@@ -111,7 +111,7 @@ export class AppGuestsBinding extends WorkerEntrypoint<
       // A read goes back only to a caller admitted again; a chat written
       // goes back unless the call's workflow attempt was let go of.
       return use === "read"
-        ? await handedBack(this.env, app, { token }, use, answer)
+        ? await handedBack(this.env, app, { token }, use, () => fence, answer)
         : await afterEffect(this.env, () => fence, answer);
     } catch (error) {
       throw forSandbox(error);

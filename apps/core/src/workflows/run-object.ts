@@ -113,33 +113,12 @@ const revokeOrLog = async (
  */
 const appsTable = "grasp_run_apps";
 
+/** One attempt of a step, as a key (`WorkflowRuns.#returned`). */
+const attemptKey = (key: string, attempt: number, generation: number) =>
+  `${String(generation)} ${String(attempt)} ${key}`;
+
 /** How long a cancel's request has to finish it before the object does. */
 const cancelRepairMs = 5000;
-
-/** The cancel a run is marked with (`markCancelled`). */
-interface CancelMark {
-  runId: string;
-  actor: AuditActor;
-  at: number;
-  settled?: boolean;
-}
-
-/** The cancel kept in `sql`, if any (`markCancelled`). */
-const cancelMarkIn = (sql: SqlStorage): CancelMark | undefined => {
-  const [row] = sql
-    .exec<{ run_id: string; actor: string; at: number; settled: number }>(
-      `SELECT run_id, actor, at, settled FROM ${cancelTable} LIMIT 1`
-    )
-    .toArray();
-  return row === undefined
-    ? undefined
-    : {
-        runId: row.run_id,
-        actor: auditActorSchema.parse(JSON.parse(row.actor)),
-        at: row.at,
-        settled: row.settled === 1,
-      };
-};
 
 /** Whether the run in `sql` was marked cancelled (`markCancelled`). */
 const cancelledIn = (sql: SqlStorage): boolean =>
@@ -149,6 +128,53 @@ const cancelledIn = (sql: SqlStorage): boolean =>
       cancelTable
     )
     .toArray().length > 0;
+
+/**
+ * The cancel a run is marked with (`markCancelled`): whether it is done
+ * (`settled`), whether the App calls of the run were revoked
+ * (`revoked`), and when the object next tries what isn't (`due`).
+ */
+interface CancelMark {
+  runId: string;
+  actor: AuditActor;
+  at: number;
+  settled?: boolean;
+  revoked?: boolean;
+  due?: number;
+}
+
+/** The cancel kept in `sql`, if any (`markCancelled`). */
+const cancelMarkIn = (sql: SqlStorage): CancelMark | undefined => {
+  if (!cancelledIn(sql)) {
+    return undefined;
+  }
+  const [row] = sql
+    .exec<{
+      run_id: string;
+      actor: string;
+      at: number;
+      settled: number;
+      revoked: number;
+      due: number;
+    }>(
+      `SELECT run_id, actor, at, settled, revoked, due FROM ${cancelTable} LIMIT 1`
+    )
+    .toArray();
+  return row === undefined
+    ? undefined
+    : {
+        runId: row.run_id,
+        actor: auditActorSchema.parse(JSON.parse(row.actor)),
+        at: row.at,
+        settled: row.settled === 1,
+        revoked: row.revoked === 1,
+        due: row.due,
+      };
+};
+
+/** Whether `mark` leaves the object something to do (`alarm`). */
+const unfinished = (mark: CancelMark | undefined): mark is CancelMark =>
+  mark !== undefined && (mark.settled !== true || mark.revoked !== true);
 
 // The object every workflow run lives in (`WORKFLOW_RUNS`): Workerflow's
 // run object, one per run, which core reaches only through engine.ts. It
@@ -174,6 +200,30 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    */
   readonly #aiCalls: AiCalls = newAiCalls();
 
+  /**
+   * The attempts whose functions have returned (`#attemptReturned`), by
+   * `attemptKey`: none of them holds from then on, even while the engine
+   * still records its step's result. In memory: the host that hears of
+   * the return runs in this object, and an activation of a new object
+   * holds none of the attempts before it.
+   */
+  readonly #returned = new Set<string>();
+
+  /**
+   * Hears that the function of an attempt of the run (`fence`) returned:
+   * it holds no more here at once, so an App call it left queued starts
+   * nothing, and its calls running in Apps are revoked there, without the
+   * run waiting on its Apps (`revokeAttemptCalls`).
+   */
+  #attemptReturned(runId: string, fence: AttemptFence): void {
+    this.#returned.add(attemptKey(fence.key, fence.number, fence.generation));
+    this.ctx.waitUntil(
+      revokeOrLog(runId, async () => {
+        await this.revokeAttemptCalls(fence);
+      })
+    );
+  }
+
   // The engine's abstract hook, which a subclass can only override as it
   // is declared. Only core holds this namespace, and a definition built
   // for a caller runs nothing: the engine runs a run's definition itself.
@@ -193,20 +243,29 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         // lease, so every check of the run's object refuses them still;
         // only a call already past that check, awaiting the App's, isn't
         // refused there as well.
+        // Not awaited: the run doesn't wait on its Apps.
         const generation = this.generation();
         if (generation !== undefined) {
-          await revokeOrLog(event.instanceId, async () => {
-            await this.revokeCalls(event.instanceId, generation);
-          });
+          this.ctx.waitUntil(
+            revokeOrLog(event.instanceId, async () => {
+              await this.revokeCalls(event.instanceId, generation);
+            })
+          );
+        }
+        // Marked cancelled: an activation that starts now (an event came,
+        // a wait's alarm fired) runs nothing of the run, and finishes the
+        // cancel instead (`#finishCancel`).
+        const mark = cancelMarkIn(this.ctx.storage.sql);
+        if (mark !== undefined) {
+          await this.#finishCancel(mark);
+          return null;
         }
         return await runPinned(this.env, pin, event, step, {
           busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),
-          revokeAttempt: async (fence) => {
-            await revokeOrLog(event.instanceId, async () => {
-              await this.revokeAttemptCalls(fence);
-            });
+          revokeAttempt: (fence) => {
+            this.#attemptReturned(event.instanceId, fence);
           },
         });
       },
@@ -244,34 +303,95 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       return { runId, actor, at };
     }
     sql.exec(
-      `CREATE TABLE IF NOT EXISTS ${cancelTable} (run_id TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0)`
+      `CREATE TABLE IF NOT EXISTS ${cancelTable} (run_id TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL)`
     );
     if (cancelMarkIn(sql) === undefined) {
       sql.exec(
-        `INSERT INTO ${cancelTable} (run_id, actor, at) VALUES (?, ?, ?)`,
+        `INSERT INTO ${cancelTable} (run_id, actor, at, due) VALUES (?, ?, ?, ?)`,
         runId,
         JSON.stringify(actor),
-        at
+        at,
+        Date.now() + cancelRepairMs
       );
     }
     const mark = cancelMarkIn(sql);
     if (mark === undefined) {
       throw new Error(`Run ${runId}'s cancel wasn't kept`);
     }
-    // Armed for the cancel's repair, should its request not finish it.
-    const due = Date.now() + cancelRepairMs;
-    const armed = await this.ctx.storage.getAlarm();
-    if (armed === null || armed > due) {
-      await this.ctx.storage.setAlarm(due);
-    }
+    // Armed for the cancel's repair, should its request not finish it;
+    // the engine's own alarms keep it (`extraAlarm`).
+    await this.#armRepair(mark.due ?? Date.now() + cancelRepairMs);
     // Then, before the cancel is recorded anywhere else, every call the
     // run's attempts started in an App is revoked there (`revokeCalls`):
     // a stub call that passed this object's check before the mark, and
     // awaits the App's own, is refused by it. Should an App not hear of
-    // it, this fails, and the alarm armed above revokes again before it
-    // finishes the cancel.
-    await this.revokeCalls(mark.runId, null);
+    // it, the cancel goes on, and the object revokes again on its alarm:
+    // this object's own check refuses those calls meanwhile.
+    await this.#revokeForCancel(mark);
     return mark;
+  }
+
+  /**
+   * Revokes the run's App calls for its cancel (`revokeCalls`), and keeps
+   * that it did; should an App not hear of it, logs, and has the object's
+   * alarm try again (`alarm`). Never throws.
+   */
+  async #revokeForCancel(mark: CancelMark): Promise<void> {
+    try {
+      await this.revokeCalls(mark.runId, null);
+      this.ctx.storage.sql.exec(`UPDATE ${cancelTable} SET revoked = 1`);
+    } catch (error) {
+      log.error("workflow.revoke_calls_failed", {
+        runId: mark.runId,
+        ...errorFields(error),
+      });
+      await this.#repairLater();
+    }
+  }
+
+  /**
+   * Finishes the cancel `mark` records, as its request does: the App
+   * calls revoked (`#revokeForCancel`), the run's row tombstoned and the
+   * cancel audited, once whoever gets there first (runs.ts,
+   * `completeCancel`), the run terminated and the mark settled.
+   */
+  async #finishCancel(mark: CancelMark): Promise<void> {
+    if (mark.revoked !== true) {
+      await this.#revokeForCancel(mark);
+    }
+    if (mark.settled === true) {
+      return;
+    }
+    await completeCancel(this.env, mark);
+    await this.terminate({ rollback: false });
+    this.settleCancel();
+  }
+
+  /** Moves the cancel's next repair a while on, and arms it. */
+  async #repairLater(): Promise<void> {
+    const due = Date.now() + cancelRepairMs;
+    this.ctx.storage.sql.exec(`UPDATE ${cancelTable} SET due = ?`, due);
+    await this.#armRepair(due);
+  }
+
+  /** Brings the object's alarm forward to `due`, if it is later. */
+  async #armRepair(due: number): Promise<void> {
+    const armed = await this.ctx.storage.getAlarm();
+    if (armed === null || armed > due) {
+      await this.ctx.storage.setAlarm(due);
+    }
+  }
+
+  /**
+   * When the cancel the run is marked with next needs the object's alarm,
+   * while any of it is left to do (`alarm`): kept whatever alarm the
+   * engine sets or deletes for the run (a heartbeat, a sleep's wake, a
+   * suspended run's none).
+   */
+  // oxlint-disable-next-line grasp/no-unbounded-rpc-target -- the engine's hook, as `definition`
+  protected override extraAlarm(): number | null {
+    const mark = cancelMarkIn(this.ctx.storage.sql);
+    return unfinished(mark) ? (mark.due ?? null) : null;
   }
 
   /** Records that the run's cancel is done (`markCancelled`). */
@@ -289,21 +409,18 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * there first, and the run terminated.
    */
   override async alarm(): Promise<void> {
-    const { sql } = this.ctx.storage;
-    const mark = cancelledIn(sql) ? cancelMarkIn(sql) : undefined;
-    if (mark !== undefined && mark.settled !== true) {
+    const mark = cancelMarkIn(this.ctx.storage.sql);
+    if (unfinished(mark)) {
       try {
-        await this.revokeCalls(mark.runId, null);
-        await completeCancel(this.env, mark);
-        await this.terminate({ rollback: false });
-        this.settleCancel();
+        await this.#finishCancel(mark);
       } catch (error) {
-        // Tried again by the engine's next alarm, which a run that goes
-        // on has; one that doesn't is cancelled again by its next request.
+        // Tried again a while on (`extraAlarm`), whatever the engine does
+        // with the alarm meanwhile.
         log.error("workflow.cancel_repair_failed", {
           runId: mark.runId,
           ...errorFields(error),
         });
+        await this.#repairLater();
       }
     }
     await super.alarm();
@@ -334,6 +451,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   ): boolean {
     const lease = this.#leaseOf(key, attempt);
     const holds =
+      !this.#returned.has(attemptKey(key, attempt, generation)) &&
       lease !== undefined &&
       lease.generation === generation &&
       Date.now() < lease.deadline;
@@ -417,6 +535,13 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     });
     if (pin?.type !== "app") {
       return;
+    }
+    // A run marked cancelled ends cancelled, however it ended: its cancel
+    // is recorded in core first (`completeCancel`, once), so its row reads
+    // it, rather than a failure its refused attempts led to.
+    const mark = cancelMarkIn(this.ctx.storage.sql);
+    if (mark !== undefined && mark.settled !== true) {
+      await completeCancel(this.env, mark);
     }
     await projectStatus(this.env, latest.instanceId, {
       status: latest.status,

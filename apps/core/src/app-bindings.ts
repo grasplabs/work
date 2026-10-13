@@ -167,24 +167,33 @@ export const stillAdmitted = async (
 };
 
 /**
- * `value`, what a stub read or got for `caller`, handed back only once
- * the caller is admitted again for `use` as it returns (`callerOf`): a
- * call let go of while the stub awaited (ended, past its deadline, on
- * code since stopped, or, for a workflow run's step, an attempt that no
- * longer holds, attempt-fence.ts) gets nothing back. Every stub read of
- * an App's server code hands back through this; a stub call that may
- * change something through `afterEffect`. (An App's writes to its own
- * SQLite never come through a stub, so neither can stop those.)
+ * `value`, what a stub read or got for `caller`, handed back, for a call
+ * from a workflow run's step (`fence`, read once the call was admitted),
+ * only while its attempt still holds (attempt-fence.ts) and the App's
+ * host still admits its token for `use` (`App.admit`, synchronous, last):
+ * nothing goes back to an attempt let go of, or cancelled, while the stub
+ * awaited. Only that: what let the call in was checked as it was admitted,
+ * and isn't read again here, and a caller with no workflow fence (a
+ * screen's, an agent's) gets its answer as it is. Every stub read of an
+ * App's server code hands back through this; a stub call that may change
+ * something through `afterEffect`. (An App's writes to its own SQLite
+ * never come through a stub, so neither can stop those.)
  */
 export const handedBack = async <T>(
   env: Env,
   app: AppId,
   caller: unknown,
   use: InvocationKind,
+  fence: () => AttemptFence | undefined,
   value: Promise<T>
 ): Promise<T> => {
   const answer = await value;
-  await callerOf(env, app, caller, use);
+  const of = fence();
+  if (of === undefined) {
+    return answer;
+  }
+  await requireAttemptHolds(env, of);
+  await appHost(env, app).admit(tokenOf(caller), use);
   return answer;
 };
 
@@ -223,6 +232,7 @@ export const statisticCallerOf = async (
   authority: Authority;
   idempotencyKey: string | undefined;
   attempt: string | undefined;
+  fence: AttemptFence | undefined;
 }> => {
   const token = tokenOf(caller);
   return await admitted(

@@ -835,12 +835,13 @@ describe(
       // any App: the object's alarm revokes, and finishes the cancel.
       await runInDurableObject(runObject(run), async (_object, state) => {
         state.storage.sql.exec(
-          "CREATE TABLE IF NOT EXISTS grasp_run_cancelled (run_id TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0)"
+          "CREATE TABLE IF NOT EXISTS grasp_run_cancelled (run_id TEXT NOT NULL, actor TEXT NOT NULL, at INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0, due INTEGER NOT NULL)"
         );
         state.storage.sql.exec(
-          "INSERT INTO grasp_run_cancelled (run_id, actor, at) VALUES (?, ?, ?)",
+          "INSERT INTO grasp_run_cancelled (run_id, actor, at, due) VALUES (?, ?, ?, ?)",
           run,
           JSON.stringify(actorOf(identity)),
+          Date.now(),
           Date.now()
         );
         await state.storage.setAlarm(Date.now());
@@ -875,6 +876,43 @@ describe(
       await server.release();
 
       expect(after).toBe("app.caller_invalid");
+    });
+
+    it("starts no App call the attempt left queued once it has returned", async () => {
+      const builder = await personApi("builder");
+      const app = appIdSchema.parse(
+        await appWith(
+          builder,
+          workflowFiles(
+            "leaves",
+            `  await step.do("leave", { description: "Leave" }, async () => {
+    // The first holds the App's turn past the attempt's return: the
+    // second waits in the App, past every check of the run's host.
+    void env.APP.call("pause", 1000);
+    void env.APP.call("hit", "second");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    return null;
+  });
+  await step.sleep("rest", { description: "Rest", duration: "1 day" });
+  return null;`,
+            { leave: null }
+          )
+        )
+      );
+      await serverBuilt(app, 1);
+      const { id: run } = await builder.api.workflows.start(app, "leaves");
+      await sleeping(run, "rest");
+      // Long enough for the queued call to have started, had it been let in.
+      await scheduler.wait(2000);
+      const second = await callApp(
+        env,
+        app,
+        { userId: builder.userId, mode: "interactive" },
+        "hits",
+        ["second"]
+      );
+
+      expect(second).toBe(0);
     });
 
     it("is refused by its App once its attempt timed out", async () => {

@@ -1104,9 +1104,11 @@ export const cancelRun = async (
   // attempt of it holds, so nothing more of it is handed back or acts,
   // even should the rest of this never happen. With it, the App calls its
   // attempts started are revoked in those Apps (run-object.ts,
-  // `revokeCalls`). Should the mark fail, nothing of the cancel happened;
-  // should the revoke, the object's alarm finishes the cancel. A run
-  // cancelled before keeps its first cancel.
+  // `revokeCalls`). Should the mark fail, nothing of the cancel happened.
+  // Should an App not hear of the revoke, the cancel goes on, and the
+  // object revokes again on its alarm; should anything after the mark
+  // fail, the object finishes the cancel. A run cancelled before keeps
+  // its first cancel.
   const mark = await markRunCancelled(env, row.id, actorOf(by));
   await completeCancel(env, mark);
   const engine = runEngine(env);

@@ -64,7 +64,7 @@ export class AppStatisticsBinding extends WorkerEntrypoint<
   async read(caller: unknown, query: unknown): Promise<StatisticAnswer> {
     const { app, permissionId } = this.ctx.props;
     try {
-      const { authority } = await statisticCallerOf(
+      const { authority, fence } = await statisticCallerOf(
         this.env,
         app,
         caller,
@@ -78,6 +78,7 @@ export class AppStatisticsBinding extends WorkerEntrypoint<
         app,
         caller,
         "read",
+        () => fence,
         readStatistics(this.env, authority, query, permissionId)
       );
     } catch (error) {

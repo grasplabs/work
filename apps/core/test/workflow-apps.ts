@@ -35,6 +35,11 @@ export class App extends DurableObject {
     return Number(row?.count ?? 0);
   }
 
+  // Takes \`ms\` milliseconds, holding the App's turn meanwhile.
+  async pause(_caller: Caller, ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   purchaseOrder(_caller: Caller, number: string): { amount: number } | null {
     return number === "PO-1" ? { amount: 800_000 } : null;
   }
