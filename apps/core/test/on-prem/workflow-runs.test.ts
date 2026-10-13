@@ -19,7 +19,11 @@ import {
   woken,
 } from "../runs.ts";
 import { signedInApi } from "../sign-in.ts";
-import { workflowFiles } from "../workflow-apps.ts";
+import {
+  bindModel,
+  modelRegistration,
+  workflowFiles,
+} from "../workflow-apps.ts";
 
 // A workflow's runs on-prem: each load of a run (its start, and each
 // resume after a wait) runs as a sandbox session owned by its App, through
@@ -118,12 +122,13 @@ describe("a workflow's runs on-prem", runTime, () => {
   afterEach(endLiveRuns);
 
   it("runs its steps in a session, a model call going through the step's attempt host", async () => {
-    const { builder, app } = await appWith(
-      workflowFiles(
+    const { builder, app } = await appWith({
+      ...modelRegistration({ extractor: 12_000 }),
+      ...workflowFiles(
         "reader",
         `  const total = await step.llm("extract", {
     description: "Read the total",
-    model: "${extractionModel}",
+    binding: "extractor",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
@@ -131,8 +136,10 @@ describe("a workflow's runs on-prem", runTime, () => {
   });
   return await step.do("double", { description: "Double it" }, async () => total.total * 2);`,
         { extract: { total: 1 } }
-      )
-    );
+      ),
+    });
+    // The App's model binding, approved: the step names it, not a model.
+    await bindModel(app, "extractor", extractionModel);
     const gateway = fakeGateway({
       text: '{"total": 1234}',
       inputTokens: 10,
