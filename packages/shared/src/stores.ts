@@ -553,7 +553,8 @@ export type StoreBackfillFailure =
       reason: "invalid_value" | "too_large";
     }
   | MigrationFailure
-  | { reason: "stalled" };
+  | { reason: "stalled" }
+  | { reason: "ready" };
 
 /**
  * Why an explicit migration's batch failed (spec 17.2): the record, when
@@ -597,6 +598,11 @@ export interface StoreBackfill {
   scanned: number;
   filled: number;
   failure: StoreBackfillFailure | null;
+  /**
+   * An explicit migration that finished: it takes over as a release that
+   * needs it is made current, and an admin may still abandon it.
+   */
+  ready: boolean;
 }
 
 /**

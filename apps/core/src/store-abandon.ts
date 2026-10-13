@@ -101,7 +101,7 @@ export const backfillAbandonedEvent = async (
       migration: failure.migration,
       record: failure.id,
     };
-  } else if (failure.reason !== "stalled") {
+  } else if (failure.reason !== "stalled" && failure.reason !== "ready") {
     record = { table: failure.table, field: failure.field, record: failure.id };
   }
   return auditEventSchema.parse({
@@ -192,8 +192,8 @@ export const storeBackfill = async (
   if (status === null) {
     return null;
   }
-  const { target, state, attempt, scanned, filled, failure } = status;
-  return { target, state, attempt, scanned, filled, failure };
+  const { target, state, attempt, scanned, filled, failure, ready } = status;
+  return { target, state, attempt, scanned, filled, failure, ready };
 };
 
 /**
@@ -322,12 +322,13 @@ export const appStoreBackfills = async (
     if (answer.value === null) {
       return [];
     }
-    const { target, state, attempt, scanned, filled, failure } = answer.value;
+    const { target, state, attempt, scanned, filled, failure, ready } =
+      answer.value;
     return [
       {
         store,
         alias,
-        backfill: { target, state, attempt, scanned, filled, failure },
+        backfill: { target, state, attempt, scanned, filled, failure, ready },
       },
     ];
   });

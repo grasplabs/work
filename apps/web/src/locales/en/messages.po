@@ -513,6 +513,10 @@ msgstr "A change to the store {name} can't be applied"
 msgid "A change to the store {name} is being applied"
 msgstr "A change to the store {name} is being applied"
 
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} is ready"
+msgstr "A change to the store {name} is ready"
+
 #: src/workflows/history-view.tsx
 msgid "A change waits for approval by the person the run acts for"
 msgstr "A change waits for approval by the person the run acts for"
@@ -2408,6 +2412,10 @@ msgstr "Its contents couldn't be read."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
+
+#: src/engines/store-changes.tsx
+msgid "Its migration has transformed every record. It takes over when a release that needs it is made current; until then the current release goes on using the store as before."
+msgstr "Its migration has transformed every record. It takes over when a release that needs it is made current; until then the current release goes on using the store as before."
 
 #: src/chat/builds.tsx
 msgid "Its migrations can't be read: it may rewrite the records of any table"

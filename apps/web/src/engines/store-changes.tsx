@@ -79,12 +79,17 @@ const MigrationFailureText = ({ failure }: { failure: MigrationFailure }) => {
 /** Whether no record is to blame for `failure`: abandoning is all that's left. */
 const nothingToMend = (failure: StoreBackfillFailure): boolean =>
   failure.reason === "stalled" ||
+  failure.reason === "ready" ||
   ("migration" in failure && failure.id === null);
 
 /** What a failure means, in a sentence naming the record and field. */
 const FailureText = ({ failure }: { failure: StoreBackfillFailure }) => {
   if ("migration" in failure) {
     return <MigrationFailureText failure={failure} />;
+  }
+  if (failure.reason === "ready") {
+    // A finished migration failed nothing (`StoreChange` shows it as ready).
+    return null;
   }
   if (failure.reason === "stalled") {
     return (
@@ -208,6 +213,34 @@ export const StoreChange = ({
   const titleId = useId();
   const { backfill } = change;
   const name = change.alias ?? change.store;
+  if (backfill.ready) {
+    return (
+      <Alert live="polite">
+        <DatabaseIcon aria-hidden="true" />
+        <AlertTitle id={titleId}>
+          <Trans>A change to the store {name} is ready</Trans>
+        </AlertTitle>
+        <AlertDescription>
+          <p>
+            <Trans>
+              Its migration has transformed every record. It takes over when a
+              release that needs it is made current; until then the current
+              release goes on using the store as before.
+            </Trans>
+          </p>
+          <Progress change={change} />
+          <StoreId change={change} />
+          <div className="pt-2">
+            <AbandonDialog
+              busy={busy}
+              describedBy={titleId}
+              onConfirm={onAbandon}
+            />
+          </div>
+        </AlertDescription>
+      </Alert>
+    );
+  }
   if (backfill.state === "running" || backfill.failure === null) {
     // Polite: it is where things stand, not news to interrupt with.
     return (

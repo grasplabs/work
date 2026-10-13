@@ -65,9 +65,10 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 // output, validated against the table, supplies defaults). Still refused
 // there: a field holding a record ID that is added or changed (the
 // store's reference index would have to follow), a removed required
-// field, and a changed access mode. A migrated table must be on both
-// sides (`migration_table_invalid`): a table the contract hasn't holds
-// no record to transform.
+// field, a changed access mode, and a field whose old and new values
+// can't overlap (`values_disjoint`: a migration only expands). A migrated
+// table must be on both sides (`migration_table_invalid`): a table the
+// contract hasn't holds no record to transform.
 
 /** Why a change can't be applied without a migration. */
 export type PlanRefusalReason =
@@ -78,6 +79,7 @@ export type PlanRefusalReason =
   | "required_field_removed"
   | "reserved_field_changed"
   | "migration_table_invalid"
+  | "values_disjoint"
   | "contract_invalid";
 
 /** One change refused, and why. */
@@ -325,6 +327,32 @@ interface FieldOutcomes {
 }
 
 /**
+ * Whether some value fits both `before` and `after`: the same kind, a
+ * string and an enum (an enum's members are strings), a union with a
+ * member that overlaps the other, or both nullable. A migration only
+ * expands, so its output fits the contract in force and the target at
+ * once: a change whose value sets can't overlap (a string becoming a
+ * number) can't run under it, and is refused (`values_disjoint`); it is a
+ * contraction, for a later release.
+ */
+const valuesOverlap = (
+  before: ValueDescriptor,
+  after: ValueDescriptor
+): boolean => {
+  if (before.nullable && after.nullable) {
+    return true;
+  }
+  if (before.kind === "union") {
+    return before.members.some((member) => valuesOverlap(member, after));
+  }
+  if (after.kind === "union") {
+    return after.members.some((member) => valuesOverlap(before, member));
+  }
+  const kinds = new Set([before.kind, after.kind]);
+  return kinds.size === 1 || (kinds.has("string") && kinds.has("enum"));
+};
+
+/**
  * Classifies one change of a field of a migrated table (see the header),
  * where it isn't the same as on any other: a field added or changed that
  * holds no record ID. Whether it did.
@@ -340,6 +368,12 @@ const classifyMigrated = (
   if (change.change === "changed") {
     if (references && !sameUpToEnumOrder(change.before, change.after)) {
       refused.push({ table, field, reason: "field_changed" });
+    } else if (
+      change.before !== undefined &&
+      change.after !== undefined &&
+      !valuesOverlap(change.before, change.after)
+    ) {
+      refused.push({ table, field, reason: "values_disjoint" });
     }
     return true;
   }

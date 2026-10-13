@@ -513,6 +513,10 @@ msgstr "Een wijziging in de opslag {name} kan niet worden toegepast"
 msgid "A change to the store {name} is being applied"
 msgstr "Een wijziging in de opslag {name} wordt toegepast"
 
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} is ready"
+msgstr "Een wijziging aan de opslag {name} is klaar"
+
 #: src/workflows/history-view.tsx
 msgid "A change waits for approval by the person the run acts for"
 msgstr "Een wijziging wacht op goedkeuring van de persoon voor wie de run handelt"
@@ -2408,6 +2412,10 @@ msgstr "De inhoud kon niet worden gelezen."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "De berichten worden definitief verwijderd en elke wijziging die de agent voor je vasthoudt, wordt afgewezen. Wat de agent deed, blijft in het auditlog."
+
+#: src/engines/store-changes.tsx
+msgid "Its migration has transformed every record. It takes over when a release that needs it is made current; until then the current release goes on using the store as before."
+msgstr "De migratie heeft elk record omgezet. Ze gaat in zodra een release die haar nodig heeft actueel wordt gemaakt; tot dan gebruikt de actuele release de opslag zoals voorheen."
 
 #: src/chat/builds.tsx
 msgid "Its migrations can't be read: it may rewrite the records of any table"

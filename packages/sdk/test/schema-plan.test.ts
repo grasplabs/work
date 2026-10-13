@@ -571,7 +571,7 @@ describe("a table an explicit migration transforms", () => {
     expect(manifestText(contract)).toBe(manifestText(target));
   });
 
-  test("still refuses a reference added, a changed access and a table on one side only", () => {
+  test("still refuses a reference added, a changed access, values that can't overlap and a table on one side only", () => {
     const referring = notes({ ...noteFields, author: v.id("notes") });
     const access = notes(noteFields, titleIndex, {
       tables: { notes: { read: "appMembers", write: "owner" } },
@@ -586,6 +586,11 @@ describe("a table an explicit migration transforms", () => {
     expect(planSchemaChange(v1, access, {}, migrated)).toMatchObject({
       accepted: false,
       refused: [{ table: "notes", reason: "access_changed" }],
+    });
+    const disjoint = notes({ ...noteFields, title: v.number() });
+    expect(planSchemaChange(v1, disjoint, {}, migrated)).toMatchObject({
+      accepted: false,
+      refused: [{ table: "notes", field: "title", reason: "values_disjoint" }],
     });
     const elsewhere = planSchemaChange(v1, target, {}, new Set(["people"]));
     expect(elsewhere.accepted).toBeFalsy();

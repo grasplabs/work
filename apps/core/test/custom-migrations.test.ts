@@ -198,6 +198,22 @@ const activate = async ({ store, app }: Pick<Migrating, "store" | "app">) =>
     resourceVersion: 2,
   });
 
+/** What `call` was refused with, as its message; "ok" when it wasn't. */
+const messageOf = async (call: Promise<unknown>): Promise<string> => {
+  try {
+    await call;
+    return "ok";
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+};
+
+/** The outcome a run of `migrating`'s backfill ends with, for run `attempt`. */
+const lastOutcome = async (migrating: Migrating, attempt = 1) => {
+  const { outcomes } = await migrateAll(migrating, derived, { attempt });
+  return outcomes.at(-1);
+};
+
 const statusOf = async (store: OpenStore, schema: string, app?: string) =>
   await objectOf(store).schemaStatus(
     store.id,
@@ -247,10 +263,24 @@ const workOf = async (store: OpenStore): Promise<number> =>
   );
 
 describe("an explicit migration on a store", () => {
-  it("refuses a migration that doesn't fit the store", async () => {
+  it("refuses a migration that doesn't fit a store holding records of its table", async () => {
     const store = await newStore();
     const first = await store.defineTables(v1, {
       resourceId: "a",
+      resourceVersion: 1,
+    });
+    await commit(store, first.schemaHash, [
+      {
+        op: "insert",
+        table: "notes",
+        id: newRecordId(),
+        fields: { title: "One" },
+      },
+    ]);
+    // A schema the store recorded that doesn't declare the table.
+    const other = notes({ title }).replace('"notes"', '"other"');
+    const otherSchema = await store.defineTables(other, {
+      resourceId: "b",
       resourceVersion: 1,
     });
     const consumer = { resourceId: "a", resourceVersion: 2 };
@@ -261,9 +291,13 @@ describe("an explicit migration on a store", () => {
       fromSchema: first.schemaHash,
       toSchema,
     };
-    const refused = async (migrations: (typeof migration)[], by = consumer) => {
+    const refused = async (
+      migrations: (typeof migration)[],
+      schema = v2,
+      by = consumer
+    ) => {
       try {
-        await store.defineTables(v2, by, migrations);
+        await store.defineTables(schema, by, migrations);
         return "ok";
       } catch (error) {
         return typeof error === "object" && error !== null
@@ -280,18 +314,72 @@ describe("an explicit migration on a store", () => {
       unknownSource: await refused([
         { ...migration, fromSchema: "e".repeat(64) },
       ]),
+      sourceWithoutTable: await refused([
+        { ...migration, fromSchema: otherSchema.schemaHash },
+      ]),
       wrongTarget: await refused([{ ...migration, toSchema: "e".repeat(64) }]),
       sharedTable: await refused([
         migration,
         { ...migration, name: "another" },
       ]),
       noConsumer: await codeOf(store.defineTables(v2, undefined, [migration])),
+      nothingToMigrate: await refused(
+        [{ ...migration, toSchema: first.schemaHash }],
+        v1,
+        { resourceId: "a", resourceVersion: 3 }
+      ),
     }).toStrictEqual({
       none: { code: "migration.required", reason: undefined },
       unknownSource: { code: "migration.invalid", reason: "unknown_source" },
+      sourceWithoutTable: {
+        code: "migration.invalid",
+        reason: "unknown_source",
+      },
       wrongTarget: { code: "migration.invalid", reason: "wrong_target" },
       sharedTable: { code: "migration.invalid", reason: "shared_table" },
       noConsumer: "migration.invalid",
+      nothingToMigrate: {
+        code: "migration.invalid",
+        reason: "nothing_to_migrate",
+      },
+    });
+  });
+
+  it("applies a migration with nothing to transform at once: a new store, or a table without records", async () => {
+    const fresh = await newStore();
+    const migration = {
+      name: "derive-category",
+      table: "notes",
+      fromSchema: "e".repeat(64),
+      toSchema: await manifestHash(v2),
+    };
+    // A first version that declares a migration, sealed on a new store.
+    const first = await fresh.defineTables(
+      v2,
+      { resourceId: "a", resourceVersion: 1 },
+      [migration]
+    );
+    const empty = await newStore();
+    const base = await empty.defineTables(v1, {
+      resourceId: "b",
+      resourceVersion: 1,
+    });
+    const migrated = await empty.defineTables(
+      v2,
+      { resourceId: "b", resourceVersion: 2 },
+      [{ ...migration, fromSchema: base.schemaHash }]
+    );
+
+    expect({
+      fresh: first.contract,
+      freshContract: await contractHash(fresh),
+      empty: migrated.contract,
+      emptyContract: await contractHash(empty),
+    }).toMatchObject({
+      fresh: { pending: false },
+      freshContract: first.contract.hash,
+      empty: { pending: false, changed: true },
+      emptyContract: migrated.contract.hash,
     });
   });
 
@@ -419,6 +507,153 @@ describe("an explicit migration on a store", () => {
       oldWrite: "migration.incompatible_write",
       newWrite: "ok",
     });
+  });
+
+  it("transforms again a record the current version edits after its transform, before it takes over", async () => {
+    const migrating = await migratingStore(3);
+    const { store, first, ids } = migrating;
+    const edited = ids[1] ?? "";
+    const scanned = await migrateAll(migrating);
+
+    // Transformed (category "general"), then retitled by version 1: it
+    // still fits the target, but its category is derived from the old title.
+    await commit(store, first.schemaHash, [
+      {
+        op: "patch",
+        table: "notes",
+        id: edited,
+        fields: { title: "launch day" },
+        expectedRevision: 2,
+      },
+    ]);
+    const afterEdit = {
+      status: await statusOf(store, v2),
+      work: await workOf(store),
+    };
+    const rest = await migrateAll(migrating, derived, {
+      from: (scanned.outcomes.at(-1)?.batch ?? 0) + 1,
+    });
+    const activated = await activate(migrating);
+
+    expect({
+      afterEdit,
+      rest: rest.outcomes.map(({ state }) => state),
+      activated,
+      edited: await noteOf(store, edited),
+    }).toMatchObject({
+      afterEdit: { status: { state: "pending" }, work: 1 },
+      rest: ["running", "ready"],
+      activated: { state: "active" },
+      edited: { fields: { title: "launch day", category: "launch" } },
+    });
+  });
+
+  it("counts no stall for a ready migration taken up again for work that came and went", async () => {
+    const migrating = await migratingStore(2);
+    const { store, first, target } = migrating;
+    let outcome = await lastOutcome(migrating);
+    let attempt = 1;
+    for (let cycle = 0; cycle < 4; cycle += 1) {
+      const id = newRecordId();
+      // A note inserted and deleted again by version 1: work queued, whose
+      // record is gone by the time a run takes it up.
+      // oxlint-disable-next-line no-await-in-loop -- one cycle after another
+      await commit(store, first.schemaHash, [
+        { op: "insert", table: "notes", id, fields: { title: "Brief" } },
+      ]);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await commit(store, first.schemaHash, [
+        { op: "delete", table: "notes", id, expectedRevision: 1 },
+      ]);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      attempt = await objectOf(store).restartBackfill(store.id, {
+        target,
+        attempt,
+      });
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      outcome = await lastOutcome(migrating, attempt);
+    }
+
+    expect({ attempt, outcome }).toMatchObject({
+      attempt: 5,
+      outcome: { state: "ready", failure: null },
+    });
+  });
+
+  it("can be abandoned while ready, keeping the contract, and shows admins it's ready", async () => {
+    const migrating = await migratingStore(3);
+    const { store, first, target } = migrating;
+    await migrateAll(migrating);
+    const shown = await storeBackfill(env, admin, store.id);
+
+    const abandoned = await abandonStoreBackfill(env, admin, {
+      store: store.id,
+      target,
+      attempt: 1,
+    });
+
+    expect({
+      shown,
+      abandoned: {
+        failure: abandoned.failure,
+        reserved: abandoned.reserved,
+      },
+      contract: await contractHash(store),
+      write: await codeOf(
+        commit(store, first.schemaHash, [
+          {
+            op: "insert",
+            table: "notes",
+            id: newRecordId(),
+            fields: { title: "Still" },
+          },
+        ])
+      ),
+    }).toMatchObject({
+      shown: { state: "running", ready: true, failure: null },
+      abandoned: {
+        failure: { reason: "ready" },
+        reserved: [{ table: "notes", field: "category" }],
+      },
+      contract: first.contract.hash,
+      write: "ok",
+    });
+  });
+
+  it("refuses a commit that doesn't account for exactly what its batch handed out, which only a caller's bug sends", async () => {
+    const migrating = await migratingStore(3);
+    const { store, target } = migrating;
+    const read = await migrationBatch(store, target, 1);
+    if (read.state !== "transform") {
+      throw new Error("Expected a batch to transform");
+    }
+    const rows = read.rows.map(({ id, revision, fields }) => ({
+      id,
+      revision,
+      fields: derived(fields),
+    }));
+    const batch = {
+      target,
+      attempt: 1,
+      batch: 1,
+      phase: read.phase,
+      table: read.table,
+      through: read.through,
+    };
+
+    const missing = await messageOf(
+      commitBatch(store, { ...batch, rows: rows.slice(1) })
+    );
+    const notQueued = await messageOf(
+      commitBatch(store, { ...batch, phase: "work", through: null, rows })
+    );
+    const exact = await messageOf(commitBatch(store, { ...batch, rows }));
+
+    expect({
+      missing: missing.includes("doesn't cover exactly"),
+      notQueued: notQueued.includes("not queued"),
+      exact,
+    }).toStrictEqual({ missing: true, notQueued: true, exact: "ok" });
   });
 
   it("fails on an output that doesn't fit, writing nothing of its batch, and goes on once its record changed", async () => {

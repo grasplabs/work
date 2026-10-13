@@ -8,7 +8,7 @@ import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
-import { commit } from "./pending-stores.ts";
+import { codeOf, commit } from "./pending-stores.ts";
 import { appWith, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { newRecordId } from "./store-schemas.ts";
@@ -151,12 +151,22 @@ const notesOf = async (
  * migrating them with `handler` sealed (version 2 learned the schema hash
  * from the seal's refusal): the release whose store now runs it.
  */
-const migrated = async (count: number, handler: string) => {
+const migrated = async (
+  count: number,
+  handler: string,
+  {
+    extra = {},
+    firstCurrent = false,
+  }: { extra?: Record<string, string>; firstCurrent?: boolean } = {}
+) => {
   const fixture: Fixture = await appWith({
     "schema.ts": v1Schema,
     "app.ts": appFile(false),
   });
   const first = await seal(fixture);
+  if (firstCurrent) {
+    await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+  }
   const store = await openStore(env, fixture.store);
   const fromSchema = first.manifest.schemaHash;
   for (let index = 0; index < count; index += 1) {
@@ -182,7 +192,7 @@ const migrated = async (count: number, handler: string) => {
     env,
     fixture.owner,
     fixture.app,
-    migratedFiles(fromSchema, placeholder, handler),
+    { ...migratedFiles(fromSchema, placeholder, handler), ...extra },
     "Migrate"
   );
   const refused = await refusalOf(async () => await seal(fixture, 2));
@@ -191,7 +201,7 @@ const migrated = async (count: number, handler: string) => {
     env,
     fixture.owner,
     fixture.app,
-    migratedFiles(fromSchema, toSchema, handler),
+    { ...migratedFiles(fromSchema, toSchema, handler), ...extra },
     "Migrate to the sealed schema"
   );
   const release = await seal(fixture, 3);
@@ -245,6 +255,79 @@ describe("an explicit migration's run", { timeout: 180_000 }, () => {
       count: 130,
       revisions: new Set([2]),
       derivedRight: true,
+    });
+  });
+
+  it("leaves the version still current in force when another gate refuses making the migrated one current", async () => {
+    const failingTests = {
+      "tests/fixtures/base.json": JSON.stringify({
+        principals: { someone: { role: "user" } },
+      }),
+      "tests/failing.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+
+export default appTest({
+  fixtures: "base",
+  tests: {
+    "fails": async (t) => {
+      t.equal(1, 2);
+    },
+  },
+});
+`,
+    };
+    const { fixture, store, release } = await migrated(5, deriving, {
+      extra: failingTests,
+      firstCurrent: true,
+    });
+    const object = env.DATA_STORES.getByName(store.id);
+    const consumer = { resourceId: fixture.app, resourceVersion: 3 };
+    await vi.waitFor(
+      async () => {
+        await expect(
+          object.schemaStatus(store.id, release.manifest.schemaHash, consumer)
+        ).resolves.toMatchObject({ state: "ready" });
+      },
+      { timeout: 120_000, interval: 500 }
+    );
+
+    const refused = await refusalOf(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 3)
+    );
+    const current = await env.DB.prepare(
+      "SELECT current_version AS version FROM apps WHERE id = ?"
+    )
+      .bind(fixture.app)
+      .first<{ version: number }>();
+
+    expect({
+      refused: refused.code,
+      current: current?.version,
+      migration: await object.schemaStatus(
+        store.id,
+        release.manifest.schemaHash,
+        consumer
+      ),
+      firstWrite: await codeOf(
+        commit(
+          store,
+          fixture.firstSchema,
+          [
+            {
+              op: "insert",
+              table: "notes",
+              id: newRecordId(),
+              fields: { title: "Still writing" },
+            },
+          ],
+          fixture.owner.userId
+        )
+      ),
+    }).toMatchObject({
+      refused: "version.tests_failed",
+      current: 1,
+      // Not taken over; the write it then queued makes it pending again.
+      migration: { state: "ready" },
+      firstWrite: "ok",
     });
   });
 

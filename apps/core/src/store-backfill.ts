@@ -271,7 +271,10 @@ export const defineSchemaOnStore = async (
 
 /**
  * Refuses release `version` of `app` while the store it binds doesn't
- * hold its schema in force, keeping its backfill going:
+ * hold its schema in force, keeping its backfill going. A ready explicit
+ * migration passes; with `activate` (the last step before the version is
+ * made current, apps.ts) it takes over first (`StoreHost.activateReady`),
+ * refused as pending if work came back:
  * `migration.pending` (retryable, with the backfill's progress) while
  * its defaulted fields are being filled in, `migration.backfill_failed`
  * (naming the record) while the backfill stays failed,
@@ -281,7 +284,8 @@ export const defineSchemaOnStore = async (
 export const requireStoreSchemaActive = async (
   env: Env,
   app: AppId,
-  version: number
+  version: number,
+  { activate = false }: { activate?: boolean } = {}
 ): Promise<void> => {
   const bound = await drizzle(env.DB)
     .select({
@@ -303,9 +307,13 @@ export const requireStoreSchemaActive = async (
   const storeId = storeIdSchema.parse(bound.store);
   const consumer = { resourceId: app, resourceVersion: version };
   let status = await schemaStatus(env, storeId, bound.schemaHash, consumer);
+  if (status.state === "ready" && !activate) {
+    // Its explicit migration is done: it may be made current, and takes
+    // over only as it is (`activate`), once every other gate passed.
+    return;
+  }
   if (status.state === "ready") {
-    // Its explicit migration is done: it takes over now, as its release
-    // is made current, unless a write queued work meanwhile.
+    // It takes over now, unless a write queued work meanwhile.
     status = await storeObject(env, storeId).activateReady(
       storeId,
       bound.schemaHash,

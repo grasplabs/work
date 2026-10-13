@@ -66,6 +66,7 @@ const failed = (
     scanned: 40,
     filled: 39,
     failure,
+    ready: false,
   },
 });
 
@@ -176,6 +177,35 @@ describe("a store's pending change", () => {
     });
   });
 
+  it("shows a ready migration as waiting for its release, with abandoning it on offer", () => {
+    const text = textOf(
+      <StoreChange
+        busy={false}
+        change={{
+          store: "store-1",
+          alias: "crm",
+          backfill: {
+            target: "c".repeat(64),
+            state: "running",
+            attempt: 1,
+            scanned: 12,
+            filled: 12,
+            failure: null,
+            ready: true,
+          },
+        }}
+        onAbandon={idle}
+      />
+    );
+    expect({
+      ready: text.includes("A change to the store crm is ready"),
+      waits: text.includes(
+        "It takes over when a release that needs it is made current"
+      ),
+      abandon: text.includes("Abandon this change"),
+    }).toStrictEqual({ ready: true, waits: true, abandon: true });
+  });
+
   it("shows a change still being applied with its progress, and nothing to abandon", () => {
     const text = textOf(
       <StoreChange
@@ -190,6 +220,7 @@ describe("a store's pending change", () => {
             scanned: 10,
             filled: 4,
             failure: null,
+            ready: false,
           },
         }}
         onAbandon={idle}

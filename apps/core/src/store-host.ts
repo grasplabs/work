@@ -121,14 +121,15 @@ import { installIndexes, planIndexes } from "./store-indexes.ts";
 import {
   dropWork,
   fieldsOf as tableFieldsOf,
-  fitsTable,
   hasWork,
+  isQueued,
   nextScanBatch,
   nextWorkBatch,
   outputRefusal,
   pendingMigrationsSchema,
   queueWork,
   scanPositionSchema,
+  scanRangeIds,
 } from "./store-migrations.ts";
 import type {
   MigratedTable,
@@ -579,7 +580,8 @@ export interface RecordFailure {
 export type BackfillFailure =
   | RecordFailure
   | MigrationFailure
-  | { reason: "stalled" };
+  | { reason: "stalled" }
+  | { reason: "ready" };
 
 /**
  * One batch of an explicit migration for core to transform (`fillMissing`,
@@ -655,6 +657,8 @@ const failureSchema = z.union([
   }),
   migrationFailureSchema,
   z.strictObject({ reason: z.literal("stalled") }),
+  // An explicit migration abandoned while ready: nothing failed.
+  z.strictObject({ reason: z.literal("ready") }),
 ]);
 
 /**
@@ -1276,7 +1280,11 @@ export class StoreHost {
       consumer: SchemaConsumer | undefined;
     }
   ): { plan: AcceptedPlan; migrated: PendingMigrations | null } {
-    const migrated = this.#requireMigrations(migrations, schemaHash, consumer);
+    const migrated = this.#requireMigrations(migrations, {
+      schemaHash,
+      consumer,
+      contract,
+    });
     const plan = planSchemaChange(
       contract,
       target,
@@ -1290,6 +1298,12 @@ export class StoreHost {
         })),
       });
     }
+    if (migrated !== null && !plan.changed) {
+      // The contract holds the schema already: nothing is left to
+      // transform, and running the transform again would rewrite records
+      // the contract describes.
+      refuseMigration(migrated.migrations[0]?.[1] ?? "", "nothing_to_migrate");
+    }
     return { plan, migrated };
   }
 
@@ -1297,13 +1311,24 @@ export class StoreHost {
    * The explicit migrations a schema is applied with, checked against
    * the store (`migration.invalid`, naming the migration and why): a
    * consumer whose release holds their transforms, each to `schemaHash`
-   * itself, one per table, from a schema the store recorded and still
-   * holds in force. Null for none.
+   * itself, one per table. A migration of a table the contract doesn't
+   * hold (a new store, a new table) has nothing to transform and is left
+   * out. One of a table that holds records must come from a schema the
+   * store recorded, still holds in force, that declares the table and
+   * that the contract in force covers: the records it reads were written
+   * as that schema has them. Null for none left.
    */
   #requireMigrations(
     migrations: readonly z.output<typeof storeMigrationSchema>[],
-    schemaHash: string,
-    consumer: SchemaConsumer | undefined
+    {
+      schemaHash,
+      consumer,
+      contract,
+    }: {
+      schemaHash: string;
+      consumer: SchemaConsumer | undefined;
+      contract: SchemaManifest | null;
+    }
   ): PendingMigrations | null {
     if (migrations.length === 0) {
       return null;
@@ -1311,7 +1336,11 @@ export class StoreHost {
     if (consumer === undefined) {
       return refuseMigration(migrations[0]?.name ?? "", "no_consumer");
     }
+    const tableIds = new Map(
+      this.#tableRows().map(({ name, tableId }) => [name, tableId])
+    );
     const tablesSeen = new Set<string>();
+    const kept: [string, string][] = [];
     for (const { name, table, fromSchema, toSchema } of migrations) {
       if (toSchema !== schemaHash) {
         refuseMigration(name, "wrong_target");
@@ -1320,28 +1349,58 @@ export class StoreHost {
         refuseMigration(name, "shared_table");
       }
       tablesSeen.add(table);
-      const source = this.#db
-        .select({
-          abandonedAt: schemas.abandonedAt,
-          supersededAt: schemas.supersededAt,
-        })
-        .from(schemas)
-        .where(eq(schemas.schemaHash, fromSchema))
-        .get();
-      if (
-        source === undefined ||
-        source.abandonedAt !== null ||
-        source.supersededAt !== null
-      ) {
-        refuseMigration(name, "unknown_source");
+      if (contract === null || !Object.hasOwn(contract.tables, table)) {
+        continue;
       }
+      if (this.#holdsRecords(tableIds.get(table))) {
+        this.#requireSource(name, table, fromSchema, contract);
+      }
+      kept.push([table, name]);
+    }
+    if (kept.length === 0) {
+      return null;
     }
     return {
       consumer: [consumer.resourceId, consumer.resourceVersion],
-      migrations: migrations
-        .map(({ table, name }): [string, string] => [table, name])
-        .toSorted(([a], [b]) => a.localeCompare(b)),
+      schema: schemaHash,
+      migrations: kept.toSorted(([a], [b]) => a.localeCompare(b)),
     };
+  }
+
+  /**
+   * Refuses (`migration.invalid`, `unknown_source`) a migration of `table`
+   * from `fromSchema` unless the store recorded it, holds it in force, it
+   * declares `table`, and `contract` covers it.
+   */
+  #requireSource(
+    name: string,
+    table: string,
+    fromSchema: string,
+    contract: SchemaManifest
+  ): void {
+    const source = this.#db
+      .select({
+        manifest: schemas.manifest,
+        abandonedAt: schemas.abandonedAt,
+        supersededAt: schemas.supersededAt,
+      })
+      .from(schemas)
+      .where(eq(schemas.schemaHash, fromSchema))
+      .get();
+    const manifest =
+      source === undefined
+        ? undefined
+        : readSchemaManifest(source.manifest).manifest;
+    if (
+      source === undefined ||
+      manifest === undefined ||
+      source.abandonedAt !== null ||
+      source.supersededAt !== null ||
+      !Object.hasOwn(manifest.tables, table) ||
+      !covered(planSchemaChange(contract, manifest))
+    ) {
+      refuseMigration(name, "unknown_source");
+    }
   }
 
   /**
@@ -3092,17 +3151,22 @@ export class StoreHost {
     // moves on once, so a read of it (even one that matched nothing) is
     // known to be stale.
     const changed = new Set<string>();
-    // While an explicit migration runs, a record of a table it migrates
-    // that this commit leaves not fitting the target is queued for its
-    // transform, in this transaction (store-migrations.ts).
+    // While an explicit migration is pending or ready, every record of a
+    // table it migrates that this commit inserts or changes under another
+    // schema than its target is queued for its transform, in this
+    // transaction (store-migrations.ts): a record transformed already and
+    // then edited by the version still current must be transformed again
+    // from the edit, whether or not it still fits the target.
     const migrating = this.#migrating();
     for (const { table, tableId, recordId, base, fields } of staged) {
-      const migratedFields = migrating?.tables.get(table);
+      const written =
+        fields !== null &&
+        (base === undefined || storedText(fields) !== base.valueJson);
       if (
         migrating !== null &&
-        migratedFields !== undefined &&
-        fields !== null &&
-        !fitsTable(migratedFields, fields)
+        migrating.tables.has(table) &&
+        schemaHash !== migrating.schema &&
+        written
       ) {
         queueWork(
           this.#db,
@@ -3343,13 +3407,7 @@ export class StoreHost {
         .where(eq(backfills.targetHash, pending.hash))
         .run();
     }
-    const work = nextWorkBatch(
-      this.#db,
-      pending.hash,
-      migrated,
-      (table, fields) =>
-        fitsTable(tableFieldsOf(pending.manifest, table.table), fields)
-    );
+    const work = nextWorkBatch(this.#db, pending.hash, migrated);
     if (work !== null) {
       return {
         state: "transform",
@@ -3377,6 +3435,10 @@ export class StoreHost {
       .update(backfills)
       .set({
         readyAt: pending.readyAt ?? now,
+        // Done, not stalled: runs taken up again for work a write queued
+        // count stalls afresh from here.
+        stalls: 0,
+        stallScanned: row.scanned,
         lastBatch: batch,
         lastOutcome: JSON.stringify(outcome),
         leaseUntil: null,
@@ -3529,6 +3591,9 @@ export class StoreHost {
     ) {
       throw new Error("A migration's batch doesn't fit where it is");
     }
+    if (input.failure === undefined) {
+      this.#requireCovered(pending.hash, table, row, input);
+    }
     const checked =
       input.failure === undefined
         ? this.#checkedWrites(pending, table, input.rows, now)
@@ -3552,6 +3617,66 @@ export class StoreHost {
       now,
     });
     return outcome;
+  }
+
+  /**
+   * Refuses, as a caller's bug, a batch that doesn't account for exactly
+   * the records the store handed out for it: a scan batch every record
+   * from the cursor through `through` (each committed, or queued as work
+   * since), none outside it; a work batch only queued records.
+   */
+  #requireCovered(
+    target: string,
+    table: MigratedTable,
+    row: typeof backfills.$inferSelect,
+    input: z.output<typeof transformedSchema>
+  ): void {
+    const ids = new Set(input.rows.map(({ id }) => id));
+    if (input.through === null) {
+      if (
+        input.rows.some(
+          ({ id }) => !isQueued(this.#db, target, table.tableId, id)
+        )
+      ) {
+        throw new Error("A migration's work batch names records not queued");
+      }
+      return;
+    }
+    if (input.through.tableId !== table.tableId) {
+      throw new Error("A migration's scan batch ends in another table");
+    }
+    const cursor =
+      row.cursorTable === null ||
+      row.cursorRecord === null ||
+      row.cursorOwner === null ||
+      row.cursorCreatedAt === null
+        ? null
+        : {
+            tableId: row.cursorTable,
+            ownerId: row.cursorOwner,
+            createdAt: row.cursorCreatedAt,
+            recordId: row.cursorRecord,
+          };
+    const range = new Set(scanRangeIds(this.#db, table, cursor, input.through));
+    const outside = [...ids].some(
+      (id) =>
+        !range.has(id) &&
+        this.#db
+          .select({ id: records.recordId })
+          .from(records)
+          .where(
+            and(eq(records.tableId, table.tableId), eq(records.recordId, id))
+          )
+          .get() !== undefined
+    );
+    const missed = [...range].some(
+      (id) => !ids.has(id) && !isQueued(this.#db, target, table.tableId, id)
+    );
+    if (outside || missed) {
+      throw new Error(
+        "A migration's scan batch doesn't cover exactly the records handed out"
+      );
+    }
   }
 
   /**
@@ -4103,7 +4228,7 @@ export class StoreHost {
           // nothing to watch change, so it stays failed until abandoned.
           return statusOf(pending);
         }
-        if (failure.reason !== "stalled") {
+        if (failure.reason !== "stalled" && failure.reason !== "ready") {
           const tableId = this.#tableRows().find(
             ({ name }) => name === failure.table
           )?.tableId;
@@ -4229,7 +4354,11 @@ export class StoreHost {
           }
           throw migrationErrors.create("migration.superseded");
         }
-        if (pending.state !== "failed" || pending.failure === null) {
+        const ready = pending.state === "running" && pending.readyAt !== null;
+        if (
+          !ready &&
+          (pending.state !== "failed" || pending.failure === null)
+        ) {
           throw migrationErrors.create("migration.not_failed", {
             scanned: pending.scanned,
             filled: pending.filled,
@@ -4246,10 +4375,16 @@ export class StoreHost {
         ) {
           throw migrationErrors.create("migration.metadata_corrupt");
         }
-        return this.#abandon(pending, pending.failure, kept.manifest, {
-          abandonedBy,
-          actor,
-        });
+        // A ready migration failed nothing: abandoned as it stands.
+        return this.#abandon(
+          pending,
+          pending.failure ?? { reason: "ready" },
+          kept.manifest,
+          {
+            abandonedBy,
+            actor,
+          }
+        );
       }
     );
     this.#schemasGeneration += 1;
@@ -4612,12 +4747,13 @@ export class StoreHost {
 
   /**
    * The pending target's explicit migration, as a commit queues work for
-   * it (`#flush`): its hash and the target's fields of each table it
+   * it (`#flush`): its hash, the schema it transforms to and the tables it
    * migrates; null while none runs. Call it inside a transaction.
    */
   #migrating(): {
     target: string;
-    tables: ReadonlyMap<string, Readonly<Record<string, ValueDescriptor>>>;
+    schema: string;
+    tables: ReadonlySet<string>;
   } | null {
     const pending = this.#pendingTarget();
     if (pending?.migrations === null || pending?.migrations === undefined) {
@@ -4625,12 +4761,8 @@ export class StoreHost {
     }
     return {
       target: pending.hash,
-      tables: new Map(
-        pending.migrations.migrations.map(([table]) => [
-          table,
-          tableFieldsOf(pending.manifest, table),
-        ])
-      ),
+      schema: pending.migrations.schema,
+      tables: new Set(pending.migrations.migrations.map(([table]) => table)),
     };
   }
 
@@ -4974,7 +5106,8 @@ export class StoreHost {
         })
         .from(backfills)
         .innerJoin(store, sql`1 = 1`)
-        .where(eq(backfills.state, "running"))
+        // A ready migration has no run to look after.
+        .where(and(eq(backfills.state, "running"), isNull(backfills.readyAt)))
         .get();
       if (row === undefined || backfillDueAt(row) > now) {
         return null;
@@ -5041,7 +5174,8 @@ export class StoreHost {
       .from(abandonedTargets)
       .where(isNull(abandonedTargets.auditedAt))
       .get();
-    // A running backfill: looked at when it is due (`backfillDueAt`).
+    // A running backfill: looked at when it is due (`backfillDueAt`); a
+    // ready migration has no run, so it is due for nothing.
     const backfill = this.#db
       .select({
         leaseUntil: backfills.leaseUntil,
@@ -5049,7 +5183,7 @@ export class StoreHost {
         createdAt: backfills.createdAt,
       })
       .from(backfills)
-      .where(eq(backfills.state, "running"))
+      .where(and(eq(backfills.state, "running"), isNull(backfills.readyAt)))
       .get();
     const times = [
       entry?.at,

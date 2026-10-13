@@ -30,12 +30,14 @@ import { validates } from "./store-queries.ts";
 //   fill's does; a retry of a committed batch is answered from that
 //   receipt, never compared with a transform run again (its answer may
 //   differ: determinism is best effort).
-// - The contract moves while a record still doesn't fit it (premature
-//   activation): concurrent commits that leave a record of a migrated
-//   table not fitting the target queue it in their own transaction
-//   (store-host.ts, `#flush`), and the target is ready only once the scan
-//   is through and no work is left; a write that queues work makes it
-//   not ready again.
+// - The contract moves while a record still doesn't fit it, or holds
+//   fields derived from what it held before an edit (premature
+//   activation, stale derivations): every commit that inserts or changes
+//   a record of a migrated table under another schema than the target
+//   queues it in its own transaction (store-host.ts, `#flush`), and it is
+//   transformed again from the edit; the target is ready only once the
+//   scan is through and no work is left, and a write that queues work
+//   makes it not ready again.
 // - The version still current can't write between the migration's end
 //   and its release being made current (a write outage): a ready target
 //   takes over only as its release is made current (store-host.ts,
@@ -100,6 +102,8 @@ export const scanPositionSchema = z.strictObject({
 /** A pending target's migrations, as `sdk_schema_backfills.migrations` keeps them. */
 export const pendingMigrationsSchema = z.strictObject({
   consumer: z.tuple([z.string().min(1), z.number().int().min(1)]),
+  /** The schema the migrations transform to: its writers' records fit it. */
+  schema: z.string().regex(/^[0-9a-f]{64}$/u),
   migrations: z.array(z.tuple([z.string().min(1), z.string().min(1)])),
 });
 export type PendingMigrations = z.output<typeof pendingMigrationsSchema>;
@@ -269,15 +273,16 @@ export const dropWork = (
 
 /**
  * The next batch of queued work of `target`: one table's records (one
- * owner's where it is `owned`) that still don't fit `fits`, by owner then
- * ID. Work whose record is gone, or fits by now, is dropped as it is
- * found. Null once no work is left.
+ * owner's where it is `owned`), by owner then ID, each transformed again
+ * from what it holds now, whether or not it fits the target (an edit of
+ * a transformed record still fits, and its derived fields are stale).
+ * Work whose record is gone is dropped as it is found. Null once no work
+ * is left.
  */
 export const nextWorkBatch = (
   db: Db,
   target: string,
-  tables: readonly MigratedTable[],
-  fits: (table: MigratedTable, fields: StoreFields) => boolean
+  tables: readonly MigratedTable[]
 ): { table: MigratedTable; rows: MigrationRow[] } | null => {
   for (;;) {
     const queued = db
@@ -319,7 +324,7 @@ export const nextWorkBatch = (
           )
         )
         .get();
-      if (record === undefined || fits(table, rowOf(record).fields)) {
+      if (record === undefined) {
         dropWork(db, target, item.tableId, item.recordId);
       } else {
         due.push(record);
@@ -331,6 +336,51 @@ export const nextWorkBatch = (
     }
   }
 };
+
+/**
+ * The IDs of the records of `table` a scan batch from `cursor` through
+ * `through` covers, as they are now: what its commit must account for.
+ */
+export const scanRangeIds = (
+  db: Db,
+  table: MigratedTable,
+  cursor: ScanPosition | null,
+  through: ScanPosition
+): string[] =>
+  db
+    .select({ id: records.recordId })
+    .from(records)
+    .where(
+      and(
+        eq(records.tableId, table.tableId),
+        lte(records.recordId, table.bound),
+        cursor !== null && cursor.tableId === table.tableId
+          ? sql`(${records.ownerId}, ${records.createdAt}, ${records.recordId}) > (${cursor.ownerId}, ${cursor.createdAt}, ${cursor.recordId})`
+          : undefined,
+        sql`(${records.ownerId}, ${records.createdAt}, ${records.recordId}) <= (${through.ownerId}, ${through.createdAt}, ${through.recordId})`
+      )
+    )
+    .all()
+    .map(({ id }) => id);
+
+/** Whether `recordId` of `tableId` is queued as work of `target`. */
+export const isQueued = (
+  db: Db,
+  target: string,
+  tableId: string,
+  recordId: string
+): boolean =>
+  db
+    .select({ id: migrationWork.recordId })
+    .from(migrationWork)
+    .where(
+      and(
+        eq(migrationWork.targetHash, target),
+        eq(migrationWork.tableId, tableId),
+        eq(migrationWork.recordId, recordId)
+      )
+    )
+    .get() !== undefined;
 
 /** Whether `target` has work left. */
 export const hasWork = (db: Db, target: string): boolean =>
