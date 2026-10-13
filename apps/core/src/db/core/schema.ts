@@ -1024,6 +1024,14 @@ export const workflowRuns = sqliteTable(
      * transaction, so a summary read in one statement is of one revision.
      */
     summaryRevision: integer("summary_revision").notNull().default(0),
+    /**
+     * How deep in its lineage the run is: 0 for a root, its parent's depth
+     * and one more for a run another started (src/workflows/quotas.ts).
+     * Written once, with the row, from the parent's row, never from what
+     * the run is given: a lineage nests no deeper than the quota policy
+     * allows however its runs start one another.
+     */
+    depth: integer().notNull().default(0),
   },
   (table) => [
     index("workflow_runs_app_idx").on(table.appId, table.createdAt),
@@ -1065,6 +1073,100 @@ export const workflowRuns = sqliteTable(
       .where(sql`ended_at IS NOT NULL AND details_removed_at IS NULL`),
   ]
 );
+
+/**
+ * Each run lineage's durable counters (src/workflows/quotas.ts): a root
+ * run and every run started under it, at any depth, keyed by the root.
+ * Created with the root's row, or with the lineage's first admission
+ * after it, from the root's row. Every admission of the lineage's work
+ * checks these against the quota policy as it is then, in one statement
+ * that changes them only if the work fits, so admissions racing each
+ * other never pass a limit, and nothing a retry, a restart, a child or a
+ * branch does starts them afresh: they only grow (but for `active_held_ms`,
+ * which moves into `active_used_ms` as attempts settle).
+ *
+ * - `created_at`: the root's start, which the lineage's age counts from.
+ *   A wait doesn't move it, nor does a child.
+ * - `descendants`: runs admitted under the root, whether or not their
+ *   start then succeeded: a slot taken is never given back.
+ * - `active_used_ms`: wall time its steps' attempts used, settled.
+ * - `active_held_ms`: what attempts under way hold, each its whole
+ *   allowance until it settles (`run_lineage_attempts`).
+ * - `policy_generation`: the quota policy's generation at the latest
+ *   admission.
+ */
+export const runLineages = sqliteTable("run_lineages", {
+  rootRunId: text("root_run_id")
+    .primaryKey()
+    .references(() => workflowRuns.id),
+  createdAt: timestamp("created_at").notNull(),
+  descendants: integer().notNull().default(0),
+  activeUsedMs: integer("active_used_ms").notNull().default(0),
+  activeHeldMs: integer("active_held_ms").notNull().default(0),
+  policyGeneration: integer("policy_generation").notNull().default(0),
+});
+
+/**
+ * The reservation receipt of each step attempt a run lineage admitted
+ * (src/workflows/quotas.ts): one per attempt, as the engine names it (its
+ * run, its step's key, its number and the generation of the activation
+ * that claimed it), so the same attempt admitted twice holds once, and an
+ * attempt of another activation is admitted afresh: it runs again. It
+ * holds `reserved_ms` (its allowance up to its deadline, at most an
+ * attempt's default active wall time) until it settles with what it used
+ * (`used_ms`, `settled_at`), up to its `deadline`; one that never settles
+ * (its activation died) is settled as having used all it could, once its
+ * deadline has passed.
+ */
+export const runLineageAttempts = sqliteTable(
+  "run_lineage_attempts",
+  {
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    stepKey: text("step_key").notNull(),
+    attempt: integer().notNull(),
+    generation: integer().notNull(),
+    rootRunId: text("root_run_id")
+      .notNull()
+      .references(() => runLineages.rootRunId),
+    reservedMs: integer("reserved_ms").notNull(),
+    /** When the engine gives up on the attempt: the most it can use ends here. */
+    deadline: timestamp("deadline").notNull(),
+    usedMs: integer("used_ms"),
+    admittedAt: timestamp("admitted_at").notNull(),
+    settledAt: timestamp("settled_at"),
+    policyGeneration: integer("policy_generation").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.runId, table.stepKey, table.attempt, table.generation],
+    }),
+    // A lineage's attempts still holding, by when they were admitted: what
+    // an admission settles once their allowance has passed, and how long a
+    // refusal for a busy lineage says to wait.
+    index("run_lineage_attempts_held_idx")
+      .on(table.rootRunId, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+  ]
+);
+
+/**
+ * Each quota policy generation core has applied (src/workflows/quotas.ts):
+ * the limits the deployment's `QUOTA_LIMITS` set under it, as canonical
+ * JSON, and their SHA-256. Written the first time core sees a generation,
+ * never changed after: a later var that sets other limits under a
+ * generation recorded here, or a lower generation than the highest, is
+ * refused, and core keeps the highest generation's limits. So two
+ * policies never share a generation, and none goes back to an older one,
+ * whatever is deployed.
+ */
+export const quotaPolicies = sqliteTable("quota_policies", {
+  generation: integer().primaryKey(),
+  limits: text().notNull(),
+  limitsHash: text("limits_hash").notNull(),
+  recordedAt: timestamp("recorded_at").notNull(),
+});
 
 /**
  * Each pause, resume or cancel of a run that the host admitted

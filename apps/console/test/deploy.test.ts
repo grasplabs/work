@@ -802,6 +802,11 @@ describe("deploying safely", () => {
       // Longer than the engine keeps an ended run.
       ["RUN_RETENTION_DAYS", "31"],
       ["MEMORY_LIMITS", "{not json"],
+      // A quota above the platform's: only a release raises one.
+      [
+        "QUOTA_LIMITS",
+        JSON.stringify({ generation: 1, limits: { workflowSteps: 1001 } }),
+      ],
     ];
     const outcomes: unknown[] = [];
     for (const [key, value] of refusedSettings) {

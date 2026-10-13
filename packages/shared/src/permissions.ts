@@ -172,6 +172,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "ONBOARDING",
   "PACKAGE_LIMITS",
   "PLATFORM_CHANGE",
+  // The deployment's quota policy (core's src/workflows/quotas.ts).
+  "QUOTA_LIMITS",
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
   "RUN_RETENTION_DAYS",
@@ -191,7 +193,6 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "WORKFLOW_OFF_WAIT_MS",
   "WORKFLOW_RETRY_DELAY_MS",
   "WORKFLOW_RUNS",
-  "WORKFLOW_STEP_LIMIT",
   "WORKSPACES",
 ]);
 

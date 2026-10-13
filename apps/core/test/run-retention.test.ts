@@ -87,6 +87,19 @@ const keeps = workflowFiles(
  * A workflow that fails, quoting what it read in its error, in a step
  * keyed by what it read.
  */
+/**
+ * A workflow whose one keyed step's last attempt hangs until it times
+ * out: its receipt is never settled by the attempt itself.
+ */
+const hangs = workflowFiles(
+  "hangs",
+  `  await step.do("wait", { key: "TRANSCRIPT", description: "Hang", timeout: "1 second", retries: { limit: 0 } }, async () => {
+    await new Promise(() => {});
+  });
+  return null;`,
+  { wait: null }
+);
+
 const fails = workflowFiles(
   "fails",
   `  const { notes = "none" } = (input ?? {}) as { notes?: string };
@@ -153,6 +166,20 @@ const rowOf = async (run: string) =>
   await env.DB.prepare("SELECT * FROM workflow_runs WHERE id = ?")
     .bind(run)
     .first<Record<string, string | number | null>>();
+
+/** How many receipts of its steps' attempts its lineage keeps of `run`. */
+const receiptsOf = async (run: string): Promise<number> =>
+  (await env.DB.prepare(
+    "SELECT count(*) AS n FROM run_lineage_attempts WHERE run_id = ?"
+  )
+    .bind(run)
+    .first<number>("n")) ?? 0;
+
+/** Whether the sweep marked `run` as having had its details removed. */
+const markedOf = async (run: string): Promise<boolean> => {
+  const row = await rowOf(run);
+  return row !== null && row.details_removed_at !== null;
+};
 
 /** Whether the engine still has anything of the run. */
 const inEngine = async (run: string): Promise<boolean> =>
@@ -234,6 +261,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       done: await builder.api.workflows.status(done.id),
       failed: await builder.api.workflows.status(failed.id),
     };
+    const receiptsWithin = await receiptsOf(done.id);
     const at = daysOn(31);
     await runQuarterHourCron({}, at);
     const after = {
@@ -241,6 +269,10 @@ describe("run retention", { timeout: 60_000 }, () => {
       failed: await builder.api.workflows.status(failed.id),
     };
     const rows = [await rowOf(done.id), await rowOf(failed.id)];
+    const receipts = {
+      within: receiptsWithin > 0,
+      after: (await receiptsOf(done.id)) + (await receiptsOf(failed.id)),
+    };
     const listed = await builder.api.workflows.list(app);
     const { runs: page } = await builder.api.workflows.runs({ app });
 
@@ -255,6 +287,8 @@ describe("run retention", { timeout: 60_000 }, () => {
       after,
       markedAt: rows.map((row) => row?.details_removed_at),
       inRows: JSON.stringify(rows).includes("TRANSCRIPT"),
+      // Its attempts' settled receipts go with its details.
+      receipts,
       listed: listed.map(({ id, status, detailsRemoved }) => ({
         id,
         status,
@@ -307,6 +341,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       },
       markedAt: [at.getTime(), at.getTime()],
       inRows: false,
+      receipts: { within: true, after: 0 },
       listed: [
         { id: failed.id, status: "failed", detailsRemoved: true },
         { id: done.id, status: "completed", detailsRemoved: true },
@@ -334,6 +369,88 @@ describe("run retention", { timeout: 60_000 }, () => {
         "workflow.step.completed done",
         "workflow.step.completed read",
       ],
+    });
+  });
+
+  it("settles and removes the receipt of a last attempt that never returned, charging its lineage, once the run's retention is over", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, hangs);
+    const run = await builder.api.workflows.start(app, "hangs");
+    await finished(run.id);
+    const lineage = async () =>
+      await env.DB.prepare(
+        "SELECT active_used_ms AS used, active_held_ms AS held FROM run_lineages WHERE root_run_id = ?"
+      )
+        .bind(run.id)
+        .first<{ used: number; held: number }>();
+    const before = {
+      receipts: await receiptsOf(run.id),
+      lineage: await lineage(),
+    };
+
+    await runQuarterHourCron({}, daysOn(31));
+    const after = {
+      receipts: await receiptsOf(run.id),
+      lineage: await lineage(),
+    };
+
+    expect({
+      before: {
+        receipts: before.receipts,
+        held: (before.lineage?.held ?? 0) > 0,
+      },
+      after: {
+        receipts: after.receipts,
+        held: after.lineage?.held,
+        // Charged up to its deadline: its second of time.
+        used: (after.lineage?.used ?? 0) >= 900,
+      },
+    }).toStrictEqual({
+      before: { receipts: 2, held: true },
+      after: { receipts: 0, held: 0, used: true },
+    });
+  });
+
+  it("removes a run's attempt receipts before it marks the run, so a sweep stopped in between leaves the run due, and the next finishes it", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, hangs);
+    const run = await builder.api.workflows.start(app, "hangs");
+    await finished(run.id);
+    // The database fails at the sweep's second batch, once: the one after
+    // its receipts' (no other run is due).
+    let batches = 0;
+    const db = racingDb(() => {
+      batches += 1;
+      if (batches === 2) {
+        throw new Error("D1_ERROR: broken for the test");
+      }
+    });
+    const halted = await sweepRunDetails({ ...env, DB: db }, daysOn(31)).catch(
+      (error: unknown) => error
+    );
+    const between = {
+      receipts: await receiptsOf(run.id),
+      marked: await markedOf(run.id),
+    };
+    await sweepRunDetails({ ...env, DB: db }, daysOn(31));
+    const lineage = await env.DB.prepare(
+      "SELECT active_held_ms AS held FROM run_lineages WHERE root_run_id = ?"
+    )
+      .bind(run.id)
+      .first<{ held: number }>();
+
+    expect({
+      halted: halted instanceof Error && halted.message,
+      between,
+      after: {
+        receipts: await receiptsOf(run.id),
+        marked: await markedOf(run.id),
+        held: lineage?.held,
+      },
+    }).toStrictEqual({
+      halted: "D1_ERROR: broken for the test",
+      between: { receipts: 0, marked: false },
+      after: { receipts: 0, marked: true, held: 0 },
     });
   });
 
