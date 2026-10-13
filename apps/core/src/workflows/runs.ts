@@ -1027,20 +1027,30 @@ export interface EngineStatus {
    * changes again, so nothing later can be newer.
    */
   sequence?: number;
+  /**
+   * When the run's first activation started, as the engine says with its
+   * notifications (`firstActivatedAt`): nothing before it ran, or for an
+   * end core's own command confirmed.
+   */
+  startedAt?: number;
 }
 
 /**
  * What the projection of `engine` writes of the engine itself: its own
  * status, the notification's sequence (none for an end core's own command
- * confirmed), the run's next summary revision, and when it first ran.
+ * confirmed), the run's next summary revision, and when it first ran:
+ * written once, from the engine's own record of its first activation, so
+ * a batch that skips past `running` loses nothing, and never overwritten.
  */
 const engineFields = (engine: EngineStatus) => ({
   engineStatus: engine.status,
   summaryRevision: nextRevision,
   ...(engine.sequence === undefined ? {} : { engineSequence: engine.sequence }),
-  ...(engine.status === "running" || engine.status === "waiting"
-    ? { startedAt: sql`COALESCE(${workflowRuns.startedAt}, ${engine.at})` }
-    : {}),
+  ...(engine.startedAt === undefined
+    ? {}
+    : {
+        startedAt: sql`COALESCE(${workflowRuns.startedAt}, ${engine.startedAt})`,
+      }),
 });
 
 /**

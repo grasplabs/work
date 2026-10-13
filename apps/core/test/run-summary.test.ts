@@ -2,6 +2,8 @@ import type { RunSummary } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
+import { projectStatus } from "../src/workflows/runs.ts";
 import { approvalApp, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
@@ -331,5 +333,83 @@ describe("a run's summary", { timeout: 60_000 }, () => {
       // As the run's status says it.
       removed: { code: "invoice.missing", message: failure?.error.message },
     });
+  });
+
+  it("hide an expired failed run's message before its details are swept, and give the sweep a revision of its own", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "failing",
+        `  return await step.do("fail", { description: "Fail", retries: { limit: 0 } }, async () => {
+    throw Object.assign(new Error("Invoice INV-7 of Acme is missing"), { code: "invoice.missing" });
+  });`,
+        { fail: null }
+      )
+    );
+    const { id: run } = await builder.api.screens.startRun(app, "failing");
+    await summaryWhen(builder, app, run, ({ status }) => status === "failed");
+    // Ended longer ago than the run retention (30 days): the sweep hasn't
+    // been by yet.
+    const longAgo = Date.now() - 31 * 24 * 60 * 60 * 1000;
+    await env.DB.prepare("UPDATE workflow_runs SET ended_at = ? WHERE id = ?")
+      .bind(longAgo, run)
+      .run();
+    const expired = await builder.api.screens.summary(app, run);
+    await sweepRunDetails(env, new Date());
+    const swept = await builder.api.screens.summary(app, run);
+
+    expect({
+      expired: expired.error,
+      swept: swept.error,
+      revised: swept.revision > expired.revision,
+    }).toStrictEqual({
+      expired: { code: "invoice.missing", message: removedText(env) },
+      swept: { code: "invoice.missing", message: removedText(env) },
+      revised: true,
+    });
+  });
+
+  it("keep when a run first ran, though the engine's batch skips past running to its end", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(
+      builder,
+      workflowFiles("quick", "  return null;", {})
+    );
+    const { id: run } = await builder.api.screens.startRun(app, "quick");
+    const done = await summaryWhen(
+      builder,
+      app,
+      run,
+      ({ status }) => status === "completed"
+    );
+    // A row whose engine's first notification it takes is its end, with
+    // when the run first ran, as a batch that went from running to waiting
+    // to complete hands it over; then a later one, which can't move it.
+    const skipped = crypto.randomUUID();
+    await env.DB.prepare(
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'quick', 1, ?, 'starting', ?)"
+    )
+      .bind(skipped, app, builder.userId, Date.now() - 5000)
+      .run();
+    const firstRan = Date.now() - 4000;
+    await projectStatus(env, skipped, {
+      status: "complete",
+      at: Date.now(),
+      sequence: 4,
+      startedAt: firstRan,
+    });
+    await projectStatus(env, skipped, {
+      status: "complete",
+      at: Date.now(),
+      sequence: 5,
+      startedAt: Date.now(),
+    });
+    const projected = await builder.api.screens.summary(app, skipped);
+
+    expect({
+      ran: done.startedAt !== null && done.startedAt <= (done.finishedAt ?? 0),
+      skipped: projected.startedAt,
+    }).toStrictEqual({ ran: true, skipped: firstRan });
   });
 });

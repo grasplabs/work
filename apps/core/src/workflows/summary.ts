@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { requireAppRole } from "../app-access.ts";
 import { findApp } from "../apps.ts";
-import { removedText } from "./retention.ts";
+import { detailsRemoved, removedText } from "./retention.ts";
 
 // A run's summary, as an App's screens observe it (spec 10.4.1, 10.4.5,
 // 10.4.7, 10.7.3): its status, who it is, its times, the decisions it
@@ -197,8 +197,15 @@ export const runSummary = async (
     by.role === "admin" || by.userId === (row.started_by ?? found.owner);
   const reported =
     status === "failed" && sees ? errorOf(row.failure) : undefined;
+  // Removed once the run's retention is up, whether or not the sweep has
+  // been by yet, as every reader of a run says (`detailsRemoved`).
+  const removed = detailsRemoved(env, {
+    endedAt: row.ended_at === null ? null : new Date(row.ended_at),
+    detailsRemovedAt:
+      row.details_removed_at === null ? null : new Date(row.details_removed_at),
+  });
   const error =
-    reported === undefined || row.details_removed_at === null
+    reported === undefined || !removed
       ? reported
       : { ...reported, message: removedText(env) };
   return {
