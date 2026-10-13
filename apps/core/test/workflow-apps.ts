@@ -19,9 +19,9 @@ import { person } from "./sealed-apps.ts";
  * A registration of spec 8's layout beside an App's server, declaring a
  * text model resource for each of `bounds`' aliases, which its workflows'
  * AI steps go through (`step.llm`'s `binding`), each with that bound on
- * the answer. A step may ask twice, so each ask gets half: twice what the
- * gateway gives a model's answer when a call says nothing (16,384 tokens,
- * and a quarter of Llama 3.3's window, 6,000) asks for as much as before.
+ * the answer. A step may ask twice, so each ask gets half. A binding
+ * holds the whole bound to what its model can answer, as an action would
+ * ask for all of it: at most 6,000 tokens on Llama 3.3.
  */
 export const modelRegistration = (
   bounds: Record<string, number>

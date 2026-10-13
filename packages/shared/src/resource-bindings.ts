@@ -384,6 +384,8 @@ export const resourceBindingErrors = defineErrorFamily({
   "resource.template_not_found": "There's no such template.",
   "resource.template_contract_changed":
     "A template keeps the contract of its first version: publish a new template for another contract.",
+  "resource.model_too_small":
+    "That model can't give an answer as long as this resource declares within its window. Choose a model with a larger window, or ask the App's builder for a smaller bound.",
   "resource.target_invalid":
     "That can't serve this resource: it isn't the App's own active grant, a model this deployment allows, or a published version of the declared template.",
 });
