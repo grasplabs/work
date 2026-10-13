@@ -481,14 +481,16 @@ export const fromIsolate = (value: unknown): Settled<unknown> => {
       };
 };
 
-/** The engine's delay before a retry when the SDK names none. */
+/** The delay before a step's first retry when the SDK names none. */
 const defaultRetryDelayMs = 10_000;
 
 /**
- * The engine's retries of a step when the SDK names none: the engine's
- * own default, which it journals as the step's config.
+ * A step's retries when the SDK names none: the platform's, never the
+ * engine's own default (5, one attempt more than a step may have, which
+ * its admission would refuse after minutes of backoff, failing the step
+ * with that refusal instead of its own error).
  */
-const defaultRetryLimit = 5;
+const defaultRetryLimit = maxStepRetries;
 
 /**
  * The step config the engine takes: what the SDK gave, its defaults
@@ -502,25 +504,25 @@ const defaultRetryLimit = 5;
  * a step (a clamp, another default, another `defaultRetryDelayMs`) halts
  * the runs in flight that journaled the old one on replay.
  *
- * Its retries are what the step declared, at most `maxStepRetries`
- * (`doOptionsSchema`). The ceiling on its attempts (spec 18.1's five, all
- * counted, or the operator's lower one) is enforced as each attempt is
- * admitted (quotas.ts, `admitAttempt`), which refuses an attempt past it,
- * and `isLastAttempt` takes it into account.
+ * Its retries are always given too: what the step declared, at most
+ * `maxStepRetries` (`doOptionsSchema`), or `defaultRetryLimit`. The
+ * ceiling on its attempts (spec 18.1's five, all counted, or the
+ * operator's lower one) is enforced as each attempt is admitted
+ * (quotas.ts, `admitAttempt`), which refuses an attempt past it, and
+ * `isLastAttempt` takes it into account. A step whose side effect is held
+ * runs again in steps of core's own (`#waitBefore`), each with these
+ * retries afresh: the ceiling is per round, and every round is still held
+ * to its lineage's active time.
  */
 const stepConfig = ({
   retries,
   timeout,
 }: z.output<typeof doOptionsSchema>): WorkflowStepConfig => ({
-  ...(retries === undefined
-    ? {}
-    : {
-        retries: {
-          limit: retries.limit,
-          delay: retries.delay ?? defaultRetryDelayMs,
-          backoff: retries.backoff ?? "exponential",
-        },
-      }),
+  retries: {
+    limit: retries?.limit ?? defaultRetryLimit,
+    delay: retries?.delay ?? defaultRetryDelayMs,
+    backoff: retries?.backoff ?? "exponential",
+  },
   timeout: timeout ?? maxAttemptTimeoutMs,
 });
 
@@ -692,12 +694,16 @@ export interface BusyRefusals {
  *   paying, again.
  *
  * This is how an AI step whose model takes longer than an attempt's
- * minute is served, rather than by an exception to that minute: the call
- * is core's, not the step's code, and runs on, as long as the gateway
- * lets one (`models.ts`, its timeout), while the step's next attempts
- * wait for it, each within its own minute. A step that runs out of
- * attempts first fails as timed out; one whose model is that slow is
- * split into smaller calls.
+ * minute is served, rather than by an exception to that minute. Only the
+ * one provider request already sent runs on past the attempt that asked
+ * for it, as long as the gateway lets a call run (`models.ts`, its
+ * timeout); no other is sent for it, as `beforeSend` refuses the
+ * gateway's retries once the attempt no longer holds. The step's next
+ * attempts wait for that answer, each within its own minute. The handoff
+ * lives in the run's object's memory only: an object evicted meanwhile
+ * loses it, and the next attempt asks, and pays, again. A step that runs
+ * out of attempts first fails as timed out; one whose model is that slow
+ * is split into smaller calls.
  */
 export interface AiCalls {
   asking: Map<string, Promise<unknown>>;
@@ -799,13 +805,29 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
 };
 
 /**
+ * How the Loader stops an isolate past its `limits.cpuMs`: it throws, as
+ * Cloudflare documents, "Worker exceeded CPU time limit." to whoever
+ * called into it. Known by its message, which is all that survives RPC.
+ * The run's own code can't make a call into its isolate reject so: every
+ * entrypoint and step function settles what its code threw into a report
+ * (code.ts, `settled`).
+ */
+const cpuLimit = /\bCPU time limit\b/u;
+export const isCpuLimitKill = (error: unknown): boolean =>
+  error instanceof Error && cpuLimit.test(error.message);
+
+/**
  * One of core's errors as the isolate, and the run's own record, may see
- * it: an expected error as it is, a timeout as one, anything else as
- * `internal.unexpected`, with the cause only in the log.
+ * it: an expected error as it is, a timeout as one (the Loader's CPU limit
+ * too), anything else as `internal.unexpected`, with the cause only in
+ * the log.
  */
 export const forIsolate = (error: unknown): StepError => {
   if (isTimeout(error)) {
     return { name: "TimeoutError", message: "The step ran out of time." };
+  }
+  if (isCpuLimitKill(error)) {
+    return { name: "TimeoutError", message: "The step ran out of CPU time." };
   }
   const seen = forSandbox(error);
   return {
@@ -933,6 +955,14 @@ export interface FailedStep {
 export interface HostHooks {
   /** Hears of each step that failed, with the error it failed with. */
   stepFailed: (failure: FailedStep) => void;
+  /**
+   * Hears of each call of an attempt's function into the run's isolate as
+   * it starts, with a promise that settles once the attempt's step ends in
+   * this activation (done, or failed for good): so the run can tell, once
+   * the Loader stops the isolate past its CPU time, whether an attempt was
+   * cut off, and whether its step is to be retried (dispatcher.ts).
+   */
+  attemptCall?: (call: Promise<unknown>, stepDone: Promise<unknown>) => void;
   /** Each step's last refusal for a busy budget (`#untilAsking`). */
   busyRefusals: BusyRefusals;
   /**
@@ -1032,6 +1062,11 @@ export class RunHost extends RpcTarget {
    * (`#requireReviewed`).
    */
   readonly #live: StepAttempt[] = [];
+  /**
+   * Whether the Loader stopped the run's isolate past its CPU time: no
+   * later attempt of this execution calls into it (`do`).
+   */
+  #isolateStopped = false;
 
   constructor(env: Env, step: RunStep, run: HostedRun, hooks: HostHooks) {
     super();
@@ -1284,6 +1319,7 @@ export class RunHost extends RpcTarget {
     let step = "";
     let sideEffect = false;
     let input: InputShape | null = null;
+    const stepDone = Promise.withResolvers<null>();
     try {
       this.#requireUntampered();
       step = checked(stepNameSchema, name);
@@ -1345,7 +1381,7 @@ export class RunHost extends RpcTarget {
         let current = false;
         this.#live.push(attempt);
         try {
-          result = fromIsolate(await fn(this.#attemptHost(attempt)));
+          result = await this.#callAttempt(attempt, fn, stepDone.promise);
         } finally {
           current = this.#holds(attempt);
           // Its function has returned: its host acts no more, whatever
@@ -1455,6 +1491,37 @@ export class RunHost extends RpcTarget {
         });
       }
       return { ok: false, error: reported };
+    } finally {
+      stepDone.resolve(null);
+    }
+  }
+
+  /**
+   * Calls `attempt`'s function in the run's isolate, `stepDone` settling
+   * once its step ends in this activation: what it settled with, or, once
+   * the Loader stopped the isolate past its CPU time while it ran, a
+   * timeout, which its step's retries retry in a fresh activation with a
+   * fresh isolate (dispatcher.ts, `afterCpuKill`). An isolate so stopped
+   * runs nothing more: an attempt that comes after it in this activation
+   * (a retry due at once) times out as the one cut off did.
+   */
+  async #callAttempt(
+    attempt: StepAttempt,
+    fn: (attempt: AttemptHost) => Promise<unknown>,
+    stepDone: Promise<unknown>
+  ): Promise<Settled<unknown>> {
+    const call = this.#isolateStopped
+      ? Promise.reject(new Error("Worker exceeded CPU time limit."))
+      : fn(this.#attemptHost(attempt));
+    this.#hooks.attemptCall?.(call, stepDone);
+    try {
+      return fromIsolate(await call);
+    } catch (error) {
+      if (!isCpuLimitKill(error)) {
+        throw error;
+      }
+      this.#isolateStopped = true;
+      return { ok: false, error: forIsolate(error) };
     }
   }
 

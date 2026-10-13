@@ -23,6 +23,7 @@ import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
 import {
   countedStep,
   fromIsolate,
+  isCpuLimitKill,
   RunHost,
   settle,
   stepLimitOf,
@@ -124,6 +125,56 @@ const settledRun = async (
 ): Promise<Settled<unknown>> => {
   const outer = await settle(run);
   return outer.ok ? fromIsolate(outer.value) : outer;
+};
+
+/** An attempt's call into the run's isolate, as it started (`attemptCall`). */
+interface AttemptCall {
+  call: Promise<unknown>;
+  /** Settles once the attempt's step ends in this activation. */
+  stepDone: Promise<unknown>;
+}
+
+/**
+ * What an activation does once the Loader stopped the run's isolate past
+ * its CPU time (`thrown`, by the run's call into it): fails the run, as for
+ * any error of its isolate, unless an attempt was cut off with it. The
+ * host failed each such attempt as a retryable timeout (host.ts,
+ * `isCpuLimitKill`), and fails any later one of this activation so too,
+ * so the engine parks its step for its retry and the activation
+ * suspends until then, as for a wait: the next one replays in a fresh
+ * isolate, with a fresh limit, rather than the run fail for CPU earlier
+ * steps spent. Should such a step end in this activation instead (its
+ * last attempt, or every retry due at once), the run fails with its
+ * failure. Code spending the time outside any attempt fails the run.
+ */
+const afterCpuKill = async (
+  thrown: unknown,
+  calls: readonly AttemptCall[]
+): Promise<never> => {
+  if (!isCpuLimitKill(thrown)) {
+    throw thrown;
+  }
+  // Each attempt's call ends with the isolate; waited for, as the run's
+  // own call may end first.
+  const attempts: Promise<unknown>[] = [];
+  for (const { call } of calls) {
+    attempts.push(call);
+  }
+  const outcomes = await Promise.allSettled(attempts);
+  const cutOff = calls.filter((_, index) => {
+    const outcome = outcomes[index];
+    return outcome?.status === "rejected" && isCpuLimitKill(outcome.reason);
+  });
+  if (cutOff.length > 0) {
+    const steps: Promise<unknown>[] = [];
+    for (const { stepDone } of cutOff) {
+      steps.push(stepDone);
+    }
+    // Never settles while each such step is parked: the engine suspends
+    // the run, and the next activation replays it.
+    await Promise.race(steps);
+  }
+  throw thrown;
 };
 
 /** The run's App, as a context for its restricted mode. */
@@ -272,8 +323,14 @@ const runWorkflow = async (
         ...(memory.current === undefined ? {} : { current: memory.current }),
       }
     );
+    const calls: AttemptCall[] = [];
     const host = new RunHost(env, step, run, {
       stepFailed,
+      attemptCall: (call, stepDone) => {
+        // Observed, never left to reject unhandled: the host awaits it.
+        call.catch(() => null);
+        calls.push({ call, stepDone });
+      },
       busyRefusals: memory.busyRefusals,
       aiCalls: memory.aiCalls,
       leaseOf: memory.leaseOf,
@@ -298,14 +355,18 @@ const runWorkflow = async (
           attempt
         ),
     });
-    return await code.run(host, {
-      runId,
-      params: Object.fromEntries(params),
-      input: event.payload,
-      collections: Object.keys(bindings),
-      connections: Object.keys(connections),
-      apps: Object.keys(apps),
-    });
+    try {
+      return await code.run(host, {
+        runId,
+        params: Object.fromEntries(params),
+        input: event.payload,
+        collections: Object.keys(bindings),
+        connections: Object.keys(connections),
+        apps: Object.keys(apps),
+      });
+    } catch (error) {
+      return await afterCpuKill(error, calls);
+    }
   });
   if (!result.ok && memory.current?.() === false) {
     // Cancelled or taken over as it ran (its load let go, say): whoever

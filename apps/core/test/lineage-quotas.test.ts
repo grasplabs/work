@@ -131,13 +131,14 @@ const working = (name: string, ms: number) =>
   });`;
 
 /**
- * A workflow whose one step declares the most retries a step may, and
- * whose every attempt counts itself, then hangs until its second is over.
+ * A workflow whose one step declares the most retries a step may (or,
+ * `undeclared`, none), and whose every attempt counts itself, then hangs
+ * until its second is over.
  */
-const hanging = (name: string) =>
+const hanging = (name: string, retries: "most" | "undeclared" = "most") =>
   workflowFiles(
     name,
-    `  return await step.do("hang", { description: "Hang", timeout: "1 second", retries: { limit: 4, delay: 1, backoff: "constant" } }, async () => {
+    `  return await step.do("hang", { description: "Hang", timeout: "1 second"${retries === "most" ? ', retries: { limit: 4, delay: 1, backoff: "constant" }' : ""} }, async () => {
     await env.APP.call("hit", "${name}");
     await new Promise(() => {});
   });`,
@@ -200,6 +201,114 @@ const withPolicyReadFailingOnce = async <Result>(
     return { value: await run(), failed };
   } finally {
     env.DB = database;
+  }
+};
+
+/** How the Loader stops an isolate past its `limits.cpuMs`, as Cloudflare documents it. */
+const cpuKill = (): Error => new Error("Worker exceeded CPU time limit.");
+
+/** The host core gives a run's isolate, as the isolate calls it (code.ts, runMain). */
+interface RunCallHost {
+  do: (
+    name: string,
+    options: unknown,
+    fn: (attempt: unknown) => Promise<unknown>
+  ) => Promise<unknown>;
+  sleep: (...args: unknown[]) => Promise<unknown>;
+  waitForDecision: (...args: unknown[]) => Promise<unknown>;
+}
+
+/**
+ * The `run` of a run's entrypoint `target`, with the Loader stopping the
+ * isolate past its CPU time as each attempt of step `step` that `kills`
+ * picks starts (`counted`, from 1, across activations): the attempt's
+ * call and the run's own call into the isolate both reject with it.
+ */
+const killingRun =
+  (
+    target: object,
+    step: string,
+    kills: (attempt: number) => boolean,
+    counted: { attempts: number }
+  ) =>
+  async (host: RunCallHost, input: unknown): Promise<unknown> => {
+    const real: unknown = Reflect.get(target, "run");
+    if (typeof real !== "function") {
+      throw new TypeError("The run's isolate has no run");
+    }
+    const killed = Promise.withResolvers<never>();
+    killed.promise.catch(() => null);
+    const watched: RunCallHost = {
+      do: async (stepName, stepOptions, fn) =>
+        await host.do(stepName, stepOptions, async (attempt) => {
+          if (stepName === step) {
+            counted.attempts += 1;
+            if (kills(counted.attempts)) {
+              const error = cpuKill();
+              killed.reject(error);
+              throw error;
+            }
+          }
+          return await fn(attempt);
+        }),
+      sleep: async (...waitArgs) => await host.sleep(...waitArgs),
+      waitForDecision: async (...waitArgs) =>
+        await host.waitForDecision(...waitArgs),
+    };
+    const ran: Promise<unknown> = Promise.resolve(
+      Reflect.apply(real, target, [watched, input])
+    );
+    return await Promise.race([ran, killed.promise]);
+  };
+
+/**
+ * What `run` returns while the Loader stops a run's isolate past its CPU
+ * time as each attempt of step `step` that `kills` picks starts (counted
+ * from 1 across activations), as Cloudflare does (`killingRun`). Plain
+ * workerd enforces no `cpuMs`, so the Loader is stood in for; the
+ * isolate, the host and the engine are real.
+ */
+const withCpuKills = async <Result>(
+  step: string,
+  kills: (attempt: number) => boolean,
+  run: () => Promise<Result>
+): Promise<Result> => {
+  const loader = env.LOADER;
+  const counted = { attempts: 0 };
+  const getWorker = (...args: Parameters<WorkerLoader["get"]>) =>
+    new Proxy(loader.get(...args), {
+      get: (worker, property): unknown =>
+        property === "getEntrypoint"
+          ? (...entrypointArgs: Parameters<typeof worker.getEntrypoint>) => {
+              const entrypoint = worker.getEntrypoint(...entrypointArgs);
+              return entrypointArgs[0] === "Run"
+                ? new Proxy(entrypoint, {
+                    get: (target, name): unknown =>
+                      name === "run"
+                        ? killingRun(target, step, kills, counted)
+                        : Reflect.get(target, name),
+                  })
+                : entrypoint;
+            }
+          : Reflect.get(worker, property),
+    });
+  env.LOADER = new Proxy(loader, {
+    get: (target, property): unknown =>
+      property === "get" ? getWorker : Reflect.get(target, property),
+  });
+  const retryDelay = env.WORKFLOW_RETRY_DELAY_MS;
+  // A retry comes soon, but not at once: the engine parks its step, as for
+  // any backoff, and the run's next activation runs it.
+  env.WORKFLOW_RETRY_DELAY_MS = "200";
+  try {
+    return await run();
+  } finally {
+    env.LOADER = loader;
+    if (retryDelay === undefined) {
+      Reflect.deleteProperty(env, "WORKFLOW_RETRY_DELAY_MS");
+    } else {
+      env.WORKFLOW_RETRY_DELAY_MS = retryDelay;
+    }
   }
 };
 
@@ -279,16 +388,22 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     });
   });
 
-  it("try a step no more often than a step may be tried, declaring the most retries it may, and fewer once the operator lowers it", async () => {
+  it("try a step no more often than a step may be tried, declaring the most retries it may or none, failing with its own error, and fewer once the operator lowers it", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(builder, {
       ...hanging("declared"),
+      ...hanging("undeclared", "undeclared"),
       ...hanging("lowered"),
     });
     await serverBuilt(app, 1);
 
     const declared = await withQuotas({}, async () => {
       const run = await builder.api.workflows.start(app, "declared");
+      await finished(run.id);
+      return run.id;
+    });
+    const undeclared = await withQuotas({}, async () => {
+      const run = await builder.api.workflows.start(app, "undeclared");
       await finished(run.id);
       return run.id;
     });
@@ -302,13 +417,19 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     );
 
     const declaredRun = await builder.api.workflows.status(declared);
+    const undeclaredRun = await builder.api.workflows.status(undeclared);
     expect({
       declared: await hitsOf(app, builder.userId, "declared"),
+      undeclared: await hitsOf(app, builder.userId, "undeclared"),
+      // Its own error, its fifth attempt's timeout: never a sixth refused.
+      undeclaredWith: undeclaredRun.failure?.error.message,
       lowered: await hitsOf(app, builder.userId, "lowered"),
       loweredWith: await failedWith(lowered),
       declaredStatus: declaredRun.status,
     }).toStrictEqual({
       declared: 5,
+      undeclared: 5,
+      undeclaredWith: "The step ran out of time.",
       lowered: 2,
       loweredWith: "workflow.too_many_attempts",
       declaredStatus: "failed",
@@ -365,6 +486,81 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
       ],
     });
     expect(held?.most).toBeLessThanOrEqual(60_000);
+  });
+
+  it("retry an attempt the Loader cut off past its CPU time in a fresh activation, rather than fail the run for it", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "spends",
+        `  await step.do("before", { description: "Before" }, async () => 1);
+  return await step.do("work", { description: "Work" }, async () => 2);`,
+        { before: 1, work: 2 }
+      )
+    );
+
+    const result = await withCpuKills(
+      "work",
+      (attempt) => attempt === 1,
+      async () => {
+        const run = await builder.api.workflows.start(app, "spends");
+        await finished(run.id);
+        const { status, output } = await builder.api.workflows.status(run.id);
+        const attempts = await runInDurableObject(
+          runObject(run.id),
+          (_object, state) =>
+            state.storage.sql
+              .exec<{ attempt: number; ended: string }>(
+                `SELECT attempts.attempt AS attempt, attempts.ended AS ended
+                 FROM steps JOIN attempts ON attempts.ordinal = steps.ordinal
+                 WHERE steps.name = 'work' ORDER BY attempts.attempt`
+              )
+              .toArray()
+        );
+        return { status, output, attempts };
+      }
+    );
+
+    expect(result).toStrictEqual({
+      status: "completed",
+      output: 2,
+      attempts: [
+        { attempt: 1, ended: "failed" },
+        { attempt: 2, ended: "succeeded" },
+      ],
+    });
+  });
+
+  it("fail a run whose step's last attempt the Loader cut off past its CPU time, with that timeout", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "spendsAll",
+        `  return await step.do("work", { description: "Work", retries: { limit: 0 } }, async () => 2);`,
+        { work: 2 }
+      )
+    );
+
+    const failure = await withCpuKills(
+      "work",
+      () => true,
+      async () => {
+        const run = await builder.api.workflows.start(app, "spendsAll");
+        await finished(run.id);
+        const { status, failure: failed } = await builder.api.workflows.status(
+          run.id
+        );
+        return { status, step: failed?.step, message: failed?.error.message };
+      }
+    );
+
+    expect(failure).toStrictEqual({
+      status: "failed",
+      step: "work",
+      message: "The step ran out of CPU time.",
+    });
   });
 
   it("refuse a step that declares a longer attempt or more retries than the platform allows, written past the SDK, without running it", async () => {

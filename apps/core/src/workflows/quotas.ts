@@ -42,7 +42,9 @@ import {
 //   counters, which only grow, and its number, which the engine journals,
 //   against the attempts a step may have, whatever its code declares; a
 //   step declaring more retries than the platform's is refused (host.ts,
-//   `doOptionsSchema`).
+//   `doOptionsSchema`). The ceiling is per round of a step: one whose side
+//   effect was held runs again, once decided, in a step of core's own
+//   with attempts afresh, every round held to the lineage's active time.
 // - A restart or a new activation starting afresh: nothing is counted in
 //   memory. An activation that runs an attempt again is admitted again:
 //   the attempt runs, and uses time, again.
