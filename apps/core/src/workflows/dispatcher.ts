@@ -1,11 +1,13 @@
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { coreStepPrefix } from "@grasp-os/shared/workflows";
 import type {
   WorkflowEvent,
   WorkflowStep,
 } from "@grasp-os/workerflow/contracts";
 
+import { callRunFunction } from "../app-functions.ts";
 import { callApp } from "../app.ts";
 import { callsFor, versionFiles } from "../apps.ts";
 import { runBackfill } from "../backfill-run.ts";
@@ -19,7 +21,6 @@ import { runParamsSchema } from "./engine.ts";
 import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
 import {
   countedStep,
-  coreStepPrefix,
   fromIsolate,
   RunHost,
   settle,
@@ -269,6 +270,8 @@ const runWorkflow = async (
       },
       callApp: async (caller, method, args, ends) =>
         await callApp(env, run.app, caller, method, args, ends),
+      callFunction: async (caller, reference, input, idempotencyKey) =>
+        await callRunFunction(env, caller, reference, input, idempotencyKey),
     });
     return await code.run(host, {
       runId,

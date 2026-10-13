@@ -181,6 +181,9 @@ const runOf = async (
         callApp: () => {
           throw new Error("No App call here");
         },
+        callFunction: () => {
+          throw new Error("No App function call here");
+        },
       }
     );
   return {

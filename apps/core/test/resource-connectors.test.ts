@@ -490,15 +490,18 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
 
   it("hold a side effect for the person, then answer it once, under the call's key", async () => {
     const mailer = await mailerApp();
-    const input = { to: "ada@acme.test", subject: "Launch" };
+    // A subject of this test's own: other files' runs send mail through
+    // the same Graph fake meanwhile.
+    const subject = `Launch ${crypto.randomUUID()}`;
+    const input = { to: "ada@acme.test", subject };
     const held = await call(mailer, "mail.send", input, "launch-1");
-    const whileHeld = await graphSent();
+    const whileHeld = await sentCount(subject);
     await confirmAll(mailer);
     const answered = await call(mailer, "mail.send", input, "launch-1");
     const again = await call(mailer, "mail.send", input, "launch-1");
     expect({
       held: outcomeOf(held),
-      sentWhileHeld: whileHeld.length,
+      sentWhileHeld: whileHeld,
       answered: outcomeOf(answered),
       again: outcomeOf(again),
     }).toStrictEqual({
@@ -508,9 +511,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
       again: { mailbox: "team@acme.test", sent: true },
     });
     // Sent once, as the person confirmed it: the repeats replayed it.
-    await expect(graphSent()).resolves.toStrictEqual([
-      { mailbox: "team@acme.test", subject: "Launch", to: ["ada@acme.test"] },
-    ]);
+    await expect(sentCount(subject)).resolves.toBe(1);
   });
 
   it("refuse arguments the contract doesn't allow before connect sees them", async () => {

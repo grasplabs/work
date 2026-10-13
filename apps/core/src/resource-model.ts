@@ -1,6 +1,5 @@
 import type { ValueDescriptor } from "@grasp-os/sdk";
 import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
-import { delegateActorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -25,7 +24,8 @@ import type {
 // deployment's allowlist and data rules, reserves and settles the call
 // against every budget it counts against (the deployment's, the person's
 // it acts for, the binding's own caps per request, day and month in
-// model-budgets.ts), and audits it as metadata only. The declaration
+// model-budgets.ts, and for a workflow run's call its workflow's and its
+// run lineage's), and audits it as metadata only. The declaration
 // bounds the answer's tokens, and a structured output is the descriptor's:
 // the model is told its JSON Schema, asked once more when an answer
 // doesn't fit, and the operation host checks the answer against the
@@ -174,18 +174,28 @@ const generate = async (
         Math.max(1, Math.floor(context.deadline - Date.now()))
       ),
       purpose: "app.resource",
-      trigger: delegateActorOf(caller.authority),
+      // The App for a screen's call; the run for a workflow's, whose
+      // workflow and run lineage budgets then count it too.
+      trigger: caller.actor,
       provenance: [...caller.sources.snapshot().collectionIds],
       connections: [...caller.sources.connections()],
       work: { authority: caller.authority, context: caller.context },
       requestId: context.requestId,
       binding: { app: caller.app, alias: record.alias, budget: record.budget },
+      // A run's attempt let go of while the gateway admitted the request
+      // sends nothing to the provider.
+      ...(caller.requireHolds === undefined
+        ? {}
+        : { beforeSend: caller.requireHolds }),
       ...(structuredOutput === null
         ? {}
         : { schema: answerSchema(structuredOutput) }),
     });
     return structuredOutput === null ? answer.text : answer.output;
   } catch (error) {
+    // Stopped before it was sent, as a run's attempt was let go of: said
+    // so, whatever the gateway made of the stop.
+    caller.requireHolds?.();
     throw refusalOf(error);
   }
 };
