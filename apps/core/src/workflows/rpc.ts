@@ -14,6 +14,7 @@ import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { runActivity } from "./activity.ts";
+import { cancelRun } from "./controls.ts";
 import {
   dryRunWorkflow,
   listAllRuns,
@@ -21,7 +22,7 @@ import {
   workflowOverview,
 } from "./overview.ts";
 import { WorkflowParamsRpc } from "./params-rpc.ts";
-import { cancelRun, listRuns, runStatus, startWorkflow } from "./runs.ts";
+import { listRuns, runStatus, startWorkflow } from "./runs.ts";
 
 /**
  * A signed-in person's `workflows`. Like AppsRpc, every call checks the

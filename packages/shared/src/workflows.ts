@@ -37,6 +37,10 @@ export const workflowErrors = defineErrorFamily({
     "A workflow's tests fail, or it has none, so this version can't be made current.",
   "workflow.outside_step":
     "A workflow calls its connections only inside a step: code between steps runs again on every replay.",
+  "workflow.control_conflict":
+    "Another pause, resume or cancel of this run is still being applied, or the run is being cancelled: wait for it, then try again.",
+  "workflow.control_refused":
+    "The run has ended, so it can't be paused, resumed or cancelled.",
   "workflow.too_many_steps":
     "This run has taken as many steps as a workflow run may: split the work over more runs.",
   "workflow.idempotency_key_invalid":
@@ -458,6 +462,17 @@ export type RunStatus =
   | "completed"
   | "failed"
   | "cancelled";
+
+/**
+ * The receipt of a pause, resume or cancel of a run the host admitted:
+ * `admitted` until the engine confirms it, then `applied`; `superseded`
+ * when a cancel overtook it first.
+ */
+export interface RunControl {
+  id: string;
+  kind: "pause" | "resume" | "cancel";
+  state: "admitted" | "applied" | "superseded";
+}
 
 /** One run of a workflow. */
 export interface WorkflowRun {

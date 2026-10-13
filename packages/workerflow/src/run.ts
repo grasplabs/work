@@ -279,13 +279,40 @@ export type StartOutcome =
  * `ignored`: the run is queued, pausing or paused already, or has ended,
  * and a pause does nothing, as on the reference engine.
  */
-export type PauseOutcome = "pausing" | "paused" | "ignored" | "missing";
+export type PauseOutcome =
+  | "pausing"
+  | "paused"
+  | "ignored"
+  | "fenced"
+  | "missing";
+
+/**
+ * A host's own order of the controls it sends a run (pause, resume,
+ * terminate): `fence`, a number the host raises with each newer control.
+ * The run keeps the greatest it took, in the same write as the state
+ * change, and ignores (`fenced`) a control with a smaller one, so a
+ * command delivered late can't undo a newer one. The same fence again (a
+ * command sent again) is taken as before. Without one, a control is
+ * taken as it comes, and fences nothing.
+ */
+export interface ControlFence {
+  fence?: number;
+}
 
 /**
  * `resumed`: the run was paused, or still pausing, and runs again.
  * `ignored`: it was neither, and a resume does nothing.
  */
-export type ResumeOutcome = "resumed" | "ignored" | "missing";
+export type ResumeOutcome = "resumed" | "ignored" | "fenced" | "missing";
+
+/**
+ * Whether a resume leaves the run's pending deadlines where they were (a
+ * host whose paused time counts, as Grasp's does), or moves them on by
+ * the time it was paused, as the reference engine does: the default.
+ */
+export interface ResumeCommand extends ControlFence {
+  keepDeadlines: boolean;
+}
 
 /**
  * `ended`: the run has ended already, and can't be terminated.
@@ -295,10 +322,11 @@ export type TerminateOutcome =
   | "terminated"
   | "ended"
   | "rolling_back"
+  | "fenced"
   | "missing";
 
 /** Whether a termination rolls the run's steps back first. */
-export interface TerminateCommand {
+export interface TerminateCommand extends ControlFence {
   rollback: boolean;
 }
 
@@ -502,22 +530,29 @@ const pauseIn = (sql: SqlStorage, now: number): void => {
 
 /**
  * Moves each of the run's pending deadlines on by `ms`, the time it was
- * paused: a sleep's or a wait's, a retry's, and that of an attempt cut
- * off, its step's latest with no outcome journaled: one still open (its
- * activation died before the pause) or one whose answer came back
- * superseded, which the next activation ends as cut off by its deadline
- * (activation.ts). Paused time doesn't count against them, as on the
- * reference engine.
+ * paused: a sleep's or a wait's, a retry's (unless the resume keeps them,
+ * `waits` false), and that of an attempt cut off, its step's latest with
+ * no outcome journaled: one still open (its activation died before the
+ * pause) or one whose answer came back superseded, which the next
+ * activation ends as cut off by its deadline (activation.ts). Paused time
+ * doesn't count against them, as on the reference engine; an attempt's
+ * always moves, so paused time never makes it one that timed out.
  */
-const shiftDeadlinesIn = (sql: SqlStorage, ms: number): void => {
-  sql.exec(
-    "UPDATE steps SET deadline = deadline + ? WHERE state = 'waiting' AND deadline IS NOT NULL",
-    ms
-  );
-  sql.exec(
-    "UPDATE attempts SET retry_at = retry_at + ? WHERE retry_at IS NOT NULL AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'retrying')",
-    ms
-  );
+const shiftDeadlinesIn = (
+  sql: SqlStorage,
+  ms: number,
+  waits: boolean
+): void => {
+  if (waits) {
+    sql.exec(
+      "UPDATE steps SET deadline = deadline + ? WHERE state = 'waiting' AND deadline IS NOT NULL",
+      ms
+    );
+    sql.exec(
+      "UPDATE attempts SET retry_at = retry_at + ? WHERE retry_at IS NOT NULL AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'retrying')",
+      ms
+    );
+  }
   sql.exec(
     "UPDATE attempts SET deadline = deadline + ? WHERE ended_at IS NULL OR (ended = 'superseded' AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'running'))",
     ms
@@ -620,6 +655,32 @@ const activatesNow = (run: RunRow): boolean => {
 const isDue = (run: RunRow, force: boolean): boolean =>
   run.notify_at !== null &&
   (force || run.notify_failures === 0 || run.notify_at <= Date.now());
+
+/**
+ * Whether the run takes a control that comes with `command`'s fence: not
+ * one older than the newest it took. One it takes is kept, in the
+ * command's own write.
+ */
+const takesFence = (
+  sql: SqlStorage,
+  run: RunRow,
+  command: ControlFence | undefined
+): boolean => {
+  const fence = command?.fence;
+  if (fence === undefined) {
+    return true;
+  }
+  if (!Number.isSafeInteger(fence)) {
+    throw new TypeError(
+      `A control's fence is a whole number: ${String(fence)}`
+    );
+  }
+  if (run.control_fence !== null && fence < run.control_fence) {
+    return false;
+  }
+  sql.exec("UPDATE run SET control_fence = ?", fence);
+  return true;
+};
 
 /** The earlier of two times an alarm is wanted at, either of which may be none. */
 const earlier = (a: number | null, b: number | null): number | null => {
@@ -1335,6 +1396,20 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * Where the run is, and the greatest control fence it took
+   * (`ControlFence`, null before any came with a control), read together
+   * in one turn; undefined when there is no run. What a host settles its
+   * controls from: a control whose fence is at most `fence` reached the
+   * run, one with a greater fence hasn't yet.
+   */
+  controlState(): { status: InstanceStatus; fence: number | null } | undefined {
+    const run = this.#run();
+    return run === undefined
+      ? undefined
+      : { status: statusOf(run), fence: run.control_fence };
+  }
+
+  /**
    * The run's whole journal, as plain data: raw, a sensitive step's result
    * too, for the host's own inspection. Observers subscribe.
    */
@@ -1992,9 +2067,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * Pauses the run: at once if no activation runs it (it waits, asleep or
    * for an event), otherwise at the activation's next safe boundary.
    */
-  async pause(): Promise<PauseOutcome> {
+  async pause(command?: ControlFence): Promise<PauseOutcome> {
     const { sql } = this.ctx.storage;
     return await this.#command((run, now): CommandDecision<PauseOutcome> => {
+      if (!takesFence(sql, run, command)) {
+        return { outcome: "fenced" };
+      }
       if (run.status === "running") {
         sql.exec("UPDATE run SET status = 'waitingForPause'");
         return { outcome: "pausing" };
@@ -2010,12 +2088,18 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /**
    * Resumes a paused run, its deadlines moved on by the time it was
-   * paused, or lets a run still pausing go on as it was.
+   * paused (unless `keepDeadlines`: a sleep, a wait or a retry then comes
+   * due as it would have, at once if its time has passed), or lets a run
+   * still pausing go on as it was.
    */
-  async resume(): Promise<ResumeOutcome> {
+  async resume(command?: ResumeCommand): Promise<ResumeOutcome> {
+    const keepDeadlines = command?.keepDeadlines === true;
     const { sql } = this.ctx.storage;
     const outcome = await this.#command(
       (run, now): CommandDecision<ResumeOutcome> => {
+        if (!takesFence(sql, run, command)) {
+          return { outcome: "fenced" };
+        }
         if (run.status === "waitingForPause") {
           // Its activation goes on; what it parked for the pause comes due
           // at once when it suspends (activation.ts).
@@ -2028,7 +2112,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         if (run.paused_at === null) {
           throw new Error("The journal holds a paused run with no pause time");
         }
-        shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at));
+        shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at), !keepDeadlines);
         sql.exec(
           "UPDATE run SET status = 'running', paused_at = NULL, wake_at = ?",
           now
@@ -2055,6 +2139,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     const { sql } = this.ctx.storage;
     const outcome = await this.#command(
       (run, now): CommandDecision<TerminateOutcome> => {
+        if (!takesFence(sql, run, command)) {
+          return { outcome: "fenced" };
+        }
         if (hasEnded(run)) {
           return { outcome: "ended" };
         }

@@ -47,12 +47,37 @@ export class JournalSchemaError extends Error {
 }
 
 /**
- * The journal's own layout; a change to it is a new version. No journal
- * predates version 8 (nothing earlier was released), so a run of any other
- * version is refused when it is read; a later layout that changes it
- * brings its own upgrade.
+ * The journal's own layout; a change to it is a new version, with the
+ * upgrade from the one before it (`upgradedSchema`). No journal predates
+ * version 8 (nothing earlier was released), so a run of an older version,
+ * or a newer one, is refused when it is read.
+ *
+ * - 9: `run.control_fence`, the newest fence a control came with (run.ts,
+ *   `ControlFence`).
  */
-export const journalSchemaVersion = 8;
+export const journalSchemaVersion = 9;
+
+/**
+ * The journal's version, once upgraded to this engine's where it was the
+ * one before (`journalSchemaVersion`): each upgrade in one write, as the
+ * journal is first read by an engine that knows it. Of a version it
+ * doesn't upgrade, left as it was, for the caller to refuse.
+ */
+const upgradedSchema = (
+  sql: SqlStorage
+): number | string | null | undefined => {
+  const [stored] = sql
+    .exec<{ schema: number | string | null }>("SELECT schema FROM run")
+    .toArray();
+  if (stored?.schema === 8) {
+    // In one turn, so in one of the object's atomic writes: the column and
+    // the version move together.
+    sql.exec("ALTER TABLE run ADD COLUMN control_fence INTEGER");
+    sql.exec("UPDATE run SET schema = 9");
+    return 9;
+  }
+  return stored?.schema;
+};
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:
@@ -204,6 +229,12 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   notify_at: number | null;
   /** How many deliveries in a row the host failed: the backoff's count. */
   notify_failures: number;
+  /**
+   * The newest fence a pause, resume or terminate came with (run.ts,
+   * `ControlFence`), or null before any did: a control with an older one
+   * is ignored, so a late command can't undo a newer one.
+   */
+  control_fence: number | null;
 }
 
 /**
@@ -380,7 +411,8 @@ export const createJournal = (sql: SqlStorage): void => {
       purge_at INTEGER,
       executions INTEGER NOT NULL DEFAULT 1,
       notify_at INTEGER,
-      notify_failures INTEGER NOT NULL DEFAULT 0
+      notify_failures INTEGER NOT NULL DEFAULT 0,
+      control_fence INTEGER
     );
     CREATE TABLE IF NOT EXISTS activations (
       generation INTEGER PRIMARY KEY,
@@ -605,10 +637,7 @@ export const notifyDue = (sql: SqlStorage): number | null => {
   if (!hasJournal(sql)) {
     return null;
   }
-  const [run] = sql
-    .exec<{ schema: SqlStorageValue }>("SELECT schema FROM run")
-    .toArray();
-  if (run?.schema !== journalSchemaVersion) {
+  if (upgradedSchema(sql) !== journalSchemaVersion) {
     return null;
   }
   return sql
@@ -624,21 +653,19 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   // The version first, on its own: another layout's columns may not be
   // the ones read below.
-  const [stored] = sql
-    .exec<{ schema: number | string | null }>("SELECT schema FROM run")
-    .toArray();
-  if (stored === undefined) {
+  const schema = upgradedSchema(sql);
+  if (schema === undefined) {
     return undefined;
   }
-  if (stored.schema !== journalSchemaVersion) {
-    // No journal predates this version; see journalSchemaVersion.
+  if (schema !== journalSchemaVersion) {
+    // No journal predates version 8; see journalSchemaVersion.
     throw new JournalSchemaError(
-      `This run's journal has schema ${String(stored.schema)}, where this engine reads only schema ${journalSchemaVersion}`
+      `This run's journal has schema ${String(schema)}, where this engine reads only schema ${journalSchemaVersion}`
     );
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures, control_fence FROM run"
     )
     .toArray()[0];
 };

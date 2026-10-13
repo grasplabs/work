@@ -21,7 +21,7 @@ import type {
   ScreensApi,
 } from "@grasp-os/shared/screens";
 import { valueDepth } from "@grasp-os/shared/value-depth";
-import type { WorkflowRun } from "@grasp-os/shared/workflows";
+import type { RunControl, WorkflowRun } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { callApp, isPlainData, plainDataBounds } from "./app.ts";
@@ -46,6 +46,7 @@ import {
 import { screenCode } from "./screens.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { controlScreenRun } from "./workflows/controls.ts";
 import {
   decideScreenRun,
   screenRun,
@@ -676,6 +677,23 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
           "decide",
           async (id) =>
             await decideScreenRun(this.#env, by, id, run, decision, answer)
+        )
+    );
+  }
+
+  async control(
+    app: string,
+    run: string,
+    kind: RunControl["kind"]
+  ): Promise<RunControl> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await this.#delivered(
+          by,
+          app,
+          "control",
+          async (id) => await controlScreenRun(this.#env, by, id, run, kind)
         )
     );
   }
