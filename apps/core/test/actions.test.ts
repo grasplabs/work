@@ -922,17 +922,24 @@ describe("resources", () => {
     await send(wallMs);
     await send(wallMs + 1);
     await send(10 * wallMs);
-    const [early, atLimit, pastLimit, late] = left;
+    // No time at all: never an end, nor one no comparison can reach.
+    await send(Number.POSITIVE_INFINITY);
+    await send(Number.NaN);
+    const [early, atLimit, pastLimit, late, endless, notATime] = left;
     expect({
       early: leaves(early, wallMs / 2),
       atLimit: leaves(atLimit, wallMs),
       pastLimit: leaves(pastLimit, wallMs),
       late: leaves(late, wallMs),
+      endless: leaves(endless, wallMs),
+      notATime: leaves(notATime, wallMs),
     }).toStrictEqual({
       early: true,
       atLimit: true,
       pastLimit: true,
       late: true,
+      endless: true,
+      notATime: true,
     });
   });
 

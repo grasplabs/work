@@ -92,6 +92,12 @@ export class App extends DurableObject {
     return ["x".repeat(input.bytes - 4)];
   }
 
+  // Adds a customer, then answers exactly \`bytes\` bytes of UTF-8 JSON.
+  addThenAnswer(caller: Caller, input: { bytes: number }): string[] {
+    this.addCustomer(caller, { name: "Initech" });
+    return this.sizedAnswer(caller, input);
+  }
+
   // Calls \`method\` of the App \`binding\` names with input it builds here,
   // past what a screen may send: \`{ query }\` of exactly \`inputBytes\` bytes,
   // or \`{ bytes: answerBytes }\`. Answers how many bytes the answer was, or
@@ -200,6 +206,11 @@ const exported = {
   },
   sizedAnswer: {
     access: "read",
+    input: anyObject,
+    output: { type: "array", items: {} },
+  },
+  addThenAnswer: {
+    access: "write",
     input: anyObject,
     output: { type: "array", items: {} },
   },
@@ -706,6 +717,47 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
       inputPastLimit: { refused: "app.call_too_large" },
       answerAtLimit: { bytes: answerLimit },
       answerPastLimit: { refused: "app.call_too_large" },
+    });
+  });
+
+  it("record an answer refused after the export ran, a write's included", async () => {
+    const { admin, clerk, invoicing, crm } = await setUp();
+    await grantCalls(admin, invoicing, crm, ["read", "write"], "CRM");
+    let ended: unknown;
+    const events = await auditedDuring(async () => {
+      ended = await callApp(
+        env,
+        invoicing,
+        { userId: clerk.userId, mode: "interactive" },
+        "probe",
+        ["CRM", "addThenAnswer", { answerBytes: 256 * 1024 + 1 }]
+      );
+    });
+    const outcomes = callsIn(events)
+      .filter(
+        ({ action, target, detail }) =>
+          action === "app.call" &&
+          target?.id === crm &&
+          detail.method === "addThenAnswer"
+      )
+      .map(({ detail }) => [detail.outcome ?? null, detail.reason ?? null]);
+    expect({
+      ended,
+      // The write happened: the refusal is of the answer, not the call.
+      customers: await callApp(
+        env,
+        crm,
+        { userId: admin.userId, mode: "interactive" },
+        "customerCount"
+      ),
+      outcomes,
+    }).toStrictEqual({
+      ended: { refused: "app.call_too_large" },
+      customers: 1,
+      outcomes: [
+        ["called", null],
+        ["answer_refused", "app.call_too_large"],
+      ],
     });
   });
 

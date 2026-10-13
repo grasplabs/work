@@ -2096,8 +2096,11 @@ const execute = async (
  * (spec 18.1) from now. A caller may give less (a screen's call, an
  * agent's, a step's attempt), never more: a later deadline is held to it.
  */
-const invocationDeadline = (asked: number): number =>
-  Math.min(asked, Date.now() + platformLimits.serverInvocationWallMs);
+const invocationDeadline = (asked: number): number => {
+  const latest = Date.now() + platformLimits.serverInvocationWallMs;
+  // Not a time at all (NaN, or no end): the latest a call may have.
+  return Number.isFinite(asked) ? Math.min(asked, latest) : latest;
+};
 
 /**
  * Calls the public function `reference` names of `app` for `invocation`,
