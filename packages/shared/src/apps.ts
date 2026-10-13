@@ -6,6 +6,7 @@ import { collectionIdSchema, identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
 import { recordTypeNameSchema } from "./knowledge.ts";
 import type { DeclaredPermission, Permission } from "./permissions.ts";
+import { platformLimits } from "./platform-limits.ts";
 import type { TriggerDeclaration } from "./workflows.ts";
 
 // An App's code is a tree of text files, versioned as a whole: builders
@@ -685,15 +686,15 @@ export const appExportsMaxLength = 64_000;
 
 /**
  * The limits of a call to another App's export. The input and the answer
- * are JSON, measured in bytes of UTF-8 as sent: an answer fits a workflow
- * step's result. One call may lead to more (the called App calling
- * another), at most `depth` calls deep, so 3 hops, 4 Apps: A calls B, B
+ * are JSON, measured in bytes of UTF-8 as sent: an export is a public
+ * operation, held to spec 18.1's input and output limits as any other
+ * is. One call may lead to more (the called App calling another), at most `depth` calls deep, so 3 hops, 4 Apps: A calls B, B
  * calls C, C calls D, and D calls no further. Never back into an App
  * already in it; all of them end by the time the first one must.
  */
 export const appCallLimits = {
-  inputBytes: 256 * 1024,
-  answerBytes: 1024 * 1024,
+  inputBytes: platformLimits.operationInputBytes,
+  answerBytes: platformLimits.operationOutputBytes,
   depth: 3,
 } as const;
 

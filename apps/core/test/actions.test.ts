@@ -894,6 +894,48 @@ describe("resources", () => {
     });
   });
 
+  it("end by a server invocation's wall time however late a deadline the caller gives", async () => {
+    const fixture = await notes();
+    // Spec 18.1: a server invocation has 60 seconds of wall time.
+    const wallMs = 60_000;
+    const left: number[] = [];
+    const resources = mailBinding(async (_args, context) => {
+      left.push(context.deadline - Date.now());
+      return await Promise.resolve({ mailbox: "m", sent: true });
+    });
+    const send = async (within: number) =>
+      valueOf(
+        await call(
+          fixture,
+          "action",
+          "actions.sendMail",
+          { to: "ada@acme.test" },
+          { resources, within }
+        )
+      );
+    // What a deadline leaves once the provider hears of it: within
+    // `[expected - slack, expected]`, the slack for the call's own work.
+    const slack = 5000;
+    const leaves = (ms: number | undefined, expected: number) =>
+      ms !== undefined && ms <= expected && ms > expected - slack;
+    await send(wallMs / 2);
+    await send(wallMs);
+    await send(wallMs + 1);
+    await send(10 * wallMs);
+    const [early, atLimit, pastLimit, late] = left;
+    expect({
+      early: leaves(early, wallMs / 2),
+      atLimit: leaves(atLimit, wallMs),
+      pastLimit: leaves(pastLimit, wallMs),
+      late: leaves(late, wallMs),
+    }).toStrictEqual({
+      early: true,
+      atLimit: true,
+      pastLimit: true,
+      late: true,
+    });
+  });
+
   it("are unavailable without a binding, or with one serving another contract or kind", async () => {
     const fixture = await notes();
     const send = async (resources?: ResourceBindings) =>
