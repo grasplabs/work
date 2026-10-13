@@ -9,6 +9,8 @@ import type {
   ScreenDefinition,
   TableVerbs,
 } from "./app.ts";
+import { migration } from "./migration.ts";
+import type { Migration } from "./migration.ts";
 import {
   isBrowserResource,
   isResource,
@@ -34,7 +36,8 @@ import type { AnySchema } from "./value-schema.ts";
 // again, through the same constructors App code uses: its schema through
 // `readSchemaManifest`, each function through `serverModule(schema)` with
 // schemas rebuilt from its descriptors and a handler that runs nothing,
-// each resource through `resource`, and the App through `app`. What that
+// each resource through `resource`, each migration through `migration`
+// (its handler running nothing too), and the App through `app`. What that
 // registration's inspection makes must then be exactly the manifest read,
 // canonically: anything a declaration couldn't have made (a widened verb,
 // a use of something unregistered, a public function in the internal
@@ -259,6 +262,40 @@ const screensFrom = (input: unknown): ScreenDefinition[] =>
     } as ScreenDefinition;
   });
 
+/** The migrations of the manifest, declared again, in the order filed. */
+const migrationsFrom = (input: unknown): Migration[] =>
+  entriesOf(input, "migrations").map(([name, declared]) => {
+    if (
+      !hasExactly(declared, [
+        "name",
+        "table",
+        "fromSchema",
+        "toSchema",
+        "input",
+        "output",
+      ])
+    ) {
+      return refuse(
+        `Migration \`${name}\` isn't a migration as a manifest holds one.`
+      );
+    }
+    if (declared.name !== name) {
+      return refuse(`Migration \`${name}\` is filed under another name.`);
+    }
+    // SAFETY: `migration` checks each part as it checks a declaration's,
+    // and `app` checks it against the schema.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return migration({
+      name,
+      table: declared.table,
+      fromSchema: declared.fromSchema,
+      toSchema: declared.toSchema,
+      ...(declared.input === null ? {} : { input: schemaFrom(declared.input) }),
+      output: schemaFrom(declared.output),
+      handler: inert,
+    } as Parameters<typeof migration>[0]);
+  });
+
 /** Whether two verb maps grant the same verbs on every table. */
 const sameVerbs = (
   one: Readonly<Record<string, TableVerbs>>,
@@ -294,10 +331,11 @@ export const readAppManifest = (text: string): AppManifest => {
       "browserResources",
       "screens",
       "preferences",
+      "migrations",
     ])
   ) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, resources, browserResources, screens, preferences }`."
+      "An App's manifest is `{ name, schema, operations, resources, browserResources, screens, preferences, migrations }`."
     );
   }
   const { schema, manifest: schemaManifest } = readSchemaManifest(
@@ -383,6 +421,7 @@ export const readAppManifest = (text: string): AppManifest => {
         ? {}
         : { preferences: schemaFrom(data.preferences) }),
       uses: [...resources.values(), ...browser.values()],
+      migrations: migrationsFrom(data.migrations),
     } as Parameters<typeof app>[0];
     return inspectApp(app(definition)).manifest;
   };

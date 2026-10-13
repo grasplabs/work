@@ -681,6 +681,10 @@ msgstr "Flujo de trabajo añadido:"
 msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Añadido: actúa en nombre de quien use el motor, con todo lo que el motor tiene"
 
+#: src/chat/builds.tsx
+msgid "Added: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Añadida: lee y reescribe todos los registros de {table}, sea quien sea su propietario"
+
 #: src/labels.ts
 msgid "Admin"
 msgstr "Administrador"
@@ -1230,6 +1234,10 @@ msgstr "Flujo de trabajo cambiado:"
 #: src/chat/builds.tsx
 msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Cambiado: actúa en nombre de quien use el motor, con todo lo que el motor tiene"
+
+#: src/chat/builds.tsx
+msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Cambiada: lee y reescribe todos los registros de {table}, sea quien sea su propietario"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
@@ -2397,6 +2405,10 @@ msgstr "No se pudo leer su contenido."
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Sus mensajes se eliminan para siempre y se rechaza cada cambio que su agente retiene para ti. Lo que hizo el agente queda en el registro de auditoría."
 
+#: src/chat/builds.tsx
+msgid "Its migrations can't be read: it may rewrite the records of any table"
+msgstr "Sus migraciones no se pueden leer: puede reescribir los registros de cualquier tabla"
+
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "Se están rellenando los valores predeterminados de sus nuevos campos. Las versiones que lo necesitan podrán hacerse actuales cuando termine."
@@ -2642,6 +2654,10 @@ msgstr "Memoria"
 #: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Mensajes"
+
+#: src/chat/builds.tsx
+msgid "Migrations"
+msgstr "Migraciones"
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx

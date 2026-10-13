@@ -28,6 +28,8 @@ export type {
   UseManifest,
 } from "./app.ts";
 export { appErrorDetailsOf } from "./app-error.ts";
+export { appMaxMigrations } from "./app.ts";
+export type { MigrationManifest } from "./migration.ts";
 
 // A schema as a store's host reads, hashes and compares it.
 export { diffSchemaManifests, schemaReferences } from "./schema-diff.ts";

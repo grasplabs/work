@@ -4,6 +4,7 @@ import {
   workflowPaths,
 } from "@grasp-os/compiler";
 import { readOutline } from "@grasp-os/sdk/describe";
+import type { AppManifest } from "@grasp-os/sdk/host";
 import type {
   AppExports,
   AppFiles,
@@ -12,7 +13,8 @@ import type {
 } from "@grasp-os/shared/apps";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, WorkflowId } from "@grasp-os/shared/ids";
-import { canonicalJson } from "@grasp-os/shared/json";
+import { canonicalJson, canonicalText } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { outlineSteps, workflowErrors } from "@grasp-os/shared/workflows";
 import type {
   OutlineNode,
@@ -22,6 +24,7 @@ import type {
 } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
+import { versionManifest } from "./app-releases.ts";
 import {
   appFor,
   keptCallsOf,
@@ -56,6 +59,55 @@ import {
 // the App asks for that no admin granted yet, what it holds and which of
 // that making it current would ask an admin for again, and its workflows'
 // tests, kept per version's files so they run once.
+
+/**
+ * The explicit migrations of version `proposed` the current version
+ * (`before`) doesn't have as they are (see `VersionReview.migrations`),
+ * read from each version's App manifest, so wherever and however they
+ * are declared or registered; every one when there is no current
+ * version. A migration declared the same counts as modified when the
+ * server code changed (`serverChanged`): its transform may run any of it.
+ * Null when either manifest can't be read.
+ */
+const migrationsOf = async (
+  env: Env,
+  app: AppId,
+  proposed: { version: number; files: Readonly<Record<string, string>> },
+  before:
+    | { version: number; files: Readonly<Record<string, string>> }
+    | undefined,
+  serverChanged: boolean
+): Promise<VersionReview["migrations"]> => {
+  let next: AppManifest | undefined;
+  let previous: AppManifest | undefined;
+  try {
+    next = await versionManifest(env, app, proposed.version, proposed.files);
+    previous =
+      before === undefined
+        ? undefined
+        : await versionManifest(env, app, before.version, before.files);
+  } catch (error) {
+    log.warn("version_review.migrations_unread", errorFields(error));
+    return null;
+  }
+  const had = previous?.migrations ?? {};
+  const listed: NonNullable<VersionReview["migrations"]> = [];
+  for (const declared of Object.values(next?.migrations ?? {})) {
+    const old = Object.hasOwn(had, declared.name)
+      ? had[declared.name]
+      : undefined;
+    const { name, table } = declared;
+    if (old === undefined) {
+      listed.push({ name, table, change: "added" });
+    } else if (
+      canonicalText(old) !== canonicalText(declared) ||
+      serverChanged
+    ) {
+      listed.push({ name, table, change: "modified" });
+    }
+  }
+  return listed;
+};
 
 /** Most test failures a review lists. */
 const maxFailures = 50;
@@ -568,6 +620,26 @@ export const reviewVersion = async (
     new Map(Object.entries(serverFiles(files))),
     (one, other) => one === other
   );
+  const server = serverChangeOf(
+    serverChanges,
+    Object.keys(serverFiles(before?.files ?? {})).length,
+    Object.keys(serverFiles(files)).length
+  );
+  const migrations = await migrationsOf(
+    env,
+    found.id,
+    { version: row.version, files },
+    before,
+    server !== null ||
+      fileChanges.some(
+        ({ name }) =>
+          name === "app.ts" ||
+          name === "schema.ts" ||
+          name === "values.ts" ||
+          name.startsWith("operations/") ||
+          name.startsWith("migrations/")
+      )
+  );
   // Asked for again only if not kept, as `madeCurrent` says: an App's
   // first version copied from a blueprint, made current for the first time.
   const keep = current === null && row.approved === 1;
@@ -585,16 +657,13 @@ export const reviewVersion = async (
     proposedBy: await proposerOf(env, by, row),
     current,
     files: fileChanges.map(({ name, change }) => ({ path: name, change })),
-    server: serverChangeOf(
-      serverChanges,
-      Object.keys(serverFiles(before?.files ?? {})).length,
-      Object.keys(serverFiles(files)).length
-    ),
+    server,
     exports: exportChanges(exportsBefore, row.exports),
     serverFiles: serverChanges.map(({ name, change }) => ({
       path: name,
       change,
     })),
+    migrations,
     workflows,
     // As the permissions API shows them to this reviewer, no more.
     permissions: await permissionsOpenTo(

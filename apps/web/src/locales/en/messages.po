@@ -681,6 +681,10 @@ msgstr "Added workflow"
 msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Added: it acts for whoever uses the engine, with everything the engine holds"
 
+#: src/chat/builds.tsx
+msgid "Added: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Added: it reads and rewrites every record of {table}, whoever owns it"
+
 #: src/labels.ts
 msgid "Admin"
 msgstr "Admin"
@@ -1230,6 +1234,10 @@ msgstr "Changed workflow"
 #: src/chat/builds.tsx
 msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Changed: it acts for whoever uses the engine, with everything the engine holds"
+
+#: src/chat/builds.tsx
+msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Changed: it reads and rewrites every record of {table}, whoever owns it"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
@@ -2397,6 +2405,10 @@ msgstr "Its contents couldn't be read."
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 
+#: src/chat/builds.tsx
+msgid "Its migrations can't be read: it may rewrite the records of any table"
+msgstr "Its migrations can't be read: it may rewrite the records of any table"
+
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 msgstr "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
@@ -2642,6 +2654,10 @@ msgstr "Memory"
 #: src/routes/guest.tsx
 msgid "Messages"
 msgstr "Messages"
+
+#: src/chat/builds.tsx
+msgid "Migrations"
+msgstr "Migrations"
 
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
