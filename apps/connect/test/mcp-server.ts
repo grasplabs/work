@@ -49,7 +49,10 @@ export interface FakeTool {
 export interface FakeResult {
   output: Record<string, unknown>;
   /** Content blocks to answer with instead of `output`, such as an image. */
-  content?: { type: "image"; data: string; mimeType: string }[];
+  content?: (
+    | { type: "image"; data: string; mimeType: string }
+    | { type: "text"; text: string }
+  )[];
   /** The IDs of the resources it read. */
   provenance?: string[];
   /** It failed, and says so in its result. */

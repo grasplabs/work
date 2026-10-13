@@ -68,12 +68,32 @@ const notPerformed = ({ output }: McpToolResult): Error => {
 const maxLoggedErrorChars = 500;
 
 /**
- * A tool's error text as connect logs it: credentials redacted, then cut
- * to {@link maxLoggedErrorChars}, so neither a secret it echoed nor its
- * size reaches the log.
+ * What a tool's error said, as text to redact: its text blocks' own text,
+ * as the server sent it, or its structured content as JSON. Never the
+ * output as connect stores it, where text is JSON-quoted once more and a
+ * credential's name and quotes come escaped (`\"password\"`). Content
+ * other than text (an image, a resource) is left out.
  */
-export const loggedError = (output: string): string => {
-  const redacted = redact(output);
+const errorText = (output: string): string => {
+  let said: unknown;
+  try {
+    said = JSON.parse(output);
+  } catch {
+    return output;
+  }
+  if (typeof said === "string") {
+    return said;
+  }
+  return Array.isArray(said) ? "(content other than text)" : output;
+};
+
+/**
+ * A tool's error as connect logs it: credentials redacted in what it said
+ * ({@link errorText}), then cut to {@link maxLoggedErrorChars}, so neither
+ * a secret it echoed nor its size reaches the log.
+ */
+const loggedError = (output: string): string => {
+  const redacted = redact(errorText(output));
   return redacted.length > maxLoggedErrorChars
     ? `${redacted.slice(0, maxLoggedErrorChars)}…`
     : redacted;

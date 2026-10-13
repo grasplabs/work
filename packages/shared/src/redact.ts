@@ -9,11 +9,14 @@
  * `github_pat_`); Slack tokens (`xoxa-`, `xoxb-`, `xoxp-`, `xoxr-`);
  * Google API keys (`AIza`); JSON Web Tokens; PEM private keys, an
  * unfinished block to the end of the text; AWS access key IDs; and the
- * whole value of an `api_key`, `apikey`, `token`, `secret`, `password` or
- * `authorization` written as `name=value` or `name: value`: quoted, to
- * its closing quote (or the end of the line), spaces included; unquoted,
- * to the next space or separator, with a `Bearer` or `Basic` scheme of
- * any length taken with it. Anything else
+ * whole value of an `api_key`, `apikey`, `token`, `secret`, `password`,
+ * `passwd` or `authorization`, or of a name ending in one
+ * (`access_token`, `client_secret`), written as `name=value` or
+ * `name: value`: quoted, to its closing quote (or the end of the line),
+ * spaces included; unquoted, to the next space or separator, with a
+ * `Bearer` or `Basic` scheme of any length taken with it. JSON quoted
+ * once more, as a string inside JSON (`{\"password\":\"…\"}`), is
+ * caught the same way, to the escaped closing quote. Anything else
  * shaped like a secret is not caught: this is a net for what an outside
  * system's data may carry, not a guarantee (a run holds no secret of its
  * own). Applied to what streams to the chat, to what the model reads and
@@ -34,7 +37,9 @@ const redactedAssignment = (...args: unknown[]): string => {
         : undefined;
     return typeof value === "string" ? value : "";
   };
-  return `${part("name")}${part("between")}${part("quote")}[redacted]${part("close")}`;
+  const quote = part("quote") || part("escapedQuote");
+  const close = part("close") || part("escapedClose");
+  return `${part("name")}${part("between")}${quote}[redacted]${close}`;
 };
 
 const credentials: readonly (readonly [
@@ -57,10 +62,12 @@ const credentials: readonly (readonly [
   [/(?<![\w-])eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,}/gu, "[redacted]"],
   [/\bAKIA[0-9A-Z]{16}\b/gu, "[redacted]"],
   // Each character of a quoted value is taken by one alternative only
-  // (an escape, or anything but the quote, a backslash or a newline): it
-  // stays linear.
+  // (an escape, or anything but the quote, a backslash or a newline), and
+  // an escaped quote's value ends at the next escaped quote: it stays
+  // linear. A name's prefix (`access_`) is word characters only, so a
+  // match starts once per word, not at every "-" of a flood.
   [
-    /\b(?<name>api[_-]?key|apikey|token|secret|password|authorization)(?<between>["']?\s*[:=]\s*)(?:(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
+    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'\\&,;]+)/giu,
     redactedAssignment,
   ],
 ];

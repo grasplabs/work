@@ -22,6 +22,8 @@ import { fakeMcpServer } from "./mcp-server.ts";
 let sent = 0;
 /** What `mail.forward` answers its next calls with: an error, or its result. */
 let forwardError: Record<string, unknown> | undefined;
+/** An error `mail.forward` answers with as a text block, in its place. */
+let forwardText: string | undefined;
 /** Holds `mail.archive` until the test lets it finish. */
 let archiveDone: Promise<unknown> = Promise.resolve();
 
@@ -35,10 +37,18 @@ const server = fakeMcpServer(serverUrl, [
   },
   {
     name: "mail.forward",
-    run: () =>
-      forwardError === undefined
+    run: () => {
+      if (forwardText !== undefined) {
+        return {
+          output: {},
+          content: [{ type: "text", text: forwardText }],
+          isError: true,
+        };
+      }
+      return forwardError === undefined
         ? { output: { forwarded: true } }
-        : { output: forwardError, isError: true },
+        : { output: forwardError, isError: true };
+    },
   },
   {
     name: "mail.bounce",
@@ -477,6 +487,57 @@ describe("a side effect", () => {
       bounded: true,
     });
   });
+
+  // A text block's JSON is quoted once more in the output connect keeps
+  // (`\"password\"`): what is logged is redacted as the server sent it.
+  it.each([
+    ["a password", JSON.stringify({ password: "hunter2" }), "hunter2"],
+    [
+      "an access token",
+      JSON.stringify({ access_token: "ya29.a0AfH6SMBxyz" }),
+      "ya29.a0AfH6SMBxyz",
+    ],
+    [
+      "a bearer token",
+      "Request failed: Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123",
+      "abcdefghijklmnopqrstuvwxyz0123",
+    ],
+  ])(
+    "whose Composio tool answered with %s in a text block logs it redacted",
+    async (_kind, text, secret) => {
+      const connectionId = await addConnection();
+      const warn = vi.spyOn(console, "warn");
+      forwardText = text;
+      try {
+        await expect(
+          outcome(
+            callAs(anna, {
+              connectionId,
+              action: "mail.forward",
+              input: {},
+              idempotencyKey: "run-1:forward",
+            })
+          )
+        ).resolves.toBe("connect.outcome_unknown");
+      } finally {
+        forwardText = undefined;
+      }
+      const logged = warn.mock.calls
+        .map(([entry]: unknown[]) => entry)
+        .find(
+          (entry): entry is Record<string, unknown> =>
+            typeof entry === "object" &&
+            entry !== null &&
+            "event" in entry &&
+            entry.event === "connect.composio_error_unknown"
+        );
+      expect({
+        logged: typeof logged?.error,
+        leaked: JSON.stringify(logged).includes(secret),
+        redacted: JSON.stringify(logged).includes("[redacted]"),
+      }).toStrictEqual({ logged: "string", leaked: false, redacted: true });
+    }
+  );
 
   it("running at the same time as a repeat runs once", async () => {
     const connectionId = await addConnection();

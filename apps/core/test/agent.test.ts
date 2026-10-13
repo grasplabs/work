@@ -2421,6 +2421,9 @@ describe("chat agent code output", () => {
         "secret='two words' and more",
         '{"password":"a b c","user":"ann"}',
         'token: "never closed',
+        '{"access_token":"ya29.abc","client_secret":"shh"}',
+        String.raw`"{\"password\":\"hunter2\",\"user\":\"ann\"}"`,
+        String.raw`"{\"refresh_token\":\"1//abc def\"}"`,
       ].map(redact)
     ).toStrictEqual([
       "authorization: [redacted]",
@@ -2429,6 +2432,9 @@ describe("chat agent code output", () => {
       "secret='[redacted]' and more",
       '{"password":"[redacted]","user":"ann"}',
       'token: "[redacted]',
+      '{"access_token":"[redacted]","client_secret":"[redacted]"}',
+      String.raw`"{\"password\":\"[redacted]\",\"user\":\"ann\"}"`,
+      String.raw`"{\"refresh_token\":\"[redacted]\"}"`,
     ]);
   });
 
@@ -2446,7 +2452,9 @@ describe("chat agent code output", () => {
       "AIza-",
       "AKIA",
       "token:",
+      "access_token:",
       'password: "',
+      String.raw`password\":\"`,
       "secret='\\",
       "authorization: Basic ",
       "-----BEGIN PRIVATE KEY-----",
