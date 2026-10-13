@@ -570,6 +570,16 @@ const sandboxEnded = (error: unknown): CodeRun | undefined => {
   if (verdict === undefined) {
     return undefined;
   }
+  // Not the code's doing, nor an outage: its person runs as much code in the
+  // sandbox as they may right now.
+  if (verdict === "busy") {
+    return {
+      status: "crashed",
+      logs: [],
+      error:
+        "The sandbox already runs as much of this person's code as it may. Try again shortly.",
+    };
+  }
   return {
     status: sandboxStatuses[verdict] ?? "crashed",
     logs: [],

@@ -15,12 +15,14 @@ import { RpcSession, WebSocketTransport } from "capnweb";
 import { sessionMaxRuns } from "./call-limits.ts";
 import { browserMessageSize } from "./rpc-target.ts";
 import {
+  sandboxCallIdHeader,
   sandboxCpuHeader,
   sandboxDeadlineHeader,
+  sandboxOwnerHeader,
+  sandboxParentHeader,
   sandboxWaitHeader,
-  sandboxWaitMs,
-  SandboxUnavailableError,
-} from "./sandboxed.ts";
+} from "./sandbox-headers.ts";
+import { sandboxWaitMs, SandboxUnavailableError } from "./sandboxed.ts";
 
 // One call of an isolate that reaches back into core, on the on-prem
 // sandbox host (on-prem/sandbox-session.ts): an App function's operation
@@ -124,6 +126,8 @@ export interface SessionOptions {
     /** Gets the session's own call's answer as it comes, before draining. */
     readonly answered: (answer: unknown) => void;
     readonly drain: () => Promise<void>;
+    /** Whether nothing nested runs in it now: drained, whatever `drain` says yet. */
+    readonly idle: () => boolean;
   };
 }
 
@@ -235,15 +239,6 @@ export const sessionForwarder = (
 
 /** How much longer than the supervisor may take core waits for a session. */
 const backstopMs = 2000;
-
-/** The header core gives a session's ID in, which its verdict is asked by. */
-export const sandboxCallIdHeader = "x-grasp-sandbox-call";
-
-/** The header core names a session's parent in (`SessionCall.parent`). */
-export const sandboxParentHeader = "x-grasp-sandbox-parent";
-
-/** The header core says whose session it is in, for the per-owner cap. */
-export const sandboxOwnerHeader = "x-grasp-sandbox-owner";
 
 /** A verdict as the supervisor gives it. */
 interface Verdict {
@@ -384,11 +379,6 @@ const rejectAfter = async (
 };
 
 /**
- * What `call` answers, run on the sandbox host in a session of its own.
- * Throws what the isolate's entrypoint threw, an error saying why the
- * sandbox ended it (the App's), or {@link SandboxUnavailableError}.
- */
-/**
  * The session's socket, accepted: once the supervisor took the call and
  * says it bounds its CPU time as asked. Refused otherwise: `busy` for an
  * owner at its cap, unavailable for anything else.
@@ -445,6 +435,9 @@ const openSession = async (
   const socket = response.webSocket;
   if (socket === null) {
     await response.body?.cancel();
+    if (response.status === 409) {
+      throw sessionEndedError();
+    }
     if (response.status === 429) {
       throw verdictError({
         verdict: "busy",
@@ -560,6 +553,24 @@ const failureOf = async (
     : verdictError(verdict, error);
 };
 
+/** What rejects as `signal` aborts, for a race: nothing without one. */
+const abortsOf = (signal: AbortSignal | undefined): Promise<never>[] =>
+  signal === undefined ? [] : [whenAborted(signal)];
+
+/**
+ * Whether a session its caller stopped waiting for is simply over, its call
+ * having answered: nothing nested in it runs any more.
+ */
+const overOnceAnswered = (
+  signal: AbortSignal | undefined,
+  nesting: SessionOptions["nesting"]
+): boolean => signal?.aborted === true && nesting?.idle() === true;
+
+/**
+ * What `call` answers, run on the sandbox host in a session of its own.
+ * Throws what the isolate's entrypoint threw, an error saying why the
+ * sandbox ended it (the App's), or {@link SandboxUnavailableError}.
+ */
 export const runInSession = async (
   host: Fetcher,
   call: SessionCall,
@@ -589,15 +600,13 @@ export const runInSession = async (
     sessionAccounting,
     (refusal) => {
       // Every session's holdings together past the isolate's pool: the
-      // session crossing it is ended, but the App may hold little; it's
-      // busy, as an owner at its cap is, never the App's fault.
+      // session crossing it is ended, but the App may hold little; core
+      // can't take it now, to try again, never the App's fault.
       const error =
         refusal === "isolate"
-          ? verdictError({
-              verdict: "busy",
-              message:
-                "Core holds as much for calls in the sandbox as it may. Try again shortly.",
-            })
+          ? new SandboxUnavailableError(
+              "Core holds as much for calls in the sandbox as it may. Try again shortly."
+            )
           : verdictError({
               verdict: "refused",
               message:
@@ -672,11 +681,7 @@ export const runInSession = async (
     overdue,
     settled.signal
   );
-  const bounds = [
-    whenRefused,
-    backstop,
-    ...(signal === undefined ? [] : [whenAborted(signal)]),
-  ];
+  const bounds = [whenRefused, backstop, ...abortsOf(signal)];
   // A nested call ends as its own call does, its capabilities with it, or
   // as the session does.
   // Runs of App code in the session: past what one call makes, refused
@@ -695,7 +700,7 @@ export const runInSession = async (
       return await Promise.race([
         callIn(given, () => nestedLive && live),
         ...bounds,
-        ...(nestedSignal === undefined ? [] : [whenAborted(nestedSignal)]),
+        ...abortsOf(nestedSignal),
       ]);
     } catch (error) {
       nestedLive = false;
@@ -720,12 +725,14 @@ export const runInSession = async (
   // The session's own call: its capabilities refuse once it answered, as a
   // nested call's do, though the session stays open for those it started.
   let topLive = true;
+  let answered: { answer: unknown } | undefined;
   try {
     const answer = await Promise.race([
       callIn(call, () => topLive && live),
       ...bounds,
     ]);
     topLive = false;
+    answered = { answer };
     if (nesting !== undefined) {
       nesting.answered(answer);
       await Promise.race([nesting.drain(), ...bounds]);
@@ -733,6 +740,11 @@ export const runInSession = async (
     return answer;
   } catch (error) {
     topLive = false;
+    // Its caller stops waiting once it has its answer and every nested
+    // call settled: a session that's over, not one given up on.
+    if (answered !== undefined && overOnceAnswered(signal, nesting)) {
+      return answered.answer;
+    }
     giveUp();
     if (signal?.aborted === true || error === overdue) {
       // Given up on: the supervisor ends the call and frees its process at

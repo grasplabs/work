@@ -83,13 +83,28 @@ export const screenTests = [
   "test/rpc-targets.test.ts",
 ];
 
-/** Core's Worker test setup, shared by both of core's test projects. */
-export const coreProject = (test: UserWorkspaceConfig["test"]) =>
+/** Core's Worker test setup, shared by each of core's test projects. */
+export const coreProject = (
+  test: UserWorkspaceConfig["test"],
+  {
+    sandboxSocket,
+  }: {
+    /**
+     * For the on-prem project: the sandbox supervisor's socket, read when
+     * its pool starts, which core's `SANDBOX_HOST` is bound to, as on-prem
+     * binds it, instead of running App code unbounded.
+     */
+    sandboxSocket?: () => string;
+  } = {}
+) =>
   defineProject({
     test: {
       // Writes the assets the tests serve and bundles connect, once per run,
       // so each project also runs on its own.
-      globalSetup: ["./test/global-setup.ts"],
+      globalSetup: [
+        "./test/global-setup.ts",
+        ...(sandboxSocket === undefined ? [] : ["./test/sandbox-setup.ts"]),
+      ],
       // A worker's test files share one runtime, which loads core once:
       // starting workerd and loading core took longer than most files'
       // tests. Each file still starts with empty storage and the env as
@@ -165,11 +180,13 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
             DURABLE_OBJECT_JURISDICTION: "none",
             // Plain workerd: no CPU limit on Code Mode's isolates.
             RUNTIME_PROFILE: "workerd",
-            // No sandbox supervisor in tests: App code is inspected in the
-            // test's own workerd, where a busy loop would hold it
-            // (src/sandboxed.ts). scripts/workerd-sandbox.test.ts tests the
-            // supervisor on plain workerd.
-            SANDBOX_IN_PROCESS: "unbounded",
+            // No sandbox supervisor in tests but the on-prem project's: App
+            // code is inspected in the test's own workerd, where a busy loop
+            // would hold it (src/sandboxed.ts). scripts/workerd-sandbox.test.ts
+            // tests the supervisor on plain workerd.
+            ...(sandboxSocket === undefined
+              ? { SANDBOX_IN_PROCESS: "unbounded" }
+              : {}),
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
             // Core's step limit, lowered so a test reaches it.
@@ -184,7 +201,16 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
           d1Databases: { CONNECT_DB: "grasp-os-connect" },
           // The outside systems connect reaches, so tests can plan how
           // they answer and read what they did (test/mail-server.ts).
-          serviceBindings: { CONNECT_PROVIDERS: "connect-providers" },
+          serviceBindings: {
+            CONNECT_PROVIDERS: "connect-providers",
+            ...(sandboxSocket === undefined
+              ? {}
+              : {
+                  SANDBOX_HOST: {
+                    external: { address: `unix:${sandboxSocket()}`, http: {} },
+                  },
+                }),
+          },
           // A stand-in frontend and the screen compiler, written by the
           // global setup.
           assets: { directory: "./dist/test-assets" },
@@ -234,6 +260,8 @@ export default coreProject({
   exclude: [
     ...defaultExclude,
     ...screenTests,
+    // With the sandbox supervisor bound: vite.on-prem.config.ts.
+    "test/on-prem/**",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

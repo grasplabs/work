@@ -1,6 +1,7 @@
 import { heldPool } from "@grasp-os/shared/rpc-accounting";
 
 import { sessionMaxRuns } from "../../src/call-limits.ts";
+import { sandboxDeadlineHeader } from "../../src/sandbox-headers.ts";
 import type { NestedCall, NestedRun } from "../../src/sandbox-session.ts";
 import {
   capability,
@@ -8,10 +9,7 @@ import {
   runInSession,
   sandboxVerdictOf,
 } from "../../src/sandbox-session.ts";
-import {
-  sandboxDeadlineHeader,
-  SandboxUnavailableError,
-} from "../../src/sandboxed.ts";
+import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 
 // Sessions on plain workerd (scripts/workerd-sandbox-session.test.ts): the
 // same `runInSession` core runs, with `SANDBOX_HOST` bound to the sandbox
@@ -157,6 +155,12 @@ const cases: Record<string, Case> = {
   },
   // Waits long, on a long wall-clock cap: its process held all the while.
   waitsLong: { body: "return await probe.slow(60_000);", wallMs: 120_000 },
+  // Past V8's own heap limit, which aborts its process.
+  crashes: {
+    body: "const held = []; for (;;) held.push(new Array(1e5).fill(1));",
+    cpuMs: 20_000,
+    wallMs: 30_000,
+  },
   // Longer than a session waits for its owner's room (3 s).
   holds: { body: "return await probe.slow(6000);", wallMs: 20_000 },
 };
@@ -205,6 +209,7 @@ const manyRunsNesting = () => {
     answered: () => {
       // The case's own outcome is what the session answers.
     },
+    idle: () => false,
     drain: async () => {
       // One past what a session runs, its own call among them: as many
       // as one call nests, each with every rerun stale reads may take.
@@ -229,7 +234,12 @@ const crowdedPool = () => {
   return pool;
 };
 
-const run = async (env: StandInEnv, name: string, owner: string) => {
+const run = async (
+  env: StandInEnv,
+  name: string,
+  owner: string,
+  parent?: string
+) => {
   const chosen = cases[name];
   if (chosen === undefined) {
     return { status: "unknown" };
@@ -270,6 +280,7 @@ const run = async (env: StandInEnv, name: string, owner: string) => {
           },
         ],
         owner,
+        ...(parent === undefined ? {} : { parent }),
         cpuMs: chosen.cpuMs ?? 5000,
         wallMs: chosen.wallMs ?? 10_000,
         ...(chosen.lingerMs === undefined ? {} : { lingerMs: chosen.lingerMs }),
@@ -301,7 +312,8 @@ export default {
       const outcome = await run(
         env,
         searchParams.get("case") ?? "",
-        searchParams.get("owner") ?? "app-stand-in"
+        searchParams.get("owner") ?? "app-stand-in",
+        searchParams.get("parent") ?? undefined
       );
       // Long enough for what the isolate left behind to try its capability.
       await scheduler.wait(800);
