@@ -24,9 +24,9 @@ export const provenanceMetaKey = "grasp-os/provenance";
  * provider rate limited it, say, before it sent any write. A connector
  * sets it with `new ToolError(message, { notPerformed: true })`. Connect
  * then frees the call's idempotency key and answers
- * `connect.server_unavailable`, which a workflow step retries. Without it,
- * a tool's error is final: the tool may have acted before it failed, so
- * its answer is kept for the key.
+ * `connect.server_unavailable`, which a workflow step retries. Without it
+ * (or `outcomeUnknownMetaKey`), a tool's error is final: the action
+ * failed, and its answer is kept for the key.
  *
  * Connect takes this only from native connectors, whose code is ours and
  * reviewed. A Composio or other remote server setting it is ignored: its
@@ -36,6 +36,25 @@ export const provenanceMetaKey = "grasp-os/provenance";
  * may send one for its provider's 429 after a first write.
  */
 export const notPerformedMetaKey = "grasp-os/not-performed";
+
+/**
+ * Result `_meta` key: `true` on an error result (`isError`) says the tool
+ * can't tell whether its write took effect: the request may have reached
+ * the provider, and its answer was lost or can't be read (a dropped
+ * connection, a server error, a timeout, an answer the tool can't parse
+ * after a write the provider took). A connector sets it with
+ * `new ToolError(message, { outcomeUnknown: true })`; `providerFetch` does
+ * for every such answer to a write, and the kit for any error a writing
+ * tool didn't foresee. Connect then answers `connect.outcome_unknown` and
+ * spends the call's idempotency key, as for a call whose answer it lost
+ * itself: the call is never sent again under that key, and its error is
+ * never kept as the answer, which a caller could take for "nothing was
+ * done" (spec 14.3, 44).
+ *
+ * Connect takes this from any server: believing it can only stop a repeat,
+ * never cause one.
+ */
+export const outcomeUnknownMetaKey = "grasp-os/outcome-unknown";
 
 /**
  * Response header on the answers connect's egress gives itself: `refused`

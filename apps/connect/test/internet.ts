@@ -84,13 +84,19 @@ export const route = <Part extends string>(
   answer,
 });
 
-/** How the provider fails the next request, or the next write only. */
-export interface Failure {
-  status: number;
-  body: unknown;
-  headers?: HeadersInit;
-  writesOnly?: boolean;
-}
+/**
+ * How the provider fails the next request, or the next write only: with
+ * its own answer, or (`lost`) by carrying the request out and then losing
+ * its answer on the way back, as a dropped connection does.
+ */
+export type Failure =
+  | {
+      status: number;
+      body: unknown;
+      headers?: HeadersInit;
+      writesOnly?: boolean;
+    }
+  | { lost: true; writesOnly?: boolean };
 
 /**
  * A provider on `hosts`, answering by its `routes` (`unmatched` for any
@@ -145,15 +151,27 @@ export const fakeProvider = <Part extends string>({
       return elsewhere(url);
     }
     const isWrite = request.method !== "GET";
-    if (failure !== undefined && (isWrite || failure.writesOnly !== true)) {
-      const { status, body, headers } = failure;
+    const failing =
+      failure !== undefined && (isWrite || failure.writesOnly !== true)
+        ? failure
+        : undefined;
+    if (failing !== undefined) {
       failure = undefined;
+    }
+    if (failing !== undefined && !("lost" in failing)) {
+      const { status, body, headers } = failing;
       return Response.json(body, { status, headers });
     }
     if (isWrite) {
       writesDone += 1;
     }
-    return await answer(request, url);
+    const answered = await answer(request, url);
+    if (failing !== undefined) {
+      // Done, and its answer never arrives.
+      await answered.body?.cancel();
+      throw new TypeError("Network connection lost.");
+    }
+    return answered;
   });
   return {
     sent,

@@ -410,8 +410,16 @@ export const carryOut = async (
     await store.spend();
     throw connectErrors.create("connect.outcome_unknown");
   }
-  // ...unless the tool is one connect trusts to say it did nothing: then
-  // the key is free, and the caller may try again.
+  // ...unless the tool says it can't tell whether its write took effect:
+  // then, as for an answer lost on its way to connect, the key is spent,
+  // and the error isn't kept as the answer, which would tell every repeat
+  // the action failed when it may have happened.
+  if (done.outcomeUnknown) {
+    await store.spend();
+    throw connectErrors.create("connect.outcome_unknown");
+  }
+  // ...or the tool is one connect trusts to say it did nothing: then the
+  // key is free, and the caller may try again.
   if (didNothing(connection.serverKind, done)) {
     await store.release();
     throw notPerformed(done);

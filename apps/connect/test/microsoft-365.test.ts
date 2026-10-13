@@ -5,7 +5,13 @@ import { z } from "zod";
 
 import { nativeConnector } from "../src/connectors.ts";
 import { accessTokenFor } from "../src/tokens.ts";
-import { connectAccount, outcome, ownAccount, someone } from "./connect.ts";
+import {
+  auditEvents,
+  connectAccount,
+  outcome,
+  ownAccount,
+  someone,
+} from "./connect.ts";
 import {
   archiveFolderId,
   attachmentsSkipToken,
@@ -48,6 +54,7 @@ import type { Connection, Input } from "./tool-calls.ts";
 
 const providers = fakeProviders();
 const graph = fakeGraph();
+const audit = auditEvents();
 
 /** Someone's Microsoft 365 connection, made through OAuth. */
 const connected = async (): Promise<Connection> => {
@@ -846,5 +853,100 @@ describe("the Microsoft 365 connector's answers", () => {
       )
     ).resolves.toMatchObject({ error: { code: "egress_refused" } });
     expect(graph.sent).toStrictEqual([]);
+  });
+});
+
+describe("the Microsoft 365 connector's writes whose outcome can't be confirmed", () => {
+  const email = {
+    mailbox: invoices,
+    subject: "Payment of invoice 2026-0041",
+    body: "Paid today.",
+    to: ["billing@northwind.example.org"],
+  };
+
+  /** The write requests that reached Graph. */
+  const writesSent = (): number =>
+    requests().filter(({ method }) => method !== "GET").length;
+
+  const draft = async (connection: Connection, key: string): Promise<string> =>
+    await outcome(
+      call(connection, "mail.createDraft", email, {
+        resource: invoices,
+        idempotencyKey: key,
+      })
+    );
+
+  it("say an email Graph sent is of unknown outcome when its answer was lost, and never send it again", async () => {
+    const connection = await connected();
+    const send = async () =>
+      await outcome(
+        call(connection, "mail.send", email, {
+          resource: invoices,
+          idempotencyKey: "run-9:send-receipt",
+        })
+      );
+    // Graph sends it; its answer never arrives.
+    graph.loseWriteAnswer();
+    const outcomes = [await send(), await send(), await send()];
+    expect(outcomes).toStrictEqual([
+      "connect.outcome_unknown",
+      "connect.outcome_unknown",
+      "connect.outcome_unknown",
+    ]);
+    expect(graph.writesDone()).toBe(1);
+    expect(writesSent()).toBe(1);
+    // Recorded as of unknown outcome, never as a failure a caller could
+    // take for "nothing was sent".
+    const audited = await audit.events();
+    expect(
+      audited
+        .filter(({ action }) => action === "connection.call")
+        .map(({ detail }) => detail)
+    ).toMatchObject([
+      { outcome: "unknown", reason: "connect.outcome_unknown" },
+      { outcome: "unknown", reason: "connect.outcome_unknown" },
+      { outcome: "unknown", reason: "connect.outcome_unknown" },
+    ]);
+  });
+
+  it("say a write Graph answered with a server error is of unknown outcome, but one it refused failed", async () => {
+    const connection = await connected();
+    const outcomes: string[] = [];
+    for (const status of [500, 502, 503, 504]) {
+      graph.failWrite(status);
+      // The same key twice: Graph fails the first write only.
+      outcomes.push(
+        // oxlint-disable-next-line no-await-in-loop -- one write failed at a time
+        await draft(connection, `run-9:draft-${status}`),
+        // oxlint-disable-next-line no-await-in-loop -- one write failed at a time
+        await draft(connection, `run-9:draft-${status}`)
+      );
+    }
+    // A refusal says nothing was made: the action failed, for good.
+    graph.failWrite(400, { error: { code: "ErrorInvalidRecipients" } });
+    outcomes.push(
+      await draft(connection, "run-9:draft-400"),
+      await draft(connection, "run-9:draft-400")
+    );
+    expect(outcomes).toStrictEqual([
+      ...Array.from({ length: 8 }, () => "connect.outcome_unknown"),
+      "connect.action_failed",
+      "connect.action_failed",
+    ]);
+    // Each key reached Graph once.
+    expect(writesSent()).toBe(5);
+  });
+
+  it("say a draft Graph made is of unknown outcome when its answer can't be read", async () => {
+    const connection = await connected();
+    // Graph made it, and its answer isn't a draft the connector can read.
+    graph.failWrite(201, { value: "not a message" });
+    await expect(draft(connection, "run-9:draft-unreadable")).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    await expect(draft(connection, "run-9:draft-unreadable")).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    expect(writesSent()).toBe(1);
   });
 });

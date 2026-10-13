@@ -3,7 +3,9 @@
  * connector reaches them through connect's egress, serving the recorded
  * answers in test/fixtures/graph.ts. Any other host takes whatever it is
  * sent, as an attacker's would. `throttle` makes Graph answer the next
- * request with a 429, `throttleWrite` the next write.
+ * request with a 429, `throttleWrite` the next write; `failWrite` answers
+ * the next write with an error, and `loseWriteAnswer` carries the next
+ * write out and loses its answer.
  */
 import { egressHeader } from "@grasp-os/connector-kit/manifest";
 import { graphHost } from "@grasp-os/connector-microsoft-365/graph";
@@ -176,6 +178,18 @@ export const fakeGraph = () => {
         headers: { "retry-after": "7" },
         writesOnly: true,
       });
+    },
+    /** Makes Graph answer the next write with `status`, without acting. */
+    failWrite: (status: number, body?: unknown) => {
+      fail({
+        status,
+        body: body ?? { error: { code: "Failed" } },
+        writesOnly: true,
+      });
+    },
+    /** Makes Graph carry out the next write, then lose its answer. */
+    loseWriteAnswer: () => {
+      fail({ lost: true, writesOnly: true });
     },
     sharePointHost,
   };
