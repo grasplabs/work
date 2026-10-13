@@ -197,8 +197,8 @@ export type {
   UnreadableHistoryRecord,
 } from "./history.ts";
 
-/** What `WorkflowRun.stepIdentities` is asked for. */
-export interface StepIdentitiesCommand {
+/** Which of the run's steps a history read also tells of. */
+export interface StepIdentitiesQuery {
   /** Only steps of this kind; every kind when null. */
   readonly kind: StepType | null;
   /** Only steps whose name starts with this; every name when null. */
@@ -211,12 +211,23 @@ export interface HistoryCommand {
   readonly after: number;
   /** The most records to return, 1 to {@link maxHistoryRecords}. */
   readonly limit: number;
+  /**
+   * Steps to tell of beside the page, each query's in the order they were
+   * first reached: read with the page, so they stand as its records do.
+   */
+  readonly steps?: readonly StepIdentitiesQuery[];
 }
 
-/** A page of the run's history, and whether more of it follows. */
+/**
+ * A page of the run's history, whether more of it follows, and the steps
+ * asked for, all of one moment of the run: read in one synchronous turn,
+ * with no write between them.
+ */
 export interface HistoryPage {
   readonly records: readonly HistoryRecord[];
   readonly more: boolean;
+  /** Each query's steps (`HistoryCommand.steps`), in its order. */
+  readonly steps: readonly (readonly StepIdentity[])[];
 }
 
 /** What `WorkflowRun.attemptLease` returns. */
@@ -1461,33 +1472,28 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * taken up again from the last event ID it has. Undefined when there is
    * no run. Who may see it is the host's to decide, and its cursor the
    * host's to check: a page holds at least one record and at most
-   * {@link maxHistoryRecords}, whatever `limit` says.
+   * {@link maxHistoryRecords}, whatever `limit` says. The steps a host
+   * asks for beside it (`HistoryCommand.steps`, as metadata:
+   * `StepIdentity`, who each is and its latest attempt, never what it
+   * holds) come from the same moment, for a host relating its own steps
+   * to each other in its history.
    */
   history(command: HistoryCommand): HistoryPage | undefined {
     if (this.#run() === undefined) {
       return undefined;
     }
+    const { sql } = this.ctx.storage;
     const limit = Number.isSafeInteger(command.limit)
       ? Math.min(Math.max(command.limit, 1), maxHistoryRecords)
       : maxHistoryRecords;
-    return readHistoryRecords(this.ctx.storage.sql, command.after, limit);
-  }
-
-  /**
-   * The run's steps as metadata (history.ts, `StepIdentity`), in the order
-   * they were first reached, narrowed by kind and name prefix: who each is
-   * and its latest attempt, never what it holds. For a host relating its
-   * own steps to each other in its history. Undefined when there is no run.
-   */
-  stepIdentities(command: StepIdentitiesCommand): StepIdentity[] | undefined {
-    if (this.#run() === undefined) {
-      return undefined;
-    }
-    return readStepIdentities(
-      this.ctx.storage.sql,
-      command.kind,
-      command.prefix
-    );
+    // One synchronous turn: no write lands between the page and its steps,
+    // so the steps stand as they did when the page's records were read.
+    return {
+      ...readHistoryRecords(sql, command.after, limit),
+      steps: (command.steps ?? []).map(({ kind, prefix }) =>
+        readStepIdentities(sql, kind, prefix)
+      ),
+    };
   }
 
   /**

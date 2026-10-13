@@ -20,6 +20,8 @@ import type { WorkflowError } from "@grasp-os/workerflow/contracts";
 import type {
   ReadableHistoryRecord,
   HistoryRecord,
+  StepIdentitiesQuery,
+  StepIdentity,
 } from "@grasp-os/workerflow/run";
 
 import { callsFor, appFor } from "../apps.ts";
@@ -390,15 +392,16 @@ const entryOf = (
 
 type RunStub = ReturnType<typeof runObjectOf>;
 
-/**
- * The run's steps whose side effect was held, and their rounds of runs
- * again: read only for a run that had one (its held steps are core's, so
- * a short read of those alone tells), then matched to the steps they are
- * of by the key core named them by (`waitKeyOf`).
- */
-const heldStepsOf = async (stub: RunStub): Promise<HeldStep[]> => {
-  const waits =
-    (await stub.stepIdentities({ kind: null, prefix: waitStepPrefix })) ?? [];
+/** Core's wait steps, a held step's runs again among them. */
+const coreWaits: StepIdentitiesQuery = { kind: null, prefix: waitStepPrefix };
+
+/** Every `do` step, to find which a held step's runs again are of. */
+const doSteps: StepIdentitiesQuery = { kind: "do", prefix: null };
+
+/** The rounds of runs again core's wait steps `waits` tell of, by key. */
+const roundsIn = (
+  waits: readonly StepIdentity[]
+): Map<string, Map<number, number>> => {
   const rounds = new Map<string, Map<number, number>>();
   for (const wait of waits) {
     const parts = heldStep.exec(wait.name)?.groups;
@@ -411,17 +414,25 @@ const heldStepsOf = async (stub: RunStub): Promise<HeldStep[]> => {
       rounds.set(parts.key, ofKey);
     }
   }
-  if (rounds.size === 0) {
-    return [];
-  }
-  const steps = (await stub.stepIdentities({ kind: "do", prefix: null })) ?? [];
-  const held: HeldStep[] = [];
+  return rounds;
+};
+
+/**
+ * The steps of `steps` whose side effect was held, by the key core named
+ * their runs again by (`waitKeyOf`), with their rounds (`rounds`).
+ */
+const heldOf = async (
+  steps: readonly StepIdentity[],
+  rounds: ReadonlyMap<string, Map<number, number>>
+): Promise<Map<string, HeldStep>> => {
+  const held = new Map<string, HeldStep>();
   for (const step of steps) {
     if (!step.name.startsWith("$")) {
       // oxlint-disable-next-line no-await-in-loop -- a digest each, of names alone
-      const ofKey = rounds.get(await waitKeyOf(step.name));
+      const key = await waitKeyOf(step.name);
+      const ofKey = rounds.get(key);
       if (ofKey !== undefined) {
-        held.push({
+        held.set(key, {
           ordinal: step.ordinal,
           name: step.name,
           attempts: step.attempt,
@@ -431,6 +442,50 @@ const heldStepsOf = async (stub: RunStub): Promise<HeldStep[]> => {
     }
   }
   return held;
+};
+
+/**
+ * One read of the run's history after `after`, with the held steps it is
+ * told against, both of one moment: the engine reads the page and the
+ * steps asked for in one synchronous turn (`history`). A step held
+ * between two separate reads would otherwise show its held end as a
+ * completion. Core's wait steps come with every read; every `do` step
+ * only for a run whose waits show a step was held, read again then with
+ * its page, so the two still stand together.
+ */
+const readWithHeld = async (
+  stub: RunStub,
+  after: number,
+  limit: number
+): Promise<
+  | {
+      records: readonly HistoryRecord[];
+      more: boolean;
+      held: Map<string, HeldStep>;
+    }
+  | undefined
+> => {
+  const page = await stub.history({ after, limit, steps: [coreWaits] });
+  if (page === undefined) {
+    return undefined;
+  }
+  if (roundsIn(page.steps[0] ?? []).size === 0) {
+    return { records: page.records, more: page.more, held: new Map() };
+  }
+  const withSteps = await stub.history({
+    after,
+    limit,
+    steps: [coreWaits, doSteps],
+  });
+  if (withSteps === undefined) {
+    return undefined;
+  }
+  const [waits = [], steps = []] = withSteps.steps;
+  return {
+    records: withSteps.records,
+    more: withSteps.more,
+    held: await heldOf(steps, roundsIn(waits)),
+  };
 };
 
 /**
@@ -484,20 +539,8 @@ export const runHistory = async (
     return done;
   }
   const stub = runObjectOf(env, row.id);
-  const [reviewed, held] = await Promise.all([
-    reviewedOf(env, row),
-    heldStepsOf(stub),
-  ]);
-  const context: Context = {
-    sees: seesDetails(by, row, owner),
-    reviewed,
-    heldByKey: new Map(
-      await Promise.all(
-        held.map(async (step) => [await waitKeyOf(step.name), step] as const)
-      )
-    ),
-    heldByOrdinal: new Map(held.map((step) => [step.ordinal, step])),
-  };
+  const sees = seesDetails(by, row, owner);
+  const reviewed = await reviewedOf(env, row);
   const { pageSize, cursor } = query.data;
   const limit = Math.min(maxRecordsPerRead, pageSize * 4);
   const items: RunHistoryEntry[] = [];
@@ -509,11 +552,20 @@ export const runHistory = async (
     read += 1
   ) {
     // oxlint-disable-next-line no-await-in-loop -- each read goes on from the one before
-    const page = await stub.history({ after, limit });
+    const page = await readWithHeld(stub, after, limit);
     if (page === undefined) {
       // The engine has no record of it: still starting, or never started.
       return done;
     }
+    // Each read is told against the held steps of its own moment.
+    const context: Context = {
+      sees,
+      reviewed,
+      heldByKey: page.held,
+      heldByOrdinal: new Map(
+        [...page.held.values()].map((step) => [step.ordinal, step])
+      ),
+    };
     const { records, more: followed } = page;
     more = followed;
     for (const record of records) {

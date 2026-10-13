@@ -672,7 +672,7 @@ describe("the history a host reads", () => {
     }).toStrictEqual({
       more: [true, false],
       joined: whole?.records,
-      least: { records: whole?.records.slice(0, 1), more: true },
+      least: { records: whole?.records.slice(0, 1), more: true, steps: [] },
       most: [500, true],
       none: undefined,
     });
@@ -717,9 +717,16 @@ describe("the history a host reads", () => {
     await ended("retrying", id);
     const object = runObject("retrying", id);
 
-    const all = await object.stepIdentities({ kind: null, prefix: null });
-    const named = await object.stepIdentities({ kind: "do", prefix: "fla" });
-    const none = await object.stepIdentities({ kind: "sleep", prefix: null });
+    const page = await object.history({
+      after: 0,
+      limit: 500,
+      steps: [
+        { kind: null, prefix: null },
+        { kind: "do", prefix: "fla" },
+        { kind: "sleep", prefix: null },
+      ],
+    });
+    const [all, named, none] = page?.steps ?? [];
 
     expect({ all, named, none }).toMatchObject({
       all: [{ name: "flaky", occurrence: 1, kind: "do", attempt: 2 }],
@@ -727,6 +734,38 @@ describe("the history a host reads", () => {
       none: [],
     });
     expect(JSON.stringify(all)).not.toContain(secret);
+  });
+
+  it("tells the steps of the same moment as the page, every step its records are of among them, and a sleep with no attempt", async () => {
+    const id = newId();
+    await workflow("napper").create({ id, params: { duration: 1 } });
+    await ended("napper", id);
+
+    const page = await runObject("napper", id).history({
+      after: 0,
+      limit: 500,
+      steps: [{ kind: null, prefix: null }],
+    });
+    const [steps = []] = page?.steps ?? [];
+    const told = new Set(
+      (page?.records ?? []).flatMap((record) =>
+        record.unreadable || record.step === null ? [] : [record.step.ordinal]
+      )
+    );
+
+    expect({
+      told: [...told].every((ordinal) =>
+        steps.some((step) => step.ordinal === ordinal)
+      ),
+      steps: steps.map(({ name, kind, attempt }) => ({ name, kind, attempt })),
+    }).toStrictEqual({
+      told: true,
+      steps: [
+        { name: "before", kind: "do", attempt: 1 },
+        { name: "nap", kind: "sleep", attempt: 0 },
+        { name: "after", kind: "do", attempt: 1 },
+      ],
+    });
   });
 });
 

@@ -769,8 +769,8 @@ export const readHistoryRecords = (
 };
 
 /**
- * A step as `readStepIdentities` tells it: who it is and how far it got,
- * never what it holds.
+ * A step as a history read tells it (`readStepIdentities`): who it is and
+ * how far it got, never what it holds.
  */
 export interface StepIdentity {
   readonly ordinal: number;
@@ -817,7 +817,12 @@ export const readStepIdentities = (
               name: row.name,
               occurrence: row.occurrence,
               kind: row.kind,
-              attempt: row.attempt,
+              // A sleep or an event wait journals an attempt count of its
+              // own, but runs no attempt.
+              attempt:
+                row.kind === "sleep" || row.kind === "waitForEvent"
+                  ? 0
+                  : row.attempt,
             },
           ]
         : []
