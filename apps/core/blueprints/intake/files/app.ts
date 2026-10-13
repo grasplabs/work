@@ -10,9 +10,11 @@ import schema from "./schema.ts";
 //
 // The bound on its answers holds for one reading as a whole: the workflow
 // may ask once more for an answer that doesn't fit, so each ask gets half,
-// 6,000 tokens, what the gateway gives the default model's answer anyway.
+// 3,000 tokens. A binding holds the whole bound to what its model can
+// answer, as an action would ask for all of it: 6,000 tokens is the most
+// the default model, Llama 3.3, gives one answer.
 export const extractor = resource.model("extractor", {
-  maxOutputTokens: 12_000,
+  maxOutputTokens: 6000,
 });
 
 export default app({

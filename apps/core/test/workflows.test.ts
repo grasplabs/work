@@ -211,7 +211,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const reviewer = await personApi("admin");
     const app = await appWith(builder, {
-      ...modelRegistration({ extractor: 12_000 }),
+      ...modelRegistration({ extractor: 6000 }),
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
     });
@@ -271,6 +271,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       auditedFor: new Set(
         audited.map(({ detail }) => `${detail.app}/${detail.version}`)
       ),
+      asked: gateway.requests.map(({ body }) => body),
     }).toMatchObject({
       matched: { kind: "value", value: { amount: 800_000 } },
       status: {
@@ -295,6 +296,25 @@ describe("workflow runs", { timeout: 60_000 }, () => {
         "workflow.step.completed review#asked",
       ],
       auditedFor: new Set([`${app}/1`]),
+      // Half the binding's 6,000 tokens, as the step may ask again. The
+      // binding holds the whole bound to what Llama 3.3 can answer, a
+      // quarter of its window, as an action would ask for all of it.
+      asked: [{ max_completion_tokens: 3000 }],
+    });
+  });
+
+  it("refuse binding a model that can't give the declared bound, though only an AI step uses it", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, {
+      ...modelRegistration({ extractor: 6001 }),
+      "workflows/invoice-approval.ts": invoiceWorkflow,
+      "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
+    });
+    await expect(
+      bindModel(app, "extractor", extractionModel)
+    ).rejects.toMatchObject({
+      code: "resource.model_too_small",
+      details: { maxTokens: 6001, usableTokens: 6000 },
     });
   });
 
@@ -490,7 +510,7 @@ ${mailStep("after")}`,
   it("check a model's answer against the step's schema, formats included", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, {
-      ...modelRegistration({ extractor: 12_000 }),
+      ...modelRegistration({ extractor: 6000 }),
       ...workflowFiles(
         "reader",
         `  return await step.llm("extract", {

@@ -8,7 +8,7 @@ import { modelErrors } from "@grasp-os/shared/models";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { z } from "zod";
 
-import { gatewaySettings, models } from "./models.ts";
+import { gatewaySettings, models, usableAnswerTokens } from "./models.ts";
 import type { ResourceContext } from "./operations.ts";
 import type {
   BindingCaller,
@@ -115,7 +115,8 @@ const refusalOf = (error: unknown): unknown => {
     code === "model.unconfigured" ||
     code === "model.eu_only" ||
     code === "model.sensitive_data" ||
-    code === "model.unpriced"
+    code === "model.unpriced" ||
+    code === "model.answer_too_long"
   ) {
     return operationErrors.create("resource.unavailable");
   }
@@ -138,18 +139,35 @@ const refusalOf = (error: unknown): unknown => {
 };
 
 /**
- * How the declaration's token bound is spent: it bounds the App's request
- * as a whole, never each provider request. Text takes one request with
- * all of it; a structured output may be asked for twice, so each attempt
- * gets half, and a bound too small to halve allows one attempt only.
+ * How a declaration's token bound is spent: it bounds a request of the
+ * App's (or a workflow's AI step) as a whole, never each provider request.
+ * One that may ask once more for an answer that doesn't fit gives each ask
+ * half; a bound too small to halve allows one ask only. An App's request
+ * may ask again for a structured output; a workflow's AI step always may
+ * (workflows/host.ts).
  */
+export const tokensOfBound = (
+  maxOutputTokens: number,
+  mayAskAgain: boolean
+): { maxTokens: number; askAgain: boolean } =>
+  !mayAskAgain || maxOutputTokens < 2
+    ? { maxTokens: maxOutputTokens, askAgain: false }
+    : { maxTokens: Math.floor(maxOutputTokens / 2), askAgain: true };
+
+/** How an App's request spends the declaration's bound. */
 const tokensFor = ({
   maxOutputTokens,
   structuredOutput,
 }: DeclarationOf<"model">): { maxTokens: number; askAgain: boolean } =>
-  structuredOutput === null || maxOutputTokens < 2
-    ? { maxTokens: maxOutputTokens, askAgain: false }
-    : { maxTokens: Math.floor(maxOutputTokens / 2), askAgain: true };
+  tokensOfBound(maxOutputTokens, structuredOutput !== null);
+
+/**
+ * Whether `model` can give the longest ask `maxTokens` of a request
+ * through a binding, by the gateway's own measure (`usableAnswerTokens`),
+ * which refuses any call through a binding that asks for more.
+ */
+export const modelAnswers = (model: string, maxTokens: number): boolean =>
+  maxTokens <= (usableAnswerTokens(model) ?? 0);
 
 /** One request of a model resource, through the gateway. */
 const generate = async (

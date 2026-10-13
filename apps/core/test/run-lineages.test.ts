@@ -64,7 +64,7 @@ const appWith = async (
   files: Record<string, string>
 ): Promise<string> => {
   const app = await serverAppWith(builder, {
-    ...modelRegistration({ reader: 12_000 }),
+    ...modelRegistration({ reader: 6000 }),
     ...files,
   });
   await bindModel(app, "reader", workersAi);
@@ -333,9 +333,11 @@ ${llmStep()}`,
       }),
     ];
 
-    // $0.035 a lineage fits two such calls at once, not three.
+    // $0.03 a lineage fits two such calls at once, not a third beside
+    // them: the child's step, which reserves some $0.007 (half its
+    // binding's 6,000 tokens).
     const result = await withGateway(
-      { run: { limit: 0.035 } },
+      { run: { limit: 0.03 } },
       [...times(2, held), dearTotal],
       async (fake) => {
         const holding = Promise.all(

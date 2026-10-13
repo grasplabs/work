@@ -53,7 +53,7 @@ import { bindingScopes } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type { LedgerScope, ScopeSpend } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
-import { gatewaySettings } from "./models.ts";
+import { gatewaySettings, usableAnswerTokens } from "./models.ts";
 import type { BoundResource, ResourceBindings } from "./operations.ts";
 import {
   requireMemberAdmin,
@@ -64,6 +64,7 @@ import { unchecked } from "./resource-adapter.ts";
 import type {
   BindingCaller,
   ContractAsks,
+  DeclarationOf,
   ResourceAdapter,
   ServedBinding,
 } from "./resource-adapter.ts";
@@ -73,7 +74,7 @@ import type {
   ContractReader,
 } from "./resource-connector.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
-import { modelAdapter } from "./resource-model.ts";
+import { modelAdapter, modelAnswers, tokensOfBound } from "./resource-model.ts";
 import { templateAdapter, templateVersionsOf } from "./resource-templates.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
@@ -322,6 +323,37 @@ const activeRow = async (
     .get();
 
 /**
+ * The longest single request model resource `declaration` asks for, as an
+ * action spends its bound (`tokensOfBound`), whoever uses it: a binding
+ * outlives the release it was approved for while the declaration stays
+ * the same, and a later one may add an action. A workflow's AI step asks
+ * for half of it.
+ */
+const longestAsk = ({
+  maxOutputTokens,
+  structuredOutput,
+}: DeclarationOf<"model">): number =>
+  tokensOfBound(maxOutputTokens, structuredOutput !== null).maxTokens;
+
+/**
+ * Refuses binding model resource `declaration` to `model` unless the model
+ * can give its longest request (`longestAsk`), by the gateway's measure:
+ * otherwise every such request would be refused at run time (models.ts).
+ */
+const requireModelAnswers = (
+  declaration: DeclarationOf<"model">,
+  model: string
+): void => {
+  const maxTokens = longestAsk(declaration);
+  if (!modelAnswers(model, maxTokens)) {
+    throw resourceBindingErrors.create("resource.model_too_small", {
+      maxTokens,
+      usableTokens: usableAnswerTokens(model) ?? 0,
+    });
+  }
+};
+
+/**
  * Binds an alias of an App to a provider, as an admin of the organization
  * (`ResourceBindingsApi.approve`): for the alias as the reviewed version
  * declares it, while that version is still current, to a target its kind's
@@ -353,6 +385,11 @@ export const approveResourceBinding = async (
   const served = await boundBy(env, found.id, declaration, target);
   if (served === undefined) {
     throw resourceBindingErrors.create("resource.target_invalid");
+  }
+  // A model the deployment allows, which can serve the declaration only
+  // when it can give the answers it asks for.
+  if (declaration["~resource"] === "model" && target.kind === "model") {
+    requireModelAnswers(declaration, target.model);
   }
   const previous = await activeRow(env, found.id, alias);
   const now = new Date();
@@ -700,7 +737,10 @@ const choicesFor = async (
   if (declaration["~resource"] === "model") {
     return {
       kind: "model",
-      models: gatewaySettings(env).models,
+      // Only those approving accepts: each can give its longest request.
+      models: gatewaySettings(env).models.filter((model) =>
+        modelAnswers(model, longestAsk(declaration))
+      ),
       truncated: false,
     };
   }

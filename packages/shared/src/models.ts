@@ -18,6 +18,8 @@ export const modelErrors = defineErrorFamily({
     "Model calls still under way hold what's left of this month's model budget. Try again once they finish.",
   "model.unpriced":
     "What this model call would cost can't be bounded at known prices, so it wasn't sent. Choose another model, or send less.",
+  "model.answer_too_long":
+    "That model can't give an answer as long as this call asks for, so it wasn't sent. Choose a model with a larger window, or ask for a shorter answer.",
   "model.ledger_unavailable":
     "Model spend can't be accounted for right now, so no model call was made. Try again later.",
   "model.failed": "The model call failed. Try again later.",

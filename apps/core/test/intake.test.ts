@@ -72,6 +72,9 @@ const call = async (
  */
 const estimatedCharactersPerToken = 3;
 
+/** How many claims the extract step's instructions ask for at most. */
+const listedAtMost = /List at most (?<count>\d+)/u;
+
 /**
  * A quote and a backslash: characters JSON writes escaped, two for each,
  * so text of them is the longest JSON text of its length.
@@ -1122,7 +1125,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
     });
   });
 
-  it("asks the default model for no more than it may answer, by a conservative estimate", async () => {
+  it("asks the default model for no more than it may answer, by a conservative estimate, and for as many claims as its schema takes", async () => {
     const { admin, app } = await setUp();
     const gateway = fakeGateway({
       text: JSON.stringify(found),
@@ -1169,11 +1172,29 @@ describe("reading notes", { timeout: 60_000 }, () => {
     const estimatedTokens = Math.ceil(
       largest.length / estimatedCharactersPerToken
     );
+    // The claims the instructions ask for at most, and the schema takes:
+    // more than it takes is an answer refused and asked for again.
+    const told =
+      typeof system === "string"
+        ? listedAtMost.exec(system)?.groups?.count
+        : undefined;
+    const { properties } = z
+      .object({
+        properties: z.object({
+          statements: z.object({ maxItems: z.number() }),
+        }),
+      })
+      .parse(JSON.parse(schemaLine ?? "null"));
 
     expect({
       answerCap,
       estimateFits: estimatedTokens <= answerCap,
-    }).toStrictEqual({ answerCap: 6000, estimateFits: true });
+      told: Number(told),
+    }).toStrictEqual({
+      answerCap: 3000,
+      estimateFits: true,
+      told: properties.statements.maxItems,
+    });
   });
 
   it("shows its steps as its code runs them, where its runs are reviewed", async () => {
