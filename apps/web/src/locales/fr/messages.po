@@ -529,6 +529,14 @@ msgstr "Une connexion doit être reconnectée"
 msgid "A connection refused to say what changed"
 msgstr "Une connexion a refusé de dire ce qui a changé"
 
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
+msgstr "Une migration des données a transformé les enregistrements de ce moteur après cette version : elle ne peut plus être rendue actuelle, et aucune version conservée ne leur correspond désormais. Créez plutôt une nouvelle version."
+
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
+msgstr "Une migration des données a transformé les enregistrements de ce moteur après cette version : elle ne peut plus être rendue actuelle. Versions conservées qui leur correspondent encore : {versions}."
+
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "Une décision a été soumise à des personnes, ou tranchée"

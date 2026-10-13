@@ -153,6 +153,15 @@ export class DataStore extends DurableObject<Env> {
     return this.#live().schemaStatus(storeId, schemaHash, consumer);
   }
 
+  /** `StoreHost.compatibleVersions`. */
+  compatibleVersions(
+    storeId: StoreId,
+    resourceId: string,
+    candidates: readonly { resourceVersion: number; schemaHash: string }[]
+  ): number[] {
+    return this.#live().compatibleVersions(storeId, resourceId, candidates);
+  }
+
   /** `StoreHost.abandonBackfill`. */
   async abandonBackfill(
     storeId: StoreId,

@@ -505,8 +505,19 @@ export const dataErrors = defineErrorFamily({
  * an admin abandons it as); a backfill's step from a run the store moved
  * past is `migration.superseded`. Once an admin abandoned a failed
  * target, the releases sealed on it are `migration.abandoned`; only a
- * failed one can be (`migration.not_failed`).
+ * failed one can be (`migration.not_failed`). A release whose schema an
+ * explicit migration left behind can't be made current again (a rollback,
+ * spec 17.4): `migration.rollback_incompatible`, its details naming the
+ * App's retained versions on the same store that still fit
+ * (`details.compatible`, newest first).
  */
+/**
+ * The most of an App's retained releases a refused rollback looks at for
+ * versions that still fit its store (`migration.rollback_incompatible`):
+ * its newest.
+ */
+export const compatibleVersionsMax = 100;
+
 export const migrationErrors = defineErrorFamily({
   "migration.required":
     "This schema change can't be applied on its own: it needs a migration. Add only new tables, optional or defaulted fields and indexes, or keep the fields as they were.",
@@ -530,6 +541,8 @@ export const migrationErrors = defineErrorFamily({
     "This version's migrations don't fit this store: each transforms one table, from a schema the store recorded, to this version's schema, and a migration can't share a change with defaults to fill in elsewhere.",
   "migration.incompatible_write":
     "This version's schema no longer fits the store: a migration moved its records on. Make the migrated version current.",
+  "migration.rollback_incompatible":
+    "This version's schema no longer fits its store: a migration moved its records on, so it can't be made current again. Make one of the compatible versions current instead.",
 });
 
 /**

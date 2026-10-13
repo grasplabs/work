@@ -572,6 +572,27 @@ describe("why a version wasn't made current", () => {
     });
   });
 
+  it("names the kept versions that still fit when a migration rules out a rollback", () => {
+    expect({
+      some: makeCurrentFailure(
+        migrationErrors.create("migration.rollback_incompatible", {
+          compatible: [4, 3],
+        })
+      ),
+      none: makeCurrentFailure(
+        migrationErrors.create("migration.rollback_incompatible", {
+          compatible: [],
+        })
+      ).text,
+    }).toStrictEqual({
+      some: {
+        text: "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: 4 and 3.",
+        link: undefined,
+      },
+      none: "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead.",
+    });
+  });
+
   it("says an abandoned change is final, and points nowhere for anything else", () => {
     expect({
       abandoned: makeCurrentFailure(
