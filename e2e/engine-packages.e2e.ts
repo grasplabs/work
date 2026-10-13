@@ -18,6 +18,7 @@ const pageRead = { timeout: 20_000 };
 const engineWithPackages = async (
   scene:
     | "enginePackages"
+    | "enginePackagesBuilder"
     | "enginePackagesRefresh"
     | "enginePackagesFresh"
     | "enginePackagesTab"
@@ -125,6 +126,30 @@ test("someone who may approve packages and isn't a member sees only an engine's 
     .filter({ hasText: "charts@3.1.0" });
   await expect(builderRow).toContainText("Retired", pageRead);
   await expect(builderRow.getByRole("button")).toHaveCount(0);
+});
+
+test("someone who may approve packages and builds other engines sees only this one's packages", async ({
+  browser,
+}) => {
+  // An approver's organization role doesn't decide it: core lets them
+  // list the packages of an engine they aren't a member of.
+  const { approver, app } = await engineWithPackages(
+    "enginePackagesBuilder",
+    "Ledger"
+  );
+
+  const page = await pageOf(browser, approver);
+  await page.goto(`/engines/${app}`);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Ledger" })
+  ).toBeVisible(pageRead);
+  await expect(page.getByRole("tab")).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("table", { name: "Approved packages" })
+      .getByRole("row")
+      .filter({ hasText: "charts@3.1.0" })
+  ).toContainText("Approved");
 });
 
 test("reads the packages again when a decision fails, keeping why", async ({

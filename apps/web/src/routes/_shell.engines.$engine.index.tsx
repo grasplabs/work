@@ -31,6 +31,8 @@ import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/to-do.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
+import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
+import type { EnginePage } from "../engines/engine-page.ts";
 import { PackageApprovals } from "../engines/package-approvals.tsx";
 import { ResourceBindings } from "../engines/resource-bindings.tsx";
 import type { ResourcesPage } from "../engines/resource-bindings.tsx";
@@ -73,22 +75,6 @@ const onFirstUse = <T,>(start: () => Deferred<T>): OnFirstUse<T> => {
     started ??= start();
     return { read: started };
   };
-};
-
-interface EnginePage {
-  app: App;
-  contents: AppContents;
-}
-
-const loadEngine = async (
-  session: Session,
-  engine: string
-): Promise<EnginePage> => {
-  const [found, contents] = await Promise.all([
-    session.apps.get(engine),
-    session.apps.contents(engine),
-  ]);
-  return { app: found, contents };
 };
 
 /**
@@ -602,7 +588,7 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
 };
 
 const EnginePageView = () => {
-  const { page, packages } = Route.useLoaderData();
+  const { page, packagesOnly } = Route.useLoaderData();
   const { t } = useLingui();
   if (page.state !== "ready") {
     const notLoaded = (
@@ -614,8 +600,10 @@ const EnginePageView = () => {
       />
     );
     // Not a member: someone who may approve packages still gets those.
-    return page.state === "missing" && packages !== undefined ? (
-      <Await fallback={<PageLoading />} promise={packages}>
+    return packagesOnly === undefined ? (
+      notLoaded
+    ) : (
+      <Await fallback={<PageLoading />} promise={packagesOnly}>
         {(listed) =>
           listed.state === "ready" ? (
             <PackagesOnlyView listed={listed.data} />
@@ -624,8 +612,6 @@ const EnginePageView = () => {
           )
         }
       </Await>
-    ) : (
-      notLoaded
     );
   }
   return (
@@ -682,25 +668,18 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
             )
         )
       : undefined,
-    // Not awaited, and only to find out whether someone who doesn't build
-    // the engine may see its packages (who may approve packages): their
-    // tab, or the packages alone when they aren't a member. The tab reads
-    // the packages again each time it opens.
-    packages: canBuild(identity.role)
-      ? undefined
-      : loadFromCore(
-          core,
-          async (session) => await session.dependencies.approvals(params.engine)
-        ),
     integrations: canBuild(identity.role)
       ? loadFromCore(
           core,
           async (session) => await loadIntegrations(session, params.engine)
         )
       : undefined,
-    page: await loadFromCore(
-      core,
-      async (session) => await loadEngine(session, params.engine)
-    ),
+    // Last, so the reads above start first. The engine, and its packages
+    // for whoever core lets read them: their tab, or the packages alone
+    // for who isn't a member.
+    ...(await loadEnginePage(
+      engineReaders(core, params.engine),
+      canBuild(identity.role)
+    )),
   }),
 });

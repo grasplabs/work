@@ -195,6 +195,11 @@ const cast = {
   dependencyApproval: { admin: "admin", builder: "builder", approver: "user" },
   enginePackages: { admin: "admin", builder: "builder", approver: "user" },
   enginePackagesTab: { admin: "admin", builder: "builder", approver: "user" },
+  enginePackagesBuilder: {
+    admin: "admin",
+    builder: "builder",
+    approver: "builder",
+  },
   enginePackagesBusy: { admin: "admin", builder: "builder", approver: "user" },
   enginePackagesStale: { admin: "admin", builder: "builder", approver: "user" },
   enginePackagesFresh: { admin: "admin", builder: "builder", approver: "user" },

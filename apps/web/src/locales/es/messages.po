@@ -1343,10 +1343,9 @@ msgstr "Borrar"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
-#: src/engines/resource-bindings.tsx
-#: src/engines/store-changes.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
+#: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -4811,10 +4810,6 @@ msgstr "El onboarding"
 msgid "The one before"
 msgstr "La anterior"
 
-#: src/workflows/triggers.tsx
-msgid "The part of the address before the @, on the mail domain set up for Grasp."
-msgstr "La parte de la dirección antes de la @, en el dominio de correo configurado para Grasp."
-
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
 msgstr "Los paquetes aprobados para este motor. Los ves porque puedes aprobar paquetes; el resto del motor es para sus miembros."
@@ -4822,6 +4817,10 @@ msgstr "Los paquetes aprobados para este motor. Los ves porque puedes aprobar pa
 #: src/engines/package-approvals.tsx
 msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
 msgstr "No se pudieron leer de nuevo los paquetes, así que esta lista puede estar desactualizada: {unread}"
+
+#: src/workflows/triggers.tsx
+msgid "The part of the address before the @, on the mail domain set up for Grasp."
+msgstr "La parte de la dirección antes de la @, en el dominio de correo configurado para Grasp."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
