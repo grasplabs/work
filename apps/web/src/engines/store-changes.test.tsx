@@ -115,8 +115,20 @@ describe("a store's pending change", () => {
     expect(tooLarge).toContain(
       "Filling in the new field body of the table notes would make the record rec_7 larger"
     );
-    expect(stalled).toContain("stopped making progress");
-    expect(stalled).toContain("Abandon this change");
+    // A stalled change names no record, so it advises no mending.
+    expect({
+      stalledWhy: stalled.includes("stopped making progress"),
+      stalledNothingToMend: stalled.includes("there is nothing to mend"),
+      stalledMend: stalled.includes("Mend the record"),
+      tooLargeMend: tooLarge.includes("Mend the record"),
+      stalledAbandon: stalled.includes("Abandon this change"),
+    }).toStrictEqual({
+      stalledWhy: true,
+      stalledNothingToMend: true,
+      stalledMend: false,
+      tooLargeMend: true,
+      stalledAbandon: true,
+    });
   });
 
   it("shows a change still being applied with its progress, and nothing to abandon", () => {
@@ -345,6 +357,32 @@ describe("confirming an abandonment", () => {
       ended: "refused",
     });
   });
+
+  it("keeps what an abandonment took out of force when reading again fails", async () => {
+    const answer: AbandonedBackfill = {
+      store: change.store,
+      target: change.backfill.target,
+      attempt: change.backfill.attempt,
+      scanned: 40,
+      filled: 39,
+      failure: { reason: "stalled" },
+      releases: [{ app: engine.id, version: 3 }],
+      reserved: [{ table: "notes", field: "category" }],
+      abandonedAt: "2026-10-13T12:00:00.000Z",
+    };
+    const { settled } = await confirm(
+      change,
+      async () => {
+        await Promise.resolve();
+        return answer;
+      },
+      async () => {
+        await Promise.resolve();
+        throw new Error("Core went away");
+      }
+    );
+    expect(settled).toStrictEqual([{ abandoned: answer, name: "crm" }]);
+  });
 });
 
 describe("an abandoned change", () => {
@@ -405,29 +443,58 @@ describe("why abandoning didn't go through", () => {
   });
 });
 
+/** `migration.backfill_failed` as core sends it, failing as `failure` says. */
+const backfillFailed = (failure: AppStoreBackfill["backfill"]["failure"]) =>
+  migrationErrors.create("migration.backfill_failed", {
+    target: "a".repeat(64),
+    attempt: 2,
+    failure,
+  });
+
 describe("why a version wasn't made current", () => {
-  it("points to the engine's page when a store's failed change holds it back", () => {
-    const blocked = makeCurrentFailure(
-      migrationErrors.create("migration.backfill_failed", {
-        target: "a".repeat(64),
-        attempt: 2,
-      })
-    );
-    const abandoned = makeCurrentFailure(
-      migrationErrors.create("migration.abandoned")
-    );
-    const other = makeCurrentFailure(roleErrors.create("role.forbidden"));
+  it("explains a store's failed change by its reason, and points to the engine's page", () => {
+    const record = { table: "notes", field: "category", id: "rec_42" };
     expect({
-      blocked: blocked.blocked,
-      abandoned,
-      other: other.blocked,
+      invalid: makeCurrentFailure(
+        backfillFailed({ ...record, reason: "invalid_value" })
+      ),
+      tooLarge: makeCurrentFailure(
+        backfillFailed({ ...record, reason: "too_large" })
+      ),
+      stalled: makeCurrentFailure(backfillFailed({ reason: "stalled" })),
+      unnamed: makeCurrentFailure(backfillFailed(null)),
     }).toStrictEqual({
-      blocked: true,
+      invalid: {
+        text: "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept.",
+        link: "An admin can see the record that holds it back, and abandon the change, on the engine's page.",
+      },
+      tooLarge: {
+        text: "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be.",
+        link: "An admin can see the record that holds it back, and abandon the change, on the engine's page.",
+      },
+      stalled: {
+        text: "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress.",
+        link: "No record is to blame, so an admin can only abandon the change, on the engine's page.",
+      },
+      unnamed: {
+        text: "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress.",
+        link: "No record is to blame, so an admin can only abandon the change, on the engine's page.",
+      },
+    });
+  });
+
+  it("says an abandoned change is final, and points nowhere for anything else", () => {
+    expect({
+      abandoned: makeCurrentFailure(
+        migrationErrors.create("migration.abandoned")
+      ),
+      other: makeCurrentFailure(roleErrors.create("role.forbidden")).link,
+    }).toStrictEqual({
       abandoned: {
         text: "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again.",
-        blocked: false,
+        link: undefined,
       },
-      other: false,
+      other: undefined,
     });
   });
 });

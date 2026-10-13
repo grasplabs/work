@@ -488,7 +488,7 @@ type MadeCurrent = { made: true } | ReturnType<typeof makeCurrentFailure>;
 
 /**
  * Makes `version` of `app` current, or says why core refused: a store's
- * failed change it waits on (`blocked`) points to the engine's page.
+ * failed change it waits on points to the engine's page (`link`).
  * Outside the component, as the React Compiler can't compile `try`.
  */
 const setCurrentOf = async (
@@ -569,7 +569,10 @@ const PendingVersion = ({
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `codeReads` says when to read again
   }, [core, app.id, version, loaded, codeReads]);
-  const [refused, setRefused] = useState<{ text: string; blocked: boolean }>();
+  const [refused, setRefused] = useState<{
+    text: string;
+    link: string | undefined;
+  }>();
   const makeCurrent = async (): Promise<void> => {
     setRefused(undefined);
     const made = await run(
@@ -627,7 +630,7 @@ const PendingVersion = ({
           />
         )}
         <ErrorText>{failure ?? refused?.text}</ErrorText>
-        {refused?.blocked === true ? (
+        {refused?.link === undefined ? null : (
           <p className="text-muted-foreground">
             <Link
               className="underline underline-offset-3"
@@ -635,13 +638,10 @@ const PendingVersion = ({
               params={{ engine: app.id }}
               to="/engines/$engine"
             >
-              <Trans>
-                An admin can see the record that holds it back, and abandon the
-                change, on the engine&apos;s page.
-              </Trans>
+              {refused.link}
             </Link>
           </p>
-        ) : null}
+        )}
       </CardContent>
       {loaded === undefined ? null : (
         <CardFooter>

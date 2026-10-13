@@ -776,7 +776,7 @@ msgstr "Un administrador"
 msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
 msgstr "Un administrador abandonó el cambio de datos que necesita esta versión, así que nunca podrá hacerse actual. Pide que se vuelva a crear el motor."
 
-#: src/chat/builds.tsx
+#: src/engines/store-change-errors.ts
 msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 msgstr "Un administrador puede ver en la página del motor el registro que lo impide y abandonar el cambio."
 
@@ -2777,6 +2777,10 @@ msgstr "Antes no se había aprobado ningún paquete para este motor."
 #: src/chat/builds.tsx
 msgid "No permissions."
 msgstr "Sin permisos."
+
+#: src/engines/store-change-errors.ts
+msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
+msgstr "Ningún registro tiene la culpa, así que un administrador solo puede abandonar el cambio, en la página del motor."
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -4787,6 +4791,14 @@ msgid "This version changes the engine's data, and the change can't be applied: 
 msgstr "Esta versión cambia los datos del motor y el cambio no se puede aplicar: un registro ya tiene un valor que uno de sus nuevos campos no acepta."
 
 #: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgstr "Esta versión cambia los datos del motor y el cambio no se puede aplicar: el relleno de sus nuevos campos dejó de avanzar."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgstr "Esta versión cambia los datos del motor y el cambio no se puede aplicar: rellenar uno de sus nuevos campos haría un registro más grande de lo que puede ser un registro."
+
+#: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "El cambio de datos de esta versión todavía se está aplicando. Vuelve a intentarlo en un momento."
 
@@ -4895,6 +4907,10 @@ msgstr "Evento ilegible"
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
 msgstr "Hasta que se resuelva, ninguna versión que cambie las tablas de este almacén podrá hacerse actual, ni en este motor ni en ningún otro que use el almacén. Corrige el registro desde el motor y el cambio se volverá a intentar, o abandónalo."
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgstr "Hasta que se resuelva, ninguna versión que cambie las tablas de este almacén podrá hacerse actual, ni en este motor ni en ningún otro que use el almacén. Ningún registro tiene la culpa, así que no hay nada que corregir: abandona el cambio para que el almacén vuelva a aceptar cambios."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

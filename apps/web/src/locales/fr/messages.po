@@ -776,7 +776,7 @@ msgstr "Un admin"
 msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
 msgstr "Un admin a abandonné la modification des données dont cette version a besoin : elle ne pourra jamais être rendue actuelle. Demandez à reconstruire le moteur."
 
-#: src/chat/builds.tsx
+#: src/engines/store-change-errors.ts
 msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 msgstr "Un admin peut voir, sur la page du moteur, l’enregistrement qui la bloque, et abandonner la modification."
 
@@ -2777,6 +2777,10 @@ msgstr "Aucun paquet n’avait encore été approuvé pour ce moteur."
 #: src/chat/builds.tsx
 msgid "No permissions."
 msgstr "Aucune autorisation."
+
+#: src/engines/store-change-errors.ts
+msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
+msgstr "Aucun enregistrement n’est en cause : un admin peut seulement abandonner la modification, sur la page du moteur."
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -4787,6 +4791,14 @@ msgid "This version changes the engine's data, and the change can't be applied: 
 msgstr "Cette version modifie les données du moteur, et la modification ne peut pas être appliquée : un enregistrement contient déjà une valeur que l’un de ses nouveaux champs n’accepte pas."
 
 #: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgstr "Cette version modifie les données du moteur, et la modification ne peut pas être appliquée : le remplissage de ses nouveaux champs n’avançait plus."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgstr "Cette version modifie les données du moteur, et la modification ne peut pas être appliquée : remplir l’un de ses nouveaux champs rendrait un enregistrement plus grand qu’un enregistrement ne peut l’être."
+
+#: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "La modification des données de cette version est encore en cours d’application. Réessayez dans un instant."
 
@@ -4895,6 +4907,10 @@ msgstr "Événement illisible"
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
 msgstr "Tant que ce n’est pas résolu, aucune version qui modifie les tables de ce magasin ne peut être rendue actuelle, ni dans ce moteur ni dans un autre qui utilise le magasin. Corrigez l’enregistrement via le moteur et la modification sera retentée, ou abandonnez-la."
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgstr "Tant que ce n’est pas résolu, aucune version qui modifie les tables de ce magasin ne peut être rendue actuelle, ni dans ce moteur ni dans un autre qui utilise le magasin. Aucun enregistrement n’est en cause, il n’y a donc rien à corriger : abandonnez la modification pour que le magasin accepte à nouveau des modifications."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

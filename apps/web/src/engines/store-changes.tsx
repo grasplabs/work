@@ -22,7 +22,7 @@ import {
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Await, useRouter } from "@tanstack/react-router";
+import { Await } from "@tanstack/react-router";
 import { DatabaseIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -201,12 +201,21 @@ export const StoreChange = ({
           <FailureText failure={backfill.failure} />
         </p>
         <p>
-          <Trans>
-            Until this is resolved, no release that changes this store&apos;s
-            tables can be made current, in this engine or any other engine using
-            the store. Mend the record through the engine and the change is
-            tried again, or abandon it.
-          </Trans>
+          {backfill.failure.reason === "stalled" ? (
+            <Trans>
+              Until this is resolved, no release that changes this store&apos;s
+              tables can be made current, in this engine or any other engine
+              using the store. No record is to blame, so there is nothing to
+              mend: abandon the change for the store to take changes again.
+            </Trans>
+          ) : (
+            <Trans>
+              Until this is resolved, no release that changes this store&apos;s
+              tables can be made current, in this engine or any other engine
+              using the store. Mend the record through the engine and the change
+              is tried again, or abandon it.
+            </Trans>
+          )}
         </p>
         <Progress change={change} />
         <StoreId change={change} />
@@ -311,6 +320,16 @@ export const abandonChange = async (
 /** A read of the engine's stores' changes, which the page doesn't wait for. */
 type ChangesRead = Promise<Loaded<AppStoreBackfill[]>>;
 
+/** The engine's stores' changes, read from core. */
+const readChangesOf = async (
+  core: Pick<CoreConnection, "withSession">,
+  engine: string
+): ChangesRead =>
+  await loadFromCore(
+    core,
+    async (session) => await session.stores.appBackfills(engine)
+  );
+
 /**
  * The read of the engine's stores' changes, for its loader: started only
  * for the organization's own admins, never Grasp staff, who alone may
@@ -321,12 +340,7 @@ export const readStoreChanges = (
   viewer: { role: string; staff: boolean },
   engine: string
 ): ChangesRead | undefined =>
-  isMemberAdmin(viewer)
-    ? loadFromCore(
-        core,
-        async (session) => await session.stores.appBackfills(engine)
-      )
-    : undefined;
+  isMemberAdmin(viewer) ? readChangesOf(core, engine) : undefined;
 
 const StoreChangesOf = ({
   changes,
@@ -337,8 +351,18 @@ const StoreChangesOf = ({
 }) => {
   const { t } = useLingui();
   const core = useCore();
-  const router = useRouter();
   const [busy, setBusy] = useState(false);
+  // After an abandonment, only this section reads again, never the whole
+  // route: a route read that failed (offline, refused) would swap the page
+  // for its error and take the outcome below with it, so the admin would
+  // never learn which releases can't run or which fields stay reserved.
+  // The read is kept with the loader's read it replaced, so a later reload
+  // of the route shows what that reads.
+  const [reread, setReread] = useState<{
+    of: ChangesRead;
+    read: ChangesRead;
+  }>();
+  const shown = reread?.of === changes ? reread.read : changes;
   const [outcome, setOutcome] = useState<Outcome>();
   const outcomeRef = useRef<HTMLDivElement>(null);
   // The control that was confirmed may be gone once the page is read
@@ -358,9 +382,11 @@ const StoreChangesOf = ({
           async (session) => await session.stores.abandonBackfill(input)
         ),
       async () => {
-        // `sync` waits for the loader, so the controls stay off until what
-        // they act on is back.
-        await router.invalidate({ sync: true });
+        const read = readChangesOf(core, engine.id);
+        setReread({ of: changes, read });
+        // Waited for, so the controls stay off until what they act on is
+        // back. A failed read never throws: it shows where the list was.
+        await read;
       },
       (ended) => {
         setOutcome(ended);
@@ -374,7 +400,7 @@ const StoreChangesOf = ({
       className="flex flex-col gap-3 empty:hidden"
       id={storeChangesAnchor}
     >
-      <Await fallback={null} promise={changes}>
+      <Await fallback={null} promise={shown}>
         {(loaded) =>
           loaded.state === "ready" ? (
             <>

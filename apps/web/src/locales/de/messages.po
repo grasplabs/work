@@ -776,7 +776,7 @@ msgstr "Ein Admin"
 msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
 msgstr "Ein Admin hat die Datenänderung verworfen, die diese Version braucht, daher kann sie nie aktuell gemacht werden. Lassen Sie die Engine neu bauen."
 
-#: src/chat/builds.tsx
+#: src/engines/store-change-errors.ts
 msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 msgstr "Ein Admin sieht auf der Seite der Engine den Datensatz, der sie aufhält, und kann die Änderung verwerfen."
 
@@ -2777,6 +2777,10 @@ msgstr "Für diese Engine wurden bisher keine Pakete genehmigt."
 #: src/chat/builds.tsx
 msgid "No permissions."
 msgstr "Keine Berechtigungen."
+
+#: src/engines/store-change-errors.ts
+msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
+msgstr "Kein Datensatz ist schuld, daher kann ein Admin die Änderung auf der Seite der Engine nur verwerfen."
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -4787,6 +4791,14 @@ msgid "This version changes the engine's data, and the change can't be applied: 
 msgstr "Diese Version ändert die Daten der Engine, und die Änderung lässt sich nicht anwenden: Ein Datensatz enthält bereits einen Wert, den eines ihrer neuen Felder nicht akzeptiert."
 
 #: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgstr "Diese Version ändert die Daten der Engine, und die Änderung lässt sich nicht anwenden: Das Ausfüllen ihrer neuen Felder kam nicht mehr voran."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgstr "Diese Version ändert die Daten der Engine, und die Änderung lässt sich nicht anwenden: Das Ausfüllen eines ihrer neuen Felder würde einen Datensatz größer machen, als ein Datensatz sein darf."
+
+#: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "Die Datenänderung dieser Version wird noch angewendet. Versuchen Sie es gleich noch einmal."
 
@@ -4895,6 +4907,10 @@ msgstr "Unlesbares Ereignis"
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
 msgstr "Bis das gelöst ist, kann keine Release, die die Tabellen dieses Speichers ändert, aktuell gemacht werden, weder in dieser Engine noch in einer anderen, die den Speicher nutzt. Korrigieren Sie den Datensatz über die Engine, dann wird die Änderung erneut versucht, oder verwerfen Sie sie."
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgstr "Bis das gelöst ist, kann keine Release, die die Tabellen dieses Speichers ändert, aktuell gemacht werden, weder in dieser Engine noch in einer anderen, die den Speicher nutzt. Kein Datensatz ist schuld, es gibt also nichts zu korrigieren: Verwerfen Sie die Änderung, damit der Speicher wieder Änderungen annimmt."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

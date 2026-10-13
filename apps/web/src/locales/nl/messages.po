@@ -776,7 +776,7 @@ msgstr "Een beheerder"
 msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
 msgstr "Een beheerder heeft de gegevenswijziging opgegeven die deze versie nodig heeft, dus die kan nooit actueel worden gemaakt. Laat de engine opnieuw bouwen."
 
-#: src/chat/builds.tsx
+#: src/engines/store-change-errors.ts
 msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 msgstr "Een beheerder ziet op de pagina van de engine het record dat het tegenhoudt, en kan de wijziging opgeven."
 
@@ -2777,6 +2777,10 @@ msgstr "Voor deze engine zijn nog niet eerder pakketten goedgekeurd."
 #: src/chat/builds.tsx
 msgid "No permissions."
 msgstr "Geen toestemmingen."
+
+#: src/engines/store-change-errors.ts
+msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
+msgstr "Geen enkel record is de oorzaak, dus een beheerder kan de wijziging alleen opgeven, op de pagina van de engine."
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -4787,6 +4791,14 @@ msgid "This version changes the engine's data, and the change can't be applied: 
 msgstr "Deze versie wijzigt de gegevens van de engine, en de wijziging kan niet worden toegepast: een record heeft al een waarde die een van de nieuwe velden niet accepteert."
 
 #: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgstr "Deze versie wijzigt de gegevens van de engine, en de wijziging kan niet worden toegepast: het invullen van de nieuwe velden kwam niet meer verder."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgstr "Deze versie wijzigt de gegevens van de engine, en de wijziging kan niet worden toegepast: het invullen van een van de nieuwe velden zou een record groter maken dan een record mag zijn."
+
+#: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
 msgstr "De gegevenswijziging van deze versie wordt nog toegepast. Probeer het zo opnieuw."
 
@@ -4895,6 +4907,10 @@ msgstr "Onleesbare gebeurtenis"
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
 msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wijzigt actueel worden gemaakt, in deze engine noch in een andere engine die de opslag gebruikt. Herstel het record via de engine, dan wordt de wijziging opnieuw geprobeerd, of geef haar op."
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wijzigt actueel worden gemaakt, in deze engine noch in een andere engine die de opslag gebruikt. Geen enkel record is de oorzaak, dus er valt niets te herstellen: geef de wijziging op, zodat de opslag weer wijzigingen aanneemt."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
