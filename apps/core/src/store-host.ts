@@ -19,7 +19,7 @@ import type {
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
-import { storeIdSchema } from "@grasp-os/shared/ids";
+import { identifierSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -39,6 +39,7 @@ import {
   documentMaxBytes,
   migrationErrors,
   recordIdSchema,
+  compatibleVersionsMax,
   schemaConsumerSchema,
   stagedWritesSchema,
   storeIntentSchema,
@@ -632,11 +633,14 @@ export interface BackfillOutcome {
 /**
  * Whether a schema the store recorded is in force (`schemaStatus`):
  * `abandoned` when an admin abandoned the pending target that held it for
- * the consumer asked about (`abandonBackfill`), or that alone held it.
+ * the consumer asked about (`abandonBackfill`), or that alone held it;
+ * `incompatible` when an explicit migration left it behind
+ * (`sdk_schemas.superseded_at`), for good: its records moved on.
  */
 export type SchemaStatus =
   | { state: "active" }
   | { state: "abandoned" }
+  | { state: "incompatible" }
   | {
       state: "pending" | "failed" | "ready";
       target: string;
@@ -813,6 +817,16 @@ export const backfillBatchSize = 100;
 export const backfillLeaseMs = 5 * 60 * 1000;
 
 const backfillTargetSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+
+/** Releases of one App asked about together (`compatibleVersions`). */
+const releaseCandidatesSchema = z
+  .array(
+    z.strictObject({
+      resourceVersion: z.number().int().min(1),
+      schemaHash: backfillTargetSchema,
+    })
+  )
+  .max(compatibleVersionsMax);
 
 /** One batch of a backfill, as its run asks for it (`fillMissing`). */
 const backfillStepSchema = z.strictObject({
@@ -4670,8 +4684,9 @@ export class StoreHost {
    * contract holds it; `pending` or `failed`, with its backfill's
    * progress, when only the pending target holds it; `unknown` for a
    * schema the store wasn't handed (or holds in neither, which a store
-   * whose metadata is intact never does). What core asks before it makes
-   * a release current on the store.
+   * whose metadata is intact never does); `incompatible` for one an
+   * explicit migration left behind. What core asks before it makes a
+   * release current on the store.
    */
   schemaStatus(
     storeId: StoreId,
@@ -4693,6 +4708,7 @@ export class StoreHost {
         .select({
           manifest: schemas.manifest,
           abandonedAt: schemas.abandonedAt,
+          supersededAt: schemas.supersededAt,
         })
         .from(schemas)
         .where(eq(schemas.schemaHash, hash))
@@ -4719,6 +4735,11 @@ export class StoreHost {
         recorded.abandonedAt !== null
       ) {
         return { state: "abandoned" };
+      }
+      if (recorded.supersededAt !== null) {
+        // Writes under it are refused for good (`#requireInForce`), so it
+        // never runs on the store again, even should a contract cover it.
+        return { state: "incompatible" };
       }
       const schema = readSchemaManifest(recorded.manifest).manifest;
       const row = this.#db
@@ -4753,6 +4774,86 @@ export class StoreHost {
         filled: pending.filled,
         failure: shownFailure(pending.failure, pending.migrations, named),
       };
+    });
+  }
+
+  /**
+   * Which of App `resourceId`'s releases (`candidates`, each its version
+   * and the schema it was sealed on) the store's contract holds in force
+   * now, as `schemaStatus` would answer `active` for each: their versions,
+   * in the order asked. What core names when a rollback to a release a
+   * migration left behind is refused (store-backfill.ts). Reads only, and
+   * tells core nothing of the store's records.
+   */
+  compatibleVersions(
+    storeId: StoreId,
+    resourceId: string,
+    candidates: readonly { resourceVersion: number; schemaHash: string }[]
+  ): number[] {
+    const app = dataErrors.parse("data.invalid", identifierSchema, resourceId);
+    const asked = dataErrors.parse(
+      "data.invalid",
+      releaseCandidatesSchema,
+      candidates
+    );
+    return this.ctx.storage.transactionSync((): number[] => {
+      this.#bind(storeId, false);
+      const row = this.#db
+        .select({ text: store.contractManifest })
+        .from(store)
+        .get();
+      if (row?.text === null || row?.text === undefined) {
+        return [];
+      }
+      const contract = readSchemaManifest(row.text).manifest;
+      const fits = new Map<string, boolean>();
+      const fitsContract = (hash: string): boolean => {
+        const known = fits.get(hash);
+        if (known !== undefined) {
+          return known;
+        }
+        const recorded = this.#db
+          .select({
+            manifest: schemas.manifest,
+            abandonedAt: schemas.abandonedAt,
+            supersededAt: schemas.supersededAt,
+          })
+          .from(schemas)
+          .where(eq(schemas.schemaHash, hash))
+          .get();
+        const fit =
+          recorded !== undefined &&
+          recorded.abandonedAt === null &&
+          recorded.supersededAt === null &&
+          covered(
+            planSchemaChange(
+              contract,
+              readSchemaManifest(recorded.manifest).manifest
+            )
+          );
+        fits.set(hash, fit);
+        return fit;
+      };
+      const abandonedFor = (resourceVersion: number, hash: string): boolean =>
+        this.#db
+          .select({ abandonedAt: schemaActivations.abandonedAt })
+          .from(schemaActivations)
+          .where(
+            and(
+              eq(schemaActivations.resourceId, app),
+              eq(schemaActivations.resourceVersion, resourceVersion),
+              eq(schemaActivations.schemaHash, hash),
+              isNotNull(schemaActivations.abandonedAt)
+            )
+          )
+          .get() !== undefined;
+      return asked
+        .filter(
+          ({ resourceVersion, schemaHash }) =>
+            fitsContract(schemaHash) &&
+            !abandonedFor(resourceVersion, schemaHash)
+        )
+        .map(({ resourceVersion }) => resourceVersion);
     });
   }
 

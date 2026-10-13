@@ -5,6 +5,8 @@ import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
+import { formatList } from "../format.ts";
+
 // What the page says when a store's schema change gets in the way: when an
 // admin abandons a failed one (store-changes.tsx), and when a builder makes
 // a version current that the change holds back (chat/builds.tsx). Core's
@@ -80,6 +82,42 @@ const backfillFailedLinks = {
 } as const;
 
 /**
+ * The versions a refused rollback names as still fitting the store
+ * (`migration.rollback_incompatible`'s `details.compatible`), newest
+ * first; none when core named none or sent something else.
+ */
+const compatibleOf = (error: unknown): number[] => {
+  if (typeof error !== "object" || error === null || !("details" in error)) {
+    return [];
+  }
+  const { details } = error;
+  const compatible =
+    typeof details === "object" && details !== null && "compatible" in details
+      ? details.compatible
+      : undefined;
+  return Array.isArray(compatible)
+    ? compatible.filter(
+        (version): version is number =>
+          typeof version === "number" && Number.isInteger(version)
+      )
+    : [];
+};
+
+/** What the page says of a rollback a data migration rules out. */
+const rollbackIncompatibleText = (error: unknown): string => {
+  const compatible = compatibleOf(error);
+  if (compatible.length === 0) {
+    return i18n._(
+      msg`A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead.`
+    );
+  }
+  const versions = formatList(compatible.map(String));
+  return i18n._(
+    msg`A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: ${versions}.`
+  );
+};
+
+/**
  * Why a version couldn't be made current and, when a store's failed
  * change holds it back, what to say of the engine's page (`link`), where an
  * admin sees it and can abandon it.
@@ -102,6 +140,9 @@ export const makeCurrentFailure = (
       ),
       link: undefined,
     };
+  }
+  if (code === "migration.rollback_incompatible") {
+    return { text: rollbackIncompatibleText(error), link: undefined };
   }
   if (code === "migration.pending") {
     return {

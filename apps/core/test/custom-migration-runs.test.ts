@@ -28,6 +28,10 @@ import { newRecordId } from "./store-schemas.ts";
 // - A transform's failure lets the release run, or its message reaches
 //   no one who can act on it: "refuses the release while its transform
 //   fails, telling the App why".
+// - A rollback to a version the migration left behind runs it over
+//   records it no longer fits, or refuses without saying what would fit:
+//   "refuses a rollback past the migration, naming the versions that
+//   still fit"; one to a version that fits is refused: same test.
 
 const placeholder = "0".repeat(64);
 
@@ -328,6 +332,61 @@ export default appTest({
       // Not taken over; the write it then queued makes it pending again.
       migration: { state: "ready" },
       firstWrite: "ok",
+    });
+  });
+
+  it("refuses a rollback past the migration, naming the versions that still fit", async () => {
+    const { fixture, store, release } = await migrated(5, deriving, {
+      firstCurrent: true,
+    });
+    const object = env.DATA_STORES.getByName(store.id);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          object.schemaStatus(store.id, release.manifest.schemaHash, {
+            resourceId: fixture.app,
+            resourceVersion: 3,
+          })
+        ).resolves.toMatchObject({ state: "ready" });
+      },
+      { timeout: 120_000, interval: 500 }
+    );
+    await setCurrentVersion(env, fixture.owner, fixture.app, 3);
+    const toFirst = await refusalOf(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 1)
+    );
+    // A later version on the migrated schema, without the migration.
+    await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      { "app.ts": appFile(false), "migrations/derive-category.ts": null },
+      "Drop the finished migration"
+    );
+    await seal(fixture, 4);
+    await setCurrentVersion(env, fixture.owner, fixture.app, 4);
+
+    const toThird = await setCurrentVersion(env, fixture.owner, fixture.app, 3);
+    const again = await refusalOf(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 1)
+    );
+
+    expect({
+      toFirst,
+      status: await object.schemaStatus(store.id, fixture.firstSchema),
+      toThird: toThird.currentVersion,
+      again,
+    }).toStrictEqual({
+      toFirst: {
+        code: "migration.rollback_incompatible",
+        details: { compatible: [3] },
+      },
+      status: { state: "incompatible" },
+      toThird: 3,
+      again: {
+        code: "migration.rollback_incompatible",
+        details: { compatible: [4, 3] },
+      },
     });
   });
 
