@@ -4,7 +4,21 @@ import type {
 } from "@grasp-os/shared/resource-bindings";
 import { describe, expect, it } from "vite-plus/test";
 
-import { allChosen, formKey, targetOf } from "./binding-form.ts";
+import {
+  allChosen,
+  budgetFieldsOf,
+  budgetOf,
+  formKey,
+  problemsAfter,
+  targetOf,
+} from "./binding-form.ts";
+import type { BudgetFields } from "./binding-form.ts";
+
+/** A model form's budget fields as they start, but for those `typed`. */
+const typed = (fields: Partial<BudgetFields>): BudgetFields => ({
+  ...budgetFieldsOf(null),
+  ...fields,
+});
 
 /** Knowledge declared with `collections`, offered `permissions`. */
 const knowledge = (
@@ -98,6 +112,70 @@ describe("a resource's bind form", () => {
       declaration: false,
       version: false,
       offers: false,
+    });
+  });
+});
+
+describe("a model binding's budget fields", () => {
+  it("send no budget without a cap, and a cap typed either way", () => {
+    expect({
+      none: budgetOf(typed({})),
+      day: budgetOf(typed({ perDay: " 2,50 ", alertAt: "90" })),
+      request: budgetOf(typed({ perRequest: "0.01" })),
+    }).toStrictEqual({
+      none: { ok: true, budget: undefined },
+      day: { ok: true, budget: { perDay: 2.5, alertAt: 90 } },
+      // No day or month cap to alert on: the alert isn't sent.
+      request: { ok: true, budget: { perRequest: 0.01 } },
+    });
+  });
+
+  it("refuse what core refuses: under a cent, past the most, not an amount, an alert out of range", () => {
+    expect({
+      cent: budgetOf(typed({ perDay: "0.001" })),
+      most: budgetOf(typed({ perMonth: "1000000001" })),
+      text: budgetOf(typed({ perRequest: "2 dollars" })),
+      negative: budgetOf(typed({ perRequest: "-1" })),
+      alert: budgetOf(typed({ perMonth: "10", alertAt: "100" })),
+      fraction: budgetOf(typed({ perDay: "10", alertAt: "50.5" })),
+    }).toStrictEqual({
+      cent: { ok: false, problems: { perDay: "amount" } },
+      most: { ok: false, problems: { perMonth: "amount" } },
+      text: { ok: false, problems: { perRequest: "amount" } },
+      negative: { ok: false, problems: { perRequest: "amount" } },
+      alert: { ok: false, problems: { alertAt: "alert" } },
+      fraction: { ok: false, problems: { alertAt: "alert" } },
+    });
+  });
+
+  it("drop a refusal once its field changes, or once the alert is off", () => {
+    const refused = typed({ perDay: "10", perRequest: "x", alertAt: "100" });
+    const read = budgetOf(refused);
+    const problems = read.ok ? {} : read.problems;
+    expect({
+      problems,
+      // The day's cap cleared: no cap left to alert on, the request's
+      // refusal still stands.
+      dayCleared: problemsAfter(problems, refused, { ...refused, perDay: "" }),
+      requestFixed: problemsAfter(problems, refused, {
+        ...refused,
+        perRequest: "1",
+      }),
+    }).toStrictEqual({
+      problems: { perRequest: "amount", alertAt: "alert" },
+      dayCleared: { perRequest: "amount" },
+      requestFixed: { alertAt: "alert" },
+    });
+  });
+
+  it("start on the caps of the binding they replace, so replacing keeps them", () => {
+    const budget = { perRequest: 0.5, perMonth: 300, alertAt: 70 };
+    expect({
+      kept: budgetOf(budgetFieldsOf(budget)),
+      fresh: budgetFieldsOf(null),
+    }).toStrictEqual({
+      kept: { ok: true, budget },
+      fresh: { perRequest: "", perDay: "", perMonth: "", alertAt: "80" },
     });
   });
 });

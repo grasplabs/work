@@ -21,7 +21,15 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
 import {
   NativeSelect,
   NativeSelectOption,
@@ -49,13 +57,18 @@ import { formatList } from "../format.ts";
 import { dollars, percent } from "../settings/money.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import {
+  alerts,
   allChosen,
+  budgetFieldsOf,
+  budgetOf,
+  problemsAfter,
   firstChoice,
   formKey,
   noChoice,
   targetOf,
   templateKey,
 } from "./binding-form.ts";
+import type { BudgetFields, BudgetProblem } from "./binding-form.ts";
 
 // What an engine's actions reach through its declared resources (core's
 // resource-bindings.ts): the models, integrations, knowledge and templates
@@ -283,6 +296,117 @@ const NothingToChoose = ({
   );
 };
 
+/** What a budget field that doesn't hold what it may says, by why. */
+const budgetProblemText = (problem: BudgetProblem): MessageDescriptor => {
+  if (problem === "alert") {
+    return msg`Enter a whole percent from 1 to 99.`;
+  }
+  const least = dollars(0.01);
+  const most = dollars(1_000_000_000);
+  return msg`Enter an amount in US dollars from ${least} to ${most}, such as 2.50.`;
+};
+
+/** One field of a model binding's budget, with why it can't be sent. */
+const BudgetInput = ({
+  label,
+  value,
+  onChange,
+  problem,
+  disabled = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  problem: BudgetProblem | undefined;
+  disabled?: boolean;
+}) => {
+  const { i18n } = useLingui();
+  const id = useId();
+  const errorId = useId();
+  return (
+    <Field data-invalid={problem !== undefined}>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
+      <Input
+        aria-describedby={problem === undefined ? undefined : errorId}
+        aria-invalid={problem !== undefined}
+        disabled={disabled}
+        id={id}
+        inputMode="decimal"
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+        value={value}
+      />
+      {problem === undefined ? null : (
+        <FieldError id={errorId}>
+          {i18n._(budgetProblemText(problem))}
+        </FieldError>
+      )}
+    </Field>
+  );
+};
+
+/**
+ * A model binding's own caps, all optional: on top of the deployment's
+ * budgets, for the requests the engine's actions make through it.
+ */
+const BudgetFieldSet = ({
+  fields,
+  problems,
+  onChange,
+}: {
+  fields: BudgetFields;
+  problems: Partial<Record<keyof BudgetFields, BudgetProblem>>;
+  onChange: (fields: BudgetFields) => void;
+}) => {
+  const { t } = useLingui();
+  const set = (field: keyof BudgetFields) => (value: string) => {
+    onChange({ ...fields, [field]: value });
+  };
+  return (
+    <FieldSet className="w-full max-w-prose">
+      <FieldLegend variant="label">
+        <Trans>Budget (optional)</Trans>
+      </FieldLegend>
+      <FieldDescription>
+        <Trans>
+          What the engine&apos;s actions may spend through this binding, on top
+          of the deployment&apos;s budgets. Leave a cap empty for none. A
+          workflow&apos;s own AI steps don&apos;t go through it.
+        </Trans>
+      </FieldDescription>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <BudgetInput
+          label={t`Per request, in US dollars`}
+          onChange={set("perRequest")}
+          problem={problems.perRequest}
+          value={fields.perRequest}
+        />
+        <BudgetInput
+          label={t`Per day (UTC), in US dollars`}
+          onChange={set("perDay")}
+          problem={problems.perDay}
+          value={fields.perDay}
+        />
+        <BudgetInput
+          label={t`Per month (UTC), in US dollars`}
+          onChange={set("perMonth")}
+          problem={problems.perMonth}
+          value={fields.perMonth}
+        />
+        <BudgetInput
+          // Admins are alerted on a day's or a month's cap only.
+          disabled={!alerts(fields)}
+          label={t`Alert admins at, in percent of a day's or month's cap`}
+          onChange={set("alertAt")}
+          problem={problems.alertAt}
+          value={fields.alertAt}
+        />
+      </div>
+    </FieldSet>
+  );
+};
+
 /** An admin's choice of what serves `resource`, and the approval of it. */
 const BindForm = ({
   app,
@@ -313,6 +437,13 @@ const BindForm = ({
       ])
     )
   );
+  // A replaced binding's caps stay unless the admin changes them.
+  const [budget, setBudget] = useState(() =>
+    budgetFieldsOf(binding?.budget ?? null)
+  );
+  const [problems, setProblems] = useState<
+    Partial<Record<keyof BudgetFields, BudgetProblem>>
+  >({});
   if (noChoice(choices)) {
     return (
       <NothingToChoose resource={resource} truncated={choices.truncated} />
@@ -328,6 +459,16 @@ const BindForm = ({
     if (target === undefined) {
       return;
     }
+    // Only a model binding has a budget; core checks it again.
+    const read =
+      choices.kind === "model"
+        ? budgetOf(budget)
+        : { ok: true as const, budget: undefined };
+    if (!read.ok) {
+      setProblems(read.problems);
+      return;
+    }
+    setProblems({});
     void decide(
       async (session) =>
         await session.resourceBindings.approve({
@@ -335,6 +476,7 @@ const BindForm = ({
           alias,
           target,
           reviewed: { version },
+          ...(read.budget === undefined ? {} : { budget: read.budget }),
         })
     );
   };
@@ -355,6 +497,18 @@ const BindForm = ({
             </NativeSelectOption>
           ))}
         </Choice>
+      ) : null}
+      {choices.kind === "model" ? (
+        <BudgetFieldSet
+          fields={budget}
+          onChange={(next) => {
+            // A refusal no longer stands once its field changes, or once
+            // the alert is off.
+            setProblems(problemsAfter(problems, budget, next));
+            setBudget(next);
+          }}
+          problems={problems}
+        />
       ) : null}
       {choices.kind === "connector" ? (
         <Choice label={t`Connection`} onChange={setPicked} value={picked}>
