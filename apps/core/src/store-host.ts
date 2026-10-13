@@ -4,6 +4,7 @@ import {
   manifestText,
   planSchemaChange,
   readSchemaManifest,
+  schemaFromDescriptor,
   SchemaDefinitionError,
   schemaHash as hashOf,
 } from "@grasp-os/sdk/host";
@@ -829,6 +830,12 @@ export class StoreHost {
   #keys: CursorKeys | undefined;
   /** Each schema read so far, by hash (`#pinned`). */
   readonly #schemas = new Map<string, PinnedSchema>();
+  /**
+   * Moved on by every abandonment (`abandonBackfill`): a schema read while
+   * one committed isn't kept (`#pinned`), so none taken out of force stays
+   * cached.
+   */
+  #schemasGeneration = 0;
   /** The store's contract as last read, by its hash (`#contractNow`). */
   #contract: StoreContract | undefined;
   /** The defaulted fields of each contract read so far, by hash. */
@@ -994,7 +1001,7 @@ export class StoreHost {
     const plan = planSchemaChange(
       base?.manifest ?? null,
       target,
-      this.#reservedFields(target)
+      this.#reservedFields()
     );
     if (!plan.accepted) {
       throw migrationErrors.create("migration.required", {
@@ -1294,53 +1301,34 @@ export class StoreHost {
 
   /**
    * The fields the store reserved (`sdk_reserved_fields`), each with its
-   * descriptor, read back through the SDK's own checks as the fields of a
-   * manifest of `like`'s versions: one that doesn't read is
+   * descriptor, read back one at a time through the SDK's descriptor
+   * checks: a descriptor alone, so a reference to a table no reserved
+   * field names needs no resolving. One that doesn't read is
    * `migration.metadata_corrupt`.
    */
-  #reservedFields(like: SchemaManifest): ReservedFields {
+  #reservedFields(): ReservedFields {
+    const reserved: Record<string, Record<string, ValueDescriptor>> = {};
     const rows = this.#db
       .select()
       .from(reservedFields)
       .orderBy(asc(reservedFields.tableName), asc(reservedFields.fieldName))
       .all();
-    if (rows.length === 0) {
-      return {};
-    }
-    try {
-      const byTable = new Map<string, Record<string, unknown>>();
-      for (const row of rows) {
-        const fields = byTable.get(row.tableName) ?? {};
-        fields[row.fieldName] = JSON.parse(row.descriptor);
-        byTable.set(row.tableName, fields);
+    for (const row of rows) {
+      let descriptor: ValueDescriptor;
+      try {
+        ({ descriptor } = schemaFromDescriptor(row.descriptor));
+      } catch (error) {
+        if (error instanceof ValueDefinitionError) {
+          throw migrationErrors.create("migration.metadata_corrupt");
+        }
+        throw error;
       }
-      const { manifest } = readSchemaManifest(
-        JSON.stringify({
-          ...like,
-          tables: Object.fromEntries(
-            [...byTable].map(([table, fields]) => [
-              table,
-              { fields, indexes: {}, access: { read: "none", write: "none" } },
-            ])
-          ),
-        })
-      );
-      return Object.fromEntries(
-        Object.entries(manifest.tables).map(([table, { fields }]) => [
-          table,
-          fields,
-        ])
-      );
-    } catch (error) {
-      if (
-        error instanceof SchemaDefinitionError ||
-        error instanceof ValueDefinitionError ||
-        error instanceof SyntaxError
-      ) {
-        throw migrationErrors.create("migration.metadata_corrupt");
-      }
-      throw error;
+      reserved[row.tableName] = {
+        ...reserved[row.tableName],
+        [row.fieldName]: descriptor,
+      };
     }
+    return reserved;
   }
 
   /**
@@ -1485,11 +1473,11 @@ export class StoreHost {
     byName: ReadonlyMap<string, string>,
     now: number
   ): void {
-    const abandoned = this.#db
-      .select({ attempt: abandonedTargets.attempt })
+    const [abandoned] = this.#db
+      .select({ attempt: max(abandonedTargets.attempt) })
       .from(abandonedTargets)
       .where(eq(abandonedTargets.targetHash, change.hash))
-      .get();
+      .all();
     this.#db
       .insert(backfills)
       .values({
@@ -1968,6 +1956,7 @@ export class StoreHost {
     if (known !== undefined) {
       return known;
     }
+    const generation = this.#schemasGeneration;
     const row = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
       return this.#db
@@ -2000,8 +1989,27 @@ export class StoreHost {
       tableIds,
       indexes: await planIndexes(manifest, tableIds),
     };
-    this.#schemas.set(schemaHash, pinned);
+    // Kept only if no abandonment committed while its indexes were planned;
+    // a commit checks again in its transaction anyway (`#requireInForce`).
+    if (generation === this.#schemasGeneration) {
+      this.#schemas.set(schemaHash, pinned);
+    }
     return pinned;
+  }
+
+  /**
+   * Refuses (`migration.abandoned`) a schema only an abandoned target
+   * held. Call it inside the transaction that writes under the schema.
+   */
+  #requireInForce(schemaHash: string): void {
+    const row = this.#db
+      .select({ abandonedAt: schemas.abandonedAt })
+      .from(schemas)
+      .where(eq(schemas.schemaHash, schemaHash))
+      .get();
+    if (row !== undefined && row.abandonedAt !== null) {
+      throw migrationErrors.create("migration.abandoned");
+    }
   }
 
   /**
@@ -2136,6 +2144,9 @@ export class StoreHost {
       ) {
         throw submissionErrors.create("submission.intent_unsupported");
       }
+      // Checked again here, with nothing awaited between it and the
+      // writes: an abandonment that committed since `#pinned` read it.
+      this.#requireInForce(schemaHash);
       // The explicit guards first: a record the mutation asserted a
       // revision of, now at another, is a conflict for its caller
       // (`data.conflict`), never a stale read set to run again for, which
@@ -3347,7 +3358,7 @@ export class StoreHost {
               )
             )
             .get();
-          if (done !== undefined && pending?.hash !== target) {
+          if (done !== undefined) {
             return abandonmentOf(done);
           }
           throw migrationErrors.create("migration.superseded");
@@ -3375,6 +3386,7 @@ export class StoreHost {
         });
       }
     );
+    this.#schemasGeneration += 1;
     this.#schemas.clear();
     await this.schedule();
     return abandoned;
@@ -3487,12 +3499,12 @@ export class StoreHost {
       abandonedAt: at,
       auditedAt: null,
     };
-    // The same target abandoned again (added back as it was, and failed
-    // again): its newest abandonment is the one on record.
+    // One record per run: the same target abandoned again (added back as
+    // it was, and failed again) goes on from a later run (`#makePending`),
+    // so each abandonment keeps its own record and its own event.
     this.#db
       .insert(abandonedTargets)
       .values({ targetHash: pending.hash, ...record })
-      .onConflictDoUpdate({ target: abandonedTargets.targetHash, set: record })
       .run();
     log.info("store.backfill_abandoned", {
       target: pending.hash,
@@ -3514,13 +3526,13 @@ export class StoreHost {
 
   /**
    * Notes that core's audit outbox holds the event of the abandonment of
-   * `target` at `abandonedAt` (store-abandon.ts), so the alarm doesn't
+   * `target` as of run `attempt` (store-abandon.ts), so the alarm doesn't
    * record it again.
    */
   markAbandonmentAudited(
     storeId: StoreId,
     target: string,
-    abandonedAt: number
+    attempt: number
   ): void {
     this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
@@ -3530,7 +3542,7 @@ export class StoreHost {
         .where(
           and(
             eq(abandonedTargets.targetHash, target),
-            eq(abandonedTargets.abandonedAt, abandonedAt)
+            eq(abandonedTargets.attempt, attempt)
           )
         )
         .run();
@@ -3563,7 +3575,7 @@ export class StoreHost {
         .where(
           and(
             eq(abandonedTargets.targetHash, row.targetHash),
-            eq(abandonedTargets.abandonedAt, row.abandonedAt)
+            eq(abandonedTargets.attempt, row.attempt)
           )
         )
         .run();

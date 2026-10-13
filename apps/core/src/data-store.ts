@@ -109,9 +109,9 @@ export class DataStore extends DurableObject<Env> {
   markAbandonmentAudited(
     storeId: StoreId,
     target: string,
-    abandonedAt: number
+    attempt: number
   ): void {
-    this.#host.markAbandonmentAudited(storeId, target, abandonedAt);
+    this.#host.markAbandonmentAudited(storeId, target, attempt);
   }
 
   /** `StoreHost.get`. */

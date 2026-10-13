@@ -263,27 +263,33 @@ export const reservedFields = sqliteTable(
  * made from alone, so core and the store's alarm make the same event;
  * `audited_at` is set once core holds it.
  */
-export const abandonedTargets = sqliteTable("sdk_abandoned_targets", {
-  targetHash: text("target_hash").primaryKey(),
-  baseHash: text("base_hash"),
-  /** The run the target was at: a new pending target of this hash goes on past it. */
-  attempt: integer().notNull(),
-  scanned: integer().notNull(),
-  filled: integer().notNull(),
-  /** Why its backfill failed (JSON). */
-  failure: text().notNull(),
-  /** The schemas taken out of force, as canonical JSON: `[hash, ...]`. */
-  schemas: text().notNull(),
-  /** The receipts abandoned, as canonical JSON: `[[resource, version], ...]`. */
-  consumers: text().notNull(),
-  /** The fields reserved, as canonical JSON: `[[table, field], ...]`. */
-  reserved: text().notNull(),
-  /** Who abandoned it, as the audit log names them (JSON). */
-  abandonedBy: text("abandoned_by").notNull(),
-  abandonedAt: integer("abandoned_at").notNull(),
-  /** When core's audit outbox was found to hold its event. */
-  auditedAt: integer("audited_at"),
-});
+export const abandonedTargets = sqliteTable(
+  "sdk_abandoned_targets",
+  {
+    targetHash: text("target_hash").notNull(),
+    baseHash: text("base_hash"),
+    /** The run abandoned: a new pending target of this hash goes on past it. */
+    attempt: integer().notNull(),
+    scanned: integer().notNull(),
+    filled: integer().notNull(),
+    /** Why its backfill failed (JSON). */
+    failure: text().notNull(),
+    /** The schemas taken out of force, as canonical JSON: `[hash, ...]`. */
+    schemas: text().notNull(),
+    /** The receipts abandoned, as canonical JSON: `[[resource, version], ...]`. */
+    consumers: text().notNull(),
+    /** The fields reserved, as canonical JSON: `[[table, field], ...]`. */
+    reserved: text().notNull(),
+    /** Who abandoned it, as the audit log names them (JSON). */
+    abandonedBy: text("abandoned_by").notNull(),
+    abandonedAt: integer("abandoned_at").notNull(),
+    /** When core's audit outbox was found to hold its event. */
+    auditedAt: integer("audited_at"),
+  },
+  // One per run abandoned: a target added back as it was goes on from a
+  // later run, and its abandonment is a record of its own.
+  (table) => [primaryKey({ columns: [table.targetHash, table.attempt] })]
+);
 
 /**
  * A schema change the store took but whose contract isn't in force yet:

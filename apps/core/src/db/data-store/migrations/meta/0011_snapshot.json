@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1064085c-30ef-4d44-b67a-b1447c0f2cdb",
+  "id": "307793cf-765e-4329-bcda-80560555b191",
   "prevId": "0e5247bd-86c2-4aaa-857c-f1d1511f7c6c",
   "tables": {
     "sdk_abandoned_targets": {
@@ -10,7 +10,7 @@
         "target_hash": {
           "name": "target_hash",
           "type": "text",
-          "primaryKey": true,
+          "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
@@ -94,7 +94,15 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {},
+      "compositePrimaryKeys": {
+        "sdk_abandoned_targets_target_hash_attempt_pk": {
+          "columns": [
+            "target_hash",
+            "attempt"
+          ],
+          "name": "sdk_abandoned_targets_target_hash_attempt_pk"
+        }
+      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

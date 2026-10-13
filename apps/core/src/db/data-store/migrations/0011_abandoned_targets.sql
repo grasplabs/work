@@ -1,5 +1,5 @@
 CREATE TABLE `sdk_abandoned_targets` (
-	`target_hash` text PRIMARY KEY NOT NULL,
+	`target_hash` text NOT NULL,
 	`base_hash` text,
 	`attempt` integer NOT NULL,
 	`scanned` integer NOT NULL,
@@ -10,7 +10,8 @@ CREATE TABLE `sdk_abandoned_targets` (
 	`reserved` text NOT NULL,
 	`abandoned_by` text NOT NULL,
 	`abandoned_at` integer NOT NULL,
-	`audited_at` integer
+	`audited_at` integer,
+	PRIMARY KEY(`target_hash`, `attempt`)
 );
 --> statement-breakpoint
 CREATE TABLE `sdk_reserved_fields` (

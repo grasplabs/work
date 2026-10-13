@@ -13,7 +13,7 @@ import { abandonStoreBackfill, storeBackfill } from "./store-abandon.ts";
 // Business stores over `/rpc`, for admins: a store's failed schema change,
 // and abandoning it (store-abandon.ts, where who may is decided).
 
-/** Business stores over `/rpc`, for admins; abandoning never for Grasp staff. */
+/** Business stores over `/rpc`, for admins, never Grasp staff. */
 export class StoresRpc extends CoreRpcTarget implements StoresApi {
   readonly #env: Env;
   readonly #check: SessionCheck;

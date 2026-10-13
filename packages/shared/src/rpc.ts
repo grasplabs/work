@@ -137,7 +137,7 @@ export interface SessionApi {
   readonly models: ModelsApi;
   /**
    * Business stores: a store's failed schema change, and abandoning it.
-   * Admins only; abandoning never Grasp staff.
+   * Admins only, never Grasp staff.
    */
   readonly stores: StoresApi;
   /**

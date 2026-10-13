@@ -162,6 +162,7 @@ export const storeBackfill = async (
   store: string
 ): Promise<StoreBackfill | null> => {
   requireAdmin(by);
+  requireNotStaff(by);
   const { store: id } = dataErrors.parse(
     "data.invalid",
     abandonBackfillSchema.pick({ store: true }),
@@ -201,7 +202,7 @@ export const abandonStoreBackfill = async (
     actorOf(by)
   );
   await recordBackfillAbandoned(env, store, abandonment);
-  await object.markAbandonmentAudited(store, target, abandonment.abandonedAt);
+  await object.markAbandonmentAudited(store, target, abandonment.attempt);
   return {
     store,
     target,
