@@ -38,7 +38,7 @@ export const abandonFailureText = (error: unknown): string => {
  */
 const failedReasonOf = (
   error: unknown
-): "invalid_value" | "too_large" | "stalled" => {
+): "invalid_value" | "too_large" | "migration" | "stalled" => {
   if (typeof error !== "object" || error === null || !("details" in error)) {
     return "stalled";
   }
@@ -47,6 +47,13 @@ const failedReasonOf = (
     return "stalled";
   }
   const failure = "failure" in details ? details.failure : null;
+  if (
+    typeof failure === "object" &&
+    failure !== null &&
+    "migration" in failure
+  ) {
+    return "migration";
+  }
   const reason =
     typeof failure === "object" && failure !== null && "reason" in failure
       ? failure.reason
@@ -60,6 +67,7 @@ const failedReasonOf = (
 const backfillFailedTexts = {
   invalid_value: msg`This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept.`,
   too_large: msg`This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be.`,
+  migration: msg`This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept.`,
   stalled: msg`This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress.`,
 } as const;
 
@@ -67,6 +75,7 @@ const backfillFailedTexts = {
 const backfillFailedLinks = {
   invalid_value: msg`An admin can see the record that holds it back, and abandon the change, on the engine's page.`,
   too_large: msg`An admin can see the record that holds it back, and abandon the change, on the engine's page.`,
+  migration: msg`An admin can see what went wrong, and abandon the change, on the engine's page.`,
   stalled: msg`No record is to blame, so an admin can only abandon the change, on the engine's page.`,
 } as const;
 

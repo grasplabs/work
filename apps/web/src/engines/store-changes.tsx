@@ -4,6 +4,7 @@ import type {
   AbandonBackfill,
   AbandonedBackfill,
   AppStoreBackfill,
+  MigrationFailure,
   StoreBackfillFailure,
 } from "@grasp-os/shared/stores";
 import {
@@ -45,8 +46,51 @@ import { abandonFailureText } from "./store-change-errors.ts";
 /** Where the engine page shows its stores' changes, for links to them. */
 export const storeChangesAnchor = "store-changes";
 
+/**
+ * What an explicit migration's failure means: its migration, table and
+ * record, and what its transform threw or why its output was refused,
+ * which only admins and the migration's own engine are shown.
+ */
+const MigrationFailureText = ({ failure }: { failure: MigrationFailure }) => {
+  const { migration, table, id, issues } = failure;
+  const record = <span className="font-mono">{id}</span>;
+  return (
+    <>
+      {id === null ? (
+        <Trans>
+          The migration {migration} of the table {table} failed as a whole: its
+          code failed, not a record.
+        </Trans>
+      ) : (
+        <Trans>
+          The migration {migration} of the table {table} failed on the record{" "}
+          {record}.
+        </Trans>
+      )}
+      {issues.length === 0 ? null : (
+        <code className="block font-mono whitespace-pre-wrap">
+          {issues.join("\n")}
+        </code>
+      )}
+    </>
+  );
+};
+
+/** Whether no record is to blame for `failure`: abandoning is all that's left. */
+const nothingToMend = (failure: StoreBackfillFailure): boolean =>
+  failure.reason === "stalled" ||
+  failure.reason === "ready" ||
+  ("migration" in failure && failure.id === null);
+
 /** What a failure means, in a sentence naming the record and field. */
 const FailureText = ({ failure }: { failure: StoreBackfillFailure }) => {
+  if ("migration" in failure) {
+    return <MigrationFailureText failure={failure} />;
+  }
+  if (failure.reason === "ready") {
+    // A finished migration failed nothing (`StoreChange` shows it as ready).
+    return null;
+  }
   if (failure.reason === "stalled") {
     return (
       <Trans>
@@ -169,6 +213,34 @@ export const StoreChange = ({
   const titleId = useId();
   const { backfill } = change;
   const name = change.alias ?? change.store;
+  if (backfill.ready) {
+    return (
+      <Alert live="polite">
+        <DatabaseIcon aria-hidden="true" />
+        <AlertTitle id={titleId}>
+          <Trans>A change to the store {name} is ready</Trans>
+        </AlertTitle>
+        <AlertDescription>
+          <p>
+            <Trans>
+              Its migration has transformed every record. It takes over when a
+              release that needs it is made current; until then the current
+              release goes on using the store as before.
+            </Trans>
+          </p>
+          <Progress change={change} />
+          <StoreId change={change} />
+          <div className="pt-2">
+            <AbandonDialog
+              busy={busy}
+              describedBy={titleId}
+              onConfirm={onAbandon}
+            />
+          </div>
+        </AlertDescription>
+      </Alert>
+    );
+  }
   if (backfill.state === "running" || backfill.failure === null) {
     // Polite: it is where things stand, not news to interrupt with.
     return (
@@ -201,7 +273,7 @@ export const StoreChange = ({
           <FailureText failure={backfill.failure} />
         </p>
         <p>
-          {backfill.failure.reason === "stalled" ? (
+          {nothingToMend(backfill.failure) ? (
             <Trans>
               Until this is resolved, no release that changes this store&apos;s
               tables can be made current, in this engine or any other engine

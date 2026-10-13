@@ -55,6 +55,20 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 // keep) is added again only with the descriptor it had, so those values
 // still fit it; with any other it is refused (`reserved_field_changed`),
 // on a table the contract has or one the schema adds alike.
+//
+// A table an explicit migration transforms (`migrated`, spec 17.2) may
+// also take a required field without a default, and a field whose
+// descriptor changed: the migration's transform rewrites every record of
+// the table before the contract takes the change, so the contract holds
+// the schema's descriptors for that table's declared fields (its
+// retained ones kept), and nothing of it is filled in (the transform's
+// output, validated against the table, supplies defaults). Still refused
+// there: a field holding a record ID that is added or changed (the
+// store's reference index would have to follow), a removed required
+// field, a changed access mode, and a field whose old and new values
+// can't overlap (`values_disjoint`: a migration only expands). A migrated
+// table must be on both sides (`migration_table_invalid`): a table the
+// contract hasn't holds no record to transform.
 
 /** Why a change can't be applied without a migration. */
 export type PlanRefusalReason =
@@ -64,6 +78,8 @@ export type PlanRefusalReason =
   | "defaulted_reference_added"
   | "required_field_removed"
   | "reserved_field_changed"
+  | "migration_table_invalid"
+  | "values_disjoint"
   | "contract_invalid";
 
 /** One change refused, and why. */
@@ -108,6 +124,8 @@ export interface PlannedChanges {
 /** A safe change: the contract after it, and what it changes. */
 export interface AcceptedPlan extends PlannedChanges {
   readonly accepted: true;
+  /** The tables an explicit migration transforms, sorted. */
+  readonly migratedTables: readonly string[];
   /** The contract after the change, canonical. */
   readonly contract: SchemaManifest;
   /** Whether the contract differs from the one before. */
@@ -205,15 +223,22 @@ const mapOf = <Value>(
   entries: Iterable<readonly [string, Value]>
 ): Record<string, Value> => Object.fromEntries(entries);
 
-/** `contract`'s table `name` with the target's version of it merged in. */
+/**
+ * `contract`'s table `name` with the target's version of it merged in: a
+ * migrated table takes the target's descriptor of every field it
+ * declares, any other keeps its own.
+ */
 const mergedTable = (
   kept: ManifestTable,
-  declared: ManifestTable
+  declared: ManifestTable,
+  migrated: boolean
 ): ManifestTable => ({
   fields: mapOf([
-    ...Object.entries(kept.fields),
+    ...Object.entries(kept.fields).filter(
+      ([field]) => !migrated || own(declared.fields, field) === undefined
+    ),
     ...Object.entries(declared.fields).filter(
-      ([field]) => own(kept.fields, field) === undefined
+      ([field]) => migrated || own(kept.fields, field) === undefined
     ),
   ]),
   indexes: declared.indexes,
@@ -223,14 +248,17 @@ const mergedTable = (
 /** The contract after a safe change: the union, read back canonical. */
 const unionOf = (
   contract: SchemaManifest,
-  target: SchemaManifest
+  target: SchemaManifest,
+  migrated: ReadonlySet<string>
 ): SchemaManifest | undefined => {
   const tables = mapOf([
     ...Object.entries(contract.tables).map(([name, kept]) => {
       const declared = own(target.tables, name);
       return [
         name,
-        declared === undefined ? kept : mergedTable(kept, declared),
+        declared === undefined
+          ? kept
+          : mergedTable(kept, declared, migrated.has(name)),
       ] as const;
     }),
     ...Object.entries(target.tables).filter(
@@ -253,7 +281,7 @@ const unionOf = (
 };
 
 /** Whether `descriptor` can hold a record ID, at any depth. */
-const holdsId = (descriptor: ValueDescriptor): boolean => {
+export const holdsId = (descriptor: ValueDescriptor): boolean => {
   if (descriptor.kind === "id") {
     return true;
   }
@@ -298,12 +326,83 @@ interface FieldOutcomes {
   readonly retainedFields: PlannedField[];
 }
 
+/**
+ * Whether some value fits both `before` and `after`: the same kind, a
+ * string and an enum (an enum's members are strings), a union with a
+ * member that overlaps the other, or both nullable. A migration only
+ * expands, so its output fits the contract in force and the target at
+ * once: a change whose value sets can't overlap (a string becoming a
+ * number) can't run under it, and is refused (`values_disjoint`); it is a
+ * contraction, for a later release.
+ */
+const valuesOverlap = (
+  before: ValueDescriptor,
+  after: ValueDescriptor
+): boolean => {
+  if (before.nullable && after.nullable) {
+    return true;
+  }
+  if (before.kind === "union") {
+    return before.members.some((member) => valuesOverlap(member, after));
+  }
+  if (after.kind === "union") {
+    return after.members.some((member) => valuesOverlap(before, member));
+  }
+  const kinds = new Set([before.kind, after.kind]);
+  return kinds.size === 1 || (kinds.has("string") && kinds.has("enum"));
+};
+
+/**
+ * Classifies one change of a field of a migrated table (see the header),
+ * where it isn't the same as on any other: a field added or changed that
+ * holds no record ID. Whether it did.
+ */
+const classifyMigrated = (
+  change: FieldChange,
+  { refused, addedFields }: FieldOutcomes
+): boolean => {
+  const { table, field } = change;
+  const references =
+    (change.before !== undefined && holdsId(change.before)) ||
+    (change.after !== undefined && holdsId(change.after));
+  if (change.change === "changed") {
+    if (references && !sameUpToEnumOrder(change.before, change.after)) {
+      refused.push({ table, field, reason: "field_changed" });
+    } else if (
+      change.before !== undefined &&
+      change.after !== undefined &&
+      !valuesOverlap(change.before, change.after)
+    ) {
+      refused.push({ table, field, reason: "values_disjoint" });
+    }
+    return true;
+  }
+  if (change.change === "added") {
+    if (references) {
+      refused.push({
+        table,
+        field,
+        reason:
+          change.after?.presence === "default"
+            ? "defaulted_reference_added"
+            : "required_field_added",
+      });
+    } else {
+      addedFields.push({ table, field });
+    }
+    return true;
+  }
+  return false;
+};
+
 /** Classifies one change of a field of a table on both sides (see the header). */
 const classifyField = (
   change: FieldChange,
   reserved: ReservedFields,
-  { refused, addedFields, filledFields, retainedFields }: FieldOutcomes
+  outcomes: FieldOutcomes,
+  migrated: boolean
 ): void => {
+  const { refused, addedFields, filledFields, retainedFields } = outcomes;
   const { table, field } = change;
   const kept = reservedAs(reserved, table, field);
   if (
@@ -312,6 +411,8 @@ const classifyField = (
     !sameUpToEnumOrder(kept, change.after)
   ) {
     refused.push({ table, field, reason: "reserved_field_changed" });
+  } else if (migrated && classifyMigrated(change, outcomes)) {
+    // A migrated table's own rules.
   } else if (change.change === "changed") {
     if (!sameUpToEnumOrder(change.before, change.after)) {
       refused.push({ table, field, reason: "field_changed" });
@@ -342,17 +443,33 @@ const classifyField = (
   }
 };
 
+/** The migrated tables not on both sides (see the header). */
+const migratedTablesRefused = (
+  before: SchemaManifest,
+  target: SchemaManifest,
+  migrated: ReadonlySet<string>
+): PlanRefusal[] =>
+  [...migrated]
+    .filter(
+      (table) =>
+        own(before.tables, table) === undefined ||
+        own(target.tables, table) === undefined
+    )
+    .map((table) => ({ table, reason: "migration_table_invalid" }));
+
 /**
  * How `contract`, a store's data contract (null for a store holding
  * nothing yet), changes when the store is handed `target` (see the
- * header), given the fields the store reserved. Both are canonical
- * manifests. Refused when any change needs a migration, with every such
- * change; otherwise the contract after it.
+ * header), given the fields the store reserved and the tables an explicit
+ * migration transforms. Both are canonical manifests. Refused when any
+ * change needs a migration (that none covers), with every such change;
+ * otherwise the contract after it.
  */
 export const planSchemaChange = (
   contract: SchemaManifest | null,
   target: SchemaManifest,
-  reserved: ReservedFields = {}
+  reserved: ReservedFields = {},
+  migrated: ReadonlySet<string> = new Set()
 ): SchemaPlan => {
   const before = contract ?? emptyContract;
   const diff = diffSchemaManifests(before, target);
@@ -369,14 +486,15 @@ export const planSchemaChange = (
   const addedFields: PlannedField[] = [];
   const filledFields: PlannedField[] = [];
   const retainedFields: PlannedField[] = [];
+  refused.push(...migratedTablesRefused(before, target, migrated));
   for (const change of diff.fields) {
     if (onBothSides(change.table)) {
-      classifyField(change, reserved, {
-        refused,
-        addedFields,
-        filledFields,
-        retainedFields,
-      });
+      classifyField(
+        change,
+        reserved,
+        { refused, addedFields, filledFields, retainedFields },
+        migrated.has(change.table)
+      );
     }
   }
   for (const table of addedTables) {
@@ -388,21 +506,22 @@ export const planSchemaChange = (
       }
     }
   }
-  for (const { table } of diff.access) {
-    if (onBothSides(table)) {
-      refused.push({ table, reason: "access_changed" });
-    }
-  }
+  refused.push(
+    ...diff.access
+      .filter(({ table }) => onBothSides(table))
+      .map(({ table }): PlanRefusal => ({ table, reason: "access_changed" }))
+  );
   const addedIndexes: PlannedIndex[] = [];
   const retainedIndexes: PlannedIndex[] = [];
   for (const { table, index, change } of diff.indexes) {
-    if (retainedTables.has(table)) {
-      continue;
-    }
-    if (change !== "removed") {
+    if (!retainedTables.has(table) && change !== "removed") {
       addedIndexes.push({ table, index });
     }
-    if (change !== "added" && !addedTables.has(table)) {
+    if (
+      !retainedTables.has(table) &&
+      change !== "added" &&
+      !addedTables.has(table)
+    ) {
       retainedIndexes.push({ table, index });
     }
   }
@@ -418,7 +537,7 @@ export const planSchemaChange = (
   if (refused.length > 0) {
     return { accepted: false, refused, ...changes };
   }
-  const union = unionOf(before, target);
+  const union = unionOf(before, target, migrated);
   if (union === undefined) {
     return {
       accepted: false,
@@ -430,6 +549,7 @@ export const planSchemaChange = (
     accepted: true,
     contract: union,
     changed: manifestText(union) !== manifestText(before),
+    migratedTables: [...migrated].toSorted(),
     ...changes,
   };
 };

@@ -12,6 +12,23 @@ export const isUniqueViolation = (error: unknown): boolean =>
     isUniqueViolation(error.cause));
 
 /**
+ * What D1 says when it couldn't be reached for a moment or reset under
+ * the call (Cloudflare's own list of errors worth retrying), never a
+ * refusal of what was asked: a constraint, a syntax error, a limit.
+ */
+const transientD1Error =
+  /Network connection lost|storage caused object to be reset|reset because its code was updated|D1 DB is overloaded|transient issue on remote node/u;
+
+/**
+ * Whether a D1 call failed for a moment, however it was wrapped, so the
+ * same call may be tried again: whether the failed try committed is
+ * unknown.
+ */
+export const isTransientD1Error = (error: unknown): boolean =>
+  error instanceof Error &&
+  (transientD1Error.test(error.message) || isTransientD1Error(error.cause));
+
+/**
  * Whether D1 refused a write because `column` (`table.column`) would be
  * NULL, however it was wrapped: the guard of an insert that selects its
  * value only where a condition holds.

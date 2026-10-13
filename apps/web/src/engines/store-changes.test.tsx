@@ -66,6 +66,7 @@ const failed = (
     scanned: 40,
     filled: 39,
     failure,
+    ready: false,
   },
 });
 
@@ -131,6 +132,80 @@ describe("a store's pending change", () => {
     });
   });
 
+  it("names a failed migration, its table and record, and what its transform threw", () => {
+    const onRecord = textOf(
+      <StoreChange
+        busy={false}
+        change={failed({
+          table: "notes",
+          id: "rec_9",
+          migration: "derive-category",
+          reason: "threw",
+          issues: ["No category for Note 9"],
+        })}
+        onAbandon={idle}
+      />
+    );
+    const whole = textOf(
+      <StoreChange
+        busy={false}
+        change={failed({
+          table: "notes",
+          id: null,
+          migration: "derive-category",
+          reason: "invalid_answer",
+          issues: [],
+        })}
+        onAbandon={idle}
+      />
+    );
+    expect({
+      record:
+        /The migration derive-category of the table notes failed on the record\s*rec_9\s*\./u.test(
+          onRecord
+        ),
+      issue: onRecord.includes("No category for Note 9"),
+      mend: onRecord.includes("Mend the record"),
+      whole: whole.includes("failed as a whole: its code failed, not a record"),
+      wholeNothingToMend: whole.includes("there is nothing to mend"),
+    }).toStrictEqual({
+      record: true,
+      issue: true,
+      mend: true,
+      whole: true,
+      wholeNothingToMend: true,
+    });
+  });
+
+  it("shows a ready migration as waiting for its release, with abandoning it on offer", () => {
+    const text = textOf(
+      <StoreChange
+        busy={false}
+        change={{
+          store: "store-1",
+          alias: "crm",
+          backfill: {
+            target: "c".repeat(64),
+            state: "running",
+            attempt: 1,
+            scanned: 12,
+            filled: 12,
+            failure: null,
+            ready: true,
+          },
+        }}
+        onAbandon={idle}
+      />
+    );
+    expect({
+      ready: text.includes("A change to the store crm is ready"),
+      waits: text.includes(
+        "It takes over when a release that needs it is made current"
+      ),
+      abandon: text.includes("Abandon this change"),
+    }).toStrictEqual({ ready: true, waits: true, abandon: true });
+  });
+
   it("shows a change still being applied with its progress, and nothing to abandon", () => {
     const text = textOf(
       <StoreChange
@@ -145,6 +220,7 @@ describe("a store's pending change", () => {
             scanned: 10,
             filled: 4,
             failure: null,
+            ready: false,
           },
         }}
         onAbandon={idle}
@@ -448,7 +524,7 @@ const backfillFailed = (failure: AppStoreBackfill["backfill"]["failure"]) =>
   migrationErrors.create("migration.backfill_failed", {
     target: "a".repeat(64),
     attempt: 2,
-    failure,
+    failure: failure === null ? null : { ...failure },
   });
 
 describe("why a version wasn't made current", () => {
@@ -462,6 +538,15 @@ describe("why a version wasn't made current", () => {
         backfillFailed({ ...record, reason: "too_large" })
       ),
       stalled: makeCurrentFailure(backfillFailed({ reason: "stalled" })),
+      migration: makeCurrentFailure(
+        backfillFailed({
+          table: "notes",
+          id: "rec_9",
+          migration: "derive-category",
+          reason: "threw",
+          issues: [],
+        })
+      ),
       unnamed: makeCurrentFailure(backfillFailed(null)),
     }).toStrictEqual({
       invalid: {
@@ -475,6 +560,10 @@ describe("why a version wasn't made current", () => {
       stalled: {
         text: "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress.",
         link: "No record is to blame, so an admin can only abandon the change, on the engine's page.",
+      },
+      migration: {
+        text: "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept.",
+        link: "An admin can see what went wrong, and abandon the change, on the engine's page.",
       },
       unnamed: {
         text: "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress.",

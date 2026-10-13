@@ -94,10 +94,16 @@ export const backfillAbandonedEvent = async (
   abandonment: BackfillAbandonment
 ): Promise<AuditEvent> => {
   const { target, attempt, failure, abandonedAt } = abandonment;
-  const record =
-    failure.reason === "stalled"
-      ? {}
-      : { table: failure.table, field: failure.field, record: failure.id };
+  let record = {};
+  if ("migration" in failure) {
+    record = {
+      table: failure.table,
+      migration: failure.migration,
+      record: failure.id,
+    };
+  } else if (failure.reason !== "stalled" && failure.reason !== "ready") {
+    record = { table: failure.table, field: failure.field, record: failure.id };
+  }
   return auditEventSchema.parse({
     actor: abandonment.abandonedBy,
     action: "store.backfill_abandoned",
@@ -186,8 +192,8 @@ export const storeBackfill = async (
   if (status === null) {
     return null;
   }
-  const { target, state, attempt, scanned, filled, failure } = status;
-  return { target, state, attempt, scanned, filled, failure };
+  const { target, state, attempt, scanned, filled, failure, ready } = status;
+  return { target, state, attempt, scanned, filled, failure, ready };
 };
 
 /**
@@ -316,12 +322,13 @@ export const appStoreBackfills = async (
     if (answer.value === null) {
       return [];
     }
-    const { target, state, attempt, scanned, filled, failure } = answer.value;
+    const { target, state, attempt, scanned, filled, failure, ready } =
+      answer.value;
     return [
       {
         store,
         alias,
-        backfill: { target, state, attempt, scanned, filled, failure },
+        backfill: { target, state, attempt, scanned, filled, failure, ready },
       },
     ];
   });

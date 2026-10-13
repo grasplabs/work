@@ -126,7 +126,12 @@ describe("an App's migrations", () => {
     [
       "two of the same name",
       [deriveCategory, looseMigration(declaration)],
-      /Two of the App's migrations/u,
+      /Two of the App's migrations are named/u,
+    ],
+    [
+      "two of the same table",
+      [deriveCategory, looseMigration({ ...declaration, name: "another" })],
+      /Two of the App's migrations transform/u,
     ],
     [
       "something `migration` didn't declare",
@@ -225,13 +230,13 @@ describe("the runner", () => {
       { id: "n2", fields: { title: "Two" } },
     ];
     expect(
-      runMigration(notes([failing, waiting]), { name: "failing", rows })
+      runMigration(notes([failing]), { name: "failing", rows })
     ).toStrictEqual({
       ok: false,
       index: 1,
       message: "No category for this one",
     });
-    const waited = runMigration(notes([failing, waiting]), {
+    const waited = runMigration(notes([waiting]), {
       name: "waiting",
       rows,
     });

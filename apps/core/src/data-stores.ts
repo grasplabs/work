@@ -21,6 +21,7 @@ import type {
   SchemaConsumer,
   StagedWrites,
   StoredRecord,
+  StoreMigration,
 } from "@grasp-os/shared/stores";
 import { and, asc, eq, exists, isNull, lte, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -127,7 +128,8 @@ export interface OpenStore {
    */
   defineTables: (
     manifest: string,
-    consumer?: SchemaConsumer
+    consumer?: SchemaConsumer,
+    migrations?: StoreMigration[]
   ) => Promise<DefinedTables>;
   get: (table: string, id: string) => Promise<StoredRecord | null>;
   claim: (claim: Omit<ClaimInput, "storeId">) => Promise<Claimed>;
@@ -707,8 +709,8 @@ const storeClient = (
   const stub = inJurisdiction(env, env.DATA_STORES).getByName(storeId);
   return {
     id: storeId,
-    defineTables: async (manifest, consumer) =>
-      await stub.defineTables(storeId, manifest, consumer),
+    defineTables: async (manifest, consumer, migrations) =>
+      await stub.defineTables(storeId, manifest, consumer, migrations),
     get: async (table, recordId) => await stub.get(storeId, table, recordId),
     claim: async (claim) => claimedOf(await stub.claim({ ...claim, storeId })),
     commit: async (commit) =>

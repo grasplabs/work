@@ -513,6 +513,10 @@ msgstr "Een wijziging in de opslag {name} kan niet worden toegepast"
 msgid "A change to the store {name} is being applied"
 msgstr "Een wijziging in de opslag {name} wordt toegepast"
 
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} is ready"
+msgstr "Een wijziging aan de opslag {name} is klaar"
+
 #: src/workflows/history-view.tsx
 msgid "A change waits for approval by the person the run acts for"
 msgstr "Een wijziging wacht op goedkeuring van de persoon voor wie de run handelt"
@@ -795,6 +799,10 @@ msgstr "Een beheerder heeft de gegevenswijziging opgegeven die deze versie nodig
 #: src/engines/store-change-errors.ts
 msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 msgstr "Een beheerder ziet op de pagina van de engine het record dat het tegenhoudt, en kan de wijziging opgeven."
+
+#: src/engines/store-change-errors.ts
+msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
+msgstr "Een admin kan op de pagina van de engine zien wat er misging en de wijziging laten vallen."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
@@ -2404,6 +2412,10 @@ msgstr "De inhoud kon niet worden gelezen."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "De berichten worden definitief verwijderd en elke wijziging die de agent voor je vasthoudt, wordt afgewezen. Wat de agent deed, blijft in het auditlog."
+
+#: src/engines/store-changes.tsx
+msgid "Its migration has transformed every record. It takes over when a release that needs it is made current; until then the current release goes on using the store as before."
+msgstr "De migratie heeft elk record omgezet. Ze gaat in zodra een release die haar nodig heeft actueel wordt gemaakt; tot dan gebruikt de actuele release de opslag zoals voorheen."
 
 #: src/chat/builds.tsx
 msgid "Its migrations can't be read: it may rewrite the records of any table"
@@ -4683,6 +4695,14 @@ msgstr "De link werkt tot {until}."
 msgid "The list is full: remove a line to add another."
 msgstr "De lijst is vol: verwijder een regel om er een toe te voegen."
 
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
+msgstr "De migratie {migration} van de tabel {table} is als geheel mislukt: de code mislukte, niet een record."
+
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed on the record {record}."
+msgstr "De migratie {migration} van de tabel {table} is mislukt bij het record {record}."
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
@@ -4941,6 +4961,10 @@ msgstr "Deze stap is mislukt."
 #: src/engines/store-change-errors.ts
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "Deze opslag bestaat niet meer, dus er valt niets op te geven."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+msgstr "Deze versie wijzigt de gegevens van de engine met een migratie, en die kan niet afronden: de omzetting mislukte, of gaf iets terug dat de tabel niet accepteert."
 
 #: src/engines/store-change-errors.ts
 msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."

@@ -97,6 +97,40 @@ const committed = async (
 };
 
 /** The App's schedules as core has them: ID, version, cron and next time. */
+/**
+ * Core's database, losing the answer of the first batch after a statement
+ * that `writes` matches was prepared: the batch commits, and its caller is
+ * told D1 couldn't be reached.
+ */
+const answerLost = (writes: RegExp): D1Database => {
+  const real = env.DB;
+  let writing = false;
+  let lost = false;
+  return {
+    prepare: (query) => {
+      writing ||= writes.test(query);
+      return real.prepare(query);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      const results = await real.batch<T>(statements);
+      if (writing && !lost) {
+        lost = true;
+        throw new Error("D1_ERROR: Network connection lost.");
+      }
+      return results;
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+};
+
+const currentVersionOf = async (app: string): Promise<unknown> =>
+  await env.DB.prepare("SELECT current_version FROM apps WHERE id = ?")
+    .bind(app)
+    .first("current_version");
+
 const schedulesOf = async (app: string) => {
   const { results } = await env.DB.prepare(
     "SELECT id, version, cron, next_run_at, failed_starts FROM workflow_triggers WHERE app_id = ? ORDER BY id"
@@ -562,6 +596,32 @@ describe("activations racing", () => {
       refused: "app.conflict",
       schedules: [winner],
     });
+  });
+
+  it("make the version current once when the batch committed but its answer was lost", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, weekly());
+    const next = await committed(builder, app, {
+      "workflows/weekly.ts":
+        weekly()["workflows/weekly.ts"]?.replace("0 8 * * 1", "0 9 * * 1") ??
+        "",
+    });
+
+    const answered = await outcome(
+      setCurrentVersion(
+        { ...env, DB: answerLost(/update "apps" set "current_version"/iu) },
+        await builder.api.whoami(),
+        app,
+        next
+      )
+    );
+    const after = await schedulesOf(app);
+
+    expect({
+      answered,
+      current: await currentVersionOf(app),
+      schedules: after.map(({ version }) => version),
+    }).toStrictEqual({ answered: "ok", current: next, schedules: [next] });
   });
 
   it("refuse, and write nothing, when a schedule parameter is set meanwhile", async () => {
