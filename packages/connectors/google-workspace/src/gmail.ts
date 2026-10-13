@@ -471,6 +471,10 @@ const labelMessage = defineTool({
   }),
   readOnly: false,
   destructive: true,
+  // Adding labels a message has and removing ones it lacks changes
+  // nothing: sent again, it leaves the same labels (within the recovery
+  // horizon, before people relabel it).
+  repeatable: true,
   resource: "mailbox",
   routes: [post("/messages/{message}/modify")],
   describe: {

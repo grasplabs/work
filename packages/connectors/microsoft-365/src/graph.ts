@@ -24,6 +24,16 @@ import { z } from "zod";
 export const graphHost = "graph.microsoft.com";
 
 /**
+ * The extended property a message this connector makes carries its call's
+ * effect key in (`effectKeyMetaKey`), so a call of unknown outcome can find
+ * it again (`findByEffect`): a named MAPI string property in a property set
+ * of our own. Graph keeps it on the message, and on the Sent Items copy of
+ * one it sent, and filters on it.
+ */
+export const effectPropertyId =
+  "String {c30928d5-7050-44f2-99d3-ce09d5cd6e60} Name GraspEffect";
+
+/**
  * Where a download may be redirected to: Graph answers a file's `/content`
  * with a redirect to a pre-authenticated URL on the tenant's SharePoint
  * (`<tenant>.sharepoint.com`, `<tenant>-my.sharepoint.com` for OneDrive),

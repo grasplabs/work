@@ -299,6 +299,8 @@ const deletion = (
           output: sql<string | null>`${spentAs ?? null}`.as("output"),
           provenance: sql<null>`NULL`.as("provenance"),
           createdAt: sql<Date>`${Date.now()}`.as("created_at"),
+          claimedAt: sql<Date>`${Date.now()}`.as("claimed_at"),
+          connectorVersion: sql<null>`NULL`.as("connector_version"),
           resource: pendingActions.resource,
         })
         .from(pendingActions)

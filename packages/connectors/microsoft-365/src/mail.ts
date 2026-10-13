@@ -14,6 +14,7 @@ import { z } from "zod";
 
 import {
   atPage,
+  effectPropertyId,
   graphFetch,
   graphHost,
   graphJson,
@@ -505,23 +506,61 @@ const draftFields = [
 const recipients = (addresses: string[] | undefined) =>
   (addresses ?? []).map((address) => ({ emailAddress: { address } }));
 
-/** A message as Graph takes it. */
-const graphDraft = ({
-  subject,
-  body,
-  bodyType,
-  to,
-  cc,
-  bcc,
-  replyTo,
-}: z.output<typeof draftInput>) => ({
+/** A message as Graph takes it, tagged with the call's effect key if any. */
+const graphDraft = (
+  {
+    subject,
+    body,
+    bodyType,
+    to,
+    cc,
+    bcc,
+    replyTo,
+  }: z.output<typeof draftInput>,
+  effectKey: string | null
+) => ({
   subject,
   body: { contentType: bodyType ?? "text", content: body },
   toRecipients: recipients(to),
   ccRecipients: recipients(cc),
   bccRecipients: recipients(bcc),
   replyTo: recipients(replyTo),
+  ...(effectKey === null
+    ? {}
+    : {
+        singleValueExtendedProperties: [
+          { id: effectPropertyId, value: effectKey },
+        ],
+      }),
 });
+
+/** What a message found by its effect key tells of it. */
+const foundMessage = z.object({
+  id: z.string(),
+  conversationId: z.string().nullish(),
+  webLink: z.string().nullish(),
+});
+
+/**
+ * The message in `mailbox`, in any folder, that a call with effect key
+ * `key` made, if there is one. The key is 64 hex characters (connect
+ * derives it, the kit checks it), so it can't break out of the filter's
+ * string literal.
+ */
+const findByEffect = async (
+  mailbox: string,
+  key: string
+): Promise<z.infer<typeof foundMessage> | undefined> => {
+  const { value } = await graphJson(
+    graphUrl(`/users/${segment(mailbox)}/messages`, {
+      $filter: `singleValueExtendedProperties/Any(ep: ep/id eq '${effectPropertyId}' and ep/value eq '${key}')`,
+      $select: "id,conversationId,webLink",
+      $top: "1",
+    }),
+    pageOf(foundMessage)
+  );
+  return value[0];
+};
 
 const sendMail = defineTool({
   name: "mail.send",
@@ -532,12 +571,24 @@ const sendMail = defineTool({
   readOnly: false,
   destructive: false,
   resource: "mailbox",
+  // Recovery `none`: a sent email of unknown outcome stays unknown. Not
+  // finding its Sent Items copy doesn't prove it wasn't sent: a shared
+  // mailbox's copy can land in the delegate's own mailbox, a copy can be
+  // hard-deleted, Graph may not keep the tag on the copy, and `sendMail`
+  // answers 202 before the copy is saved. Before this tool gets a `find`,
+  // a live check (M365_SMOKE_WRITES) must show, for a person's own and a
+  // shared mailbox: the copy carries the tag, it is found by it once the
+  // claim timeout has passed, and where a delegate's copy lands. The tag
+  // is kept on every send, so such a lookup can find it then.
   routes: [post("/sendMail")],
   describe: { title: "Send an email", fields: draftFields },
-  run: async (input) => {
+  run: async (input, effect) => {
     const response = await graphFetch(
       graphUrl(`/users/${segment(input.mailbox)}/sendMail`),
-      jsonBody({ message: graphDraft(input), saveToSentItems: true })
+      jsonBody({
+        message: graphDraft(input, effect.key),
+        saveToSentItems: true,
+      })
     );
     await response.body?.cancel();
     return { output: { mailbox: input.mailbox, sent: true as const } };
@@ -558,13 +609,13 @@ const createDraft = defineTool({
   readOnly: false,
   destructive: false,
   resource: "mailbox",
-  routes: [post("/messages")],
+  routes: [get("/messages"), post("/messages")],
   describe: { title: "Create a draft email", fields: draftFields },
-  run: async (input) => {
+  run: async (input, effect) => {
     const draft = await graphJson(
       graphUrl(`/users/${segment(input.mailbox)}/messages`),
       graphMessage,
-      jsonBody(graphDraft(input))
+      jsonBody(graphDraft(input, effect.key))
     );
     return {
       output: {
@@ -574,6 +625,21 @@ const createDraft = defineTool({
         webLink: draft.webLink ?? null,
       },
     };
+  },
+  // Made, if a message with its key is in the mailbox: the draft, or the
+  // message it became once a person sent it.
+  find: async (input, effect) => {
+    const draft = await findByEffect(input.mailbox, effect.key);
+    return draft === undefined
+      ? null
+      : {
+          output: {
+            mailbox: input.mailbox,
+            id: draft.id,
+            conversationId: draft.conversationId ?? null,
+            webLink: draft.webLink ?? null,
+          },
+        };
   },
 });
 

@@ -117,7 +117,24 @@ export const idempotentCalls = sqliteTable(
      */
     output: text(),
     provenance: text(),
+    /** When the key was first claimed: a recovery's horizon counts from it. */
     createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the call now under way, or last under way, claimed the key: the
+     * first claim, or a recovery's retake. A claim older than the claim
+     * timeout no longer runs, so its call may be recovered. A row from
+     * before this column counts as claimed long ago, which it was.
+     */
+    claimedAt: timestamp("claimed_at")
+      .notNull()
+      .default(sql`0`),
+    /**
+     * The native connector build (`name@version+<code hash>`) that first
+     * claimed the key; null for a remote server's call. A call is recovered
+     * only by the build that made it: another may tag, find or repeat
+     * differently, whether or not its version was bumped.
+     */
+    connectorVersion: text("connector_version"),
     /**
      * The one resource the call's capability named, or null for the whole
      * connection: what reading the answer later is authorised against
