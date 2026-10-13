@@ -1225,6 +1225,52 @@ export default app({
 `,
 });
 
+/** An App reading contacts from two CRMs, each its own resource. */
+const twoCrmFiles = (): Record<string, string> => ({
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({ notes: defineTable({ title: v.string() }) });
+`,
+  "operations/crm.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+export const crm = resource.connector("crm", {
+  contract: "composio.crm@1",
+  actions: ["CRM_LIST_CONTACTS"],
+});
+
+export const backup = resource.connector("backup", {
+  contract: "composio.crm@1",
+  actions: ["CRM_LIST_CONTACTS"],
+});
+
+export const contacts = action({
+  args: {},
+  returns: v.number(),
+  uses: [crm, backup],
+  handler: async (ctx) => {
+    await ctx.resources.crm.call("CRM_LIST_CONTACTS", { limit: 5 });
+    await ctx.resources.backup.call("CRM_LIST_CONTACTS", { limit: 5 });
+    return 0;
+  },
+});
+`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { backup, contacts, crm } from "./operations/crm.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Two CRMs",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { crm: { contacts } },
+  internalOperations: {},
+  screens: [],
+  uses: [crm, backup],
+});
+`,
+});
+
 const crmServerStateSchema = z.object({
   ran: z.array(z.object({ tool: z.string(), arguments: z.unknown() })),
 });
@@ -1462,6 +1508,62 @@ describe("Composio connector resource bindings", { timeout: 120_000 }, () => {
       open: "resource.target_invalid",
       unreachable: { failed: "resource.unavailable" },
       ran: [],
+    });
+  });
+
+  it("review the rest of an App's resources while one CRM's Composio server can't be reached, marking only that CRM unchecked", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const created = await builder.api.apps.create({ name: "Two CRMs" });
+    await builder.api.apps.files.commit(created.id, twoCrmFiles(), "First");
+    await builder.api.apps.versions.setCurrent(created.id, 1);
+    const down = await crmConnection();
+    const up = await crmConnection();
+    const granted = async (crm: CrmConnection, binding: string) => {
+      const requested = await builder.api.permissions.request({
+        subject: { type: "app", appId: created.id },
+        object: { type: "connection", connectionId: crm.id },
+        actions: ["CRM_LIST_CONTACTS"],
+        binding,
+      });
+      await admin.api.permissions.grant(requested.id, { version: 1 });
+      return requested.id;
+    };
+    const downPermission = await granted(down, "CRM");
+    const upPermission = await granted(up, "BACKUP");
+    const approve = async (alias: string, permissionId: string) =>
+      await admin.api.resourceBindings.approve({
+        app: created.id,
+        alias,
+        target: { kind: "connector", permissionId },
+        reviewed: { version: 1 },
+      });
+    await approve("crm", downPermission);
+    await approve("backup", upPermission);
+    await down.unavailable();
+    const review = await admin.api.resourceBindings.review(created.id);
+    // Each CRM is offered the reachable permission; the unreachable one is
+    // neither offered nor ruled out, so the choices say they are partial.
+    const offered = {
+      kind: "connector",
+      permissions: [
+        { permissionId: upPermission, connectionId: up.id, resource: null },
+      ],
+      truncated: true,
+    };
+    expect({
+      resources: review.resources.map(({ alias, state, choices }) => ({
+        alias,
+        state,
+        choices,
+      })),
+      truncated: review.truncated,
+    }).toStrictEqual({
+      resources: [
+        { alias: "backup", state: "served", choices: offered },
+        { alias: "crm", state: "unchecked", choices: offered },
+      ],
+      truncated: false,
     });
   });
 });

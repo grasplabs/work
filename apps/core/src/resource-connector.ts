@@ -20,7 +20,11 @@ import { readContractSchema } from "./connector-contracts.ts";
 import type { ReadSchema } from "./connector-contracts.ts";
 import { permissions } from "./db/core/schema.ts";
 import type { ResourceContext } from "./operations.ts";
-import { providerUnreachable, unchecked } from "./resource-adapter.ts";
+import {
+  isProviderUnreachable,
+  providerUnreachable,
+  unchecked,
+} from "./resource-adapter.ts";
 import type {
   BindingCaller,
   ContractAsks,
@@ -197,13 +201,38 @@ const grantOf = (row: ConnectionGrantRow): ConnectionGrant | undefined => {
 };
 
 /**
+ * What a connection serves of `contract`, for a review: `unchecked` when
+ * its provider can't be reached (a Composio server that is down), so one
+ * outage marks only what depends on that connection, and never fails the
+ * whole review. A request still refuses it (`contractOf`).
+ */
+const reviewedContractOf = async (
+  env: Env,
+  contract: string,
+  connectionId: ConnectionId
+): Promise<ConnectorContract | undefined | typeof unchecked> => {
+  try {
+    return await contractOf(env, contract, connectionId);
+  } catch (error) {
+    if (isProviderUnreachable(error)) {
+      return unchecked;
+    }
+    throw error;
+  }
+};
+
+/**
  * Asks connect what connections serve, for one review of an App's
  * resources: each connection's contract at most once, however many
  * declarations or permissions name it, and at most `limit` asks in all.
- * `truncated` says whether the limit left something unasked.
+ * `truncated` says whether the limit left something unasked. A connection
+ * whose provider can't be reached is `unchecked` (`reviewedContractOf`).
  */
 export const contractReader = (env: Env, limit: number) => {
-  const asked = new Map<string, Promise<ConnectorContract | undefined>>();
+  const asked = new Map<
+    string,
+    Promise<ConnectorContract | undefined | typeof unchecked>
+  >();
   let truncated = false;
   const asks: ContractAsks = {
     contractOf: async (connectionId, contract) => {
@@ -214,7 +243,7 @@ export const contractReader = (env: Env, limit: number) => {
           truncated = true;
           return unchecked;
         }
-        served = contractOf(env, contract, connectionId);
+        served = reviewedContractOf(env, contract, connectionId);
         asked.set(key, served);
       }
       return await served;
