@@ -32,7 +32,7 @@ import { EngineIcon } from "../engines/engine-icon.tsx";
 import { ResourceBindings } from "../engines/resource-bindings.tsx";
 import type { ResourcesPage } from "../engines/resource-bindings.tsx";
 import { ScreenApproval } from "../engines/screen-approval.tsx";
-import { StoreChanges } from "../engines/store-changes.tsx";
+import { readStoreChanges, StoreChanges } from "../engines/store-changes.tsx";
 import {
   LoadingLines,
   PageLoading,
@@ -545,12 +545,7 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
       : undefined,
     // Only for who may abandon a store's failed change: the organization's
     // own admins, never Grasp staff.
-    storeChanges: decidesRequests(identity)
-      ? loadFromCore(
-          core,
-          async (session) => await session.stores.appBackfills(params.engine)
-        )
-      : undefined,
+    storeChanges: readStoreChanges(core, identity, params.engine),
     // For who reads them: admins, who decide them, and builders.
     resources: canBuild(identity.role)
       ? loadFromCore(

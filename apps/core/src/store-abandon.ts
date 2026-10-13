@@ -2,7 +2,8 @@ import { actorOf, auditEventSchema } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
-import type { StoreId } from "@grasp-os/shared/ids";
+import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { abandonBackfillSchema, dataErrors } from "@grasp-os/shared/stores";
 import type {
@@ -10,7 +11,7 @@ import type {
   AppStoreBackfill,
   StoreBackfill,
 } from "@grasp-os/shared/stores";
-import { and, eq, inArray, isNull, not } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -23,6 +24,7 @@ import {
 import type { Member } from "./auth/identity.ts";
 import {
   appDefaultStores,
+  apps,
   businessStores,
   sdkResourceBindings,
 } from "./db/core/schema.ts";
@@ -189,17 +191,82 @@ export const storeBackfill = async (
 };
 
 /**
- * The most stores `appStoreBackfills` asks: an App's releases bind one
- * store each, so more than a handful only comes of rebinding it often.
+ * The most stores `appStoreBackfills` asks: the current and pending
+ * versions bind at most 16 stores each, and the default store makes one
+ * more, so the cap only ever drops what an App can't have.
  */
 const appStoresAsked = 32;
 
 /**
- * The pending schema changes of the stores the App `app` uses, for an
- * admin (`StoresApi.appBackfills`): its default store and every live
- * store a release of it is bound to. On a shared store the change may be
- * another App's, which blocks this App's releases all the same. A store
- * with none isn't listed; neither is an App nobody knows.
+ * The stores the App `app` runs on now or is about to: those its current
+ * and pending versions are bound to, newest version first, then its
+ * default store; each once, with the alias its newest binding gives it.
+ * Releases kept from older versions aren't asked: no change of theirs
+ * holds back what the App would make current.
+ */
+const storesInUse = async (
+  env: Env,
+  app: AppId
+): Promise<{ store: string; alias: string | null }[]> => {
+  const db = drizzle(env.DB);
+  const [found, defaults] = await Promise.all([
+    db
+      .select({
+        current: apps.currentVersion,
+        pending: apps.pendingVersion,
+      })
+      .from(apps)
+      .where(eq(apps.id, app))
+      .get(),
+    db
+      .select({ store: appDefaultStores.storeId })
+      .from(appDefaultStores)
+      .where(eq(appDefaultStores.appId, app)),
+  ]);
+  const versions = [found?.pending, found?.current].filter(
+    (version): version is number => typeof version === "number"
+  );
+  const bound =
+    versions.length === 0
+      ? []
+      : await db
+          .select({
+            store: sdkResourceBindings.targetId,
+            alias: sdkResourceBindings.alias,
+          })
+          .from(sdkResourceBindings)
+          .where(
+            and(
+              eq(sdkResourceBindings.resourceId, app),
+              eq(sdkResourceBindings.kind, "store"),
+              inArray(sdkResourceBindings.resourceVersion, versions)
+            )
+          )
+          .orderBy(
+            desc(sdkResourceBindings.resourceVersion),
+            asc(sdkResourceBindings.alias)
+          );
+  const named = new Map<string, string | null>();
+  for (const { store, alias } of [
+    ...bound,
+    ...defaults.map((row) => ({ store: row.store, alias: null })),
+  ]) {
+    if (!named.has(store)) {
+      named.set(store, alias);
+    }
+  }
+  return [...named]
+    .slice(0, appStoresAsked)
+    .map(([store, alias]) => ({ store, alias }));
+};
+
+/**
+ * The pending schema changes of the stores the App `app` runs on (see
+ * `storesInUse`), for an admin (`StoresApi.appBackfills`), in that order.
+ * On a shared store the change may be another App's, which blocks this
+ * App's releases all the same. A store with none isn't listed; neither is
+ * one that is gone, nor one whose object didn't answer (logged), so one
+ * store out of reach leaves the others; nor an App nobody knows.
  */
 export const appStoreBackfills = async (
   env: Env,
@@ -213,53 +280,51 @@ export const appStoreBackfills = async (
     z.strictObject({ app: appIdSchema }),
     { app }
   );
-  const db = drizzle(env.DB);
-  const [bound, defaults] = await Promise.all([
-    db
-      .selectDistinct({ store: sdkResourceBindings.targetId })
-      .from(sdkResourceBindings)
-      .where(
-        and(
-          eq(sdkResourceBindings.resourceId, id),
-          eq(sdkResourceBindings.kind, "store")
-        )
-      )
-      .limit(appStoresAsked),
-    db
-      .select({ store: appDefaultStores.storeId })
-      .from(appDefaultStores)
-      .where(eq(appDefaultStores.appId, id)),
-  ]);
-  const named = [
-    ...new Set([...defaults, ...bound].map(({ store }) => store)),
-  ].slice(0, appStoresAsked);
+  const named = await storesInUse(env, id);
   if (named.length === 0) {
     return [];
   }
-  const live = await db
+  const liveRows = await drizzle(env.DB)
     .select({ id: businessStores.id })
     .from(businessStores)
     .where(
-      and(inArray(businessStores.id, named), isNull(businessStores.deletedAt))
-    )
-    .orderBy(businessStores.id);
-  const found = await Promise.all(
-    live.map(async (row) => {
-      const store = storeIdSchema.parse(row.id);
-      const status = await storeObject(env, store).backfillStatus(store);
-      if (status === null) {
-        return [];
-      }
-      const { target, state, attempt, scanned, filled, failure } = status;
-      return [
-        {
-          store,
-          backfill: { target, state, attempt, scanned, filled, failure },
-        },
-      ];
+      and(
+        inArray(
+          businessStores.id,
+          named.map(({ store }) => store)
+        ),
+        isNull(businessStores.deletedAt)
+      )
+    );
+  const live = new Set(liveRows.map((row) => row.id));
+  const asked = named.filter(({ store }) => live.has(store));
+  const answers = await Promise.allSettled(
+    asked.map(async ({ store }) => {
+      const storeId = storeIdSchema.parse(store);
+      return await storeObject(env, storeId).backfillStatus(storeId);
     })
   );
-  return found.flat();
+  return answers.flatMap((answer, index): AppStoreBackfill[] => {
+    const { store, alias } = asked[index] ?? { store: "", alias: null };
+    if (answer.status === "rejected") {
+      log.warn("store.backfill_status_failed", {
+        store,
+        ...errorFields(answer.reason),
+      });
+      return [];
+    }
+    if (answer.value === null) {
+      return [];
+    }
+    const { target, state, attempt, scanned, filled, failure } = answer.value;
+    return [
+      {
+        store,
+        alias,
+        backfill: { target, state, attempt, scanned, filled, failure },
+      },
+    ];
+  });
 };
 
 /**

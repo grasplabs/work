@@ -1,4 +1,5 @@
 import type { App } from "@grasp-os/shared/apps";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type {
   AbandonBackfill,
   AbandonedBackfill,
@@ -23,12 +24,12 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, useRouter } from "@tanstack/react-router";
 import { DatabaseIcon, TriangleAlertIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
-import { NotLoaded } from "../load-from-core.tsx";
+import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { abandonFailureText } from "./store-change-errors.ts";
@@ -82,13 +83,13 @@ const Progress = ({ change }: { change: AppStoreBackfill }) => {
   );
 };
 
-/** Abandoning the change to `store`, once confirmed. */
+/** Abandoning the change, once confirmed; `describedBy` names its store. */
 const AbandonDialog = ({
-  store,
+  describedBy,
   busy,
   onConfirm,
 }: {
-  store: string;
+  describedBy: string;
   busy: boolean;
   onConfirm: () => void;
 }) => {
@@ -99,7 +100,7 @@ const AbandonDialog = ({
       <DialogTrigger
         render={
           <Button
-            aria-label={t`Abandon the change to store ${store}`}
+            aria-describedby={describedBy}
             disabled={busy}
             size="sm"
             variant="destructive"
@@ -118,15 +119,10 @@ const AbandonDialog = ({
               The store keeps its tables as they are, and takes changes again.
               The release that needed this change can never be made current, in
               this engine or any other engine using the store: it has to be
-              built again.
-            </Trans>
-          </DialogDescription>
-          <DialogDescription>
-            <Trans>
-              The new fields stay reserved with the meaning this change gave
-              them: a later version can add them again only exactly as they
-              were. The values already filled in stay in the records, unseen.
-              This can&apos;t be undone.
+              built again. The new fields stay reserved with the meaning this
+              change gave them: a later version can add them again only exactly
+              as they were. The values already filled in stay in the records,
+              unseen. This can&apos;t be undone.
             </Trans>
           </DialogDescription>
         </DialogHeader>
@@ -147,6 +143,16 @@ const AbandonDialog = ({
   );
 };
 
+/** The store's ID, under the alias the change names it by. */
+const StoreId = ({ change }: { change: AppStoreBackfill }) => {
+  const { store } = change;
+  return change.alias === null ? null : (
+    <p className="font-mono">
+      <Trans>Store ID: {store}</Trans>
+    </p>
+  );
+};
+
 /**
  * One store's pending change: how far filling in got and, once it failed,
  * which record and field failed, what that blocks, and abandoning it.
@@ -160,13 +166,16 @@ export const StoreChange = ({
   busy: boolean;
   onAbandon: () => void;
 }) => {
-  const { store, backfill } = change;
+  const titleId = useId();
+  const { backfill } = change;
+  const name = change.alias ?? change.store;
   if (backfill.state === "running" || backfill.failure === null) {
+    // Polite: it is where things stand, not news to interrupt with.
     return (
-      <Alert>
+      <Alert live="polite">
         <DatabaseIcon aria-hidden="true" />
         <AlertTitle>
-          <Trans>A change to the store {store} is being applied</Trans>
+          <Trans>A change to the store {name} is being applied</Trans>
         </AlertTitle>
         <AlertDescription>
           <p>
@@ -176,6 +185,7 @@ export const StoreChange = ({
             </Trans>
           </p>
           <Progress change={change} />
+          <StoreId change={change} />
         </AlertDescription>
       </Alert>
     );
@@ -183,8 +193,8 @@ export const StoreChange = ({
   return (
     <Alert variant="destructive">
       <TriangleAlertIcon aria-hidden="true" />
-      <AlertTitle>
-        <Trans>A change to the store {store} can&apos;t be applied</Trans>
+      <AlertTitle id={titleId}>
+        <Trans>A change to the store {name} can&apos;t be applied</Trans>
       </AlertTitle>
       <AlertDescription>
         <p>
@@ -199,8 +209,13 @@ export const StoreChange = ({
           </Trans>
         </p>
         <Progress change={change} />
+        <StoreId change={change} />
         <div className="pt-2">
-          <AbandonDialog busy={busy} onConfirm={onAbandon} store={store} />
+          <AbandonDialog
+            busy={busy}
+            describedBy={titleId}
+            onConfirm={onAbandon}
+          />
         </div>
       </AlertDescription>
     </Alert>
@@ -210,29 +225,32 @@ export const StoreChange = ({
 /** What abandoning a change took out of force, named for the engine's page. */
 export const Abandoned = ({
   abandoned,
+  name,
   engine,
 }: {
   abandoned: AbandonedBackfill;
+  /** What the engine calls the store. */
+  name: string;
   engine: App;
 }) => {
   const { t } = useLingui();
-  const { name } = engine;
-  const { store } = abandoned;
+  const engineName = engine.name;
   const releases = formatList(
     abandoned.releases.map(({ app, version }) =>
       app === engine.id
-        ? t`${name}, version ${version}`
+        ? t`${engineName}, version ${version}`
         : t`engine ${app}, version ${version}`
     )
   );
   const reserved = formatList(
     abandoned.reserved.map(({ table, field }) => `${table}.${field}`)
   );
+  // Polite: focus moves to it once it shows (`StoreChangesOf`).
   return (
-    <Alert>
+    <Alert live="polite">
       <DatabaseIcon aria-hidden="true" />
       <AlertTitle>
-        <Trans>The change to the store {store} was abandoned</Trans>
+        <Trans>The change to the store {name} was abandoned</Trans>
       </AlertTitle>
       <AlertDescription>
         {abandoned.releases.length === 0 ? null : (
@@ -253,33 +271,62 @@ export const Abandoned = ({
 };
 
 /** What came of abandoning a change: what it took out of force, or why not. */
-type Outcome = { abandoned: AbandonedBackfill } | { failure: string };
+export type Outcome =
+  | { abandoned: AbandonedBackfill; name: string }
+  | { failure: string };
 
 /**
- * Abandons the change `input` names, then reads the page again whatever
- * came of it: a refusal may mean the change moved on. Outside the
- * component, as the React Compiler can't compile `try`.
+ * Abandons `change` as the page loaded it (its store, target and the run
+ * seen failing) with `abandon`, core's `stores.abandonBackfill`, then reads
+ * the page again with `refresh` whatever came of it, as a refusal may mean
+ * the change moved on, and hands `settle` the outcome even if reading
+ * again fails. Outside the component, as the React Compiler can't compile
+ * `try`.
  */
-const abandonThenRefresh = async (
-  core: CoreConnection,
-  input: AbandonBackfill,
-  refresh: () => Promise<void>
-): Promise<Outcome> => {
+export const abandonChange = async (
+  change: AppStoreBackfill,
+  abandon: (input: AbandonBackfill) => Promise<AbandonedBackfill>,
+  refresh: () => Promise<void>,
+  settle: (outcome: Outcome) => void
+): Promise<void> => {
+  const { store, alias, backfill } = change;
   let outcome: Outcome;
   try {
-    const abandoned = await core.withSession(
-      async (session) => await session.stores.abandonBackfill(input)
-    );
-    outcome = { abandoned };
+    const abandoned = await abandon({
+      store,
+      target: backfill.target,
+      attempt: backfill.attempt,
+    });
+    outcome = { abandoned, name: alias ?? store };
   } catch (error) {
     outcome = { failure: abandonFailureText(error) };
   }
-  await refresh();
-  return outcome;
+  try {
+    await refresh();
+  } finally {
+    settle(outcome);
+  }
 };
 
 /** A read of the engine's stores' changes, which the page doesn't wait for. */
 type ChangesRead = Promise<Loaded<AppStoreBackfill[]>>;
+
+/**
+ * The read of the engine's stores' changes, for its loader: started only
+ * for the organization's own admins, never Grasp staff, who alone may
+ * abandon one; nothing, and nothing asked of core, for anyone else.
+ */
+export const readStoreChanges = (
+  core: Pick<CoreConnection, "withSession">,
+  viewer: { role: string; staff: boolean },
+  engine: string
+): ChangesRead | undefined =>
+  isMemberAdmin(viewer)
+    ? loadFromCore(
+        core,
+        async (session) => await session.stores.appBackfills(engine)
+      )
+    : undefined;
 
 const StoreChangesOf = ({
   changes,
@@ -293,20 +340,33 @@ const StoreChangesOf = ({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
-  const abandon = async ({ store, backfill }: AppStoreBackfill) => {
+  const outcomeRef = useRef<HTMLDivElement>(null);
+  // The control that was confirmed may be gone once the page is read
+  // again: focus goes to what came of it, never back to the page's body.
+  useEffect(() => {
+    if (outcome !== undefined) {
+      outcomeRef.current?.focus();
+    }
+  }, [outcome]);
+  const abandon = async (change: AppStoreBackfill) => {
     setBusy(true);
     setOutcome(undefined);
-    const ended = await abandonThenRefresh(
-      core,
-      { store, target: backfill.target, attempt: backfill.attempt },
+    await abandonChange(
+      change,
+      async (input) =>
+        await core.withSession(
+          async (session) => await session.stores.abandonBackfill(input)
+        ),
       async () => {
         // `sync` waits for the loader, so the controls stay off until what
         // they act on is back.
         await router.invalidate({ sync: true });
+      },
+      (ended) => {
+        setOutcome(ended);
+        setBusy(false);
       }
     );
-    setOutcome(ended);
-    setBusy(false);
   };
   return (
     <section
@@ -334,21 +394,26 @@ const StoreChangesOf = ({
           )
         }
       </Await>
-      {outcome !== undefined && "abandoned" in outcome ? (
-        <Abandoned abandoned={outcome.abandoned} engine={engine} />
-      ) : null}
-      <ErrorText>
-        {outcome !== undefined && "failure" in outcome
-          ? outcome.failure
-          : undefined}
-      </ErrorText>
+      {outcome === undefined ? null : (
+        <div className="outline-none" ref={outcomeRef} tabIndex={-1}>
+          {"abandoned" in outcome ? (
+            <Abandoned
+              abandoned={outcome.abandoned}
+              engine={engine}
+              name={outcome.name}
+            />
+          ) : (
+            <ErrorText>{outcome.failure}</ErrorText>
+          )}
+        </div>
+      )}
     </section>
   );
 };
 
 /**
- * The engine's stores' pending changes, read only for the organization's
- * admins (`changes`); nothing for anyone else.
+ * The engine's stores' pending changes, as `readStoreChanges` read them;
+ * nothing for anyone it didn't read them for.
  */
 export const StoreChanges = ({
   changes,

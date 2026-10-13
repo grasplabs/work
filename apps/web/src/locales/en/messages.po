@@ -177,6 +177,10 @@ msgstr "{engine} may use exactly these packages from now on."
 msgid "{engine}: run of {workflowId}"
 msgstr "{engine}: run of {workflowId}"
 
+#: src/engines/store-changes.tsx
+msgid "{engineName}, version {version}"
+msgstr "{engineName}, version {version}"
+
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -313,10 +317,6 @@ msgstr "{name} now changes the engine's data (read → write)"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{name}, per {key}"
 msgstr "{name}, per {key}"
-
-#: src/engines/store-changes.tsx
-msgid "{name}, version {version}"
-msgstr "{name}, version {version}"
 
 #: src/dashboard/report.ts
 msgid "{name}: {count}"
@@ -502,12 +502,12 @@ msgid "A change applies to runs that start after it: runs already going keep the
 msgstr "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 
 #: src/engines/store-changes.tsx
-msgid "A change to the store {store} can't be applied"
-msgstr "A change to the store {store} can't be applied"
+msgid "A change to the store {name} can't be applied"
+msgstr "A change to the store {name} can't be applied"
 
 #: src/engines/store-changes.tsx
-msgid "A change to the store {store} is being applied"
-msgstr "A change to the store {store} is being applied"
+msgid "A change to the store {name} is being applied"
+msgstr "A change to the store {name} is being applied"
 
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
@@ -576,10 +576,6 @@ msgstr "A search in {where} found nothing {searches, plural, one {once} other {#
 #: src/engines/store-changes.tsx
 msgid "Abandon the change"
 msgstr "Abandon the change"
-
-#: src/engines/store-changes.tsx
-msgid "Abandon the change to store {store}"
-msgstr "Abandon the change to store {store}"
 
 #: src/engines/store-changes.tsx
 msgid "Abandon this change"
@@ -4206,6 +4202,10 @@ msgstr "Stopped following what changes at a connection"
 msgid "Stopped."
 msgstr "Stopped."
 
+#: src/engines/store-changes.tsx
+msgid "Store ID: {store}"
+msgstr "Store ID: {store}"
+
 #: src/engines/resource-bindings.tsx
 msgid "Structured, at most {tokens} tokens"
 msgstr "Structured, at most {tokens} tokens"
@@ -4391,8 +4391,8 @@ msgid "The catalog of integrations couldn't be read, so this page shows only wha
 msgstr "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 
 #: src/engines/store-changes.tsx
-msgid "The change to the store {store} was abandoned"
-msgstr "The change to the store {store} was abandoned"
+msgid "The change to the store {name} was abandoned"
+msgstr "The change to the store {name} was abandoned"
 
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
@@ -4548,10 +4548,6 @@ msgstr "The most pressing first."
 msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
 msgstr "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
 
-#: src/engines/store-changes.tsx
-msgid "The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-msgstr "The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
 msgstr "The next one"
@@ -4595,8 +4591,8 @@ msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "The steps can't be read from this workflow's code: {message}"
 
 #: src/engines/store-changes.tsx
-msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again."
-msgstr "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again."
+msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+msgstr "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."

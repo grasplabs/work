@@ -12,7 +12,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { Member } from "../src/auth/identity.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import { sdkResourceBindings } from "../src/db/core/schema.ts";
+import { apps, sdkResourceBindings } from "../src/db/core/schema.ts";
 import {
   abandonStoreBackfill,
   appStoreBackfills,
@@ -68,6 +68,9 @@ import { memberRoles, newRecordId } from "./store-schemas.ts";
 //   abandonment of a target", "audits it before a deleted store's purge".
 // - An admin can't find the failed change from the App it blocks, or
 //   someone else reads it: "lists an App's failed change for its admins".
+// - It misses the store an App's next version needs among the stores
+//   its older releases were bound to: "lists the stores of the versions
+//   an App runs and reviews".
 
 const admin: Member = {
   userId: "grace",
@@ -107,7 +110,24 @@ const bind = async (
  * failed on a note whose `category` is a number, under a key release 1
  * doesn't declare: the case no App can mend.
  */
-const failedStore = async (extra?: StoreFields) => {
+/** Registers `app` with its current and pending versions, as apps.ts keeps them. */
+const registerApp = async (
+  app: AppId,
+  currentVersion: number | null,
+  pendingVersion: number | null
+): Promise<void> => {
+  await drizzle(env.DB).insert(apps).values({
+    id: app,
+    name: "Notes",
+    description: "",
+    ownerId: admin.userId,
+    currentVersion,
+    pendingVersion,
+    createdAt: new Date(),
+  });
+};
+
+const failedStore = async (extra?: StoreFields, boundAs = 2) => {
   const app = appIdSchema.parse(crypto.randomUUID());
   const store = await newStore();
   const first = await store.defineTables(v1, release(app, 1));
@@ -117,7 +137,7 @@ const failedStore = async (extra?: StoreFields) => {
   ]);
   const second = await store.defineTables(withCategory, release(app, 2));
   const target = second.contract.hash;
-  await bind(app, 2, store, second.schemaHash);
+  await bind(app, boundAs, store, second.schemaHash);
   const failed = await fillAll(store, target);
   return {
     app,
@@ -407,6 +427,7 @@ describe("abandoning a failed backfill", () => {
 
   it("lists an App's failed change for its admins, until it is abandoned", async () => {
     const { app, store, target, odd } = await failedStore();
+    await registerApp(app, 1, 2);
     const listed = await appStoreBackfills(env, admin, app);
     const read = await storeBackfill(env, admin, store.id);
     const builder = await codeOf(
@@ -436,7 +457,7 @@ describe("abandoning a failed backfill", () => {
       after: await appStoreBackfills(env, admin, app),
     }).toStrictEqual({
       // As the store's own read has it.
-      listed: [{ store: store.id, backfill: read }],
+      listed: [{ store: store.id, alias: "default", backfill: read }],
       read: {
         target,
         state: "failed",
@@ -453,6 +474,39 @@ describe("abandoning a failed backfill", () => {
       unknown: [],
       after: [],
     });
+  });
+
+  it("lists the stores of the versions an App runs and reviews, past more than the cap of older bindings", async () => {
+    const { app, store } = await failedStore(undefined, 50);
+    await registerApp(app, null, 50);
+    // Older releases, each bound to a store of its own, more than are asked.
+    await Promise.all(
+      Array.from(
+        { length: 40 },
+        async (_, index) =>
+          await drizzle(env.DB)
+            .insert(sdkResourceBindings)
+            .values({
+              resourceId: app,
+              resourceVersion: index + 1,
+              alias: "default",
+              kind: "store",
+              // Before any store minted at random, wherever IDs are sorted.
+              targetId: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+              schemaHash: "s".repeat(64),
+              manifestHash: "m".repeat(64),
+            })
+      )
+    );
+
+    const listed = await appStoreBackfills(env, admin, app);
+    expect(
+      listed.map(({ store: id, alias, backfill }) => ({
+        id,
+        alias,
+        state: backfill.state,
+      }))
+    ).toStrictEqual([{ id: store.id, alias: "default", state: "failed" }]);
   });
 
   it("audits it once, from the store's alarm when core's call stopped short", async () => {

@@ -177,6 +177,10 @@ msgstr "{engine} mag vanaf nu precies deze pakketten gebruiken."
 msgid "{engine}: run of {workflowId}"
 msgstr "{engine}: run van {workflowId}"
 
+#: src/engines/store-changes.tsx
+msgid "{engineName}, version {version}"
+msgstr "{engineName}, versie {version}"
+
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# mislukt in de afgelopen {days} dagen} other {# mislukt in de afgelopen {days} dagen}}"
@@ -313,10 +317,6 @@ msgstr "{name} wijzigt nu de gegevens van de engine (lezen → schrijven)"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "{name}, per {key}"
 msgstr "{name}, per {key}"
-
-#: src/engines/store-changes.tsx
-msgid "{name}, version {version}"
-msgstr "{name}, versie {version}"
 
 #: src/dashboard/report.ts
 msgid "{name}: {count}"
@@ -502,12 +502,12 @@ msgid "A change applies to runs that start after it: runs already going keep the
 msgstr "Een wijziging geldt voor runs die daarna starten: runs die al bezig zijn houden de waarden waarmee ze begonnen. Elke wijziging wordt vastgelegd, zonder de waarde."
 
 #: src/engines/store-changes.tsx
-msgid "A change to the store {store} can't be applied"
-msgstr "Een wijziging in de opslag {store} kan niet worden toegepast"
+msgid "A change to the store {name} can't be applied"
+msgstr "Een wijziging in de opslag {name} kan niet worden toegepast"
 
 #: src/engines/store-changes.tsx
-msgid "A change to the store {store} is being applied"
-msgstr "Een wijziging in de opslag {store} wordt toegepast"
+msgid "A change to the store {name} is being applied"
+msgstr "Een wijziging in de opslag {name} wordt toegepast"
 
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
@@ -576,10 +576,6 @@ msgstr "Een zoekopdracht in {where} vond {searches, plural, one {één keer} oth
 #: src/engines/store-changes.tsx
 msgid "Abandon the change"
 msgstr "Wijziging opgeven"
-
-#: src/engines/store-changes.tsx
-msgid "Abandon the change to store {store}"
-msgstr "Wijziging in de opslag {store} opgeven"
 
 #: src/engines/store-changes.tsx
 msgid "Abandon this change"
@@ -4206,6 +4202,10 @@ msgstr "Gestopt met volgen wat er bij een verbinding verandert"
 msgid "Stopped."
 msgstr "Gestopt."
 
+#: src/engines/store-changes.tsx
+msgid "Store ID: {store}"
+msgstr "Opslag-ID: {store}"
+
 #: src/engines/resource-bindings.tsx
 msgid "Structured, at most {tokens} tokens"
 msgstr "Gestructureerd, hoogstens {tokens} tokens"
@@ -4391,8 +4391,8 @@ msgid "The catalog of integrations couldn't be read, so this page shows only wha
 msgstr "De catalogus van integraties kon niet worden gelezen, dus deze pagina toont alleen wat je accounts erover zeggen."
 
 #: src/engines/store-changes.tsx
-msgid "The change to the store {store} was abandoned"
-msgstr "De wijziging in de opslag {store} is opgegeven"
+msgid "The change to the store {name} was abandoned"
+msgstr "De wijziging in de opslag {name} is opgegeven"
 
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
@@ -4548,10 +4548,6 @@ msgstr "Het dringendste eerst."
 msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
 msgstr "Het nieuwe veld {field} van de tabel {table} kan niet worden ingevuld: het record {record} heeft onder die naam al een waarde die het veld niet accepteert."
 
-#: src/engines/store-changes.tsx
-msgid "The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-msgstr "De nieuwe velden blijven gereserveerd met de betekenis die deze wijziging ze gaf: een latere versie kan ze alleen precies zo opnieuw toevoegen. De al ingevulde waarden blijven onzichtbaar in de records staan. Dit kan niet ongedaan worden gemaakt."
-
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
 msgstr "De volgende"
@@ -4595,8 +4591,8 @@ msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "De stappen kunnen niet uit de code van deze workflow worden gelezen: {message}"
 
 #: src/engines/store-changes.tsx
-msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again."
-msgstr "De opslag houdt zijn tabellen zoals ze zijn en neemt weer wijzigingen aan. De release die deze wijziging nodig had, kan nooit actueel worden gemaakt, in deze engine noch in een andere engine die de opslag gebruikt: die moet opnieuw worden gebouwd."
+msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+msgstr "De opslag houdt zijn tabellen zoals ze zijn en neemt weer wijzigingen aan. De release die deze wijziging nodig had, kan nooit actueel worden gemaakt, in deze engine noch in een andere engine die de opslag gebruikt: die moet opnieuw worden gebouwd. De nieuwe velden blijven gereserveerd met de betekenis die deze wijziging ze gaf: een latere versie kan ze alleen precies zo opnieuw toevoegen. De al ingevulde waarden blijven onzichtbaar in de records staan. Dit kan niet ongedaan worden gemaakt."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."
