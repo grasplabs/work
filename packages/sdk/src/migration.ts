@@ -30,8 +30,10 @@ import type { Infer, InferInput } from "./values.ts";
 // A migration carries fixtures: records it is run on as its release is
 // sealed, before it touches the store (spec 17.2's representative
 // fixtures). Each fixture's output must fit the target table, and match
-// what it `expect`s when it says; a fixture that fails refuses the seal.
-// They are data the reviewer reads with the migration, never real records.
+// what it `expect`s when it says. The release is sealed either way, with
+// what the run found; a migration with a fixture that failed runs on no
+// records, and its release can't be made current. They are data the
+// reviewer reads with the migration, never real records.
 
 /** What a migration's handler is told besides the row: data only. */
 export interface MigrationContext {
@@ -99,7 +101,9 @@ export interface MigrationDefinition<
   readonly output: Output;
   /**
    * The records it is run on as its release is sealed: at least one, at
-   * most `migrationMaxFixtures`. Any that fails refuses the seal.
+   * most `migrationMaxFixtures`. If any fails, the release is sealed with
+   * that failure recorded, the migration runs on no records, and the
+   * release can't be made current.
    */
   readonly fixtures: readonly MigrationFixture<
     FixtureRowOf<Input>,
@@ -270,7 +274,9 @@ const fixturesOf = (fixtures: unknown): MigrationFixtureManifest[] => {
       `A migration's \`fixtures\` lists between 1 and ${migrationMaxFixtures} records it is checked against: \`{ row, expect? }\`.`
     );
   }
-  const read = fixtures.map((fixture: unknown, index) => {
+  // Every index, a hole (`new Array(1)`) included: `map` would skip one,
+  // which the manifest then records as null.
+  const read = Array.from(fixtures, (fixture: unknown, index) => {
     const what = `Fixture ${index + 1}`;
     if (!isPlainObject(fixture)) {
       return refuse(`${what} is \`{ row, expect? }\`.`);

@@ -595,6 +595,8 @@ describe("why a version wasn't made current", () => {
       fixture: {
         text: "The migration derive-category failed on its fixture 2 when this version was sealed: its output isn't what the fixture expects. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again.",
         link: undefined,
+        // Core's own words, shown beside it.
+        issues: ["It answered {}"],
       },
       none: "The migration derive-category failed on its fixtures when this version was sealed: it answered something that isn't its records. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again.",
     });

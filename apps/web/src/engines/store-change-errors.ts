@@ -168,9 +168,27 @@ const rollbackIncompatibleText = (error: unknown): string => {
  */
 export const makeCurrentFailure = (
   error: unknown
-): { text: string; link: string | undefined } => {
+): {
+  text: string;
+  link: string | undefined;
+  /**
+   * What core said went wrong, in its own words, when that helps mend it:
+   * a fixture's thrown message, or what it answered against what was
+   * expected. Fixtures are the App's own data, never real records.
+   */
+  issues?: readonly string[];
+} => {
   if (versionErrors.codeOf(error) === "version.migration_fixtures_failed") {
-    return { text: fixturesFailedText(error), link: undefined };
+    const issues = detailOf(error, "issues");
+    return {
+      text: fixturesFailedText(error),
+      link: undefined,
+      issues: Array.isArray(issues)
+        ? issues
+            .filter((issue): issue is string => typeof issue === "string")
+            .slice(0, 20)
+        : [],
+    };
   }
   const code = migrationErrors.codeOf(error);
   if (code === "migration.backfill_failed") {

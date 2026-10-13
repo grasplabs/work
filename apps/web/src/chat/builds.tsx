@@ -615,10 +615,8 @@ const PendingVersion = ({
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `codeReads` says when to read again
   }, [core, app.id, version, loaded, codeReads]);
-  const [refused, setRefused] = useState<{
-    text: string;
-    link: string | undefined;
-  }>();
+  const [refused, setRefused] =
+    useState<Exclude<MadeCurrent, { made: true }>>();
   const makeCurrent = async (): Promise<void> => {
     setRefused(undefined);
     const made = await run(
@@ -676,6 +674,15 @@ const PendingVersion = ({
           />
         )}
         <ErrorText>{failure ?? refused?.text}</ErrorText>
+        {failure !== undefined || refused?.issues === undefined ? null : (
+          <ul className="flex flex-col gap-1">
+            {refused.issues.map((issue) => (
+              <li key={issue}>
+                <code className="font-mono text-sm break-all">{issue}</code>
+              </li>
+            ))}
+          </ul>
+        )}
         {refused?.link === undefined ? null : (
           <p className="text-muted-foreground">
             <Link
