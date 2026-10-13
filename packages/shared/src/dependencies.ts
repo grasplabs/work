@@ -458,6 +458,21 @@ export interface DependencyStatus {
   approved: DependencyRequest | null;
 }
 
+/** Most approvals `DependenciesApi.approvals` lists for an App: the newest. */
+export const dependencyApprovalsListed = 50;
+
+/** An App's approvals in force, for its builders and whoever may end them. */
+export interface DependencyApprovals {
+  /** The policy generation now. */
+  policyGeneration: number;
+  /** Whether the reader holds `dependencies.approve` now, so may retire or revoke them. */
+  decides: boolean;
+  /** The App, by its name: all a reader who doesn't build it is told of it. */
+  app: { id: AppId; name: string };
+  /** Approved or retired, the newest decision first; at most {@link dependencyApprovalsListed}. */
+  approvals: DependencyRequest[];
+}
+
 /** What a person decides, and what they reviewed as they did. */
 export const dependencyDecisionSchema = z.strictObject({
   approved: z.boolean(),
@@ -634,6 +649,11 @@ export interface DependenciesApi {
     request: string,
     decision: DependencyDecision
   ) => Promise<DependencyRequest>;
+  /**
+   * An App's approvals in force (approved or retired), for one of its
+   * builders or someone who holds `dependencies.approve` now.
+   */
+  approvals: (app: string) => Promise<DependencyApprovals>;
   /**
    * What retiring or revoking the graph of approval `request` would touch,
    * for someone who holds `dependencies.approve` now.

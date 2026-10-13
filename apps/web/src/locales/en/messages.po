@@ -77,9 +77,21 @@ msgstr "{app} needs someone to sign in again"
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Version {version}"
 
+#: src/engines/package-approvals.tsx
+msgid "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
+msgstr "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
+
 #: src/routes/_shell.engines.index.tsx
 msgid "{apps, plural, one {# app} other {# apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
+msgstr "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
+msgstr "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
 
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}"
@@ -255,6 +267,7 @@ msgid "{monthly} a month"
 msgstr "{monthly} a month"
 
 #: src/dashboard/dependency-requests.tsx
+#: src/engines/package-approvals.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 msgstr "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 
@@ -622,6 +635,7 @@ msgstr "Account"
 msgid "Action"
 msgstr "Action"
 
+#: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Actions"
 msgstr "Actions"
@@ -916,6 +930,7 @@ msgid "Approve the packages for {engine}"
 msgstr "Approve the packages for {engine}"
 
 #: src/dashboard/runs-widget.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 msgid "Approved"
 msgstr "Approved"
@@ -924,11 +939,16 @@ msgstr "Approved"
 msgid "Approved an app's code"
 msgstr "Approved an app's code"
 
+#: src/engines/package-approvals.tsx
+msgid "Approved by {decidedBy}, {decidedAt}"
+msgstr "Approved by {decidedBy}, {decidedAt}"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Approved by {name} on {date}."
 
 #: src/activity/audit-words.ts
+#: src/engines/package-approvals.tsx
 msgid "Approved packages"
 msgstr "Approved packages"
 
@@ -1138,6 +1158,7 @@ msgstr "Called another engine"
 msgid "Calls {tools} (any of their methods): may change things"
 msgstr "Calls {tools} (any of their methods): may change things"
 
+#: src/engines/package-approvals.tsx
 #: src/knowledge/document.tsx
 msgid "Cancel"
 msgstr "Cancel"
@@ -1322,6 +1343,7 @@ msgstr "Clear"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
@@ -2868,6 +2890,10 @@ msgstr "No model is set up for this deployment yet."
 msgid "No next run"
 msgstr "No next run"
 
+#: src/engines/package-approvals.tsx
+msgid "No packages are approved for this engine."
+msgstr "No packages are approved for this engine."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this engine before."
 msgstr "No packages were approved for this engine before."
@@ -3374,6 +3400,11 @@ msgstr "Owned by you"
 msgid "Package"
 msgstr "Package"
 
+#: src/engines/package-approvals.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "Packages"
+msgstr "Packages"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Packages for {engine}"
 msgstr "Packages for {engine}"
@@ -3576,6 +3607,10 @@ msgstr "Read"
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "Read a knowledge document"
+
+#: src/engines/package-approvals.tsx
+msgid "Read again"
+msgstr "Read again"
 
 #: src/activity/audit-words.ts
 msgid "Read an email attachment"
@@ -3826,6 +3861,26 @@ msgstr "Result"
 msgid "Results"
 msgstr "Results"
 
+#: src/engines/package-approvals.tsx
+msgid "Retire"
+msgstr "Retire"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}"
+msgstr "Retire the packages for {engine}"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}?"
+msgstr "Retire the packages for {engine}?"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired"
+msgstr "Retired"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
+msgstr "Retired by {endedBy}, {endedAt}: {endedReason}"
+
 #: src/dashboard/to-do.tsx
 msgid "Review"
 msgstr "Review"
@@ -3843,6 +3898,7 @@ msgid "Review the apps of {name}"
 msgstr "Review the apps of {name}"
 
 #: src/connections/connection-list.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Revoke"
 msgstr "Revoke"
@@ -3858,6 +3914,14 @@ msgstr "Revoke the binding of {alias}"
 #: src/engines/resource-bindings.tsx
 msgid "Revoke the binding of {alias}?"
 msgstr "Revoke the binding of {alias}?"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}"
+msgstr "Revoke the packages for {engine}"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}?"
+msgstr "Revoke the packages for {engine}?"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
@@ -3962,6 +4026,10 @@ msgstr "Runs {how} {count, plural, one {# more time} other {# more times}} ({now
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
 msgstr "Runs by the day they started"
+
+#: src/engines/package-approvals.tsx
+msgid "Runs in"
+msgstr "Runs in"
 
 #: src/chat/builds-state.ts
 msgid "Runs now"
@@ -4302,6 +4370,7 @@ msgid "Started following what changes at a connection"
 msgstr "Started following what changes at a connection"
 
 #: src/connections/connection-list.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -4741,6 +4810,14 @@ msgstr "The onboarding"
 msgid "The one before"
 msgstr "The one before"
 
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
+msgstr "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
+
+#: src/engines/package-approvals.tsx
+msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
+msgstr "The packages couldn't be read again, so this list may be out of date: {unread}"
+
 #: src/workflows/triggers.tsx
 msgid "The part of the address before the @, on the mail domain set up for Grasp."
 msgstr "The part of the address before the @, on the mail domain set up for Grasp."
@@ -5018,6 +5095,10 @@ msgstr "To do"
 #: src/dashboard/report.ts
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
+
+#: src/engines/package-approvals.tsx
+msgid "To use them again, someone who approves packages reviews them again."
+msgstr "To use them again, someone who approves packages reviews them again."
 
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"
@@ -5477,6 +5558,10 @@ msgstr "Who works where"
 #: src/onboarding/staff-words.ts
 msgid "Who works where is in"
 msgstr "Who works where is in"
+
+#: src/engines/package-approvals.tsx
+msgid "Why"
+msgstr "Why"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
