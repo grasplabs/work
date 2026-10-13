@@ -25,6 +25,7 @@ import {
 } from "../src/resource-bindings.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { planOf, recordedQueries } from "./query-plans.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
@@ -459,6 +460,28 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
   it("read through connect under the App's connection grant", async () => {
     const mailer = await mailerApp();
     expect(outcomeOf(await call(mailer, "mail.inbox", {}))).toBe(0);
+  });
+
+  it("find a call's binding by the index of active bindings, reading no bindings whole", async () => {
+    const mailer = await mailerApp();
+    const queries = await recordedQueries(async () => {
+      await call(mailer, "mail.inbox", {});
+    });
+    const plans = await Promise.all(
+      queries
+        .filter(({ query }) => /from "app_resource_bindings"/u.test(query))
+        .map(async (recorded) => await planOf(recorded))
+    );
+
+    expect({
+      looked: plans.length > 0,
+      plans: new Set(plans.flat()),
+    }).toStrictEqual({
+      looked: true,
+      plans: new Set([
+        "SEARCH app_resource_bindings USING INDEX app_resource_bindings_active_idx (app_id=? AND alias=?)",
+      ]),
+    });
   });
 
   it("hold a side effect for the person, then answer it once, under the call's key", async () => {

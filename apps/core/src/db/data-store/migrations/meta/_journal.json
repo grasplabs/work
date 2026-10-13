@@ -71,6 +71,13 @@
       "when": 1791835681842,
       "tag": "0009_schema_backfills",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791892187702,
+      "tag": "0010_backfill_pending_and_cascade_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -170,7 +170,16 @@ export const recordRefs = sqliteTable(
         table.toRecordId,
       ],
     }),
-    index("sdk_record_refs_target").on(table.toTableId, table.toRecordId),
+    // The references to a record, with what a cascade reads of each, so
+    // the cascade's lookup (store-host.ts, `#cascade`) reads the index
+    // alone.
+    index("sdk_record_refs_target_cascade").on(
+      table.toTableId,
+      table.toRecordId,
+      table.cascade,
+      table.tableId,
+      table.recordId
+    ),
   ]
 );
 
@@ -289,9 +298,10 @@ export const backfills = sqliteTable(
       "sdk_schema_backfills_failure",
       sql`(${table.state} = 'failed') = (${table.failure} IS NOT NULL)`
     ),
-    // One pending target at a time.
-    uniqueIndex("sdk_schema_backfills_pending")
-      .on(table.state)
+    // One pending target at a time, running or failed: unique on whether
+    // it is pending, so a running and a failed one can't both be there.
+    uniqueIndex("sdk_schema_backfills_one_pending")
+      .on(sql`(${table.state} <> 'complete')`)
       .where(sql`state <> 'complete'`),
   ]
 );
