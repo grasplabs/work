@@ -1,4 +1,15 @@
-import { codesFailure, isolateCall } from "../../src/workflows/code.ts";
+import {
+  appModuleName,
+  kitModuleName,
+  workflowPaths,
+} from "@grasp-os/compiler";
+import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
+
+import {
+  codesFailure,
+  isolateCall,
+  testOutcomeOf,
+} from "../../src/workflows/code.ts";
 
 // A workflow's metadata, tests and dry runs on the on-prem sandbox
 // (scripts/workerd-sandbox-workflow-code.test.ts): the same call core makes
@@ -27,9 +38,40 @@ const cases: Record<string, string> = {
   doesntLoad: "",
 };
 
+/** What a workflow's tests do, as the SDK's test harness would run them. */
+const harnesses: Record<string, string> = {
+  // Past V8's own heap limit, which aborts its process: a crash.
+  crashes:
+    "export const runWorkflowTests = async () => { const held = []; for (;;) held.push(new Array(1e5).fill(1)); };",
+  fails:
+    'export const runWorkflowTests = async () => ({ passed: false, results: [{ name: "t", failures: ["no"] }] });',
+};
+
+/** How workflow `notes`'s tests went with `harness`, as core reads them. */
+const testsWith = async (env: StandInEnv, harness: string) => {
+  const id = workflowIdSchema.parse("notes");
+  return await testOutcomeOf(
+    env,
+    appIdSchema.parse("app-stand-in"),
+    id,
+    {
+      [kitModuleName("@grasp-os/sdk/testing")]: harness,
+      [appModuleName(workflowPaths(id).tests)]:
+        'export default { definition: { metadata: { id: "notes" } } };',
+    },
+    "{}"
+  );
+};
+
 export default {
   async fetch(request, env) {
     const { pathname, searchParams } = new URL(request.url);
+    if (pathname === "/tests") {
+      const harness = harnesses[searchParams.get("case") ?? ""];
+      return harness === undefined
+        ? new Response("no such case", { status: 404 })
+        : Response.json(await testsWith(env, harness));
+    }
     if (pathname !== "/run") {
       return new Response("core answers");
     }

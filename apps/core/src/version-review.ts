@@ -41,7 +41,7 @@ import {
   declaredParams,
   declaredTriggers,
   workflowIdsIn,
-  workflowTestFailures,
+  workflowTestOutcome,
 } from "./workflows/code.ts";
 
 // What a version changes, for the builder who reviews it before making
@@ -413,11 +413,13 @@ const testsOf = async (
     }
   }
   let tests: VersionReview["tests"];
+  let keep = true;
   try {
-    const failures = await workflowTestFailures(env, app, version, files);
+    const outcome = await workflowTestOutcome(env, app, version, files);
+    ({ keep } = outcome);
     tests = {
-      status: failures.length === 0 ? "passed" : "failed",
-      failures: failures.slice(0, maxFailures),
+      status: outcome.failures.length === 0 ? "passed" : "failed",
+      failures: outcome.failures.slice(0, maxFailures),
     };
   } catch (error) {
     if (workflowErrors.codeOf(error) !== "workflow.build_failed") {
@@ -425,7 +427,11 @@ const testsOf = async (
     }
     tests = { status: "failed", failures: ["The workflows don't build."] };
   }
-  await keepTests(env, app, tree, tests);
+  // A result that may be the sandbox's doing is shown, and run again next
+  // time, never kept.
+  if (keep) {
+    await keepTests(env, app, tree, tests);
+  }
   return tests;
 };
 

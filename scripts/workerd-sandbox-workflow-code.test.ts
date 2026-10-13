@@ -34,6 +34,8 @@ describe("a workflow's code read on the on-prem sandbox", () => {
     supervisor = await startSandboxSupervisor({
       workerd: nativeWorkerd,
       processes: 2,
+      // No memory bound of its own: a test past V8's heap limit crashes.
+      memoryLimitBytes: 64 * 1024 ** 3,
       log: () => {},
     });
     coreUrl = await serveStandIn("workflow-code-worker.ts", supervisor.socket);
@@ -87,4 +89,21 @@ describe("a workflow's code read on the on-prem sandbox", () => {
     expect(outcome.ok).toBeFalsy();
     expect(outcome.ok ? null : outcome.codes).not.toBeNull();
   });
+
+  it("keeps what a workflow's tests say, but not when their isolate crashed: that may be the sandbox's", async () => {
+    const tests = async (name: string) => {
+      const response = await fetch(`${coreUrl}tests?case=${name}`);
+      return z
+        .object({ failures: z.array(z.string()), keep: z.boolean() })
+        .parse(await response.json());
+    };
+    const [fails, crashes] = [await tests("fails"), await tests("crashes")];
+    expect({
+      fails,
+      crashes: { failed: crashes.failures.length, keep: crashes.keep },
+    }).toStrictEqual({
+      fails: { failures: ['notes, "t": no'], keep: true },
+      crashes: { failed: 1, keep: false },
+    });
+  }, 60_000);
 });

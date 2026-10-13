@@ -744,6 +744,16 @@ export const declaredTriggers = async (
   return parsed.data ?? [];
 };
 
+/** What a run of tests says: why they fail (none: they pass), and whether that may be kept. */
+export interface TestOutcome {
+  failures: string[];
+  /**
+   * Whether it says what the code does, and may be kept for the version:
+   * not when its isolate crashed, which may be the sandbox's doing.
+   */
+  keep: boolean;
+}
+
 /**
  * Why workflow `id`'s tests fail on a version's `modules`, one line each;
  * none if they pass. They run App code, once, as the version is made
@@ -751,13 +761,16 @@ export const declaredTriggers = async (
  * goes once they are done: workerd keeps a named isolate, the SDK's
  * modules in it, for as long as the process runs.
  */
-const testFailures = async (
-  env: Env,
+export const testOutcomeOf = async (
+  env: Pick<
+    Env,
+    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+  >,
   app: AppId,
   id: WorkflowId,
   modules: Record<string, string>,
   calls: string
-): Promise<string[]> => {
+): Promise<TestOutcome> => {
   let outcome: Settled<unknown>;
   try {
     outcome = fromIsolate(
@@ -784,24 +797,35 @@ const testFailures = async (
     if (cause === undefined) {
       throw error;
     }
-    return [`${id}: its code doesn't load: ${cause}`];
+    return {
+      failures: [`${id}: its code doesn't load: ${cause}`],
+      // A crash may be the sandbox's own (its process killed from outside)
+      // as much as the code's: reported, never kept.
+      keep: sandboxVerdictOf(error) !== "crashed",
+    };
   }
   if (!outcome.ok) {
-    return [`${id}: ${outcome.error.message}`];
+    return { failures: [`${id}: ${outcome.error.message}`], keep: true };
   }
   const report = testReportSchema.safeParse(outcome.value);
   if (!report.success) {
-    return [`${id}: its tests didn't report as the test harness does`];
+    return {
+      failures: [`${id}: its tests didn't report as the test harness does`],
+      keep: true,
+    };
   }
   const { passed, results } = report.data;
   if (results.length === 0) {
-    return [`${id}: has no tests`];
+    return { failures: [`${id}: has no tests`], keep: true };
   }
-  return passed
-    ? []
-    : results.flatMap(({ name, failures }) =>
-        failures.map((failure) => `${id}, "${name}": ${failure}`)
-      );
+  return {
+    keep: true,
+    failures: passed
+      ? []
+      : results.flatMap(({ name, failures }) =>
+          failures.map((failure) => `${id}, "${name}": ${failure}`)
+        ),
+  };
 };
 
 /**
@@ -873,26 +897,29 @@ export const dryRunTests = async (
  * nothing when all pass, or there are no workflows. Refuses workflows that
  * don't build (`workflow.build_failed`).
  */
-export const workflowTestFailures = async (
+export const workflowTestOutcome = async (
   env: Env,
   /** Whose tests they are: the App, which the sandbox caps per owner. */
   app: AppId,
   version: number,
   files: AppFiles
-): Promise<string[]> => {
+): Promise<TestOutcome> => {
   const ids = workflowIdsIn(files);
   if (ids.length === 0) {
-    return [];
+    return { failures: [], keep: true };
   }
   // Refused before anything is built where no sandbox may run them.
   sessionHost(env);
   const modules = await modulesOf(env, version, files);
   const failures: string[] = [];
+  let keep = true;
   for (const id of ids) {
     if (Object.hasOwn(files, workflowPaths(id).tests)) {
       const calls = callsOf(files, id);
       // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
-      failures.push(...(await testFailures(env, app, id, modules, calls)));
+      const outcome = await testOutcomeOf(env, app, id, modules, calls);
+      failures.push(...outcome.failures);
+      keep &&= outcome.keep;
     } else {
       // Often a helper, not a workflow: say where shared code goes.
       failures.push(
@@ -900,6 +927,18 @@ export const workflowTestFailures = async (
       );
     }
   }
+  return { failures, keep };
+};
+
+/** Why the workflows' tests in `files` fail (`workflowTestOutcome`). */
+export const workflowTestFailures = async (
+  env: Env,
+  /** Whose tests they are: the App, which the sandbox caps per owner. */
+  app: AppId,
+  version: number,
+  files: AppFiles
+): Promise<string[]> => {
+  const { failures } = await workflowTestOutcome(env, app, version, files);
   return failures;
 };
 

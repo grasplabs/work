@@ -2,6 +2,7 @@ import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { sandboxVerdictOf } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import {
   declaredParams,
@@ -43,6 +44,15 @@ export default workflowTests(definition, [{ name: "echoes", ${testParams} expect
 const calm = notesFiles("");
 /** Its test's dry run spins: its test sets `note` to `spin`. */
 const spinning = notesFiles('params: { note: "spin" },');
+
+/**
+ * A refusal as its kind, and the sandbox's word for it: `busy`, the App at
+ * its share, never a pool too full to take anyone.
+ */
+const refusal = (reason: unknown) => ({
+  unavailable: reason instanceof SandboxUnavailableError,
+  verdict: reason instanceof Error ? sandboxVerdictOf(reason.cause) : undefined,
+});
 
 /** A new App's ID, so nothing one test read is kept for another. */
 const newApp = () => appIdSchema.parse(`app-${crypto.randomUUID()}`);
@@ -95,7 +105,7 @@ describe("a workflow's code read on-prem", () => {
         declaredParams(env, held, version, notes, calm),
       ]);
       return tests.status === "rejected" && params.status === "rejected"
-        ? [tests.reason, params.reason]
+        ? [refusal(tests.reason), refusal(params.reason)]
         : undefined;
     };
     let refusals = await busy(2);
@@ -104,8 +114,8 @@ describe("a workflow's code read on-prem", () => {
       refusals = await busy(2 + tries);
     }
     expect(refusals).toStrictEqual([
-      expect.any(SandboxUnavailableError),
-      expect.any(SandboxUnavailableError),
+      { unavailable: true, verdict: "busy" },
+      { unavailable: true, verdict: "busy" },
     ]);
     // What it read before is kept, and needs no session; another App's
     // reads don't wait on it.
