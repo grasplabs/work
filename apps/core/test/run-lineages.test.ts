@@ -6,6 +6,7 @@ import {
   runIdSchema,
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
+import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runDurableObjectAlarm } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -116,6 +117,21 @@ const withGateway = async <Result>(
     env.MODEL_BUDGET_MONTH = month;
     sending.mockRestore();
   }
+};
+
+/** The limits the tests' deployment sets (vite.config.ts). */
+const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
+
+/**
+ * The generation of the next quota policy a test sets: each higher than
+ * any before, as an operator's must be.
+ */
+let generations = 100;
+
+/** Sets the operator's quota policy to `limits`, under a new generation. */
+const setPolicy = (limits: Record<string, number>): void => {
+  generations += 1;
+  env.QUOTA_LIMITS = { generation: generations, limits };
 };
 
 /** `count` of `item`. */
@@ -456,6 +472,70 @@ ${llmStep()}`,
       again: "model.run_limit",
       other: "ok",
       sent: 101,
+    });
+  });
+
+  it("hold a lineage to the requests its operator's quota policy allows as each is sent, its runs already under way too, never above the platform's", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Lowered" });
+    const work = { app, person: builder.userId };
+    const root = `run-${crypto.randomUUID()}`;
+    const rootActor = runActorOf({ runId: root, app, workflow: "reader" });
+    const childActor = runActorOf({
+      runId: `run-${crypto.randomUUID()}`,
+      app,
+      workflow: "reader",
+      rootRunId: root,
+    });
+    const otherLineage = runActorOf({
+      runId: `run-${crypto.randomUUID()}`,
+      app,
+      workflow: "reader",
+    });
+
+    const result = await withGateway(
+      undefined,
+      times(20, cheapAnswer),
+      async (fake) => {
+        try {
+          const before = await allAtOnce(times(5, rootActor), work);
+          // The operator lowers a lineage's requests to 8, while this one
+          // is under way with 5 sent.
+          setPolicy({ ...configuredLimits, lineageModelRequests: 8 });
+          const lowered = await allAtOnce(times(5, childActor), work);
+          const other = await callFor(work, otherLineage);
+          // A policy raising it past the platform's is refused whole: the
+          // lowered one stays in force.
+          setPolicy({ ...configuredLimits, lineageModelRequests: 1000 });
+          const raised = await callFor(work, childActor);
+          // No longer lowered: the platform's 100 again, and the lineage
+          // goes on from the 8 it sent.
+          setPolicy(configuredLimits);
+          const restored = await callFor(work, rootActor);
+          return {
+            before: countOf(before, "ok"),
+            lowered: {
+              ok: countOf(lowered, "ok"),
+              refused: countOf(lowered, "model.run_limit"),
+            },
+            other,
+            raised,
+            restored,
+            sent: fake.requests.length,
+          };
+        } finally {
+          setPolicy(configuredLimits);
+        }
+      }
+    );
+
+    expect(result).toStrictEqual({
+      before: 5,
+      lowered: { ok: 3, refused: 2 },
+      other: "ok",
+      raised: "model.run_limit",
+      restored: "ok",
+      sent: 10,
     });
   });
 

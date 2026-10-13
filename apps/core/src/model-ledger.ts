@@ -8,6 +8,7 @@ import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { DurableObject } from "cloudflare:workers";
 import {
   and,
@@ -30,6 +31,7 @@ import migrations from "./db/model-ledger/migrations/migrations.js";
 import {
   alerts,
   auditOutbox,
+  policy,
   requestScopes,
   requests,
   spend,
@@ -68,7 +70,13 @@ import { endedLineages, lineagesAsked } from "./run-lineage-ends.ts";
 //   were recorded reserved every scope under its own month, a run's on
 //   the run's monthly row, and settles there, never on a lineage's row. A
 //   lineage whose spend row was lost lost its request count too: rebuilt,
-//   it is used up.
+//   it is used up, under any quota policy.
+// - A lineage's request limit kept past a policy change: each admission
+//   carries the limit of the policy in force (model-budgets.ts) and is
+//   checked against it; the lineage's row keeps only its count. An
+//   admission under an older generation than one this ledger already saw
+//   is refused (`policyBehind`), so nothing is admitted under an older
+//   policy once an admission came under a newer one.
 // - The ledger fails or can't be reached: the gateway sends nothing
 //   unless its admission answered yes. An admission whose answer was lost
 //   may have committed: the gateway releases it only if it knows the
@@ -120,6 +128,9 @@ import { endedLineages, lineagesAsked } from "./run-lineage-ends.ts";
 //   it passes on a fixed wait, and to a guest, whose user scope is the
 //   member who invited them, it says only that the budget is used up
 //   (models.ts).
+
+/** The most provider requests any quota policy allows a run lineage. */
+const { lineageModelRequests } = platformLimits;
 
 /** The object's name: one ledger for the deployment. */
 const ledgerName = "deployment";
@@ -265,6 +276,11 @@ const admissionSchema = z
     deadline: z.int().positive(),
     /** When it is charged in full unless settled before, in ms since the epoch. */
     reconcileAt: z.int().positive(),
+    /**
+     * The generation of the quota policy its run lineage's request limit
+     * comes from; none for a request with no lineage.
+     */
+    policyGeneration: z.int().min(0).optional(),
   })
   .refine(({ deadline, reconcileAt }) => deadline <= reconcileAt, {
     message: "A request comes due no sooner than its deadline",
@@ -291,6 +307,12 @@ export type Admitted =
     }
   /** It admitted as many requests as it may: refused, for good. */
   | { ok: false; scope: LedgerScopeName; requests: true }
+  /**
+   * Its quota policy generation is lower than one an admission already
+   * carried: refused, reserving nothing, to be asked again under the
+   * policy in force.
+   */
+  | { ok: false; policyBehind: true }
   /**
    * Its ID was admitted before, for another request or one no longer
    * open: refused, reserving nothing.
@@ -488,6 +510,15 @@ export class ModelLedger extends DurableObject<Env> {
           alerted: 0,
         };
       }
+      if (
+        admission.policyGeneration !== undefined &&
+        !this.#policyCurrent(admission.policyGeneration)
+      ) {
+        return {
+          admitted: { ok: false, policyBehind: true } as const,
+          alerted: 0,
+        };
+      }
       const { price } = admission;
       const unpriced = [price, ...price.tiers].some(
         (rates) => rates.input === 0 || rates.output === 0
@@ -560,6 +591,7 @@ export class ModelLedger extends DurableObject<Env> {
           dispatchedAt: now,
           deadline: admission.deadline,
           reconcileAt: admission.reconcileAt,
+          policyGeneration: admission.policyGeneration ?? null,
         })
         .run();
       for (const {
@@ -871,12 +903,36 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
+   * Whether an admission under quota policy `generation` may go on: no
+   * admission carried a higher one. Records it as the highest when it is.
+   * Inside a transaction.
+   */
+  #policyCurrent(generation: number): boolean {
+    const highest = this.#db
+      .select({ generation: policy.generation })
+      .from(policy)
+      .where(eq(policy.id, 0))
+      .get()?.generation;
+    if (highest !== undefined && highest > generation) {
+      return false;
+    }
+    if (highest === undefined || highest < generation) {
+      this.#db
+        .insert(policy)
+        .values({ id: 0, generation })
+        .onConflictDoUpdate({ target: policy.id, set: { generation } })
+        .run();
+    }
+    return true;
+  }
+
+  /**
    * Rebuilds the damaged spend of `kept`, which holds `holds` (none when
    * its row is missing), in the period `row` reserved against: its
    * reservation becomes what the other open requests on it reserve. A
    * missing row is recreated only when they reserve something, or when it
    * is a run lineage's: the row took the lineage's count with it, so it
-   * comes back used up (`requests` at its limit), and the lineage makes no
+   * comes back used up (`requests` at the most any policy allows), and the lineage makes no
    * more requests. What it rebuilt to, none when nothing was written, and
    * the count it set. Inside a transaction.
    */
@@ -901,8 +957,12 @@ export class ModelLedger extends DurableObject<Env> {
         .run();
       return { micros };
     }
+    // Used up under any policy: none allows a lineage more than the
+    // platform's limit, which the limit it was admitted under may be below.
     const exhausted =
-      period === lineagePeriod ? (kept.limitRequests ?? undefined) : undefined;
+      period === lineagePeriod
+        ? Math.max(kept.limitRequests ?? 0, lineageModelRequests)
+        : undefined;
     if (micros === 0 && exhausted === undefined) {
       return { micros: null };
     }
