@@ -27,8 +27,9 @@ jobs:
     name: check
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    # A passing run takes 9 to 12 minutes, most of it `vp test`.
-    timeout-minutes: 20
+    # Most of a run is `vp test`, whose step may take 24 minutes (below);
+    # the rest is room for the steps around it.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,7 +47,10 @@ jobs:
       - run: vp run check:docs
       - run: vp run check:migrations
       - run: vp run check:wrangler-configs
-      # 8 to 10.5 minutes when it passes. Vitest's default runs a worker per
+      # 8 to 10.5 minutes when it passed with fewer tests; at about 5,300
+      # tests (October 2026) one passing run reached the old 16-minute
+      # limit. Until the job is sharded, the step has 24 minutes and the
+      # job 30. Vitest's default runs a worker per
       # CPU but one, which left a third of the runner's CPU idle; a worker
       # per CPU measured about 6% faster.
       # Vitest times a test out from inside its worker, so a worker that is
@@ -54,8 +58,8 @@ jobs:
       # The stall reporter (scripts/stall-reporter.ts) names such a test or
       # file and ends the run once it is well past its timeout. A hang
       # outside any test (teardown, shutting the pool down) fails at this
-      # step's timeout after 16 minutes, instead of at the job's limit: half
-      # again over the slowest pass. A minute before that, the reporter
+      # step's timeout after 24 minutes, instead of at the job's limit. Two
+      # minutes before that, the reporter
       # prints the files and tests still running, and each finished test is
       # in the test-progress artifact. "0 files, 0 tests" there means the
       # hang is in teardown or in shutting the pool down. A run that doesn't
@@ -65,9 +69,11 @@ jobs:
       # Reporters given here replace Vitest's defaults, so github-actions is
       # listed for the inline failure annotations.
       - run: vp test --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
-        timeout-minutes: 16
+        timeout-minutes: 24
         env:
-          GRASP_STALL_REPORT_AFTER_MINUTES: 15
+          # Below the step's timeout, so the reporter says what still runs
+          # before the step is killed.
+          GRASP_STALL_REPORT_AFTER_MINUTES: 22
           # Seconds past a test's own timeout (counted for each attempt):
           # room for the hooks around it, which have timeouts of their own.
           # The longest is 120 s, set by workerflow's process tests
