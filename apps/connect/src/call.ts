@@ -18,7 +18,7 @@ import {
 import type { Connection } from "./connections.ts";
 import { nativeAction, nativeServer } from "./connectors.ts";
 import { hashCall, idempotencyStore, replay } from "./idempotency.ts";
-import type { StoredAnswer } from "./idempotency.ts";
+import type { Repeat, StoredAnswer } from "./idempotency.ts";
 import { McpError } from "./mcp.ts";
 import type {
   McpServer,
@@ -83,9 +83,15 @@ const heldAnswer: StoredAnswer = {
   failed: false,
 };
 
-/** Knows once the action is found whether it has a side effect. */
-export interface CallProgress {
+/**
+ * How far a call got: whether its action has a side effect (once found),
+ * whether it was answered as a repeat of an earlier call (`replayed`), and
+ * whether it claimed its key to go out (`claimed`): from then on, an error
+ * leaves its outcome unknown.
+ */
+export interface CallProgress extends Repeat {
   sideEffect?: boolean;
+  claimed?: boolean;
 }
 
 type Input = Record<string, Json>;
@@ -247,7 +253,12 @@ export const heldOutcome = async (
     if (reason === undefined) {
       throw error;
     }
-    // Its outcome is unknown, or its answer is no longer kept.
+    // Sent, and nobody can tell whether it took effect: never "failed",
+    // which would read as "not done".
+    if (reason === "connect.outcome_unknown") {
+      return { outcome: { state: "unknown", reason } };
+    }
+    // Its answer is no longer kept.
     return { outcome: { state: "failed", reason, output: null } };
   }
   return {
@@ -334,7 +345,9 @@ export const carryOut = async (
   // out, not even a look at the server's tools.
   const inputHash = await hashCall(resource, input);
   const store = storeOf(env, claims, call, inputHash);
-  const stored = await store?.replay();
+  // Only a side effect has a stored row: one found makes this a repeat
+  // (`progress.replayed`), answered or refused as the earlier call ended.
+  const stored = await store?.replay(progress);
   if (stored !== undefined) {
     progress.sideEffect = true;
     return { ...stored, sideEffect: true, replayed: true };
@@ -389,10 +402,13 @@ export const carryOut = async (
   }
   // Every refusal is behind: only now may a token be read.
   const server = await open();
-  const earlier = await store.claim();
+  const earlier = await store.claim(progress);
   if (earlier !== undefined) {
     return { ...earlier, sideEffect, replayed: true };
   }
+  // Claimed: the call may go out now, so whatever fails from here on
+  // (spending or freeing the key included) leaves its outcome unknown.
+  progress.claimed = true;
   let done: McpToolResult;
   try {
     done = withProvenance(

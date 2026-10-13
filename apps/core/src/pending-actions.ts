@@ -213,7 +213,16 @@ export const confirmPendingAction = async (
     // Only when this confirmation took it (`markTaken`): a refused one
     // tells nothing, whatever another decision did meanwhile.
     if (wasTaken(error)) {
-      await tellChat(env, held, identity.userId, "failed");
+      // Sent, with no answer: it may have been carried out, which a
+      // failure would deny.
+      await tellChat(
+        env,
+        held,
+        identity.userId,
+        connectErrors.codeOf(error) === "connect.outcome_unknown"
+          ? "unknown"
+          : "failed"
+      );
     }
     throw error;
   }

@@ -401,4 +401,57 @@ describe("the audit log", () => {
       { outcome: "unknown", reason: "connect.outcome_unknown" },
     ]);
   });
+
+  it("records a side effect as unknown when spending its key fails after it went out", async () => {
+    const connectionId = await addConnection();
+    server.network = "drop";
+    // The database refuses to spend the key once the answer was lost.
+    const prepare = env.DB.prepare.bind(env.DB);
+    vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
+      if (query.startsWith('update "idempotent_calls" set "state"')) {
+        throw new Error("D1 is unavailable");
+      }
+      return prepare(query);
+    });
+    await expect(
+      outcome(callAs(anna, write(connectionId, "mail.send")))
+    ).resolves.toBe("connect.outcome_unknown");
+    const audited = await audit.events();
+    expect(audited.map((event) => event.detail)).toMatchObject([
+      {
+        outcome: "unknown",
+        reason: "connect.outcome_unknown",
+        sideEffect: true,
+      },
+    ]);
+  });
+
+  it("marks a repeat answered from its key's earlier call, so it isn't counted as a send", async () => {
+    const connectionId = await addConnection();
+    const sent = write(connectionId, "mail.send");
+    await callAs(anna, sent);
+    await callAs(anna, sent);
+    const lost = write(connectionId, "mail.send");
+    server.network = "drop";
+    await outcome(callAs(anna, lost));
+    await outcome(callAs(anna, lost));
+    const audited = await audit.events();
+    const details = audited.map((event) => event.detail);
+    expect(details).toMatchObject([
+      { outcome: "ok", sideEffect: true },
+      { outcome: "replayed", sideEffect: true, replayed: true },
+      { outcome: "unknown", reason: "connect.outcome_unknown" },
+      {
+        outcome: "unknown",
+        reason: "connect.outcome_unknown",
+        sideEffect: true,
+        replayed: true,
+      },
+    ]);
+    // The calls that went out say nothing of repeats.
+    expect(
+      [details[0], details[2]].map((detail) => detail?.replayed)
+    ).toStrictEqual([undefined, undefined]);
+    expect(server.ran).toHaveLength(2);
+  });
 });

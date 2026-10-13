@@ -6,7 +6,10 @@
  * what they return, and how the network between them fails, and read back
  * which tools actually ran.
  */
-import { notPerformedMetaKey } from "@grasp-os/connector-kit/manifest";
+import {
+  notPerformedMetaKey,
+  outcomeUnknownMetaKey,
+} from "@grasp-os/connector-kit/manifest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { afterEach, beforeEach, vi } from "vite-plus/test";
@@ -36,6 +39,8 @@ export interface FakeResult {
   isError?: boolean;
   /** Its failed result says it did nothing (`notPerformedMetaKey`). */
   notPerformed?: boolean;
+  /** Its failed result says its outcome is unknown (`outcomeUnknownMetaKey`). */
+  outcomeUnknown?: boolean;
 }
 
 /**
@@ -125,8 +130,14 @@ const serverWith = (tools: readonly FakeTool[], ran: Ran[]): McpServer => {
       },
       async (input: Record<string, unknown>) => {
         ran.push({ tool: tool.name, input });
-        const { output, content, provenance, isError, notPerformed } =
-          await tool.run(input);
+        const {
+          output,
+          content,
+          provenance,
+          isError,
+          notPerformed,
+          outcomeUnknown,
+        } = await tool.run(input);
         return {
           content: content ?? [
             { type: "text" as const, text: JSON.stringify(output) },
@@ -138,6 +149,9 @@ const serverWith = (tools: readonly FakeTool[], ran: Ran[]): McpServer => {
               ? {}
               : { "grasp-os/provenance": provenance }),
             ...(notPerformed === true ? { [notPerformedMetaKey]: true } : {}),
+            ...(outcomeUnknown === true
+              ? { [outcomeUnknownMetaKey]: true }
+              : {}),
           },
         };
       }

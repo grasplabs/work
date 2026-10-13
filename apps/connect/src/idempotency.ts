@@ -31,10 +31,13 @@ import { idempotentCalls } from "./db/schema.ts";
 //   every repeat is `connect.outcome_unknown`, and nothing is sent again.
 // - The provider answers the write with a server error (5xx), which may
 //   come after it acted: the connector kit says the outcome is unknown
-//   (`outcomeUnknownMetaKey`), and connect spends the key the same way. The
-//   error is never kept as the answer: a stored failure would tell every
-//   repeat the action failed, and code that read that as "nothing was
-//   sent" could send it again under a fresh key.
+//   (`outcomeUnknownMetaKey`), and connect spends the key the same way.
+//   For a native connector the error is never kept as the answer: a stored
+//   failure would tell every repeat the action failed, and code that read
+//   that as "nothing was sent" could send it again under a fresh key. A
+//   Composio or other remote tool's error result is still kept as the
+//   action's failure (`failed`), even when it acted first, unless the tool
+//   itself says the outcome is unknown: telling those apart is GRA-539.
 // - The provider takes the write, and its answer can't be read (not what
 //   the connector expects, past the size limit): it went through, but what
 //   it made can't be told, so the same.
@@ -44,10 +47,15 @@ import { idempotentCalls } from "./db/schema.ts";
 //   provider answered before acting, is the action's failure.
 // - Connect stores the answer and its audit events in one batch, and that
 //   batch fails: the effect happened, unrecorded; the key is spent.
-// - A server lies. Saying it did nothing is believed only of a native
-//   connector, whose code is reviewed: a remote server that acted and said
-//   it hadn't would have its effect run twice. Saying the outcome is
-//   unknown is believed of any server: it can only stop a repeat.
+// - A server lies. A tool result saying it did nothing
+//   (`notPerformedMetaKey`) is believed only of a native connector, whose
+//   code is reviewed. Saying the outcome is unknown is believed of any
+//   server: it can only stop a repeat, and it wins over "did nothing" in
+//   the same result. But a call any server turned away at the transport
+//   (HTTP 401 or 403, a JSON-RPC parse error or no such method) frees the
+//   key, a remote server's included: one that acted and then answered 401
+//   would have its effect run again on a repeat. Closing that for remote
+//   servers is GRA-539.
 // - A call is cancelled, fenced or its permission revoked after it was
 //   sent: what it did stays recorded as it ended (done, failed or
 //   unknown), never as undone; a later call needs a capability core signs
@@ -162,6 +170,11 @@ const retainable = (output: string): string | null =>
     ? output
     : null;
 
+/** Set once a call is answered from an earlier call's stored row. */
+export interface Repeat {
+  replayed?: boolean;
+}
+
 /** The idempotency store for one key: see the module comment. */
 export const idempotencyStore = (
   database: D1Database,
@@ -178,17 +191,26 @@ export const idempotencyStore = (
     /** The stored row of an earlier call with this key, as it is. */
     find,
 
-    /** The stored answer of an earlier call with this key, if there was one. */
-    replay: async (): Promise<StoredAnswer | undefined> => {
+    /**
+     * The stored answer of an earlier call with this key, if there was one.
+     * `seen.replayed` says the call was answered (or refused) as a repeat,
+     * so its audit event isn't counted as a send.
+     */
+    replay: async (seen: Repeat = {}): Promise<StoredAnswer | undefined> => {
       const row = await find();
-      return row === undefined ? undefined : replay(row, inputHash, Date.now());
+      if (row === undefined) {
+        return undefined;
+      }
+      seen.replayed = true;
+      return replay(row, inputHash, Date.now());
     },
 
     /**
      * Claims the key for a call about to go out: undefined once claimed. If
-     * another call claimed it first, answers as a repeat of that call.
+     * another call claimed it first, answers as a repeat of that call
+     * (`seen.replayed`).
      */
-    claim: async (): Promise<StoredAnswer | undefined> => {
+    claim: async (seen: Repeat = {}): Promise<StoredAnswer | undefined> => {
       const now = Date.now();
       const [, claimed] = await db.batch([
         // Expired answers are dropped; the index on created_at keeps it
@@ -223,6 +245,9 @@ export const idempotencyStore = (
         return undefined;
       }
       const row = await find();
+      if (row !== undefined) {
+        seen.replayed = true;
+      }
       const earlier =
         row === undefined ? undefined : replay(row, inputHash, now);
       if (earlier === undefined) {

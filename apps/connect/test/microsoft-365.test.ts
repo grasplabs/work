@@ -896,17 +896,17 @@ describe("the Microsoft 365 connector's writes whose outcome can't be confirmed"
     expect(graph.writesDone()).toBe(1);
     expect(writesSent()).toBe(1);
     // Recorded as of unknown outcome, never as a failure a caller could
-    // take for "nothing was sent".
+    // take for "nothing was sent"; the repeats as repeats, not sends.
     const audited = await audit.events();
-    expect(
-      audited
-        .filter(({ action }) => action === "connection.call")
-        .map(({ detail }) => detail)
-    ).toMatchObject([
+    const details = audited
+      .filter(({ action }) => action === "connection.call")
+      .map(({ detail }) => detail);
+    expect(details).toMatchObject([
       { outcome: "unknown", reason: "connect.outcome_unknown" },
-      { outcome: "unknown", reason: "connect.outcome_unknown" },
-      { outcome: "unknown", reason: "connect.outcome_unknown" },
+      { outcome: "unknown", reason: "connect.outcome_unknown", replayed: true },
+      { outcome: "unknown", reason: "connect.outcome_unknown", replayed: true },
     ]);
+    expect(details[0]?.replayed).toBeUndefined();
   });
 
   it("say a write Graph answered with a server error is of unknown outcome, but one it refused failed", async () => {
