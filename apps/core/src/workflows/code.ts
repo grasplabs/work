@@ -12,6 +12,7 @@ import type { ParamKind } from "@grasp-os/sdk/params";
 import type { AppFiles } from "@grasp-os/shared/apps";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   paramDeclarationSchema,
   paramDeclarationsSchema,
@@ -148,13 +149,20 @@ const declaredMetadataSchema = z.object({
  * How workflow code runs: as App server code does, with more CPU. One load
  * runs the workflow from its start (finished steps replayed) to its next
  * wait, where one App call runs one method.
+ *
+ * Its CPU time is a workflow attempt's (spec 18.1, 30 seconds), and the
+ * Loader bounds each call into the isolate by it. An attempt's code runs
+ * within one such call, with whatever else that call runs (the replay
+ * before it, other attempts), so no attempt gets more, retried or not.
+ * Its wall time is the engine's to end, at each attempt's timeout
+ * (host.ts, `stepConfig`).
  */
 const workflowSandbox = {
   ...sandbox,
   // `AsyncLocalStorage` only, for a run's bindings: which attempt of a
   // step a call comes from (`runBindings`).
   compatibilityFlags: [...sandbox.compatibilityFlags, "nodejs_als"],
-  limits: { cpuMs: 30_000 },
+  limits: { cpuMs: platformLimits.workflowAttemptCpuMs },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
 /**

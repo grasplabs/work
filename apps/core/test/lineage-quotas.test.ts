@@ -131,13 +131,13 @@ const working = (name: string, ms: number) =>
   });`;
 
 /**
- * A workflow whose one step declares 40 retries, and whose every attempt
- * counts itself, then hangs until it times out.
+ * A workflow whose one step declares the most retries a step may, and
+ * whose every attempt counts itself, then hangs until its second is over.
  */
 const hanging = (name: string) =>
   workflowFiles(
     name,
-    `  return await step.do("hang", { description: "Hang", timeout: "1 second", retries: { limit: 40, delay: 1, backoff: "constant" } }, async () => {
+    `  return await step.do("hang", { description: "Hang", timeout: "1 second", retries: { limit: 4, delay: 1, backoff: "constant" } }, async () => {
     await env.APP.call("hit", "${name}");
     await new Promise(() => {});
   });`,
@@ -279,7 +279,7 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     });
   });
 
-  it("try a step no more often than a step may be tried, however many retries its workflow declares, and fewer once the operator lowers it", async () => {
+  it("try a step no more often than a step may be tried, declaring the most retries it may, and fewer once the operator lowers it", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(builder, {
       ...hanging("declared"),
@@ -315,34 +315,96 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
     });
   });
 
-  it("resume a run whose steps the engine journaled with the retries they declared, holding them to the ceiling only as each attempt is admitted", async () => {
+  it("give an attempt a minute when its step declares no timeout, as long as it declares when shorter, and the same again when the run resumes and replays it", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(
       builder,
       workflowFiles(
         "resumes",
-        `  await step.do("a", { description: "First", retries: { limit: 40, delay: 1 } }, async () => 1);
+        `  await step.do("a", { description: "First" }, async () => 1);
+  await step.do("b", { description: "Tight", timeout: "5 seconds" }, async () => 2);
   await step.sleep("go", { description: "Wait", duration: "1 day" });
-  return await step.do("b", { description: "Second" }, async () => 2);`,
-        { a: 1, b: 2 }
+  return await step.do("c", { description: "Third" }, async () => 3);`,
+        { a: 1, b: 2, c: 3 }
       )
     );
     const run = await builder.api.workflows.start(app, "resumes");
     await sleeping(run.id, "go");
-    // The step's config as a release before the quota policy journaled
-    // it: its 40 retries as declared. A replay must give the same.
-    await runInDurableObject(runObject(run.id), (_object, state) => {
-      state.storage.sql.exec(
-        `UPDATE steps SET config = json_set(config, '$.limit', 40) WHERE name = 'a'`
-      );
-    });
+    // A new activation replays a and b, which the engine journaled: their
+    // configs must be given the same again, or the run halts.
     await woken(run.id, "go");
+    await finished(run.id);
+    const { status, output } = await builder.api.workflows.status(run.id);
+    // How long the engine let each attempt run, from its claim to the
+    // deadline it ends it at, as its journal has it.
+    const allowed = await runInDurableObject(
+      runObject(run.id),
+      (_object, state) =>
+        state.storage.sql
+          .exec<{ name: string; ms: number }>(
+            `SELECT steps.name AS name, attempts.deadline - attempts.started_at AS ms
+             FROM steps JOIN attempts ON attempts.ordinal = steps.ordinal
+             WHERE steps.type = 'do' AND steps.name IN ('a', 'b', 'c') ORDER BY steps.name`
+          )
+          .toArray()
+    );
+    // And what each attempt held of its lineage's active time.
+    const held = await env.DB.prepare(
+      "SELECT max(reserved_ms) AS most FROM run_lineage_attempts WHERE run_id = ?"
+    )
+      .bind(run.id)
+      .first<{ most: number }>();
+
+    expect({ status, output, allowed }).toStrictEqual({
+      status: "completed",
+      output: 3,
+      allowed: [
+        { name: "a", ms: 60_000 },
+        { name: "b", ms: 5000 },
+        { name: "c", ms: 60_000 },
+      ],
+    });
+    expect(held?.most).toBeLessThanOrEqual(60_000);
+  });
+
+  it("refuse a step that declares a longer attempt or more retries than the platform allows, written past the SDK, without running it", async () => {
+    const builder = await signedInApi(idp, "builder");
+    // Written by hand, past the SDK: the host is the boundary, not the SDK.
+    const app = await appWith(builder, {
+      "workflows/wide.ts": `export default {
+  metadata: { id: "wide", params: [] },
+  run: async (engine) => {
+    const outcome = async (name, options) => {
+      try {
+        return await engine.do(name, options, async () => "ran");
+      } catch (error) {
+        return error.code ?? error.message;
+      }
+    };
+    return {
+      longer: await outcome("longer", { timeout: 60_001 }),
+      retried: await outcome("retried", { retries: { limit: 5 } }),
+      within: await outcome("within", { timeout: 60_000, retries: { limit: 4 } }),
+    };
+  },
+};
+`,
+      "workflows/wide.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+import definition from "./wide.ts";
+export default workflowTests(definition, [{ name: "runs", expect: {} }]);
+`,
+    });
+    const run = await builder.api.workflows.start(app, "wide");
     await finished(run.id);
     const { status, output } = await builder.api.workflows.status(run.id);
 
     expect({ status, output }).toStrictEqual({
       status: "completed",
-      output: 2,
+      output: {
+        longer: "workflow.invalid",
+        retried: "workflow.invalid",
+        within: "ran",
+      },
     });
   });
 
@@ -472,7 +534,7 @@ ${working("c", 10)}
       builder,
       workflowFiles(
         "slow",
-        `  await step.do("work", { description: "Work", timeout: "2 minutes" }, async () => {
+        `  await step.do("work", { description: "Work" }, async () => {
     await scheduler.wait(3000);
     return 1;
   });

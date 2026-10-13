@@ -2,7 +2,10 @@
 // SDK: neither workflow code nor the runtime imports this module.
 
 import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
-import { maxAttemptTimeoutMs } from "@grasp-os/shared/workflows";
+import {
+  maxAttemptTimeoutMs,
+  maxStepRetries,
+} from "@grasp-os/shared/workflows";
 import type { StepKind } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
@@ -127,22 +130,30 @@ const common = {
   ),
 };
 
+// Refused here, where the step is written, rather than held to the
+// platform's ceilings at run time without the author seeing it: a
+// declaration may only be stricter (spec 18.1). The host refuses the same
+// for code that gets past the SDK.
 const retries = option(
   z
     .strictObject({
-      // Cloudflare Workflows allows at most this many.
-      limit: z.int().min(0).max(10_000),
+      limit: z
+        .int()
+        .min(0)
+        .max(maxStepRetries, {
+          message: `A step retries at most ${maxStepRetries} times, ${maxStepRetries + 1} attempts in all`,
+        }),
       delay: durationSchema.optional(),
       backoff: z.enum(["constant", "linear", "exponential"]).optional(),
     })
     .optional(),
   "value"
 );
-/** How long one attempt of a step may run: up to 14 minutes. */
+/** How long one attempt of a step may run: up to a minute. */
 const attemptTimeoutSchema = durationSchema.refine(
   (milliseconds) => milliseconds <= maxAttemptTimeoutMs,
   {
-    message: `A step attempt's timeout is at most ${maxAttemptTimeoutMs / 60_000} minutes, e.g. "10 minutes": a longer step is split into steps, or waits with step.sleep or a decision`,
+    message: `A step attempt's timeout is at most ${maxAttemptTimeoutMs / 1000} seconds, e.g. "30 seconds": a longer step is split into steps, or waits with step.sleep or a decision`,
   }
 );
 const attemptTimeout = option(attemptTimeoutSchema.optional(), "value");

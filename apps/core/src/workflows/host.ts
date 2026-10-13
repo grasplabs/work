@@ -22,6 +22,7 @@ import {
   isRetryable,
   paramsStep,
   maxAttemptTimeoutMs,
+  maxStepRetries,
   stepIdempotencyKey,
   inboundEmailIndexSchema,
   storedEmailSchema,
@@ -339,10 +340,14 @@ const milliseconds = z
   .positive()
   .max(365 * 86_400_000);
 
+// What a step may declare: no more retries, and no longer an attempt,
+// than the platform allows (spec 18.1). The SDK refuses wider ones where
+// the step is written; code that gets past it is refused here, never
+// held to less without saying so.
 const doOptionsSchema = z.object({
   retries: z
     .object({
-      limit: z.int().min(0).max(10_000),
+      limit: z.int().min(0).max(maxStepRetries),
       delay: milliseconds.optional(),
       backoff: z.enum(["constant", "linear", "exponential"]).optional(),
     })
@@ -487,16 +492,21 @@ const defaultRetryLimit = 5;
 
 /**
  * The step config the engine takes: what the SDK gave, its defaults
- * where it gave none, exactly as the engine has always journaled it.
+ * where it gave none, as the engine journals it.
  *
- * Never held to the platform's ceiling on a step's attempts here: the
- * engine journals a step's config, and a replay must give it the same,
- * so any change to what this returns for a step (a clamp, another
- * default, another `defaultRetryDelayMs`) halts every run in flight on
- * replay. The ceiling (spec 18.1's five attempts, all counted, or the
- * operator's lower one) is enforced as each attempt is admitted instead
- * (quotas.ts, `admitAttempt`), which refuses an attempt past it, and
- * `isLastAttempt` takes it into account.
+ * An attempt always runs under a timeout of the platform's, a minute when
+ * the step declares none (spec 18.1's active wall time): the engine's own
+ * default is ten minutes, and the engine ends an attempt at its timeout,
+ * whatever its code still does. The engine journals a step's config, and
+ * a replay must give it the same, so any change to what this returns for
+ * a step (a clamp, another default, another `defaultRetryDelayMs`) halts
+ * the runs in flight that journaled the old one on replay.
+ *
+ * Its retries are what the step declared, at most `maxStepRetries`
+ * (`doOptionsSchema`). The ceiling on its attempts (spec 18.1's five, all
+ * counted, or the operator's lower one) is enforced as each attempt is
+ * admitted (quotas.ts, `admitAttempt`), which refuses an attempt past it,
+ * and `isLastAttempt` takes it into account.
  */
 const stepConfig = ({
   retries,
@@ -511,7 +521,7 @@ const stepConfig = ({
           backoff: retries.backoff ?? "exponential",
         },
       }),
-  ...(timeout === undefined ? {} : { timeout }),
+  timeout: timeout ?? maxAttemptTimeoutMs,
 });
 
 /**
@@ -680,6 +690,14 @@ export interface BusyRefusals {
  *   it was given up on (it timed out while the gateway answered), which
  *   the step's next attempt asking the same takes instead of asking, and
  *   paying, again.
+ *
+ * This is how an AI step whose model takes longer than an attempt's
+ * minute is served, rather than by an exception to that minute: the call
+ * is core's, not the step's code, and runs on, as long as the gateway
+ * lets one (`models.ts`, its timeout), while the step's next attempts
+ * wait for it, each within its own minute. A step that runs out of
+ * attempts first fails as timed out; one whose model is that slow is
+ * split into smaller calls.
  */
 export interface AiCalls {
   asking: Map<string, Promise<unknown>>;

@@ -40,8 +40,9 @@ import {
 //
 // - A retry starting afresh: an attempt is admitted against the lineage's
 //   counters, which only grow, and its number, which the engine journals,
-//   against the attempts a step may have; a step's retries are held to
-//   that ceiling whatever its code declares (host.ts, `stepConfig`).
+//   against the attempts a step may have, whatever its code declares; a
+//   step declaring more retries than the platform's is refused (host.ts,
+//   `doOptionsSchema`).
 // - A restart or a new activation starting afresh: nothing is counted in
 //   memory. An activation that runs an attempt again is admitted again:
 //   the attempt runs, and uses time, again.
@@ -61,17 +62,15 @@ import {
 //   admission. A late settle changes nothing: an attempt settles once.
 //
 // What an attempt holds while it runs is its allowance up to its
-// deadline, but no more than an attempt's default active wall time
-// (`platformLimits.workflowAttemptWallMs`, a minute): an attempt's timeout
-// (ten minutes by default, as long as 14) is what it may take, not what it
-// usually does, and holding all of it would let three attempts of a
-// lineage keep every other attempt of it waiting for minutes. What it
-// settles with is what it used, up to its deadline, held or not. So
-// attempts running at once can take a lineage past its active time by
-// what each runs past its minute; the attempt wall-time ceiling (60
-// seconds, GRA-532) makes the hold exact.
+// deadline, which is never more than an attempt's active wall time
+// (`platformLimits.workflowAttemptWallMs`, a minute): the most a step may
+// declare, and what it gets when it declares none (host.ts,
+// `stepConfig`). The hold is capped at that minute here too, so a
+// deadline from anywhere else can't hold more. What it settles with is
+// what it used, up to its deadline.
 // - A resource declaring wider limits: none reaches here. What a workflow
-//   declares can only lower what applies to it (host.ts, `stepConfig`).
+//   declares can only lower what applies to it (host.ts,
+//   `doOptionsSchema`).
 // - The operator raising a limit: the policy's schema refuses a value
 //   above the platform's (quota-policy.ts); a var that doesn't parse is
 //   never one without limits.
