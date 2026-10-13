@@ -29,9 +29,9 @@ import {
   attemptCallLabels,
 } from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
+import { cancelRun } from "../src/workflows/controls.ts";
 import { RunHost } from "../src/workflows/host.ts";
 import { keepMessage } from "../src/workflows/kept-email.ts";
-import { cancelRun } from "../src/workflows/runs.ts";
 import { requestGranted, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";

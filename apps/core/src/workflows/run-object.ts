@@ -275,7 +275,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
 
   /**
    * Marks the run cancelled in its object, the first step of a cancel and
-   * its record (runs.ts, `cancelRun`): who cancelled it and when, kept with
+   * its record (controls.ts, `cancelRun`): who cancelled it and when, kept with
    * the run until the cancel is done in core's database and the engine
    * (`settleCancel`). From then on no attempt of the run holds
    * (`#leaseOf`), so every fenced call of it is refused at once, in this
