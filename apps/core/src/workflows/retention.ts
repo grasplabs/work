@@ -173,6 +173,8 @@ const marked = (
       .update(workflowRuns)
       .set({
         detailsRemovedAt: now,
+        // A summary showing the message is out of date: its next revision.
+        summaryRevision: sql`${workflowRuns.summaryRevision} + 1`,
         // Null stays null: only a failed run has a report.
         failure: sql`json_set(${workflowRuns.failure}, '$.error.message', '', '$.step', ${unkeyed(step)})`,
       })

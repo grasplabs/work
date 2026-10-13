@@ -50,6 +50,7 @@ export interface FrameTarget {
   run: (run: string) => Promise<unknown>;
   decide: (run: string, decision: string, answer: unknown) => Promise<unknown>;
   control: (run: string, kind: string) => Promise<unknown>;
+  summary: (run: string) => Promise<unknown>;
   watchRuns: (workflow: string, onChange: unknown) => Promise<unknown>;
 }
 
@@ -168,6 +169,11 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
   ): Promise<unknown> {
     this.#request();
     return await this.#target.decide(text(run), text(decision), answer);
+  }
+
+  async summary(run: unknown): Promise<unknown> {
+    this.#request();
+    return await this.#target.summary(text(run));
   }
 
   async control(run: unknown, kind: unknown): Promise<unknown> {

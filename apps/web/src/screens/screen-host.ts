@@ -289,6 +289,8 @@ const appTarget = (
         async (screens) =>
           await screens.decide(app, run, decision, forCore(answer))
       ),
+    summary: async (run) =>
+      await framed(async (screens) => await screens.summary(app, run)),
     control: async (run, kind) =>
       await framed(async (screens) => {
         if (kind !== "pause" && kind !== "resume" && kind !== "cancel") {
@@ -346,6 +348,7 @@ const previewTarget = (
     run: refusedInPreview,
     decide: refusedInPreview,
     control: refusedInPreview,
+    summary: refusedInPreview,
     watchRuns: async () =>
       await Promise.resolve({
         release: async () => {
