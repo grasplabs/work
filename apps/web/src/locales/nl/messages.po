@@ -1358,10 +1358,6 @@ msgstr "Koppeling {connectionId}"
 msgid "Connection {connectionId}, {resource}"
 msgstr "Koppeling {connectionId}, {resource}"
 
-#: src/engines/resource-bindings.tsx
-msgid "Connection {id}"
-msgstr "Verbinding {id}"
-
 #: src/dashboard/to-do.tsx
 msgid "Connections to sign in to again"
 msgstr "Verbindingen om opnieuw bij aan te melden"
@@ -2783,8 +2779,12 @@ msgid "Not enough is known yet. It can open once it is past {threshold}%, or onc
 msgstr "Er is nog niet genoeg bekend. Het kan open zodra het boven {threshold}% is, of zodra de interviews voorbij zijn."
 
 #: src/engines/resource-bindings.tsx
-msgid "Not every choice is listed: there are too many to check."
-msgstr "Niet elke keuze staat erbij: het zijn er te veel om te controleren."
+msgid "Not every choice could be checked, and none of those checked can serve it. Reload the page to check again."
+msgstr "Niet elke keuze kon worden gecontroleerd, en geen van de gecontroleerde kan hem bedienen. Laad de pagina opnieuw om nogmaals te controleren."
+
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice could be checked: some may be missing from the list."
+msgstr "Niet elke keuze kon worden gecontroleerd: er kunnen er in de lijst ontbreken."
 
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx

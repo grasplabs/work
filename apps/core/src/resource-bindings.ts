@@ -18,6 +18,7 @@ import {
 } from "@grasp-os/shared/resource-bindings";
 import type {
   BindingChoices,
+  BindingLabel,
   BindingState,
   BindingTarget,
   DeclaredResource,
@@ -36,6 +37,7 @@ import type { Release } from "./app-releases.ts";
 import { appFor, findApp } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
+import { personOf } from "./connections.ts";
 import { appResourceBindings, apps, permissions } from "./db/core/schema.ts";
 import { collections } from "./db/knowledge/schema.ts";
 import { gatewaySettings } from "./models.ts";
@@ -745,6 +747,103 @@ const usersOf = (release: Release, alias: string): string[] =>
     .map(([path]) => path)
     .toSorted();
 
+/**
+ * How a review names each of `rows`' own bound target, for anyone who may
+ * read the review, builders included: a connector binding's connection,
+ * as `by` can see it in their own connections (connect lists them a
+ * person's personal ones and the shared ones), and a knowledge binding's
+ * collections by name. Only the targets bound, never what else the App
+ * holds: that is an admin's choices.
+ */
+const targetLabels = async (
+  env: Env,
+  by: Identity,
+  rows: readonly Row[]
+): Promise<(row: Row) => BindingLabel> => {
+  const targets = new Map<string, BindingTarget>();
+  for (const row of rows) {
+    const target = bindingTargetSchema.safeParse(jsonOrUndefined(row.target));
+    if (target.success) {
+      targets.set(row.id, target.data);
+    }
+  }
+  const permissionIds = [
+    ...new Set(
+      [...targets.values()].flatMap((target) => {
+        if (target.kind === "connector") {
+          return [target.permissionId];
+        }
+        return target.kind === "knowledge"
+          ? Object.values(target.collections)
+          : [];
+      })
+    ),
+  ];
+  const objects =
+    permissionIds.length === 0
+      ? []
+      : await drizzle(env.DB)
+          .select({ id: permissions.id, objectId: permissions.objectId })
+          .from(permissions)
+          .where(inArray(permissions.id, permissionIds));
+  const objectOf = new Map(objects.map(({ id, objectId }) => [id, objectId]));
+  const connectorBound = [...targets.values()].some(
+    ({ kind }) => kind === "connector"
+  );
+  const visible = connectorBound
+    ? await env.CONNECT.listConnections(await personOf(env, by))
+    : [];
+  const collectionIds = [...targets.values()].flatMap((target) =>
+    target.kind === "knowledge"
+      ? Object.values(target.collections).flatMap(
+          (id) => objectOf.get(id) ?? []
+        )
+      : []
+  );
+  const named =
+    collectionIds.length === 0
+      ? []
+      : await drizzle(env.KNOWLEDGE)
+          .select({ id: collections.id, name: collections.name })
+          .from(collections)
+          .where(inArray(collections.id, [...new Set(collectionIds)]));
+  const nameOf = new Map(named.map(({ id, name }) => [id, name]));
+  return (row) => {
+    const target = targets.get(row.id);
+    if (target?.kind === "connector") {
+      const connectionId = objectOf.get(target.permissionId);
+      const connection = visible.find(({ id }) => id === connectionId);
+      return {
+        connection:
+          connection === undefined
+            ? null
+            : {
+                account: connection.accountName,
+                provider: connection.provider,
+              },
+        collections: {},
+      };
+    }
+    if (target?.kind === "knowledge") {
+      return {
+        connection: null,
+        collections: Object.fromEntries(
+          Object.entries(target.collections).map(([name, permission]) => {
+            const collection = objectOf.get(permission);
+            return [
+              name,
+              collection === undefined
+                ? null
+                : (nameOf.get(collection) ?? null),
+            ];
+          })
+        ),
+      };
+    }
+    return { connection: null, collections: {} };
+  };
+};
+
 /** What a review says of `declaration`, apart from how it is bound. */
 const declaredOf = (declaration: AnyResource) => {
   const kind = declaration["~resource"];
@@ -802,6 +901,8 @@ export const reviewResourceBindings = async (
   const grants = decides
     ? await reviewGrants(env, found.id, contracts)
     : undefined;
+  const declaredRows = declared.flatMap(([alias]) => byAlias.get(alias) ?? []);
+  const labelOf = await targetLabels(env, by, declaredRows);
   const resources = await Promise.all(
     declared.map(async ([alias, declaration]): Promise<DeclaredResource> => {
       const row = byAlias.get(alias);
@@ -813,7 +914,8 @@ export const reviewResourceBindings = async (
         ...declaredOf(declaration),
         usedBy: release === undefined ? [] : usersOf(release, alias),
         state: resolution?.state ?? "unbound",
-        binding: row === undefined ? null : toBinding(row),
+        binding:
+          row === undefined ? null : { ...toBinding(row), label: labelOf(row) },
         choices:
           grants === undefined
             ? null

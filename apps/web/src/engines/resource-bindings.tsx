@@ -3,7 +3,6 @@ import { templatePublicationSchema } from "@grasp-os/shared/resource-bindings";
 import type {
   BindingChoices,
   BindingState,
-  BindingTargetInput,
   DeclaredResource,
   ModelBindingBudget,
   PublishedTemplate,
@@ -49,6 +48,14 @@ import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { dollars, percent } from "../settings/money.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import {
+  allChosen,
+  firstChoice,
+  formKey,
+  noChoice,
+  targetOf,
+  templateKey,
+} from "./binding-form.ts";
 
 // What an engine's actions reach through its declared resources (core's
 // resource-bindings.ts): the models, integrations, knowledge and templates
@@ -144,27 +151,6 @@ const parsedJson = (
   }
 };
 
-/** A connection, as the page names it: its account and integration. */
-const ConnectionName = ({
-  id,
-  connections,
-}: {
-  id: string;
-  connections: ListedConnection[];
-}) => {
-  const connection = connections.find((listed) => listed.id === id);
-  if (connection === undefined) {
-    return <Trans>Connection {id}</Trans>;
-  }
-  const account = connection.accountName ?? connection.id;
-  const { provider } = connection;
-  return (
-    <Trans>
-      {account} on {provider}
-    </Trans>
-  );
-};
-
 /** A template version, as the page names it. */
 const TemplateName = ({
   templateId,
@@ -181,14 +167,10 @@ const TemplateName = ({
 /** What a resource's binding binds it to, named as far as the page can. */
 const BoundTo = ({
   binding,
-  choices,
-  connections,
 }: {
-  binding: ResourceBinding;
-  choices: BindingChoices | null;
-  connections: ListedConnection[];
+  binding: NonNullable<DeclaredResource["binding"]>;
 }) => {
-  const { target } = binding;
+  const { target, label } = binding;
   if (target.kind === "model") {
     return <span className="font-mono">{target.model}</span>;
   }
@@ -198,32 +180,24 @@ const BoundTo = ({
     );
   }
   if (target.kind === "connector") {
+    // Core names the bound connection for everyone who reads the review,
+    // while they can see it; its permission otherwise.
     const { permissionId: permission } = target;
-    const choice =
-      choices?.kind === "connector"
-        ? choices.permissions.find(
-            ({ permissionId }) => permissionId === permission
-          )
-        : undefined;
-    return choice === undefined ? (
-      <Trans>Permission {permission}</Trans>
-    ) : (
-      <ConnectionName connections={connections} id={choice.connectionId} />
+    if (label.connection === null) {
+      return <Trans>Permission {permission}</Trans>;
+    }
+    const { provider } = label.connection;
+    const account = label.connection.account ?? provider;
+    return (
+      <Trans>
+        {account} on {provider}
+      </Trans>
     );
   }
-  const names =
-    choices?.kind === "knowledge"
-      ? new Map(
-          choices.permissions.map(({ permissionId, name }) => [
-            permissionId,
-            name,
-          ])
-        )
-      : new Map<string, string | null>();
   return (
     <ul className="flex flex-col gap-0.5">
       {Object.entries(target.collections).map(([collection, permission]) => {
-        const name = names.get(permission) ?? permission;
+        const name = label.collections[collection] ?? permission;
         return (
           <li key={collection}>
             <Trans>
@@ -266,8 +240,25 @@ const Choice = ({
 };
 
 /** Why nothing can be chosen for a resource yet, by its kind. */
-const NothingToChoose = ({ resource }: { resource: DeclaredResource }) => {
+const NothingToChoose = ({
+  resource,
+  truncated,
+}: {
+  resource: DeclaredResource;
+  truncated: boolean;
+}) => {
   const { contract } = resource;
+  if (truncated) {
+    // Some were never checked: that none is listed doesn't mean none exists.
+    return (
+      <p className="text-muted-foreground max-w-prose">
+        <Trans>
+          Not every choice could be checked, and none of those checked can serve
+          it. Reload the page to check again.
+        </Trans>
+      </p>
+    );
+  }
   const reasons: Readonly<Record<DeclaredResource["kind"], ReactNode>> = {
     model: <Trans>This deployment allows no model.</Trans>,
     connector: (
@@ -290,63 +281,6 @@ const NothingToChoose = ({ resource }: { resource: DeclaredResource }) => {
       {reasons[resource.kind]}
     </p>
   );
-};
-
-/** Whether `choices` offer nothing to bind. */
-const noChoice = (choices: BindingChoices): boolean => {
-  if (choices.kind === "model") {
-    return choices.models.length === 0;
-  }
-  if (choices.kind === "template") {
-    return choices.versions.length === 0;
-  }
-  return choices.permissions.length === 0;
-};
-
-/** The first of each choice, as a form starts. */
-/** A template version as a choice names it: its template and version. */
-const templateKey = ({
-  templateId,
-  version,
-}: Pick<PublishedTemplate, "templateId" | "version">): string =>
-  `${templateId}@${version}`;
-
-const firstChoice = (choices: BindingChoices): string => {
-  if (choices.kind === "model") {
-    return choices.models[0] ?? "";
-  }
-  if (choices.kind === "template") {
-    const [newest] = choices.versions;
-    return newest === undefined ? "" : templateKey(newest);
-  }
-  return choices.permissions[0]?.permissionId ?? "";
-};
-
-/** The target the form's choice names. */
-const targetOf = (
-  choices: BindingChoices,
-  picked: string,
-  collections: Record<string, string>
-): BindingTargetInput | undefined => {
-  if (choices.kind === "model") {
-    return { kind: "model", model: picked };
-  }
-  if (choices.kind === "connector") {
-    return { kind: "connector", permissionId: picked };
-  }
-  if (choices.kind === "knowledge") {
-    return { kind: "knowledge", collections };
-  }
-  const version = choices.versions.find(
-    (published) => templateKey(published) === picked
-  );
-  return version === undefined
-    ? undefined
-    : {
-        kind: "template",
-        templateId: version.templateId,
-        version: version.version,
-      };
 };
 
 /** An admin's choice of what serves `resource`, and the approval of it. */
@@ -380,14 +314,17 @@ const BindForm = ({
     )
   );
   if (noChoice(choices)) {
-    return <NothingToChoose resource={resource} />;
+    return (
+      <NothingToChoose resource={resource} truncated={choices.truncated} />
+    );
   }
-  // Every declared collection needs its own choice before binding.
-  const chosen = Object.values(collections).every(
-    (permission) => permission !== ""
-  );
+  // Every collection declared now needs its own choice before binding;
+  // what is sent names those, and only those.
+  const chosen =
+    choices.kind !== "knowledge" ||
+    allChosen(resource.collections, collections);
   const submit = () => {
-    const target = targetOf(choices, picked, collections);
+    const target = targetOf(resource, choices, picked, collections);
     if (target === undefined) {
       return;
     }
@@ -467,7 +404,8 @@ const BindForm = ({
       {choices.truncated ? (
         <p className="text-muted-foreground max-w-prose">
           <Trans>
-            Not every choice is listed: there are too many to check.
+            Not every choice could be checked: some may be missing from the
+            list.
           </Trans>
         </p>
       ) : null}
@@ -700,11 +638,7 @@ const ResourceCard = ({
             <span className="text-muted-foreground">
               <Trans>Bound to</Trans>
             </span>
-            <BoundTo
-              binding={binding}
-              choices={choices}
-              connections={connections}
-            />
+            <BoundTo binding={binding} />
             {binding.budget === null ? null : (
               <Budget budget={binding.budget} />
             )}
@@ -810,19 +744,6 @@ const Undeclared = ({
   );
 };
 
-/** How many choices `resource` offers, so a form starts afresh when that changes. */
-const choiceCount = ({ choices }: DeclaredResource): number => {
-  if (choices === null) {
-    return 0;
-  }
-  if (choices.kind === "model") {
-    return choices.models.length;
-  }
-  return choices.kind === "template"
-    ? choices.versions.length
-    : choices.permissions.length;
-};
-
 /**
  * The engine's declared resources and their bindings; with the controls
  * when the viewer `decides` them (an admin of the organization).
@@ -886,9 +807,9 @@ export const ResourceBindings = ({
               busy={busy}
               connections={connections}
               decide={decide}
-              // A new binding, or a newly published version, starts its
-              // forms afresh, on the newest choice.
-              key={`${resource.alias}:${resource.binding?.id ?? "none"}:${choiceCount(resource)}`}
+              // Another version, declaration, binding or set of offers
+              // starts its forms afresh, on the newest choice.
+              key={formKey(app, version, resource)}
               resource={resource}
               version={version}
             />
