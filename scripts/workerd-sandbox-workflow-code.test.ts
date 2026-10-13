@@ -5,6 +5,8 @@
  * (workflows/code.ts), with `SANDBOX_HOST` bound to the supervisor
  * (workerd-sandbox.ts), so each runs in a session of its own.
  */
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -70,18 +72,36 @@ describe("a workflow's code read on the on-prem sandbox", () => {
   });
 
   it("ends a busy loop on the workflow's CPU time as the code's failure, while core keeps answering", async () => {
-    const busy = run("busy");
+    const state = { settled: false };
+    const busy = run("busy").finally(() => {
+      state.settled = true;
+    });
+    // Its session confirmed running before core is timed, and core timed
+    // all the while it runs: each answer counts only if the loop still ran
+    // when it came.
+    await expect
+      .poll(() => supervisor.stats().inFlight, {
+        timeout: 10_000,
+        interval: 20,
+      })
+      .toBe(1);
     const answers: number[] = [];
-    for (let i = 0; i < 4; i += 1) {
+    while (!state.settled) {
       // oxlint-disable-next-line no-await-in-loop -- one after another, during the loop
-      answers.push(await answerTime());
+      const ms = await answerTime();
+      if (supervisor.stats().inFlight === 1) {
+        answers.push(ms);
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a sample every so often
+      await sleep(200);
     }
     const outcome = await busy;
+    expect(answers.length).toBeGreaterThanOrEqual(4);
     expect(outcome.ok).toBeFalsy();
     expect(outcome.ok ? null : outcome.codes).toContain("CPU time");
     // Its 30 s of CPU time, and not the call's five minutes.
     expect(outcome.ms).toBeLessThan(40_000);
-    expect(Math.max(...answers)).toBeLessThan(ANSWER_MS);
+    expect(answers.filter((ms) => ms >= ANSWER_MS)).toStrictEqual([]);
   }, 60_000);
 
   it("takes code that doesn't load as the code's failure", async () => {
