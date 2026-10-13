@@ -31,7 +31,9 @@ import { newRecordId } from "./store-schemas.ts";
 // - A rollback to a version the migration left behind runs it over
 //   records it no longer fits, or refuses without saying what would fit:
 //   "refuses a rollback past the migration, naming the versions that
-//   still fit"; one to a version that fits is refused: same test.
+//   still fit"; one to a version that fits is refused, or a version whose
+//   receipt was abandoned is named beside another on its schema: same
+//   test.
 
 const placeholder = "0".repeat(64);
 
@@ -370,12 +372,29 @@ export default appTest({
     const again = await refusalOf(
       async () => await setCurrentVersion(env, fixture.owner, fixture.app, 1)
     );
+    // Version 4's receipt waited on a target an admin abandoned
+    // (store-abandon.ts): it never runs on the store, though version 3,
+    // on the same schema, does.
+    const abandoned = await runInDurableObject(
+      object,
+      (_instance, state) =>
+        state.storage.sql.exec(
+          "UPDATE sdk_schema_activations SET abandoned_at = ? WHERE resource_id = ? AND resource_version = 4",
+          Date.now(),
+          fixture.app
+        ).rowsWritten
+    );
+    const withoutAbandoned = await refusalOf(
+      async () => await setCurrentVersion(env, fixture.owner, fixture.app, 1)
+    );
 
     expect({
       toFirst,
       status: await object.schemaStatus(store.id, fixture.firstSchema),
       toThird: toThird.currentVersion,
       again,
+      abandoned,
+      withoutAbandoned,
     }).toStrictEqual({
       toFirst: {
         code: "migration.rollback_incompatible",
@@ -386,6 +405,11 @@ export default appTest({
       again: {
         code: "migration.rollback_incompatible",
         details: { compatible: [4, 3] },
+      },
+      abandoned: 1,
+      withoutAbandoned: {
+        code: "migration.rollback_incompatible",
+        details: { compatible: [3] },
       },
     });
   });
