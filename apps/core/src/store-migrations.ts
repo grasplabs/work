@@ -10,8 +10,9 @@ import { z } from "zod";
 
 import { migrationWork, records } from "./db/data-store/schema.ts";
 import {
-  transformBatchBytes,
   transformBatchMaxBytes,
+  transformBatchOverhead,
+  transformRecordBytes,
 } from "./migration-transform.ts";
 import { validates } from "./store-queries.ts";
 
@@ -157,18 +158,19 @@ const batchOf = (rows: readonly RecordRow[], owned: boolean): RecordRow[] => {
     return [];
   }
   const taken: RecordRow[] = [];
+  // A running total, as the transform measures its batch
+  // (`transformBatchBytes`): a record's stored text is its fields'
+  // canonical text, and each is measured once.
+  let bytes = transformBatchOverhead;
   for (const row of rows) {
     if (owned && row.ownerId !== first.ownerId) {
       break;
     }
-    // Measured as the transform measures its batch: a record's stored
-    // text is its fields' canonical text.
-    const bytes = transformBatchBytes(
-      [...taken, row].map(({ valueJson }) => valueJson)
-    );
-    if (taken.length > 0 && bytes > transformBatchMaxBytes) {
+    const added = transformRecordBytes(row.valueJson, taken.length > 0);
+    if (taken.length > 0 && bytes + added > transformBatchMaxBytes) {
       break;
     }
+    bytes += added;
     taken.push(row);
   }
   return taken;

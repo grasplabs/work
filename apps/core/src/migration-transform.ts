@@ -71,17 +71,33 @@ export const transformBatchMaxBytes = 2 * 1024 * 1024;
 
 const encoder = new TextEncoder();
 
+/** What a batch's array takes besides its records: its brackets. */
+export const transformBatchOverhead = 2;
+
+/**
+ * What one record's canonical text (`text`) adds to a batch: its UTF-8
+ * bytes, and the comma before it unless it is the first (`afterAnother`).
+ * A caller cutting a batch adds these up as it goes, measuring each
+ * record once, and lands where `transformBatchBytes` would.
+ */
+export const transformRecordBytes = (
+  text: string,
+  afterAnother: boolean
+): number => encoder.encode(text).byteLength + (afterAnother ? 1 : 0);
+
 /**
  * The bytes a batch of records takes as one JSON array of their fields'
  * canonical texts (`texts`): the brackets, the commas between them and
- * each text's UTF-8 bytes. The one measure both a transform's bound
- * (`requireBatch`) and the store cutting its batches (store-migrations.ts)
- * use, so a batch the store hands out always passes the transform's.
+ * each text's UTF-8 bytes. The transform's bound (`requireBatch`) uses
+ * it, and the store cutting its batches (store-migrations.ts) sums the
+ * same parts, so a batch the store hands out always passes the transform's.
  */
 export const transformBatchBytes = (texts: readonly string[]): number =>
-  2 +
-  Math.max(0, texts.length - 1) +
-  texts.reduce((sum, text) => sum + encoder.encode(text).byteLength, 0);
+  transformBatchOverhead +
+  texts.reduce(
+    (sum, text, index) => sum + transformRecordBytes(text, index > 0),
+    0
+  );
 
 /** The most bytes of JSON text a batch's answer may take. */
 export const transformAnswerMaxBytes = 4 * 1024 * 1024;
