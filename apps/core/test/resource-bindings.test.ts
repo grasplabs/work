@@ -1,6 +1,7 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
+import type { ModelBindingSpend } from "@grasp-os/shared/models";
 import { knowledgeSearchMaxLength } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -44,8 +45,10 @@ import { isRestricted } from "../src/restricted.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { allEvents } from "./audit-events.ts";
+import { mockIdp } from "./idp.ts";
 import { appWith, failure, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
+import { openRpc, signedInWithRole } from "./sign-in.ts";
 
 // An App's declared resources reach real providers only through bindings
 // an admin approved, and the live grant each names, through core's
@@ -179,8 +182,11 @@ export default app({
 type Sealed = Fixture & { release: Release };
 
 /** An App with `files`, sealed and current. */
-const sealedApp = async (files: Record<string, string>): Promise<Sealed> => {
-  const fixture = await appWith(files);
+const sealedApp = async (
+  files: Record<string, string>,
+  name?: string
+): Promise<Sealed> => {
+  const fixture = await appWith(files, name);
   const release = await seal(fixture);
   await setCurrentVersion(env, fixture.owner, fixture.app, 1);
   return { ...fixture, release };
@@ -1921,6 +1927,158 @@ describe("model binding budgets", { timeout: 120_000 }, () => {
       sent: 0,
       shown: [null, true],
     });
+  });
+});
+
+/**
+ * What a binding spent today, as it stands to a cent a day alerted at
+ * 80%: the capped writer's.
+ */
+const standing = (amount: number): string | number => {
+  if (amount >= 0.008 && amount < 0.01) {
+    return "past the alert";
+  }
+  return amount > 0 && amount < 0.008 ? "under the alert" : amount;
+};
+
+/** A listed binding's spend, today's as it `standing`s, and its month as against its day. */
+const spent = (listed: ModelBindingSpend | undefined) =>
+  listed === undefined
+    ? undefined
+    : {
+        ...listed,
+        today: standing(listed.today),
+        thisMonth:
+          listed.thisMonth === listed.today ? "today's" : listed.thisMonth,
+      };
+
+/** App `app`'s active binding's row, to damage what it stores. */
+const active = (app: string) =>
+  and(
+    eq(appResourceBindings.appId, app),
+    eq(appResourceBindings.status, "active")
+  );
+
+describe("model binding spend", { timeout: 120_000 }, () => {
+  const idp = mockIdp();
+
+  /** The model bindings the models settings list, as `role` reads them on `day`. */
+  const bindingsOn = async (day: string, role: "admin" | "builder") => {
+    const { session } = await signedInWithRole(idp, role);
+    const { core } = await openRpc(session, {
+      coreEnv: { ...env, MODEL_BUDGET_DAY: day },
+    });
+    return await core.authenticate().models.settings();
+  };
+
+  it("list each App's model bindings with their caps, today's and this month's spend and alert, to admins only", async () => {
+    // Named to sort first, ahead of this file's other Apps.
+    const capped = await sealedApp(modelFiles(nearCentBound), "0 Capped");
+    const free = await sealedApp(modelFiles(), "0 Free");
+    await approveWriter(capped, { perDay: 0.01 });
+    const freeBinding = await approveWriter(free);
+    const { gatewayEnv: withGateway } = gatewayEnv([
+      longAnswer,
+      answer("Free."),
+    ]);
+    const first = "2031-02-01";
+    // Past 80% of the capped writer's cent a day.
+    await draftOn(withGateway, capped, first);
+    await draftOn(withGateway, free, first);
+
+    const ours = ({ appId }: { appId: string }): boolean =>
+      appId === capped.app || appId === free.app;
+    const thatDay = await bindingsOn(first, "admin");
+    const nextDay = await bindingsOn("2031-02-02", "admin");
+    const [cappedThen, freeThen] = thatDay.bindings.listed.filter(ours);
+    const cappedNext = nextDay.bindings.listed.find(ours);
+    expect({
+      day: thatDay.day,
+      capped: spent(cappedThen),
+      free: spent(freeThen),
+      // Another day starts the day afresh; the month keeps it.
+      next: [
+        cappedNext?.today,
+        cappedNext?.thisMonth === cappedThen?.thisMonth,
+        cappedNext?.alert,
+      ],
+      more: thatDay.bindings.more,
+    }).toStrictEqual({
+      day: first,
+      capped: {
+        appId: capped.app,
+        appName: "0 Capped",
+        alias: "writer",
+        model: allowedModel,
+        budget: { perDay: 0.01, alertAt: 80 },
+        budgetDamaged: false,
+        today: "past the alert",
+        thisMonth: "today's",
+        alert: "alerted",
+      },
+      free: {
+        appId: free.app,
+        appName: "0 Free",
+        alias: "writer",
+        model: allowedModel,
+        budget: null,
+        budgetDamaged: false,
+        today: "under the alert",
+        thisMonth: "today's",
+        // Counted all the same, with no cap to alert on.
+        alert: "none",
+      },
+      next: [0, true, "none"],
+      more: false,
+    });
+
+    // A revoked binding isn't listed; one whose caps or target can't be
+    // read is, as such, and never hides the others.
+    const garbled = await sealedApp(modelFiles(), "0 Garbled");
+    await approveWriter(garbled, { perMonth: 3 });
+    await revokeResourceBinding(env, await person("admin"), freeBinding.id);
+    await drizzle(env.DB)
+      .update(appResourceBindings)
+      .set({ budget: JSON.stringify({ perDay: "lots" }) })
+      .where(active(capped.app));
+    await drizzle(env.DB)
+      .update(appResourceBindings)
+      .set({ target: "{not json" })
+      .where(active(garbled.app));
+    const later = await bindingsOn(first, "admin");
+    expect(
+      later.bindings.listed
+        .filter(
+          ({ appId }) =>
+            appId === capped.app || appId === free.app || appId === garbled.app
+        )
+        .map(({ appId, model, budget, budgetDamaged, alert }) => ({
+          appId,
+          model,
+          budget,
+          budgetDamaged,
+          alert,
+        }))
+    ).toStrictEqual([
+      {
+        appId: capped.app,
+        model: allowedModel,
+        budget: null,
+        budgetDamaged: true,
+        alert: "none",
+      },
+      {
+        appId: garbled.app,
+        model: null,
+        budget: { perMonth: 3, alertAt: 80 },
+        budgetDamaged: false,
+        alert: "none",
+      },
+    ]);
+
+    await expect(
+      failure(async () => await bindingsOn(first, "builder"))
+    ).resolves.toBe("role.forbidden");
   });
 });
 

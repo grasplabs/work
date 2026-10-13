@@ -24,6 +24,7 @@ import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import { drainObjectOutbox } from "./audit-outbox.ts";
+import { inList } from "./db/d1.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/model-ledger/migrations/migrations.js";
 import {
@@ -1013,6 +1014,37 @@ export class ModelLedger extends DurableObject<Env> {
     }
     await Promise.resolve();
     return read;
+  }
+
+  /**
+   * What `scope` spent and holds in `period` under each of `keys`, for the
+   * keys that spent or hold anything: the named ones only, however many
+   * the scope has. The keys go to SQLite as one parameter (`inList`).
+   */
+  async spendOfKeys(
+    period: string,
+    scope: LedgerScopeName,
+    keys: readonly string[]
+  ): Promise<ScopeSpend[]> {
+    await Promise.resolve();
+    if (keys.length === 0) {
+      return [];
+    }
+    return this.#db
+      .select({
+        key: spend.key,
+        spentMicros: spend.spentMicros,
+        reservedMicros: spend.reservedMicros,
+      })
+      .from(spend)
+      .where(
+        and(
+          eq(spend.scope, scope),
+          eq(spend.period, periodOf(scope, period)),
+          inList(spend.key, keys)
+        )
+      )
+      .all();
   }
 
   /**
