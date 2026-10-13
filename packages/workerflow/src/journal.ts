@@ -676,6 +676,50 @@ export const readAttempt = (
     )
     .toArray()[0];
 
+/**
+ * What holds a `do` step's attempt while it may still act: the generation
+ * of the activation that claimed it, and its deadline. Only the step's
+ * latest attempt, not yet ended, of an activation that still holds the
+ * run and hasn't ended, has one.
+ */
+export interface AttemptLease {
+  readonly generation: number;
+  readonly deadline: number;
+}
+
+/**
+ * The lease of attempt `attempt` at the `do` step whose idempotency key is
+ * `key`, if it still holds: none once the attempt has ended (its outcome
+ * journaled, timed out, or superseded), once a newer attempt was claimed,
+ * and once its activation is over or the run has been taken over (a
+ * command, a newer activation, its deletion).
+ */
+export const readAttemptLease = (
+  sql: SqlStorage,
+  key: string,
+  attempt: number
+): AttemptLease | undefined =>
+  sql
+    .exec<{ generation: number; deadline: number }>(
+      `SELECT attempts.generation AS generation, attempts.deadline AS deadline
+       FROM steps
+       JOIN attempts ON attempts.ordinal = steps.ordinal
+         AND attempts.attempt = steps.attempt
+       JOIN run ON run.generation = attempts.generation
+       JOIN activations ON activations.generation = attempts.generation
+       WHERE steps.idempotency_key = ? AND steps.type = 'do'
+         AND steps.state = 'running' AND steps.attempt = ?
+         AND attempts.ended_at IS NULL AND activations.ended_at IS NULL`,
+      key,
+      attempt
+    )
+    .toArray()[0];
+
+/** The run's generation now: the activation that holds it, if one does. */
+export const readGeneration = (sql: SqlStorage): number | undefined =>
+  sql.exec<{ generation: number }>("SELECT generation FROM run").toArray()[0]
+    ?.generation;
+
 const eventColumns = "seq, type, payload, key, accepted_at, consumed_by";
 
 /** The event a wait took, if it took one. */

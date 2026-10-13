@@ -29,6 +29,7 @@ import type {
   AiCalls,
   BusyRefusals,
   FailedStep,
+  HostHooks,
   HostedRun,
   RunStep,
 } from "./host.ts";
@@ -163,11 +164,17 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
   };
 };
 
-/** What a run keeps beside the engine's journal, in its own object. */
+/**
+ * What a run has of its own object beside the engine's journal: where it
+ * keeps each step's busy-budget refusal, and the engine's lease of each
+ * step's attempt, read from the journal as it is now (run-object.ts).
+ */
 export interface RunMemory {
   busyRefusals: BusyRefusals;
   /** Its AI calls in flight and answers no attempt took (host.ts). */
   aiCalls: AiCalls;
+  leaseOf: HostHooks["leaseOf"];
+  revokeAttempt?: HostHooks["revokeAttempt"];
 }
 
 /** Runs (or resumes) one run of an App's workflow. */
@@ -252,6 +259,8 @@ const runWorkflow = async (
       stepFailed,
       busyRefusals: memory.busyRefusals,
       aiCalls: memory.aiCalls,
+      leaseOf: memory.leaseOf,
+      revokeAttempt: memory.revokeAttempt,
       tampered: (error) => {
         tampered ??= error;
       },

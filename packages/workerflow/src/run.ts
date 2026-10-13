@@ -146,6 +146,8 @@ import {
   isTombstoned,
   JournalSchemaError,
   journalSchemaVersion,
+  readAttemptLease,
+  readGeneration,
   readJournal,
   readRollbackWorklist,
   maxEventPayloadBytes,
@@ -159,7 +161,7 @@ import {
   expireTombstones,
   startRetentionIn,
 } from "./journal.ts";
-import type { Journal, RunRow, StepType } from "./journal.ts";
+import type { AttemptLease, Journal, RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
 import {
   failedIn,
@@ -182,6 +184,9 @@ export type { RunNotification } from "./notifications.ts";
 
 /** What `WorkflowRun.journal()` returns. */
 export type { Journal } from "./journal.ts";
+
+/** What `WorkflowRun.attemptLease` returns. */
+export type { AttemptLease } from "./journal.ts";
 
 /** How long an activation may go without journaling before it's recovered. */
 export const defaultLeaseMs = 60_000;
@@ -616,6 +621,14 @@ const isDue = (run: RunRow, force: boolean): boolean =>
   run.notify_at !== null &&
   (force || run.notify_failures === 0 || run.notify_at <= Date.now());
 
+/** The earlier of two times an alarm is wanted at, either of which may be none. */
+const earlier = (a: number | null, b: number | null): number | null => {
+  if (a === null || b === null) {
+    return a ?? b;
+  }
+  return Math.min(a, b);
+};
+
 /** How long a tombstone holds by default: 30 days. */
 export const defaultTombstoneMs = 30 * 24 * 60 * 60 * 1000;
 
@@ -747,12 +760,36 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         return defaultTombstoneMs;
       }
     },
-    () => this.#notifyObligation(),
+    () => earlier(this.#notifyObligation(), this.#extraObligation()),
     () => {
       this.#wakeObservers();
       this.#deliverSoon();
     }
   );
+
+  /**
+   * When the host next needs the object's alarm for work of its own beside
+   * the run's, or null for none: folded into every alarm the engine sets
+   * or deletes, as the tombstones' expiry is (sharingAlarm), so the engine
+   * never moves it later or drops it. A host that overrides `alarm` does
+   * that work there, before the engine's. Read with no await, in the same
+   * turn as the alarm it goes with; one that throws counts as none.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- the host's hook; by default it needs none
+  protected extraAlarm(): number | null {
+    return null;
+  }
+
+  /** The host's `extraAlarm`, checked: a time, or null. */
+  #extraObligation(): number | null {
+    try {
+      const at = this.extraAlarm();
+      return at !== null && Number.isFinite(at) ? at : null;
+    } catch (error) {
+      warnRecovered("workflow_extra_alarm_failed", error);
+      return null;
+    }
+  }
 
   /** When the batch out to the host was handed over, if one is out. */
   #handedAt: number | undefined;
@@ -1133,6 +1170,35 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * The lease of a step's attempt, as the step's callback was told it
+   * (`ctx.idempotencyKey`, `ctx.attempt`), while it still holds: for the
+   * host, which hands an attempt's code capabilities of its own, to check
+   * before each of them acts that the attempt may still act (journal.ts,
+   * `readAttemptLease`). An attempt past its deadline whose timeout the
+   * journal hasn't caught up with still has one: the host checks the
+   * deadline too. Read from the journal, in this object only: no caller
+   * outside it reaches it.
+   */
+  protected attemptLease(
+    key: string,
+    attempt: number
+  ): AttemptLease | undefined {
+    const { sql } = this.ctx.storage;
+    return hasJournal(sql) ? readAttemptLease(sql, key, attempt) : undefined;
+  }
+
+  /**
+   * The run's generation now (none before it has a journal): what the
+   * activation running its definition took, for the host to let go of
+   * anything an older one started. Read from the journal, in this object
+   * only.
+   */
+  protected generation(): number | undefined {
+    const { sql } = this.ctx.storage;
+    return hasJournal(sql) ? readGeneration(sql) : undefined;
+  }
+
+  /**
    * Creates the run, or finds the one this same start created before. The
    * run and its alarm are written together, before the answer: once a
    * caller hears `created` or `existing`, the run will execute.
@@ -1228,7 +1294,8 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if (
       alarm === null ||
       alarm === this.#tombstoneExpiry() ||
-      alarm === notifyDue(this.ctx.storage.sql)
+      alarm === notifyDue(this.ctx.storage.sql) ||
+      alarm === this.#extraObligation()
     ) {
       await this.#store.setAlarm(ownWake(run));
     }
