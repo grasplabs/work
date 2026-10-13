@@ -34,10 +34,11 @@ import type {
 } from "@grasp-os/shared/app-releases";
 import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { dataErrors } from "@grasp-os/shared/stores";
+import { dataErrors, migrationErrors } from "@grasp-os/shared/stores";
 import type { AppliedContract } from "@grasp-os/shared/stores";
 import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -62,7 +63,7 @@ import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
 import { buildAppCode } from "./screens.ts";
-import { defineSchemaOnStore } from "./store-backfill.ts";
+import { defineSchemaOnStore, schemaStatus } from "./store-backfill.ts";
 import { liveStoreSql } from "./store-deletion.ts";
 
 // Sealing an App's release (spec 8, 16): turning one version of an App of
@@ -784,6 +785,10 @@ const boundStore = async (
  * answered, so sealing a version always leaves its release protected,
  * whatever happened to its reservations; then loaded, every byte checked.
  * Its store's definition was recorded with its seal, in the same write.
+ * One whose store abandoned the target its schema waited on is refused
+ * (`migration.abandoned`), as a fresh seal of it would be: its store
+ * keeps that per release (store-abandon.ts), so this holds even once a
+ * later release brought the same schema back into force.
  */
 const resealed = async (
   env: Env,
@@ -796,7 +801,19 @@ const resealed = async (
     { app, version },
     named.artifacts.map(({ sha256 }) => sha256)
   );
-  return await loadRelease(env, app, version);
+  const release = await loadRelease(env, app, version);
+  if (release.store !== null) {
+    const status = await schemaStatus(
+      env,
+      storeIdSchema.parse(release.store.storeId),
+      release.store.schemaHash,
+      { resourceId: app, resourceVersion: version }
+    );
+    if (status.state === "abandoned") {
+      throw migrationErrors.create("migration.abandoned");
+    }
+  }
+  return release;
 };
 
 /**

@@ -31,10 +31,13 @@ import {
 } from "../src/data-stores.ts";
 import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
+import { abandonStoreBackfill, storeBackfill } from "../src/store-abandon.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { commit as commitTo } from "./pending-stores.ts";
 import { aroundEngine } from "./runs.ts";
 import { failure, person, sweptAway } from "./sealed-apps.ts";
+import { newRecordId } from "./store-schemas.ts";
 
 // Making a version of spec 8's layout current seals it on the App's one
 // default store, which the host creates the first time a version needs
@@ -924,6 +927,90 @@ describe(
       expect({ activated, current: await currentOf(app) }).toStrictEqual({
         activated: "migration.pending",
         current: 1,
+      });
+    });
+
+    it("keeps a version whose failed backfill an admin abandoned refused, resealed or not", async () => {
+      const { owner, app } = await appWith(evolvingFiles());
+      await activateVersion(env, owner, app, 1);
+      const first = await storeOf(app, 1);
+      if (first === null) {
+        throw new Error("The first version binds no store");
+      }
+      const store = await openStore(env, first.storeId);
+      // A value under a key no version declares, which no default fills
+      // over and no version can change.
+      const odd = newRecordId();
+      await commitTo(store, first.schemaHash, [
+        {
+          op: "insert",
+          table: "notes",
+          id: odd,
+          fields: { title: "Odd", category: 42 },
+        },
+      ]);
+      const files = evolvingFiles(
+        {},
+        { category: 'v.string().default("general")' }
+      );
+      const defaulted = await nextVersion(owner, app, files);
+      await vi.waitFor(
+        async () => {
+          await expect(
+            failure(
+              async () => await activateVersion(env, owner, app, defaulted)
+            )
+          ).resolves.toBe("migration.backfill_failed");
+        },
+        { timeout: 20_000, interval: 200 }
+      );
+      const admin = await person("admin");
+      const backfill = await storeBackfill(env, admin, store.id);
+      if (backfill === null) {
+        throw new Error("No backfill is pending");
+      }
+      await abandonStoreBackfill(env, admin, {
+        store: store.id,
+        target: backfill.target,
+        attempt: backfill.attempt,
+      });
+      const reseal = async () =>
+        await failure(
+          async () =>
+            await sealRelease(env, { app, version: defaulted, by: owner })
+        );
+      const resealed = await reseal();
+      // The record goes, and a later version brings the same schema back
+      // into force.
+      await commitTo(store, first.schemaHash, [
+        { op: "delete", table: "notes", id: odd, expectedRevision: 1 },
+      ]);
+      // The same schema, under code changed elsewhere.
+      const again = await nextVersion(owner, app, {
+        ...files,
+        "operations/notes.ts": `${files["operations/notes.ts"] ?? ""}// Again.\n`,
+      });
+      await vi.waitFor(
+        async () => {
+          await activateVersion(env, owner, app, again);
+        },
+        { timeout: 20_000, interval: 200 }
+      );
+      const resealedAfter = await reseal();
+      const activated = await failure(
+        async () => await activateVersion(env, owner, app, defaulted)
+      );
+
+      expect({
+        resealed,
+        resealedAfter,
+        activated,
+        current: await currentOf(app),
+      }).toStrictEqual({
+        resealed: "migration.abandoned",
+        resealedAfter: "migration.abandoned",
+        activated: "migration.abandoned",
+        current: again,
       });
     });
 
