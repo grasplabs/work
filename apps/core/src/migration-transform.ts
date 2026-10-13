@@ -69,6 +69,20 @@ export const transformBatchMaxRows = 100;
  */
 export const transformBatchMaxBytes = 2 * 1024 * 1024;
 
+const encoder = new TextEncoder();
+
+/**
+ * The bytes a batch of records takes as one JSON array of their fields'
+ * canonical texts (`texts`): the brackets, the commas between them and
+ * each text's UTF-8 bytes. The one measure both a transform's bound
+ * (`requireBatch`) and the store cutting its batches (store-migrations.ts)
+ * use, so a batch the store hands out always passes the transform's.
+ */
+export const transformBatchBytes = (texts: readonly string[]): number =>
+  2 +
+  Math.max(0, texts.length - 1) +
+  texts.reduce((sum, text) => sum + encoder.encode(text).byteLength, 0);
+
 /** The most bytes of JSON text a batch's answer may take. */
 export const transformAnswerMaxBytes = 4 * 1024 * 1024;
 
@@ -107,8 +121,6 @@ export type TransformOutcome =
 
 /** What a transform needs of a sealed release. */
 export type TransformRelease = Pick<Release, "app" | "modules" | "sdk">;
-
-const encoder = new TextEncoder();
 
 /** The isolate's main module, and the module its request is in. */
 const migrateModule = "grasp-migrate.js";
@@ -310,7 +322,7 @@ const requireBatch = (
 ): void => {
   if (
     rows.length > transformBatchMaxRows ||
-    encoder.encode(canonicalJson(rows.map(({ fields }) => fields))).byteLength >
+    transformBatchBytes(rows.map(({ fields }) => canonicalJson(fields))) >
       transformBatchMaxBytes
   ) {
     throw new Error("A transform's batch is past its bounds");

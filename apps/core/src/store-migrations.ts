@@ -9,7 +9,10 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import { migrationWork, records } from "./db/data-store/schema.ts";
-import { transformBatchMaxBytes } from "./migration-transform.ts";
+import {
+  transformBatchBytes,
+  transformBatchMaxBytes,
+} from "./migration-transform.ts";
 import { validates } from "./store-queries.ts";
 
 // An explicit migration as the store runs it (spec 17.2, 17.4 step 5): a
@@ -108,8 +111,6 @@ export const pendingMigrationsSchema = z.strictObject({
 });
 export type PendingMigrations = z.output<typeof pendingMigrationsSchema>;
 
-const encoder = new TextEncoder();
-
 type Db = DrizzleSqliteDODatabase;
 type RecordRow = typeof records.$inferSelect;
 
@@ -156,12 +157,15 @@ const batchOf = (rows: readonly RecordRow[], owned: boolean): RecordRow[] => {
     return [];
   }
   const taken: RecordRow[] = [];
-  let bytes = 0;
   for (const row of rows) {
     if (owned && row.ownerId !== first.ownerId) {
       break;
     }
-    bytes += encoder.encode(row.valueJson).byteLength;
+    // Measured as the transform measures its batch: a record's stored
+    // text is its fields' canonical text.
+    const bytes = transformBatchBytes(
+      [...taken, row].map(({ valueJson }) => valueJson)
+    );
     if (taken.length > 0 && bytes > transformBatchMaxBytes) {
       break;
     }

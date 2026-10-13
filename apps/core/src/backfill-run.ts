@@ -136,6 +136,10 @@ const runBatch = async (
             table,
             migration,
           },
+          // What the transform failed on: a record changed since is
+          // transformed again rather than failed (`commitTransformed`).
+          failureRevision: rows.find((row) => row.id === transformed.failure.id)
+            ?.revision,
         }),
   };
   return await stub.commitTransformed(storeId, JSON.stringify(batch));

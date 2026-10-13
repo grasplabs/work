@@ -656,6 +656,158 @@ describe("an explicit migration on a store", () => {
     }).toStrictEqual({ missing: true, notQueued: true, exact: "ok" });
   });
 
+  it("fills in, after it took over, only the defaults of the contract now in force", async () => {
+    const store = await newStore();
+    const withTag = notes({ title, tag: v.string().default("x") });
+    const optionalTag = notes({
+      title,
+      tag: v.string().optional(),
+      category: v.enum(["launch", "general"]),
+    });
+    const first = await store.defineTables(withTag, {
+      resourceId: "a",
+      resourceVersion: 1,
+    });
+    const id = newRecordId();
+    await commit(store, first.schemaHash, [
+      { op: "insert", table: "notes", id, fields: { title: "One" } },
+    ]);
+    const second = await store.defineTables(
+      optionalTag,
+      { resourceId: "a", resourceVersion: 2 },
+      [
+        {
+          name: "derive-category",
+          table: "notes",
+          fromSchema: first.schemaHash,
+          toSchema: await manifestHash(optionalTag),
+        },
+      ]
+    );
+    const migrating = { store, target: second.contract.hash, app: "a" };
+    // A write while it runs: the contract in force's defaults are worked out.
+    await commit(store, first.schemaHash, [
+      {
+        op: "insert",
+        table: "notes",
+        id: newRecordId(),
+        fields: { title: "Two" },
+      },
+    ]);
+    await migrateAll(migrating);
+    await objectOf(store).activateReady(store.id, second.schemaHash, {
+      resourceId: "a",
+      resourceVersion: 2,
+    });
+    const before = await noteOf(store, id);
+    const revision = before?.revision ?? 0;
+
+    // The tag is optional now: unset, it stays unset.
+    await commit(store, second.schemaHash, [
+      {
+        op: "patch",
+        table: "notes",
+        id,
+        fields: {},
+        unset: ["tag"],
+        expectedRevision: revision,
+      },
+    ]);
+
+    const after = await noteOf(store, id);
+    expect(after?.fields).toStrictEqual({
+      title: "One",
+      category: "general",
+    });
+  });
+
+  it("transforms again a record mended while its transform failed, without another edit", async () => {
+    const migrating = await migratingStore(3);
+    const { store, first, target, ids } = migrating;
+    const mended = ids[1] ?? "";
+    const read = await migrationBatch(store, target, 1);
+    if (read.state !== "transform") {
+      throw new Error("Expected a batch to transform");
+    }
+    // The current version mends the record while its transform fails on it.
+    await commit(store, first.schemaHash, [
+      {
+        op: "patch",
+        table: "notes",
+        id: mended,
+        fields: { title: "launch day" },
+        expectedRevision: 1,
+      },
+    ]);
+    const failed = await commitBatch(store, {
+      target,
+      attempt: 1,
+      batch: 1,
+      phase: read.phase,
+      table: read.table,
+      through: read.through,
+      rows: [],
+      failure: {
+        table: "notes",
+        id: mended,
+        migration: "derive-category",
+        reason: "threw",
+        issues: ["No category for the old title"],
+      },
+      failureRevision: 1,
+    });
+    const rest = await migrateAll(migrating, derived, { from: 2 });
+
+    expect({
+      failed: failed.state,
+      rest: rest.outcomes.at(-1)?.state,
+      mended: await noteOf(store, mended),
+    }).toMatchObject({
+      failed: "running",
+      rest: "ready",
+      mended: { fields: { title: "launch day", category: "launch" } },
+    });
+  });
+
+  it("cuts a batch where the transform's own measure of it would pass its bound", async () => {
+    const store = await newStore();
+    const first = await store.defineTables(v1, {
+      resourceId: "a",
+      resourceVersion: 1,
+    });
+    // Each record's text is exactly 128 KiB: sixteen of them are 2 MiB
+    // before the array's brackets and commas, past the transform's bound.
+    const big = "x".repeat(131_072 - '{"title":""}'.length);
+    for (let index = 0; index < 16; index += 1) {
+      // One commit after the other.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await commit(store, first.schemaHash, [
+        {
+          op: "insert",
+          table: "notes",
+          id: newRecordId(),
+          fields: { title: big },
+        },
+      ]);
+    }
+    const second = await store.defineTables(
+      v2,
+      { resourceId: "a", resourceVersion: 2 },
+      [
+        {
+          name: "derive-category",
+          table: "notes",
+          fromSchema: first.schemaHash,
+          toSchema: await manifestHash(v2),
+        },
+      ]
+    );
+
+    const read = await migrationBatch(store, second.contract.hash, 1);
+
+    expect(read.state === "transform" ? read.rows.length : 0).toBe(15);
+  });
+
   it("fails on an output that doesn't fit, writing nothing of its batch, and goes on once its record changed", async () => {
     const migrating = await migratingStore(5);
     const { store, first, target, ids } = migrating;

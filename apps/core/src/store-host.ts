@@ -537,6 +537,25 @@ const refuseMigration = (migration: string, reason: string): never => {
   throw migrationErrors.create("migration.invalid", { migration, reason });
 };
 
+/** Where a migration's scan is, as its backfill row keeps it; null at its start. */
+const cursorOf = (row: {
+  cursorTable: string | null;
+  cursorOwner: string | null;
+  cursorCreatedAt: number | null;
+  cursorRecord: string | null;
+}): ScanPosition | null =>
+  row.cursorTable === null ||
+  row.cursorRecord === null ||
+  row.cursorOwner === null ||
+  row.cursorCreatedAt === null
+    ? null
+    : {
+        tableId: row.cursorTable,
+        ownerId: row.cursorOwner,
+        createdAt: row.cursorCreatedAt,
+        recordId: row.cursorRecord,
+      };
+
 /** The tables `pending`'s explicit migrations transform, by name. */
 const migratedSet = (pending: { migrations: PendingMigrations | null }) =>
   new Set((pending.migrations?.migrations ?? []).map(([table]) => table));
@@ -695,6 +714,8 @@ const transformedSchema = z.strictObject({
     )
     .max(100),
   failure: migrationFailureSchema.optional(),
+  /** The revision the failed record was at when the batch read it. */
+  failureRevision: z.number().int().min(1).optional(),
 });
 export type TransformedBatch = z.input<typeof transformedSchema>;
 
@@ -3591,13 +3612,14 @@ export class StoreHost {
     ) {
       throw new Error("A migration's batch doesn't fit where it is");
     }
-    if (input.failure === undefined) {
+    const reported = this.#currentFailure(pending.hash, table, row, input, now);
+    if (reported === undefined) {
       this.#requireCovered(pending.hash, table, row, input);
     }
     const checked =
-      input.failure === undefined
+      reported === undefined
         ? this.#checkedWrites(pending, table, input.rows, now)
-        : { writes: [], failure: { ...input.failure } };
+        : { writes: [], failure: { ...reported } };
     const { failure } = checked;
     const changed = checked.writes.filter(
       ({ record, valueJson }) => valueJson !== record.valueJson
@@ -3617,6 +3639,64 @@ export class StoreHost {
       now,
     });
     return outcome;
+  }
+
+  /**
+   * The failure core reported for a batch, if it still holds: one on a
+   * record that changed since the batch read it (`failureRevision`, the
+   * revision the transform saw) was the transform of a value no longer
+   * there. It is dropped, and every record the batch handed out queued as
+   * work, transformed again from what it holds now; so a record mended
+   * while its transform failed is retried without another edit.
+   */
+  #currentFailure(
+    target: string,
+    table: MigratedTable,
+    row: typeof backfills.$inferSelect,
+    input: z.output<typeof transformedSchema>,
+    now: number
+  ): MigrationFailure | undefined {
+    const { failure, failureRevision } = input;
+    if (
+      failure === undefined ||
+      failure.id === null ||
+      failureRevision === undefined
+    ) {
+      return failure;
+    }
+    const record = this.#db
+      .select({ revision: records.revision })
+      .from(records)
+      .where(
+        and(
+          eq(records.tableId, table.tableId),
+          eq(records.recordId, failure.id)
+        )
+      )
+      .get();
+    if (record?.revision === failureRevision) {
+      return failure;
+    }
+    if (input.through !== null) {
+      for (const id of scanRangeIds(
+        this.#db,
+        table,
+        cursorOf(row),
+        input.through
+      )) {
+        const handed = this.#db
+          .select()
+          .from(records)
+          .where(
+            and(eq(records.tableId, table.tableId), eq(records.recordId, id))
+          )
+          .get();
+        if (handed !== undefined) {
+          queueWork(this.#db, target, table.tableId, handed, now);
+        }
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -3645,19 +3725,9 @@ export class StoreHost {
     if (input.through.tableId !== table.tableId) {
       throw new Error("A migration's scan batch ends in another table");
     }
-    const cursor =
-      row.cursorTable === null ||
-      row.cursorRecord === null ||
-      row.cursorOwner === null ||
-      row.cursorCreatedAt === null
-        ? null
-        : {
-            tableId: row.cursorTable,
-            ownerId: row.cursorOwner,
-            createdAt: row.cursorCreatedAt,
-            recordId: row.cursorRecord,
-          };
-    const range = new Set(scanRangeIds(this.#db, table, cursor, input.through));
+    const range = new Set(
+      scanRangeIds(this.#db, table, cursorOf(row), input.through)
+    );
     const outside = [...ids].some(
       (id) =>
         !range.has(id) &&
@@ -4717,7 +4787,15 @@ export class StoreHost {
     if (widest === undefined) {
       return new Map();
     }
-    const known = this.#defaults.get(widest.hash);
+    // Keyed by the target and the contract in force together: while a
+    // migration runs its tables are filled in as the contract has them,
+    // and once it took over the contract's hash is the target's, whose
+    // defaults those no longer are.
+    const key =
+      pending === undefined
+        ? `contract:${widest.hash}`
+        : `pending:${widest.hash}:${contract?.hash ?? ""}`;
+    const known = this.#defaults.get(key);
     if (known !== undefined) {
       return known;
     }
@@ -4741,7 +4819,7 @@ export class StoreHost {
         ...[...kept].filter(([table]) => migrated.has(table)),
       ]);
     }
-    this.#defaults.set(widest.hash, defaulted);
+    this.#defaults.set(key, defaulted);
     return defaulted;
   }
 
