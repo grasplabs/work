@@ -31,7 +31,9 @@ describe("a Code Mode run on the on-prem sandbox", () => {
   beforeAll(async () => {
     supervisor = await startSandboxSupervisor({
       workerd: nativeWorkerd,
-      processes: 2,
+      // One process: a run that waited for another, for an App function
+      // it calls, would wait for its own.
+      processes: 1,
       log: () => {},
     });
     coreUrl = await serveStandIn(
@@ -89,6 +91,25 @@ describe("a Code Mode run on the on-prem sandbox", () => {
     expect(outcome.text).toContain("isn't available");
     expect(outcome.text).not.toContain("SANDBOX_HOST");
   });
+
+  it("carries an App call's request, a stream, as the API takes it", async () => {
+    const outcome = await run("streamedRequest");
+    expect(outcome.status).toBe("completed");
+    expect(outcome.text).toContain('"kind":"query"');
+  });
+
+  it("refuses an App call's request past what a request may be, as too large", async () => {
+    const outcome = await run("tooLargeRequest");
+    expect(outcome.status).toBe("threw");
+    expect(outcome.text).toContain("larger than an operation accepts");
+  });
+
+  it("runs an App function a run calls on a process of the run's own reserve, in a pool of one", async () => {
+    const outcome = await run("callsFunction");
+    expect(outcome.status).toBe("completed");
+    expect(outcome.text).toContain('"ok":true');
+    expect(outcome.text).toContain('"n":2');
+  }, 30_000);
 
   it("ends a busy loop as cpu_exceeded on its CPU time while core keeps answering", async () => {
     const busy = run("busy");

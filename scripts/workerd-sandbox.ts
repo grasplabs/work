@@ -114,6 +114,8 @@ export const cpuHeader = "x-grasp-sandbox-cpu-ms";
 export const callIdHeader = "x-grasp-sandbox-call";
 /** Whose session it is, for the per-owner cap. */
 export const ownerHeader = "x-grasp-sandbox-owner";
+/** The header core names a session's parent session in, by its call ID. */
+export const parentHeader = "x-grasp-sandbox-parent";
 
 /** The header that marks an answer as the supervisor's verdict on the App's code. */
 export const verdictHeader = "x-grasp-sandbox-verdict";
@@ -638,6 +640,8 @@ class SandboxPool {
   >();
   /** Sessions each owner holds now, waiting or running. */
   readonly #owners = new Map<string, number>();
+  /** Child sessions running now, by their parent's call ID: one each. */
+  readonly #children = new Set<string>();
   /** Sessions each owner has waiting for its room, and all of them. */
   readonly #ownerWaiters = new Map<string, number>();
   #waitingForOwners = 0;
@@ -1097,9 +1101,36 @@ class SandboxPool {
       );
       return;
     }
+    // A child of a session running now (an App function a Code Mode run
+    // calls, which the run waits for): one at a time for each parent, on a
+    // process past the pool's size, so it never waits for the process its
+    // own parent holds. A parent that isn't running gives nothing.
+    const parentOf = request.headers[parentHeader];
+    const parent =
+      typeof parentOf === "string" &&
+      callIdPattern.test(parentOf) &&
+      this.#running.has(parentOf)
+        ? parentOf
+        : undefined;
+    if (
+      parent !== undefined &&
+      !(await this.#childRoom(parent, waitMs, client))
+    ) {
+      refuse(429, "This session's parent already runs a child.");
+      return;
+    }
+    let childHeld = parent !== undefined;
+    const letGoOfChild = (): void => {
+      if (childHeld && parent !== undefined) {
+        childHeld = false;
+        this.#children.delete(parent);
+        this.#released.dispatchEvent(new Event("released"));
+      }
+    };
     // One owner holds at most its share of the pool, waiting or running: a
     // session past it waits, as for a process, then is refused.
     if (!(await this.#ownerRoom(owner, waitMs, client))) {
+      letGoOfChild();
       refuse(429, "This owner already holds as many sessions as it may.");
       return;
     }
@@ -1123,6 +1154,7 @@ class SandboxPool {
     // nothing else may take its place meanwhile.
     if (this.#inFlight >= settings.processes + settings.maxWaiting) {
       giveBack();
+      letGoOfChild();
       refuse(503, "The sandbox is full.");
       return;
     }
@@ -1134,11 +1166,16 @@ class SandboxPool {
         waitMs,
         callId,
         refuse,
-        ended: giveBack,
+        child: parent !== undefined,
+        ended: () => {
+          giveBack();
+          letGoOfChild();
+        },
       });
     } finally {
       this.#inFlight -= 1;
       giveBack();
+      letGoOfChild();
     }
   }
 
@@ -1152,11 +1189,14 @@ class SandboxPool {
       waitMs: number;
       callId: string;
       refuse: (status: number, message: string) => void;
+      /** Whether it's a parent's child, on a process past the pool's size. */
+      child: boolean;
       /** Called once the session is over for core. */
       ended: () => void;
     }
   ): Promise<void> {
-    const { deadlineMs, cpuLimitMs, waitMs, callId, refuse, ended } = session;
+    const { deadlineMs, cpuLimitMs, waitMs, callId, refuse, child, ended } =
+      session;
     // Gone: core closed its end, done or giving up.
     const caller = new AbortController();
     client.on("close", () => {
@@ -1168,7 +1208,8 @@ class SandboxPool {
     }
     client.on("error", ignore);
     const host = await this.#acquire(
-      AbortSignal.any([caller.signal, AbortSignal.timeout(waitMs)])
+      AbortSignal.any([caller.signal, AbortSignal.timeout(waitMs)]),
+      child
     );
     if (host === undefined) {
       if (!caller.signal.aborted) {
@@ -1441,6 +1482,41 @@ class SandboxPool {
     return true;
   }
 
+  /**
+   * Takes `parent`'s one child place, waiting up to `waitMs` (or until the
+   * caller leaves) for its child running now to end; false if it doesn't.
+   */
+  async #childRoom(
+    parent: string,
+    waitMs: number,
+    client: Socket
+  ): Promise<boolean> {
+    if (this.#children.has(parent)) {
+      const gone = new AbortController();
+      const leave = (): void => {
+        gone.abort();
+      };
+      client.once("close", leave);
+      const signal = AbortSignal.any([
+        gone.signal,
+        AbortSignal.timeout(waitMs),
+      ]);
+      try {
+        while (this.#children.has(parent)) {
+          // oxlint-disable-next-line no-await-in-loop -- until its child ends
+          await once(this.#released, "released", { signal });
+        }
+      } catch {
+        return false;
+      } finally {
+        client.off("close", leave);
+      }
+    }
+    // Taken in the same turn as the check, as an owner's place is.
+    this.#children.add(parent);
+    return true;
+  }
+
   /** Ends session `callId` as its caller gave up on it; false if none runs. */
   cancel(callId: string): boolean {
     const running = this.#running.get(callId);
@@ -1581,14 +1657,21 @@ class SandboxPool {
   }
 
   /** An idle process for one call, or undefined once `signal` aborts first. */
-  async #acquire(signal: AbortSignal): Promise<HostProcess | undefined> {
+  async #acquire(
+    signal: AbortSignal,
+    child = false
+  ): Promise<HostProcess | undefined> {
     // Gone already: nothing to wait for, no process to take.
     if (signal.aborted) {
       return undefined;
     }
-    // An idle process, while fewer calls run than the pool's size.
+    // An idle process, while fewer calls run than the pool's size; for a
+    // child, past it: each running parent has at most one, so the pool
+    // never runs more than twice its size.
     const take = (): HostProcess | undefined =>
-      this.#busy < this.#settings.processes ? this.#idle.shift() : undefined;
+      child || this.#busy < this.#settings.processes
+        ? this.#idle.shift()
+        : undefined;
     this.#waiting += 1;
     try {
       let host = take();

@@ -1,12 +1,14 @@
 import piAgentCore from "@earendil-works/pi-agent-core/package.json" with { type: "json" };
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { compatibilityDate } from "@grasp-os/shared/runtime";
 import { RpcPromise, RpcStub } from "capnweb";
 import type { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
 import type { CodeRunStatus } from "./code-run-statuses.ts";
+import { holdRunSession } from "./run-sessions.ts";
 import {
   capability,
   functionCapability,
@@ -166,6 +168,17 @@ const then = bind(Promise.prototype.then);
 const resolve = Promise.resolve.bind(Promise);
 const create = Object.create;
 const define = Object.defineProperty;
+const isPrototypeOf = bind(Object.prototype.isPrototypeOf);
+const streamPrototype = ReadableStream.prototype;
+const getReader = bind(ReadableStream.prototype.getReader);
+const readChunk = bind(ReadableStreamDefaultReader.prototype.read);
+const cancelReader = bind(ReadableStreamDefaultReader.prototype.cancel);
+const BytesOf = Uint8Array;
+const setBytes = bind(Uint8Array.prototype.set);
+const push = bind(Array.prototype.push);
+// The most of a stream an API call carries: a call of an App's function's
+// own bound, and one byte more, for the API to refuse it as too large.
+const streamBytes = ${functionRequestMaxBytes} + 1;
 
 Object.defineProperty(globalThis, "caches", { value: undefined });
 
@@ -218,6 +231,42 @@ const describe = (error) => {
   } catch {
     return undescribable;
   }
+};
+
+// A stream's bytes, no more than streamBytes of them: the rest is
+// left unread, and the stream cancelled.
+const bytesOf = async (stream) => {
+  const reader = getReader(stream);
+  const chunks = [];
+  let total = 0;
+  try {
+    while (total < streamBytes) {
+      const { done, value } = await readChunk(reader);
+      if (done) {
+        break;
+      }
+      if (typeof value !== "object" || value === null || !isPrototypeOf(BytesOf.prototype, value)) {
+        throw new ErrorOf("A stream an API takes carries bytes only.");
+      }
+      push(chunks, value);
+      total += value.byteLength;
+    }
+  } finally {
+    try {
+      await cancelReader(reader);
+    } catch {
+      // Ended already.
+    }
+  }
+  const bytes = new BytesOf(total < streamBytes ? total : streamBytes);
+  let at = 0;
+  for (let index = 0; index < chunks.length && at < bytes.length; index += 1) {
+    const chunk = chunks[index];
+    const room = bytes.length - at;
+    setBytes(bytes, chunk.byteLength > room ? chunk.subarray(0, room) : chunk, at);
+    at += chunk.byteLength > room ? room : chunk.byteLength;
+  }
+  return bytes;
 };
 
 // What the code logs, as it loads and as it runs: one run per isolate.
@@ -362,7 +411,20 @@ class Harness extends WorkerEntrypoint {
             if (typeof method !== "string" || method === "then") {
               return undefined;
             }
-            return (...args) => bridge.invoke(name, method, args);
+            return async (...args) => {
+              // A stream (an App call's request) crosses as its bytes, read
+              // here no further than such a request may be: the bridge
+              // takes no stream.
+              const streamed = [];
+              for (let at = 0; at < args.length; at += 1) {
+                const arg = args[at];
+                if (typeof arg === "object" && arg !== null && isPrototypeOf(streamPrototype, arg)) {
+                  args[at] = await bytesOf(arg);
+                  push(streamed, at);
+                }
+              }
+              return await bridge.invoke(name, method, args, streamed);
+            };
           },
         });
         define(apis, name, { value: api, enumerable: true });
@@ -533,12 +595,44 @@ const notApiMethod = (name: string): boolean =>
   name === "dispose";
 
 /**
+ * `args` with each argument `streamed` names, the bytes of a stream the
+ * code passed (as the harness read it, no further than an App call's
+ * request may be), a stream again: what the API takes. Only bytes become
+ * one; the bridge itself takes no stream.
+ */
+const asStreams = (args: unknown[], streamed: unknown): unknown[] => {
+  if (
+    !Array.isArray(streamed) ||
+    !streamed.every(
+      (at): at is number =>
+        Number.isInteger(at) &&
+        typeof at === "number" &&
+        at >= 0 &&
+        at < args.length &&
+        args[at] instanceof Uint8Array
+    )
+  ) {
+    throw new TypeError("That isn't a call of one of this chat's APIs.");
+  }
+  return args.map((arg, at) =>
+    streamed.includes(at) && arg instanceof Uint8Array
+      ? new Blob([arg]).stream()
+      : arg
+  );
+};
+
+/**
  * The one capability a session's run reaches its APIs through: a call of
  * `method` on the API named `api`, on core's own stub of it, which answers
  * only while the run is open, as the code's env would.
  */
 const apiBridge = (env: Readonly<Record<string, Fetcher>>) => ({
-  invoke: async (api: unknown, method: unknown, args: unknown) => {
+  invoke: async (
+    api: unknown,
+    method: unknown,
+    args: unknown,
+    streamed: unknown = []
+  ) => {
     if (
       typeof api !== "string" ||
       !Object.hasOwn(env, api) ||
@@ -553,7 +647,11 @@ const apiBridge = (env: Readonly<Record<string, Fetcher>>) => ({
     if (typeof fn !== "function") {
       throw new TypeError(`env.${api} has no method ${method}.`);
     }
-    const answer: unknown = await Reflect.apply(fn, env[api], args);
+    const answer: unknown = await Reflect.apply(
+      fn,
+      env[api],
+      asStreams(args, streamed)
+    );
     return answer;
   },
 });
@@ -571,8 +669,16 @@ const sessionCalls = (
     timeoutMs,
     signal,
     owner,
-  }: { timeoutMs: number; signal: AbortSignal; owner: string }
+    sessionKey,
+  }: {
+    timeoutMs: number;
+    signal: AbortSignal;
+    owner: string;
+    sessionKey?: string;
+  }
 ): HarnessCalls => {
+  // Held only once the session is open.
+  let letGoOfSession: (() => void) | undefined;
   const both = (async () => {
     const answer = await runInSession(
       host,
@@ -591,9 +697,21 @@ const sessionCalls = (
         wallMs: timeoutMs,
       },
       // A cancel or the run's wall-clock limit ends the session, and frees
-      // its process at once.
-      { signal }
-    );
+      // its process at once. The App functions the run calls run in its
+      // children (run-sessions.ts), named by its ID while it's open.
+      {
+        signal,
+        ...(sessionKey === undefined
+          ? {}
+          : {
+              opened: (callId: string) => {
+                letGoOfSession = holdRunSession(sessionKey, callId);
+              },
+            }),
+      }
+    ).finally(() => {
+      letGoOfSession?.();
+    });
     // Not the harness's answer, the code changed it: no outcome at all.
     let json: unknown;
     try {
@@ -631,6 +749,7 @@ const harnessCalls = (
     timeoutMs: number;
     signal: AbortSignal;
     owner: string;
+    sessionKey?: string;
   },
   code: string,
   env: Readonly<Record<string, Fetcher>>,
@@ -708,6 +827,11 @@ export interface RunOptions {
   sandbox?: () => Fetcher | undefined;
   /** Whose run it is, which the sandbox caps per owner: `person:` and an ID. */
   owner?: string;
+  /**
+   * The run's ID, under which its session is named while it's open, so
+   * the App functions it calls run in its children (run-sessions.ts).
+   */
+  sessionKey?: string;
 }
 
 /**
@@ -727,6 +851,7 @@ export const runCode = async (
     onOutput,
     sandbox: sandboxOf,
     owner,
+    sessionKey,
   }: RunOptions = {}
 ): Promise<CodeRun> => {
   const limit = deadline(timeoutMs, signal);
@@ -756,6 +881,7 @@ export const runCode = async (
         timeoutMs,
         signal: limit.signal,
         owner: owner ?? "code-mode",
+        ...(sessionKey === undefined ? {} : { sessionKey }),
       },
       code,
       env,

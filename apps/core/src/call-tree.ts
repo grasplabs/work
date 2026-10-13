@@ -11,6 +11,19 @@
 export class CallTree {
   readonly #started = new Set<Promise<unknown>>();
 
+  /**
+   * The sandbox session, by its call ID, of a call this one was made from
+   * (a Code Mode run's, for an App function it calls): the session this
+   * call's functions run in is its child, which the supervisor gives a
+   * process of the parent's own reserve, so it never waits for one the
+   * parent holds while the parent waits for it.
+   */
+  readonly parentSession: string | undefined;
+
+  constructor(parentSession?: string) {
+    this.parentSession = parentSession;
+  }
+
   /** Counts `work`, a nested call just started, until it settles. */
   track(work: Promise<unknown>): void {
     this.#started.add(work);

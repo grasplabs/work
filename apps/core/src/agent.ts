@@ -267,6 +267,7 @@ const runOpen = async (
     run = await runCode(loader, code, env, {
       ...(sandbox === undefined ? {} : { sandbox }),
       owner: `person:${scope.personId}`,
+      sessionKey: runId,
       signal,
       timeoutMs: codeTimeoutMs,
       onOutput: (line) => {
