@@ -2,11 +2,13 @@ import piAgentCore from "@earendil-works/pi-agent-core/package.json" with { type
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { operationErrors } from "@grasp-os/shared/operations";
 import { compatibilityDate } from "@grasp-os/shared/runtime";
 import { RpcPromise, RpcStub } from "capnweb";
 import type { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
+import { requestReadMs } from "./app-requests.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
 import { holdRunSession } from "./run-sessions.ts";
 import {
@@ -179,6 +181,13 @@ const push = bind(Array.prototype.push);
 // The most of a stream an API call carries: a call of an App's function's
 // own bound, and one byte more, for the API to refuse it as too large.
 const streamBytes = ${functionRequestMaxBytes} + 1;
+// How long it gives a stream to arrive in full, as the API does.
+const readMs = ${requestReadMs};
+const later = setTimeout;
+const clearLater = clearTimeout;
+const PromiseOf = Promise;
+const race = Promise.race.bind(Promise);
+const pastTimeMark = {};
 
 Object.defineProperty(globalThis, "caches", { value: undefined });
 
@@ -235,13 +244,26 @@ const describe = (error) => {
 
 // A stream's bytes, no more than streamBytes of them: the rest is
 // left unread, and the stream cancelled.
+// Within as long as the API itself gives a request to arrive: past it,
+// the stream is cancelled and the call refused as the API refuses it.
+// What it answers says whether it did.
 const bytesOf = async (stream) => {
   const reader = getReader(stream);
   const chunks = [];
   let total = 0;
+  let unfinished = false;
+  let timer;
+  const pastTime = new PromiseOf((settle) => {
+    timer = later(() => settle(pastTimeMark), readMs);
+  });
   try {
     while (total < streamBytes) {
-      const { done, value } = await readChunk(reader);
+      const read = await race([readChunk(reader), pastTime]);
+      if (read === pastTimeMark) {
+        unfinished = true;
+        break;
+      }
+      const { done, value } = read;
       if (done) {
         break;
       }
@@ -252,11 +274,12 @@ const bytesOf = async (stream) => {
       total += value.byteLength;
     }
   } finally {
-    try {
-      await cancelReader(reader);
-    } catch {
-      // Ended already.
-    }
+    clearLater(timer);
+    // Not waited for: a stream that never ends may never finish cancelling.
+    then(cancelReader(reader), undefined, () => undefined);
+  }
+  if (unfinished) {
+    return { unfinished };
   }
   const bytes = new BytesOf(total < streamBytes ? total : streamBytes);
   let at = 0;
@@ -266,7 +289,7 @@ const bytesOf = async (stream) => {
     setBytes(bytes, chunk.byteLength > room ? chunk.subarray(0, room) : chunk, at);
     at += chunk.byteLength > room ? room : chunk.byteLength;
   }
-  return bytes;
+  return { bytes };
 };
 
 // What the code logs, as it loads and as it runs: one run per isolate.
@@ -416,14 +439,21 @@ class Harness extends WorkerEntrypoint {
               // here no further than such a request may be: the bridge
               // takes no stream.
               const streamed = [];
+              let unfinished = false;
               for (let at = 0; at < args.length; at += 1) {
                 const arg = args[at];
                 if (typeof arg === "object" && arg !== null && isPrototypeOf(streamPrototype, arg)) {
-                  args[at] = await bytesOf(arg);
+                  const read = await bytesOf(arg);
+                  if (read.unfinished) {
+                    unfinished = true;
+                    args[at] = new BytesOf(0);
+                  } else {
+                    args[at] = read.bytes;
+                  }
                   push(streamed, at);
                 }
               }
-              return await bridge.invoke(name, method, args, streamed);
+              return await bridge.invoke(name, method, args, streamed, unfinished);
             };
           },
         });
@@ -642,7 +672,8 @@ const apiBridge = (env: Readonly<Record<string, Fetcher>>) => ({
     api: unknown,
     method: unknown,
     args: unknown,
-    streamed: unknown = []
+    streamed: unknown = [],
+    unfinished: unknown = false
   ) => {
     if (
       typeof api !== "string" ||
@@ -658,11 +689,12 @@ const apiBridge = (env: Readonly<Record<string, Fetcher>>) => ({
     if (typeof fn !== "function") {
       throw new TypeError(`env.${api} has no method ${method}.`);
     }
-    const answer: unknown = await Reflect.apply(
-      fn,
-      env[api],
-      asStreams(`${api}.${method}`, args, streamed)
-    );
+    const request = asStreams(`${api}.${method}`, args, streamed);
+    // A stream that didn't arrive in time, as the API itself refuses one.
+    if (unfinished === true && Array.isArray(streamed) && streamed.length > 0) {
+      throw operationErrors.create("operation.deadline_exceeded");
+    }
+    const answer: unknown = await Reflect.apply(fn, env[api], request);
     return answer;
   },
 });

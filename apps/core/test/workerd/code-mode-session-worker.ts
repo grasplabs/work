@@ -148,6 +148,11 @@ const cases: Record<
   tooLargeRequest: {
     code: "export default async (self, env) => await env.apps.call('app', new Blob(['x'.repeat(140_000)]).stream());",
   },
+  // An App call whose request never ends: refused as the API refuses one,
+  // and the run goes on.
+  neverEnding: {
+    code: "export default async (self, env) => { const never = new ReadableStream({ pull: () => new Promise(() => {}) }); try { await env.apps.call('app', never); return 'answered'; } catch (error) { return 'went on: ' + error.message; } };",
+  },
   // A stream where the API takes none: only an App call's request is one.
   streamElsewhere: {
     code: "export default async (self, env) => await env.apps.double(new Blob(['2']).stream());",

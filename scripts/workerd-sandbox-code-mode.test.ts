@@ -98,6 +98,15 @@ describe("a Code Mode run on the on-prem sandbox", () => {
     expect(outcome.text).toContain('"kind":"query"');
   });
 
+  it("refuses an App call whose request never ends after the API's own time, and the run goes on", async () => {
+    const outcome = await run("neverEnding");
+    expect(outcome.status).toBe("completed");
+    expect(outcome.text).toContain("went on: ");
+    expect(outcome.text).toContain("ran past its deadline");
+    expect(outcome.ms).toBeGreaterThan(4500);
+    expect(outcome.ms).toBeLessThan(9000);
+  }, 30_000);
+
   it("refuses a stream passed anywhere but an App call's request", async () => {
     const outcome = await run("streamElsewhere");
     expect(outcome.status).toBe("threw");

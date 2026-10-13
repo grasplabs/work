@@ -6,6 +6,7 @@
  * that reach back through them. No Wrangler dev server, no Miniflare.
  */
 import { once } from "node:events";
+import { chmodSync, writeFileSync } from "node:fs";
 import { IncomingMessage, request as httpRequest } from "node:http";
 import { Socket, connect, createServer } from "node:net";
 import path from "node:path";
@@ -99,10 +100,14 @@ describe("a session on the on-prem sandbox", () => {
    */
   const rawOpen = async (
     id: string,
-    { owner = "app-raw", parent }: { owner?: string; parent?: string } = {}
+    {
+      owner = "app-raw",
+      parent,
+      socket,
+    }: { owner?: string; parent?: string; socket?: string } = {}
   ): Promise<{ status: number; socket?: Socket }> => {
     const upgrade = httpRequest({
-      socketPath: supervisor.socket,
+      socketPath: socket ?? supervisor.socket,
       path: "/session",
       headers: {
         connection: "upgrade",
@@ -166,9 +171,9 @@ describe("a session on the on-prem sandbox", () => {
   };
 
   /** Says core is done with session `id`, as `POST /end/<id>`. */
-  const endRaw = async (id: string): Promise<void> => {
+  const endRaw = async (id: string, socket?: string): Promise<void> => {
     const end = httpRequest({
-      socketPath: supervisor.socket,
+      socketPath: socket ?? supervisor.socket,
       path: `/end/${id}`,
       method: "POST",
     });
@@ -234,6 +239,100 @@ describe("a session on the on-prem sandbox", () => {
     await expect
       .poll(() => supervisor.stats().inFlight, { timeout: 3000, interval: 50 })
       .toBe(0);
+  });
+
+  it("refuses a child still waiting for its owner's place as its parent ends, and runs nothing", async () => {
+    // app-held holds its owner's one place: the child waits for it.
+    const holder = await rawOpen(crypto.randomUUID(), { owner: "app-held" });
+    const parent = crypto.randomUUID();
+    const opened = await rawOpen(parent, { owner: "run-parent" });
+    try {
+      const child = rawOpen(crypto.randomUUID(), {
+        owner: "app-held",
+        parent,
+      });
+      await expect
+        .poll(() => supervisor.stats().waitingForOwners, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(1);
+      const ended = Date.now();
+      await endRaw(parent);
+      const refused = await child;
+      expect(refused.status).toBe(409);
+      expect(Date.now() - ended).toBeLessThan(1000);
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(1);
+    } finally {
+      opened.socket?.destroy();
+      holder.socket?.destroy();
+    }
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000, interval: 50 })
+      .toBe(0);
+  });
+
+  it(
+    "refuses a child still waiting for a process as its parent ends, and runs nothing",
+    { timeout: 60_000 },
+    async () => {
+      // workerd behind a shell that starts it two seconds late: a pool of
+      // one has no process to give the child until its spare is up.
+      const slow = path.join(tempDir(), "slow-to-start.sh");
+      writeFileSync(slow, `#!/bin/sh\nsleep 2\nexec "${nativeWorkerd}" "$@"\n`);
+      chmodSync(slow, 0o755);
+      const small = await startSandboxSupervisor({
+        workerd: slow,
+        processes: 1,
+        log: () => {},
+      });
+      try {
+        const parent = crypto.randomUUID();
+        const opened = await rawOpen(parent, {
+          owner: "run-parent",
+          socket: small.socket,
+        });
+        const child = rawOpen(crypto.randomUUID(), {
+          owner: "app-child",
+          parent,
+          socket: small.socket,
+        });
+        await expect
+          .poll(() => small.stats().waiting, { timeout: 1500, interval: 20 })
+          .toBe(1);
+        const ended = Date.now();
+        await endRaw(parent, small.socket);
+        const refused = await child;
+        expect(refused.status).toBe(409);
+        expect(Date.now() - ended).toBeLessThan(1000);
+        opened.socket?.destroy();
+        // Its spare up, nothing runs on it.
+        await sleep(2500);
+        expect(small.stats().inFlight).toBe(0);
+      } finally {
+        await small.stop();
+      }
+    }
+  );
+
+  it("refuses a child named after a parent that has ended", async () => {
+    const parent = crypto.randomUUID();
+    const opened = await rawOpen(parent, { owner: "run-parent" });
+    await endRaw(parent);
+    opened.socket?.destroy();
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 1500, interval: 50 })
+      .toBe(0);
+    const late = await rawOpen(crypto.randomUUID(), {
+      owner: "app-late",
+      parent,
+    });
+    expect(late.status).toBe(409);
   });
 
   it("refuses a child's own child: only a session core opened at the top may be a parent", async () => {

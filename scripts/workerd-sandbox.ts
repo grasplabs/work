@@ -647,6 +647,8 @@ class SandboxPool {
   readonly #children = new Map<string, string>();
   /** Every child's call ID while it runs or waits: never a parent itself. */
   readonly #childIds = new Set<string>();
+  /** Each parent's children being admitted, as how to refuse each. */
+  readonly #admissions = new Map<string, Set<AbortController>>();
   /** Parents with a child waiting for their one child place, at most one each. */
   readonly #childWaiting = new Set<string>();
   /** Sessions each owner has waiting for its room, and all of them. */
@@ -1121,41 +1123,100 @@ class SandboxPool {
       refuse(400, "A child session can't be a parent.");
       return;
     }
-    const parent =
-      typeof parentOf === "string" &&
-      callIdPattern.test(parentOf) &&
-      this.#running.has(parentOf)
-        ? parentOf
-        : undefined;
+    if (typeof parentOf === "string" && !this.#running.has(parentOf)) {
+      refuse(409, "This session's parent has ended.");
+      return;
+    }
+    const parent = typeof parentOf === "string" ? parentOf : undefined;
+    // A child is tracked under its parent from now, through every wait of
+    // its admission (its owner's place, its parent's child place, a
+    // process): its parent ending stops it there (`#endChildOf`), and it
+    // never takes the pool's own capacity after.
+    const orphaned = new AbortController();
+    const admissions =
+      parent === undefined ? undefined : this.#admissionsOf(parent);
+    admissions?.add(orphaned);
+    try {
+      await this.#admitted(request, client, head, {
+        owner,
+        callId,
+        deadlineMs,
+        cpuLimitMs,
+        waitMs,
+        refuse,
+        parent,
+        orphaned: orphaned.signal,
+      });
+    } finally {
+      admissions?.delete(orphaned);
+      if (parent !== undefined && admissions?.size === 0) {
+        this.#admissions.delete(parent);
+      }
+    }
+  }
+
+  /** A session past its checks: its places, then its relay. */
+  async #admitted(
+    request: IncomingMessage,
+    client: Socket,
+    head: Buffer,
+    {
+      owner,
+      callId,
+      deadlineMs,
+      cpuLimitMs,
+      waitMs,
+      refuse,
+      parent,
+      orphaned,
+    }: {
+      owner: string;
+      callId: string;
+      deadlineMs: number;
+      cpuLimitMs: number;
+      waitMs: number;
+      refuse: (status: number, message: string) => void;
+      parent: string | undefined;
+      orphaned: AbortSignal;
+    }
+  ): Promise<void> {
+    const settings = this.#settings;
+    const parentEnded = (): boolean =>
+      parent !== undefined && (orphaned.aborted || !this.#running.has(parent));
     // One owner holds at most its share of the pool, waiting or running: a
     // session past it waits, as for a process, then is refused. Its place
     // first, then its parent's child place.
-    if (!(await this.#ownerRoom(owner, waitMs, client))) {
-      refuse(429, "This owner already holds as many sessions as it may.");
+    const ownerRoom = await this.#ownerRoom(owner, waitMs, client, orphaned);
+    if (!ownerRoom || parentEnded()) {
+      if (ownerRoom) {
+        this.#giveOwnerBack(owner);
+      }
+      if (parentEnded()) {
+        refuse(409, "This session's parent has ended.");
+      } else {
+        refuse(429, "This owner already holds as many sessions as it may.");
+      }
       return;
     }
     // Given back as soon as the session ends for core, before its process
     // is killed: core may start the owner's next call at once.
     let ownerHeld = true;
     const giveBack = (): void => {
-      if (!ownerHeld) {
-        return;
+      if (ownerHeld) {
+        ownerHeld = false;
+        this.#giveOwnerBack(owner);
       }
-      ownerHeld = false;
-      const left = (this.#owners.get(owner) ?? 1) - 1;
-      if (left <= 0) {
-        this.#owners.delete(owner);
-      } else {
-        this.#owners.set(owner, left);
-      }
-      this.#released.dispatchEvent(new Event("released"));
     };
     if (
       parent !== undefined &&
-      !(await this.#childRoom(parent, callId, waitMs, client))
+      !(await this.#childRoom(parent, callId, waitMs, client, orphaned))
     ) {
       giveBack();
-      refuse(429, "This session's parent already runs a child.");
+      if (parentEnded()) {
+        refuse(409, "This session's parent has ended.");
+      } else {
+        refuse(429, "This session's parent already runs a child.");
+      }
       return;
     }
     let childHeld = parent !== undefined;
@@ -1187,6 +1248,7 @@ class SandboxPool {
         // parent runs.
         reserved:
           parent === undefined ? undefined : () => this.#running.has(parent),
+        orphaned: parent === undefined ? undefined : orphaned,
         ended: () => {
           giveBack();
           letGoOfChild();
@@ -1213,12 +1275,22 @@ class SandboxPool {
       refuse: (status: number, message: string) => void;
       /** For a parent's child: whether it may take a process past the pool's size now. */
       reserved: (() => boolean) | undefined;
+      /** For a parent's child: aborts as its parent ends, refusing it. */
+      orphaned: AbortSignal | undefined;
       /** Called once the session is over for core. */
       ended: () => void;
     }
   ): Promise<void> {
-    const { deadlineMs, cpuLimitMs, waitMs, callId, refuse, reserved, ended } =
-      session;
+    const {
+      deadlineMs,
+      cpuLimitMs,
+      waitMs,
+      callId,
+      refuse,
+      reserved,
+      orphaned,
+      ended,
+    } = session;
     // Gone: core closed its end, done or giving up.
     const caller = new AbortController();
     client.on("close", () => {
@@ -1230,18 +1302,27 @@ class SandboxPool {
     }
     client.on("error", ignore);
     const host = await this.#acquire(
-      AbortSignal.any([caller.signal, AbortSignal.timeout(waitMs)]),
+      AbortSignal.any([
+        caller.signal,
+        AbortSignal.timeout(waitMs),
+        ...(orphaned === undefined ? [] : [orphaned]),
+      ]),
       reserved
     );
     if (host === undefined) {
-      if (!caller.signal.aborted) {
+      if (orphaned?.aborted === true) {
+        refuse(409, "This session's parent has ended.");
+      } else if (!caller.signal.aborted) {
         refuse(503, "No sandbox process came free in time.");
       }
       return;
     }
-    if (caller.signal.aborted) {
+    if (caller.signal.aborted || orphaned?.aborted === true) {
       this.#busy -= 1;
       this.#release(host);
+      if (orphaned?.aborted === true) {
+        refuse(409, "This session's parent has ended.");
+      }
       return;
     }
     this.#topUp();
@@ -1463,7 +1544,8 @@ class SandboxPool {
   async #ownerRoom(
     owner: string,
     waitMs: number,
-    client: Socket
+    client: Socket,
+    stop?: AbortSignal
   ): Promise<boolean> {
     const hasRoom = (): boolean =>
       (this.#owners.get(owner) ?? 0) < this.#maxPerOwner;
@@ -1482,6 +1564,7 @@ class SandboxPool {
       const signal = AbortSignal.any([
         gone.signal,
         AbortSignal.timeout(waitMs),
+        ...(stop === undefined ? [] : [stop]),
       ]);
       try {
         while (!hasRoom()) {
@@ -1517,7 +1600,8 @@ class SandboxPool {
     parent: string,
     child: string,
     waitMs: number,
-    client: Socket
+    client: Socket,
+    stop: AbortSignal
   ): Promise<boolean> {
     if (this.#children.has(parent)) {
       if (this.#childWaiting.has(parent)) {
@@ -1532,6 +1616,7 @@ class SandboxPool {
       const signal = AbortSignal.any([
         gone.signal,
         AbortSignal.timeout(waitMs),
+        stop,
       ]);
       try {
         while (this.#children.has(parent)) {
@@ -1545,7 +1630,7 @@ class SandboxPool {
         this.#childWaiting.delete(parent);
       }
       // Its parent ended while it waited: it's no child of anything now.
-      if (!this.#running.has(parent)) {
+      if (stop.aborted || !this.#running.has(parent)) {
         return false;
       }
     }
@@ -1555,12 +1640,39 @@ class SandboxPool {
     return true;
   }
 
-  /** Cancels the child session `parent` runs, if any: it ends with it. */
+  /**
+   * Ends every child of `parent` as it ends: the one it runs, cancelled,
+   * and any still being admitted, refused wherever they wait.
+   */
   #endChildOf(parent: string): void {
+    for (const orphaned of this.#admissions.get(parent) ?? []) {
+      orphaned.abort();
+    }
     const child = this.#children.get(parent);
     if (child !== undefined) {
       this.cancel(child);
     }
+  }
+
+  /** The children `parent` is admitting, each as how to refuse it. */
+  #admissionsOf(parent: string): Set<AbortController> {
+    let admitting = this.#admissions.get(parent);
+    if (admitting === undefined) {
+      admitting = new Set();
+      this.#admissions.set(parent, admitting);
+    }
+    return admitting;
+  }
+
+  /** Gives one of `owner`'s places back, for a session that ended or never ran. */
+  #giveOwnerBack(owner: string): void {
+    const left = (this.#owners.get(owner) ?? 1) - 1;
+    if (left <= 0) {
+      this.#owners.delete(owner);
+    } else {
+      this.#owners.set(owner, left);
+    }
+    this.#released.dispatchEvent(new Event("released"));
   }
 
   /** Ends session `callId` as its caller gave up on it; false if none runs. */
