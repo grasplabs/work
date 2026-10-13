@@ -19,6 +19,13 @@ export const appLimits = {
 } as const;
 
 /**
+ * One folder or file name in an App's path (`appPathSchema`): letters,
+ * digits, `_`, `-` and `.`, not starting with a `.`. That rules out `.`
+ * and `..`, so a path can't step out of the App, and hidden files.
+ */
+export const appPathSegmentPattern = /^[\w-][\w.-]*$/u;
+
+/**
  * The most bytes of an App's manifest's text, as UTF-8, checked before it
  * is parsed: room for the schema's own megabyte and every function's
  * descriptors. Whatever the size of its source, an App's manifest is

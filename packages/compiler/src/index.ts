@@ -30,8 +30,13 @@ export type {
 export {
   appCodeFiles,
   appCodeKind,
+  appTestFiles,
   generatedModules,
   isAppLayout,
+  isAppTestSuite,
+  isUnderAppTests,
+  strayTestFileMessage,
+  strayTestFiles,
 } from "./app-code.ts";
 export {
   appCodeLimitErrors,

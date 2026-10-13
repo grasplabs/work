@@ -50,6 +50,7 @@ export const screenTests = [
   "test/app-invocation-isolation.test.ts",
   "test/release-retention.test.ts",
   "test/app-activation.test.ts",
+  "test/app-tests.test.ts",
   "test/app-function-route.test.ts",
   "test/resource-bindings.test.ts",
   "test/resource-connectors.test.ts",
