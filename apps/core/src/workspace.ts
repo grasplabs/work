@@ -391,7 +391,7 @@ const interruptedMessage = (): AssistantMessage => ({
 });
 
 /** How a write a chat's agent had held for its person ended. */
-export type HeldOutcome = "confirmed" | "declined" | "failed";
+export type HeldOutcome = "confirmed" | "declined" | "unknown" | "failed";
 
 /** A held write, as its chat's agent knows it: the ID its call answered with. */
 const heldSchema = z.strictObject({
@@ -411,6 +411,8 @@ const heldOutcomes: Record<HeldOutcome, string> = {
     "The person confirmed it and it was carried out. Don't ask for it again.",
   declined:
     "The person declined it: it was not carried out and won't be. Don't ask for it again unless they say so.",
+  unknown:
+    "The person confirmed it and it was sent, but whether it took effect is unknown: it may have been carried out. It won't be sent again; check the outside system before asking for it again.",
   failed:
     "The person confirmed it, but carrying it out failed, so it may not have been done. It no longer waits for them; don't ask for it again unless they say so.",
 };

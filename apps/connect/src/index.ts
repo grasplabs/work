@@ -368,6 +368,7 @@ export default class Connect
       await auditCall(this.env, {
         ...ended,
         outcome: "replayed",
+        replayed: true,
         provenance: outcome.result.provenance,
       });
     } else if (outcome.state === "waiting") {
@@ -381,6 +382,8 @@ export default class Connect
         outcome:
           reason === "connect.action_failed" ? "replayed" : outcomeOf(reason),
         reason,
+        // How it ended, read again: no send of its own.
+        replayed: true,
       });
     }
     return outcome;
@@ -541,16 +544,26 @@ export default class Connect
     try {
       done = await carryOut(this.env, claims, call, progress, held);
     } catch (error) {
-      const reason = codeOf(error);
+      let reason = codeOf(error);
+      // Once the key was claimed the call may have gone out: an error that
+      // is none of connect's own answers (spending or freeing the key
+      // failed, say) leaves its outcome unknown, never a plain failure.
+      const lost = progress.claimed === true && reason === undefined;
+      if (lost) {
+        log.error("connect.call_after_claim_failed", errorFields(error));
+        reason = "connect.outcome_unknown";
+      }
       await auditFailure(this.env, {
         call: stated,
         claims,
-        sideEffect: progress.sideEffect,
+        // A repeat refused as its earlier call ended is of a side effect.
+        sideEffect: progress.replayed === true ? true : progress.sideEffect,
         outcome: outcomeOf(reason),
         reason: reason ?? "internal",
+        replayed: progress.replayed,
         pendingActionId: held?.id,
       });
-      throw error;
+      throw lost ? connectErrors.create("connect.outcome_unknown") : error;
     }
     // Nothing is returned, or stored for a repeat, that the audit log
     // doesn't have: a side effect's answer is stored with its events. If
@@ -562,6 +575,7 @@ export default class Connect
       sideEffect: done.sideEffect,
       outcome: callOutcome(done),
       reason: done.failed ? "connect.action_failed" : undefined,
+      replayed: done.replayed,
       provenance: done.result.provenance,
       pendingActionId: done.pending?.id ?? held?.id,
     };

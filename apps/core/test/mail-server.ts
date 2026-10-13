@@ -25,10 +25,11 @@ export const mailControlUrl = (name: string): string =>
  * How the server answers its next call: `unavailable` (a 503 to the call's
  * look at its tools, before anything is sent); or, to the call itself,
  * `sent` (it sends the mail), `invalid` (the tool refuses the input and
- * says so in its result) or `slow` (it holds the call, as a server that
- * takes its time does, until the test lets it go; then sends the mail).
+ * says so in its result), `slow` (it holds the call, as a server that
+ * takes its time does, until the test lets it go; then sends the mail) or
+ * `lost` (it sends the mail, and its answer is a 502 a gateway made of it).
  */
-export type MailAnswer = "sent" | "unavailable" | "invalid" | "slow";
+export type MailAnswer = "sent" | "unavailable" | "invalid" | "slow" | "lost";
 
 /**
  * A server's tools, set by a test in place of the mail tools: what
@@ -134,6 +135,9 @@ const mailServer = async (request, url) => {
   }
   const { to, subject } = params.arguments;
   server.sent.push({ to, subject });
+  if (answer === "lost") {
+    return new Response("Bad Gateway", { status: 502 });
+  }
   const sent = { messageId: "message-" + server.sent.length };
   return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(sent) }], structuredContent: sent });
 };

@@ -48,6 +48,25 @@ const server = fakeMcpServer(serverUrl, [
     }),
   },
   {
+    name: "mail.unsure",
+    // Says it can't tell whether it acted.
+    run: () => ({
+      output: { error: "Gateway timeout" },
+      isError: true,
+      outcomeUnknown: true,
+    }),
+  },
+  {
+    name: "mail.mixed",
+    // Says both: that it did nothing, and that its outcome is unknown.
+    run: () => ({
+      output: { error: "Unsure" },
+      isError: true,
+      notPerformed: true,
+      outcomeUnknown: true,
+    }),
+  },
+  {
     name: "mail.archive",
     run: async () => {
       await archiveDone;
@@ -216,6 +235,41 @@ describe("a side effect", () => {
     );
     await expect(outcome(callAs(anna, call))).resolves.toBe(
       "connect.action_failed"
+    );
+    expect(server.ran).toHaveLength(1);
+  });
+
+  it("that a remote server's tool says is of unknown outcome spends its key, its error kept as no answer", async () => {
+    const connectionId = await addConnection();
+    const call = {
+      connectionId,
+      action: "mail.unsure",
+      input: {},
+      idempotencyKey: "run-1:unsure",
+    };
+    // Believed of any server: it can only stop a repeat.
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    expect(server.ran).toHaveLength(1);
+  });
+
+  it("whose result says both that it did nothing and that its outcome is unknown keeps its key spent", async () => {
+    const connectionId = await addConnection();
+    const call = {
+      connectionId,
+      action: "mail.mixed",
+      input: {},
+      idempotencyKey: "run-1:mixed",
+    };
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
     );
     expect(server.ran).toHaveLength(1);
   });

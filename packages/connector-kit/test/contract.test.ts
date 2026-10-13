@@ -5,6 +5,7 @@ import { defineConnector, defineTool, ToolError } from "../src/connector.ts";
 import {
   connectorManifestSchema,
   generatedContracts,
+  outcomeUnknownMetaKey,
   pathMatches,
   redirectHostMatches,
 } from "../src/manifest.ts";
@@ -168,6 +169,61 @@ describe("a tool", () => {
       content: [{ type: "text", text: "The action failed" }],
       isError: true,
     });
+  });
+
+  it("says a write whose outcome it can't tell is of unknown outcome, never that it failed", async () => {
+    const writing = (error: Error) =>
+      defineTool({
+        name: "items.create",
+        description: "Creates an item",
+        input: z.strictObject({}),
+        output: z.strictObject({}),
+        readOnly: false,
+        routes: [{ ...route, method: "POST" }],
+        run: () => {
+          throw error;
+        },
+      });
+    await expect(
+      writing(
+        new ToolError("Example answered 502", {
+          code: "failed",
+          outcomeUnknown: true,
+        })
+      ).call({})
+    ).resolves.toStrictEqual({
+      content: [{ type: "text", text: "Example answered 502" }],
+      structuredContent: {
+        error: { message: "Example answered 502", code: "failed" },
+      },
+      isError: true,
+      _meta: { [outcomeUnknownMetaKey]: true },
+    });
+    // An error the tool didn't foresee may have come after its write.
+    await expect(
+      writing(new Error("token=abc")).call({})
+    ).resolves.toStrictEqual({
+      content: [{ type: "text", text: "The action's outcome is unknown" }],
+      isError: true,
+      _meta: { [outcomeUnknownMetaKey]: true },
+    });
+    // What it refused itself, before sending anything, failed.
+    await expect(
+      writing(new ToolError("Name a label", { code: "invalid" })).call({})
+    ).resolves.toStrictEqual({
+      content: [{ type: "text", text: "Name a label" }],
+      structuredContent: {
+        error: { message: "Name a label", code: "invalid" },
+      },
+      isError: true,
+    });
+  });
+
+  it("can't say both that it did nothing and that its outcome is unknown", () => {
+    expect(
+      () =>
+        new ToolError("Throttled", { notPerformed: true, outcomeUnknown: true })
+    ).toThrow(Error);
   });
 });
 
