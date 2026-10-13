@@ -149,6 +149,10 @@ msgstr "{count, plural, one {una vez} other {# veces}}"
 msgid "{count} or more files"
 msgstr "{count} archivos o más"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{daily} a day"
+msgstr "{daily} al día"
+
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# día} other {# días}}"
@@ -241,6 +245,10 @@ msgstr "{link} en {appName} falló {failures, plural, one {una vez} other {# vec
 #: src/chat/thread.tsx
 msgid "{minutes}m {rest}s"
 msgstr "{minutes} min {rest} s"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{monthly} a month"
+msgstr "{monthly} al mes"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
@@ -342,6 +350,10 @@ msgstr "{place} de {count}"
 msgid "{points} of {weight}"
 msgstr "{points} de {weight}"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{request} a request"
+msgstr "{request} por solicitud"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -374,6 +386,10 @@ msgstr "Aplicación {screen}"
 #: src/routes/_shell.settings.spend.tsx
 msgid "{share} of the {limit} budget"
 msgstr "{share} del presupuesto de {limit}"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{spent} of {limit}"
+msgstr "{spent} de {limit}"
 
 #: src/dashboard/pile-cards.tsx
 msgid "{subject} gets this permission from now on."
@@ -633,6 +649,10 @@ msgstr "Administrador"
 msgid "Admins"
 msgstr "Administradores"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "Admins alerted at {alertAt}"
+msgstr "Se avisa a los administradores al {alertAt}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Los administradores pueden cambiar el rol de cualquiera, cerrar sus sesiones y quitarlo, incluidos otros administradores."
@@ -669,6 +689,10 @@ msgstr "Acuerdos"
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "Gasto en IA"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Alert"
+msgstr "Aviso"
 
 #: src/engines/resource-bindings.tsx
 msgid "Alert admins at, in percent of a day's or month's cap"
@@ -1049,6 +1073,18 @@ msgstr "Cancelar"
 #: src/workflows/runs.tsx
 msgid "Cancelled"
 msgstr "Cancelada"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Cap reached"
+msgstr "Límite alcanzado"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps"
+msgstr "Límites"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
+msgstr "Los límites que un administrador fijó para el modelo de un motor, en la pestaña Recursos del motor, además de los presupuestos de la implementación, y lo que las acciones del motor gastaron a través de él. Los pasos de IA propios de un flujo de trabajo no cuentan aquí."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -1679,6 +1715,7 @@ msgstr "Correo electrónico"
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Engine"
@@ -1691,6 +1728,10 @@ msgstr "Motor {engine}"
 #: src/screens/screen-frame.tsx
 msgid "Engine app"
 msgstr "Aplicación del motor"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Engine budgets"
+msgstr "Presupuestos de motores"
 
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
@@ -2242,6 +2283,10 @@ msgstr "Su acceso ha caducado. Vuelve a iniciar sesión con la misma cuenta: los
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 msgstr "Su presupuesto no se puede leer, así que no sirve nada en lugar de funcionar sin él. Vincúlalo de nuevo para fijar su presupuesto otra vez."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "Its budget can't be read, so it serves nothing."
+msgstr "Su presupuesto no se puede leer, así que no atiende nada."
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "No se pudo leer su contenido."
@@ -2604,6 +2649,14 @@ msgstr "No hay presupuesto definido: las llamadas a modelos no tienen límite de
 #: src/routes/_shell.settings.models.tsx
 msgid "No call has to stay in the EU."
 msgstr "Ninguna llamada tiene que quedarse en la UE."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "No caps of its own"
+msgstr "Sin límites propios"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "No engine has a model bound to it."
+msgstr "Ningún motor tiene un modelo vinculado."
 
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.engines.index.tsx
@@ -3153,6 +3206,10 @@ msgstr "Parámetros"
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Parte de lo que se enviará aparece recortado arriba. Muéstralo todo, o exactamente lo que se enviará, para confirmar."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Past the alert"
+msgstr "Pasado el aviso"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Paste the transcript of the first conversation with the sponsor"
@@ -4342,6 +4399,10 @@ msgstr "Los motores que crea este chat no se cargaron."
 msgid "The export didn't work. Try again."
 msgstr "La exportación no ha funcionado. Inténtalo de nuevo."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "The first {shown} by engine; more engines have models bound."
+msgstr "Los primeros {shown} por motor; más motores tienen modelos vinculados."
+
 #: src/dashboard/activity.tsx
 msgid "The full audit trail"
 msgstr "El registro de auditoría completo"
@@ -4604,6 +4665,10 @@ msgstr "Este enlace no funciona. Pide uno nuevo a quien te lo envió."
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Este enlace ha caducado. Pide uno nuevo a quien te lo envió."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "This month"
+msgstr "Este mes"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "This month so far"
 msgstr "Este mes hasta ahora"
@@ -4649,6 +4714,10 @@ msgstr "Para que siga siendo privado quién habló, un equipo no aparece hasta q
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Hoy"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Today ({day}, UTC)"
+msgstr "Hoy ({day}, UTC)"
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"
@@ -4909,6 +4978,10 @@ msgstr "Qué es delicado ahora"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "What it brought"
 msgstr "Lo que aportó"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "What it is bound to can't be read, so it serves nothing."
+msgstr "No se puede leer a qué está vinculado, así que no atiende nada."
 
 #: src/engines/resource-bindings.tsx
 msgid "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."

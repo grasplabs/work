@@ -1,4 +1,5 @@
 import { defineErrorFamily } from "./errors.ts";
+import type { ModelBindingBudget } from "./resource-bindings.ts";
 
 /** Why the model gateway refused or failed a model call. */
 export const modelErrors = defineErrorFamily({
@@ -124,8 +125,50 @@ export interface ModelSettings {
   rules: { state: "invalid" } | ({ state: "on" } & ModelRulesSettings);
   /** The UTC month budgets count in now, such as `2026-09`. */
   month: string;
+  /** The UTC day a model binding's daily cap counts in now, such as `2026-09-30`. */
+  day: string;
   /** Reservations held for review (`HeldRequest`), oldest first. */
   held: HeldRequest[];
+  /**
+   * The Apps' active model bindings, by App name and alias, with their
+   * caps and what each spent: at most {@link bindingSpendListed}, and
+   * whether more are bound.
+   */
+  bindings: { listed: ModelBindingSpend[]; more: boolean };
+}
+
+/** Most model bindings the settings list the spend of. */
+export const bindingSpendListed = 100;
+
+/**
+ * How far a model binding's spend is into its caps: under its alert
+ * threshold (or capless), at it, or at a cap. The most of its day's and
+ * month's.
+ */
+export type ModelBindingAlert = "none" | "alerted" | "reached";
+
+/**
+ * An App's model binding (resource-bindings.ts), its own caps, and what
+ * its requests spent: the calls the App's actions make through it, never
+ * a workflow's own model steps.
+ */
+export interface ModelBindingSpend {
+  appId: string;
+  appName: string;
+  alias: string;
+  /**
+   * `<provider>/<model>`; null when its stored target can't be read, so
+   * it serves nothing.
+   */
+  model: string | null;
+  /** Its own caps; null for none, and while `budgetDamaged`. */
+  budget: ModelBindingBudget | null;
+  /** Its caps can't be read, so it serves nothing. */
+  budgetDamaged: boolean;
+  /** US dollars spent today (UTC, `day`) and this month (`month`). */
+  today: number;
+  thisMonth: number;
+  alert: ModelBindingAlert;
 }
 
 /**

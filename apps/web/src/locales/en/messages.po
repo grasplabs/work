@@ -149,6 +149,10 @@ msgstr "{count, plural, one {once} other {# times}}"
 msgid "{count} or more files"
 msgstr "{count} or more files"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{daily} a day"
+msgstr "{daily} a day"
+
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# day} other {# days}}"
@@ -241,6 +245,10 @@ msgstr "{link} in {appName} failed {failures, plural, one {once} other {# times}
 #: src/chat/thread.tsx
 msgid "{minutes}m {rest}s"
 msgstr "{minutes}m {rest}s"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{monthly} a month"
+msgstr "{monthly} a month"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
@@ -342,6 +350,10 @@ msgstr "{place} of {count}"
 msgid "{points} of {weight}"
 msgstr "{points} of {weight}"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{request} a request"
+msgstr "{request} a request"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -374,6 +386,10 @@ msgstr "{screen} app"
 #: src/routes/_shell.settings.spend.tsx
 msgid "{share} of the {limit} budget"
 msgstr "{share} of the {limit} budget"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{spent} of {limit}"
+msgstr "{spent} of {limit}"
 
 #: src/dashboard/pile-cards.tsx
 msgid "{subject} gets this permission from now on."
@@ -633,6 +649,10 @@ msgstr "Admin"
 msgid "Admins"
 msgstr "Admins"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "Admins alerted at {alertAt}"
+msgstr "Admins alerted at {alertAt}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Admins can change anyone's role, end their sessions and remove them, other admins included."
@@ -669,6 +689,10 @@ msgstr "Agreements"
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "AI spend"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Alert"
+msgstr "Alert"
 
 #: src/engines/resource-bindings.tsx
 msgid "Alert admins at, in percent of a day's or month's cap"
@@ -1049,6 +1073,18 @@ msgstr "Cancel"
 #: src/workflows/runs.tsx
 msgid "Cancelled"
 msgstr "Cancelled"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Cap reached"
+msgstr "Cap reached"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps"
+msgstr "Caps"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
+msgstr "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -1679,6 +1715,7 @@ msgstr "Email"
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Engine"
@@ -1691,6 +1728,10 @@ msgstr "Engine {engine}"
 #: src/screens/screen-frame.tsx
 msgid "Engine app"
 msgstr "Engine app"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Engine budgets"
+msgstr "Engine budgets"
 
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
@@ -2242,6 +2283,10 @@ msgstr "Its access ran out. Sign in again with the same account: engines and age
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 msgstr "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "Its budget can't be read, so it serves nothing."
+msgstr "Its budget can't be read, so it serves nothing."
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "Its contents couldn't be read."
@@ -2604,6 +2649,14 @@ msgstr "No budget is set: model calls aren't limited by cost."
 #: src/routes/_shell.settings.models.tsx
 msgid "No call has to stay in the EU."
 msgstr "No call has to stay in the EU."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "No caps of its own"
+msgstr "No caps of its own"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "No engine has a model bound to it."
+msgstr "No engine has a model bound to it."
 
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.engines.index.tsx
@@ -3153,6 +3206,10 @@ msgstr "Parameters"
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Past the alert"
+msgstr "Past the alert"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Paste the transcript of the first conversation with the sponsor"
@@ -4342,6 +4399,10 @@ msgstr "The engines this chat builds didn't load."
 msgid "The export didn't work. Try again."
 msgstr "The export didn't work. Try again."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "The first {shown} by engine; more engines have models bound."
+msgstr "The first {shown} by engine; more engines have models bound."
+
 #: src/dashboard/activity.tsx
 msgid "The full audit trail"
 msgstr "The full audit trail"
@@ -4604,6 +4665,10 @@ msgstr "This link doesn't work. Ask whoever sent it for a new one."
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "This link has expired. Ask whoever sent it for a new one."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "This month"
+msgstr "This month"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "This month so far"
 msgstr "This month so far"
@@ -4649,6 +4714,10 @@ msgstr "To keep who spoke private, a team is left out until five of its people w
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Today"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Today ({day}, UTC)"
+msgstr "Today ({day}, UTC)"
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"
@@ -4909,6 +4978,10 @@ msgstr "What is sensitive now"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "What it brought"
 msgstr "What it brought"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "What it is bound to can't be read, so it serves nothing."
+msgstr "What it is bound to can't be read, so it serves nothing."
 
 #: src/engines/resource-bindings.tsx
 msgid "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."

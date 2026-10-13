@@ -149,6 +149,10 @@ msgstr "{count, plural, one {één keer} other {# keer}}"
 msgid "{count} or more files"
 msgstr "{count} of meer bestanden"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{daily} a day"
+msgstr "{daily} per dag"
+
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# dag} other {# dagen}}"
@@ -241,6 +245,10 @@ msgstr "{link} in {appName} is {failures, plural, one {één keer} other {# keer
 #: src/chat/thread.tsx
 msgid "{minutes}m {rest}s"
 msgstr "{minutes} min {rest} s"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{monthly} a month"
+msgstr "{monthly} per maand"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
@@ -342,6 +350,10 @@ msgstr "{place} van {count}"
 msgid "{points} of {weight}"
 msgstr "{points} van {weight}"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{request} a request"
+msgstr "{request} per verzoek"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -374,6 +386,10 @@ msgstr "App {screen}"
 #: src/routes/_shell.settings.spend.tsx
 msgid "{share} of the {limit} budget"
 msgstr "{share} van het budget van {limit}"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{spent} of {limit}"
+msgstr "{spent} van {limit}"
 
 #: src/dashboard/pile-cards.tsx
 msgid "{subject} gets this permission from now on."
@@ -633,6 +649,10 @@ msgstr "Beheerder"
 msgid "Admins"
 msgstr "Beheerders"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "Admins alerted at {alertAt}"
+msgstr "Admins gewaarschuwd bij {alertAt}"
+
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
 msgstr "Beheerders kunnen ieders rol wijzigen, sessies beëindigen en mensen verwijderen, andere beheerders inbegrepen."
@@ -669,6 +689,10 @@ msgstr "Afspraken"
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "AI-uitgaven"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Alert"
+msgstr "Waarschuwing"
 
 #: src/engines/resource-bindings.tsx
 msgid "Alert admins at, in percent of a day's or month's cap"
@@ -1049,6 +1073,18 @@ msgstr "Annuleren"
 #: src/workflows/runs.tsx
 msgid "Cancelled"
 msgstr "Geannuleerd"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Cap reached"
+msgstr "Limiet bereikt"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps"
+msgstr "Limieten"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
+msgstr "Limieten die een admin op het model van een engine heeft ingesteld, op het tabblad Resources van de engine, bovenop de budgetten van de installatie, en wat de acties van de engine erdoor hebben uitgegeven. De eigen AI-stappen van een workflow tellen hier niet mee."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -1679,6 +1715,7 @@ msgstr "E-mail"
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Engine"
@@ -1691,6 +1728,10 @@ msgstr "Engine {engine}"
 #: src/screens/screen-frame.tsx
 msgid "Engine app"
 msgstr "Engine-app"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Engine budgets"
+msgstr "Enginebudgetten"
 
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
@@ -2242,6 +2283,10 @@ msgstr "De toegang is verlopen. Meld je opnieuw aan met hetzelfde account: engin
 msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
 msgstr "Het budget kan niet worden gelezen, dus hij bedient niets in plaats van zonder budget te draaien. Koppel hem opnieuw om het budget opnieuw in te stellen."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "Its budget can't be read, so it serves nothing."
+msgstr "Het budget kan niet worden gelezen, dus de koppeling bedient niets."
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "De inhoud kon niet worden gelezen."
@@ -2604,6 +2649,14 @@ msgstr "Er is geen budget ingesteld: modelaanroepen worden niet beperkt op koste
 #: src/routes/_shell.settings.models.tsx
 msgid "No call has to stay in the EU."
 msgstr "Geen aanroep hoeft in de EU te blijven."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "No caps of its own"
+msgstr "Geen eigen limieten"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "No engine has a model bound to it."
+msgstr "Aan geen enkele engine is een model gekoppeld."
 
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.engines.index.tsx
@@ -3153,6 +3206,10 @@ msgstr "Parameters"
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Een deel van wat wordt verstuurd, is hierboven ingekort. Toon alles, of precies wat wordt verstuurd, om te bevestigen."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Past the alert"
+msgstr "Voorbij de waarschuwing"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Paste the transcript of the first conversation with the sponsor"
@@ -4342,6 +4399,10 @@ msgstr "De engines die deze chat bouwt, zijn niet geladen."
 msgid "The export didn't work. Try again."
 msgstr "Het exporteren is niet gelukt. Probeer het opnieuw."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "The first {shown} by engine; more engines have models bound."
+msgstr "De eerste {shown} op engine; aan meer engines zijn modellen gekoppeld."
+
 #: src/dashboard/activity.tsx
 msgid "The full audit trail"
 msgstr "De volledige audittrail"
@@ -4604,6 +4665,10 @@ msgstr "Deze link werkt niet. Vraag wie hem stuurde om een nieuwe."
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Deze link is verlopen. Vraag wie hem stuurde om een nieuwe."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "This month"
+msgstr "Deze maand"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "This month so far"
 msgstr "Deze maand tot nu toe"
@@ -4649,6 +4714,10 @@ msgstr "Om privé te houden wie er sprak, ontbreekt een team tot vijf van zijn m
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Vandaag"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Today ({day}, UTC)"
+msgstr "Vandaag ({day}, UTC)"
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"
@@ -4909,6 +4978,10 @@ msgstr "Wat nu gevoelig ligt"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "What it brought"
 msgstr "Wat het opleverde"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "What it is bound to can't be read, so it serves nothing."
+msgstr "Waaraan het gekoppeld is, kan niet worden gelezen, dus de koppeling bedient niets."
 
 #: src/engines/resource-bindings.tsx
 msgid "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."
