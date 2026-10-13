@@ -312,7 +312,7 @@ export type Admitted =
    * carried: refused, reserving nothing, to be asked again under the
    * policy in force.
    */
-  | { ok: false; policyBehind: true }
+  | { ok: false; policyBehind: true; highest: number }
   /**
    * Its ID was admitted before, for another request or one no longer
    * open: refused, reserving nothing.
@@ -510,12 +510,13 @@ export class ModelLedger extends DurableObject<Env> {
           alerted: 0,
         };
       }
-      if (
-        admission.policyGeneration !== undefined &&
-        !this.#policyCurrent(admission.policyGeneration)
-      ) {
+      const highest =
+        admission.policyGeneration === undefined
+          ? undefined
+          : this.#policyAhead(admission.policyGeneration);
+      if (highest !== undefined) {
         return {
-          admitted: { ok: false, policyBehind: true } as const,
+          admitted: { ok: false, policyBehind: true, highest } as const,
           alerted: 0,
         };
       }
@@ -903,18 +904,18 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
-   * Whether an admission under quota policy `generation` may go on: no
-   * admission carried a higher one. Records it as the highest when it is.
-   * Inside a transaction.
+   * The higher quota policy generation an earlier admission carried, which
+   * an admission under `generation` is behind; none when it may go on, and
+   * then it is recorded as the highest. Inside a transaction.
    */
-  #policyCurrent(generation: number): boolean {
+  #policyAhead(generation: number): number | undefined {
     const highest = this.#db
       .select({ generation: policy.generation })
       .from(policy)
       .where(eq(policy.id, 0))
       .get()?.generation;
     if (highest !== undefined && highest > generation) {
-      return false;
+      return highest;
     }
     if (highest === undefined || highest < generation) {
       this.#db
@@ -923,7 +924,7 @@ export class ModelLedger extends DurableObject<Env> {
         .onConflictDoUpdate({ target: policy.id, set: { generation } })
         .run();
     }
-    return true;
+    return undefined;
   }
 
   /**
@@ -932,9 +933,9 @@ export class ModelLedger extends DurableObject<Env> {
    * reservation becomes what the other open requests on it reserve. A
    * missing row is recreated only when they reserve something, or when it
    * is a run lineage's: the row took the lineage's count with it, so it
-   * comes back used up (`requests` at the most any policy allows), and the lineage makes no
-   * more requests. What it rebuilt to, none when nothing was written, and
-   * the count it set. Inside a transaction.
+   * comes back used up (`requests` at the most any policy allows), and
+   * the lineage makes no more requests. What it rebuilt to, none when
+   * nothing was written, and the count it set. Inside a transaction.
    */
   #rebuildScope(
     kept: typeof requestScopes.$inferSelect,
@@ -957,12 +958,11 @@ export class ModelLedger extends DurableObject<Env> {
         .run();
       return { micros };
     }
-    // Used up under any policy: none allows a lineage more than the
-    // platform's limit, which the limit it was admitted under may be below.
+    // At the platform's limit, never the lower one it may have been
+    // admitted under: no policy allows a lineage more, so it stays used up
+    // under every policy.
     const exhausted =
-      period === lineagePeriod
-        ? Math.max(kept.limitRequests ?? 0, lineageModelRequests)
-        : undefined;
+      period === lineagePeriod ? lineageModelRequests : undefined;
     if (micros === 0 && exhausted === undefined) {
       return { micros: null };
     }

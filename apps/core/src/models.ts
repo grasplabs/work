@@ -905,14 +905,17 @@ const scopesRead = async (
   } catch (error) {
     // No lineage's request limit, so nothing is admitted.
     log.error("model.quota_policy_failed", errorFields(error));
-    return { held: { code: "model.ledger_unavailable" } };
+    return { held: { code: "model.quota_policy_unavailable" } };
   }
 };
 
 /** Why the ledger's refusal `admitted` holds back a request of `call`. */
 const heldBecause = (
   call: Session,
-  admitted: Exclude<LedgerAdmitted, { ok: true } | { policyBehind: true }>
+  admitted: Exclude<
+    LedgerAdmitted,
+    { ok: true } | { policyBehind: true; highest: number }
+  >
 ): Refusal => {
   if ("unpriced" in admitted) {
     return { code: "model.unpriced" };
@@ -1017,12 +1020,16 @@ const admitRequest = async (
         return await admitRequest(route, body, endsAt, true);
       }
       // Never expected: core records a generation before any admission
-      // carries it, and reads the highest it recorded.
+      // carries it, and reads the highest it recorded. A ledger ahead of
+      // core (core's database restored, say) holds back every workflow's
+      // call until core's policy passes it: logged with both generations,
+      // and refused for what it is, never as a ledger outage.
       log.error("model.quota_policy_behind", {
         model: call.model,
         generation: policyGeneration,
+        ledgerGeneration: admitted.highest,
       });
-      return { held: { code: "model.ledger_unavailable" } };
+      return { held: { code: "model.quota_policy_behind" } };
     }
     if (admitted.ok) {
       if (perRequest !== undefined) {

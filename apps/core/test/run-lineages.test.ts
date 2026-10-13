@@ -7,13 +7,14 @@ import {
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall } from "../src/models.ts";
+import { quotaPolicy } from "../src/workflows/quotas.ts";
 import { runActor, startRun } from "../src/workflows/runs.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
@@ -128,11 +129,68 @@ const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
  */
 let generations = 100;
 
-/** Sets the operator's quota policy to `limits`, under a new generation. */
-const setPolicy = (limits: Record<string, number>): void => {
+/**
+ * Sets the operator's quota policy to `limits`, under a new generation,
+ * which it returns.
+ */
+const setPolicy = (limits: Record<string, number>): number => {
   generations += 1;
   env.QUOTA_LIMITS = { generation: generations, limits };
+  return generations;
 };
+
+/**
+ * The quota policy generations the model ledger recorded the provider
+ * requests of the lineage of `root` under, and how many under each.
+ */
+const generationsOf = async (root: string) =>
+  await runInDurableObject(modelLedger(env), (_instance, state) =>
+    state.storage.sql
+      .exec<{ generation: number | null; requests: number }>(
+        "SELECT policy_generation AS generation, count(*) AS requests FROM requests WHERE actor LIKE ? GROUP BY policy_generation ORDER BY policy_generation",
+        `%${root}%`
+      )
+      .toArray()
+  );
+
+/**
+ * Sets the model ledger's highest quota policy generation to
+ * `generation`, as a ledger ahead of core would have it; none clears it.
+ */
+const setLedgerGeneration = async (generation?: number): Promise<void> => {
+  await runInDurableObject(modelLedger(env), (_instance, state) => {
+    state.storage.sql.exec("DELETE FROM policy");
+    if (generation !== undefined) {
+      state.storage.sql.exec(
+        "INSERT INTO policy (id, generation) VALUES (0, ?)",
+        generation
+      );
+    }
+  });
+};
+
+/**
+ * Core's database, with `onRead` run as each statement on the quota
+ * policy's table is prepared: one that throws is a table that can't be
+ * read.
+ */
+const onPolicyRead = (onRead: () => void): D1Database =>
+  new Proxy(env.DB, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string): unknown => {
+          if (query.includes("quota_policies")) {
+            onRead();
+          }
+          return target.prepare(query);
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
 
 /** `count` of `item`. */
 const times = <Item>(count: number, item: Item): Item[] =>
@@ -498,10 +556,14 @@ ${llmStep()}`,
       times(20, cheapAnswer),
       async (fake) => {
         try {
+          const { generation: first } = await quotaPolicy(env);
           const before = await allAtOnce(times(5, rootActor), work);
           // The operator lowers a lineage's requests to 8, while this one
           // is under way with 5 sent.
-          setPolicy({ ...configuredLimits, lineageModelRequests: 8 });
+          const lowering = setPolicy({
+            ...configuredLimits,
+            lineageModelRequests: 8,
+          });
           const lowered = await allAtOnce(times(5, childActor), work);
           const other = await callFor(work, otherLineage);
           // A policy raising it past the platform's is refused whole: the
@@ -510,9 +572,16 @@ ${llmStep()}`,
           const raised = await callFor(work, childActor);
           // No longer lowered: the platform's 100 again, and the lineage
           // goes on from the 8 it sent.
-          setPolicy(configuredLimits);
+          const restoring = setPolicy(configuredLimits);
           const restored = await callFor(work, rootActor);
           return {
+            // Each request's receipt, under the policy it was admitted by.
+            recorded: await generationsOf(root),
+            expected: [
+              { generation: first, requests: 5 },
+              { generation: lowering, requests: 3 },
+              { generation: restoring, requests: 1 },
+            ],
             before: countOf(before, "ok"),
             lowered: {
               ok: countOf(lowered, "ok"),
@@ -529,13 +598,155 @@ ${llmStep()}`,
       }
     );
 
-    expect(result).toStrictEqual({
+    const { recorded, expected, ...outcomes } = result;
+    expect(outcomes).toStrictEqual({
       before: 5,
       lowered: { ok: 3, refused: 2 },
       other: "ok",
       raised: "model.run_limit",
       restored: "ok",
       sent: 10,
+    });
+    expect(recorded).toStrictEqual(expected);
+  });
+
+  it("hold a provider request's retry to a policy lowered while its call is under way", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Retried" });
+    const work = { app, person: builder.userId };
+    const root = `run-${crypto.randomUUID()}`;
+    const actor = runActorOf({ runId: root, app, workflow: "reader" });
+
+    const result = await withGateway(
+      undefined,
+      [cheapAnswer, cheapAnswer, { status: 500 }, cheapAnswer],
+      async (fake) => {
+        const ai: AiBinding = env.AI;
+        // The operator lowers a lineage's requests to the 3 this one has
+        // sent, as its third goes out: the provider then fails it, and
+        // the call tries again.
+        vi.spyOn(ai, "fetch").mockImplementation(async (...args) => {
+          if (fake.requests.length === 2) {
+            setPolicy({ ...configuredLimits, lineageModelRequests: 3 });
+          }
+          return await fake.binding.fetch(...args);
+        });
+        try {
+          const before = await allAtOnce(times(2, actor), work);
+          const retried = await callFor(work, actor);
+          return {
+            before: countOf(before, "ok"),
+            retried,
+            sent: fake.requests.length,
+          };
+        } finally {
+          setPolicy(configuredLimits);
+        }
+      }
+    );
+
+    expect(result).toStrictEqual({
+      before: 2,
+      retried: "model.run_limit",
+      sent: 3,
+    });
+  });
+
+  it("hold back a workflow's model call, sending nothing, when its quota policy can't be read or is behind the model ledger's", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Behind" });
+    const work = { app, person: builder.userId };
+    const unreadableRun = `run-${crypto.randomUUID()}`;
+    const behindRun = `run-${crypto.randomUUID()}`;
+    const unreadable = runActorOf({
+      runId: unreadableRun,
+      app,
+      workflow: "reader",
+    });
+    const behind = runActorOf({ runId: behindRun, app, workflow: "reader" });
+
+    const result = await withGateway(undefined, [cheapAnswer], async (fake) => {
+      const policyDown = await outcome(
+        models({
+          ...env,
+          DB: onPolicyRead(() => {
+            throw new Error("D1_ERROR: the database is unavailable");
+          }),
+        }).call(stepCall(work, unreadable))
+      );
+      // The ledger saw a generation core never recorded: core's database
+      // restored from before it, say.
+      const { generation } = await quotaPolicy(env);
+      await setLedgerGeneration(generation + 1_000_000);
+      try {
+        const ledgerAhead = await callFor(work, behind);
+        return {
+          policyDown,
+          ledgerAhead,
+          refused: [
+            ...(await refusalsOf(unreadableRun)),
+            ...(await refusalsOf(behindRun)),
+          ],
+          sent: fake.requests.length,
+        };
+      } finally {
+        await setLedgerGeneration();
+      }
+    });
+
+    expect(result).toStrictEqual({
+      policyDown: "model.quota_policy_unavailable",
+      ledgerAhead: "model.quota_policy_behind",
+      refused: [
+        ["model.quota_policy_unavailable", null],
+        ["model.quota_policy_behind", null],
+      ],
+      sent: 0,
+    });
+  });
+
+  it("read the quota policy again, once, when the model ledger already admitted under a newer one", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const { id: app } = await builder.api.apps.create({ name: "Raced" });
+    const work = { app, person: builder.userId };
+    const root = `run-${crypto.randomUUID()}`;
+    const actor = runActorOf({ runId: root, app, workflow: "reader" });
+
+    const result = await withGateway(undefined, [cheapAnswer], async (fake) => {
+      // Another request already came to the ledger under the operator's
+      // next policy, which this call's first read of the policy misses:
+      // it is set only as that read reaches the database.
+      const next = generations + 1;
+      await setLedgerGeneration(next);
+      const raced = { ...env };
+      let changed = false;
+      raced.DB = onPolicyRead(() => {
+        if (!changed) {
+          changed = true;
+          raced.QUOTA_LIMITS = {
+            generation: setPolicy(configuredLimits),
+            limits: configuredLimits,
+          };
+        }
+      });
+      try {
+        const call = await outcome(models(raced).call(stepCall(work, actor)));
+        return {
+          call,
+          recorded: await generationsOf(root),
+          next,
+          sent: fake.requests.length,
+        };
+      } finally {
+        await setLedgerGeneration();
+      }
+    });
+
+    expect(result).toStrictEqual({
+      call: "ok",
+      recorded: [{ generation: result.next, requests: 1 }],
+      next: result.next,
+      sent: 1,
     });
   });
 

@@ -59,14 +59,17 @@ import { microsPerDollar } from "./model-prices.ts";
 // - Requests under an older policy after one under a newer: the ledger
 //   keeps the highest generation an admission carried, and refuses one
 //   under a lower (`policyBehind`); the gateway reads the policy again and
-//   tries once more. One that read the policy just before a newer
-//   generation was recorded, and reaches the ledger before anything under
-//   it, is admitted as if it came first: at most the requests already on
-//   their way when the policy changed.
+//   tries once more. Still behind, it is held back as
+//   `model.quota_policy_behind`, logged with both generations. One that
+//   read the policy just before a newer generation was recorded, and
+//   reaches the ledger before anything under it, is admitted as if it
+//   came first: at most the requests already on their way when the policy
+//   changed, and never past the limit they read, so never past the
+//   platform's.
 // - A rebuilt lineage starting afresh: a lineage whose spend row was lost
 //   comes back used up under any policy (model-ledger.ts, `#rebuildScope`).
-// - A policy that can't be read: a workflow's request is held back, never
-//   admitted without its limit.
+// - A policy that can't be read: a workflow's request is held back as
+//   `model.quota_policy_unavailable`, never admitted without its limit.
 //
 // A model binding of an App (resource-bindings.ts) may have caps of its
 // own, set by the admin who approved it, on top of all these: per UTC

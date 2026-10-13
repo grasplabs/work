@@ -174,6 +174,8 @@ export interface Refusal {
     | "model.budget_busy"
     | "model.unpriced"
     | "model.ledger_unavailable"
+    | "model.quota_policy_unavailable"
+    | "model.quota_policy_behind"
     | "permission.context_invalid";
   because?: string;
   /**

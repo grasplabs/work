@@ -1149,7 +1149,7 @@ describe("the model ledger", () => {
     }).toStrictEqual({
       admitted: [
         { ok: true },
-        { ok: false, policyBehind: true },
+        { ok: false, policyBehind: true, highest: 7 },
         { ok: true },
         { ok: true },
         // Two of its two requests made, under the newest policy too.
