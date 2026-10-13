@@ -293,22 +293,47 @@ export const sessionEndedError = (): Error =>
 export const sandboxVerdictOf = (error: unknown): string | undefined =>
   error instanceof Error ? verdicts.get(error) : undefined;
 
-/** What the supervisor blamed the App for in session `id`, if anything. */
+/**
+ * How long core waits for the supervisor's verdict on a call that failed
+ * while its session looked open, and how often it asks meanwhile.
+ */
+const verdictWaitMs = 1000;
+const verdictPollMs = 100;
+
+/** Whether `signal` has aborted, read as it is now. */
+const isAborted = (signal: AbortSignal | undefined): boolean =>
+  signal?.aborted === true;
+
+/**
+ * What the supervisor says of session `id`: what it blamed the App for, or
+ * else whether the session still runs (`running`) or is ending with its
+ * verdict yet to come (`ending`); nothing it could say for sure otherwise.
+ */
 const verdictOf = async (
   host: Fetcher,
-  id: string
-): Promise<Verdict | undefined> => {
+  id: string,
+  signal: AbortSignal
+): Promise<{ verdict?: Verdict; state?: "running" | "ending" }> => {
   try {
     const response = await host.fetch(`http://sandbox/verdict/${id}`, {
-      signal: AbortSignal.timeout(backstopMs),
+      signal,
     });
     if (response.status !== 200) {
       await response.body?.cancel();
-      return undefined;
+      return {};
     }
-    return verdictSchema(await response.json());
+    const body: unknown = await response.json();
+    const verdict = verdictSchema(body);
+    if (verdict !== undefined) {
+      return { verdict };
+    }
+    const state =
+      typeof body === "object" && body !== null && "state" in body
+        ? body.state
+        : undefined;
+    return state === "running" || state === "ending" ? { state } : {};
   } catch {
-    return undefined;
+    return {};
   }
 };
 
@@ -427,7 +452,8 @@ const openSession = async (
       });
     }
     throw new SandboxUnavailableError(
-      `The sandbox host answered ${response.status}.`
+      `The sandbox host answered ${response.status}.`,
+      { status: response.status }
     );
   }
   socket.accept();
@@ -454,12 +480,13 @@ const failureOf = async (
   {
     host,
     id,
-    closed,
+    isClosed,
     signal,
   }: {
     host: Fetcher;
     id: string;
-    closed: boolean;
+    /** Whether the session's socket has closed, read when it's needed. */
+    isClosed: () => boolean;
     signal: AbortSignal | undefined;
   }
 ): Promise<unknown> => {
@@ -468,11 +495,64 @@ const failureOf = async (
     // it the call's process.
     return signal.reason;
   }
-  if (sandboxVerdictOf(error) !== undefined || !closed) {
-    // The App's: what its isolate's entrypoint threw, or what it sent.
+  if (
+    sandboxVerdictOf(error) !== undefined ||
+    error instanceof SandboxUnavailableError
+  ) {
+    // Core's own word on the call: what the App sent that a session
+    // doesn't take, or the sandbox overdue.
     return error;
   }
-  const verdict = await verdictOf(host, id);
+  // Asked before trusting an open socket: the supervisor keeps its verdict
+  // before it closes core's end, but a broken session (a process killed
+  // mid-call, or one whose isolate failed the call as its process exits)
+  // can reject the call first. A session the supervisor says still runs
+  // threw it itself, at once. One it says is ending, or one it can't say
+  // of, is asked again for a moment, until the socket closes (then once
+  // more, which settles it) or `verdictWaitMs` passes.
+  // By the clock, every ask included: a stalled supervisor holds it no
+  // longer than `verdictWaitMs`, and the caller's signal ends it at once.
+  const deadline = Date.now() + verdictWaitMs;
+  const bounded = (ms: number): AbortSignal =>
+    signal === undefined
+      ? AbortSignal.timeout(ms)
+      : AbortSignal.any([AbortSignal.timeout(ms), signal]);
+  let verdict: Verdict | undefined;
+  for (;;) {
+    const closedBefore = isClosed();
+    // In order: each ask follows the wait after the one before.
+    // oxlint-disable-next-line no-await-in-loop
+    const said = await verdictOf(
+      host,
+      id,
+      bounded(Math.max(1, deadline - Date.now()))
+    );
+    // Read again: it may have aborted while the ask ran.
+    if (isAborted(signal)) {
+      return signal?.reason;
+    }
+    ({ verdict } = said);
+    const left = deadline - Date.now();
+    if (
+      verdict !== undefined ||
+      closedBefore ||
+      said.state === "running" ||
+      left <= 0
+    ) {
+      break;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop
+      await scheduler.wait(Math.min(verdictPollMs, left), { signal });
+    } catch {
+      // The caller gave up meanwhile.
+      return signal?.reason;
+    }
+  }
+  if (verdict === undefined && !isClosed()) {
+    // The App's: what its isolate's entrypoint threw.
+    return error;
+  }
   return verdict === undefined
     ? new SandboxUnavailableError("The sandbox session ended.", {
         cause: error,
@@ -627,7 +707,12 @@ export const runInSession = async (
           message: "The call this function was called in was stopped.",
         });
       }
-      throw await failureOf(error, { host, id, closed, signal: nestedSignal });
+      throw await failureOf(error, {
+        host,
+        id,
+        isClosed: () => closed,
+        signal: nestedSignal,
+      });
     } finally {
       nestedLive = false;
     }
@@ -655,7 +740,12 @@ export const runInSession = async (
       told = true;
       await endSession(host, id, "cancel");
     }
-    throw await failureOf(error, { host, id, closed, signal });
+    throw await failureOf(error, {
+      host,
+      id,
+      isClosed: () => closed,
+      signal,
+    });
   } finally {
     giveUp();
     signal?.removeEventListener("abort", giveUp);

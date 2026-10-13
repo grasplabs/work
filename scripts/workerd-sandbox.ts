@@ -636,10 +636,13 @@ class SandboxPool {
     crashed: 0,
     abandoned: 0,
   };
-  /** How to end each session running now, by its call ID. */
+  /**
+   * How to end each session running now, by its call ID, and whether it is
+   * ending: its process gone or going, its verdict not yet kept.
+   */
   readonly #running = new Map<
     string,
-    { cancel: () => void; finish: () => void }
+    { cancel: () => void; finish: () => void; ending: () => boolean }
   >();
   /** Sessions each owner holds now, waiting or running. */
   readonly #owners = new Map<string, number>();
@@ -1332,6 +1335,8 @@ class SandboxPool {
     // as abandoned. The guard watches only the bounds.
     const cancelled = new AbortController();
     const finished = new AbortController();
+    // Set once the session's end is seen, until its verdict is kept.
+    let ending = false;
     this.#running.set(callId, {
       cancel: () => {
         cancelled.abort();
@@ -1339,6 +1344,7 @@ class SandboxPool {
       finish: () => {
         finished.abort();
       },
+      ending: () => ending || host.gone,
     });
     const endsAt = Date.now() + deadlineMs;
     const guard = this.#guard(
@@ -1394,14 +1400,15 @@ class SandboxPool {
         abortOf(caller.signal),
         abortOf(finished.signal),
       ]);
-      const ending = guard.signal.aborted
+      ending = true;
+      const endedAs = guard.signal.aborted
         ? await this.#cutShort(host, guard, endsAt)
         : await this.#sessionEnded(
             host,
             AbortSignal.any([caller.signal, finished.signal]),
             endsAt
           );
-      this.#judge(host, callId, ending, deadlineMs);
+      this.#judge(host, callId, endedAs, deadlineMs);
     } finally {
       this.#running.delete(callId);
       guard.stop();
@@ -1689,6 +1696,33 @@ class SandboxPool {
     return running !== undefined;
   }
 
+  /**
+   * What `GET /verdict/<id>` answers for session `callId`: its verdict if
+   * kept; else, while it runs, `state` `ending` once its end is seen but
+   * not yet judged (a verdict may follow: core waits a moment only then)
+   * or `running`; 404 for a session it doesn't know.
+   */
+  verdictAnswer(callId: string): {
+    status: number;
+    body: Record<string, unknown>;
+  } {
+    const kept = this.verdict(callId);
+    if (kept !== undefined) {
+      return {
+        status: 200,
+        body: { verdict: kept.verdict, message: kept.message },
+      };
+    }
+    const running = this.#running.get(callId);
+    if (running === undefined) {
+      return { status: 404, body: { verdict: null } };
+    }
+    return {
+      status: 200,
+      body: { verdict: null, state: running.ending() ? "ending" : "running" },
+    };
+  }
+
   /** The verdict on session `callId`, if the App was blamed for it lately. */
   verdict(callId: string): Verdict | undefined {
     const kept = this.#verdicts.get(callId);
@@ -1933,16 +1967,8 @@ const answerRequest = async (
   }
   const verdictOf = /^\/verdict\/(?<id>[^/]+)$/u.exec(pathname)?.groups?.id;
   if (verdictOf !== undefined && request.method === "GET") {
-    const kept = pool.verdict(verdictOf);
-    send(
-      response,
-      kept === undefined ? 404 : 200,
-      JSON.stringify(
-        kept === undefined
-          ? { verdict: null }
-          : { verdict: kept.verdict, message: kept.message }
-      )
-    );
+    const { status, body } = pool.verdictAnswer(verdictOf);
+    send(response, status, JSON.stringify(body));
     return;
   }
   // Core gave up on a session (`cancel`), or is done with it (`end`).
