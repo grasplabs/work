@@ -100,6 +100,9 @@ const uploaded = async (
  */
 const busyTries = 8;
 
+/** How many of those the pool is full (503), the rest the share taken. */
+const poolFullTries = 5;
+
 /** Runs `run` with every step's retry due at once. */
 const withRetriesAtOnce = async <T>(run: () => Promise<T>): Promise<T> => {
   env.WORKFLOW_RETRY_DELAY_MS = "0";
@@ -654,9 +657,10 @@ describe("uploads", { timeout: 60_000 }, () => {
 
   it("wait out a sandbox with no place for the extractor, over more tries than a failing file gets, and read the file once one frees", async () => {
     const person = await personWithCollection();
-    // The on-prem sandbox host, its extractor's share taken: it refuses
-    // each session as busy, until a place frees after eight tries (twice
-    // the retries a failing file gets), and the file is read.
+    // The on-prem sandbox host with no place for the extractor: its pool
+    // full (503) for more tries than a failing file gets, then its owner's
+    // share taken (429), until a place frees after eight tries, and the
+    // file is read.
     let refused = 0;
     const takenHost: Fetcher = {
       fetch: async () => {
@@ -665,9 +669,12 @@ describe("uploads", { timeout: 60_000 }, () => {
           Reflect.deleteProperty(env, "SANDBOX_HOST");
         }
         return await Promise.resolve(
-          new Response("This owner already holds as many sessions as it may.", {
-            status: 429,
-          })
+          refused <= poolFullTries
+            ? new Response("The sandbox is full.", { status: 503 })
+            : new Response(
+                "This owner already holds as many sessions as it may.",
+                { status: 429 }
+              )
         );
       },
       connect: () => {

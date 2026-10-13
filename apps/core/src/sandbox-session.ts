@@ -427,7 +427,8 @@ const openSession = async (
       });
     }
     throw new SandboxUnavailableError(
-      `The sandbox host answered ${response.status}.`
+      `The sandbox host answered ${response.status}.`,
+      { status: response.status }
     );
   }
   socket.accept();

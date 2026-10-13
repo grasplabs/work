@@ -218,13 +218,12 @@ const fileVerdicts = new Set([
 
 /**
  * Whether the supervisor refused the session for a full pool: it answers
- * 503 to an upgrade it has no room for, which `runInSession` reports as
- * the sandbox unavailable, the same as an outage. For an extraction it is
- * a wait, as a taken share is.
+ * 503 to an upgrade it has no room for (or no process came free in time),
+ * which `runInSession` reports as the sandbox unavailable with that
+ * status. For an extraction it is a wait, as a taken share is.
  */
 const isPoolFull = (error: unknown): boolean =>
-  error instanceof SandboxUnavailableError &&
-  error.message === "The sandbox host answered 503.";
+  error instanceof SandboxUnavailableError && error.status === 503;
 
 /** What the extractor answers in a Dynamic Worker of core's own. */
 const extractedInCore = async (
