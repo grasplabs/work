@@ -70,6 +70,15 @@ import { parseArgs } from "node:util";
 import { z } from "zod";
 
 import {
+  sandboxCallIdHeader,
+  sandboxCpuHeader,
+  sandboxDeadlineHeader,
+  sandboxOwnerHeader,
+  sandboxParentHeader,
+  sandboxVerdictHeader,
+  sandboxWaitHeader,
+} from "../apps/core/src/sandbox-headers.ts";
+import {
   checkUsageProbe,
   defaultUsageProbe,
   watchUsage,
@@ -106,19 +115,14 @@ export const nativeWorkerd = path.join(
   "node_modules/workerd/bin/workerd"
 );
 
-/** The headers core gives a call's deadline and wait in (apps/core/src/sandboxed.ts). */
-export const deadlineHeader = "x-grasp-sandbox-deadline-ms";
-export const waitHeader = "x-grasp-sandbox-wait-ms";
-/** A session's CPU-time budget, and the ID core asks its verdict by. */
-export const cpuHeader = "x-grasp-sandbox-cpu-ms";
-export const callIdHeader = "x-grasp-sandbox-call";
-/** Whose session it is, for the per-owner cap. */
-export const ownerHeader = "x-grasp-sandbox-owner";
-/** The header core names a session's parent session in, by its call ID. */
-export const parentHeader = "x-grasp-sandbox-parent";
-
-/** The header that marks an answer as the supervisor's verdict on the App's code. */
-export const verdictHeader = "x-grasp-sandbox-verdict";
+// The headers core speaks in, as core names them (apps/core/src/sandbox-headers.ts).
+export const deadlineHeader = sandboxDeadlineHeader;
+export const waitHeader = sandboxWaitHeader;
+export const cpuHeader = sandboxCpuHeader;
+export const callIdHeader = sandboxCallIdHeader;
+export const ownerHeader = sandboxOwnerHeader;
+export const parentHeader = sandboxParentHeader;
+export const verdictHeader = sandboxVerdictHeader;
 
 /** What the supervisor is told; every field but `workerd` has a default. */
 export interface SandboxSupervisorOptions {
@@ -167,6 +171,8 @@ export interface SandboxStats {
   inFlight: number;
   /** Sessions waiting for their owner's room. */
   waitingForOwners: number;
+  /** Owners' places held now, by sessions waiting, running or dying. */
+  ownerPlaces: number;
   /** Child sessions running, and those waiting for their parent's place. */
   children: number;
   waitingForParents: number;
@@ -556,7 +562,7 @@ interface Guard {
 
 /** A session's ending the App is blamed for, kept for core to ask. */
 interface Verdict {
-  verdict: "deadline" | "memory" | "cpu" | "crashed";
+  verdict: "deadline" | "memory" | "cpu" | "crashed" | "ended";
   message: string;
   at: number;
 }
@@ -681,6 +687,10 @@ class SandboxPool {
       waiting: this.#waiting,
       inFlight: this.#inFlight,
       waitingForOwners: this.#waitingForOwners,
+      ownerPlaces: [...this.#owners.values()].reduce(
+        (sum, held) => sum + held,
+        0
+      ),
       children: this.#children.size,
       waitingForParents: this.#childWaiting.size,
     };
@@ -1201,8 +1211,10 @@ class SandboxPool {
       }
       return;
     }
-    // Given back as soon as the session ends for core, before its process
-    // is killed: core may start the owner's next call at once.
+    // Given back once the session's process is gone, not as the session
+    // ends for core: a process dying (a crash judged on its exit, a kill
+    // still going through) holds its owner's place, so no owner holds more
+    // processes than its share, however fast it starts its next call.
     let ownerHeld = true;
     const giveBack = (): void => {
       if (ownerHeld) {
@@ -1253,7 +1265,6 @@ class SandboxPool {
           parent === undefined ? undefined : () => this.#running.has(parent),
         orphaned: parent === undefined ? undefined : orphaned,
         ended: () => {
-          giveBack();
           letGoOfChild();
           this.#endChildOf(callId);
         },
@@ -1401,6 +1412,11 @@ class SandboxPool {
         abortOf(finished.signal),
       ]);
       ending = true;
+      // Over for core, whatever its process does now: its parent's child
+      // place comes back at once, not after the wait for a dying process
+      // to go, which only its verdict needs. Its owner's place comes back
+      // once the process is gone.
+      ended();
       const endedAs = guard.signal.aborted
         ? await this.#cutShort(host, guard, endsAt)
         : await this.#sessionEnded(
@@ -1657,6 +1673,13 @@ class SandboxPool {
     }
     const child = this.#children.get(parent);
     if (child !== undefined) {
+      // Not the App's fault, nor given up on by core: the call it was made
+      // in has ended, which is what core hears of it.
+      this.#keepVerdict(child, {
+        verdict: "ended",
+        message: "The call this function was called in has ended.",
+        at: Date.now(),
+      });
       this.cancel(child);
     }
   }

@@ -41,6 +41,51 @@ export class CallTree {
     }
   }
 
+  /** Whether no nested call it started is still running. */
+  idle(): boolean {
+    return this.#started.size === 0;
+  }
+
+  #session: Promise<unknown> | undefined;
+
+  /**
+   * Keeps `session`, the sandbox session its functions run in, which goes
+   * on after the function its caller named answered (app-functions.ts).
+   */
+  holdSession(session: Promise<unknown>): void {
+    this.#session = session;
+  }
+
+  /**
+   * Waits up to `ms` for its sandbox session to end, if it has one: a run
+   * given up on frees its process then, which a request that ends with the
+   * answer might never get to ask.
+   */
+  async sessionEnded(ms: number): Promise<void> {
+    if (this.#session === undefined) {
+      return;
+    }
+    const session = this.#session;
+    const waited = new AbortController();
+    await Promise.race([
+      (async () => {
+        try {
+          await session;
+        } catch {
+          // How it ended is its caller's to hear.
+        }
+      })(),
+      (async () => {
+        try {
+          await scheduler.wait(ms, { signal: waited.signal });
+        } catch {
+          // Ended first.
+        }
+      })(),
+    ]);
+    waited.abort();
+  }
+
   /** Settles once every nested call started, those they start too, has. */
   async settled(): Promise<void> {
     while (this.#started.size > 0) {

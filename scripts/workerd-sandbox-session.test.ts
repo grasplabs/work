@@ -45,6 +45,8 @@ const outcomeSchema = z.object({
   nestedRefused: z.number(),
   refusedVerdict: z.string().nullable(),
   verdict: z.string().nullable().optional(),
+  /** The status the sandbox host refused with, as core's error carries it. */
+  refusedStatus: z.number().nullable().optional(),
   logged: z.array(z.unknown()),
 });
 
@@ -66,8 +68,15 @@ describe("a session on the on-prem sandbox", () => {
     cleanUp();
   });
 
-  const run = async (name: string, owner = "app-stand-in", url = coreUrl) => {
-    const response = await fetch(`${url}run?case=${name}&owner=${owner}`);
+  const run = async (
+    name: string,
+    owner = "app-stand-in",
+    url = coreUrl,
+    parent?: string
+  ) => {
+    const response = await fetch(
+      `${url}run?case=${name}&owner=${owner}${parent === undefined ? "" : `&parent=${parent}`}`
+    );
     return outcomeSchema.parse(await response.json());
   };
 
@@ -170,6 +179,25 @@ describe("a session on the on-prem sandbox", () => {
     return socket;
   };
 
+  /** The verdict the supervisor keeps on session `id`, as core asks for it. */
+  const fetchVerdict = async (id: string): Promise<unknown> => {
+    const asked = httpRequest({
+      socketPath: supervisor.socket,
+      path: `/verdict/${id}`,
+    });
+    asked.end();
+    const answered: unknown[] = await once(asked, "response");
+    const response = answered.at(0);
+    if (!(response instanceof IncomingMessage)) {
+      throw new TypeError("No answer");
+    }
+    let text = "";
+    for await (const chunk of response) {
+      text += String(chunk);
+    }
+    return JSON.parse(text);
+  };
+
   /** Says core is done with session `id`, as `POST /end/<id>`. */
   const endRaw = async (id: string, socket?: string): Promise<void> => {
     const end = httpRequest({
@@ -241,6 +269,10 @@ describe("a session on the on-prem sandbox", () => {
         })
         .toBe(0);
       expect(supervisor.stats().children).toBe(0);
+      // Not the App's fault, nor an outage: its call has ended.
+      await expect(fetchVerdict(child)).resolves.toMatchObject({
+        verdict: "ended",
+      });
     } finally {
       opened.socket?.destroy();
       kid.socket?.destroy();
@@ -354,6 +386,101 @@ describe("a session on the on-prem sandbox", () => {
         // Its spare up, nothing runs on it.
         await sleep(2500);
         expect(small.stats().inFlight).toBe(0);
+      } finally {
+        await small.stop();
+      }
+    }
+  );
+
+  it("tells core a child named after a parent that has ended is over, as its call has ended", async () => {
+    const parent = crypto.randomUUID();
+    const opened = await rawOpen(parent, { owner: "run-parent" });
+    await endRaw(parent);
+    opened.socket?.destroy();
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 1500, interval: 50 })
+      .toBe(0);
+    const outcome = await run("capabilities", "app-late", coreUrl, parent);
+    expect(outcome).toMatchObject({ status: "refused", verdict: "ended" });
+  });
+
+  it(
+    "gives a crashed child's places back as its process dies, not once it's gone",
+    { timeout: 60_000 },
+    async () => {
+      // workerd behind a shell that goes two seconds after it: a process
+      // slow to exit after V8 aborted it.
+      const slow = path.join(tempDir(), "slow-to-exit.sh");
+      writeFileSync(
+        slow,
+        `#!/bin/sh\n"${nativeWorkerd}" "$@"\ncode=$?\nsleep 2\nexit $code\n`
+      );
+      chmodSync(slow, 0o755);
+      const small = await startSandboxSupervisor({
+        workerd: slow,
+        processes: 2,
+        memoryLimitBytes: 64 * 1024 ** 3,
+        log: () => {},
+      });
+      try {
+        const url = await serveStandIn("session-worker.ts", small.socket);
+        const parent = crypto.randomUUID();
+        const opened = await rawOpen(parent, {
+          owner: "run-parent",
+          socket: small.socket,
+        });
+        const crashing = run("crashes", "app-crash", url, parent);
+        await expect
+          .poll(() => small.stats().children, { timeout: 3000, interval: 20 })
+          .toBe(1);
+        await expect
+          .poll(() => small.stats().children, { timeout: 15_000, interval: 20 })
+          .toBe(0);
+        // Its places came back while its verdict still waits on its exit.
+        expect(small.stats().crashed).toBe(0);
+        await expect(crashing).resolves.toMatchObject({ verdict: "crashed" });
+        opened.socket?.destroy();
+      } finally {
+        await small.stop();
+      }
+    }
+  );
+
+  it(
+    "holds a crashed session's owner place until its process is gone",
+    { timeout: 60_000 },
+    async () => {
+      // A process slow to exit after V8 aborted it, as above.
+      const slow = path.join(tempDir(), "slow-to-exit-owner.sh");
+      writeFileSync(
+        slow,
+        `#!/bin/sh\n"${nativeWorkerd}" "$@"\ncode=$?\nsleep 2\nexit $code\n`
+      );
+      chmodSync(slow, 0o755);
+      const small = await startSandboxSupervisor({
+        workerd: slow,
+        processes: 2,
+        memoryLimitBytes: 64 * 1024 ** 3,
+        log: () => {},
+      });
+      try {
+        const url = await serveStandIn("session-worker.ts", small.socket);
+        const state = { settled: false };
+        const crashing = run("crashes", "app-dying", url).finally(() => {
+          state.settled = true;
+        });
+        // Every moment its process lives, its owner holds its place.
+        const placeless: number[] = [];
+        while (!state.settled) {
+          const { inFlight, ownerPlaces } = small.stats();
+          if (inFlight > 0 && ownerPlaces === 0) {
+            placeless.push(inFlight);
+          }
+          // oxlint-disable-next-line no-await-in-loop -- sampled until it settles
+          await sleep(20);
+        }
+        await expect(crashing).resolves.toMatchObject({ verdict: "crashed" });
+        expect(placeless).toStrictEqual([]);
       } finally {
         await small.stop();
       }
@@ -633,11 +760,12 @@ describe("a session on the on-prem sandbox", () => {
   });
 
   it(
-    "ends a call as busy, never the App's fault, when the isolate's sessions hold their pool",
+    "ends a call as the sandbox unavailable, never the App's fault, when the isolate's sessions hold their pool",
     { timeout: 30_000 },
     async () => {
       const outcome = await run("crowded");
-      expect(outcome).toMatchObject({ status: "refused", verdict: "busy" });
+      expect(outcome).toMatchObject({ status: "unavailable", verdict: null });
+      expect(outcome.message).toContain("Core holds as much");
     }
   );
 
@@ -707,8 +835,10 @@ describe("a session on the on-prem sandbox", () => {
           .poll(() => small.stats().waitingForOwners, { timeout: 2000 })
           .toBe(1);
         const fourth = await run("capabilities", "app-three", url);
-        expect(fourth.status).toBe("unavailable");
-        expect(fourth.message).toContain("503");
+        expect(fourth).toMatchObject({
+          status: "unavailable",
+          refusedStatus: 503,
+        });
         expect(fourth.ms).toBeLessThan(1000);
         await Promise.all([holdingOne, holdingTwo, waiting]);
       } finally {

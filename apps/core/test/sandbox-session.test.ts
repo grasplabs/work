@@ -3,13 +3,13 @@ import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { RpcSession, RpcTarget, WebSocketTransport } from "capnweb";
 import { describe, expect, it } from "vite-plus/test";
 
+import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
 import {
   capability,
   runInSession,
   sandboxVerdictOf,
   sessionForwarder,
 } from "../src/sandbox-session.ts";
-import { sandboxCpuHeader } from "../src/sandboxed.ts";
 
 // What reaches a capability through a sandbox session (on-prem) arrives
 // over Cap'n Web from the sandbox host, where App code runs: the forwarder
@@ -175,6 +175,7 @@ describe("a call in a session that stays open for what it nested", () => {
           drain: async () => {
             await scheduler.wait(500);
           },
+          idle: () => false,
         },
       }
     );

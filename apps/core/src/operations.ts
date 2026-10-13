@@ -1687,6 +1687,13 @@ const runHandler = async (
     if (expired) {
       await letGo(ran);
     }
+    // Its session, on-prem, which the function its caller named opened and
+    // which went on after it answered: it ends now, as the run is over, and
+    // is waited for a little, so it asks the supervisor to free its process
+    // while this request still can.
+    if (run.depth === 0) {
+      await run.call.sessionEnded(letGoMs);
+    }
   }
 };
 

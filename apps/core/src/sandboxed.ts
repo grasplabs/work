@@ -1,3 +1,4 @@
+import { sandboxDeadlineHeader, sandboxWaitHeader } from "./sandbox-headers.ts";
 import { sandbox } from "./sandbox.ts";
 
 // Running an env-less untrusted isolate (an App's inspection, app-releases.ts)
@@ -42,12 +43,6 @@ export const sandboxWaitMs = 3000;
 
 /** How much longer than the supervisor may take core waits for its answer. */
 const backstopMs = 2000;
-
-/** The headers core gives a call's deadline and wait in, in milliseconds. */
-export const sandboxDeadlineHeader = "x-grasp-sandbox-deadline-ms";
-export const sandboxWaitHeader = "x-grasp-sandbox-wait-ms";
-/** The header core gives a session's CPU-time budget in (sandbox-session.ts). */
-export const sandboxCpuHeader = "x-grasp-sandbox-cpu-ms";
 
 /** What a sandboxed call reads from core's env (src/env.d.ts). */
 export type SandboxedEnv = Pick<
