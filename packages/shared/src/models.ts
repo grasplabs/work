@@ -156,8 +156,11 @@ export interface ModelBindingSpend {
   appId: string;
   appName: string;
   alias: string;
-  /** `<provider>/<model>`. */
-  model: string;
+  /**
+   * `<provider>/<model>`; null when its stored target can't be read, so
+   * it serves nothing.
+   */
+  model: string | null;
   /** Its own caps; null for none, and while `budgetDamaged`. */
   budget: ModelBindingBudget | null;
   /** Its caps can't be read, so it serves nothing. */

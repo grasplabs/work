@@ -1075,8 +1075,8 @@ msgid "Caps"
 msgstr "Límites"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the budgets above, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
-msgstr "Los límites que un administrador fijó para el modelo de un motor, en la pestaña Recursos del motor, además de los presupuestos de arriba, y lo que las acciones del motor gastaron a través de él. Los pasos de IA propios de un flujo de trabajo no cuentan aquí."
+msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
+msgstr "Los límites que un administrador fijó para el modelo de un motor, en la pestaña Recursos del motor, además de los presupuestos de la implementación, y lo que las acciones del motor gastaron a través de él. Los pasos de IA propios de un flujo de trabajo no cuentan aquí."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -4950,6 +4950,10 @@ msgstr "Qué es delicado ahora"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "What it brought"
 msgstr "Lo que aportó"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "What it is bound to can't be read, so it serves nothing."
+msgstr "No se puede leer a qué está vinculado, así que no atiende nada."
 
 #: src/engines/resource-bindings.tsx
 msgid "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."

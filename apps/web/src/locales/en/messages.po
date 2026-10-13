@@ -1075,8 +1075,8 @@ msgid "Caps"
 msgstr "Caps"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the budgets above, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
-msgstr "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the budgets above, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
+msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
+msgstr "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -4950,6 +4950,10 @@ msgstr "What is sensitive now"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "What it brought"
 msgstr "What it brought"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "What it is bound to can't be read, so it serves nothing."
+msgstr "What it is bound to can't be read, so it serves nothing."
 
 #: src/engines/resource-bindings.tsx
 msgid "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."

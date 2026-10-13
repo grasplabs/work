@@ -1952,6 +1952,13 @@ const spent = (listed: ModelBindingSpend | undefined) =>
           listed.thisMonth === listed.today ? "today's" : listed.thisMonth,
       };
 
+/** App `app`'s active binding's row, to damage what it stores. */
+const active = (app: string) =>
+  and(
+    eq(appResourceBindings.appId, app),
+    eq(appResourceBindings.status, "active")
+  );
+
 describe("model binding spend", { timeout: 120_000 }, () => {
   const idp = mockIdp();
 
@@ -2025,29 +2032,48 @@ describe("model binding spend", { timeout: 120_000 }, () => {
       more: false,
     });
 
-    // A revoked binding isn't listed; a damaged one is, as such.
+    // A revoked binding isn't listed; one whose caps or target can't be
+    // read is, as such, and never hides the others.
+    const garbled = await sealedApp(modelFiles(), "0 Garbled");
+    await approveWriter(garbled, { perMonth: 3 });
     await revokeResourceBinding(env, await person("admin"), freeBinding.id);
     await drizzle(env.DB)
       .update(appResourceBindings)
       .set({ budget: JSON.stringify({ perDay: "lots" }) })
-      .where(
-        and(
-          eq(appResourceBindings.appId, capped.app),
-          eq(appResourceBindings.status, "active")
-        )
-      );
+      .where(active(capped.app));
+    await drizzle(env.DB)
+      .update(appResourceBindings)
+      .set({ target: "{not json" })
+      .where(active(garbled.app));
     const later = await bindingsOn(first, "admin");
     expect(
       later.bindings.listed
-        .filter(ours)
-        .map(({ appId, budget, budgetDamaged, alert }) => ({
+        .filter(
+          ({ appId }) =>
+            appId === capped.app || appId === free.app || appId === garbled.app
+        )
+        .map(({ appId, model, budget, budgetDamaged, alert }) => ({
           appId,
+          model,
           budget,
           budgetDamaged,
           alert,
         }))
     ).toStrictEqual([
-      { appId: capped.app, budget: null, budgetDamaged: true, alert: "none" },
+      {
+        appId: capped.app,
+        model: allowedModel,
+        budget: null,
+        budgetDamaged: true,
+        alert: "none",
+      },
+      {
+        appId: garbled.app,
+        model: null,
+        budget: { perMonth: 3, alertAt: 80 },
+        budgetDamaged: false,
+        alert: "none",
+      },
     ]);
 
     await expect(

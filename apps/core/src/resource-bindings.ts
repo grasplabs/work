@@ -1110,8 +1110,8 @@ const spentByKey = (spent: readonly ScopeSpend[]): Map<string, number> =>
  * counts against (`bindingScopes`), keyed by App and alias, so it is what
  * the next request's admission counts, settled: reservations still held
  * aren't spend yet. A binding without caps is listed too, its spend
- * counted all the same. One whose caps can't be read is listed as
- * damaged, as it serves nothing.
+ * counted all the same. One whose caps or target can't be read is listed
+ * as damaged (`budgetDamaged`, a null `model`), as it serves nothing.
  */
 export const modelBindingSpend = async (
   env: Pick<Env, "DB" | "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">,
@@ -1137,15 +1137,31 @@ export const modelBindingSpend = async (
   const listed = rows
     .slice(0, bindingSpendListed)
     .flatMap(({ row, appName }) => {
-      const binding = toBinding(row);
+      // Each row read without throwing, so one stored damaged never hides
+      // the others: its target or its caps are listed as damaged.
+      const stored = storedBudget(row);
+      const budget = stored === "unreadable" ? null : stored;
+      const target = bindingTargetSchema.safeParse(jsonOrUndefined(row.target));
       const [month, day] = bindingScopes(
-        { app: row.appId, alias: row.alias, budget: binding.budget },
+        { app: row.appId, alias: row.alias, budget },
         periods.day
       );
-      const { target } = binding;
-      return target.kind === "model" && month !== undefined && day !== undefined
-        ? [{ binding, model: target.model, appName, month, day }]
-        : [];
+      return month === undefined || day === undefined
+        ? []
+        : [
+            {
+              row,
+              appName,
+              budget,
+              budgetDamaged: stored === "unreadable",
+              model:
+                target.success && target.data.kind === "model"
+                  ? target.data.model
+                  : null,
+              month,
+              day,
+            },
+          ];
     });
   const ledger = modelLedger(env);
   const [monthSpend, daySpend] = await Promise.all([
@@ -1164,21 +1180,23 @@ export const modelBindingSpend = async (
   const monthSpent = spentByKey(monthSpend);
   const daySpent = spentByKey(daySpend);
   return {
-    listed: listed.map(({ binding, model, appName, month, day }) => {
-      const monthMicros = monthSpent.get(month.key) ?? 0;
-      const dayMicros = daySpent.get(day.key) ?? 0;
-      return {
-        appId: binding.appId,
-        appName,
-        alias: binding.alias,
-        model,
-        budget: binding.budget,
-        budgetDamaged: binding.budgetDamaged,
-        today: dayMicros / microsPerDollar,
-        thisMonth: monthMicros / microsPerDollar,
-        alert: furthest(alertOf(month, monthMicros), alertOf(day, dayMicros)),
-      };
-    }),
+    listed: listed.map(
+      ({ row, appName, budget, budgetDamaged, model, month, day }) => {
+        const monthMicros = monthSpent.get(month.key) ?? 0;
+        const dayMicros = daySpent.get(day.key) ?? 0;
+        return {
+          appId: row.appId,
+          appName,
+          alias: row.alias,
+          model,
+          budget,
+          budgetDamaged,
+          today: dayMicros / microsPerDollar,
+          thisMonth: monthMicros / microsPerDollar,
+          alert: furthest(alertOf(month, monthMicros), alertOf(day, dayMicros)),
+        };
+      }
+    ),
     more: rows.length > bindingSpendListed,
   };
 };

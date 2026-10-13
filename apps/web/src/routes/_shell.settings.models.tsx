@@ -384,13 +384,22 @@ const BindingBudgets = ({
                   <span className="text-muted-foreground font-mono">
                     {binding.alias}
                   </span>
-                  {/* A model ID can be long: cut, with all of it on hover. */}
-                  <span
-                    className="text-muted-foreground block max-w-64 truncate font-mono text-xs"
-                    title={binding.model}
-                  >
-                    {binding.model}
-                  </span>
+                  {binding.model === null ? (
+                    <span className="text-destructive text-xs">
+                      <Trans>
+                        What it is bound to can&apos;t be read, so it serves
+                        nothing.
+                      </Trans>
+                    </span>
+                  ) : (
+                    // A model ID can be long: cut, with all of it on hover.
+                    <span
+                      className="text-muted-foreground block max-w-64 truncate font-mono text-xs"
+                      title={binding.model}
+                    >
+                      {binding.model}
+                    </span>
+                  )}
                 </span>
               </TableCell>
               <TableCell>
@@ -423,18 +432,44 @@ const BindingBudgets = ({
   );
 };
 
+/**
+ * The engine budgets section: shown whatever the gateway's configuration
+ * says, as what was spent stays worth seeing while calls are refused.
+ */
+const EngineBudgets = ({ settings }: { settings: ModelSettings }) => {
+  const { t } = useLingui();
+  return (
+    <Section
+      description={
+        <Trans>
+          Caps an admin set on an engine&apos;s model, on the engine&apos;s
+          Resources tab, on top of the deployment&apos;s budgets, and what the
+          engine&apos;s actions spent through it. A workflow&apos;s own AI steps
+          don&apos;t count here.
+        </Trans>
+      }
+      title={t`Engine budgets`}
+    >
+      <BindingBudgets bindings={settings.bindings} day={settings.day} />
+    </Section>
+  );
+};
+
 const Settings = ({ settings }: { settings: ModelSettings }) => {
   const { t } = useLingui();
   if (settings.models.length === 0) {
     return (
-      <Section title={t`Allowed models`}>
-        <p className="text-muted-foreground text-sm">
-          <Trans>
-            Models aren&apos;t set up for this deployment yet, so no model call
-            can be made. Grasp sets them up.
-          </Trans>
-        </p>
-      </Section>
+      <>
+        <Section title={t`Allowed models`}>
+          <p className="text-muted-foreground text-sm">
+            <Trans>
+              Models aren&apos;t set up for this deployment yet, so no model
+              call can be made. Grasp sets them up.
+            </Trans>
+          </p>
+        </Section>
+        <EngineBudgets settings={settings} />
+      </>
     );
   }
   const { rules } = settings;
@@ -470,19 +505,7 @@ const Settings = ({ settings }: { settings: ModelSettings }) => {
           </Section>
         </>
       )}
-      <Section
-        description={
-          <Trans>
-            Caps an admin set on an engine&apos;s model, on the engine&apos;s
-            Resources tab, on top of the budgets above, and what the
-            engine&apos;s actions spent through it. A workflow&apos;s own AI
-            steps don&apos;t count here.
-          </Trans>
-        }
-        title={t`Engine budgets`}
-      >
-        <BindingBudgets bindings={settings.bindings} day={settings.day} />
-      </Section>
+      <EngineBudgets settings={settings} />
     </>
   );
 };
