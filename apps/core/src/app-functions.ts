@@ -10,7 +10,6 @@ import {
   appErrorDetailsMaxBytes,
   appErrorMessageMaxLength,
   functionRequestMaxBytes,
-  operationInputMaxBytes,
   operationResultMaxBytes,
 } from "@grasp-os/shared/operation-limits";
 import {
@@ -333,14 +332,6 @@ const parsed = (text: string | undefined): unknown => {
 };
 
 /**
- * The runner of `release`: each call in a fresh isolate of its own (the
- * loader names none, so none is shared or kept), loaded with the release's
- * verified modules and the SDK modules sealed with it (never the SDK the
- * host serves now), with no network and an empty env. On-prem it runs in a
- * sandbox session (sandbox-session.ts), its process killed past the CPU
- * time Cloudflare's runtime would give it.
- */
-/**
  * The session each caller's call runs its functions in on-prem, by that
  * call (operations.ts `CallTree`), while it's open: how to run one more
  * function in it.
@@ -404,6 +395,7 @@ const inSession = async (
             drain: async () => {
               await tree.settled();
             },
+            idle: () => tree.idle(),
           },
         }
       );
@@ -415,12 +407,21 @@ const inSession = async (
       }
     }
   })();
+  tree.holdSession(session);
   // Answered as the function answers. The session stays open behind it for
   // the calls the function started and didn't wait for, which the operation
   // host waits for in turn, or gives up on at its deadline (`signal`).
   return await Promise.race([answered, session]);
 };
 
+/**
+ * The runner of `release`: each call in a fresh isolate of its own (the
+ * loader names none, so none is shared or kept), loaded with the release's
+ * verified modules and the SDK modules sealed with it (never the SDK the
+ * host serves now), with no network and an empty env. On-prem it runs in a
+ * sandbox session (sandbox-session.ts), its process killed past the CPU
+ * time Cloudflare's runtime would give it.
+ */
 export const releaseRunner =
   (
     env: Pick<
@@ -835,7 +836,7 @@ export const readFunctionRequest = (request: unknown): FunctionRequest => {
   }
   if (isOverBytes(request, functionRequestMaxBytes)) {
     throw operationErrors.create("contract.input_too_large", {
-      maxBytes: operationInputMaxBytes,
+      maxBytes: functionRequestMaxBytes,
     });
   }
   try {

@@ -59,6 +59,7 @@ const { manifest } = inspectApp(
         callsBusy: action({ ...contract, uses: [busy] }),
         forgets: action({ ...contract, uses: [waits] }),
         forgetsLeaf: action({ ...contract, uses: [leaf] }),
+        awaitsLeaf: action({ ...contract, uses: [leaf] }),
         catches: action({ ...contract, uses: [throws] }),
       },
     },
@@ -100,6 +101,7 @@ const appModule = `export default {
     n: globalThis.secret === undefined && globalThis.parentChannel === undefined ? 1 : 0,
   }),
   "jobs.callsBusy": async (channel, args) => await channel.call("action", "jobs.busy", args),
+  "jobs.awaitsLeaf": async (channel, args) => await channel.call("action", "jobs.leaf", args),
   "jobs.forgetsLeaf": async (channel, args) => {
     // Started, so the host has it, and not waited for.
     channel.call("action", "jobs.leaf", args).catch(() => {});
@@ -174,6 +176,12 @@ export default {
     const started = Date.now();
     const within = Number(searchParams.get("within") ?? "60000");
     let authorized = 0;
+    // What core logs as it runs the call: how each function of it ended.
+    const logged: unknown[] = [];
+    const { warn } = console;
+    console.warn = (entry: unknown) => {
+      logged.push(entry);
+    };
     const result = await callOperation(
       { manifest, run },
       {
@@ -198,6 +206,9 @@ export default {
       { path: `jobs.${searchParams.get("path") ?? ""}`, kind: "action" },
       { n: 1 }
     );
-    return Response.json({ ...result, ms: Date.now() - started });
+    // What still settles of the call after it answered, a moment more.
+    await scheduler.wait(Number(searchParams.get("settle") ?? "0"));
+    console.warn = warn;
+    return Response.json({ ...result, ms: Date.now() - started, logged });
   },
 } satisfies ExportedHandler<StandInEnv>;

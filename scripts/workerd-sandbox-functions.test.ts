@@ -18,7 +18,12 @@ import { cleanUp } from "./workerd-test-server.ts";
 const ANSWER_MS = 500;
 
 const outcomeSchema = z.union([
-  z.object({ ok: z.literal(true), value: z.unknown(), ms: z.number() }),
+  z.object({
+    ok: z.literal(true),
+    value: z.unknown(),
+    ms: z.number(),
+    logged: z.array(z.unknown()),
+  }),
   z.object({
     ok: z.literal(false),
     error: z.object({
@@ -27,6 +32,7 @@ const outcomeSchema = z.union([
       retryable: z.boolean(),
     }),
     ms: z.number(),
+    logged: z.array(z.unknown()),
   }),
 ]);
 
@@ -65,10 +71,11 @@ describe("an App's function on the on-prem sandbox", () => {
       owner = "app-stand-in",
       endLost = false,
       slowNested = false,
+      settle = 0,
     } = {}
   ) => {
     const response = await fetch(
-      `${coreUrl}run?path=${path}&within=${within}&owner=${owner}&endLost=${endLost ? 1 : 0}&slowNested=${slowNested ? 1 : 0}`
+      `${coreUrl}run?path=${path}&within=${within}&owner=${owner}&endLost=${endLost ? 1 : 0}&slowNested=${slowNested ? 1 : 0}&settle=${settle}`
     );
     return outcomeSchema.parse(await response.json());
   };
@@ -83,12 +90,15 @@ describe("an App's function on the on-prem sandbox", () => {
     return Date.now() - started;
   };
 
-  it("runs a function through the operation host", async () => {
+  it("runs a function through the operation host, its session ending as done", async () => {
+    const { abandoned } = supervisor.stats();
     const outcome = await call("echo");
     expect(outcome).toMatchObject({ ok: true, value: { n: 1 } });
     await expect
       .poll(() => supervisor.stats(), { timeout: 3000 })
       .toMatchObject({ inFlight: 0 });
+    // Over, not given up on: the host stops waiting only once it answered.
+    expect(supervisor.stats().abandoned).toBe(abandoned);
   });
 
   it.each([false, true])(
@@ -109,12 +119,15 @@ describe("an App's function on the on-prem sandbox", () => {
   it("runs functions nested three deep in the session of the one called, whatever the owner's share", async () => {
     // One process an owner here: each nested call taking one of its own
     // would wait for the place its callers hold.
+    const { abandoned } = supervisor.stats();
     const outcome = await call("chain");
     expect(outcome).toMatchObject({ ok: true, value: { n: 4 } });
     expect(outcome.ms).toBeLessThan(3000);
     await expect
       .poll(() => supervisor.stats().inFlight, { timeout: 1500, interval: 50 })
       .toBe(0);
+    // Over once all three answered, not given up on.
+    expect(supervisor.stats().abandoned).toBe(abandoned);
   });
 
   it("runs two such calls of one owner, one after the other within its share", async () => {
@@ -166,6 +179,24 @@ describe("an App's function on the on-prem sandbox", () => {
       .toBe(1);
     await sleep(500);
     expect(processesStarted - before).toBe(1);
+  });
+
+  it("ends a nested call still being authorized as its caller's deadline passes as operation.ended", async () => {
+    const outcome = await call("awaitsLeaf", {
+      within: 300,
+      slowNested: true,
+      settle: 1500,
+    });
+    expect(failure(outcome).code).toBe("operation.deadline_exceeded");
+    // The nested one reached its runner once its caller's session was over:
+    // refused as ended, never given a process of its own.
+    expect(outcome.logged).toContainEqual(
+      expect.objectContaining({
+        event: "operation.sandbox_ended",
+        path: "jobs.leaf",
+        verdict: "ended",
+      })
+    );
   });
 
   it("ends a busy-looping function on its CPU-time budget while core keeps answering", async () => {

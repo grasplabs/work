@@ -221,6 +221,7 @@ export default defineConfig({
       "!apps/console",
       "apps/console/vite.test.config.ts",
       "apps/core/vite.screens.config.ts",
+      "apps/core/vite.on-prem.config.ts",
       "packages/*",
       "packages/workerflow/vite.process.config.ts",
       "packages/connectors/*",

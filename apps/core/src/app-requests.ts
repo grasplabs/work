@@ -67,3 +67,18 @@ export const requestText = async (request: unknown): Promise<string> => {
     limit.clear();
   }
 };
+
+/**
+ * Cancels a request a chat's code sent that is refused before it is read
+ * (`requestText`): nothing reads it, and nothing of it is held.
+ */
+export const cancelRequest = async (request: unknown): Promise<void> => {
+  if (!(request instanceof ReadableStream) || request.locked) {
+    return;
+  }
+  try {
+    await request.cancel();
+  } catch {
+    // The sender gone already: nothing to cancel.
+  }
+};
