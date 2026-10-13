@@ -123,4 +123,8 @@ export const versionErrors = defineErrorFamily({
   "version.revoked": "This version was revoked and no longer runs.",
   "version.mismatch":
     "That reference belongs to another version or contract than the one that runs.",
+  "version.tests_failed":
+    "This version's App tests fail, so it can't be made current.",
+  "version.tests_unavailable":
+    "This version has App tests, which run only where a sandbox bounds them: on this deployment they need the sandbox host, which doesn't run them yet. Until it does, a version with App tests can't be made current here.",
 });

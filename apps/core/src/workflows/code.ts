@@ -529,7 +529,7 @@ const failedStart = /^Failed to start Worker:\n(?:Uncaught )?(?<cause>.*)/u;
  * What threw as an isolate's code loaded, without the stack, when `error`
  * is workerd's "Failed to start Worker"; nothing for any other error.
  */
-const startFailure = (error: unknown): string | undefined => {
+export const startFailure = (error: unknown): string | undefined => {
   const cause =
     error instanceof Error
       ? failedStart.exec(error.message)?.groups?.cause

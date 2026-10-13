@@ -1115,6 +1115,12 @@ export const setCurrentVersion = async (
     // Its store's contract holds its schema, or it waits: once in force a
     // schema stays so, so the check needn't be part of the batch below.
     await requireStoreSchemaActive(env, appId, number);
+    // Its App tests, on fixture stores of their own (app-tests.ts),
+    // whoever makes it current. Imported here, not at the top: the
+    // runner reaches releases and the operation host, which reach back
+    // into this module for App lookups.
+    const { requireAppTestsPass } = await import("./app-tests.ts");
+    await requireAppTestsPass(env, appId, number, files);
   }
   await requireWorkflowTestsPass(env, number, files);
   const triggers = await triggerRegistration(env, appId, number, files);

@@ -1,6 +1,7 @@
 import {
   appCodeFiles,
   appCodeLimitErrors,
+  appTestFiles,
   appModuleName,
   buildFiles,
   compilerVersion,
@@ -102,7 +103,7 @@ interface FailedBuild {
  */
 const cachedBuild = async <Build>(
   env: Env,
-  kind: "screen" | "server" | "workflow" | "app",
+  kind: "screen" | "server" | "workflow" | "app" | "app-tests",
   appFiles: AppFiles,
   select: (files: AppFiles) => AppFiles,
   build: (
@@ -180,6 +181,24 @@ export const buildAppCode = async (
     appFiles,
     appCodeFiles,
     async (compiler, files) => await compiler.buildAppCode(files)
+  );
+
+/**
+ * Builds an App's tests (`tests/**.ts`) into ES modules, in the
+ * compiler's isolate, each held to what a test may import. Only the test
+ * files become modules: what they import of the App comes from its
+ * release (app-tests.ts). Cached in R2 like the others.
+ */
+export const buildAppTests = async (
+  env: Env,
+  appFiles: AppFiles
+): Promise<AppCodeBuild> =>
+  await cachedBuild(
+    env,
+    "app-tests",
+    appFiles,
+    appTestFiles,
+    async (compiler, files) => await compiler.buildAppTests(files)
   );
 
 /**
