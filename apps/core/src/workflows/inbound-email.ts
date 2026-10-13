@@ -87,15 +87,19 @@ import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 // mail-stamps.ts). Mail to a tokened address goes to the address without
 // the token. It is the run's own mail, and starts its runs under the run,
 // admitted against its lineage (quotas.ts, `admitChild`), only when it
-// goes to the address the token was put on and comes from the run's
-// sender (its envelope sender or its From); its key is then the token's,
-// so every copy of it starts one run of each workflow, in that lineage.
+// goes to the address the token was put on and its envelope sender (which
+// SPF vouches for, unlike its From) is the run's; its key is then the
+// token's and its Message-ID's, so the same message delivered again is
+// one run, and a new one from that mailbox another run in the lineage.
 // Anything else to a tokened address (a customer's reply to all, the
 // token on another address) is mail like any other: a root, keyed by its
 // Message-ID. A token core didn't record is part of the address, which
-// no one receives at. Past the lineage's limits the run is refused: the
-// message bounces, and the refusal is audited (`workflow.email.refused`,
-// `lineage_limit`). Each message also tells core its mail domain, from
+// no one receives at. Past the lineage's limits the run is refused and
+// audited (`workflow.email.refused`, `lineage_limit`): the message
+// bounces when every workflow it would start is refused so, and fails for
+// now when another started or is only at its hourly limit, so a delivery
+// tried again starts only what it didn't (and its sender hears of it once
+// it gives up). Each message also tells core its mail domain, from
 // the envelope recipient Email Routing sets, which no sender chooses: a
 // run's mail to it is what core stamps, from the first message on, so a
 // fresh deployment's first hop is a root.
@@ -416,10 +420,11 @@ export const receiveEmail = async (
   }
   const id = toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", raw)));
   // The run's own mail only to the address it mailed, from its sender.
-  const stamp = runsOwnMail(recorded, `${address}@${domain ?? ""}`, [
-    message.from,
-    parsed.from?.address,
-  ]);
+  const stamp = runsOwnMail(
+    recorded,
+    `${address}@${domain ?? ""}`,
+    message.from
+  );
   const loop = loopOf(message.to, message.from, parsed);
   if (loop !== undefined) {
     // Once for each App it would have started a run of. Identifiers only:
@@ -438,16 +443,18 @@ export const receiveEmail = async (
     );
     return;
   }
-  // A run's mail is the same message by its token, whatever its copies
-  // say. Otherwise only a Message-ID with an `@` names one message: `<>`
-  // or `x` would make every message that carries it the same one.
+  // Only a Message-ID with an `@` names one message: `<>` or `x` would
+  // make every message that carries it the same one. A run's own mail is
+  // keyed by its token too, so it is never taken for mail to another.
   const { messageId } = parsed;
-  let same = id;
-  if (stamp !== undefined) {
-    same = await sha256Hex(`stamp:${stamp.token}`);
-  } else if (messageId !== undefined && messageId.includes("@")) {
-    same = await sha256Hex(messageId);
-  }
+  const messageKey =
+    messageId !== undefined && messageId.includes("@")
+      ? await sha256Hex(messageId)
+      : id;
+  const same =
+    stamp === undefined
+      ? messageKey
+      : await sha256Hex(`stamp:${stamp.token}:${messageKey}`);
   // By workflow, not by trigger row: the rows are written anew each time
   // a version is made current.
   const keyOf = ({
@@ -547,9 +554,9 @@ export const receiveEmail = async (
   if (failures.length > 0) {
     throw new Error(`Message ${id} didn't start every run it should`);
   }
-  if (refused.length > 0) {
-    // Bounced, so its sender hears of it: the run that sent it reached
-    // its lineage's limits.
+  if (refused.length > 0 && refused.length === receivers.length) {
+    // Bounced, so its sender hears of it: every workflow it would start
+    // is past the limits of the run that sent it.
     message.setReject(
       "This message would start a workflow run past the limits of the run that sent it."
     );
@@ -565,5 +572,16 @@ export const receiveEmail = async (
       capped: receivers.length - withRoom.length,
     });
     throw new Error(`Message ${id} is over a workflow's hourly limit`);
+  }
+  if (refused.length > 0) {
+    // Started some, refused others: fails for now, as for a workflow at
+    // its hourly limit, so the runs started are the same runs when its
+    // sender tries again, and a sender who gives up hears of it.
+    log.warn("workflow.trigger_lineage_refused", {
+      type: "email",
+      message: id,
+      refused: refused.length,
+    });
+    throw new Error(`Message ${id} is past a lineage's limits for a workflow`);
   }
 };

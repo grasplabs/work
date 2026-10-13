@@ -35,7 +35,8 @@ export const graphControlUrl = "https://graph-control.test/receive";
 
 /**
  * Where tests read the mail Microsoft Graph sent for them (`sendMail`), in
- * order: `{ mailbox, subject, to, replyTo }` each.
+ * order: `{ mailbox, subject, to, replyTo }` each, and the drafts it made
+ * (`draft: true`).
  */
 export const graphSentUrl = "https://graph-control.test/sent";
 
@@ -89,6 +90,18 @@ export default {
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
         });
         return new Response(null, { status: 202 });
+      }
+      if (request.method === "POST" && mailPath && rest[0] === "messages") {
+        // A draft, recorded as a message sent is, marked a draft.
+        const message = await request.json();
+        graphSent.push({
+          mailbox,
+          subject: message.subject,
+          to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
+          replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
+          draft: true,
+        });
+        return Response.json({ id: "draft-" + graphSent.length, conversationId: null, webLink: null });
       }
       if (request.method === "GET" && mailPath && rest[0] === "messages") {
         return Response.json({ value: [] });

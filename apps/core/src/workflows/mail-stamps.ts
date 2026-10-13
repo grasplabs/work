@@ -21,8 +21,9 @@ import { mailDomains, runMailStamps } from "../db/core/schema.ts";
 // connection's account. Mail back to a tokened address starts its runs
 // under the run (runs.ts, `startRun`'s `parent`), admitted against its
 // lineage's nesting and descendant limits (quotas.ts, `admitChild`), only
-// when it is that mail: to the address the token was put on, from one of
-// the run's senders. Anything else is mail like any other, a root.
+// when it is that mail: to the address the token was put on, its envelope
+// sender one of the run's senders. Anything else is mail like any other,
+// a root.
 //
 // From the threat model, each way a run could launder its lineage, or
 // anyone attach a run to another's, and what closes it:
@@ -36,13 +37,16 @@ import { mailDomains, runMailStamps } from "../db/core/schema.ts";
 //   Reply-To (never tokened), sends from their own address, not the
 //   run's: a root, keyed by its own Message-ID, so a second reply is a
 //   second run, never taken for the first (H1).
-// - A forged sender with a copied token: whoever saw the run's mail and
-//   writes as its mailbox starts, at most, the one run of each workflow
-//   the token starts (it is keyed by the token, inbound-email.ts), in the
-//   run's lineage: the run the run's own mail would have started. A copy
-//   can't add a run to a lineage, nor take one out of it.
+// - A forged sender: only the envelope sender counts, which the sending
+//   domain's SPF vouches for, never the From a message says. Mail from
+//   the run's sender is keyed by the token and its Message-ID
+//   (inbound-email.ts): the same message delivered again is one run, and
+//   a new message from that mailbox (a person answering all from it) is
+//   another run in the lineage, never swallowed by the first.
 // - A run carrying another run's token: core puts its own on every
-//   address it stamps, replacing any token it recorded already.
+//   address it stamps, replacing any token it recorded already. A token
+//   is the step's for one connection, mailbox and address: another
+//   mailbox or connection in the step gets its own, with its own senders.
 // - Mail sent to self, or two workflows mailing each other: each hop is a
 //   run's send, stamped, so each run sits one deeper than the last, and
 //   the lineage's nesting or descendant limit ends it. A run refused is
@@ -153,6 +157,12 @@ const recordedTokens = async (
  * mailbox (the provider sends from it, or refuses the call) and the
  * connection's account; none for a connection that isn't a native mail
  * connector's.
+ *
+ * Known gap (GRA-550): Microsoft 365 takes a user's ID or UPN as the
+ * mailbox, and sends from their primary address, which may be neither. A
+ * run's mail from such a mailbox then matches no sender and starts roots,
+ * bounded by each workflow's hourly limit only, as before stamping. The
+ * provider's real sending address is what to record instead.
  */
 const sendersOf = async (
   env: Env,
@@ -184,7 +194,10 @@ const sendersOf = async (
 const tokensFor = async (
   env: Pick<Env, "DB">,
   { run, stepKey }: StampingRun,
-  connectionId: string,
+  {
+    connectionId,
+    mailbox,
+  }: { connectionId: string; mailbox: Json | undefined },
   addresses: readonly string[],
   senders: readonly string[]
 ): Promise<Map<string, string>> => {
@@ -194,7 +207,9 @@ const tokensFor = async (
     addresses.map(async (address) => ({
       token: toHex(crypto.getRandomValues(new Uint8Array(tokenBytes))),
       runId: run,
-      origin: await sha256Hex(JSON.stringify([stepKey, connectionId, address])),
+      origin: await sha256Hex(
+        JSON.stringify([stepKey, connectionId, mailbox ?? null, address])
+      ),
       address,
       senders: [...senders],
       createdAt: now,
@@ -289,7 +304,13 @@ export const stampedMail = async (
   const bases = [
     ...new Set(stamped.map((address) => baseOf(address, recorded))),
   ];
-  const tokens = await tokensFor(env, stamping, connectionId, bases, senders);
+  const tokens = await tokensFor(
+    env,
+    stamping,
+    { connectionId, mailbox: input.mailbox },
+    bases,
+    senders
+  );
   /** `item`, an address of ours, carrying the run's token. */
   const tokened = (item: Json): Json => {
     const address = typeof item === "string" ? addressOf(item) : undefined;
@@ -366,21 +387,19 @@ export const mailRecipient = async (
 };
 
 /**
- * `stamp` when mail to `address` from `from` (its envelope sender and
- * its From) is the run's own mail it names: to the address the run
- * mailed, from one of its senders; none otherwise.
+ * `stamp` when mail to `address` from the envelope sender `from` is the
+ * run's own mail it names: to the address the run mailed, from one of its
+ * senders; none otherwise. Only the envelope sender, which SPF vouches
+ * for: a message's From says whatever its sender wrote.
  */
 export const runsOwnMail = (
   stamp: MailStamp | undefined,
   address: string,
-  from: readonly (string | undefined)[]
+  from: string
 ): MailStamp | undefined =>
   stamp !== undefined &&
   stamp.address === address.toLowerCase() &&
-  from.some(
-    (sender) =>
-      sender !== undefined && stamp.senders.includes(sender.toLowerCase())
-  )
+  stamp.senders.includes(from.toLowerCase())
     ? stamp
     : undefined;
 
