@@ -21,11 +21,15 @@ import { commitMaxInputBytes } from "@grasp-os/shared/stores";
 //   `operation.no_resources`, ...);
 // - it stops working once its invocation ends (`operation.ended`), so a
 //   channel kept from an earlier call acts for no one;
-// - it answers at most `platformLimits.invocationHostCalls` uses (100),
-//   counted as each reaches it, refused or not, and none after that
-//   (`operation.call_limit`): a loop of reads or calls ends there, and a
-//   function's nested calls, each an invocation of its own with its own
-//   channel, are bounded by the call's budget (operations.ts);
+// - it answers at most `platformLimits.invocationHostCalls` reads, calls
+//   and resource requests (100), counted as each reaches it, refused or
+//   not, and none after that (`operation.call_limit`): a loop of them ends
+//   there, and a function's nested calls, each an invocation of its own
+//   with its own channel, are bounded by the call's budget (operations.ts).
+//   Staged writes aren't counted: a commit bounds them
+//   (`commitMaxWrites`), and counting them would leave a mutation that
+//   reads anything short of a whole commit. This holds an App's functions
+//   (queries, mutations, actions); Code Mode counts its own;
 // - its methods take only what a request is (no scope, principal, role,
 //   schema hash or receipt): who the invocation is for was resolved by
 //   core before the channel existed;
@@ -118,7 +122,7 @@ const isAppFailure = (error: unknown): boolean =>
 /** What a channel and the host that made it share. */
 interface ChannelState {
   ended: boolean;
-  /** Its uses so far, refused ones included. */
+  /** Its reads, calls and resource requests so far, refused ones included. */
   uses: number;
   readonly raised: Map<string, CodedError>;
 }
@@ -174,7 +178,9 @@ class Channel extends ChannelTarget implements OperationChannel {
   ): Promise<unknown> {
     const capability = this.#capabilities[name];
     try {
-      this.#state.uses += 1;
+      if (name !== "write") {
+        this.#state.uses += 1;
+      }
       if (this.#state.ended) {
         throw operationErrors.create("operation.ended");
       }

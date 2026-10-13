@@ -17,6 +17,7 @@ import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
+import { commitMaxWrites } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -1296,13 +1297,22 @@ describe("bounds on one mutation", () => {
         })
       );
     // A read is one host call of its invocation: one past them is refused.
+    // Staged writes aren't: a commit's worth of them fits beside reads.
     expect({
       manyReads: await run(0, platformLimits.invocationHostCalls + 1),
       allowedReads: await run(0, platformLimits.invocationHostCalls),
+      wholeCommit: codeOf(
+        await call(fixture, owner, "mutation", "notes.stress", {
+          inserts: commitMaxWrites,
+          size: 1,
+          reads: 1,
+        })
+      ),
       heavyReads: await run(6, 40),
     }).toStrictEqual({
       manyReads: "operation.call_limit",
       allowedReads: "ok",
+      wholeCommit: "ok",
       heavyReads: "operation.read_limit",
     });
   });
