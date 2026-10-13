@@ -13,7 +13,11 @@ import { describe, expect, it } from "vite-plus/test";
 import type { Member } from "../src/auth/identity.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { sdkResourceBindings } from "../src/db/core/schema.ts";
-import { abandonStoreBackfill, storeBackfill } from "../src/store-abandon.ts";
+import {
+  abandonStoreBackfill,
+  appStoreBackfills,
+  storeBackfill,
+} from "../src/store-abandon.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { allEvents } from "./audit-events.ts";
@@ -62,6 +66,8 @@ import { memberRoles, newRecordId } from "./store-schemas.ts";
 // - It goes unaudited, or audited twice, or a second abandonment of the
 //   same target overwrites the first: "audits it once", "audits each
 //   abandonment of a target", "audits it before a deleted store's purge".
+// - An admin can't find the failed change from the App it blocks, or
+//   someone else reads it: "lists an App's failed change for its admins".
 
 const admin: Member = {
   userId: "grace",
@@ -396,6 +402,56 @@ describe("abandoning a failed backfill", () => {
       unknown: "data.store_unavailable",
       staffRead: "role.forbidden",
       still: "failed",
+    });
+  });
+
+  it("lists an App's failed change for its admins, until it is abandoned", async () => {
+    const { app, store, target, odd } = await failedStore();
+    const listed = await appStoreBackfills(env, admin, app);
+    const read = await storeBackfill(env, admin, store.id);
+    const builder = await codeOf(
+      appStoreBackfills(env, { ...admin, role: "builder" }, app)
+    );
+    const staff = await codeOf(
+      appStoreBackfills(env, { ...admin, staff: true }, app)
+    );
+    const unknown = await appStoreBackfills(env, admin, crypto.randomUUID());
+    await abandonStoreBackfill(env, admin, {
+      store: store.id,
+      target,
+      attempt: 1,
+    });
+
+    expect({
+      listed,
+      read: {
+        target: read?.target,
+        state: read?.state,
+        attempt: read?.attempt,
+        failure: read?.failure,
+      },
+      builder,
+      staff,
+      unknown,
+      after: await appStoreBackfills(env, admin, app),
+    }).toStrictEqual({
+      // As the store's own read has it.
+      listed: [{ store: store.id, backfill: read }],
+      read: {
+        target,
+        state: "failed",
+        attempt: 1,
+        failure: {
+          table: "notes",
+          field: "category",
+          id: odd,
+          reason: "invalid_value",
+        },
+      },
+      builder: "role.forbidden",
+      staff: "role.forbidden",
+      unknown: [],
+      after: [],
     });
   });
 

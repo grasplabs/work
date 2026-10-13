@@ -314,6 +314,10 @@ msgstr "{name} now changes the engine's data (read → write)"
 msgid "{name}, per {key}"
 msgstr "{name}, per {key}"
 
+#: src/engines/store-changes.tsx
+msgid "{name}, version {version}"
+msgstr "{name}, version {version}"
+
 #: src/dashboard/report.ts
 msgid "{name}: {count}"
 msgstr "{name}: {count}"
@@ -497,6 +501,14 @@ msgstr "A .txt, .vtt, .srt or .docx file, or pasted text."
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 
+#: src/engines/store-changes.tsx
+msgid "A change to the store {store} can't be applied"
+msgstr "A change to the store {store} can't be applied"
+
+#: src/engines/store-changes.tsx
+msgid "A change to the store {store} is being applied"
+msgstr "A change to the store {store} is being applied"
+
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
 msgstr "A connection needs signing in again"
@@ -545,6 +557,10 @@ msgstr "A new template"
 msgid "A new version of this engine is available."
 msgstr "A new version of this engine is available."
 
+#: src/engines/store-change-errors.ts
+msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
+msgstr "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
+
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
 msgstr "A run of a workflow asked for this answer."
@@ -556,6 +572,22 @@ msgstr "A run of a workflow waits for this answer."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
+
+#: src/engines/store-changes.tsx
+msgid "Abandon the change"
+msgstr "Abandon the change"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon the change to store {store}"
+msgstr "Abandon the change to store {store}"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change"
+msgstr "Abandon this change"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change?"
+msgstr "Abandon this change?"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "About {ending}"
@@ -743,6 +775,14 @@ msgstr "Already decided: {model}"
 #: src/connections/connection-list.tsx
 msgid "An admin"
 msgstr "An admin"
+
+#: src/engines/store-change-errors.ts
+msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
+msgstr "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
+
+#: src/chat/builds.tsx
+msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
+msgstr "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
@@ -1190,6 +1230,10 @@ msgstr "changes the engine's data"
 msgid "Changes the engine's data"
 msgstr "Changes the engine's data"
 
+#: src/engines/store-changes.tsx
+msgid "Changes to the engine's stores"
+msgstr "Changes to the engine's stores"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
 msgstr "Charge"
@@ -1238,6 +1282,7 @@ msgstr "Clear"
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
 #: src/engines/resource-bindings.tsx
+#: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -1721,6 +1766,10 @@ msgstr "Email"
 msgid "Engine"
 msgstr "Engine"
 
+#: src/engines/store-changes.tsx
+msgid "engine {app}, version {version}"
+msgstr "engine {app}, version {version}"
+
 #: src/connections/connection-list.tsx
 msgid "Engine {engine}"
 msgstr "Engine {engine}"
@@ -1904,6 +1953,14 @@ msgstr "File"
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Files"
 msgstr "Files"
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
+msgstr "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new fields stopped making progress, and trying again didn't help."
+msgstr "Filling in the new fields stopped making progress, and trying again didn't help."
 
 #: src/activity/audit-log.tsx
 msgid "Filter"
@@ -2294,6 +2351,10 @@ msgstr "Its contents couldn't be read."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
+
+#: src/engines/store-changes.tsx
+msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
+msgstr "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -3069,6 +3130,10 @@ msgstr "Only you"
 msgid "Only you can use it."
 msgstr "Only you can use it."
 
+#: src/engines/store-change-errors.ts
+msgid "Only your organization's admins can abandon a change to a store."
+msgstr "Only your organization's admins can abandon a change to a store."
+
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
 msgid "Open"
@@ -3464,6 +3529,10 @@ msgstr "Ready"
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"
 msgstr "Recent chats"
+
+#: src/engines/store-changes.tsx
+msgid "Records checked: {scanned}. Filled in: {filled}."
+msgstr "Records checked: {scanned}. Filled in: {filled}."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Registry and hash"
@@ -4321,6 +4390,10 @@ msgstr "The catalog doesn't list {app}, so its tools can't be shown."
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 
+#: src/engines/store-changes.tsx
+msgid "The change to the store {store} was abandoned"
+msgstr "The change to the store {store} was abandoned"
+
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
 msgstr "The code of version {version}"
@@ -4471,6 +4544,14 @@ msgstr "The model call failed."
 msgid "The most pressing first."
 msgstr "The most pressing first."
 
+#: src/engines/store-changes.tsx
+msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
+msgstr "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
+
+#: src/engines/store-changes.tsx
+msgid "The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+msgstr "The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
 msgstr "The next one"
@@ -4512,6 +4593,10 @@ msgstr "The sponsor's answer"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "The steps can't be read from this workflow's code: {message}"
+
+#: src/engines/store-changes.tsx
+msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again."
+msgstr "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."
@@ -4564,6 +4649,14 @@ msgstr "There are no engines you can open yet. Engines are made in chat: describ
 msgid "There is no data rule: any allowed model may take sensitive data."
 msgstr "There is no data rule: any allowed model may take sensitive data."
 
+#: src/engines/store-changes.tsx
+msgid "These fields stay reserved with their current meaning: {reserved}."
+msgstr "These fields stay reserved with their current meaning: {reserved}."
+
+#: src/engines/store-changes.tsx
+msgid "These releases can never be made current: {releases}."
+msgstr "These releases can never be made current: {releases}."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
@@ -4587,6 +4680,14 @@ msgstr "This app left its frame and was stopped."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "This app lost its connection to the page and was stopped."
+
+#: src/engines/store-change-errors.ts
+msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
+msgstr "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
+
+#: src/engines/store-change-errors.ts
+msgid "This change was already abandoned."
+msgstr "This change was already abandoned."
 
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
@@ -4680,6 +4781,18 @@ msgstr "This one can only be released: a budget record it counts against is dama
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "This page didn't load"
+
+#: src/engines/store-change-errors.ts
+msgid "This store no longer exists, so there is nothing to abandon."
+msgstr "This store no longer exists, so there is nothing to abandon."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
+msgstr "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
+
+#: src/engines/store-change-errors.ts
+msgid "This version's data change is still being applied. Try again in a moment."
+msgstr "This version's data change is still being applied. Try again in a moment."
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -4782,6 +4895,10 @@ msgstr "Unknown"
 #: src/dashboard/activity.tsx
 msgid "Unreadable event"
 msgstr "Unreadable event"
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
+msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

@@ -1,12 +1,18 @@
 import { actorOf, auditEventSchema } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { abandonBackfillSchema, dataErrors } from "@grasp-os/shared/stores";
-import type { AbandonedBackfill, StoreBackfill } from "@grasp-os/shared/stores";
-import { and, eq, isNull, not } from "drizzle-orm";
+import type {
+  AbandonedBackfill,
+  AppStoreBackfill,
+  StoreBackfill,
+} from "@grasp-os/shared/stores";
+import { and, eq, inArray, isNull, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import {
   auditedBatch,
@@ -15,7 +21,11 @@ import {
   uuidFromHash,
 } from "./audit-outbox.ts";
 import type { Member } from "./auth/identity.ts";
-import { businessStores } from "./db/core/schema.ts";
+import {
+  appDefaultStores,
+  businessStores,
+  sdkResourceBindings,
+} from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { requireNotStaff } from "./sharing.ts";
 import type { BackfillAbandonment } from "./store-host.ts";
@@ -37,7 +47,8 @@ import type { BackfillAbandonment } from "./store-host.ts";
 //   builders: on a shared store, one App's target holds other Apps'
 //   releases too, so abandoning it decides for all of them, which is the
 //   organization's call. No App or workflow reaches it (it isn't in the
-//   SDK, and core's agents don't get it).
+//   SDK, and core's agents don't get it). Reading a store's failed change,
+//   or which stores an App uses and theirs, is theirs alone too.
 // - A backfill still running is abandoned under its run: refused
 //   (`migration.not_failed`); it either finishes or fails first.
 // - An abandonment races a retry: the admin names the run they saw fail
@@ -175,6 +186,80 @@ export const storeBackfill = async (
   }
   const { target, state, attempt, scanned, filled, failure } = status;
   return { target, state, attempt, scanned, filled, failure };
+};
+
+/**
+ * The most stores `appStoreBackfills` asks: an App's releases bind one
+ * store each, so more than a handful only comes of rebinding it often.
+ */
+const appStoresAsked = 32;
+
+/**
+ * The pending schema changes of the stores the App `app` uses, for an
+ * admin (`StoresApi.appBackfills`): its default store and every live
+ * store a release of it is bound to. On a shared store the change may be
+ * another App's, which blocks this App's releases all the same. A store
+ * with none isn't listed; neither is an App nobody knows.
+ */
+export const appStoreBackfills = async (
+  env: Env,
+  by: Member,
+  app: string
+): Promise<AppStoreBackfill[]> => {
+  requireAdmin(by);
+  requireNotStaff(by);
+  const { app: id } = dataErrors.parse(
+    "data.invalid",
+    z.strictObject({ app: appIdSchema }),
+    { app }
+  );
+  const db = drizzle(env.DB);
+  const [bound, defaults] = await Promise.all([
+    db
+      .selectDistinct({ store: sdkResourceBindings.targetId })
+      .from(sdkResourceBindings)
+      .where(
+        and(
+          eq(sdkResourceBindings.resourceId, id),
+          eq(sdkResourceBindings.kind, "store")
+        )
+      )
+      .limit(appStoresAsked),
+    db
+      .select({ store: appDefaultStores.storeId })
+      .from(appDefaultStores)
+      .where(eq(appDefaultStores.appId, id)),
+  ]);
+  const named = [
+    ...new Set([...defaults, ...bound].map(({ store }) => store)),
+  ].slice(0, appStoresAsked);
+  if (named.length === 0) {
+    return [];
+  }
+  const live = await db
+    .select({ id: businessStores.id })
+    .from(businessStores)
+    .where(
+      and(inArray(businessStores.id, named), isNull(businessStores.deletedAt))
+    )
+    .orderBy(businessStores.id);
+  const found = await Promise.all(
+    live.map(async (row) => {
+      const store = storeIdSchema.parse(row.id);
+      const status = await storeObject(env, store).backfillStatus(store);
+      if (status === null) {
+        return [];
+      }
+      const { target, state, attempt, scanned, filled, failure } = status;
+      return [
+        {
+          store,
+          backfill: { target, state, attempt, scanned, filled, failure },
+        },
+      ];
+    })
+  );
+  return found.flat();
 };
 
 /**

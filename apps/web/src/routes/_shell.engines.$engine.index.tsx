@@ -32,6 +32,7 @@ import { EngineIcon } from "../engines/engine-icon.tsx";
 import { ResourceBindings } from "../engines/resource-bindings.tsx";
 import type { ResourcesPage } from "../engines/resource-bindings.tsx";
 import { ScreenApproval } from "../engines/screen-approval.tsx";
+import { StoreChanges } from "../engines/store-changes.tsx";
 import {
   LoadingLines,
   PageLoading,
@@ -389,8 +390,15 @@ const Count = ({ count }: { count: number }) => (
 );
 
 const EngineView = ({ page }: { page: EnginePage }) => {
-  const { workflows, runs, members, integrations, approval, resources } =
-    Route.useLoaderData();
+  const {
+    workflows,
+    runs,
+    members,
+    integrations,
+    approval,
+    resources,
+    storeChanges,
+  } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { app, contents } = page;
   const { version } = contents;
@@ -412,6 +420,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           </p>
         </div>
       </div>
+      <StoreChanges changes={storeChanges} engine={app} />
       <Tabs defaultValue="apps">
         <TabsList variant="line">
           <TabsTrigger value="apps">
@@ -532,6 +541,14 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
       ? loadFromCore(
           core,
           async (session) => await session.screenTrust.review(params.engine)
+        )
+      : undefined,
+    // Only for who may abandon a store's failed change: the organization's
+    // own admins, never Grasp staff.
+    storeChanges: decidesRequests(identity)
+      ? loadFromCore(
+          core,
+          async (session) => await session.stores.appBackfills(params.engine)
         )
       : undefined,
     // For who reads them: admins, who decide them, and builders.
