@@ -18,6 +18,8 @@ import { outboxConsumers } from "./outbox-delivery.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
 import type {
+  BackfillAbandon,
+  BackfillAbandonment,
   BackfillOutcome,
   BackfillRestart,
   BackfillStatus,
@@ -86,8 +88,30 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `StoreHost.schemaStatus`. */
-  schemaStatus(storeId: StoreId, schemaHash: string): SchemaStatus {
-    return this.#host.schemaStatus(storeId, schemaHash);
+  schemaStatus(
+    storeId: StoreId,
+    schemaHash: string,
+    consumer?: SchemaConsumer
+  ): SchemaStatus {
+    return this.#host.schemaStatus(storeId, schemaHash, consumer);
+  }
+
+  /** `StoreHost.abandonBackfill`. */
+  async abandonBackfill(
+    storeId: StoreId,
+    abandon: BackfillAbandon,
+    actor: AuditActor
+  ): Promise<BackfillAbandonment> {
+    return await this.#host.abandonBackfill(storeId, abandon, actor);
+  }
+
+  /** `StoreHost.markAbandonmentAudited`. */
+  markAbandonmentAudited(
+    storeId: StoreId,
+    target: string,
+    abandonedAt: number
+  ): void {
+    this.#host.markAbandonmentAudited(storeId, target, abandonedAt);
   }
 
   /** `StoreHost.get`. */

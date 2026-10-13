@@ -19,6 +19,7 @@ import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
 import type { ScreensApi } from "./screens.ts";
 import type { SignalsApi } from "./signals.ts";
+import type { StoresApi } from "./stores.ts";
 import type { UploadsApi } from "./uploads.ts";
 import type { WorkflowsApi } from "./workflows.ts";
 
@@ -134,6 +135,11 @@ export interface SessionApi {
    * month's spend against its budgets. Admins only.
    */
   readonly models: ModelsApi;
+  /**
+   * Business stores: a store's failed schema change, and abandoning it.
+   * Admins only; abandoning never Grasp staff.
+   */
+  readonly stores: StoresApi;
   /**
    * Side effects the person's agents, Apps and runs asked for, held until
    * the person confirms or declines them: from chat, from a person using

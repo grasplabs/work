@@ -60,7 +60,10 @@ import type { RunStep } from "./workflows/host.ts";
 //   at the seal and as they are made current, rather than run over
 //   records that don't fit. Once that record changed (the current
 //   version shrank it, say), keeping it going retries from there; a
-//   failure nothing changed for stays failed, so nothing loops.
+//   failure nothing changed for stays failed, so nothing loops. One no
+//   App can mend (a value under a key no schema declares) an admin
+//   abandons (store-abandon.ts): its releases are then refused for good
+//   (`migration.abandoned`).
 
 /** The store `storeId`'s object, for core's own questions of it. */
 const storeObject = (
@@ -68,13 +71,17 @@ const storeObject = (
   storeId: StoreId
 ) => inJurisdiction(env, env.DATA_STORES).getByName(storeId);
 
-/** Whether the store holds `schemaHash` in force (`StoreHost.schemaStatus`). */
+/**
+ * Whether the store holds `schemaHash` in force for `consumer`
+ * (`StoreHost.schemaStatus`).
+ */
 export const schemaStatus = async (
   env: Pick<Env, "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
   storeId: StoreId,
-  schemaHash: string
+  schemaHash: string,
+  consumer: SchemaConsumer
 ): Promise<SchemaStatus> =>
-  await storeObject(env, storeId).schemaStatus(storeId, schemaHash);
+  await storeObject(env, storeId).schemaStatus(storeId, schemaHash, consumer);
 
 /**
  * What keeping a backfill going asks of its store: core reaches it over
@@ -363,8 +370,9 @@ export const defineSchemaOnStore = async (
  * hold its schema in force, keeping its backfill going:
  * `migration.pending` (retryable, with the backfill's progress) while
  * its defaulted fields are being filled in, `migration.backfill_failed`
- * (naming the record) while the backfill stays failed. A release without
- * a store passes.
+ * (naming the record) while the backfill stays failed,
+ * `migration.abandoned` once an admin abandoned it. A release without a
+ * store passes.
  */
 export const requireStoreSchemaActive = async (
   env: Env,
@@ -389,9 +397,13 @@ export const requireStoreSchemaActive = async (
     return;
   }
   const storeId = storeIdSchema.parse(bound.store);
-  const status = await schemaStatus(env, storeId, bound.schemaHash);
+  const consumer = { resourceId: app, resourceVersion: version };
+  const status = await schemaStatus(env, storeId, bound.schemaHash, consumer);
   if (status.state === "active") {
     return;
+  }
+  if (status.state === "abandoned") {
+    throw migrationErrors.create("migration.abandoned");
   }
   if (status.state === "unknown") {
     // A sealed release's schema the store never took: its records and
@@ -404,12 +416,17 @@ export const requireStoreSchemaActive = async (
   // Asked again: the store's pending target may have moved on meanwhile
   // (this schema's finished and a newer one began), and only this
   // schema's own state refuses its release.
-  const after = await schemaStatus(env, storeId, bound.schemaHash);
+  const after = await schemaStatus(env, storeId, bound.schemaHash, consumer);
   if (after.state === "active") {
     return;
   }
+  if (after.state === "abandoned") {
+    throw migrationErrors.create("migration.abandoned");
+  }
   if (after.state === "failed") {
     throw migrationErrors.create("migration.backfill_failed", {
+      target: after.target,
+      attempt: after.attempt,
       failure: after.failure === null ? null : { ...after.failure },
     });
   }
