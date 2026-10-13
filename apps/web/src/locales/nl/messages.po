@@ -671,6 +671,10 @@ msgid "AI spend"
 msgstr "AI-uitgaven"
 
 #: src/engines/resource-bindings.tsx
+msgid "Alert admins at, in percent of a day's or month's cap"
+msgstr "Admins waarschuwen bij, in procent van de dag- of maandlimiet"
+
+#: src/engines/resource-bindings.tsx
 msgid "Alert at"
 msgstr "Waarschuwen bij"
 
@@ -992,6 +996,10 @@ msgstr "Bladeren"
 msgctxt "where a package runs"
 msgid "Browser"
 msgstr "Browser"
+
+#: src/engines/resource-bindings.tsx
+msgid "Budget (optional)"
+msgstr "Budget (optioneel)"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Budgets"
@@ -1713,6 +1721,14 @@ msgstr "Er is genoeg bekend: het is boven {threshold}%. Het bedrijf komt binnen 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter a number."
 msgstr "Voer een getal in."
+
+#: src/engines/resource-bindings.tsx
+msgid "Enter a whole percent from 1 to 99."
+msgstr "Voer een heel percentage van 1 tot en met 99 in."
+
+#: src/engines/resource-bindings.tsx
+msgid "Enter an amount in US dollars from {least} to {most}, such as 2.50."
+msgstr "Voer een bedrag in Amerikaanse dollars in van {least} tot {most}, bijvoorbeeld 2.50."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter an amount, such as 12.50."
@@ -3189,12 +3205,24 @@ msgid "Per day"
 msgstr "Per dag"
 
 #: src/engines/resource-bindings.tsx
+msgid "Per day (UTC), in US dollars"
+msgstr "Per dag (UTC), in Amerikaanse dollars"
+
+#: src/engines/resource-bindings.tsx
 msgid "Per month"
 msgstr "Per maand"
 
 #: src/engines/resource-bindings.tsx
+msgid "Per month (UTC), in US dollars"
+msgstr "Per maand (UTC), in Amerikaanse dollars"
+
+#: src/engines/resource-bindings.tsx
 msgid "Per request"
 msgstr "Per verzoek"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per request, in US dollars"
+msgstr "Per verzoek, in Amerikaanse dollars"
 
 #: src/activity/audit-log.tsx
 msgid "Permission"
@@ -4934,6 +4962,10 @@ msgstr "Wat Stephen meeneemt in elk interview. Wat het gesprek openliet, gaat na
 #: src/chat/builds.tsx
 msgid "What the engine holds"
 msgstr "Wat de engine heeft"
+
+#: src/engines/resource-bindings.tsx
+msgid "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
+msgstr "Wat de acties van de engine via deze koppeling mogen uitgeven, bovenop de budgetten van de installatie. Laat een limiet leeg voor geen limiet. De eigen AI-stappen van een workflow lopen er niet via."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
