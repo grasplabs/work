@@ -2,7 +2,7 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import type { Json } from "@grasp-os/shared/json";
 
 import type { Connection, ToolRule } from "./connections.ts";
-import type { McpError, McpServerTool, McpTool, McpToolResult } from "./mcp.ts";
+import type { McpServerTool, McpTool, McpToolResult } from "./mcp.ts";
 
 // What connect takes a tool to be. A native connector's tool is what its
 // manifest says: the manifest is ours, reviewed. A Composio server's tool
@@ -86,23 +86,6 @@ export const checkResourceScope = (
  */
 export const didNothing = (kind: ServerKind, result: McpToolResult): boolean =>
   kind === "native" && result.notPerformed;
-
-/**
- * Whether a side effect's failed request provably never reached a tool, so
- * its idempotency key is free again. A JSON-RPC parse error or "no such
- * method" can't follow a tool's run: the server didn't read the request,
- * or can't call tools at all. An HTTP 401 or 403 is believed only of a
- * native connector, whose transport is ours. A remote server's (Composio's,
- * GRA-539) may be a provider's refusal it passed on after acting: a tool
- * whose first request went through and whose second hit an expired token,
- * say, much as a 429 can be. So it spends the key. Nothing clearly before
- * authorisation is lost by it: connect lists a remote server's tools before
- * it claims the key (call.ts `actionFor`), so a key or session the server
- * refuses is refused there, with the key never taken; after the claim the
- * only request that goes out is `tools/call` itself.
- */
-export const turnedAway = (kind: ServerKind, error: McpError): boolean =>
-  error.declined && (kind === "native" || error.status === undefined);
 
 /**
  * Whether a side effect's error result leaves open whether it acted, so it

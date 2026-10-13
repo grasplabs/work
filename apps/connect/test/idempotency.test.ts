@@ -308,15 +308,19 @@ describe("a side effect", () => {
     expect(server.ran).toHaveLength(1);
   });
 
-  it("that the server has no method for can be retried with its key", async () => {
+  it("that a remote server says it has no method for is never sent again", async () => {
     const connectionId = await addConnection();
     const call = send(connectionId, "run-1:send");
+    // Its word, like a 401's, proves nothing once the call went out.
     server.network = "no-method";
     await expect(outcome(callAs(anna, call))).resolves.toBe(
-      "connect.server_unavailable"
+      "connect.outcome_unknown"
     );
-    await expect(outcome(callAs(anna, call))).resolves.toBe("ok");
-    expect(server.ran).toHaveLength(1);
+    const requestsBefore = server.requests;
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    expect(server.requests).toBe(requestsBefore);
   });
 
   it("with an answer too large to keep returns it once, and never runs again", async () => {
@@ -397,7 +401,7 @@ describe("a side effect", () => {
     }
   );
 
-  it("on a Composio tool the admin marked read-only keeps its error as the failure", async () => {
+  it("on a Composio tool the admin marked read-only keeps its error as the failure, on the read path", async () => {
     const connectionId = await addConnection({
       tools: JSON.stringify([{ name: "mail.forward", read: true }]),
     });
@@ -426,6 +430,52 @@ describe("a side effect", () => {
     // A read keeps no answer under a key: it can't have acted, so it runs.
     await expect(outcome(callAs(anna, call))).resolves.toBe("ok");
     expect(server.ran).toHaveLength(2);
+  });
+
+  it("whose Composio tool answered with an error logs what it said, redacted and cut short, for the call", async () => {
+    const connectionId = await addConnection();
+    const call = {
+      connectionId,
+      action: "mail.forward",
+      input: {},
+      idempotencyKey: "run-1:forward",
+    };
+    const secret = "Bearer abcdefghijklmnopqrstuvwxyz0123456789";
+    forwardError = {
+      error: `Upstream refused: Authorization: ${secret}`,
+      detail: "x".repeat(5000),
+    };
+    const warn = vi.spyOn(console, "warn");
+    try {
+      await expect(outcome(callAs(anna, call))).resolves.toBe(
+        "connect.outcome_unknown"
+      );
+    } finally {
+      forwardError = undefined;
+    }
+    const logged = warn.mock.calls
+      .map(([entry]: unknown[]) => entry)
+      .find(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === "object" &&
+          entry !== null &&
+          "event" in entry &&
+          entry.event === "connect.composio_error_unknown"
+      );
+    const text = typeof logged?.error === "string" ? logged.error : "";
+    expect({
+      callId: typeof logged?.callId,
+      action: logged?.action,
+      said: text.includes("Upstream refused"),
+      redacted: !text.includes("abcdefghijklmnop"),
+      bounded: text.length <= 501,
+    }).toStrictEqual({
+      callId: "string",
+      action: "mail.forward",
+      said: true,
+      redacted: true,
+      bounded: true,
+    });
   });
 
   it("running at the same time as a repeat runs once", async () => {

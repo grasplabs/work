@@ -275,6 +275,8 @@ describe("the audit log", () => {
       "connect.outcome_unknown"
     );
     const audited = await audit.events();
+    // What the tool said stays out of the log of record.
+    expect(JSON.stringify(audited)).not.toContain("too large to open");
     expect(audited.map(({ detail }) => detail)).toMatchObject([
       {
         sideEffect: true,

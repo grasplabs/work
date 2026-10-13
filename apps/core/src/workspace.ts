@@ -43,6 +43,7 @@ import {
   permissionActionSchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
+import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 import { DurableObject } from "cloudflare:workers";
@@ -87,7 +88,6 @@ import {
   codeTimeoutMs,
   cutMarker,
   cutToBytes,
-  redact,
   utf8Bytes,
 } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";

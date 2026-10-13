@@ -95,44 +95,20 @@ export interface McpToolResult {
 }
 
 /**
- * A request to the server failed. `declined` is true only when the server
- * says the request never reached a tool: it refused it as unauthorised
- * (401, 403), couldn't parse it, or has no such method. Anything else, a
- * dropped connection, an unreadable reply, a 429 (a server of its own
- * making may send one for its provider's, after a write), or a JSON-RPC
- * error a tool may throw after acting (such as invalid params), leaves
- * open whether the call ran. Whether connect believes a 401 or 403 is the
- * caller's to decide (policy.ts `turnedAway`): `status` says which one.
+ * A request to the server failed. Whether the server acted on it is never
+ * read from how it failed: a dropped connection, an unreadable reply, an
+ * HTTP error status (a 401 or 429 a server of its own making may pass on
+ * from its provider, after a write) or a JSON-RPC error (a tool may throw
+ * one after acting) all leave open whether the call ran. Before a side
+ * effect's key is claimed that costs nothing; after it, connect spends the
+ * key (call.ts).
  */
 export class McpError extends Error {
-  readonly declined: boolean;
-  /** The HTTP status the server answered with, when it answered one. */
-  readonly status: number | undefined;
-
-  constructor(
-    message: string,
-    declined = false,
-    cause?: unknown,
-    status?: number
-  ) {
+  constructor(message: string, cause?: unknown) {
     super(message, { cause });
     this.name = "McpError";
-    this.declined = declined;
-    this.status = status;
   }
 }
-
-/** JSON-RPC errors raised before any tool runs: parse error, no such method. */
-const refusedRequestCodes: ReadonlySet<number> = new Set([-32_700, -32_601]);
-
-/**
- * HTTP statuses that say the server didn't act on the request, as an MCP
- * transport sends them only before any tool runs: a tool's own answer,
- * error or not, comes in a 200. Connect takes a remote server's word for
- * that only before a tool call (policy.ts `turnedAway`).
- */
-const isDeclinedStatus = (status: number): boolean =>
-  status === 401 || status === 403;
 
 const rpcResponseSchema = z.object({
   jsonrpc: z.literal("2.0"),
@@ -397,12 +373,7 @@ export const mcpServer = (
     );
     if (!response.ok) {
       await response.body?.cancel();
-      throw new McpError(
-        `The server answered ${response.status}`,
-        isDeclinedStatus(response.status),
-        undefined,
-        response.status
-      );
+      throw new McpError(`The server answered ${response.status}`);
     }
     return response;
   };
@@ -421,15 +392,14 @@ export const mcpServer = (
       // A connection that failed or timed out may have delivered the request.
       throw error instanceof McpError
         ? error
-        : new McpError(`${method} failed`, false, error);
+        : new McpError(`${method} failed`, error);
     }
     if (message === undefined) {
       throw new McpError(`No readable answer to ${method}`);
     }
     if (message.error !== undefined) {
       throw new McpError(
-        `The server refused ${method} (${message.error.code})`,
-        refusedRequestCodes.has(message.error.code)
+        `The server refused ${method} (${message.error.code})`
       );
     }
     return message.result;
@@ -456,7 +426,7 @@ export const mcpServer = (
     } catch (error) {
       throw error instanceof McpError
         ? error
-        : new McpError("notifications/initialized failed", false, error);
+        : new McpError("notifications/initialized failed", error);
     }
   };
 
@@ -534,7 +504,7 @@ export const mcpServer = (
         // never an unexpected one of connect's.
         throw error instanceof McpError
           ? error
-          : new McpError("The server's tool list isn't readable", false, error);
+          : new McpError("The server's tool list isn't readable", error);
       }
     },
     call: async (name, input) => {

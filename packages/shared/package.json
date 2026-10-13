@@ -51,6 +51,7 @@
     "./permissions": "./src/permissions.ts",
     "./platform-change": "./src/platform-change.ts",
     "./record-ids": "./src/record-ids.ts",
+    "./redact": "./src/redact.ts",
     "./release": "./src/release.ts",
     "./resource-bindings": "./src/resource-bindings.ts",
     "./roles": "./src/roles.ts",

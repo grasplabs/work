@@ -8,6 +8,7 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import { memoryMaxLimit } from "@grasp-os/shared/memory";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { redact } from "@grasp-os/shared/redact";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -24,7 +25,6 @@ import {
   codeRuntime,
   cutMarker,
   cutToBytes,
-  redact,
   sourceHash,
   utf8Bytes,
 } from "../src/code-mode.ts";

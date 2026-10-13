@@ -1008,16 +1008,15 @@ describe("a side effect from chat", () => {
     });
   });
 
-  it("frees its key when turned away after it was taken but before anything ran", async () => {
+  it("frees its key when the server turns it away before it was taken", async () => {
     const anna = someone();
     const connectionId = await addConnection();
     const call = mail(connectionId);
     await hold(inChat(anna), call);
     const held = await heldFor(anna);
-    // The server has no such method: no tool can have run. (A remote
-    // server's 401 to the call may follow its tool's run, so it spends
-    // the key; idempotency.test.ts.)
-    server.network = "no-method";
+    // The server refuses connect's look at its tools, before the key is
+    // taken. (Once it is, any refusal spends it; idempotency.test.ts.)
+    server.refuseList = true;
     const refused = await outcome(confirm(anna, held));
     await hold(inChat(anna), call);
     const again = await heldFor(anna);
