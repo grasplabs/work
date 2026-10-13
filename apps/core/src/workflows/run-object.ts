@@ -268,6 +268,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           revokeAttempt: (fence) => {
             this.#attemptReturned(event.instanceId, fence);
           },
+          ...(this.#activation === undefined
+            ? {}
+            : { over: this.#activation.signal }),
         });
       },
     };
@@ -404,6 +407,12 @@ export class WorkflowRuns extends WorkflowRun<Env> {
   }
 
   /**
+   * Aborts once the alarm running the run's activation returns
+   * (`RunMemory.over`): only an alarm runs one.
+   */
+  #activation: AbortController | undefined;
+
+  /**
    * Finishes a cancel its request didn't (`markCancelled`), then does what
    * the engine's alarm does. The cancel is finished as its request would:
    * the run's row tombstoned and the cancel audited, once whoever gets
@@ -424,7 +433,17 @@ export class WorkflowRuns extends WorkflowRun<Env> {
         await this.#repairLater();
       }
     }
-    await super.alarm();
+    // The engine runs a run's activations in its alarm alone: once it
+    // returns, the activation it ran, if any, is over, its definition's
+    // call settled or left to never settle (a wait suspended it).
+    const activation = new AbortController();
+    this.#activation = activation;
+    try {
+      await super.alarm();
+    } finally {
+      this.#activation = undefined;
+      activation.abort(new Error("The run's activation is over."));
+    }
   }
 
   /**

@@ -178,6 +178,12 @@ export interface RunMemory {
   aiCalls: AiCalls;
   leaseOf: HostHooks["leaseOf"];
   revokeAttempt?: HostHooks["revokeAttempt"];
+  /**
+   * Aborts once the activation running the run is over, however it ended:
+   * a wait suspended it, whose call never settles, so the run's isolate,
+   * on-prem a sandbox session holding a process, is let go of then.
+   */
+  over?: AbortSignal;
 }
 
 /** Runs (or resumes) one run of an App's workflow. */
@@ -253,11 +259,11 @@ const runWorkflow = async (
       run.workflow,
       await declaredParams(env, run.app, run.version, run.workflow, files)
     );
-    const code = loadRun(env, {
-      version: run.version,
-      workflow: run.workflow,
-      files,
-    });
+    const code = loadRun(
+      env,
+      { app: run.app, version: run.version, workflow: run.workflow, files },
+      memory.over === undefined ? {} : { over: memory.over }
+    );
     const host = new RunHost(env, step, run, {
       stepFailed,
       busyRefusals: memory.busyRefusals,

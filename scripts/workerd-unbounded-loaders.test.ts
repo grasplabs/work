@@ -1,9 +1,16 @@
 /**
  * On plain workerd, where no sandbox bounds them and the deployment hasn't
+<<<<<<< HEAD
  * set `SANDBOX_IN_PROCESS=unbounded`, core refuses to load a workflow's run
  * or an App's server object, or to start the screen compiler or the
  * package builder (apps/core/test/workerd/unbounded-worker.ts):
+=======
+ * set `SANDBOX_IN_PROCESS=unbounded`, core refuses to load an App's server
+ * object or a draft's preview (apps/core/test/workerd/unbounded-worker.ts):
+>>>>>>> d1e0aeb3b (feat(core): run a workflow's loads in a sandbox session on-prem)
  * a bound `SANDBOX_HOST` doesn't allow them, as nothing runs them there.
+ * A workflow's code (its runs, metadata, tests and dry runs) runs on the
+ * sandbox host where one is bound, and is refused where none is.
  */
 import path from "node:path";
 
@@ -33,10 +40,10 @@ describe("App code no sandbox bounds, on plain workerd", () => {
     return await response.text();
   };
 
-  it("refuses to load a workflow's run", async () => {
+  it("refuses to load a workflow's run where no sandbox host is bound", async () => {
     const refused = await refusal("run");
     expect(refused).toContain("SandboxUnavailableError");
-    expect(refused).toContain("No sandbox bounds a workflow's run here yet");
+    expect(refused).toContain("No sandbox bounds App code here");
   });
 
   it("refuses to read a workflow's metadata where no sandbox host is bound", async () => {

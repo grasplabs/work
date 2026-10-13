@@ -655,6 +655,17 @@ describe("a session on the on-prem sandbox", () => {
     expect(outcome.reachedInternal).toBe(0);
   });
 
+  it("gives a capability core passes during a call only its methods, and only while its callback runs", async () => {
+    const outcome = await run("passed");
+    expect(outcome).toMatchObject({
+      status: "ok",
+      value: { inside: { ping: 103, internal: "refused" }, after: "refused" },
+    });
+    expect([outcome.reachedInternal, outcome.reachedAfter]).toStrictEqual([
+      0, 0,
+    ]);
+  });
+
   it("passes on what the isolate threw, as the App's", async () => {
     await expect(run("throws")).resolves.toMatchObject({
       status: "refused",

@@ -13,6 +13,7 @@ import { rpcArgumentDepth, screenLimits } from "@grasp-os/shared/screens";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
 import { sessionMaxRuns } from "./call-limits.ts";
+import { capabilityMarker } from "./on-prem/sandbox-capability.ts";
 import { browserMessageSize } from "./rpc-target.ts";
 import {
   sandboxCallIdHeader,
@@ -236,6 +237,23 @@ export const sessionForwarder = (
   }
   return new Forwarder();
 };
+
+/**
+ * `target` as a capability passed during a call, not as one of its
+ * arguments: as an argument of a callback into the isolate (a workflow
+ * step's attempt host, given to the step's function). Only its `methods`,
+ * bounded, while `live` says (the attempt its function runs for), and
+ * while the session is open; the sandbox host gives the isolate a
+ * capability of exactly those methods for it (on-prem/sandbox-capability.ts).
+ */
+export const passedCapability = (
+  target: object,
+  methods: readonly string[],
+  live: () => boolean
+): Record<string, unknown> => ({
+  [capabilityMarker]: [...methods],
+  target: sessionForwarder({ target, methods, function: false }, live),
+});
 
 /** How much longer than the supervisor may take core waits for a session. */
 const backstopMs = 2000;

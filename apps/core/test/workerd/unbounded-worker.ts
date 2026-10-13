@@ -18,8 +18,8 @@ import {
   workflowTestFailures,
 } from "../../src/workflows/code.ts";
 
-// A workflow's run and metadata, a draft's preview, an App's server
-// object, the screen compiler and the package builder on plain workerd
+// A workflow's code, a draft's preview, an App's server object, the
+// screen compiler and the package builder on plain workerd
 // with no sandbox and no `SANDBOX_IN_PROCESS=unbounded`
 // (scripts/workerd-unbounded-loaders.test.ts): core loads none of them, as
 // no sandbox bounds them here.
@@ -48,11 +48,16 @@ export default {
     if (pathname === "/run") {
       return new Response(
         await refusal(() =>
-          loadRun(env, {
-            version: 1,
-            workflow: workflowIdSchema.parse("intake"),
-            files: {},
-          })
+          // Run in a sandbox session where one is bound: here, none is.
+          loadRun(
+            { ...env, SANDBOX_HOST: undefined },
+            {
+              app: appIdSchema.parse(crypto.randomUUID()),
+              version: 1,
+              workflow: workflowIdSchema.parse("intake"),
+              files: {},
+            }
+          )
         )
       );
     }

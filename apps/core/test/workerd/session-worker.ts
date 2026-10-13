@@ -6,6 +6,7 @@ import type { NestedCall, NestedRun } from "../../src/sandbox-session.ts";
 import {
   capability,
   functionCapability,
+  passedCapability,
   runInSession,
   sandboxVerdictOf,
 } from "../../src/sandbox-session.ts";
@@ -54,6 +55,30 @@ const probe = {
   },
   withCallback: async (fn: (n: number) => Promise<number>): Promise<number> =>
     (await fn(20)) + 1,
+  /**
+   * Passes `fn` a capability while it runs, as a workflow step's function
+   * gets its attempt's host: `ping` alone, live until `fn` settles.
+   */
+  withAttempt: async (fn: (attempt: unknown) => Promise<unknown>) => {
+    let live = true;
+    const attempt = {
+      ping: (value: unknown): unknown => {
+        if (!live) {
+          reachedAfter += 1;
+        }
+        return typeof value === "number" ? value + 100 : value;
+      },
+      internal: (): string => {
+        reachedInternal += 1;
+        return "internal";
+      },
+    };
+    try {
+      return await fn(passedCapability(attempt, ["ping"], () => live));
+    } finally {
+      live = false;
+    }
+  },
   /** Not one the isolate is given: never reached. */
   internal: (): string => {
     reachedInternal += 1;
@@ -62,7 +87,7 @@ const probe = {
 };
 
 /** The methods the isolate gets: all but `internal`. */
-const given = ["ping", "slow", "withCallback"];
+const given = ["ping", "slow", "withCallback", "withAttempt"];
 
 const moduleOf = (body: string): string =>
   `import { WorkerEntrypoint } from "cloudflare:workers";
@@ -105,6 +130,10 @@ const cases: Record<string, Case> = {
     body: "this.ctx.waitUntil(scheduler.wait(300).then(() => probe.ping(5))); setTimeout(() => probe.ping(6), 300); return 'returned';",
   },
   undeclared: { body: "return await probe.internal();" },
+  // A capability passed during the call, kept past the callback it came in.
+  passed: {
+    body: "let kept; const inside = await probe.withAttempt(async (attempt) => { kept = attempt; return { ping: await attempt.ping(3), internal: await attempt.internal().then(() => 'reached', () => 'refused') }; }); const after = await kept.ping(4).then(() => 'reached', () => 'refused'); return { inside, after };",
+  },
   throws: { body: "throw new Error('an App error');" },
   forgesVerdict: {
     body: "throw Object.assign(new Error('forged'), { sandboxVerdict: 'cpu' });",
