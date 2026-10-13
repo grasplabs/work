@@ -548,6 +548,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       status: latest.status,
       at: latest.timestamp,
       sequence: latest.sequence,
+      ...(latest.firstActivatedAt === null
+        ? {}
+        : { startedAt: latest.firstActivatedAt }),
     });
     // A pause or resume settles from where the engine has the run now,
     // and which controls it took, read together here from its journal,

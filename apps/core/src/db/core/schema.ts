@@ -992,6 +992,20 @@ export const workflowRuns = sqliteTable(
      * its own generation is the run's, so a late one can't undo a newer.
      */
     controlGeneration: integer("control_generation").notNull().default(0),
+    /**
+     * Where the engine last said the run is (its own status, a phase
+     * `status` folds away: waiting, rolling back), as the projection took
+     * it (src/workflows/runs.ts). Null until the engine's first notification.
+     */
+    engineStatus: text("engine_status"),
+    /** When the engine first ran the run; null until it has. */
+    startedAt: timestamp("started_at"),
+    /**
+     * The revision of the run's summary (src/workflows/summary.ts): one
+     * more with every write that changes what it shows, in that write's own
+     * transaction, so a summary read in one statement is of one revision.
+     */
+    summaryRevision: integer("summary_revision").notNull().default(0),
   },
   (table) => [
     index("workflow_runs_app_idx").on(table.appId, table.createdAt),

@@ -16,6 +16,7 @@ import { markRunCancelled, runEngine, settleRunCancel } from "./engine.ts";
 import {
   endedLive,
   findRun,
+  nextRevision,
   projectStatus,
   runEntry,
   toRun,
@@ -203,6 +204,7 @@ const writeReceipt = async (
     .update(workflowRuns)
     .set({
       controlGeneration: generation,
+      summaryRevision: nextRevision,
       ...(cancelling
         ? {
             cancelRequestedAt: sql`COALESCE(${workflowRuns.cancelRequestedAt}, ${cancelledAt ?? now})`,
@@ -255,21 +257,32 @@ const writeReceipt = async (
   return found?.id;
 };
 
-/** Settles the receipt `id`, if it is still unresolved. */
+/**
+ * Settles the receipt `id` of `run`, if it is still unresolved, with the
+ * run's next summary revision.
+ */
 const settle = async (
   env: Env,
+  run: string,
   id: string,
   state: "applied" | "superseded"
 ): Promise<void> => {
-  await drizzle(env.DB)
-    .update(workflowRunControls)
-    .set({ state, settledAt: new Date() })
-    .where(
-      and(
-        eq(workflowRunControls.id, id),
-        eq(workflowRunControls.state, "admitted")
-      )
-    );
+  const db = drizzle(env.DB);
+  await db.batch([
+    db
+      .update(workflowRunControls)
+      .set({ state, settledAt: new Date() })
+      .where(
+        and(
+          eq(workflowRunControls.id, id),
+          eq(workflowRunControls.state, "admitted")
+        )
+      ),
+    db
+      .update(workflowRuns)
+      .set({ summaryRevision: nextRevision })
+      .where(and(eq(workflowRuns.id, run), sql`changes() > 0`)),
+  ]);
 };
 
 /** Whether the engine's `live` status is what a control of `kind` asked. */
@@ -309,11 +322,11 @@ const settleFrom = async (
         ({ kind, state: unresolved }) =>
           kind !== "cancel" && unresolved === "admitted"
       )
-      .map(async ({ id, kind, generation }) => {
+      .map(async ({ id, runId, kind, generation }) => {
         if (generation < fence) {
-          await settle(env, id, "superseded");
+          await settle(env, runId, id, "superseded");
         } else if (generation === fence && holdsFor(kind, state.status)) {
-          await settle(env, id, "applied");
+          await settle(env, runId, id, "applied");
         }
       })
   );
@@ -343,7 +356,7 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
     (control.generation < row.controlGeneration ||
       !unended.includes(row.status))
   ) {
-    await settle(env, control.id, "superseded");
+    await settle(env, row.id, control.id, "superseded");
     return;
   }
   const engine = runEngine(env);
@@ -377,6 +390,7 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
     const ended = await findRun(env, runIdSchema.parse(row.id));
     await settle(
       env,
+      row.id,
       control.id,
       control.kind === "cancel" && ended?.status === "cancelled"
         ? "applied"

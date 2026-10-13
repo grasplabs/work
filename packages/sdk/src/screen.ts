@@ -215,6 +215,47 @@ export interface RunControl {
   state: "admitted" | "applied" | "superseded";
 }
 
+/**
+ * A run as the platform sums it up, all of one revision (`revision`, a
+ * greater one newer): its status, who it is, its times in Unix
+ * milliseconds, the decisions it waits for, a compensation, and what the
+ * person may do with it now. `can*` say what the platform would admit; it
+ * checks again on every request.
+ */
+export interface RunSummary {
+  revision: number;
+  runId: string;
+  workflowId: string;
+  workflowVersion: number;
+  status:
+    | "queued"
+    | "running"
+    | "waiting"
+    | "paused"
+    | "compensating"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  createdAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  compensation?: {
+    cause: "failure" | "cancellation";
+    activity: "running" | "waiting" | "paused";
+  };
+  error?: { code: string; message: string };
+  waits: { kind: "decision"; name: string; expiresAt: number }[];
+  control: {
+    canPause: boolean;
+    canResume: boolean;
+    canCancel: boolean;
+    pendingControl: {
+      kind: "pause" | "resume" | "cancel";
+      stage: "applying";
+    } | null;
+  };
+}
+
 /** A decision a run waits for. */
 export interface WaitingDecision {
   /** Its name in the workflow (`step.decision(name, …)`): what `decide` takes. */
@@ -570,6 +611,8 @@ export const useWorkflow = (
   start: (input?: unknown) => Promise<WorkflowRun>;
   /** A run as it is now, with what it returned for its starter and admins. */
   status: (run: string) => Promise<ScreenRun>;
+  /** A run's summary, all of one revision, with what the person may do. */
+  summary: (run: string) => Promise<RunSummary>;
   /**
    * Answers the run's decision `decision` (its name in the workflow), if
    * the person may: someone it is from, never the run's starter unless it
@@ -624,6 +667,12 @@ export const useWorkflow = (
     },
     decide: async (run, decision, answer) => {
       await bridge().decide(run, decision, answer);
+    },
+    summary: async (run) => {
+      const found: unknown = await bridge().summary(run);
+      // SAFETY: core's `screens.summary` answers a `RunSummary`.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      return found as RunSummary;
     },
     pause: async (run) => await controlled(run, "pause"),
     resume: async (run) => await controlled(run, "resume"),

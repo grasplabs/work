@@ -21,7 +21,11 @@ import type {
   ScreensApi,
 } from "@grasp-os/shared/screens";
 import { valueDepth } from "@grasp-os/shared/value-depth";
-import type { RunControl, WorkflowRun } from "@grasp-os/shared/workflows";
+import type {
+  RunControl,
+  RunSummary,
+  WorkflowRun,
+} from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { callApp, isPlainData, plainDataBounds } from "./app.ts";
@@ -54,6 +58,7 @@ import {
   screenWorkflow,
   startScreenRun,
 } from "./workflows/screen-runs.ts";
+import { runSummary } from "./workflows/summary.ts";
 
 // What the frontend's screen host reaches for the frames it runs (see
 // @grasp-os/sdk/screen-runtime): an App's screen to load, its server to
@@ -658,6 +663,19 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
           app,
           "run",
           async (id) => await screenRun(this.#env, by, id, run)
+        )
+    );
+  }
+
+  async summary(app: string, run: string): Promise<RunSummary> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await this.#delivered(
+          by,
+          app,
+          "summary",
+          async (id) => await runSummary(this.#env, by, id, run)
         )
     );
   }

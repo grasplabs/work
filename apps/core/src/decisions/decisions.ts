@@ -98,6 +98,17 @@ export type DecisionOutcome =
   | { answered: true; approved: boolean; by: string; payload: Json | null }
   | { answered: false };
 
+/**
+ * The run's next summary revision (workflows/summary.ts), after the
+ * statement before it changed one of its decisions: their audit event,
+ * stored only if the decision changed.
+ */
+const summaryChanged = (db: DrizzleD1Database, run: string) =>
+  db
+    .update(workflowRuns)
+    .set({ summaryRevision: sql`${workflowRuns.summaryRevision} + 1` })
+    .where(and(eq(workflowRuns.id, run), sql`changes() > 0`));
+
 /** The event that wakes a run waiting on `decision`: core's own type. */
 export const decisionEventType = (decision: string): string =>
   `grasp-decision-${decision}`;
@@ -209,6 +220,7 @@ export const openDecision = async (
       }),
       stands
     ),
+    summaryChanged(db, run.runId),
   ]);
   const live = await db
     .select({ id: workflowRuns.id })
@@ -460,6 +472,7 @@ export const decisionOutcome = async (
           found
         )
       ),
+      summaryChanged(db, run.runId),
     ]);
     if (closed) {
       await tellScreens(env, changed(run));
@@ -709,6 +722,7 @@ export const answerDecision = async (
         via === undefined ? {} : { via }
       )
     ),
+    summaryChanged(db, row.runId),
   ]);
   if (!answered) {
     // Who may answer can have changed since it was checked above.

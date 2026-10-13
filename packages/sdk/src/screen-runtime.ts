@@ -56,6 +56,8 @@ export interface ScreenBridge {
   decide: (run: string, decision: string, answer: unknown) => Promise<unknown>;
   /** Pauses, resumes or cancels one of the App's runs (`kind`). */
   control: (run: string, kind: string) => Promise<unknown>;
+  /** One of the App's runs, as its summary of one revision. */
+  summary: (run: string) => Promise<unknown>;
   /**
    * Calls `onChange` each time one of the App's runs of `workflow`
    * changes, until the subscription it answers is released (`release()`)
