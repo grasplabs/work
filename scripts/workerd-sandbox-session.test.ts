@@ -6,6 +6,7 @@
  * that reach back through them. No Wrangler dev server, no Miniflare.
  */
 import { once } from "node:events";
+import { chmodSync, writeFileSync } from "node:fs";
 import { IncomingMessage, request as httpRequest } from "node:http";
 import { Socket, connect, createServer } from "node:net";
 import path from "node:path";
@@ -20,6 +21,7 @@ import {
   deadlineHeader,
   nativeWorkerd,
   ownerHeader,
+  parentHeader,
   startSandboxSupervisor,
   waitHeader,
 } from "./workerd-sandbox.ts";
@@ -92,6 +94,56 @@ describe("a session on the on-prem sandbox", () => {
       .toBe(0);
   });
 
+  /**
+   * A session opened as core opens one, as `owner`, a child of `parent`
+   * if given: its socket left to the test, or the status it was refused.
+   */
+  const rawOpen = async (
+    id: string,
+    {
+      owner = "app-raw",
+      parent,
+      socket,
+    }: { owner?: string; parent?: string; socket?: string } = {}
+  ): Promise<{ status: number; socket?: Socket }> => {
+    const upgrade = httpRequest({
+      socketPath: socket ?? supervisor.socket,
+      path: "/session",
+      headers: {
+        connection: "upgrade",
+        upgrade: "websocket",
+        "sec-websocket-version": "13",
+        "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+        [deadlineHeader]: "10000",
+        [cpuHeader]: "5000",
+        [waitHeader]: "3000",
+        [callIdHeader]: id,
+        [ownerHeader]: owner,
+        ...(parent === undefined ? {} : { [parentHeader]: parent }),
+      },
+    });
+    upgrade.end();
+    const answered = await Promise.race([
+      once(upgrade, "upgrade").then((args: unknown[]) => ({
+        args,
+        upgraded: true,
+      })),
+      once(upgrade, "response").then((args: unknown[]) => ({
+        args,
+        upgraded: false,
+      })),
+    ]);
+    const [first, second] = answered.args;
+    if (answered.upgraded && second instanceof Socket) {
+      return { status: 101, socket: second };
+    }
+    if (first instanceof IncomingMessage) {
+      first.resume();
+      return { status: first.statusCode ?? 0 };
+    }
+    throw new TypeError("The session got no answer");
+  };
+
   /** A session opened as core opens one, its socket left to the test. */
   const rawSession = async (id: string): Promise<Socket> => {
     const upgrade = httpRequest({
@@ -117,6 +169,192 @@ describe("a session on the on-prem sandbox", () => {
     }
     return socket;
   };
+
+  /** Says core is done with session `id`, as `POST /end/<id>`. */
+  const endRaw = async (id: string, socket?: string): Promise<void> => {
+    const end = httpRequest({
+      socketPath: socket ?? supervisor.socket,
+      path: `/end/${id}`,
+      method: "POST",
+    });
+    end.end();
+    const answered: unknown[] = await once(end, "response");
+    const response = answered.at(0);
+    if (response instanceof IncomingMessage) {
+      response.resume();
+    }
+  };
+
+  it("cancels a parent's child as the parent ends, and frees its process", async () => {
+    const parent = crypto.randomUUID();
+    const child = crypto.randomUUID();
+    const opened = await rawOpen(parent, { owner: "run-parent" });
+    const kid = await rawOpen(child, { owner: "app-child", parent });
+    try {
+      expect([opened.status, kid.status]).toStrictEqual([101, 101]);
+      expect(supervisor.stats()).toMatchObject({ inFlight: 2, children: 1 });
+      await endRaw(parent);
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(0);
+      expect(supervisor.stats().children).toBe(0);
+    } finally {
+      opened.socket?.destroy();
+      kid.socket?.destroy();
+    }
+  });
+
+  it("lets one child of a parent wait for its place, and refuses another at once", async () => {
+    const parent = crypto.randomUUID();
+    const opened = await rawOpen(parent, { owner: "run-parent" });
+    const first = await rawOpen(crypto.randomUUID(), {
+      owner: "app-a",
+      parent,
+    });
+    const waiting = rawOpen(crypto.randomUUID(), { owner: "app-b", parent });
+    try {
+      await expect
+        .poll(() => supervisor.stats().waitingForParents, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(1);
+      const started = Date.now();
+      const third = await rawOpen(crypto.randomUUID(), {
+        owner: "app-c",
+        parent,
+      });
+      expect(third.status).toBe(429);
+      expect(Date.now() - started).toBeLessThan(1000);
+    } finally {
+      await endRaw(parent);
+      opened.socket?.destroy();
+      first.socket?.destroy();
+      const second = await waiting;
+      second.socket?.destroy();
+    }
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000, interval: 50 })
+      .toBe(0);
+  });
+
+  it("refuses a child still waiting for its owner's place as its parent ends, and runs nothing", async () => {
+    // app-held holds its owner's one place: the child waits for it.
+    const holder = await rawOpen(crypto.randomUUID(), { owner: "app-held" });
+    const parent = crypto.randomUUID();
+    const opened = await rawOpen(parent, { owner: "run-parent" });
+    try {
+      const child = rawOpen(crypto.randomUUID(), {
+        owner: "app-held",
+        parent,
+      });
+      await expect
+        .poll(() => supervisor.stats().waitingForOwners, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(1);
+      const ended = Date.now();
+      await endRaw(parent);
+      const refused = await child;
+      expect(refused.status).toBe(409);
+      expect(Date.now() - ended).toBeLessThan(1000);
+      await expect
+        .poll(() => supervisor.stats().inFlight, {
+          timeout: 1500,
+          interval: 50,
+        })
+        .toBe(1);
+    } finally {
+      opened.socket?.destroy();
+      holder.socket?.destroy();
+    }
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000, interval: 50 })
+      .toBe(0);
+  });
+
+  it(
+    "refuses a child still waiting for a process as its parent ends, and runs nothing",
+    { timeout: 60_000 },
+    async () => {
+      // workerd behind a shell that starts it two seconds late: a pool of
+      // one has no process to give the child until its spare is up.
+      const slow = path.join(tempDir(), "slow-to-start.sh");
+      writeFileSync(slow, `#!/bin/sh\nsleep 2\nexec "${nativeWorkerd}" "$@"\n`);
+      chmodSync(slow, 0o755);
+      const small = await startSandboxSupervisor({
+        workerd: slow,
+        processes: 1,
+        log: () => {},
+      });
+      try {
+        const parent = crypto.randomUUID();
+        const opened = await rawOpen(parent, {
+          owner: "run-parent",
+          socket: small.socket,
+        });
+        const child = rawOpen(crypto.randomUUID(), {
+          owner: "app-child",
+          parent,
+          socket: small.socket,
+        });
+        await expect
+          .poll(() => small.stats().waiting, { timeout: 1500, interval: 20 })
+          .toBe(1);
+        const ended = Date.now();
+        await endRaw(parent, small.socket);
+        const refused = await child;
+        expect(refused.status).toBe(409);
+        expect(Date.now() - ended).toBeLessThan(1000);
+        opened.socket?.destroy();
+        // Its spare up, nothing runs on it.
+        await sleep(2500);
+        expect(small.stats().inFlight).toBe(0);
+      } finally {
+        await small.stop();
+      }
+    }
+  );
+
+  it("refuses a child named after a parent that has ended", async () => {
+    const parent = crypto.randomUUID();
+    const opened = await rawOpen(parent, { owner: "run-parent" });
+    await endRaw(parent);
+    opened.socket?.destroy();
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 1500, interval: 50 })
+      .toBe(0);
+    const late = await rawOpen(crypto.randomUUID(), {
+      owner: "app-late",
+      parent,
+    });
+    expect(late.status).toBe(409);
+  });
+
+  it("refuses a child's own child: only a session core opened at the top may be a parent", async () => {
+    const parent = crypto.randomUUID();
+    const child = crypto.randomUUID();
+    const opened = await rawOpen(parent, { owner: "run-parent" });
+    const kid = await rawOpen(child, { owner: "app-child", parent });
+    try {
+      const grandchild = await rawOpen(crypto.randomUUID(), {
+        owner: "app-grandchild",
+        parent: child,
+      });
+      expect(grandchild.status).toBe(400);
+    } finally {
+      await endRaw(parent);
+      opened.socket?.destroy();
+      kid.socket?.destroy();
+    }
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000, interval: 50 })
+      .toBe(0);
+  });
 
   it.each([0, 1, 2, 5, 10])(
     "frees the process and owner's place of a session core leaves while it starts (%d ms in)",

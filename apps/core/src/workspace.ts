@@ -114,6 +114,7 @@ import { PreviewReports, serverProblem } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { Previews } from "./preview.ts";
 import type { WorkContext } from "./restricted.ts";
+import { sessionHost } from "./sandboxed.ts";
 import { runEngine } from "./workflows/engine.ts";
 
 export type Chat = typeof chats.$inferSelect;
@@ -996,6 +997,7 @@ export class Workspace extends DurableObject<Env> {
           },
         },
         loader: this.env.LOADER,
+        sandbox: () => sessionHost(this.env),
         codeTimeoutMs: codeTimeoutMs(this.env),
         signal: cancel.signal,
         events: () => live.events.splice(0),

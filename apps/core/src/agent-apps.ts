@@ -4,10 +4,8 @@ import type {
   AppFiles,
   AppVersion,
 } from "@grasp-os/shared/apps";
-import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { Permission } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
@@ -18,6 +16,7 @@ import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { callAppFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
+import { requestText } from "./app-requests.ts";
 import {
   appExports,
   appFor,
@@ -30,6 +29,7 @@ import { appHost } from "./durable-objects.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { isRestricted, restrict } from "./restricted.ts";
+import { runSessionOf } from "./run-sessions.ts";
 
 // Apps for a chat's code: `await env.apps.list()`. What the chat's person
 // sees of Apps themselves (agent-person.ts), once the agent may read the
@@ -72,68 +72,6 @@ const callsApp =
 const requestKindSchema = z.looseObject({
   reference: z.looseObject({ kind: z.enum(["query", "mutation", "action"]) }),
 });
-
-/** How long a chat's code may take to send a call's request in full. */
-export const requestReadMs = 5000;
-
-/** Reads `reader` to its end, or refuses once a refusal is due. */
-const readBounded = async (
-  reader: ReadableStreamDefaultReader<unknown>
-): Promise<string> => {
-  const decoder = new TextDecoder();
-  let text = "";
-  let length = 0;
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- a stream reads in order
-    const { done, value } = await reader.read();
-    if (done) {
-      return text + decoder.decode();
-    }
-    // Bytes only: a chunk of anything else has no length to count.
-    if (!(value instanceof Uint8Array)) {
-      throw operationErrors.create("contract.invalid_request");
-    }
-    length += value.byteLength;
-    if (length > functionRequestMaxBytes) {
-      throw operationErrors.create("contract.input_too_large", {
-        maxBytes: functionRequestMaxBytes,
-      });
-    }
-    text += decoder.decode(value, { stream: true });
-  }
-};
-
-/**
- * The request a chat's code sent, as text: a stream, read no further than
- * a request may be (`functionRequestMaxBytes`) before anything parses it,
- * so the bound holds before deserialization, and within `requestReadMs`,
- * so a stream that never ends holds nothing. Anything else is refused, and
- * the stream cancelled.
- */
-const requestText = async (request: unknown): Promise<string> => {
-  if (!(request instanceof ReadableStream)) {
-    throw operationErrors.create("contract.invalid_request");
-  }
-  const reader: ReadableStreamDefaultReader<unknown> = request.getReader();
-  const limit = deadline(requestReadMs);
-  try {
-    return await Promise.race([
-      readBounded(reader),
-      whenAborted(limit.signal).catch(() => {
-        throw operationErrors.create("operation.deadline_exceeded");
-      }),
-    ]);
-  } catch (error) {
-    try {
-      await reader.cancel();
-    } catch {
-      // Cancelled already, or the sender gone: nothing more to read.
-    }
-    throw error;
-  } finally {
-    limit.clear();
-  }
-};
 
 /** Apps, as a chat's code reads them. */
 export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
@@ -243,7 +181,10 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
             if (!callsApp(appId, action)(now)) {
               throw readDenied(action);
             }
-          }
+          },
+          // On-prem, a child of the calling run's sandbox session: never
+          // waiting for a process the run holds while it waits for it.
+          runSessionOf(scope.runId)
         );
         if (
           answer.manifestHash !== null &&
