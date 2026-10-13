@@ -946,7 +946,9 @@ describe("starts core stopped in the middle of", () => {
     const afterCancel = await rowStatus(run);
     await setAge(run, 20 * minute);
 
-    await repairStarts(env);
+    // From this run's ID: other tests' orphans, more than a repair takes,
+    // could otherwise fill its slice.
+    await repairStarts(env, run);
 
     expect({
       cancelled,
