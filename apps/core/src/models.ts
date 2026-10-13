@@ -415,6 +415,13 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    * call as a whole rather than for each request (resource-model.ts).
    */
   askAgain?: boolean;
+  /**
+   * The caller's last check before each provider request is sent, after
+   * the ledger admitted it, with nothing awaited between: it throws to
+   * stop the request, which is then never sent (a workflow run's attempt
+   * let go of meanwhile, resource-model.ts).
+   */
+  beforeSend?: () => void;
 };
 
 /** What a call answered. */
@@ -607,6 +614,8 @@ interface Route extends Admitted {
   perRequest: { limitMicros: number; heldMicros: number } | undefined;
   /** Core's env, for the model ledger. */
   env: ModelsEnv;
+  /** The caller's last check before each provider request (`ModelCall.beforeSend`). */
+  beforeSend?: () => void;
 }
 
 interface Request extends Route {
@@ -1040,6 +1049,17 @@ const open = (
     if ("held" in admitted) {
       response.held = admitted.held;
       return heldResponse();
+    }
+    // The caller's last word, after the ledger's admission, with nothing
+    // awaited before the request is sent: refused, it is never sent, and
+    // its reservation goes back.
+    try {
+      route.beforeSend?.();
+    } catch (error) {
+      response.settled.push(
+        await settleAdmitted(route, admitted, { by: "unsent" })
+      );
+      throw error;
     }
     response.sentChars = typeof init?.body === "string" ? init.body.length : 0;
     let answered;
@@ -1776,10 +1796,13 @@ const answerCall = async <Output>(
 
 const callModel = async <Output>(
   env: ModelsEnv,
-  { schema, askAgain, ...fields }: ModelCall<Output>
+  { schema, askAgain, beforeSend, ...fields }: ModelCall<Output>
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
-  const route = await admit(env, call);
+  const route: Route = {
+    ...(await admit(env, call)),
+    ...(beforeSend === undefined ? {} : { beforeSend }),
+  };
   const { model } = route;
   const limit = deadline(call.timeoutMs ?? defaultTimeoutMs);
   try {

@@ -61,6 +61,9 @@ const hooks: HostHooks = {
   callApp: () => {
     throw new Error("A read calls no App");
   },
+  callFunction: () => {
+    throw new Error("A read calls no App function");
+  },
 };
 
 /**

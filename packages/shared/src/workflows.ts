@@ -356,6 +356,14 @@ export const triggerDeclarationsSchema = z
   .max(maxTriggerDeclarations);
 
 /**
+ * What core's own steps of a run start with (core's workflows/), and the
+ * keys core derives under a run's: a workflow's own steps never do, so
+ * workflow code can neither replay one of core's steps nor name a step
+ * whose key is one core derived.
+ */
+export const coreStepPrefix = "$grasp:";
+
+/**
  * The idempotency key of a run's step, as the SDK hands it to the step
  * and core requires it on the step's connection calls: the run ID
  * (encoded, so no run ID and step name make another's key) and the step's

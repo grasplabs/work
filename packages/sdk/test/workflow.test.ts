@@ -409,7 +409,7 @@ describe("step.do", () => {
   });
 
   it("retries a step that fails for a passing cause as often as asked, and any other failure never", async () => {
-    const failingWith = (error: () => Error) => {
+    const failingWith = (error: () => unknown) => {
       let attempts = 0;
       return withStep(
         async (step) =>
@@ -441,6 +441,15 @@ describe("step.do", () => {
         code: "resource.budget_busy",
       })
     );
+    // A function's failed answer as `env.APP.callFunction` gives it, thrown
+    // as it is (`throw answered.error`): plain data, its code kept.
+    const answerHeld = failingWith((): unknown => ({
+      code: "resource.budget_busy",
+      message: "Answer held",
+      category: "operational",
+      retryable: true,
+      requestId: "request-1",
+    }));
     // As the model gateway answers once the budget is spent: it stays so.
     const budgetSpent = failingWith(() =>
       Object.assign(new Error("Spent"), { code: "model.over_budget" })
@@ -464,6 +473,7 @@ describe("step.do", () => {
       rateLimited: await outcomeOf(rateLimited),
       budgetHeld: await outcomeOf(budgetHeld),
       bindingHeld: await outcomeOf(bindingHeld),
+      answerHeld: await outcomeOf(answerHeld),
       budgetSpent: await outcomeOf(budgetSpent),
       bindingSpent: await outcomeOf(bindingSpent),
       refused: await outcomeOf(refused),
@@ -472,6 +482,7 @@ describe("step.do", () => {
       rateLimited: 3,
       budgetHeld: 3,
       bindingHeld: 3,
+      answerHeld: 3,
       budgetSpent: "Spent",
       bindingSpent: "Binding spent",
       refused: "Refused",
