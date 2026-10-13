@@ -1017,7 +1017,7 @@ export const connectErrors = defineErrorFamily({
   "connect.call_in_progress":
     "A call with this idempotency key is still running. Try again shortly.",
   "connect.outcome_unknown":
-    "A call with this idempotency key was interrupted after it was sent, so it may or may not have taken effect, and it won't be sent again. Check the outside system to see whether it did.",
+    "A call with this idempotency key was interrupted after it was sent, so it may or may not have taken effect. It won't be sent again blindly: where its connector can find what it did, or can't do it twice, trying again later (after `retryAfterSeconds`, when given) recovers it; otherwise check the outside system to see whether it did.",
   "connect.action_failed": "The action reported an error.",
   "connect.pending_not_found":
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",

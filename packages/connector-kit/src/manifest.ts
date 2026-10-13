@@ -57,6 +57,50 @@ export const notPerformedMetaKey = "grasp-os/not-performed";
 export const outcomeUnknownMetaKey = "grasp-os/outcome-unknown";
 
 /**
+ * Call `_meta` key (`tools/call` params): the call's effect key, 64
+ * lowercase hex characters, which connect derives from the call's whole
+ * idempotency scope (who, for whom, which connection, action, resource and
+ * key) and sends to native connectors only, for a side effect. It is the
+ * same for every attempt of one call and differs between calls, so a tool
+ * may give it to its provider (an idempotency key, a tag on what it makes)
+ * and find the effect by it later (`findMetaKey`). It never holds the
+ * caller's own key, which App code chooses.
+ */
+export const effectKeyMetaKey = "grasp-os/effect-key";
+
+/**
+ * Call `_meta` key: `true` asks the tool to look its effect up by the
+ * effect key instead of carrying the call out (an action whose recovery is
+ * `find`). It answers the effect's result if it happened; an error saying
+ * it isn't there (`effectAbsentMetaKey`) if it certainly didn't; any other
+ * error if it can't tell.
+ */
+export const findMetaKey = "grasp-os/find";
+
+/**
+ * Result `_meta` key: `true` on a lookup's error result says the call's
+ * effect certainly isn't there (its `find` returned null), so connect may
+ * send the call. Only this says so: a lookup that failed, however it
+ * failed (a 429 says the GET did nothing, not that the effect is absent),
+ * leaves the call unknown.
+ */
+export const effectAbsentMetaKey = "grasp-os/effect-absent";
+
+/** An effect key, as connect derives it: a SHA-256, in lowercase hex. */
+export const effectKeyPattern = /^[0-9a-f]{64}$/u;
+
+/**
+ * How connect may recover a call of an action once its outcome is unknown
+ * (spec 14.3): `none`, it stays unknown; `repeat`, it is sent again under
+ * the same effect key, because it can't take effect twice (the provider
+ * keeps the key, or the write sets a state); `find`, the tool looks its
+ * effect up by the key first (`findMetaKey`). A read-only action is
+ * always `none`: it has no effect to recover.
+ */
+export const recoveryModes = ["none", "repeat", "find"] as const;
+export type RecoveryMode = (typeof recoveryModes)[number];
+
+/**
  * Response header on the answers connect's egress gives itself: `refused`
  * (the request never left) or `failed` (it left, but its answer is
  * withheld: a redirect, or unreachable). A response past the size limit
@@ -239,6 +283,8 @@ const jsonSchemaObject = z.record(z.string(), z.json());
 const actionManifestSchema = z.strictObject({
   routes: z.array(routeSchema).max(maxRoutes),
   readOnly: z.boolean(),
+  /** How a call of unknown outcome may be recovered (`recoveryModes`). */
+  recovery: z.enum(recoveryModes),
   resource: z
     .string()
     .regex(/^[A-Za-z_]\w*$/u)
@@ -300,6 +346,17 @@ export const connectorManifestSchema = z
               describe.fields.length)
       ),
     "An action describes only its own input properties, each once"
+  )
+  .refine(
+    ({ actions }) =>
+      Object.values(actions).every(
+        ({ readOnly, recovery, routes }) =>
+          (!readOnly || recovery === "none") &&
+          (recovery !== "find" || routes.some(({ method }) => method === "GET"))
+      ),
+    // Nothing to recover of a read; and a lookup reads, through the egress,
+    // on one of the action's own routes.
+    "A read-only action recovers nothing, and one that finds its effect declares the GET it finds it by"
   )
   .refine(
     ({ actions }) =>

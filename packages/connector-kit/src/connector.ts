@@ -3,6 +3,10 @@ import { z } from "zod";
 
 import {
   connectorManifestSchema,
+  effectAbsentMetaKey,
+  effectKeyMetaKey,
+  effectKeyPattern,
+  findMetaKey,
   mcpProtocolVersion,
   notPerformedMetaKey,
   outcomeUnknownMetaKey,
@@ -10,7 +14,12 @@ import {
   provenanceSchema,
   resourceMetaKey,
 } from "./manifest.ts";
-import type { ActionManifest, ConnectorManifest, Route } from "./manifest.ts";
+import type {
+  ActionManifest,
+  ConnectorManifest,
+  RecoveryMode,
+  Route,
+} from "./manifest.ts";
 
 // How a native connector is written: its tools, each with what connect
 // decides by (read-only or not, the one resource it acts on, the requests
@@ -84,7 +93,40 @@ export interface ToolDefinition<
       input: Extract<keyof z.input<Input>, string>;
     }[];
   };
-  run: (input: z.output<Input>) => Promise<ToolResult<z.input<Output>>>;
+  /**
+   * Carries the call out. `effect.key` is the call's effect key
+   * (`effectKeyMetaKey`), for a side effect connect sent one for; null
+   * otherwise. A tool that can recover gives it to its provider.
+   */
+  run: (
+    input: z.output<Input>,
+    effect: Effect
+  ) => Promise<ToolResult<z.input<Output>>>;
+  /**
+   * The write can't take effect twice under one effect key: the provider
+   * keeps the key as an idempotency key, or the write sets a state
+   * (labels, a flag) rather than adding something. Connect may then send a
+   * call of unknown outcome again, under the same key (recovery `repeat`).
+   * Say so only when that holds for every input.
+   */
+  repeatable?: true;
+  /**
+   * Looks the effect of the call with `effect.key` up, instead of carrying
+   * it out (recovery `find`): its result as `run` would have answered it,
+   * if it happened; null only if it certainly didn't. A ToolError if it
+   * can't tell. It may send only GET requests, on the tool's own routes,
+   * so `run` must give the key to the provider in a way it can be found
+   * by: a tag on what it makes.
+   */
+  find?: (
+    input: z.output<Input>,
+    effect: { key: string }
+  ) => Promise<ToolResult<z.input<Output>> | null>;
+}
+
+/** The effect key a call carries, if connect sent one. */
+export interface Effect {
+  key: string | null;
 }
 
 /** What went wrong in a tool's error, for code to act on. */
@@ -188,8 +230,42 @@ export interface Tool {
   action: ActionManifest;
   /** As `tools/list` describes it. */
   description: JsonObject;
-  call: (args: unknown) => Promise<CallResult>;
+  /** Calls it with `args`, and the call's `_meta` as connect sent it. */
+  call: (args: unknown, meta?: unknown) => Promise<CallResult>;
 }
+
+/** What a call's `_meta` asks: its effect key, and whether to find it. */
+const callMetaOf = (meta: unknown): { key: string | null; find: boolean } => {
+  if (typeof meta !== "object" || meta === null) {
+    return { key: null, find: false };
+  }
+  const key: unknown = Reflect.get(meta, effectKeyMetaKey);
+  return {
+    key: typeof key === "string" && effectKeyPattern.test(key) ? key : null,
+    find: Reflect.get(meta, findMetaKey) === true,
+  };
+};
+
+/** The recovery a tool's definition declares (`recoveryModes`). */
+const recoveryOf = (
+  name: string,
+  {
+    readOnly,
+    repeatable,
+    find,
+  }: { readOnly: boolean; repeatable?: true; find?: unknown }
+): RecoveryMode => {
+  if (repeatable === true && find !== undefined) {
+    throw new Error(`${name}: a tool either repeats or finds its effect`);
+  }
+  if (readOnly && (repeatable === true || find !== undefined)) {
+    throw new Error(`${name}: a read-only tool has no effect to recover`);
+  }
+  if (find !== undefined) {
+    return "find";
+  }
+  return repeatable === true ? "repeat" : "none";
+};
 
 /**
  * A tool's input or output schema as its generated contract holds it:
@@ -256,12 +332,13 @@ const isClosed = (schema: unknown): boolean => {
 };
 
 /** What an error result says of the call besides its message. */
-type FailureKind = "failed" | "notPerformed" | "outcomeUnknown";
+type FailureKind = "failed" | "notPerformed" | "outcomeUnknown" | "absent";
 
 const failureMeta: Record<FailureKind, JsonObject | undefined> = {
   failed: undefined,
   notPerformed: { [notPerformedMetaKey]: true },
   outcomeUnknown: { [outcomeUnknownMetaKey]: true },
+  absent: { [effectAbsentMetaKey]: true },
 };
 
 /**
@@ -292,6 +369,52 @@ const kindOf = ({ notPerformed, outcomeUnknown }: ToolError): FailureKind => {
   return outcomeUnknown ? "outcomeUnknown" : "failed";
 };
 
+/**
+ * The error result of a failed `run`: a ToolError as it says; an error the
+ * tool didn't foresee of a writing tool as of unknown outcome, since it
+ * may have come after its write, the last request it sends; of a read as
+ * failed, since a read changed nothing either way.
+ */
+const runFailure = (error: unknown, readOnly: boolean): CallResult => {
+  if (error instanceof ToolError) {
+    return failure(error.message, error.details, kindOf(error));
+  }
+  return readOnly
+    ? failure("The action failed")
+    : failure("The action's outcome is unknown", undefined, "outcomeUnknown");
+};
+
+/**
+ * A lookup of a call's effect (`findMetaKey`): what `find` found; else an
+ * error result. Only a `null` from `find` says the effect certainly isn't
+ * there (`effectAbsentMetaKey`). Every other failure is a plain one, of a
+ * lookup that tells nothing, whatever it says of itself: a throttled GET
+ * did nothing, but that doesn't make the effect absent.
+ */
+const lookUp = async <Data, Output>(
+  find:
+    | ((
+        data: Data,
+        effect: { key: string }
+      ) => Promise<ToolResult<Output> | null>)
+    | undefined,
+  data: Data,
+  key: string | null
+): Promise<ToolResult<Output> | CallResult> => {
+  if (find === undefined || key === null) {
+    return failure("This call's effect can't be looked up");
+  }
+  let found: ToolResult<Output> | null;
+  try {
+    found = await find(data, { key });
+  } catch (error) {
+    return failure(
+      error instanceof ToolError ? error.message : "The lookup failed"
+    );
+  }
+  return found ?? failure("The call's effect isn't there", undefined, "absent");
+};
+
 /** Where input didn't parse, without the values that were sent. */
 const issuesOf = (error: z.ZodError): string =>
   error.issues
@@ -313,6 +436,7 @@ export const defineTool = <
   definition: ToolDefinition<Input, Output>
 ): Tool => {
   const { name, input, output, resource, readOnly, routes } = definition;
+  const recovery = recoveryOf(name, definition);
   const inputSchema = z.toJSONSchema(input, { io: "input" });
   const outputSchema = z.toJSONSchema(output, { io: "output" });
   if (!isClosed(inputSchema)) {
@@ -335,6 +459,7 @@ export const defineTool = <
     action: {
       routes: [...routes],
       readOnly,
+      recovery,
       resource: resource ?? null,
       input: Object.keys(inputSchema.properties ?? {}),
       contract: {
@@ -362,28 +487,25 @@ export const defineTool = <
       },
       _meta: meta,
     },
-    call: async (args) => {
+    call: async (args, callMeta) => {
       const parsed = input.safeParse(args);
       if (!parsed.success) {
         return failure(`Invalid input: ${issuesOf(parsed.error)}`);
       }
+      const effect = callMetaOf(callMeta);
       let result: ToolResult<z.input<Output>>;
-      try {
-        result = await definition.run(parsed.data);
-      } catch (error) {
-        if (error instanceof ToolError) {
-          return failure(error.message, error.details, kindOf(error));
+      if (effect.find) {
+        const looked = await lookUp(definition.find, parsed.data, effect.key);
+        if (!("output" in looked)) {
+          return looked;
         }
-        // An error the tool didn't foresee may have come after its write,
-        // the last request it sends: nobody can say whether that went
-        // through. A read changed nothing either way.
-        return readOnly
-          ? failure("The action failed")
-          : failure(
-              "The action's outcome is unknown",
-              undefined,
-              "outcomeUnknown"
-            );
+        result = looked;
+      } else {
+        try {
+          result = await definition.run(parsed.data, { key: effect.key });
+        } catch (error) {
+          return runFailure(error, readOnly);
+        }
       }
       const checked = output.safeParse(result.output);
       const provenance = provenanceSchema.safeParse(result.provenance ?? []);
@@ -434,6 +556,7 @@ const requestSchema = z.object({
 const callParamsSchema = z.object({
   name: z.string(),
   arguments: z.record(z.string(), z.unknown()).optional(),
+  _meta: z.record(z.string(), z.unknown()).optional(),
 });
 
 /** JSON-RPC error codes. */
@@ -501,7 +624,10 @@ export const defineConnector = (definition: ConnectorDefinition): Connector => {
         if (tool === undefined) {
           return refusal(id, invalidParams, "No such tool");
         }
-        return answer(id, await tool.call(call.data?.arguments ?? {}));
+        return answer(
+          id,
+          await tool.call(call.data?.arguments ?? {}, call.data?._meta)
+        );
       }
       default: {
         return refusal(id, methodNotFound, "No such method");

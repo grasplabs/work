@@ -95,6 +95,8 @@ export type Failure =
       body: unknown;
       headers?: HeadersInit;
       writesOnly?: boolean;
+      /** Runs while the request is with the provider, before it answers. */
+      meanwhile?: () => Promise<void>;
     }
   | { lost: true; writesOnly?: boolean };
 
@@ -159,7 +161,8 @@ export const fakeProvider = <Part extends string>({
       failure = undefined;
     }
     if (failing !== undefined && !("lost" in failing)) {
-      const { status, body, headers } = failing;
+      const { status, body, headers, meanwhile } = failing;
+      await meanwhile?.();
       return Response.json(body, { status, headers });
     }
     if (isWrite) {
