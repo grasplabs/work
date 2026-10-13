@@ -25,8 +25,9 @@ import type {
 import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
+import { runInSession, sandboxVerdictOf } from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
-import { requireBoundedHere } from "../sandboxed.ts";
+import { requireBoundedHere, sessionHost } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
 import { collectionMethods, fromIsolate } from "./host.ts";
 
@@ -103,10 +104,6 @@ const testReportSchema = z.object({
     .max(500),
 });
 
-interface TestsEntrypoint extends Rpc.WorkerEntrypointBranded {
-  run: () => Promise<Settled<unknown>>;
-}
-
 /**
  * A workflow's parameters as its code declares them (the SDK's
  * `ParamMetadata`), within the bounds the SDK checks too. The isolate
@@ -139,10 +136,6 @@ const declaredMetadataSchema = z.object({
   triggers: z.unknown().optional(),
 });
 
-interface MetadataEntrypoint extends Rpc.WorkerEntrypointBranded {
-  read: () => Promise<Settled<unknown>>;
-}
-
 /**
  * How workflow code runs: as App server code does, with more CPU. One load
  * runs the workflow from its start (finished steps replayed) to its next
@@ -155,6 +148,73 @@ const workflowSandbox = {
   compatibilityFlags: [...sandbox.compatibilityFlags, "nodejs_als"],
   limits: { cpuMs: 30_000 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
+
+/**
+ * How long a workflow isolate's call of its metadata, tests or dry runs
+ * may take on-prem, waits included: its CPU time is bounded apart.
+ */
+const codeCallMs = 5 * 60_000;
+
+/**
+ * Calls `method` of `entrypoint` with JSON `args`, in a workflow isolate of
+ * `mainModule` and `modules`: on-prem in a sandbox session of its own, as
+ * `owner`, its CPU time and memory bounded by the supervisor, which plain
+ * workerd's Loader doesn't bound (sandbox-session.ts); elsewhere in core's
+ * Loader, kept under `key` (`null`: never kept). Throws what the isolate's
+ * entrypoint threw, or why the sandbox ended the call (`sandboxVerdictOf`).
+ */
+export const isolateCall = async (
+  env: Pick<
+    Env,
+    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+  >,
+  {
+    key,
+    owner,
+    mainModule,
+    modules,
+    entrypoint,
+    method,
+    args,
+  }: {
+    key: string | null;
+    owner: string;
+    mainModule: string;
+    modules: () => Promise<Record<string, string>>;
+    entrypoint: string;
+    method: string;
+    args: unknown[];
+  }
+): Promise<unknown> => {
+  const host = sessionHost(env);
+  if (host !== undefined) {
+    return await runInSession(host, {
+      mainModule,
+      modules: await modules(),
+      entrypoint,
+      method,
+      args: args.map((value) => ({ value })),
+      owner,
+      cpuMs: workflowSandbox.limits.cpuMs,
+      wallMs: codeCallMs,
+    });
+  }
+  const stub: unknown = env.LOADER.get(key, async () => ({
+    ...workflowSandbox,
+    mainModule,
+    modules: await modules(),
+    env: {},
+  })).getEntrypoint(entrypoint);
+  const fn: unknown =
+    typeof stub === "object" || typeof stub === "function"
+      ? Reflect.get(stub ?? {}, method)
+      : undefined;
+  if (typeof fn !== "function") {
+    throw new TypeError(`The workflow's isolate has no ${method}.`);
+  }
+  const answer: unknown = await Reflect.apply(fn, stub, args);
+  return answer;
+};
 
 const runModule = "grasp-run.js";
 const testsModule = "grasp-tests.js";
@@ -180,10 +240,6 @@ const dryRunsSchema = z
 
 /** Each test's dry run of a workflow. */
 export type DryRuns = z.infer<typeof dryRunsSchema>;
-
-interface DryRunsEntrypoint extends Rpc.WorkerEntrypointBranded {
-  run: (params: Record<string, string | number>) => Promise<Settled<unknown>>;
-}
 
 /**
  * The shared part of both main modules: settling a call into plain data
@@ -542,6 +598,18 @@ export const startFailure = (error: unknown): string | undefined => {
 };
 
 /**
+ * Whether `error` is the workflow code's failure to load or finish: a
+ * module that threw as it loaded, or (on-prem) the sandbox ending it past
+ * its CPU time, memory or time. Anything else is the platform's.
+ */
+export const codesFailure = (error: unknown): string | undefined => {
+  if (sandboxVerdictOf(error) !== undefined) {
+    return error instanceof Error ? error.message : "it was stopped";
+  }
+  return startFailure(error);
+};
+
+/**
  * What workflow `id` declares at an App version (with its `files`), read
  * from its code in an isolate of their own, kept by the loader for that
  * version: a version's code never changes. Each part is checked by
@@ -555,27 +623,27 @@ const declaredMetadata = async (
   id: WorkflowId,
   files: AppFiles
 ): Promise<{ params?: unknown; triggers?: unknown }> => {
-  requireBoundedHere(env, "a workflow's metadata");
-  const code = env.LOADER.get(
-    `workflow-metadata:${app}:${version}:${id}:${compilerVersion}`,
-    async () => ({
-      ...workflowSandbox,
-      mainModule: metadataModule,
-      modules: {
-        ...(await modulesOf(env, version, files)),
-        [metadataModule]: metadataMain(id),
-      },
-      env: {},
-    })
-  ).getEntrypoint<MetadataEntrypoint>("Metadata");
   let outcome: Settled<unknown>;
   try {
-    outcome = fromIsolate(await code.read());
+    outcome = fromIsolate(
+      await isolateCall(env, {
+        key: `workflow-metadata:${app}:${version}:${id}:${compilerVersion}`,
+        owner: app,
+        mainModule: metadataModule,
+        modules: async () => ({
+          ...(await modulesOf(env, version, files)),
+          [metadataModule]: metadataMain(id),
+        }),
+        entrypoint: "Metadata",
+        method: "read",
+        args: [],
+      })
+    );
   } catch (error) {
-    // A module threw as it loaded (a definition the SDK refuses): the
-    // code's failure, as `workflow.invalid`. Anything else is the
-    // platform's.
-    if (startFailure(error) === undefined) {
+    // A module threw as it loaded (a definition the SDK refuses), or it
+    // ran past its bounds: the code's failure, as `workflow.invalid`.
+    // Anything else is the platform's.
+    if (codesFailure(error) === undefined) {
       throw error;
     }
     throw workflowErrors.create("workflow.invalid");
@@ -637,21 +705,30 @@ const testFailures = async (
   modules: Record<string, string>,
   calls: string
 ): Promise<string[]> => {
-  requireBoundedHere(env, "a workflow's tests");
-  const tests = env.LOADER.get(null, () => ({
-    ...workflowSandbox,
-    mainModule: testsModule,
-    modules: { ...modules, [testsModule]: testsMain(id, calls) },
-    env: {},
-  })).getEntrypoint<TestsEntrypoint>("Tests");
   let outcome: Settled<unknown>;
   try {
-    outcome = fromIsolate(await tests.run());
+    outcome = fromIsolate(
+      await isolateCall(env, {
+        key: null,
+        // The version isn't anyone's App yet: its tests share one place.
+        owner: "workflow-tests",
+        mainModule: testsModule,
+        modules: async () =>
+          await Promise.resolve({
+            ...modules,
+            [testsModule]: testsMain(id, calls),
+          }),
+        entrypoint: "Tests",
+        method: "run",
+        args: [],
+      })
+    );
   } catch (error) {
     // The isolate didn't start because a module threw as it loaded, such
-    // as a workflow whose definition the SDK refuses: the code's failure,
-    // reported as its tests'. Anything else is the platform's.
-    const cause = startFailure(error);
+    // as a workflow whose definition the SDK refuses, or it ran past its
+    // bounds: the code's failure, reported as its tests'. Anything else is
+    // the platform's.
+    const cause = codesFailure(error);
     if (cause === undefined) {
       throw error;
     }
@@ -696,29 +773,29 @@ export const dryRunTests = async (
    */
   { draft = false }: { draft?: boolean } = {}
 ): Promise<DryRuns> => {
-  requireBoundedHere(env, "a workflow's dry runs");
   const calls = callsOf(files, id);
-  const code = env.LOADER.get(
-    draft
-      ? null
-      : `workflow-dry-run:${app}:${version}:${id}:${compilerVersion}`,
-    async () => ({
-      ...workflowSandbox,
-      mainModule: dryRunModule,
-      modules: {
-        ...(await modulesOf(env, version, files)),
-        [dryRunModule]: dryRunMain(id, calls),
-      },
-      env: {},
-    })
-  ).getEntrypoint<DryRunsEntrypoint>("DryRuns");
   let outcome: Settled<unknown>;
   try {
-    outcome = fromIsolate(await code.run(params));
+    outcome = fromIsolate(
+      await isolateCall(env, {
+        key: draft
+          ? null
+          : `workflow-dry-run:${app}:${version}:${id}:${compilerVersion}`,
+        owner: app,
+        mainModule: dryRunModule,
+        modules: async () => ({
+          ...(await modulesOf(env, version, files)),
+          [dryRunModule]: dryRunMain(id, calls),
+        }),
+        entrypoint: "DryRuns",
+        method: "run",
+        args: [params],
+      })
+    );
   } catch (error) {
-    // As for parameters: a module that threw as it loaded is the code's
-    // failure, anything else the platform's.
-    if (startFailure(error) === undefined) {
+    // As for parameters: a module that threw as it loaded, or one that ran
+    // past its bounds, is the code's failure, anything else the platform's.
+    if (codesFailure(error) === undefined) {
       throw error;
     }
     throw workflowErrors.create("workflow.invalid");
@@ -745,7 +822,8 @@ export const workflowTestFailures = async (
   if (ids.length === 0) {
     return [];
   }
-  requireBoundedHere(env, "a workflow's tests");
+  // Refused before anything is built where no sandbox may run them.
+  sessionHost(env);
   const modules = await modulesOf(env, version, files);
   const failures: string[] = [];
   for (const id of ids) {
