@@ -66,6 +66,53 @@ import { idempotentCalls } from "./db/schema.ts";
 //   sent: what it did stays recorded as it ended (done, failed or
 //   unknown), never as undone; a later call needs a capability core signs
 //   only while the caller may still act.
+//
+// Recovery (spec 14.3): a call of unknown outcome may be taken up again,
+// under its key, when its native action says how (`recovery`): `repeat`
+// sends it again, because it can't take effect twice under its effect key;
+// `find` looks its effect up by the key first. Composio and other remote
+// servers never recover, and never see an effect key. Threat model, and
+// how each is closed:
+// - A recovery races the call it recovers, still out: it waits until the
+//   call's last claim is past the claim timeout (`recoveryWaitMs`); a
+//   call gives up within 30 seconds, and the egress closes with it.
+// - Two recoveries race each other: each retakes the key only if its row
+//   is still as read (state, last claim, input), in one statement, so one
+//   goes out and the other is `connect.call_in_progress`.
+// - A recovery with other input under the key: `replay` refuses it
+//   (`connect.idempotency_conflict`) before anything else.
+// - A caller who may no longer act (a revoked permission, an inactive
+//   connection, another person's): recovery runs only inside a call, after
+//   the capability core signed for this call now is verified and every
+//   check of the call itself has passed again; a call its person must
+//   confirm is never recovered, which would hold it anew.
+// - A lookup reaches further than the call: it runs in the connector's
+//   isolate, through the egress, on the action's own declared routes
+//   (a GET the manifest must declare), bound to the call's resource.
+// - A lookup says "not there" while it is: only a native connector's word
+//   is taken, its `find` returns null only when certain, and the call has
+//   been out of reach for the claim timeout. Only that null says "absent"
+//   (`effectAbsentMetaKey`): a lookup that failed, a throttled GET's "did
+//   nothing" included, is a plain failure, and the call stays unknown. Any
+//   error or doubt spends the key again, with a new claim time, so the next
+//   recovery waits anew. A lookup that can't be sure (a sent email whose
+//   copy may be elsewhere) isn't declared at all.
+// - Another connector release recovers a call: it may tag, find or repeat
+//   differently (one that didn't tag yet would look for a tag that isn't
+//   there, and send), so only the release that claimed the key
+//   (`connector_version`) recovers its call.
+// - A call writes to the key after another took it over (a late answer,
+//   freeing or spending it): every write of a call to its key requires the
+//   claim time it set, and after an "absent" lookup the call claims anew,
+//   while it still holds the key, right before it sends.
+// - A row from before claim times were kept (`claimed_at` 0) passes for
+//   stale: a claim is as recent as its first claim at least.
+// - A repeat undoes what people did since (a label they removed): no
+//   recovery past `recoveryHorizonMs` from the first claim. Within it, a
+//   repeated label change can still undo a person's relabel: accepted.
+// - An effect key gives the caller away, or crosses calls: it hashes the
+//   call's whole scope, so it differs between any two calls and names
+//   nobody (`effectKeyOf`).
 
 /**
  * How long a claim holds before connect stops waiting for its call: well
@@ -98,7 +145,15 @@ export interface IdempotencyScope {
  */
 const maxStoredOutputBytes = 128 * 1024;
 
-type Row = typeof idempotentCalls.$inferSelect;
+export type Row = typeof idempotentCalls.$inferSelect;
+
+/**
+ * How long after its first claim a call of unknown outcome may still be
+ * recovered (`recoveryWaitMs`). Past it, it stays unknown: a state written
+ * again a day later may undo what people changed since, and an effect
+ * looked up then may have been redone by hand.
+ */
+export const recoveryHorizonMs = 24 * 60 * 60 * 1000;
 
 /** An earlier call's answer: its result, or the tool's error. */
 export interface StoredAnswer {
@@ -132,6 +187,13 @@ export const hashCall = async (
   input: Json
 ): Promise<string> => await sha256Hex(canonicalJson({ resource, input }));
 
+/**
+ * When the key was last claimed: its last claim, and never before its
+ * first, so a row whose `claimed_at` was never set (0) isn't stale at once.
+ */
+const lastClaimOf = (row: Row): number =>
+  Math.max(row.claimedAt.getTime(), row.createdAt.getTime());
+
 /** What a stored row means for a repeat of the call: its answer, or why not. */
 export const replay = (
   row: Row,
@@ -161,13 +223,50 @@ export const replay = (
       failed: row.state === "failed",
     };
   }
-  if (
-    row.state === "running" &&
-    now - row.createdAt.getTime() < claimTimeoutMs
-  ) {
+  if (row.state === "running" && now - lastClaimOf(row) < claimTimeoutMs) {
     throw connectErrors.create("connect.call_in_progress");
   }
   throw connectErrors.create("connect.outcome_unknown");
+};
+
+/**
+ * How long until the call `row` records may be recovered, in milliseconds:
+ * 0 now, null never. Only a call of unknown outcome (spent, or a claim
+ * past its timeout) is, and only within the horizon of its first claim.
+ * Its last claim must be past the claim timeout, so a recovery never runs
+ * while that claim's call may still be out: connect's MCP client and
+ * egress give up on a call within 30 seconds, far inside it.
+ */
+export const recoveryWaitMs = (row: Row, now: number): number | null => {
+  if (row.state !== "unknown" && row.state !== "running") {
+    return null;
+  }
+  if (now - row.createdAt.getTime() > recoveryHorizonMs) {
+    return null;
+  }
+  return Math.max(0, lastClaimOf(row) + claimTimeoutMs - now);
+};
+
+/**
+ * The effect key of the call `scope` names (`effectKeyMetaKey`): a SHA-256
+ * over its whole scope, so it is the same for every attempt of one call,
+ * differs between any two, and gives away neither the caller's key nor
+ * who called.
+ */
+export const effectKeyOf = async (scope: IdempotencyScope): Promise<string> => {
+  const { subjectType, subjectId } = subjectColumns(scope.subject);
+  return await sha256Hex(
+    canonicalJson([
+      "grasp-os/effect",
+      subjectType,
+      subjectId,
+      scope.onBehalfOf,
+      scope.connectionId,
+      scope.action,
+      scope.resource,
+      scope.idempotencyKey,
+    ])
+  );
 };
 
 /** The output as kept for repeats: itself, or nothing when too large. */
@@ -181,6 +280,10 @@ export interface Repeat {
   replayed?: boolean;
 }
 
+/** A claim time after `after`: never the same instant as the claim before. */
+const claimTime = (after: number): Date =>
+  new Date(Math.max(Date.now(), after + 1));
+
 /** The idempotency store for one key: see the module comment. */
 export const idempotencyStore = (
   database: D1Database,
@@ -192,6 +295,18 @@ export const idempotencyStore = (
 
   const find = async (): Promise<Row | undefined> =>
     await db.select().from(idempotentCalls).where(key).get();
+
+  // The claim this call holds, by the time it set: whatever it then writes
+  // to the key (its answer, freeing or spending it) applies only while the
+  // key is still claimed by it, so a call a recovery took the key from
+  // since, late, can't overwrite the newer claim.
+  let mine: Date | undefined;
+  const held = () =>
+    and(
+      key,
+      eq(idempotentCalls.state, "running"),
+      mine === undefined ? undefined : eq(idempotentCalls.claimedAt, mine)
+    );
 
   return {
     /** The stored row of an earlier call with this key, as it is. */
@@ -216,7 +331,10 @@ export const idempotencyStore = (
      * another call claimed it first, answers as a repeat of that call
      * (`seen.replayed`).
      */
-    claim: async (seen: Repeat = {}): Promise<StoredAnswer | undefined> => {
+    claim: async (
+      seen: Repeat = {},
+      connectorVersion: string | null = null
+    ): Promise<StoredAnswer | undefined> => {
       const now = Date.now();
       const [, claimed] = await db.batch([
         // Expired answers are dropped; the index on created_at keeps it
@@ -243,11 +361,14 @@ export const idempotencyStore = (
             inputHash,
             state: "running",
             createdAt: new Date(now),
+            claimedAt: new Date(now),
+            connectorVersion,
           })
           .onConflictDoNothing()
           .returning({ state: idempotentCalls.state }),
       ]);
       if (claimed.length > 0) {
+        mine = new Date(now);
         return undefined;
       }
       const row = await find();
@@ -264,6 +385,55 @@ export const idempotencyStore = (
     },
 
     /**
+     * Claims the key again for a recovery of the call `row` records, as it
+     * was read: only if it still is (the same state and last claim, the
+     * same input), so of two recoveries racing, one goes out and the other
+     * is `connect.call_in_progress`. The first claim's time stays, for the
+     * horizon.
+     */
+    retake: async (row: Row): Promise<void> => {
+      const at = claimTime(row.claimedAt.getTime());
+      const retaken = await db
+        .update(idempotentCalls)
+        .set({ state: "running", claimedAt: at })
+        .where(
+          and(
+            key,
+            eq(idempotentCalls.state, row.state),
+            eq(idempotentCalls.claimedAt, row.claimedAt),
+            eq(idempotentCalls.inputHash, inputHash)
+          )
+        )
+        .returning({ state: idempotentCalls.state });
+      if (retaken.length === 0) {
+        throw connectErrors.create("connect.call_in_progress");
+      }
+      mine = at;
+    },
+
+    /**
+     * Claims the key anew, right before the call goes out after a lookup
+     * found its effect absent: only while this call still holds it, so a
+     * lookup that ran long can't send under a claim another took since.
+     * Refused, the call stays unknown, and nothing is written.
+     */
+    restamp: async (): Promise<void> => {
+      if (mine === undefined) {
+        throw connectErrors.create("connect.outcome_unknown");
+      }
+      const at = claimTime(mine.getTime());
+      const restamped = await db
+        .update(idempotentCalls)
+        .set({ claimedAt: at })
+        .where(held())
+        .returning({ state: idempotentCalls.state });
+      if (restamped.length === 0) {
+        throw connectErrors.create("connect.outcome_unknown");
+      }
+      mine = at;
+    },
+
+    /**
      * The statement that stores the answer of the call this key was claimed
      * for, to run in one batch with the call's audit events.
      */
@@ -275,21 +445,16 @@ export const idempotencyStore = (
           output: retainable(result.output),
           provenance: JSON.stringify(result.provenance),
         })
-        .where(and(key, eq(idempotentCalls.state, "running"))),
+        .where(held()),
 
     /** Frees the key: the call is known not to have had its effect. */
     release: async (): Promise<void> => {
-      await db
-        .delete(idempotentCalls)
-        .where(and(key, eq(idempotentCalls.state, "running")));
+      await db.delete(idempotentCalls).where(held());
     },
 
     /** Spends the key: the call may or may not have had its effect. */
     spend: async (): Promise<void> => {
-      await db
-        .update(idempotentCalls)
-        .set({ state: "unknown" })
-        .where(and(key, eq(idempotentCalls.state, "running")));
+      await db.update(idempotentCalls).set({ state: "unknown" }).where(held());
     },
   };
 };

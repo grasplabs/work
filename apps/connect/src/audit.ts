@@ -1,3 +1,4 @@
+import type { RecoveryMode } from "@grasp-os/connector-kit/manifest";
 import {
   auditOutboxTakeMax,
   auditProvenanceMaxItems,
@@ -128,7 +129,8 @@ export type CallOutcome =
   | "held"
   | "refused"
   | "failed"
-  | "unknown";
+  | "unknown"
+  | "reconciled";
 
 /** One call, as far as connect got with it. */
 export interface CallRecord {
@@ -146,6 +148,12 @@ export interface CallRecord {
    * same key: a repeat, not a send of its own.
    */
   replayed?: boolean;
+  /**
+   * How a call of unknown outcome was taken up again (`repeat`, `find`),
+   * for one that was: an auditor counts a `repeat` as a send, under the
+   * same effect key, and a `reconciled` outcome as none.
+   */
+  recovery?: RecoveryMode;
   /** The IDs of the resources it read. */
   provenance?: readonly string[];
   /** The held action it made, or the one its person confirmed. */
@@ -233,6 +241,7 @@ export const auditCall = async (
   add("reason", reason);
   // Only when it is: a repeat answered from the earlier call's outcome.
   add("replayed", record.replayed === true ? true : undefined);
+  add("recovery", record.recovery);
   add("pendingActionId", record.pendingActionId);
   add("provenanceCount", provenance.length);
 

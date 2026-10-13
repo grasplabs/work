@@ -1,4 +1,5 @@
 import {
+  effectAbsentMetaKey,
   mcpProtocolVersion,
   notPerformedMetaKey,
   outcomeUnknownMetaKey,
@@ -92,6 +93,12 @@ export interface McpToolResult {
    * repeat.
    */
   outcomeUnknown: boolean;
+  /**
+   * A lookup says the call's effect certainly isn't there
+   * (`effectAbsentMetaKey`). Only a native connector is taken at its word
+   * on this (call.ts).
+   */
+  effectAbsent: boolean;
 }
 
 /**
@@ -313,6 +320,10 @@ const resultOf = (result: unknown): McpToolResult => {
       meta?.[notPerformedMetaKey] === true &&
       meta[outcomeUnknownMetaKey] !== true,
     outcomeUnknown: isError && meta?.[outcomeUnknownMetaKey] === true,
+    effectAbsent:
+      isError &&
+      meta?.[effectAbsentMetaKey] === true &&
+      meta[outcomeUnknownMetaKey] !== true,
   };
 };
 
@@ -332,8 +343,16 @@ export interface McpServer {
    * wrong reading the list.
    */
   tools: (maxTools: number) => Promise<McpListedTool[]>;
-  /** Calls the tool once. Throws {@link McpError} if it didn't answer. */
-  call: (name: string, input: Record<string, Json>) => Promise<McpToolResult>;
+  /**
+   * Calls the tool once, with `meta` as the call's `_meta` when given (an
+   * effect key, a lookup: native connectors only). Throws
+   * {@link McpError} if it didn't answer.
+   */
+  call: (
+    name: string,
+    input: Record<string, Json>,
+    meta?: Record<string, Json>
+  ) => Promise<McpToolResult>;
 }
 
 /**
@@ -507,9 +526,15 @@ export const mcpServer = (
           : new McpError("The server's tool list isn't readable", error);
       }
     },
-    call: async (name, input) => {
+    call: async (name, input, meta) => {
       await started();
-      return resultOf(await request("tools/call", { name, arguments: input }));
+      return resultOf(
+        await request("tools/call", {
+          name,
+          arguments: input,
+          ...(meta === undefined ? {} : { _meta: meta }),
+        })
+      );
     },
   };
 };

@@ -270,7 +270,16 @@ export const mcpServerWith = (
      * key the server refuses; back to `false` after it.
      */
     refuseList: boolean;
-  } = { ran: [], requests: 0, unkeyed: 0, network: "ok", refuseList: false };
+    /** The `_meta` each tool call came with, in order. */
+    callMeta: unknown[];
+  } = {
+    ran: [],
+    requests: 0,
+    unkeyed: 0,
+    network: "ok",
+    refuseList: false,
+    callMeta: [],
+  };
 
   const answer = async (request: Request): Promise<Response> => {
     state.requests += 1;
@@ -281,6 +290,15 @@ export const mcpServerWith = (
     const network = isToolCall(body) ? state.network : "ok";
     if (isToolCall(body)) {
       state.network = "ok";
+      const params: unknown =
+        typeof body === "object" && body !== null && "params" in body
+          ? body.params
+          : undefined;
+      state.callMeta.push(
+        typeof params === "object" && params !== null && "_meta" in params
+          ? params._meta
+          : undefined
+      );
     }
     if (isToolList(body) && state.refuseList) {
       state.refuseList = false;
@@ -322,6 +340,7 @@ export const mcpServerWith = (
     state.unkeyed = 0;
     state.network = "ok";
     state.refuseList = false;
+    state.callMeta = [];
   };
 
   return { state, answer, reset };
