@@ -501,8 +501,11 @@ export const dataErrors = defineErrorFamily({
  * took isn't in force yet: its defaulted fields are still being filled in
  * (`migration.pending`, retryable, with the backfill's progress), or the
  * fill found a record whose value doesn't fit the field
- * (`migration.backfill_failed`, naming the record); a backfill's step
- * from a run the store moved past is `migration.superseded`.
+ * (`migration.backfill_failed`, naming the record and the target and run
+ * an admin abandons it as); a backfill's step from a run the store moved
+ * past is `migration.superseded`. Once an admin abandoned a failed
+ * target, the releases sealed on it are `migration.abandoned`; only a
+ * failed one can be (`migration.not_failed`).
  */
 export const migrationErrors = defineErrorFamily({
   "migration.required":
@@ -519,6 +522,10 @@ export const migrationErrors = defineErrorFamily({
     "This store couldn't fill in a schema change's defaults: a record already holds a value the new field doesn't accept, so the change needs a migration.",
   "migration.superseded":
     "This backfill step belongs to a run the store has moved past.",
+  "migration.not_failed":
+    "Only a failed schema change can be abandoned: this one's defaults are still being filled in.",
+  "migration.abandoned":
+    "An admin abandoned this schema change after its defaults couldn't be filled in, so a release sealed on it can't run on this store. Seal a new version.",
 });
 
 /**
@@ -529,3 +536,70 @@ export const queryErrors = defineErrorFamily({
   "query.concurrent_change":
     "The records changed while they were read. Try again.",
 });
+
+/**
+ * Why a store's backfill failed (`StoresApi.backfill`): a record whose
+ * value doesn't fit a field it fills in, or runs that couldn't move on.
+ */
+export type StoreBackfillFailure =
+  | {
+      table: string;
+      field: string;
+      id: string;
+      reason: "invalid_value" | "too_large";
+    }
+  | { reason: "stalled" };
+
+/**
+ * A store's pending schema change and its backfill, as an admin sees it:
+ * the target, the run it is at, how far it got, and why it failed.
+ */
+export interface StoreBackfill {
+  target: string;
+  state: "running" | "failed";
+  attempt: number;
+  scanned: number;
+  filled: number;
+  failure: StoreBackfillFailure | null;
+}
+
+/**
+ * An admin's abandonment of a store's failed backfill: the target, as
+ * of the run they saw fail (`StoreBackfill.attempt`).
+ */
+export const abandonBackfillSchema = z.strictObject({
+  store: storeIdSchema,
+  target: z.string().regex(/^[0-9a-f]{64}$/u),
+  attempt: z.number().int().min(1),
+});
+export type AbandonBackfill = z.input<typeof abandonBackfillSchema>;
+
+/**
+ * What abandoning a failed backfill did: the releases sealed on the
+ * target, which now never run on the store, and the fields it reserved,
+ * which a later schema may add again only as they were.
+ */
+export interface AbandonedBackfill {
+  store: string;
+  target: string;
+  attempt: number;
+  scanned: number;
+  filled: number;
+  failure: StoreBackfillFailure;
+  releases: { app: string; version: number }[];
+  reserved: { table: string; field: string }[];
+  abandonedAt: string;
+}
+
+/**
+ * Business stores, for admins: a store's failed schema change, and
+ * abandoning it (spec 17.2, 17.3). Abandoning keeps the store's contract
+ * as it was and takes the releases sealed on the change out of force, so
+ * the store takes schema changes again. Never Grasp staff.
+ */
+export interface StoresApi {
+  /** The store's pending schema change and its backfill; null for none. */
+  backfill: (store: string) => Promise<StoreBackfill | null>;
+  /** Abandons the store's failed backfill (see `AbandonedBackfill`). */
+  abandonBackfill: (input: AbandonBackfill) => Promise<AbandonedBackfill>;
+}

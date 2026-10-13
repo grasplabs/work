@@ -49,6 +49,12 @@ import type { ValueDescriptor } from "./value-descriptor.ts";
 // presence, reference policy), and a changed access mode, either way: a
 // looser mode exposes records, a tighter one would leave older versions
 // reading under the looser one.
+//
+// A field the store reserved (`reserved`: one a pending target added
+// before an admin abandoned it, whose values the records it filled in
+// keep) is added again only with the descriptor it had, so those values
+// still fit it; with any other it is refused (`reserved_field_changed`),
+// on a table the contract has or one the schema adds alike.
 
 /** Why a change can't be applied without a migration. */
 export type PlanRefusalReason =
@@ -57,6 +63,7 @@ export type PlanRefusalReason =
   | "required_field_added"
   | "defaulted_reference_added"
   | "required_field_removed"
+  | "reserved_field_changed"
   | "contract_invalid";
 
 /** One change refused, and why. */
@@ -265,6 +272,24 @@ const holdsId = (descriptor: ValueDescriptor): boolean => {
   return false;
 };
 
+/**
+ * Fields a store reserved, by table and field, each with the descriptor
+ * it may be added with again (see the header).
+ */
+export type ReservedFields = Readonly<
+  Record<string, Readonly<Record<string, ValueDescriptor>>>
+>;
+
+/** The descriptor `field` of `table` is reserved with, if it is. */
+const reservedAs = (
+  reserved: ReservedFields,
+  table: string,
+  field: string
+): ValueDescriptor | undefined => {
+  const fields = own(reserved, table);
+  return fields === undefined ? undefined : own(fields, field);
+};
+
 /** Where a field's change goes: refused, added or retained. */
 interface FieldOutcomes {
   readonly refused: PlanRefusal[];
@@ -276,10 +301,18 @@ interface FieldOutcomes {
 /** Classifies one change of a field of a table on both sides (see the header). */
 const classifyField = (
   change: FieldChange,
+  reserved: ReservedFields,
   { refused, addedFields, filledFields, retainedFields }: FieldOutcomes
 ): void => {
   const { table, field } = change;
-  if (change.change === "changed") {
+  const kept = reservedAs(reserved, table, field);
+  if (
+    change.change === "added" &&
+    kept !== undefined &&
+    !sameUpToEnumOrder(kept, change.after)
+  ) {
+    refused.push({ table, field, reason: "reserved_field_changed" });
+  } else if (change.change === "changed") {
     if (!sameUpToEnumOrder(change.before, change.after)) {
       refused.push({ table, field, reason: "field_changed" });
     }
@@ -312,12 +345,14 @@ const classifyField = (
 /**
  * How `contract`, a store's data contract (null for a store holding
  * nothing yet), changes when the store is handed `target` (see the
- * header). Both are canonical manifests. Refused when any change needs a
- * migration, with every such change; otherwise the contract after it.
+ * header), given the fields the store reserved. Both are canonical
+ * manifests. Refused when any change needs a migration, with every such
+ * change; otherwise the contract after it.
  */
 export const planSchemaChange = (
   contract: SchemaManifest | null,
-  target: SchemaManifest
+  target: SchemaManifest,
+  reserved: ReservedFields = {}
 ): SchemaPlan => {
   const before = contract ?? emptyContract;
   const diff = diffSchemaManifests(before, target);
@@ -336,12 +371,21 @@ export const planSchemaChange = (
   const retainedFields: PlannedField[] = [];
   for (const change of diff.fields) {
     if (onBothSides(change.table)) {
-      classifyField(change, {
+      classifyField(change, reserved, {
         refused,
         addedFields,
         filledFields,
         retainedFields,
       });
+    }
+  }
+  for (const table of addedTables) {
+    const fields = own(target.tables, table)?.fields ?? {};
+    for (const [field, descriptor] of Object.entries(fields)) {
+      const kept = reservedAs(reserved, table, field);
+      if (kept !== undefined && !sameUpToEnumOrder(kept, descriptor)) {
+        refused.push({ table, field, reason: "reserved_field_changed" });
+      }
     }
   }
   for (const { table } of diff.access) {

@@ -194,6 +194,14 @@ export const schemas = sqliteTable("sdk_schemas", {
   schemaHash: text("schema_hash").primaryKey(),
   manifest: text().notNull(),
   createdAt: integer("created_at").notNull(),
+  /**
+   * When an admin abandoned the pending target that alone held this
+   * schema (store-host.ts, `abandonBackfill`): the contract never took
+   * it, so it is left out of the check of the contract against the
+   * store's schemas, and of a contract rebuilt from them, until a later
+   * consumer applies it again.
+   */
+  abandonedAt: integer("abandoned_at"),
 });
 
 /**
@@ -217,7 +225,71 @@ export const schemaActivations = sqliteTable("sdk_schema_activations", {
   /** The plan, as canonical JSON: what it added and retained. */
   plan: text().notNull(),
   createdAt: integer("created_at").notNull(),
+  /**
+   * When the pending target this receipt waited on was abandoned
+   * (store-host.ts, `abandonBackfill`): its consumer's release never runs
+   * on the store, and applying its schema for it again is refused
+   * (`migration.abandoned`) rather than making it pending once more.
+   */
+  abandonedAt: integer("abandoned_at"),
 });
+
+/**
+ * The fields an abandoned pending target added (store-host.ts,
+ * `abandonBackfill`), each with its descriptor: records its backfill
+ * filled in keep the value, so a later schema may add the field again
+ * only as it was (`planSchemaChange`'s `reserved`), never with another
+ * meaning those values wouldn't fit.
+ */
+export const reservedFields = sqliteTable(
+  "sdk_reserved_fields",
+  {
+    tableName: text("table_name").notNull(),
+    fieldName: text("field_name").notNull(),
+    /** The field's value descriptor, as canonical JSON. */
+    descriptor: text().notNull(),
+    /** The abandoned target that reserved it first. */
+    targetHash: text("target_hash").notNull(),
+    reservedAt: integer("reserved_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.tableName, table.fieldName] })]
+);
+
+/**
+ * Pending targets an admin abandoned (store-host.ts, `abandonBackfill`),
+ * by target: what the backfill had done and why it failed, the schemas
+ * and receipts it took out of force and the fields it reserved, and who
+ * abandoned it when. The abandonment's record, which its audit event is
+ * made from alone, so core and the store's alarm make the same event;
+ * `audited_at` is set once core holds it.
+ */
+export const abandonedTargets = sqliteTable(
+  "sdk_abandoned_targets",
+  {
+    targetHash: text("target_hash").notNull(),
+    baseHash: text("base_hash"),
+    /** The run abandoned: a new pending target of this hash goes on past it. */
+    attempt: integer().notNull(),
+    scanned: integer().notNull(),
+    filled: integer().notNull(),
+    /** Why its backfill failed (JSON). */
+    failure: text().notNull(),
+    /** The schemas taken out of force, as canonical JSON: `[hash, ...]`. */
+    schemas: text().notNull(),
+    /** The receipts abandoned, as canonical JSON: `[[resource, version], ...]`. */
+    consumers: text().notNull(),
+    /** The fields reserved, as canonical JSON: `[[table, field], ...]`. */
+    reserved: text().notNull(),
+    /** Who abandoned it, as the audit log names them (JSON). */
+    abandonedBy: text("abandoned_by").notNull(),
+    abandonedAt: integer("abandoned_at").notNull(),
+    /** When core's audit outbox was found to hold its event. */
+    auditedAt: integer("audited_at"),
+  },
+  // One per run abandoned: a target added back as it was goes on from a
+  // later run, and its abandonment is a record of its own.
+  (table) => [primaryKey({ columns: [table.targetHash, table.attempt] })]
+);
 
 /**
  * A schema change the store took but whose contract isn't in force yet:
