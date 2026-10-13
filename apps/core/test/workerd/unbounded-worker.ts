@@ -60,8 +60,9 @@ export default {
       return new Response(
         await refusal(
           async () =>
+            // Run in a sandbox session where one is bound: here, none is.
             await declaredParams(
-              env,
+              { ...env, SANDBOX_HOST: undefined },
               appIdSchema.parse(crypto.randomUUID()),
               1,
               workflowIdSchema.parse("intake"),
@@ -74,10 +75,15 @@ export default {
       return new Response(
         await refusal(
           async () =>
-            await workflowTestFailures(env, 1, {
-              "workflows/intake.ts": "export default {};",
-              "workflows/intake.workflow-tests.ts": "export default {};",
-            })
+            await workflowTestFailures(
+              { ...env, SANDBOX_HOST: undefined },
+              appIdSchema.parse(crypto.randomUUID()),
+              1,
+              {
+                "workflows/intake.ts": "export default {};",
+                "workflows/intake.workflow-tests.ts": "export default {};",
+              }
+            )
         )
       );
     }
@@ -86,7 +92,7 @@ export default {
         await refusal(
           async () =>
             await dryRunTests(
-              env,
+              { ...env, SANDBOX_HOST: undefined },
               appIdSchema.parse(crypto.randomUUID()),
               1,
               workflowIdSchema.parse("intake"),
