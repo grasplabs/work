@@ -27,6 +27,7 @@ import {
 } from "capnweb";
 import type { RpcTarget } from "cloudflare:workers";
 
+import { sessionMaxRuns } from "../call-limits.ts";
 import { invoke, objectCapability, outward } from "./sandbox-capability.ts";
 
 /** What the workerd config gives the sandbox host. */
@@ -167,11 +168,14 @@ const capabilityOf = (
         await invoke(stub, "call", args.map(outward))
     : objectCapability(stub, spec.methods);
 
-/** The session's main object, which core calls once. */
+/**
+ * The session's main object. Only core reaches it, over the supervisor's
+ * private socket; App code only ever gets the capabilities of its own call.
+ */
 class Session extends CapnwebTarget {
   readonly #env: SessionEnv;
   readonly #settings: IsolateSettings;
-  #ran = false;
+  #runs = 0;
 
   constructor(env: SessionEnv, settings: IsolateSettings) {
     super();
@@ -179,12 +183,18 @@ class Session extends CapnwebTarget {
     this.#settings = settings;
   }
 
-  /** Runs the call once: a session is one call. */
+  /**
+   * Runs a call in an isolate of its own: the session's call, and those
+   * core nests in it (an App function's calls of its other functions),
+   * all in this process, which is killed once the session ends.
+   */
   async run(call: unknown, stubs: unknown): Promise<unknown> {
-    if (this.#ran) {
-      throw new Error("A session runs one call.");
+    // Never more than core lets one call run (call-limits.ts), retries
+    // included, as a bound of its own: core refuses past it first.
+    if (this.#runs >= sessionMaxRuns) {
+      throw new Error("This session has run as many calls as one may.");
     }
-    this.#ran = true;
+    this.#runs += 1;
     const parsed = sessionCallOf(call);
     if (parsed === undefined || !isRecord(stubs)) {
       throw new TypeError("The call isn't in the expected shape.");

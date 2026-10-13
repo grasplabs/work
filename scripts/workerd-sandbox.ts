@@ -90,6 +90,7 @@ const capabilitySource = path.join(
   repo,
   "apps/core/src/on-prem/sandbox-capability.ts"
 );
+const callLimitsSource = path.join(repo, "apps/core/src/call-limits.ts");
 /** capnweb, as workerd loads it: one module importing only the runtime's. */
 const capnwebSource = path.join(
   repo,
@@ -241,11 +242,14 @@ const config :Workerd.Config = (
 
 const sandbox :Workerd.Worker = (
   modules = [
-    (name = "sandbox-host.js", esModule = embed "sandbox-host.js"),
-    (name = "sandbox-session.ts", esModule = embed "sandbox-session.js"),
-    (name = "sandbox-capability.ts", esModule = embed "sandbox-capability.js"),
-    (name = "sandbox-settings.ts", esModule = embed "sandbox-settings.js"),
-    (name = "capnweb", esModule = embed "capnweb.js"),
+    # Named by their paths in apps/core/src, as they import each other.
+    (name = "on-prem/sandbox-host.js", esModule = embed "sandbox-host.js"),
+    (name = "on-prem/sandbox-session.ts", esModule = embed "sandbox-session.js"),
+    (name = "on-prem/sandbox-capability.ts", esModule = embed "sandbox-capability.js"),
+    (name = "on-prem/sandbox-settings.ts", esModule = embed "sandbox-settings.js"),
+    (name = "call-limits.ts", esModule = embed "call-limits.js"),
+    # workerd resolves a bare specifier beside its importer.
+    (name = "on-prem/capnweb", esModule = embed "capnweb.js"),
   ],
   compatibilityDate = "2026-09-15",
   # Its only binding: no storage, no secrets, nothing for escaped code.
@@ -274,6 +278,10 @@ const writeSandboxHost = (dir: string): string => {
   writeFileSync(
     path.join(dir, "sandbox-settings.js"),
     stripTypeScriptTypes(readFileSync(settingsSource, "utf-8"))
+  );
+  writeFileSync(
+    path.join(dir, "call-limits.js"),
+    stripTypeScriptTypes(readFileSync(callLimitsSource, "utf-8"))
   );
   writeFileSync(path.join(dir, "capnweb.js"), readFileSync(capnwebSource));
   const config = path.join(dir, "sandbox-host.capnp");

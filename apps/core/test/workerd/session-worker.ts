@@ -1,5 +1,7 @@
 import { heldPool } from "@grasp-os/shared/rpc-accounting";
 
+import { sessionMaxRuns } from "../../src/call-limits.ts";
+import type { NestedCall, NestedRun } from "../../src/sandbox-session.ts";
 import {
   capability,
   functionCapability,
@@ -30,11 +32,15 @@ let reachedInternal = 0;
 let givenUp = false;
 let reachedAfterGivingUp = 0;
 let pinged = 0;
+/** The nested calls a session ran, and those it refused. */
+let nestedRan = 0;
+let nestedRefused = 0;
+let refusedVerdict: string | null = null;
 
 /** The capability each case gets: what core's would do, and counted. */
 const probe = {
   ping: (value: unknown): unknown => {
-    // 5 and 6 are what an isolate sends once its call is over.
+    // 5, 6 and 7 are what an isolate sends once its call is over.
     if (!open || value === 5 || value === 6) {
       reachedAfter += 1;
     }
@@ -65,6 +71,11 @@ const moduleOf = (body: string): string =>
 export class E extends WorkerEntrypoint { async go(probe, log) { ${body} } }`;
 
 interface Case {
+  /**
+   * How the session nests more calls: `manyRuns` runs as many more in it
+   * as it takes.
+   */
+  nesting?: "manyRuns";
   body: string;
   cpuMs?: number;
   wallMs?: number;
@@ -125,6 +136,7 @@ const cases: Record<string, Case> = {
     body: "return await probe.ping('x'.repeat(100_000));",
     crowded: true,
   },
+  manyRuns: { body: "return 'returned';", nesting: "manyRuns" },
   // Calls on and on, past its deadline on a supervisor that ignores it.
   keepsCalling: {
     body: "for (;;) { await probe.ping(1); await scheduler.wait(5); }",
@@ -171,6 +183,45 @@ const overdueHost = (host: Fetcher): Fetcher => ({
   connect: (address, options) => host.connect(address, options),
 });
 
+/** A call nested in a session: the least a call may be. */
+const trivial: NestedCall = {
+  mainModule: "n.js",
+  modules: {
+    "n.js": `import { WorkerEntrypoint } from "cloudflare:workers";
+export class N extends WorkerEntrypoint { async go() { return 1; } }`,
+  },
+  entrypoint: "N",
+  method: "go",
+  args: [],
+};
+
+/** A session that runs one more call in it than it may (`manyRuns`). */
+const manyRunsNesting = () => {
+  let nested: NestedRun | undefined;
+  return {
+    open: (run: NestedRun) => {
+      nested = run;
+    },
+    answered: () => {
+      // The case's own outcome is what the session answers.
+    },
+    drain: async () => {
+      // One past what a session runs, its own call among them: as many
+      // as one call nests, each with every rerun stale reads may take.
+      for (let index = 0; index < sessionMaxRuns; index += 1) {
+        try {
+          // oxlint-disable-next-line no-await-in-loop -- one after the other
+          await nested?.(trivial);
+          nestedRan += 1;
+        } catch (error) {
+          nestedRefused += 1;
+          refusedVerdict = sandboxVerdictOf(error) ?? null;
+        }
+      }
+    },
+  };
+};
+
 /** A pool of 1 MiB its other sessions hold all but 1 KB of. */
 const crowdedPool = () => {
   const pool = heldPool(1024 * 1024);
@@ -189,6 +240,9 @@ const run = async (env: StandInEnv, name: string, owner: string) => {
   givenUp = false;
   reachedAfterGivingUp = 0;
   pinged = 0;
+  nestedRan = 0;
+  nestedRefused = 0;
+  refusedVerdict = null;
   open = true;
   const started = Date.now();
   const cancel = new AbortController();
@@ -223,6 +277,7 @@ const run = async (env: StandInEnv, name: string, owner: string) => {
       {
         signal: cancel.signal,
         ...(chosen.crowded === true ? { held: crowdedPool() } : {}),
+        ...(chosen.nesting === undefined ? {} : { nesting: manyRunsNesting() }),
       }
     );
     return { status: "ok", value, ms: Date.now() - started };
@@ -256,6 +311,9 @@ export default {
         reachedInternal,
         reachedAfterGivingUp,
         pinged,
+        nestedRan,
+        nestedRefused,
+        refusedVerdict,
         logged,
       });
     }

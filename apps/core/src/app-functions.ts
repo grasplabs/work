@@ -1,6 +1,7 @@
 import { appModuleName, kitModuleName } from "@grasp-os/compiler";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { versionErrors } from "@grasp-os/shared/app-releases";
+import { whenAborted } from "@grasp-os/shared/deadline";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
@@ -32,7 +33,9 @@ import { z } from "zod";
 import { operationRoles } from "./app-access.ts";
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
+import { callTimeoutMs } from "./app.ts";
 import { appFor } from "./apps.ts";
+import type { CallTree, RunnerCall } from "./call-tree.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { sdkReleaseManifests } from "./db/core/schema.ts";
@@ -45,7 +48,14 @@ import type {
   InvocationSources,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
+import {
+  capability,
+  runInSession,
+  sessionEndedError,
+} from "./sandbox-session.ts";
+import type { NestedRun, SessionCall } from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
+import { sessionHost } from "./sandboxed.ts";
 
 // Running an App's server functions from its sealed release (spec 6, 8,
 // 16, 32.6): the App's code runs in an isolate of its own for every
@@ -316,26 +326,149 @@ const parsed = (text: string | undefined): unknown => {
  * The runner of `release`: each call in a fresh isolate of its own (the
  * loader names none, so none is shared or kept), loaded with the release's
  * verified modules and the SDK modules sealed with it (never the SDK the
- * host serves now), with no network and an empty env.
+ * host serves now), with no network and an empty env. On-prem it runs in a
+ * sandbox session (sandbox-session.ts), its process killed past the CPU
+ * time Cloudflare's runtime would give it.
  */
-const runnerOf =
-  (env: Env, release: Release): Runner =>
-  async (path, args, channel) => {
-    const isolate = env.LOADER.get(null, () => ({
-      ...sandbox,
-      mainModule: runModule,
-      // The platform's modules last: no App module takes one's name.
-      modules: {
-        ...release.modules,
-        ...release.sdk,
-        // The host's reading of what App code answers (host-json.ts).
-        [hostJsonModule]: hostJsonSource(),
-        [runModule]: runMain,
-      },
-      env: {},
-    })).getEntrypoint<RunEntrypoint>("Run");
+/**
+ * The session each caller's call runs its functions in on-prem, by that
+ * call (operations.ts `CallTree`), while it's open: how to run one more
+ * function in it.
+ */
+const openSessions = new WeakMap<CallTree, { run: NestedRun }>();
+
+/**
+ * Runs `sessionCall` in a sandbox session. A function nested in another
+ * runs in the session of the function its caller named (in its process,
+ * idle while it waits, taking none of the owner's share, as it would each
+ * nested call deep enough to wait on a place its own callers hold), and
+ * never in a session of its own: once that session is over, it's refused.
+ * The function a caller named opens the session, open until every nested
+ * call the operation host started has settled, authorized or not yet.
+ */
+const inSession = async (
+  host: Fetcher,
+  sessionCall: SessionCall,
+  { signal, call }: { signal?: AbortSignal; call?: RunnerCall }
+): Promise<unknown> => {
+  if (call?.nested === true) {
+    const open = openSessions.get(call.tree);
+    // Its call's session is over (it can't be, as the session waits for
+    // every nested call started): a fresh process would escape the whole
+    // call's CPU time and memory.
+    if (open === undefined) {
+      throw sessionEndedError();
+    }
+    return await open.run(sessionCall, signal);
+  }
+  if (call === undefined) {
+    return await runInSession(
+      host,
+      sessionCall,
+      signal === undefined ? {} : { signal }
+    );
+  }
+  const { tree } = call;
+  const entry: { run: NestedRun } = {
+    run: async () => await Promise.reject(sessionEndedError()),
+  };
+  const { promise: answered, resolve: answer } =
+    Promise.withResolvers<unknown>();
+  const session = (async (): Promise<unknown> => {
+    try {
+      return await runInSession(host, sessionCall, {
+        ...(signal === undefined ? {} : { signal }),
+        nesting: {
+          open: (run: NestedRun) => {
+            entry.run = run;
+            openSessions.set(tree, entry);
+          },
+          answered: answer,
+          // Every nested call the operation host started, those they
+          // start too: from the moment it starts each (`CallTree`).
+          drain: async () => {
+            await tree.settled();
+          },
+        },
+      });
+    } finally {
+      // Ended however it did: no function runs in it any more. A run of
+      // the named function again (stale reads) opened a session of its own.
+      if (openSessions.get(tree) === entry) {
+        openSessions.delete(tree);
+      }
+    }
+  })();
+  // Answered as the function answers. The session stays open behind it for
+  // the calls the function started and didn't wait for, which the operation
+  // host waits for in turn, or gives up on at its deadline (`signal`).
+  return await Promise.race([answered, session]);
+};
+
+export const releaseRunner =
+  (
+    env: Pick<
+      Env,
+      | "LOADER"
+      | "RUNTIME_PROFILE"
+      | "SANDBOX_HOST"
+      | "SANDBOX_IN_PROCESS"
+      | "APP_CALL_TIMEOUT_MS"
+    >,
+    release: Pick<Release, "modules" | "sdk">,
+    /** Whose release it is: the App, which the sandbox caps per owner. */
+    owner: string
+  ): Runner =>
+  async (path, args, channel, signal, call) => {
+    // The platform's modules last: no App module takes one's name.
+    const modules = {
+      ...release.modules,
+      ...release.sdk,
+      // The host's reading of what App code answers (host-json.ts).
+      [hostJsonModule]: hostJsonSource(),
+      [runModule]: runMain,
+    };
+    const isolateChannel = new IsolateChannel(channel);
+    // On-prem, in a sandbox session, where a busy loop costs only its own
+    // process (sandbox-session.ts); on Cloudflare, whose runtime ends it
+    // at the CPU limit, in a Loader isolate of core's own.
+    const host = sessionHost(env);
     const answer = settledSchema.safeParse(
-      await isolate.run(path, args, new IsolateChannel(channel))
+      host === undefined
+        ? await Promise.race([
+            env.LOADER.get(null, () => ({
+              ...sandbox,
+              mainModule: runModule,
+              modules,
+              env: {},
+            }))
+              .getEntrypoint<RunEntrypoint>("Run")
+              .run(path, args, isolateChannel),
+            // Given up on: settled at once, its isolate left to the
+            // runtime, as nothing of core's is held for it.
+            ...(signal === undefined ? [] : [whenAborted(signal)]),
+          ])
+        : await inSession(
+            host,
+            {
+              mainModule: runModule,
+              modules,
+              entrypoint: "Run",
+              method: "run",
+              args: [
+                { value: path },
+                { value: args },
+                { capability: capability(isolateChannel) },
+              ],
+              owner,
+              cpuMs: sandbox.limits.cpuMs,
+              // The host's own deadline ends the invocation before this
+              // (operations.ts), and frees the process (`signal`); this only
+              // bounds the session.
+              wallMs: callTimeoutMs(env),
+            },
+            { signal, call }
+          )
     );
     if (!answer.success) {
       throw Object.assign(new Error("The isolate answered something else"), {
@@ -370,7 +503,7 @@ const runnerOf =
 /** `release` as the operation host runs it. */
 export const hostedRelease = (env: Env, release: Release): HostedApp => ({
   manifest: release.app,
-  run: runnerOf(env, release),
+  run: releaseRunner(env, release, release.manifest.resourceId),
 });
 
 /** Every call of a store a release without tables doesn't have. */

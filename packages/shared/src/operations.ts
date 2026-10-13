@@ -61,6 +61,16 @@ export const operationErrors = defineErrorFamily({
     "This call ran more nested functions, or made more resource requests, than one call may.",
   "operation.depth_exceeded":
     "Functions called each other deeper than one call may go.",
+  "operation.cpu_exceeded":
+    "The operation used more CPU time than one call may, so it was stopped.",
+  "operation.memory_exceeded":
+    "The operation used more memory than one call may, so it was stopped.",
+  "operation.sandbox_refused":
+    "The operation's code sent the host more than one call may.",
+  "operation.sandbox_busy":
+    "This App runs as many calls at once as it may. Try again shortly.",
+  "operation.sandbox_unavailable":
+    "The sandbox that runs the App's code isn't available. Try again shortly.",
   "resource.not_allowed":
     "The App didn't declare that use of this resource for this function.",
   "resource.unavailable":
@@ -145,6 +155,8 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "mutation.too_large": "contract",
   "effect.outcome_unknown": "uncertain",
   "operation.deadline_exceeded": "operational",
+  "operation.sandbox_busy": "operational",
+  "operation.sandbox_unavailable": "operational",
 };
 
 /** The platform codes worth trying again, unchanged, a little later. */
@@ -156,6 +168,8 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "submission.deadline_passed",
   // Nothing was sent; room comes back as requests under way settle.
   "resource.budget_busy",
+  "operation.sandbox_busy",
+  "operation.sandbox_unavailable",
 ]);
 
 /** The category of platform error `code`: its own, or by its family. */
