@@ -688,6 +688,7 @@ describe("a session on the on-prem sandbox", () => {
       "callCollection",
       "callConnection",
       "callApp",
+      "callFunction",
       "callExport",
       "openDecision",
       "decisionRecipients",

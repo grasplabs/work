@@ -1,13 +1,8 @@
 /**
  * On plain workerd, where no sandbox bounds them and the deployment hasn't
-<<<<<<< HEAD
- * set `SANDBOX_IN_PROCESS=unbounded`, core refuses to load a workflow's run
- * or an App's server object, or to start the screen compiler or the
- * package builder (apps/core/test/workerd/unbounded-worker.ts):
-=======
  * set `SANDBOX_IN_PROCESS=unbounded`, core refuses to load an App's server
- * object or a draft's preview (apps/core/test/workerd/unbounded-worker.ts):
->>>>>>> d1e0aeb3b (feat(core): run a workflow's loads in a sandbox session on-prem)
+ * object or a draft's preview, or to start the screen compiler or the
+ * package builder (apps/core/test/workerd/unbounded-worker.ts):
  * a bound `SANDBOX_HOST` doesn't allow them, as nothing runs them there.
  * A workflow's code (its runs, metadata, tests and dry runs) runs on the
  * sandbox host where one is bound, and is refused where none is.
