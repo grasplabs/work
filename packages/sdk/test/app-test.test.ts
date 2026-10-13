@@ -75,6 +75,21 @@ describe(appTest, () => {
     expect(() => looseAppTest(definition)).toThrow(TestDefinitionError);
   });
 
+  it("keeps a test named after a prototype key, and every other test", () => {
+    const tests = Object.fromEntries([
+      ["__proto__", passing],
+      ["constructor", passing],
+      ["reads back", passing],
+    ]);
+    const suite = appTest({ fixtures: "notes", tests });
+    expect(Object.keys(suite.tests)).toStrictEqual([
+      "__proto__",
+      "constructor",
+      "reads back",
+    ]);
+    expect(Object.getPrototypeOf(suite.tests)).toBe(Object.prototype);
+  });
+
   it("keeps a test name as people wrote it", () => {
     const definition: AppTestDefinition = {
       fixtures: "notes-summary",

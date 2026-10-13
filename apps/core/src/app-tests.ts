@@ -101,17 +101,22 @@ interface TestLimits {
   testMs: number;
   suiteMs: number;
   runMs: number;
+  /** How long a suite's cleanup may take: discarding its stores. */
+  cleanupMs: number;
 }
 
 /**
  * The limits on an App's tests: one test the SDK's `appTestTimeoutMs`,
  * one suite 2 minutes, and all of a version's suites 10 minutes, checked
- * before each suite starts. `APP_TEST_LIMITS_MS` (tests only) lowers them.
+ * before each suite starts; after each suite, discarding its stores 10
+ * seconds, so at most 20 suites add 200 s to the run. `APP_TEST_LIMITS_MS`
+ * (tests only) lowers them.
  */
 const defaultLimits: TestLimits = {
   testMs: appTestTimeoutMs,
   suiteMs: 120_000,
   runMs: 10 * 60_000,
+  cleanupMs: 10_000,
 };
 
 /**
@@ -130,13 +135,14 @@ const lower = (set: number | undefined, most: number): number =>
 
 /** The limits in force: the defaults, or lower ones where tests set them. */
 const limitsOf = (env: Pick<Env, "APP_TEST_LIMITS_MS">): TestLimits => {
-  const [testMs, suiteMs, runMs] = (env.APP_TEST_LIMITS_MS ?? "")
+  const [testMs, suiteMs, runMs, cleanupMs] = (env.APP_TEST_LIMITS_MS ?? "")
     .split("/")
     .map(Number);
   return {
     testMs: lower(testMs, defaultLimits.testMs),
     suiteMs: lower(suiteMs, defaultLimits.suiteMs),
     runMs: lower(runMs, defaultLimits.runMs),
+    cleanupMs: lower(cleanupMs, defaultLimits.cleanupMs),
   };
 };
 
@@ -288,19 +294,46 @@ const TestTarget = boundedRpcTarget({
   size: functionRequestMaxBytes,
 });
 
+/** What `work` answers, or a rejection once `ms` have passed. */
+const within = async <T>(work: Promise<T>, ms: number): Promise<T> => {
+  const limit = deadline(ms);
+  try {
+    return await Promise.race([work, whenAborted(limit.signal)]);
+  } catch (error) {
+    if (limit.stopped() === "timeout") {
+      throw new Error(`didn't finish within ${ms / 1000} seconds`, {
+        cause: error,
+      });
+    }
+    throw error;
+  } finally {
+    limit.clear();
+  }
+};
+
+/** What a suite's sessions are opened with. */
+interface SessionContext {
+  readonly env: Env;
+  readonly release: Release;
+  /** How long discarding a session's store may take (`TestLimits`). */
+  readonly cleanupMs: number;
+}
+
 /** One test's session: its principals' calls, on a fixture store of its own. */
 class FixtureSession extends TestTarget {
   readonly #env: Env;
   readonly #release: Release;
+  readonly #cleanupMs: number;
   readonly #fixtures: string;
   readonly #fixture: Fixture;
   #store: Promise<OpenStore> | undefined;
   #closed = false;
 
-  constructor(env: Env, release: Release, fixtures: string, fixture: Fixture) {
+  constructor(context: SessionContext, fixtures: string, fixture: Fixture) {
     super();
-    this.#env = env;
-    this.#release = release;
+    this.#env = context.env;
+    this.#release = context.release;
+    this.#cleanupMs = context.cleanupMs;
     this.#fixtures = fixtures;
     this.#fixture = fixture;
   }
@@ -395,7 +428,12 @@ class FixtureSession extends TestTarget {
     return JSON.stringify(result);
   }
 
-  /** Ends the session, discarding its store. */
+  /**
+   * Ends the session, discarding its store within the cleanup's deadline:
+   * a store or D1 that stalls holds the test no longer, and the store
+   * stays recorded (`app_test_fixtures`), for the sweep. That alone fails
+   * no test.
+   */
   async close(): Promise<void> {
     this.#closed = true;
     const store = this.#store;
@@ -410,24 +448,29 @@ class FixtureSession extends TestTarget {
       // Never created: whatever was recorded, the sweep discards.
       return;
     }
-    await discardFixture(this.#env, id);
+    await within(discardFixture(this.#env, id), this.#cleanupMs).catch(
+      (error: unknown) => {
+        log.warn("app_tests.discard_unfinished", {
+          store: id,
+          ...errorFields(error),
+        });
+      }
+    );
   }
 }
 
 /** Core's side of one suite's run: its sessions, one per test. */
 class FixtureHost extends TestTarget {
-  readonly #env: Env;
-  readonly #release: Release;
+  readonly #context: SessionContext;
   readonly #files: AppFiles;
   readonly #sessions = new Set<FixtureSession>();
   /** The tests the suite opened, by name, in order: what it must report. */
   readonly opened: string[] = [];
   #closed = false;
 
-  constructor(env: Env, release: Release, files: AppFiles) {
+  constructor(context: SessionContext, files: AppFiles) {
     super();
-    this.#env = env;
-    this.#release = release;
+    this.#context = context;
     this.#files = files;
   }
 
@@ -454,12 +497,7 @@ class FixtureHost extends TestTarget {
     if ("error" in read) {
       throw new Error(read.error);
     }
-    const session = new FixtureSession(
-      this.#env,
-      this.#release,
-      fixtures,
-      read.fixture
-    );
+    const session = new FixtureSession(this.#context, fixtures, read.fixture);
     this.#sessions.add(session);
     return session;
   }
@@ -476,23 +514,6 @@ class FixtureHost extends TestTarget {
   }
 }
 
-/** What `work` answers, or a rejection once `ms` have passed. */
-const within = async <T>(work: Promise<T>, ms: number): Promise<T> => {
-  const limit = deadline(ms);
-  try {
-    return await Promise.race([work, whenAborted(limit.signal)]);
-  } catch (error) {
-    if (limit.stopped() === "timeout") {
-      throw new Error(`didn't finish within ${ms / 1000} seconds`, {
-        cause: error,
-      });
-    }
-    throw error;
-  } finally {
-    limit.clear();
-  }
-};
-
 /**
  * Why suite `path` fails, one line per failing test: run in an isolate of
  * its own, which loads the suite and runs it over a host of its own.
@@ -503,12 +524,16 @@ const suiteFailures = async (
   files: AppFiles,
   path: string,
   modules: Record<string, string>,
-  { testMs, suiteMs }: { testMs: number; suiteMs: number }
+  {
+    testMs,
+    suiteMs,
+    cleanupMs,
+  }: Pick<TestLimits, "testMs" | "suiteMs" | "cleanupMs">
 ): Promise<string[]> => {
   const failed = (failure: string): string[] => [
     `${path}: ${failure}`.slice(0, maxFailureLength),
   ];
-  const host = new FixtureHost(env, release, files);
+  const host = new FixtureHost({ env, release, cleanupMs }, files);
   const entry = env.LOADER.get(null, () => ({
     ...testSandbox,
     mainModule,
@@ -526,7 +551,12 @@ const suiteFailures = async (
         : `its code doesn't load: ${cause}`
     );
   } finally {
-    await host.closeAll();
+    // Cleanup has a deadline of its own: a store or D1 that stalls holds
+    // the activation no longer. Whatever it didn't discard stays recorded
+    // (`app_test_fixtures`), for the sweep; that alone fails no test.
+    await within(host.closeAll(), cleanupMs).catch((error: unknown) => {
+      log.warn("app_tests.cleanup_unfinished", errorFields(error));
+    });
   }
   const outcome = outcomeSchema.safeParse(answer);
   if (!outcome.success) {
@@ -616,6 +646,7 @@ export const appTestFailures = async (
         ...(await suiteFailures(env, release, files, path, modules, {
           testMs: limits.testMs,
           suiteMs: Math.min(limits.suiteMs, left),
+          cleanupMs: limits.cleanupMs,
         }))
       );
     }

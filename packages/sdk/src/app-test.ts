@@ -145,6 +145,8 @@ const readSuite = (definition: unknown): AppTestSuite => {
   if (!isRecord(tests)) {
     return refuseSuite("`tests` maps each test's name to its function.");
   }
+  // Defined, never assigned: a test named `__proto__` is a test, not a
+  // new prototype that would drop it.
   const checked: Record<string, AppTestFunction> = {};
   for (const [name, test] of Object.entries(tests)) {
     if (name.trim() === "" || name.length > maxAppTestName) {
@@ -155,10 +157,12 @@ const readSuite = (definition: unknown): AppTestSuite => {
     if (typeof test !== "function") {
       return refuseSuite(`Test "${name}" isn't a function.`);
     }
-    // SAFETY: a function, checked just above; what it does with `t` is
-    // the test's own, and a failure is reported as the test's.
-    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    checked[name] = test as AppTestFunction;
+    // A function, checked just above; what it does with `t` is the test's
+    // own, and a failure is reported as the test's.
+    Object.defineProperty(checked, name, {
+      value: test,
+      enumerable: true,
+    });
   }
   const count = Object.keys(checked).length;
   if (count === 0 || count > maxAppTests) {

@@ -439,6 +439,50 @@ export default appTest({
     await expect(fixturesLeft()).resolves.toBe(0);
   });
 
+  it("give up on a cleanup that stalls, leaving its stores to the sweep", async () => {
+    const built = await appWith({
+      ...appFiles,
+      "tests/notes.test.ts": suiteOf(
+        'await owner.mutation(api.notes.create, { title: "Kept" });'
+      ),
+    });
+    // Every store object answers as it does, but a discard never ends.
+    const stalling = new Proxy(env.DATA_STORES, {
+      get: (namespace, key): unknown => {
+        const value: unknown = Reflect.get(namespace, key);
+        if (key !== "getByName" || typeof value !== "function") {
+          return typeof value === "function" ? value.bind(namespace) : value;
+        }
+        return (name: string) =>
+          new Proxy(namespace.getByName(name), {
+            get: (stub, method): unknown => {
+              if (method === "discardFixture") {
+                return async () => await Promise.withResolvers<never>().promise;
+              }
+              // An RPC stub's methods call through it whatever `this` is.
+              return Reflect.get(stub, method);
+            },
+          });
+      },
+    });
+    const started = Date.now();
+    await activateVersion(
+      envWith({ DATA_STORES: stalling, APP_TEST_LIMITS_MS: "///1000" }),
+      built.owner,
+      built.app,
+      1
+    );
+    expect(Date.now() - started).toBeLessThan(20_000);
+    await expect(findApp(env, built.app)).resolves.toMatchObject({
+      currentVersion: 1,
+    });
+    // The store it couldn't discard stays recorded, for the sweep, which
+    // discards it (here, at once).
+    await expect(fixturesLeft()).resolves.toBe(1);
+    await sweepTestFixtures(env, new Date(Date.now() + 2 * 60 * 60_000));
+    await expect(fixturesLeft()).resolves.toBe(0);
+  });
+
   it("run no suite past the run's deadline", async () => {
     const built = await appWith({
       ...appFiles,
