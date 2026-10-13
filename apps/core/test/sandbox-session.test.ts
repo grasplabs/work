@@ -1,3 +1,4 @@
+import { whenAborted } from "@grasp-os/shared/deadline";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { RpcSession, RpcTarget, WebSocketTransport } from "capnweb";
 import { describe, expect, it } from "vite-plus/test";
@@ -187,7 +188,9 @@ type Said =
   /** Its process is ending; its verdict is kept `afterMs` after core first asks, or never. */
   | { state: "ending"; afterMs?: number }
   /** It still runs: the App's code threw. */
-  | { state: "running" };
+  | { state: "running" }
+  /** It doesn't answer at all, until core gives up on the request. */
+  | { state: "stalled" };
 
 /**
  * A sandbox host whose isolate fails its call: the call's error reaches
@@ -201,8 +204,11 @@ const hostFailing = (said: Said) => {
   const main = new SessionMain(() => {
     throw new Error("internal error; the isolate's process is exiting");
   });
-  const verdictAnswer = (): Response => {
+  const verdictAnswer = async (signal: AbortSignal): Promise<Response> => {
     asked += 1;
+    if (said.state === "stalled") {
+      return await whenAborted(signal);
+    }
     firstAsked ??= Date.now();
     if (
       said.state === "ending" &&
@@ -221,7 +227,7 @@ const hostFailing = (said: Said) => {
       const request = new Request(input, init);
       const { pathname } = new URL(request.url);
       if (pathname.startsWith("/verdict/")) {
-        return await Promise.resolve(verdictAnswer());
+        return await verdictAnswer(request.signal);
       }
       if (pathname !== "/session") {
         return await Promise.resolve(new Response("{}", { status: 200 }));
@@ -245,18 +251,22 @@ const hostFailing = (said: Said) => {
 };
 
 /** A call that fails on `host`: how it ended, and its verdict. */
-const failedOn = async (host: Fetcher) => {
+const failedOn = async (host: Fetcher, signal?: AbortSignal) => {
   try {
-    await runInSession(host, {
-      mainModule: "m.js",
-      modules: { "m.js": "" },
-      entrypoint: "E",
-      method: "go",
-      args: [],
-      owner: "app-test",
-      cpuMs: 1000,
-      wallMs: 5000,
-    });
+    await runInSession(
+      host,
+      {
+        mainModule: "m.js",
+        modules: { "m.js": "" },
+        entrypoint: "E",
+        method: "go",
+        args: [],
+        owner: "app-test",
+        cpuMs: 1000,
+        wallMs: 5000,
+      },
+      { signal }
+    );
   } catch (error) {
     return {
       message: error instanceof Error ? error.message : String(error),
@@ -296,5 +306,34 @@ describe("a call that fails while its session looks open", () => {
     });
     // Asked once, with no wait for a verdict.
     expect(asked()).toBe(1);
+  });
+
+  it("is the App's own error by the wait's end when the supervisor doesn't answer", async () => {
+    const { host } = hostFailing({ state: "stalled" });
+    const started = Date.now();
+    const failed = await failedOn(host);
+
+    expect(failed).toStrictEqual({
+      message: "internal error; the isolate's process is exiting",
+      verdict: null,
+    });
+    // About the 1 s wait, every ask included: not a request's timeout each.
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("ends at once when its caller gives up while it waits for a verdict", async () => {
+    const { host } = hostFailing({ state: "stalled" });
+    const caller = new AbortController();
+    const started = Date.now();
+    setTimeout(() => {
+      caller.abort(new Error("The caller gave up."));
+    }, 200);
+    const failed = await failedOn(host, caller.signal);
+
+    expect(failed).toStrictEqual({
+      message: "The caller gave up.",
+      verdict: null,
+    });
+    expect(Date.now() - started).toBeLessThan(700);
   });
 });
