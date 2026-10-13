@@ -2,6 +2,7 @@
 import {
   appModuleName,
   isAppTestSuite,
+  isUnderAppTests,
   kitModuleName,
   workflowSdkModules,
 } from "@grasp-os/compiler";
@@ -596,10 +597,12 @@ export const appTestFailures = async (
   release: Release,
   files: AppFiles
 ): Promise<string[]> => {
-  const suites = Object.keys(files).filter(isAppTestSuite).toSorted();
-  if (suites.length === 0) {
+  // Anything under tests/ goes to the build, which refuses what isn't a
+  // suite, a helper or a fixture: nothing there is passed over.
+  if (!Object.keys(files).some(isUnderAppTests)) {
     return [];
   }
+  const suites = Object.keys(files).filter(isAppTestSuite).toSorted();
   // Only where the runtime bounds App code's CPU, or a deployment accepts
   // that nothing does: on-prem the sandbox host doesn't run tests yet.
   if (
@@ -665,7 +668,7 @@ export const requireAppTestsPass = async (
   version: number,
   files: AppFiles
 ): Promise<void> => {
-  if (!Object.keys(files).some(isAppTestSuite)) {
+  if (!Object.keys(files).some(isUnderAppTests)) {
     return;
   }
   const release = await loadRelease(env, app, version);

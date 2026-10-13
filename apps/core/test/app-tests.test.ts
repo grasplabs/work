@@ -504,6 +504,31 @@ export default appTest({
     ]);
   });
 
+  it("run a suite in any folder an App's paths allow, dots included", async () => {
+    const built = await appWith({
+      ...appFiles,
+      "tests/access.rules/notes.test.ts": suiteOf("t.equal(1, 2);"),
+    });
+    const { code, failures } = await refusal(built);
+    expect(code).toBe("version.tests_failed");
+    expect(failures).toStrictEqual([
+      'tests/access.rules/notes.test.ts, "runs": expected 2, got 1',
+    ]);
+  });
+
+  it("refuse a file under tests/ that is no suite, helper or fixture", async () => {
+    const built = await appWith({
+      ...appFiles,
+      "tests/notes.test.ts": passingSuite,
+      "tests/notes.spec.js": "export default {};\n",
+    });
+    const { code, failures } = await refusal(built);
+    expect(code).toBe("version.tests_failed");
+    expect(failures).toStrictEqual([
+      "tests/notes.spec.js: tests/notes.spec.js is in tests/, which holds only test suites (*.test.ts), their helpers (*.ts) and fixtures (tests/fixtures/<name>.json).",
+    ]);
+  });
+
   it("refuse more suites than an App may have", async () => {
     const suites = Object.fromEntries(
       Array.from({ length: 21 }, (_unused, index) => [
@@ -515,7 +540,7 @@ export default appTest({
     const { code, failures } = await refusal(built);
     expect(code).toBe("version.tests_failed");
     expect(failures).toStrictEqual([
-      "tests: An App has at most 20 test suites (tests/*.test.ts); this one has 21. Put more tests in each suite.",
+      "tests: An App has at most 20 test suites (tests/**.test.ts); this one has 21. Put more tests in each suite.",
     ]);
   });
 

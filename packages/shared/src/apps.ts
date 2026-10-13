@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { appLimits } from "./app-limits.ts";
+import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { collectionIdSchema, identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
@@ -16,13 +16,6 @@ import type { TriggerDeclaration } from "./workflows.ts";
 // up for review before a builder makes it current.
 
 /**
- * One folder or file name: letters, digits, `_`, `-` and `.`, not starting
- * with a `.`. That rules out `.` and `..`, so a path can't step out of the
- * App, and hidden files.
- */
-const segmentPattern = /^[\w-][\w.-]*$/u;
-
-/**
  * A file's path in an App, relative to its root and `/`-separated, such
  * as `screens/inbox.tsx` or `app/server.ts`. No absolute paths, no empty,
  * `.` or `..` segments, no backslashes.
@@ -36,7 +29,7 @@ export const appPathSchema = z
       const segments = path.split("/");
       return (
         segments.length <= appLimits.pathDepth &&
-        segments.every((segment) => segmentPattern.test(segment)) &&
+        segments.every((segment) => appPathSegmentPattern.test(segment)) &&
         // Files are keyed by path in plain objects: `__proto__` would be
         // the object's prototype, not a file.
         !Object.hasOwn(Object.prototype, path)

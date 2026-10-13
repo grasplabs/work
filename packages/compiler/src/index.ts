@@ -34,6 +34,7 @@ export {
   generatedModules,
   isAppLayout,
   isAppTestSuite,
+  isUnderAppTests,
 } from "./app-code.ts";
 export {
   appCodeLimitErrors,

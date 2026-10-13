@@ -23,6 +23,8 @@
  * Screens never reach any of it: `screenImportError` says so, by name,
  * where a screen tries.
  */
+import { appPathSegmentPattern } from "@grasp-os/shared/app-limits";
+
 import { kitModuleName, appModuleName } from "./kit.ts";
 
 /**
@@ -53,7 +55,37 @@ export const generatedModules = {
 const schemaFiles: ReadonlySet<string> = new Set(["schema.ts", "values.ts"]);
 const operationFile = /^operations\/(?:[\w-]+\/)*[\w.-]+\.ts$/u;
 const generatedFile = /^\.grasp\/[\w.-]+\.ts$/u;
-const testFile = /^tests\/(?:[\w-]+\/)*[\w.-]+\.ts$/u;
+
+/** Where an App's tests are: suites, their helpers and their fixtures. */
+export const appTestsFolder = "tests/";
+
+/** Whether `path` is under `tests/`, whatever it is. */
+export const isUnderAppTests = (path: string): boolean =>
+  path.startsWith(appTestsFolder);
+
+/**
+ * Whether `path` is test code: a `.ts` file anywhere under `tests/`, its
+ * folders named as any App path's may be (`appPathSegmentPattern`), dots
+ * included, so no suite an App can hold is ever passed over.
+ */
+const isTestFile = (path: string): boolean =>
+  isUnderAppTests(path) &&
+  path.endsWith(".ts") &&
+  !path.endsWith(".d.ts") &&
+  path.split("/").every((segment) => appPathSegmentPattern.test(segment));
+
+/** Whether `path` is one of an App's test fixtures: `tests/fixtures/<name>.json`. */
+const isTestFixture = (path: string): boolean => {
+  const parts = path.split("/");
+  return (
+    parts.length === 3 &&
+    parts[0] === "tests" &&
+    parts[1] === "fixtures" &&
+    parts[2] !== undefined &&
+    parts[2].endsWith(".json") &&
+    appPathSegmentPattern.test(parts[2])
+  );
+};
 
 /**
  * The most test suites an App has: each runs in an isolate of its own
@@ -63,7 +95,19 @@ export const maxAppTestSuites = 20;
 
 /** Whether `path` is one of an App's test suites: `tests/**.test.ts`. */
 export const isAppTestSuite = (path: string): boolean =>
-  testFile.test(path) && path.endsWith(".test.ts");
+  isTestFile(path) && path.endsWith(".test.ts");
+
+/**
+ * The files under `tests/` that are none of a suite, a helper (`.ts`) or
+ * a fixture (`tests/fixtures/<name>.json`): a build of the tests refuses
+ * each, so nothing there is ever silently left out.
+ */
+export const strayTestFiles = (
+  files: Readonly<Record<string, string>>
+): string[] =>
+  Object.keys(files).filter(
+    (path) => isUnderAppTests(path) && !isTestFile(path) && !isTestFixture(path)
+  );
 
 /** The kind of `path`'s code, or undefined for a file that isn't server code. */
 export const appCodeKind = (path: string): AppCodeKind | undefined => {
@@ -79,7 +123,7 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   if (generatedFile.test(path)) {
     return "generated";
   }
-  return testFile.test(path) ? "test" : undefined;
+  return isTestFile(path) ? "test" : undefined;
 };
 
 /** Whether `files` are an App of spec 8's layout: a registration and a schema. */
@@ -98,9 +142,10 @@ export const appCodeFiles = (
   );
 
 /**
- * The files a build of an App's tests reads: its tests, and the App's own
- * server code, so a test that imports a handler is told it can't, rather
- * than that the file doesn't exist. Only the tests become modules.
+ * The files a build of an App's tests reads: everything under `tests/`
+ * (so it can refuse what isn't a suite, helper or fixture), and the App's
+ * own server code, so a test that imports a handler is told it can't,
+ * rather than that the file doesn't exist. Only the tests become modules.
  */
 export const appTestFiles = (
   files: Readonly<Record<string, string>>
@@ -108,7 +153,9 @@ export const appTestFiles = (
   Object.fromEntries(
     Object.entries(files).filter(([path]) => {
       const kind = appCodeKind(path);
-      return kind !== undefined && kind !== "generated";
+      return (
+        isUnderAppTests(path) || (kind !== undefined && kind !== "generated")
+      );
     })
   );
 

@@ -29,6 +29,7 @@ import {
   isAppLayout,
   isAppTestSuite,
   maxAppTestSuites,
+  strayTestFiles,
 } from "./app-code.ts";
 import { extractCandidates } from "./candidates.ts";
 import { compileModule, stripTypes, transformModule } from "./compile.ts";
@@ -612,6 +613,22 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
+  // Nothing under tests/ is passed over: what isn't a suite, a helper or a
+  // fixture is refused, by name.
+  const strays = strayTestFiles(code);
+  if (strays.length > 0) {
+    return {
+      ok: false,
+      diagnostics: strays.map((file) =>
+        problem(
+          "tests",
+          `${file} is in tests/, which holds only test suites (*.test.ts), their helpers (*.ts) and fixtures (tests/fixtures/<name>.json).`,
+          { file }
+        )
+      ),
+    };
+  }
+  // The same suites core runs (`isAppTestSuite`).
   const suites = Object.keys(code).filter(isAppTestSuite).length;
   if (suites > maxAppTestSuites) {
     return {
@@ -619,7 +636,7 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
       diagnostics: [
         problem(
           "tests",
-          `An App has at most ${maxAppTestSuites} test suites (tests/*.test.ts); this one has ${suites}. Put more tests in each suite.`
+          `An App has at most ${maxAppTestSuites} test suites (tests/**.test.ts); this one has ${suites}. Put more tests in each suite.`
         ),
       ],
     };
