@@ -86,7 +86,9 @@ const facetName = "server";
  */
 const defaultCallTimeoutMs = 60_000;
 
-export const callTimeoutMs = (env: Env): number => {
+export const callTimeoutMs = (
+  env: Pick<Env, "APP_CALL_TIMEOUT_MS">
+): number => {
   const set = Number(env.APP_CALL_TIMEOUT_MS);
   return Number.isInteger(set) && set > 0 && set < defaultCallTimeoutMs
     ? set

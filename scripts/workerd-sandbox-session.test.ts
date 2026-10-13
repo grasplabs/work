@@ -39,6 +39,9 @@ const outcomeSchema = z.object({
   reachedInternal: z.number(),
   reachedAfterGivingUp: z.number(),
   pinged: z.number(),
+  nestedRan: z.number(),
+  nestedRefused: z.number(),
+  refusedVerdict: z.string().nullable(),
   verdict: z.string().nullable().optional(),
   logged: z.array(z.unknown()),
 });
@@ -320,6 +323,21 @@ describe("a session on the on-prem sandbox", () => {
   );
 
   it(
+    "runs no more calls in a session than core lets one call run",
+    { timeout: 30_000 },
+    async () => {
+      const outcome = await run("manyRuns");
+      expect(outcome.status).toBe("ok");
+      // The call itself, and 64 nested, each run up to four times.
+      expect(outcome).toMatchObject({
+        nestedRan: 259,
+        nestedRefused: 1,
+        refusedVerdict: "call_limit",
+      });
+    }
+  );
+
+  it(
     "refuses its capabilities the moment core gives up on the call",
     { timeout: 20_000 },
     async () => {
@@ -426,10 +444,23 @@ describe("a session on the on-prem sandbox", () => {
    * but never its answer, and never either end's close to the other: the
    * supervisor holds a process for a session core never hears of.
    */
-  const unansweringProxy = (): string => {
+  const unansweringProxy = (): {
+    socket: string;
+    close: () => Promise<void>;
+  } => {
     const proxy = path.join(tempDir(), "unanswering.sock");
-    createServer((client: Socket) => {
+    // Every socket it holds, both ends, closed with it.
+    const held = new Set<Socket>();
+    const hold = (socket: Socket): void => {
+      held.add(socket);
+      socket.once("close", () => {
+        held.delete(socket);
+      });
+    };
+    const server = createServer((client: Socket) => {
       const upstream = connect(supervisor.socket);
+      hold(client);
+      hold(upstream);
       upstream.on("error", () => {});
       client.on("error", () => {});
       client.once("data", (first: Buffer) => {
@@ -444,27 +475,43 @@ describe("a session on the on-prem sandbox", () => {
         upstream.pipe(client);
       });
     }).listen(proxy);
-    return proxy;
+    return {
+      socket: proxy,
+      close: async () => {
+        for (const socket of held) {
+          socket.destroy();
+        }
+        server.close();
+        if (server.listening) {
+          await once(server, "close");
+        }
+      },
+    };
   };
 
   it(
     "ends a session whose upgrade is never answered as unavailable, and frees its process",
     { timeout: 30_000 },
     async () => {
-      const behindProxy = await serveStandIn(
-        "session-worker.ts",
-        unansweringProxy()
-      );
-      const outcome = await run("waitsLong", "app-unanswered", behindProxy);
-      expect(outcome.status).toBe("unavailable");
-      // Its waits for a process and its owner's room, and a little more.
-      expect(outcome.ms).toBeLessThan(12_000);
-      await expect
-        .poll(() => supervisor.stats().inFlight, {
-          timeout: 1500,
-          interval: 50,
-        })
-        .toBe(0);
+      const proxy = unansweringProxy();
+      try {
+        const behindProxy = await serveStandIn(
+          "session-worker.ts",
+          proxy.socket
+        );
+        const outcome = await run("waitsLong", "app-unanswered", behindProxy);
+        expect(outcome.status).toBe("unavailable");
+        // Its waits for a process and its owner's room, and a little more.
+        expect(outcome.ms).toBeLessThan(12_000);
+        await expect
+          .poll(() => supervisor.stats().inFlight, {
+            timeout: 1500,
+            interval: 50,
+          })
+          .toBe(0);
+      } finally {
+        await proxy.close();
+      }
     }
   );
 
@@ -472,18 +519,23 @@ describe("a session on the on-prem sandbox", () => {
     "frees the process of a session core cancels before its upgrade is answered",
     { timeout: 30_000 },
     async () => {
-      const behindProxy = await serveStandIn(
-        "session-worker.ts",
-        unansweringProxy()
-      );
-      const outcome = await run("cancelled", "app-unanswered", behindProxy);
-      expect(outcome.message).toContain("cancelled");
-      await expect
-        .poll(() => supervisor.stats().inFlight, {
-          timeout: 1500,
-          interval: 50,
-        })
-        .toBe(0);
+      const proxy = unansweringProxy();
+      try {
+        const behindProxy = await serveStandIn(
+          "session-worker.ts",
+          proxy.socket
+        );
+        const outcome = await run("cancelled", "app-unanswered", behindProxy);
+        expect(outcome.message).toContain("cancelled");
+        await expect
+          .poll(() => supervisor.stats().inFlight, {
+            timeout: 1500,
+            interval: 50,
+          })
+          .toBe(0);
+      } finally {
+        await proxy.close();
+      }
     }
   );
 
