@@ -1,12 +1,17 @@
+import { actorOf } from "@grasp-os/shared/audit";
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
 import { repairControls, settleControls } from "../src/workflows/controls.ts";
-import { runEngine } from "../src/workflows/engine.ts";
-import { projectStatus, repairStarts } from "../src/workflows/runs.ts";
+import { markRunCancelled, runEngine } from "../src/workflows/engine.ts";
+import {
+  completeCancel,
+  projectStatus,
+  repairStarts,
+} from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
@@ -562,6 +567,53 @@ describe(
         lost: "internal.unexpected",
         admitted: [["pause", "admitted"]],
         settled: [["pause", "applied"]],
+      });
+    });
+
+    it("leave no pause admitted behind a cancel the run's object finished for a request that died", async () => {
+      const builder = await personApi("builder");
+      const identity = await builder.api.whoami();
+      const app = await appWith(builder, napper);
+      const { id: run } = await builder.api.screens.startRun(app, "napper");
+      await sleeping(run, "go");
+      // A pause admitted, its answer from the engine lost.
+      await aroundEngine(
+        async (method, call) => {
+          if (method === "pause") {
+            throw new Error("The engine is unavailable");
+          }
+          return await call();
+        },
+        async () =>
+          await outcome(builder.api.screens.control(app, run, "pause"))
+      );
+      const generationOf = async () =>
+        await env.DB.prepare(
+          "SELECT control_generation FROM workflow_runs WHERE id = ?"
+        )
+          .bind(run)
+          .first<number>("control_generation");
+      const before = await generationOf();
+      // A cancel whose request died once its mark was kept: the run's
+      // object records it in core (`completeCancel`, as its repair does),
+      // while the engine has yet to end the run.
+      const mark = await markRunCancelled(env, run, actorOf(identity));
+      await completeCancel(env, mark);
+      const recorded = {
+        receipts: await receiptStates(run),
+        fenced: ((await generationOf()) ?? 0) > (before ?? 0),
+      };
+      await runDurableObjectAlarm(runObject(run));
+      await finished(run);
+
+      expect({
+        recorded,
+        receipts: await receiptStates(run),
+        fenced: ((await generationOf()) ?? 0) > (before ?? 0),
+      }).toStrictEqual({
+        recorded: { receipts: [["pause", "superseded"]], fenced: true },
+        receipts: [["pause", "superseded"]],
+        fenced: true,
       });
     });
   }

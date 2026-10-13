@@ -1146,7 +1146,13 @@ export const completeCancel = async (
   await auditedBatch(env, db, [
     db
       .update(workflowRuns)
-      .set({ cancelRequestedAt: new Date(mark.at), pendingStart: null })
+      .set({
+        cancelRequestedAt: new Date(mark.at),
+        pendingStart: null,
+        // As a cancel's receipt does (controls.ts): a pause or resume
+        // admitted before it is fenced, its generation no longer the run's.
+        controlGeneration: sql`${workflowRuns.controlGeneration} + 1`,
+      })
       .where(
         and(
           eq(workflowRuns.id, row.id),
@@ -1155,10 +1161,22 @@ export const completeCancel = async (
         )
       ),
     outboxedIfChanged(db, runEntry(mark.actor, "workflow.run.cancelled", row)),
+    // A cancel supersedes every pause or resume still unresolved, however
+    // it was recorded: no receipt is left admitted behind it.
+    db
+      .update(workflowRunControls)
+      .set({ state: "superseded", settledAt: new Date() })
+      .where(
+        and(
+          eq(workflowRunControls.runId, row.id),
+          eq(workflowRunControls.state, "admitted"),
+          inArray(workflowRunControls.kind, ["pause", "resume"]),
+          sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.cancelRequestedAt} IS NOT NULL)`
+        )
+      ),
   ]);
 };
 
-/**
 /**
  * Records that a run waits (host.ts) while a side effect of a step waits
  * for the person it acts for, until they decided. The wait is recorded in
