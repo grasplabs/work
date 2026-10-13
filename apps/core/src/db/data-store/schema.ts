@@ -383,6 +383,14 @@ export const backfills = sqliteTable(
     phase: text({ enum: ["scan", "work"] })
       .notNull()
       .default("scan"),
+    /**
+     * When an explicit migration found its scan through and no work left:
+     * ready, its contract taking over only as a release sealed on it is
+     * made current (store-host.ts, `activateReady`), so the version
+     * still current goes on writing until then. Cleared when a write
+     * queues work again.
+     */
+    readyAt: integer("ready_at"),
     /** Records looked at, and records filled in, so far. */
     scanned: integer().notNull().default(0),
     filled: integer().notNull().default(0),

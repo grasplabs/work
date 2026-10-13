@@ -130,6 +130,15 @@ export class DataStore extends DurableObject<Env> {
     return await this.#live().retryBackfill(storeId, target);
   }
 
+  /** `StoreHost.activateReady`. */
+  activateReady(
+    storeId: StoreId,
+    schemaHash: string,
+    consumer: SchemaConsumer
+  ): SchemaStatus {
+    return this.#host.activateReady(storeId, schemaHash, consumer);
+  }
+
   /** `StoreHost.schemaStatus`. */
   schemaStatus(
     storeId: StoreId,

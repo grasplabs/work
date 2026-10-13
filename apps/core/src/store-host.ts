@@ -122,6 +122,7 @@ import {
   dropWork,
   fieldsOf as tableFieldsOf,
   fitsTable,
+  hasWork,
   nextScanBatch,
   nextWorkBatch,
   outputRefusal,
@@ -526,6 +527,8 @@ interface PendingTarget {
   readonly failureRevision: number | null;
   /** Its explicit migrations, when it runs them instead of filling. */
   readonly migrations: PendingMigrations | null;
+  /** When its explicit migration was found ready (`activateReady`). */
+  readonly readyAt: number | null;
 }
 
 /** Refuses a schema's explicit migration (`migration.invalid`), saying why. */
@@ -552,6 +555,12 @@ export interface BackfillStatus {
   scanned: number;
   filled: number;
   failure: BackfillFailure | null;
+  /**
+   * An explicit migration whose run is done (its scan through, no work
+   * left): it waits, with no run, for a release sealed on it to be made
+   * current (`activateReady`).
+   */
+  ready: boolean;
 }
 
 /** Why a backfill failed: the record and field whose value it can't fill. */
@@ -591,7 +600,7 @@ export interface MigrationBatch {
 
 /** What one batch of a backfill (`fillMissing`) did, and where it is. */
 export interface BackfillOutcome {
-  state: "running" | "complete" | "failed";
+  state: "running" | "ready" | "complete" | "failed";
   batch: number;
   /** Records looked at and filled in by the backfill so far, all batches. */
   scanned: number;
@@ -608,7 +617,7 @@ export type SchemaStatus =
   | { state: "active" }
   | { state: "abandoned" }
   | {
-      state: "pending" | "failed";
+      state: "pending" | "failed" | "ready";
       target: string;
       attempt: number;
       scanned: number;
@@ -739,7 +748,7 @@ const abandonmentOf = (
 export const backfillStallLimit = 3;
 
 const outcomeSchema = z.strictObject({
-  state: z.enum(["running", "complete", "failed"]),
+  state: z.enum(["running", "ready", "complete", "failed"]),
   batch: z.number().int().min(1),
   scanned: z.number().int().min(0),
   filled: z.number().int().min(0),
@@ -869,6 +878,7 @@ const statusOf = (pending: PendingTarget): BackfillStatus => ({
   scanned: pending.scanned,
   filled: pending.filled,
   failure: pending.failure,
+  ready: pending.readyAt !== null,
 });
 
 /**
@@ -1519,6 +1529,7 @@ export class StoreHost {
           row.migrations === null
             ? null
             : pendingMigrationsSchema.parse(JSON.parse(row.migrations)),
+        readyAt: row.readyAt,
       };
     } catch (error) {
       if (
@@ -3100,6 +3111,13 @@ export class StoreHost {
           { recordId, ownerId: base?.ownerId ?? ownerId },
           now
         );
+        // A ready migration has work again: no longer ready, its run is
+        // taken up again (store-backfill.ts, `keepStoreBackfillGoing`).
+        this.#db
+          .update(backfills)
+          .set({ readyAt: null })
+          .where(eq(backfills.targetHash, migrating.target))
+          .run();
       }
       const where = and(
         eq(records.tableId, tableId),
@@ -3345,10 +3363,11 @@ export class StoreHost {
       };
     }
     // Scan through and no work left, in this transaction: no record of a
-    // migrated table fails to fit the target, so it may take over.
-    this.#activate(pending);
+    // migrated table fails to fit the target. It is ready, and takes over
+    // as a release sealed on it is made current (`activateReady`), so the
+    // version still current goes on writing until then; its run ends.
     const outcome: BackfillOutcome = {
-      state: "complete",
+      state: "ready",
       batch,
       scanned: row.scanned,
       filled: row.filled,
@@ -3357,15 +3376,80 @@ export class StoreHost {
     this.#db
       .update(backfills)
       .set({
-        state: "complete",
+        readyAt: pending.readyAt ?? now,
         lastBatch: batch,
         lastOutcome: JSON.stringify(outcome),
         leaseUntil: null,
-        completedAt: now,
       })
       .where(eq(backfills.targetHash, pending.hash))
       .run();
     return outcome;
+  }
+
+  /**
+   * Activates the pending target as a release whose schema
+   * (`schemaHash`) it holds is made current for `consumer` (core,
+   * store-backfill.ts, `requireStoreSchemaActive`), when it is an explicit
+   * migration found ready: checked again in this transaction, so work a
+   * write queued since puts it back to running instead (its run goes on,
+   * kept going as any). Activation is `#activate`'s: the contract moves to
+   * the target, and the schemas it no longer fits are left behind. Answers
+   * the schema's status after (`schemaStatus`).
+   */
+  activateReady(
+    storeId: StoreId,
+    schemaHash: string,
+    consumer: SchemaConsumer
+  ): SchemaStatus {
+    const hash = dataErrors.parse(
+      "data.invalid",
+      backfillTargetSchema,
+      schemaHash
+    );
+    const activated = this.ctx.storage.transactionSync((): boolean => {
+      this.#bind(storeId, false);
+      const pending = this.#pendingTarget();
+      const recorded = this.#db
+        .select({ manifest: schemas.manifest })
+        .from(schemas)
+        .where(eq(schemas.schemaHash, hash))
+        .get();
+      if (
+        pending?.migrations === null ||
+        pending?.migrations === undefined ||
+        pending.readyAt === null ||
+        pending.state !== "running" ||
+        recorded === undefined ||
+        !covered(
+          planSchemaChange(
+            pending.manifest,
+            readSchemaManifest(recorded.manifest).manifest
+          )
+        )
+      ) {
+        return false;
+      }
+      if (hasWork(this.#db, pending.hash)) {
+        this.#db
+          .update(backfills)
+          .set({ readyAt: null })
+          .where(eq(backfills.targetHash, pending.hash))
+          .run();
+        return false;
+      }
+      this.#activate(pending);
+      this.#db
+        .update(backfills)
+        .set({ state: "complete", completedAt: Date.now() })
+        .where(eq(backfills.targetHash, pending.hash))
+        .run();
+      return true;
+    });
+    if (activated) {
+      this.#schemasGeneration += 1;
+      this.#schemas.clear();
+    }
+    return this.schemaStatus(storeId, hash, consumer);
   }
 
   /**
@@ -4450,8 +4534,14 @@ export class StoreHost {
       ) {
         return { state: "unknown" };
       }
+      let state: "pending" | "failed" | "ready" = "pending";
+      if (pending.state === "failed") {
+        state = "failed";
+      } else if (pending.readyAt !== null) {
+        state = "ready";
+      }
       return {
-        state: pending.state === "failed" ? "failed" : "pending",
+        state,
         target: pending.hash,
         attempt: pending.attempt,
         scanned: pending.scanned,

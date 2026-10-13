@@ -4,7 +4,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { commitFiles } from "../src/apps.ts";
+import { commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
 import { requireStoreSchemaActive } from "../src/store-backfill.ts";
@@ -22,7 +22,9 @@ import { newRecordId } from "./store-schemas.ts";
 // mocked. What can go wrong, and the test that shows it doesn't:
 //
 // - The run doesn't reach activation, or transforms a record twice:
-//   "transforms every record once, then the release runs".
+//   "transforms every record once, then takes over as its release is
+//   made current"; the version still current loses writes before it is
+//   made current: same test (version 1's schema stays in force).
 // - A transform's failure lets the release run, or its message reaches
 //   no one who can act on it: "refuses the release while its transform
 //   fails, telling the App why".
@@ -193,21 +195,41 @@ const migrated = async (count: number, handler: string) => {
     "Migrate to the sealed schema"
   );
   const release = await seal(fixture, 3);
-  return { fixture, store, release };
+  return {
+    fixture: { ...fixture, firstSchema: fromSchema },
+    store,
+    release,
+  };
 };
 
 describe("an explicit migration's run", { timeout: 180_000 }, () => {
-  it("transforms every record once, then the release runs", async () => {
-    const { fixture, store } = await migrated(130, deriving);
+  it("transforms every record once, then takes over as its release is made current", async () => {
+    const { fixture, store, release } = await migrated(130, deriving);
+    const object = env.DATA_STORES.getByName(store.id);
+    const consumer = { resourceId: fixture.app, resourceVersion: 3 };
 
     await vi.waitFor(
       async () => {
         await expect(
-          requireStoreSchemaActive(env, fixture.app, 3)
-        ).resolves.toBeUndefined();
+          object.schemaStatus(store.id, release.manifest.schemaHash, consumer)
+        ).resolves.toMatchObject({ state: "ready" });
       },
       { timeout: 120_000, interval: 500 }
     );
+    // Ready, it hasn't taken over: version 1's schema still writes.
+    const before = await object.schemaStatus(store.id, fixture.firstSchema);
+
+    const current = await setCurrentVersion(env, fixture.owner, fixture.app, 3);
+    const after = await object.schemaStatus(
+      store.id,
+      release.manifest.schemaHash,
+      consumer
+    );
+    expect({ before, current: current.currentVersion, after }).toStrictEqual({
+      before: { state: "active" },
+      current: 3,
+      after: { state: "active" },
+    });
 
     const records = await notesOf(store);
     const derivedRight = records.every(({ fields }) => {

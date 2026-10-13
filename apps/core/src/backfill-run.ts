@@ -38,7 +38,7 @@ const inputSchema = z.strictObject({
 
 /** What a batch answered, as far as its run needs it. */
 const batchSchema = z.object({
-  state: z.enum(["running", "complete", "failed"]),
+  state: z.enum(["running", "ready", "complete", "failed"]),
 });
 
 /**

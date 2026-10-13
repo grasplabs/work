@@ -34,8 +34,10 @@ import { manifestHash, newRecordId } from "./store-schemas.ts";
 // - A migration a store can't vouch for runs: "refuses a migration that
 //   doesn't fit the store".
 // - The contract moves while a record doesn't fit it yet: "keeps the
-//   contract until the last batch", "waits for work a concurrent write
-//   left".
+//   contract until it is ready", "waits for work a concurrent write left".
+// - The version still current can't write between the migration's end
+//   and its release being made current: "queues the current version's
+//   writes after its scan instead of refusing them".
 // - An invalid output is written, or papered over: "fails on an output
 //   that doesn't fit, writing nothing of its batch".
 // - A concurrent edit is lost to a transform of the record as it was:
@@ -46,8 +48,9 @@ import { manifestHash, newRecordId } from "./store-schemas.ts";
 //   owner's records a batch on an owner table".
 // - What a transform threw reaches another App: "shows what a transform
 //   threw only to its App and to admins".
-// - A writer the migration left behind writes after it: "refuses writes
-//   under a schema the migration left behind".
+// - A writer the migration left behind writes after it took over:
+//   "queues the current version's writes after its scan …" (its last
+//   writes).
 // - An abandoned migration leaves records the contract doesn't describe,
 //   or loses its reservations: "can be abandoned once failed".
 
@@ -188,6 +191,13 @@ const migrateAll = async (
   }
 };
 
+/** Activates the store's ready migration, as its release is made current. */
+const activate = async ({ store, app }: Pick<Migrating, "store" | "app">) =>
+  await objectOf(store).activateReady(store.id, await manifestHash(v2), {
+    resourceId: app,
+    resourceVersion: 2,
+  });
+
 const statusOf = async (store: OpenStore, schema: string, app?: string) =>
   await objectOf(store).schemaStatus(
     store.id,
@@ -285,7 +295,7 @@ describe("an explicit migration on a store", () => {
     });
   });
 
-  it("keeps the contract until the last batch, then activates the target", async () => {
+  it("keeps the contract until it is ready, then activates it as its release is made current", async () => {
     const migrating = await migratingStore(230);
     const { store, first, second, target } = migrating;
 
@@ -294,8 +304,14 @@ describe("an explicit migration on a store", () => {
       contract: await contractHash(store),
       old: await statusOf(store, v1),
     };
-
     const { outcomes } = await migrateAll(migrating);
+    const ready = {
+      contract: await contractHash(store),
+      status: await statusOf(store, v2),
+      old: await statusOf(store, v1),
+    };
+
+    const activated = await activate(migrating);
 
     expect({
       pending,
@@ -304,8 +320,9 @@ describe("an explicit migration on a store", () => {
         scanned,
         filled,
       })),
+      ready,
+      activated,
       contract: await contractHash(store),
-      status: await statusOf(store, v2),
       notes: await categoriesOf(store),
     }).toMatchObject({
       pending: {
@@ -317,33 +334,66 @@ describe("an explicit migration on a store", () => {
         { state: "running", scanned: 100, filled: 100 },
         { state: "running", scanned: 200, filled: 200 },
         { state: "running", scanned: 230, filled: 230 },
-        { state: "complete", scanned: 230, filled: 230 },
+        { state: "ready", scanned: 230, filled: 230 },
       ],
+      // Ready, the contract and the version still current stay as they were.
+      ready: {
+        contract: first.contract.hash,
+        status: { state: "ready" },
+        old: { state: "active" },
+      },
+      activated: { state: "active" },
       contract: target,
-      status: { state: "active" },
       notes: { categories: new Set(["general"]), revisions: new Set([2]) },
     });
   });
 
-  it("refuses writes under a schema the migration left behind", async () => {
+  it("queues the current version's writes after its scan instead of refusing them, ready again only once they're transformed", async () => {
     const migrating = await migratingStore(3);
     const { store, first, second } = migrating;
-    await migrateAll(migrating);
+    const scanned = await migrateAll(migrating);
+    const late = newRecordId();
 
-    await expect(
-      codeOf(
+    const write = await codeOf(
+      commit(store, first.schemaHash, [
+        {
+          op: "insert",
+          table: "notes",
+          id: late,
+          fields: { title: "Late launch" },
+        },
+      ])
+    );
+    const afterWrite = {
+      status: await statusOf(store, v2),
+      work: await workOf(store),
+      // Asked to activate now, it finds the work and stays pending.
+      activated: await activate(migrating),
+      contract: await contractHash(store),
+    };
+    const rest = await migrateAll(migrating, derived, {
+      from: (scanned.outcomes.at(-1)?.batch ?? 0) + 1,
+    });
+    const activated = await activate(migrating);
+
+    expect({
+      scanned: scanned.outcomes.at(-1)?.state,
+      write,
+      afterWrite,
+      rest: rest.outcomes.map(({ state }) => state),
+      activated,
+      late: await noteOf(store, late),
+      oldWrite: await codeOf(
         commit(store, first.schemaHash, [
           {
             op: "insert",
             table: "notes",
             id: newRecordId(),
-            fields: { title: "Late" },
+            fields: { title: "Later" },
           },
         ])
-      )
-    ).resolves.toBe("migration.incompatible_write");
-    await expect(
-      codeOf(
+      ),
+      newWrite: await codeOf(
         commit(store, second.schemaHash, [
           {
             op: "insert",
@@ -352,8 +402,23 @@ describe("an explicit migration on a store", () => {
             fields: { title: "New", category: "launch" },
           },
         ])
-      )
-    ).resolves.toBe("ok");
+      ),
+    }).toMatchObject({
+      scanned: "ready",
+      write: "ok",
+      afterWrite: {
+        status: { state: "pending" },
+        work: 1,
+        activated: { state: "pending" },
+        contract: first.contract.hash,
+      },
+      rest: ["running", "ready"],
+      activated: { state: "active" },
+      late: { fields: { title: "Late launch", category: "launch" } },
+      // Once it took over, the schema it left behind writes no more.
+      oldWrite: "migration.incompatible_write",
+      newWrite: "ok",
+    });
   });
 
   it("fails on an output that doesn't fit, writing nothing of its batch, and goes on once its record changed", async () => {
@@ -400,6 +465,7 @@ describe("an explicit migration on a store", () => {
     ]);
     const retried = await retry(store, target);
     const done = await migrateAll(migrating, derived, { attempt: 2 });
+    await activate(migrating);
 
     expect({
       retried,
@@ -407,7 +473,7 @@ describe("an explicit migration on a store", () => {
       contract: await contractHash(store),
     }).toMatchObject({
       retried: { state: "running", attempt: 2 },
-      done: { state: "complete" },
+      done: { state: "ready" },
       contract: target,
     });
   });
@@ -462,7 +528,7 @@ describe("an explicit migration on a store", () => {
         edited: { fields: { title: "launch day" }, revision: 2 },
         work: 1,
       },
-      states: ["running", "complete"],
+      states: ["running", "ready"],
       edited: {
         fields: { title: "launch day", category: "launch" },
         revision: 3,
@@ -531,7 +597,7 @@ describe("an explicit migration on a store", () => {
     const records = await notesOf(other.store);
 
     expect({ end, late: records.get(late)?.fields }).toMatchObject({
-      end: { state: "complete" },
+      end: { state: "ready" },
       late: { title: "Late launch", category: "launch" },
     });
   });
@@ -594,7 +660,7 @@ describe("an explicit migration on a store", () => {
       },
       next: 2,
       stale: "migration.superseded",
-      outcome: { state: "complete", scanned: 150, filled: 150 },
+      outcome: { state: "ready", scanned: 150, filled: 150 },
       notes: { categories: new Set(["general"]), revisions: new Set([2]) },
     });
   });
@@ -604,7 +670,7 @@ describe("an explicit migration on a store", () => {
 
     const { outcomes, owners } = await migrateAll(migrating);
 
-    expect(outcomes.at(-1)).toMatchObject({ state: "complete", filled: 120 });
+    expect(outcomes.at(-1)).toMatchObject({ state: "ready", filled: 120 });
     expect(owners.every((batch) => batch.length === 1)).toBeTruthy();
     expect(new Set(owners.flat())).toStrictEqual(new Set(["ada", "bo"]));
   });

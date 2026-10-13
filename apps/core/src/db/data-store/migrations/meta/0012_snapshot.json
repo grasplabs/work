@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ebf4bc7b-4efa-4107-b4de-c0b072dd51e3",
+  "id": "a2eaa132-2a25-4a91-8aae-aa9746f820f5",
   "prevId": "307793cf-765e-4329-bcda-80560555b191",
   "tables": {
     "sdk_abandoned_targets": {
@@ -245,6 +245,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": "'scan'"
+        },
+        "ready_at": {
+          "name": "ready_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "scanned": {
           "name": "scanned",

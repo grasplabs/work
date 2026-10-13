@@ -209,7 +209,8 @@ export const keepStoreBackfillGoing = async (
   if (status?.state === "failed") {
     status = await store.retry(status.target);
   }
-  if (status?.state === "running") {
+  // A ready migration has no run: it waits for its release.
+  if (status?.state === "running" && !status.ready) {
     await ensureRun(env, store, status);
   }
   return status;
@@ -301,7 +302,16 @@ export const requireStoreSchemaActive = async (
   }
   const storeId = storeIdSchema.parse(bound.store);
   const consumer = { resourceId: app, resourceVersion: version };
-  const status = await schemaStatus(env, storeId, bound.schemaHash, consumer);
+  let status = await schemaStatus(env, storeId, bound.schemaHash, consumer);
+  if (status.state === "ready") {
+    // Its explicit migration is done: it takes over now, as its release
+    // is made current, unless a write queued work meanwhile.
+    status = await storeObject(env, storeId).activateReady(
+      storeId,
+      bound.schemaHash,
+      consumer
+    );
+  }
   if (status.state === "active") {
     return;
   }

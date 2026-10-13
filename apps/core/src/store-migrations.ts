@@ -33,8 +33,14 @@ import { validates } from "./store-queries.ts";
 // - The contract moves while a record still doesn't fit it (premature
 //   activation): concurrent commits that leave a record of a migrated
 //   table not fitting the target queue it in their own transaction
-//   (store-host.ts, `#flush`), and activation happens only in the
-//   transaction that finds the scan through and no work left.
+//   (store-host.ts, `#flush`), and the target is ready only once the scan
+//   is through and no work is left; a write that queues work makes it
+//   not ready again.
+// - The version still current can't write between the migration's end
+//   and its release being made current (a write outage): a ready target
+//   takes over only as its release is made current (store-host.ts,
+//   `activateReady`, which checks again for work in its transaction);
+//   until then the contract in force and its writers stay as they were.
 // - Old readers break on a migrated record, or an abandoned migration
 //   leaves records the contract doesn't describe: every output must fit
 //   both the target and the contract in force (`outside_contract`
@@ -325,6 +331,15 @@ export const nextWorkBatch = (
     }
   }
 };
+
+/** Whether `target` has work left. */
+export const hasWork = (db: Db, target: string): boolean =>
+  db
+    .select({ id: migrationWork.recordId })
+    .from(migrationWork)
+    .where(eq(migrationWork.targetHash, target))
+    .limit(1)
+    .get() !== undefined;
 
 /**
  * Why `after`, a transform's output for a record holding `before`, can't

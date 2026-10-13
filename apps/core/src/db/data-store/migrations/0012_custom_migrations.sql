@@ -12,4 +12,5 @@ ALTER TABLE `sdk_schema_backfills` ADD `cursor_owner` text;--> statement-breakpo
 ALTER TABLE `sdk_schema_backfills` ADD `cursor_created_at` integer;--> statement-breakpoint
 ALTER TABLE `sdk_schema_backfills` ADD `migrations` text;--> statement-breakpoint
 ALTER TABLE `sdk_schema_backfills` ADD `phase` text DEFAULT 'scan' NOT NULL;--> statement-breakpoint
+ALTER TABLE `sdk_schema_backfills` ADD `ready_at` integer;--> statement-breakpoint
 ALTER TABLE `sdk_schemas` ADD `superseded_at` integer;
