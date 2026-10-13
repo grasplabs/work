@@ -35,6 +35,7 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { callTimeoutMs } from "./app.ts";
 import { appFor } from "./apps.ts";
+import type { CallTree, RunnerCall } from "./call-tree.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { sdkReleaseManifests } from "./db/core/schema.ts";
@@ -47,7 +48,11 @@ import type {
   InvocationSources,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
-import { capability, runInSession } from "./sandbox-session.ts";
+import {
+  capability,
+  runInSession,
+  sessionEndedError,
+} from "./sandbox-session.ts";
 import type { NestedRun, SessionCall } from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
 import { sessionHost } from "./sandboxed.ts";
@@ -327,36 +332,34 @@ const parsed = (text: string | undefined): unknown => {
  */
 /**
  * The session each caller's call runs its functions in on-prem, by that
- * call (operations.ts), while it's open: how to run one more function in
- * it, and those running in it now.
+ * call (operations.ts `CallTree`), while it's open: how to run one more
+ * function in it.
  */
-const openSessions = new WeakMap<
-  object,
-  { run: NestedRun; running: Set<Promise<unknown>> }
->();
+const openSessions = new WeakMap<CallTree, { run: NestedRun }>();
 
 /**
- * Runs `sessionCall` in a sandbox session: the session the caller's
- * `call` runs in already, for a function nested in another (in its
- * process, idle while it waits, taking none of the owner's share, as it
- * would each nested call deep enough to wait on a place its own callers
- * hold); a session of its own otherwise, open to the functions it calls
- * until they have all settled.
+ * Runs `sessionCall` in a sandbox session. A function nested in another
+ * runs in the session of the function its caller named (in its process,
+ * idle while it waits, taking none of the owner's share, as it would each
+ * nested call deep enough to wait on a place its own callers hold), and
+ * never in a session of its own: once that session is over, it's refused.
+ * The function a caller named opens the session, open until every nested
+ * call the operation host started has settled, authorized or not yet.
  */
 const inSession = async (
   host: Fetcher,
   sessionCall: SessionCall,
-  { signal, call }: { signal?: AbortSignal; call?: object }
+  { signal, call }: { signal?: AbortSignal; call?: RunnerCall }
 ): Promise<unknown> => {
-  const open = call === undefined ? undefined : openSessions.get(call);
-  if (open !== undefined) {
-    const nested = open.run(sessionCall, signal);
-    open.running.add(nested);
-    try {
-      return await nested;
-    } finally {
-      open.running.delete(nested);
+  if (call?.nested === true) {
+    const open = openSessions.get(call.tree);
+    // Its call's session is over (it can't be, as the session waits for
+    // every nested call started): a fresh process would escape the whole
+    // call's CPU time and memory.
+    if (open === undefined) {
+      throw sessionEndedError();
     }
+    return await open.run(sessionCall, signal);
   }
   if (call === undefined) {
     return await runInSession(
@@ -365,7 +368,10 @@ const inSession = async (
       signal === undefined ? {} : { signal }
     );
   }
-  const running = new Set<Promise<unknown>>();
+  const { tree } = call;
+  const entry: { run: NestedRun } = {
+    run: async () => await Promise.reject(sessionEndedError()),
+  };
   const { promise: answered, resolve: answer } =
     Promise.withResolvers<unknown>();
   const session = (async (): Promise<unknown> => {
@@ -374,25 +380,22 @@ const inSession = async (
         ...(signal === undefined ? {} : { signal }),
         nesting: {
           open: (run: NestedRun) => {
-            openSessions.set(call, { run, running });
+            entry.run = run;
+            openSessions.set(tree, entry);
           },
           answered: answer,
+          // Every nested call the operation host started, those they
+          // start too: from the moment it starts each (`CallTree`).
           drain: async () => {
-            // What runs in it may start more: until none is left.
-            while (running.size > 0) {
-              // oxlint-disable-next-line no-await-in-loop -- until every nested call settled
-              await Promise.allSettled(running);
-            }
-            // Past here a function of the call (one started after it
-            // ended) runs in a session of its own.
-            openSessions.delete(call);
+            await tree.settled();
           },
         },
       });
     } finally {
-      // Ended however it did: no function runs in it any more.
-      if (openSessions.get(call)?.running === running) {
-        openSessions.delete(call);
+      // Ended however it did: no function runs in it any more. A run of
+      // the named function again (stale reads) opened a session of its own.
+      if (openSessions.get(tree) === entry) {
+        openSessions.delete(tree);
       }
     }
   })();

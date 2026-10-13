@@ -66,6 +66,8 @@ import {
 import { z } from "zod";
 
 import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
+import { CallTree } from "./call-tree.ts";
+import type { RunnerCall } from "./call-tree.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { openChannel } from "./operation-channel.ts";
 import type { OpenChannel } from "./operation-channel.ts";
@@ -185,7 +187,7 @@ export type Runner = (
    * runs, nested or not, so a runner may run them together (on-prem, in
    * the sandbox session of the function the caller named).
    */
-  call?: object
+  call?: RunnerCall
 ) => Promise<unknown>;
 
 /** An App as the host runs it: its inspected manifest and its runner. */
@@ -619,6 +621,7 @@ const sandboxCodes = {
   refused: "operation.sandbox_refused",
   busy: "operation.sandbox_busy",
   call_limit: "operation.call_limit",
+  ended: "operation.ended",
 } as const;
 
 const isSandboxVerdict = (
@@ -1347,7 +1350,7 @@ interface Run {
   /** What the whole call may still do, shared by every function in it. */
   readonly budget: CallBudget;
   /** The caller's call, as its runner knows it: the same at any depth. */
-  readonly call: object;
+  readonly call: CallTree;
 }
 
 /** The most resource requests one call may make, at any depth. */
@@ -1597,13 +1600,10 @@ const runHandler = async (
   });
   const stopped = new AbortController();
   const ran = settle(
-    run.app.run(
-      operation.path,
-      fresh(args),
-      open.channel,
-      stopped.signal,
-      run.call
-    )
+    run.app.run(operation.path, fresh(args), open.channel, stopped.signal, {
+      tree: run.call,
+      nested: run.depth > 0,
+    })
   );
   let expired = false;
   try {
@@ -1749,7 +1749,7 @@ const forCaller = (error: unknown, requestId: string): Error => {
  * authorized again and each mutation committed on its own under a
  * receipt derived from the action's key (`derived`).
  */
-const nestedCall = async (
+const startNested = async (
   run: Run,
   operation: OperationManifest,
   request: { kind: unknown; path: unknown; args: unknown },
@@ -1812,6 +1812,19 @@ const nestedCall = async (
   } catch (error) {
     throw forCaller(error, run.invocation.requestId);
   }
+};
+
+/**
+ * A function nested in `run`'s, started: counted by the call it runs in
+ * from now (`CallTree`), so a session that call's functions share stays
+ * open for it while it's still authorized or claimed.
+ */
+const nestedCall = async (
+  ...args: Parameters<typeof startNested>
+): Promise<Json> => {
+  const work = startNested(...args);
+  args[0].call.track(work);
+  return await work;
 };
 
 /** Runs a query: its reads one state of the store (`readConsistently`). */
@@ -2089,7 +2102,7 @@ export const callOperation = async (
         invocation,
         depth: 0,
         budget: callBudget(),
-        call: {},
+        call: new CallTree(),
       },
       operation,
       admitted,

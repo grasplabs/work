@@ -263,6 +263,16 @@ const verdictError = (verdict: Verdict, cause?: unknown): Error => {
 };
 
 /**
+ * An error saying a function's call is over, refusing it: a function
+ * nested in a call whose session has ended runs nowhere.
+ */
+export const sessionEndedError = (): Error =>
+  verdictError({
+    verdict: "ended",
+    message: "The call this function was called in has ended.",
+  });
+
+/**
  * Why the sandbox ended a session's call, for an error `runInSession`
  * threw: `deadline`, `cpu`, `memory` or `crashed` (the supervisor's),
  * `refused` (the App's code sent what a session doesn't take), `busy` (its

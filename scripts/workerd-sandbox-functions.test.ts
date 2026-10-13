@@ -4,6 +4,8 @@
  * functions with the same runner core does, with `SANDBOX_HOST` bound to
  * the supervisor (workerd-sandbox.ts), so each call runs in a session.
  */
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
@@ -35,12 +37,18 @@ const failure = (outcome: z.infer<typeof outcomeSchema>) =>
 describe("an App's function on the on-prem sandbox", () => {
   let supervisor: SandboxSupervisor;
   let coreUrl: string;
+  /** Processes the supervisor started: one more for each session it ran. */
+  let processesStarted = 0;
 
   beforeAll(async () => {
     supervisor = await startSandboxSupervisor({
       workerd: nativeWorkerd,
       processes: 2,
-      log: () => {},
+      log: (event) => {
+        if (event.event === "sandbox.process_started") {
+          processesStarted += 1;
+        }
+      },
     });
     coreUrl = await serveStandIn("functions-worker.ts", supervisor.socket);
   }, 120_000);
@@ -52,10 +60,15 @@ describe("an App's function on the on-prem sandbox", () => {
 
   const call = async (
     path: string,
-    { within = 60_000, owner = "app-stand-in", endLost = false } = {}
+    {
+      within = 60_000,
+      owner = "app-stand-in",
+      endLost = false,
+      slowNested = false,
+    } = {}
   ) => {
     const response = await fetch(
-      `${coreUrl}run?path=${path}&within=${within}&owner=${owner}&endLost=${endLost ? 1 : 0}`
+      `${coreUrl}run?path=${path}&within=${within}&owner=${owner}&endLost=${endLost ? 1 : 0}&slowNested=${slowNested ? 1 : 0}`
     );
     return outcomeSchema.parse(await response.json());
   };
@@ -135,6 +148,24 @@ describe("an App's function on the on-prem sandbox", () => {
   it("leaves a caller running when a function it nests fails", async () => {
     const outcome = await call("catches");
     expect(outcome).toMatchObject({ ok: true, value: { n: 11 } });
+  });
+
+  it("runs a nested call still being authorized as its caller returns in the caller's session, never a process of its own", async () => {
+    const before = processesStarted;
+    const outcome = await call("forgetsLeaf", { slowNested: true });
+    expect(outcome.ok).toBeTruthy();
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000, interval: 50 })
+      .toBe(0);
+    // Each session's process is replaced as it goes: one session, one more.
+    await expect
+      .poll(() => processesStarted - before, {
+        timeout: 3000,
+        interval: 50,
+      })
+      .toBe(1);
+    await sleep(500);
+    expect(processesStarted - before).toBe(1);
   });
 
   it("ends a busy-looping function on its CPU-time budget while core keeps answering", async () => {

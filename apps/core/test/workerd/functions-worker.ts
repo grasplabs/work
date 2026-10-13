@@ -58,6 +58,7 @@ const { manifest } = inspectApp(
         isolationParent: action({ ...contract, uses: [isolationChild] }),
         callsBusy: action({ ...contract, uses: [busy] }),
         forgets: action({ ...contract, uses: [waits] }),
+        forgetsLeaf: action({ ...contract, uses: [leaf] }),
         catches: action({ ...contract, uses: [throws] }),
       },
     },
@@ -99,6 +100,12 @@ const appModule = `export default {
     n: globalThis.secret === undefined && globalThis.parentChannel === undefined ? 1 : 0,
   }),
   "jobs.callsBusy": async (channel, args) => await channel.call("action", "jobs.busy", args),
+  "jobs.forgetsLeaf": async (channel, args) => {
+    // Started, so the host has it, and not waited for.
+    channel.call("action", "jobs.leaf", args).catch(() => {});
+    await scheduler.wait(50);
+    return args;
+  },
   "jobs.forgets": async (channel, args) => {
     channel.call("action", "jobs.waits", args).catch(() => {});
     return args;
@@ -166,6 +173,7 @@ export default {
     );
     const started = Date.now();
     const within = Number(searchParams.get("within") ?? "60000");
+    let authorized = 0;
     const result = await callOperation(
       { manifest, run },
       {
@@ -177,8 +185,15 @@ export default {
         requestId: crypto.randomUUID(),
         deadline: Date.now() + within,
         runId: null,
-        authorize: async () =>
-          await Promise.resolve({ appMember: true, appBuilder: false }),
+        authorize: async () => {
+          authorized += 1;
+          // Each nested call held in its authorization a while, if asked:
+          // still being authorized as the function that started it ends.
+          if (authorized > 1 && searchParams.get("slowNested") === "1") {
+            await scheduler.wait(500);
+          }
+          return { appMember: true, appBuilder: false };
+        },
       },
       { path: `jobs.${searchParams.get("path") ?? ""}`, kind: "action" },
       { n: 1 }
