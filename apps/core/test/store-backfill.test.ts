@@ -516,3 +516,40 @@ describe("making a finished schema's release current", () => {
     });
   });
 });
+
+describe("a store's pending targets", () => {
+  it("are one at a time, running or failed: a failed one can't join a running one", async () => {
+    const { store } = await pendingStore(1);
+
+    const joined = await runInDurableObject(
+      objectOf(store),
+      (_instance, state) => {
+        try {
+          state.storage.sql.exec(
+            `INSERT INTO sdk_schema_backfills (target_hash, target_manifest, fills, scan_bounds, state, failure, created_at)
+           SELECT ?, target_manifest, fills, scan_bounds, 'failed', '{}', created_at FROM sdk_schema_backfills WHERE state = 'running'`,
+            "f".repeat(64)
+          );
+          return "joined";
+        } catch (error) {
+          return String(error).includes("UNIQUE") ? "refused" : String(error);
+        }
+      }
+    );
+    const states = await runInDurableObject(
+      objectOf(store),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ state: string }>(
+            "SELECT state FROM sdk_schema_backfills ORDER BY state"
+          )
+          .toArray()
+          .map((row) => row.state)
+    );
+
+    expect({ joined, states }).toStrictEqual({
+      joined: "refused",
+      states: ["running"],
+    });
+  });
+});
