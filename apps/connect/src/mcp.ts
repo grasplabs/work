@@ -95,21 +95,30 @@ export interface McpToolResult {
 }
 
 /**
- * A request to the server failed. `declined` is true only when the request
- * provably never reached a tool: the server refused it as unauthorised
+ * A request to the server failed. `declined` is true only when the server
+ * says the request never reached a tool: it refused it as unauthorised
  * (401, 403), couldn't parse it, or has no such method. Anything else, a
  * dropped connection, an unreadable reply, a 429 (a server of its own
  * making may send one for its provider's, after a write), or a JSON-RPC
  * error a tool may throw after acting (such as invalid params), leaves
- * open whether the call ran.
+ * open whether the call ran. Whether connect believes a 401 or 403 is the
+ * caller's to decide (policy.ts `turnedAway`): `status` says which one.
  */
 export class McpError extends Error {
   readonly declined: boolean;
+  /** The HTTP status the server answered with, when it answered one. */
+  readonly status: number | undefined;
 
-  constructor(message: string, declined = false, cause?: unknown) {
+  constructor(
+    message: string,
+    declined = false,
+    cause?: unknown,
+    status?: number
+  ) {
     super(message, { cause });
     this.name = "McpError";
     this.declined = declined;
+    this.status = status;
   }
 }
 
@@ -117,9 +126,10 @@ export class McpError extends Error {
 const refusedRequestCodes: ReadonlySet<number> = new Set([-32_700, -32_601]);
 
 /**
- * HTTP statuses that mean the server didn't act on the request. This
- * assumes a server sends them only before any tool runs, as its transport
- * does: a tool's own answer, error or not, comes in a 200.
+ * HTTP statuses that say the server didn't act on the request, as an MCP
+ * transport sends them only before any tool runs: a tool's own answer,
+ * error or not, comes in a 200. Connect takes a remote server's word for
+ * that only before a tool call (policy.ts `turnedAway`).
  */
 const isDeclinedStatus = (status: number): boolean =>
   status === 401 || status === 403;
@@ -389,7 +399,9 @@ export const mcpServer = (
       await response.body?.cancel();
       throw new McpError(
         `The server answered ${response.status}`,
-        isDeclinedStatus(response.status)
+        isDeclinedStatus(response.status),
+        undefined,
+        response.status
       );
     }
     return response;

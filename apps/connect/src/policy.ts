@@ -2,7 +2,7 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import type { Json } from "@grasp-os/shared/json";
 
 import type { Connection, ToolRule } from "./connections.ts";
-import type { McpServerTool, McpTool, McpToolResult } from "./mcp.ts";
+import type { McpError, McpServerTool, McpTool, McpToolResult } from "./mcp.ts";
 
 // What connect takes a tool to be. A native connector's tool is what its
 // manifest says: the manifest is ours, reviewed. A Composio server's tool
@@ -86,6 +86,54 @@ export const checkResourceScope = (
  */
 export const didNothing = (kind: ServerKind, result: McpToolResult): boolean =>
   kind === "native" && result.notPerformed;
+
+/**
+ * Whether a side effect's failed request provably never reached a tool, so
+ * its idempotency key is free again. A JSON-RPC parse error or "no such
+ * method" can't follow a tool's run: the server didn't read the request,
+ * or can't call tools at all. An HTTP 401 or 403 is believed only of a
+ * native connector, whose transport is ours. A remote server's (Composio's,
+ * GRA-539) may be a provider's refusal it passed on after acting: a tool
+ * whose first request went through and whose second hit an expired token,
+ * say, much as a 429 can be. So it spends the key. Nothing clearly before
+ * authorisation is lost by it: connect lists a remote server's tools before
+ * it claims the key (call.ts `actionFor`), so a key or session the server
+ * refuses is refused there, with the key never taken; after the claim the
+ * only request that goes out is `tools/call` itself.
+ */
+export const turnedAway = (kind: ServerKind, error: McpError): boolean =>
+  error.declined && (kind === "native" || error.status === undefined);
+
+/**
+ * Whether a side effect's error result leaves open whether it acted, so it
+ * is `connect.outcome_unknown` with its key spent, not a failure kept as
+ * the answer to every repeat. A tool that says so (`outcomeUnknownMetaKey`)
+ * is believed from any server: it can only stop a repeat. A native
+ * connector's other errors are refusals its reviewed code made before
+ * acting (the kit marks the rest unknown).
+ *
+ * Every error of a Composio tool that may act is unknown (GRA-539).
+ * Composio runs the tool remotely and may answer a provider's 5xx, a
+ * timeout or a dropped connection after the provider acted, in a result
+ * that looks like any other error. Its documented answer (`successful`,
+ * `error`, `data`) carries no provider status, and toolkits put one, if at
+ * all, in their own `data` or message text, so nothing in it proves the
+ * provider refused before acting. When in doubt, unknown: a stored failure
+ * tells every repeat the action failed, and code that read that as
+ * "nothing was sent" would send it again under a fresh key. The cost is
+ * that an input the provider rejected outright is unknown too. Recorded
+ * Composio answers, per toolkit, can narrow this later to a shape that
+ * does prove a refusal (a 4xx it passes on, or its own validation error
+ * before running the tool). A tool the admin marked read-only can't have
+ * acted, so its error stays a failure, as on a read.
+ */
+export const uncertainFailure = (
+  kind: ServerKind,
+  tool: McpTool,
+  result: McpToolResult
+): boolean =>
+  result.outcomeUnknown ||
+  (kind === "composio" && result.isError && !tool.readOnly);
 
 /**
  * The result as connect passes it on, with the resources it read. A

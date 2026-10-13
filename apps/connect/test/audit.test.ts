@@ -248,26 +248,47 @@ describe("the audit log", () => {
     expect(server.ran).toStrictEqual([]);
   });
 
-  it("records what a failed call touched, and its repeat as replayed", async () => {
-    const connectionId = await addConnection();
-    const call = write(connectionId, "mail.open");
-    await expect(outcome(callAs(anna, call))).resolves.toBe(
-      "connect.action_failed"
-    );
-    await expect(outcome(callAs(anna, call))).resolves.toBe(
-      "connect.action_failed"
-    );
+  it("records what a failed call touched", async () => {
+    // A read: a Composio side effect's error is unknown (below).
+    const connectionId = await addConnection({
+      tools: JSON.stringify([{ name: "mail.open", read: true }]),
+    });
+    await expect(
+      outcome(callAs(anna, write(connectionId, "mail.open")))
+    ).resolves.toBe("connect.action_failed");
     const audited = await audit.events();
     expect(audited).toMatchObject([
       {
         provenance: ["message-9"],
         detail: { outcome: "failed", reason: "connect.action_failed" },
       },
+    ]);
+  });
+
+  it("records a Composio side effect's error, and each repeat, as unknown", async () => {
+    const connectionId = await addConnection();
+    const call = write(connectionId, "mail.open");
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    const audited = await audit.events();
+    expect(audited.map(({ detail }) => detail)).toMatchObject([
       {
-        provenance: ["message-9"],
-        detail: { outcome: "replayed", reason: "connect.action_failed" },
+        sideEffect: true,
+        outcome: "unknown",
+        reason: "connect.outcome_unknown",
+      },
+      {
+        sideEffect: true,
+        outcome: "unknown",
+        reason: "connect.outcome_unknown",
+        replayed: true,
       },
     ]);
+    expect(server.ran).toHaveLength(1);
   });
 
   it("records a call whose answer couldn't be stored as unknown, and spends its key", async () => {

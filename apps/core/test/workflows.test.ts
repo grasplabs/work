@@ -1162,7 +1162,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     });
   });
 
-  it("stop at a refused call without retrying it, with a report for the run's owner", async () => {
+  it("stop at a call the server answered with an error without retrying it, with a report for the run's owner", async () => {
     const admin = await personApi("admin");
     const owner = await personApi("builder");
     const starter = await personApi("builder");
@@ -1241,10 +1241,9 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
           step: "send",
           // What the step works on, without the values.
           input: { to: "string", subject: "string" },
-          error: {
-            code: "connect.action_failed",
-            message: "The action reported an error.",
-          },
+          // On Composio a tool's error can't be told from one after it
+          // acted: unknown, never sent again.
+          error: { code: "connect.outcome_unknown" },
         },
       },
       seen: {
@@ -1256,7 +1255,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
         starter: [started.id, byTrigger.id],
         owner: [null, null],
       },
-      audited: ["connect.action_failed"],
+      audited: ["connect.outcome_unknown"],
       unknownApp: "app.not_found",
     });
   });

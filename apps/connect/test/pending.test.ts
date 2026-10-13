@@ -1014,8 +1014,10 @@ describe("a side effect from chat", () => {
     const call = mail(connectionId);
     await hold(inChat(anna), call);
     const held = await heldFor(anna);
-    // The server turns the call away: the tool never ran.
-    server.network = "unauthorised";
+    // The server has no such method: no tool can have run. (A remote
+    // server's 401 to the call may follow its tool's run, so it spends
+    // the key; idempotency.test.ts.)
+    server.network = "no-method";
     const refused = await outcome(confirm(anna, held));
     await hold(inChat(anna), call);
     const again = await heldFor(anna);

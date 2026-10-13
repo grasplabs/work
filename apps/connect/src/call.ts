@@ -33,6 +33,8 @@ import {
   composioTool,
   didNothing,
   hasSideEffect,
+  turnedAway,
+  uncertainFailure,
   withProvenance,
 } from "./policy.ts";
 
@@ -417,20 +419,21 @@ export const carryOut = async (
       await server.call(tool.name, input)
     );
   } catch (error) {
-    // Only a server that turned the call away frees the key. A tool that
-    // reports an error may have acted first, so its answer is kept below.
-    if (error instanceof McpError && error.declined) {
+    // Only a server that provably turned the call away frees the key. A
+    // tool that reports an error may have acted first: see below.
+    if (error instanceof McpError && turnedAway(connection.serverKind, error)) {
       await store.release();
       throw connectErrors.create("connect.server_unavailable");
     }
     await store.spend();
     throw connectErrors.create("connect.outcome_unknown");
   }
-  // ...unless the tool says it can't tell whether its write took effect:
-  // then, as for an answer lost on its way to connect, the key is spent,
-  // and the error isn't kept as the answer, which would tell every repeat
-  // the action failed when it may have happened.
-  if (done.outcomeUnknown) {
+  // Its error is kept as the answer to every repeat, unless it leaves open
+  // whether the write took effect (the tool says so, or it is a Composio
+  // tool's, which can't tell): then, as for an answer lost on its way to
+  // connect, the key is spent, and the error isn't kept, which would tell
+  // every repeat the action failed when it may have happened.
+  if (uncertainFailure(connection.serverKind, tool, done)) {
     await store.spend();
     throw connectErrors.create("connect.outcome_unknown");
   }

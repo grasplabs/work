@@ -16,10 +16,10 @@ import { idempotentCalls } from "./db/schema.ts";
 // stored under the key, and a repeat gets that answer without calling out
 // again. A call that fails after it may have reached the server spends the
 // key: nobody can tell whether the effect happened, so a repeat is refused
-// rather than risk doing it twice. Only a server that turned the call away
-// (401, 403, a JSON-RPC parse error or no such method), or a native
-// connector that says it did nothing (`notPerformedMetaKey`), frees the
-// key again.
+// rather than risk doing it twice. Only a server that provably turned the
+// call away (a JSON-RPC parse error or no such method; a 401 or 403 only
+// from a native connector), or a native connector that says it did nothing
+// (`notPerformedMetaKey`), frees the key again.
 //
 // A step journal replays; it doesn't make a remote effect happen once
 // (spec 14.3, 44). Between a provider taking a write and connect storing
@@ -32,12 +32,17 @@ import { idempotentCalls } from "./db/schema.ts";
 // - The provider answers the write with a server error (5xx), which may
 //   come after it acted: the connector kit says the outcome is unknown
 //   (`outcomeUnknownMetaKey`), and connect spends the key the same way.
-//   For a native connector the error is never kept as the answer: a stored
-//   failure would tell every repeat the action failed, and code that read
-//   that as "nothing was sent" could send it again under a fresh key. A
-//   Composio or other remote tool's error result is still kept as the
-//   action's failure (`failed`), even when it acted first, unless the tool
-//   itself says the outcome is unknown: telling those apart is GRA-539.
+//   The error is never kept as the answer: a stored failure would tell
+//   every repeat the action failed, and code that read that as "nothing
+//   was sent" could send it again under a fresh key.
+// - A Composio tool that may act answers with an error. Composio runs it
+//   remotely and can report a provider's 5xx or timeout after the provider
+//   acted, and nothing in its answer proves the provider refused first
+//   (policy.ts `uncertainFailure`, GRA-539): every such error spends the
+//   key as unknown, an input the provider rejected outright included.
+//   Recorded answers can narrow this later; until then, when in doubt,
+//   unknown. A tool the admin marked read-only keeps its error as the
+//   failure.
 // - The provider takes the write, and its answer can't be read (not what
 //   the connector expects, past the size limit): it went through, but what
 //   it made can't be told, so the same.
@@ -51,11 +56,11 @@ import { idempotentCalls } from "./db/schema.ts";
 //   (`notPerformedMetaKey`) is believed only of a native connector, whose
 //   code is reviewed. Saying the outcome is unknown is believed of any
 //   server: it can only stop a repeat, and it wins over "did nothing" in
-//   the same result. But a call any server turned away at the transport
-//   (HTTP 401 or 403, a JSON-RPC parse error or no such method) frees the
-//   key, a remote server's included: one that acted and then answered 401
-//   would have its effect run again on a repeat. Closing that for remote
-//   servers is GRA-539.
+//   the same result. A remote server's HTTP 401 or 403 to the call spends
+//   the key too: it may be a provider's refusal passed on after the tool
+//   acted. Only a JSON-RPC parse error or "no such method", which can't
+//   follow a tool's run, frees a remote server's key (policy.ts
+//   `turnedAway`).
 // - A call is cancelled, fenced or its permission revoked after it was
 //   sent: what it did stays recorded as it ended (done, failed or
 //   unknown), never as undone; a later call needs a capability core signs
