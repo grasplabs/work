@@ -472,21 +472,17 @@ const bindingAgrees = (
 };
 
 /**
- * The sealed release of `app`'s `version`, verified: its manifest's text
- * against its hash, then every artifact's bytes against theirs, the
- * contracts against the manifest's contract hash and the registration
- * read again as the host reads it. `version.not_sealed` for a version
- * never sealed; `version.manifest_corrupt` or `version.artifact_corrupt`
- * for one that no longer matches what was sealed. With `pinned`, the
- * manifest hash an invocation was admitted under, a release whose hash
- * is another is refused too.
+ * The sealed manifest of `app`'s `version` and its hash, its text checked
+ * against the hash and the host's record of its store binding, its
+ * artifacts not read: `version.not_sealed`, `version.revoked` or
+ * `version.manifest_corrupt` as `loadRelease` says.
  */
-export const loadRelease = async (
+const checkedManifest = async (
   env: Env,
   app: AppId,
   version: number,
   pinned?: string
-): Promise<Release> => {
+): Promise<{ manifest: ReleaseManifest; hash: string }> => {
   const db = drizzle(env.DB);
   const [row, binding] = await Promise.all([
     db
@@ -543,6 +539,26 @@ export const loadRelease = async (
     log.error("release.binding_mismatch", { app, version });
     throw versionErrors.create("version.manifest_corrupt");
   }
+  return { manifest, hash };
+};
+
+/**
+ * The sealed release of `app`'s `version`, verified: its manifest's text
+ * against its hash, then every artifact's bytes against theirs, the
+ * contracts against the manifest's contract hash and the registration
+ * read again as the host reads it. `version.not_sealed` for a version
+ * never sealed; `version.manifest_corrupt` or `version.artifact_corrupt`
+ * for one that no longer matches what was sealed. With `pinned`, the
+ * manifest hash an invocation was admitted under, a release whose hash
+ * is another is refused too.
+ */
+export const loadRelease = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  pinned?: string
+): Promise<Release> => {
+  const { manifest, hash } = await checkedManifest(env, app, version, pinned);
   let loading = verified.get(hash);
   if (loading === undefined) {
     loading = verifiedRelease(env, manifest);
@@ -776,7 +792,9 @@ export const versionManifest = async (
 /**
  * What running `version`'s migrations on their fixtures found as it was
  * sealed (`ReleaseManifest.migrationEvidence`); undefined while it isn't
- * sealed.
+ * sealed. Read from its manifest alone, checked against its hash: its
+ * artifacts aren't loaded, so asking leaves no verified release cached
+ * for its first run to take (`loadRelease` checks every byte then).
  */
 export const sealedEvidence = async (
   env: Env,
@@ -796,7 +814,7 @@ export const sealedEvidence = async (
   if (sealed === undefined) {
     return undefined;
   }
-  const { manifest } = await loadRelease(env, app, version);
+  const { manifest } = await checkedManifest(env, app, version);
   return manifest.migrationEvidence;
 };
 

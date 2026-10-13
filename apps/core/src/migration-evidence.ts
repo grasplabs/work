@@ -2,7 +2,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { MigrationEvidence } from "@grasp-os/shared/app-releases";
 import type { AppId } from "@grasp-os/shared/ids";
 
-import { loadRelease } from "./app-releases.ts";
+import { sealedEvidence } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 
 // The gate a release's explicit migrations pass before they touch records
@@ -19,7 +19,7 @@ import type { Release } from "./app-releases.ts";
  * when they passed.
  */
 export const failedEvidence = (
-  release: Pick<Release, "manifest">,
+  release: { manifest: Pick<Release["manifest"], "migrationEvidence"> },
   name?: string
 ): MigrationEvidence | undefined =>
   release.manifest.migrationEvidence.find(
@@ -54,7 +54,13 @@ export const requireMigrationEvidence = async (
   app: AppId,
   version: number
 ): Promise<void> => {
-  const failed = failedEvidence(await loadRelease(env, app, version));
+  // From its hash-checked manifest alone (`sealedEvidence`): the gate
+  // loads none of its artifacts.
+  const migrationEvidence = await sealedEvidence(env, app, version);
+  const failed =
+    migrationEvidence === undefined
+      ? undefined
+      : failedEvidence({ manifest: { migrationEvidence } });
   if (failed !== undefined) {
     throw fixturesFailedError(failed);
   }
