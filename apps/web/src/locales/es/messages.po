@@ -53,6 +53,14 @@ msgstr "{about} costó {cost} por ejecución en llamadas al modelo, en {runs, pl
 msgid "{about} has {open, plural, one {# decision open} other {# decisions open}}; the oldest has waited {waited}."
 msgstr "{about} tiene {open, plural, one {# decisión abierta} other {# decisiones abiertas}}; la más antigua lleva {waited} esperando."
 
+#: src/engines/resource-bindings.tsx
+msgid "{account} on {provider}"
+msgstr "{account} en {provider}"
+
+#: src/engines/resource-bindings.tsx
+msgid "{alertAt} of a cap"
+msgstr "{alertAt} de un límite"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} no tiene herramientas."
@@ -88,6 +96,10 @@ msgstr "{binding}: {actions} sobre {object}, a la espera de un administrador"
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}, waiting for an admin (asked by the agent)"
 msgstr "{binding}: {actions} sobre {object}, a la espera de un administrador (pedido por el agente)"
+
+#: src/engines/resource-bindings.tsx
+msgid "{collection}: {name}"
+msgstr "{collection}: {name}"
 
 #: src/chat/held-writes.tsx
 msgid "{connection} ({tool})"
@@ -509,6 +521,10 @@ msgstr "Un presupuesto de modelos llegó a su aviso o se agotó"
 msgid "A model call was refused"
 msgstr "Se rechazó una llamada a un modelo"
 
+#: src/engines/resource-bindings.tsx
+msgid "A new template"
+msgstr "Una plantilla nueva"
+
 #: src/screens/screen-frame.tsx
 msgid "A new version of this engine is available."
 msgstr "Hay una nueva versión de este motor."
@@ -537,6 +553,10 @@ msgstr "Cuenta"
 #: src/activity/audit-log.tsx
 msgid "Action"
 msgstr "Acción"
+
+#: src/engines/resource-bindings.tsx
+msgid "Actions"
+msgstr "Acciones"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Actions for {who}"
@@ -649,6 +669,10 @@ msgstr "Acuerdos"
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "Gasto en IA"
+
+#: src/engines/resource-bindings.tsx
+msgid "Alert at"
+msgstr "Avisar al"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
@@ -944,6 +968,18 @@ msgstr "Volver al chat pequeño"
 msgid "Being built"
 msgstr "En construcción"
 
+#: src/engines/resource-bindings.tsx
+msgid "Bind {alias}"
+msgstr "Vincular {alias}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Bound"
+msgstr "Vinculado"
+
+#: src/engines/resource-bindings.tsx
+msgid "Bound to"
+msgstr "Vinculado a"
+
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Ruta de navegación"
@@ -1141,6 +1177,10 @@ msgstr "Chats"
 msgid "Checked the audit trail's chain"
 msgstr "Comprobó la cadena del registro de auditoría"
 
+#: src/engines/resource-bindings.tsx
+msgid "Choose a collection"
+msgstr "Elige una colección"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Elegir un archivo"
@@ -1153,6 +1193,7 @@ msgstr "Borrar"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -1187,10 +1228,15 @@ msgstr "Colección"
 msgid "Collection {collectionId}"
 msgstr "Colección {collectionId}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Collection for {collection}"
+msgstr "Colección para {collection}"
+
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection not found"
 msgstr "Colección no encontrada"
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
 msgstr "Colecciones"
@@ -1294,12 +1340,17 @@ msgstr "Conectada."
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "No se pudo conectar. Vuelve a intentarlo o pregunta a un administrador."
 
+#: src/engines/resource-bindings.tsx
+msgid "Connection"
+msgstr "Conexión"
+
 #: src/dashboard/to-do.tsx
 msgctxt "kind of thing that waits"
 msgid "Connection"
 msgstr "Conexión"
 
 #: src/activity/pending.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Connection {connectionId}"
 msgstr "Conexión {connectionId}"
 
@@ -1326,6 +1377,14 @@ msgstr "Dar consentimiento y conectar"
 #: src/connections/connect-dialog.tsx
 msgid "Consent and sign in"
 msgstr "Dar consentimiento e iniciar sesión"
+
+#: src/engines/resource-bindings.tsx
+msgid "Content, as JSON"
+msgstr "Contenido, en JSON"
+
+#: src/engines/resource-bindings.tsx
+msgid "Contract"
+msgstr "Contrato"
 
 #: src/chat/thread.tsx
 msgid "Copied"
@@ -2052,6 +2111,7 @@ msgstr "Solo en un chat, para {requester}"
 msgid "In the proposer's words"
 msgstr "En palabras de quien lo propone"
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration"
 msgstr "Integración"
@@ -2162,6 +2222,10 @@ msgstr "Su acceso caducó. El personal de Grasp no puede reconectarla: un admini
 msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
 msgstr "Su acceso ha caducado. Vuelve a iniciar sesión con la misma cuenta: los motores y los agentes conservan sus permisos sobre ella."
 
+#: src/engines/resource-bindings.tsx
+msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
+msgstr "Su presupuesto no se puede leer, así que no sirve nada en lugar de funcionar sin él. Vincúlalo de nuevo para fijar su presupuesto otra vez."
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "No se pudo leer su contenido."
@@ -2216,6 +2280,11 @@ msgctxt "onboarding stage"
 msgid "Kickoff"
 msgstr "Arranque"
 
+#: src/engines/resource-bindings.tsx
+msgid "Kind"
+msgstr "Tipo"
+
+#: src/engines/resource-bindings.tsx
 #: src/frame/app-sidebar.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
@@ -2402,6 +2471,7 @@ msgstr "Memoria"
 msgid "Messages"
 msgstr "Mensajes"
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
 msgstr "Modelo"
@@ -2549,6 +2619,10 @@ msgstr "Todavía no hay archivos."
 msgid "No integrations match your search."
 msgstr "Ninguna integración coincide con tu búsqueda."
 
+#: src/engines/resource-bindings.tsx
+msgid "No longer declared"
+msgstr "Ya no declarados"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "No longer held: {model}"
 msgstr "Ya no retenido: {model}"
@@ -2664,6 +2738,10 @@ msgstr "Ninguna actual"
 msgid "none now"
 msgstr "ninguna ahora"
 
+#: src/engines/resource-bindings.tsx
+msgid "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
+msgstr "Ninguno de los permisos de integración del motor sirve {contract} con todas las acciones que declara. Concede uno primero."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "None stated"
 msgstr "No indicada"
@@ -2684,6 +2762,14 @@ msgstr "No permitida"
 msgid "Not approved"
 msgstr "No aprobado"
 
+#: src/engines/resource-bindings.tsx
+msgid "Not bound"
+msgstr "Sin vincular"
+
+#: src/engines/resource-bindings.tsx
+msgid "Not checked"
+msgstr "Sin comprobar"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Not connected"
 msgstr "Sin conectar"
@@ -2691,6 +2777,14 @@ msgstr "Sin conectar"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
 msgstr "Aún no se sabe lo suficiente. Puede abrir cuando pase del {threshold} %, o cuando terminen las entrevistas."
+
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice could be checked, and none of those checked can serve it. Reload the page to check again."
+msgstr "No se pudieron comprobar todas las opciones, y ninguna de las comprobadas puede servirlo. Vuelve a cargar la página para comprobarlo de nuevo."
+
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice could be checked: some may be missing from the list."
+msgstr "No se pudieron comprobar todas las opciones: puede que falten algunas en la lista."
 
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -2720,6 +2814,10 @@ msgstr "Sin publicar"
 #: src/dashboard/widget-board.tsx
 msgid "Not run yet"
 msgstr "Aún sin ejecutar"
+
+#: src/engines/resource-bindings.tsx
+msgid "Not served"
+msgstr "Sin servir"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Not signed off yet"
@@ -2770,6 +2868,10 @@ msgstr "Aquí aún no hay nada."
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing is held for review now."
 msgstr "Ahora no hay nada retenido para revisión."
+
+#: src/engines/resource-bindings.tsx
+msgid "Nothing is published for {contract} yet. Publish it first."
+msgstr "Aún no hay nada publicado para {contract}. Publica primero una versión."
 
 #: src/dashboard/pile-cards.tsx
 msgid "Nothing is sent or changed on {connection}."
@@ -2973,6 +3075,10 @@ msgstr "Abriendo el chat…"
 msgid "Opens at {threshold}%"
 msgstr "Abre al {threshold} %"
 
+#: src/engines/resource-bindings.tsx
+msgid "Operations"
+msgstr "Operaciones"
+
 #: src/knowledge/uploads.tsx
 msgid "or choose them from your computer"
 msgstr "o elígelos en tu ordenador"
@@ -2994,6 +3100,7 @@ msgid "Otherwise:"
 msgstr "Si no:"
 
 #: src/chat/thread.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Output"
 msgstr "Salida"
 
@@ -3076,13 +3183,26 @@ msgstr "Personas escuchadas"
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "Se rechazaron {rejected} de {answered, plural, one {# respuesta} other {# respuestas}} en el paso {step} de {about} {days, plural, one {en el último día} other {en los últimos # días}}."
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Per day"
 msgstr "Por día"
 
+#: src/engines/resource-bindings.tsx
+msgid "Per month"
+msgstr "Por mes"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per request"
+msgstr "Por solicitud"
+
 #: src/activity/audit-log.tsx
 msgid "Permission"
 msgstr "Permiso"
+
+#: src/engines/resource-bindings.tsx
+msgid "Permission {permission}"
+msgstr "Permiso {permission}"
 
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
@@ -3149,6 +3269,14 @@ msgstr "Propuso paquetes"
 #: src/dashboard/dependency-requests.tsx
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Lo proporciona Grasp, no se instala de nuevo: {provided}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Publish a version of {contract}"
+msgstr "Publicar una versión de {contract}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Publish as"
+msgstr "Publicar como"
 
 #: src/dashboard/widget-board.tsx
 msgid "Ran"
@@ -3364,6 +3492,10 @@ msgstr "Se repite, {items}:"
 msgid "Repeats, once per item:"
 msgstr "Se repite, una vez por elemento:"
 
+#: src/engines/resource-bindings.tsx
+msgid "Replace the binding of {alias}"
+msgstr "Sustituir la vinculación de {alias}"
+
 #: src/knowledge/document.tsx
 msgid "Replace version {newerVersion} with mine"
 msgstr "Sustituir la versión {newerVersion} por la mía"
@@ -3375,6 +3507,15 @@ msgstr "Reemplazó una solicitud de paquetes"
 #: src/dashboard/report-dialog.tsx
 msgid "Report"
 msgstr "Informe"
+
+#: src/engines/resource-bindings.tsx
+msgid "Resource"
+msgstr "Recurso"
+
+#: src/engines/resource-bindings.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "Resources"
+msgstr "Recursos"
 
 #: src/knowledge/timeline.tsx
 msgid "Restore"
@@ -3423,12 +3564,21 @@ msgid "Review the apps of {name}"
 msgstr "Revisar las aplicaciones de {name}"
 
 #: src/connections/connection-list.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Revoke"
 msgstr "Revocar"
 
 #: src/connections/connection-list.tsx
 msgid "Revoke {holder}'s permission"
 msgstr "Revocar el permiso de {holder}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}"
+msgstr "Revocar la vinculación de {alias}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}?"
+msgstr "¿Revocar la vinculación de {alias}?"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
@@ -3902,6 +4052,10 @@ msgstr "Dejó de seguir lo que cambia en una conexión"
 msgid "Stopped."
 msgstr "Detenido."
 
+#: src/engines/resource-bindings.tsx
+msgid "Structured, at most {tokens} tokens"
+msgstr "Estructurada, como máximo {tokens} tokens"
+
 #: src/frame/person-menu.tsx
 msgid "System"
 msgstr "Sistema"
@@ -3948,6 +4102,18 @@ msgstr "Equipos"
 msgid "Teams named"
 msgstr "Equipos nombrados"
 
+#: src/engines/resource-bindings.tsx
+msgid "Template"
+msgstr "Plantilla"
+
+#: src/engines/resource-bindings.tsx
+msgid "Template {templateId}, version {version}"
+msgstr "Plantilla {templateId}, versión {version}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Template version"
+msgstr "Versión de la plantilla"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Test"
 msgstr "Probar"
@@ -3967,6 +4133,10 @@ msgstr "Pruebas"
 #: src/knowledge/document.tsx
 msgid "Text"
 msgstr "Texto"
+
+#: src/engines/resource-bindings.tsx
+msgid "Text, at most {tokens} tokens"
+msgstr "Texto, como máximo {tokens} tokens"
 
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
@@ -4003,6 +4173,10 @@ msgstr "Es demasiado corto para ser una conversación."
 #: src/onboarding/kickoff-errors.ts
 msgid "That isn't something the kickoff takes."
 msgstr "Eso no es algo que acepte el arranque."
+
+#: src/engines/resource-bindings.tsx
+msgid "That isn't valid JSON."
+msgstr "Eso no es JSON válido."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
@@ -4083,6 +4257,14 @@ msgstr "La plataforma de la empresa sigue cerrada hasta que Grasp dé su visto b
 msgid "The conversation couldn't be read just now. Try again in a moment."
 msgstr "No se pudo leer la conversación ahora mismo. Inténtalo de nuevo en un momento."
 
+#: src/engines/resource-bindings.tsx
+msgid "The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now."
+msgstr "La versión actual lo declara de forma distinta a la versión para la que se aprobó su vinculación. Vincúlalo de nuevo para aprobar lo que declara ahora."
+
+#: src/engines/resource-bindings.tsx
+msgid "The current version doesn't declare these, so they serve nothing until a version declares them again."
+msgstr "La versión actual no los declara, así que no sirven nada hasta que una versión los vuelva a declarar."
+
 #: src/dashboard/widget-board.tsx
 msgid "The dashboard is back to how it began."
 msgstr "El panel vuelve a estar como empezó."
@@ -4094,6 +4276,34 @@ msgstr "El contrato de encargo del tratamiento no está firmado"
 #: src/chat/composer.tsx
 msgid "The default, {each}"
 msgstr "Predeterminado, {each}"
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine has no permission to read a collection. Grant one first."
+msgstr "El motor no tiene permiso para leer ninguna colección. Concede uno primero."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+msgstr "El motor tiene demasiadas integraciones para comprobarlas todas en esta página, así que esta vinculación no se comprobó. Su siguiente solicitud se comprueba como siempre."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's actions can't use it until an admin binds it."
+msgstr "Las acciones del motor no pueden usarlo hasta que un administrador lo vincule."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr "Las acciones del motor llegan a un modelo, una integración, conocimiento o una plantilla solo mediante una vinculación que un administrador aprueba aquí. Declarar uno no concede nada, y revocar una vinculación detiene la siguiente solicitud a través de ella."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
+msgstr "Las acciones del motor llegan a un modelo, una integración, conocimiento o una plantilla solo mediante una vinculación que aprueba un administrador de tu organización."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's current version declares no resource for its actions."
+msgstr "La versión actual del motor no declara ningún recurso para sus acciones."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+msgstr "La siguiente solicitud del motor a través de ella se rechaza, y las acciones que esperan en ella se descartan. Vincúlalo de nuevo para volver a usarlo."
 
 #: src/chat/builds.tsx
 msgid "The engines this chat builds didn't load."
@@ -4175,6 +4385,10 @@ msgstr "Lo más urgente primero."
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
 msgstr "La siguiente"
+
+#: src/engines/resource-bindings.tsx
+msgid "The next version of template {id}"
+msgstr "La siguiente versión de la plantilla {id}"
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter: what"
@@ -4324,6 +4538,10 @@ msgstr "Esta decisión está cerrada."
 #: src/routes/decisions.$decision.tsx
 msgid "This decision is for someone else to answer."
 msgstr "Esta decisión le corresponde a otra persona."
+
+#: src/engines/resource-bindings.tsx
+msgid "This deployment allows no model."
+msgstr "Esta implementación no permite ningún modelo."
 
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
@@ -4496,6 +4714,7 @@ msgstr "Usa la cuenta de tu organización para continuar."
 msgid "Used a connected tool"
 msgstr "Usó una herramienta conectada"
 
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/document.tsx
 msgid "Used by"
 msgstr "Usado por"
@@ -4662,6 +4881,14 @@ msgstr "Qué es delicado ahora"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "What it brought"
 msgstr "Lo que aportó"
+
+#: src/engines/resource-bindings.tsx
+msgid "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."
+msgstr "Aquello a lo que está vinculado ya no puede servirlo: se revocó su permiso, el modelo ya no está permitido o no se puede leer la plantilla."
+
+#: src/engines/resource-bindings.tsx
+msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
+msgstr "Aquello a lo que está vinculado ha cambiado desde que se aprobó la vinculación. Vincúlalo de nuevo cuando hayas comprobado que sigue encajando."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."

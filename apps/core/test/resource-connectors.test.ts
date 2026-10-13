@@ -986,6 +986,37 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     });
   });
 
+  it("name a connector binding's own connection for the App's builder, with no choices", async () => {
+    const mailer = await mailerApp();
+    const review = await mailer.builder.api.resourceBindings.review(
+      mailer.release.manifest.resourceId
+    );
+    const listed = await mailer.builder.api.connections.list();
+    const granted = await drizzle(env.DB)
+      .select({ objectId: permissionRows.objectId })
+      .from(permissionRows)
+      .where(eq(permissionRows.id, mailer.permission))
+      .get();
+    const connection = listed.find(({ id }) => id === granted?.objectId);
+    expect(
+      review.resources.map(({ binding, choices }) => ({
+        label: binding?.label,
+        choices,
+      }))
+    ).toStrictEqual([
+      {
+        label: {
+          connection: {
+            account: connection?.accountName ?? null,
+            provider: "microsoft",
+          },
+          collections: {},
+        },
+        choices: null,
+      },
+    ]);
+  });
+
   it("say a connector binding no longer serves once its contract changed or its connection is gone", async () => {
     const mailer = await mailerApp();
     const admin = await mailer.admin.api.whoami();
