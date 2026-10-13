@@ -38,6 +38,17 @@ export const count = query({
   handler: async (ctx) => (await ctx.db.query("notes").take(100)).length,
 });
 
+/** Answers after \`ms\`: a call held open while others arrive. */
+export const hold = action({
+  args: { ms: v.number().integer().min(0).max(10000) },
+  returns: v.number(),
+  uses: [],
+  handler: async (_ctx, args) => {
+    await new Promise((resolve) => setTimeout(resolve, args.ms));
+    return args.ms;
+  },
+});
+
 /** Writes a note, then counts them: two functions nested in one. */
 export const createAndCount = action({
   args: { title: v.string().min(1).max(200) },
@@ -50,14 +61,14 @@ export const createAndCount = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { count, create, createAndCount } from "./operations/notes.ts";
+import { count, create, createAndCount, hold } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { count, create, createAndCount } },
+  operations: { notes: { count, create, createAndCount, hold } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -140,13 +151,18 @@ describe("a chat's App calls on-prem", () => {
 
   it("refuses a run's calls past the eight it may have queued at once, as busy", async () => {
     const notes = await notesApp();
-    const calls = Array.from({ length: 20 }, (_, index) =>
+    const held = callOf(notes.release, "notes.hold", { ms: 3000 });
+    const others = Array.from({ length: 19 }, (_, index) =>
       callOf(notes.release, "notes.create", { title: `note ${index}` })
     );
-    // Each call's outcome: its result, or why it was refused.
+    // The first call held open in the App until the other 19 have arrived:
+    // it and 7 more queue, the other 12 find the queue full. Each call's
+    // outcome: whether it ran and succeeded, or why it was refused.
     const code = `export default async (self, env) => {
-      const calls = ${JSON.stringify(calls)};
-      const settled = await Promise.allSettled(calls.map((call) => env.apps.call(${JSON.stringify(notes.app)}, new Blob([call]).stream())));
+      const call = (text) => env.apps.call(${JSON.stringify(notes.app)}, new Blob([text]).stream());
+      const first = call(${JSON.stringify(held)});
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const settled = await Promise.allSettled([first, ...${JSON.stringify(others)}.map(call)]);
       return settled.map((one) => one.status === "fulfilled" ? { ok: one.value.result.ok } : { refused: one.reason.message });
     };`;
     const outcomes = z
@@ -154,20 +170,20 @@ describe("a chat's App calls on-prem", () => {
         z.object({ ok: z.boolean() }).or(z.object({ refused: z.string() }))
       )
       .parse(await run(notes, code));
+    const accepted = outcomes.flatMap((outcome) =>
+      "ok" in outcome ? [outcome.ok] : []
+    );
     const refused = outcomes.flatMap((outcome) =>
       "refused" in outcome ? [outcome.refused] : []
     );
-    // The first eight queue, one taking its turn; the rest find it full.
-    expect({
-      ran: outcomes.length - refused.length >= 8,
-      someRefused: refused.length > 0,
-      why: [...new Set(refused)],
-    }).toStrictEqual({
-      ran: true,
-      someRefused: true,
-      why: [
-        "This App runs as many calls at once as it may. Try again shortly.",
-      ],
+    expect({ accepted, refused }).toStrictEqual({
+      // Each accepted call succeeded once the held one let go.
+      accepted: Array.from({ length: 8 }, () => true),
+      refused: Array.from(
+        { length: 12 },
+        () =>
+          "This App runs as many calls at once as it may. Try again shortly."
+      ),
     });
   });
 });
