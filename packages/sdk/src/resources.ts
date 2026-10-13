@@ -37,26 +37,54 @@ export interface ModelConfig<Output extends AnySchema | undefined> {
 }
 
 /**
- * A generated connector contract of this release (spec 12), e.g.
- * `microsoft-365.mail@1`: a native connector's tools of one family.
+ * A Composio connection's generated contract, `composio.<toolkit>@1`: the
+ * tools its admin allowed, each an action named by its tool, such as
+ * `HUBSPOT_LIST_CONTACTS`. Composio changes its toolkits without a release
+ * of Grasp, so they aren't in the release's catalog and their calls aren't
+ * typed (`ComposioCall`): the host checks each one, both ways, against the
+ * contract the binding pinned when an admin approved it.
  */
-export type ConnectorContract = Extract<keyof ConnectorCatalog, string>;
+export type ComposioContract = `composio.${string}@1`;
 
-/** The actions of connector contract `Contract`, by name. */
-export type ConnectorAction<Contract extends ConnectorContract> = Extract<
-  keyof ConnectorCatalog[Contract],
-  string
->;
+/**
+ * A generated connector contract (spec 12): a native connector's tools of
+ * one family, such as `microsoft-365.mail@1`, from this release's catalog;
+ * or a Composio toolkit's (`ComposioContract`).
+ */
+export type ConnectorContract =
+  | Extract<keyof ConnectorCatalog, string>
+  | ComposioContract;
+
+/**
+ * The actions of connector contract `Contract`, by name: any name for a
+ * Composio contract, whose tools only its binding knows.
+ */
+export type ConnectorAction<Contract extends ConnectorContract> =
+  Contract extends keyof ConnectorCatalog
+    ? Extract<keyof ConnectorCatalog[Contract], string>
+    : string;
+
+/**
+ * A Composio action's arguments and answer: any JSON object in, any JSON
+ * value back, both checked by the host against the pinned contract. A tool
+ * that declares no output schema answers its text, as a string.
+ */
+export interface ComposioCall {
+  readonly input: Readonly<Record<string, JsonValue>>;
+  readonly output: JsonValue;
+}
 
 /**
  * Action `Action` of contract `Contract`: its `input`, the arguments a
  * call passes, and its `output`, the answer it gets back.
  */
-type ContractAction<Contract, Action> = Contract extends ConnectorContract
+type ContractAction<Contract, Action> = Contract extends keyof ConnectorCatalog
   ? Action extends keyof ConnectorCatalog[Contract]
     ? ConnectorCatalog[Contract][Action]
     : never
-  : never;
+  : Contract extends ComposioContract
+    ? ComposioCall
+    : never;
 
 /** What a declaration's config may say about a connector. */
 export interface ConnectorConfig<
@@ -64,8 +92,9 @@ export interface ConnectorConfig<
   Actions extends readonly ConnectorAction<Contract>[],
 > {
   /**
-   * The generated contract and its major version, e.g.
-   * `microsoft-365.mail@1`: one the release's connectors serve.
+   * The generated contract and its major version: one the release's
+   * connectors serve, e.g. `microsoft-365.mail@1`, or a Composio toolkit's,
+   * e.g. `composio.hubspot@1`.
    */
   readonly contract: Contract;
   /** The contract's actions the App needs, each once. */

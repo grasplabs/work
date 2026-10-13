@@ -24,6 +24,8 @@ export { resource } from "./resources.ts";
 export type {
   AnyResource,
   BrowserResource,
+  ComposioCall,
+  ComposioContract,
   ConnectorAction,
   ConnectorContract,
   ConnectorResource,
