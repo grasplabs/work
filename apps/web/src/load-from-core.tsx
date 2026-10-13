@@ -31,6 +31,7 @@ export type Loaded<T> =
 const notFoundCodes = new Set([
   "app.not_found",
   "workflow.not_found",
+  "workflow.run_not_found",
   "knowledge.not_found",
   "decision.not_found",
   "screen.not_found",
