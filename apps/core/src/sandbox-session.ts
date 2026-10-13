@@ -293,6 +293,13 @@ export const sessionEndedError = (): Error =>
 export const sandboxVerdictOf = (error: unknown): string | undefined =>
   error instanceof Error ? verdicts.get(error) : undefined;
 
+/**
+ * How long core waits for the supervisor's verdict on a call that failed
+ * while its session looked open, and how often it asks meanwhile.
+ */
+const verdictWaitMs = 1000;
+const verdictPollMs = 100;
+
 /** What the supervisor blamed the App for in session `id`, if anything. */
 const verdictOf = async (
   host: Fetcher,
@@ -480,8 +487,22 @@ const failureOf = async (
   }
   // Asked before trusting an open socket: the supervisor keeps its verdict
   // before it closes core's end, but a broken session (a process killed
-  // mid-call) can reject the call before the socket's close is seen.
-  const verdict = await verdictOf(host, id);
+  // mid-call, or one whose isolate failed the call as its process exits)
+  // can reject the call first. So it's asked again for a moment, until
+  // the socket closes (then once more, which settles it) or
+  // `verdictWaitMs` passes: only then is the error the App's own.
+  let verdict: Verdict | undefined;
+  for (let asked = 0; asked <= verdictWaitMs / verdictPollMs; asked += 1) {
+    const closedBefore = isClosed();
+    // In order: each ask follows the wait after the one before.
+    // oxlint-disable-next-line no-await-in-loop
+    verdict = await verdictOf(host, id);
+    if (verdict !== undefined || closedBefore) {
+      break;
+    }
+    // oxlint-disable-next-line no-await-in-loop
+    await scheduler.wait(verdictPollMs);
+  }
   if (verdict === undefined && !isClosed()) {
     // The App's: what its isolate's entrypoint threw.
     return error;

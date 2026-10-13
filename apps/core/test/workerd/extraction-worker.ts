@@ -46,6 +46,14 @@ const hostile: Readonly<Record<string, string>> = {
       const until = Date.now() + 20;
       while (Date.now() < until) {}
     }`),
+  // Fills V8's own heap, which ends its process, with a read in flight.
+  heap: takenOver(`const first = await read(0);
+    read(first.byteLength);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const held = [];
+    for (;;) {
+      held.push({ at: held.length, text: String(Math.random()) });
+    }`),
   // Answers more than a session's message takes.
   oversized: takenOver(
     'return { ok: true, markdown: "x".repeat(15_000_000) };'

@@ -86,6 +86,26 @@ describe("why the sandbox ended a call", () => {
   });
 });
 
+/** A capability the isolate was given, as a test's host calls it. */
+interface Kept {
+  ping: (n: number) => unknown;
+  dup: () => { ping: (n: number) => unknown };
+}
+
+/** A test's sandbox host's session: its `run` does what `answer` does. */
+class SessionMain extends RpcTarget {
+  readonly #answer: (stubs: Record<string, Kept>) => unknown;
+
+  constructor(answer: (stubs: Record<string, Kept>) => unknown) {
+    super();
+    this.#answer = answer;
+  }
+
+  run(_call: unknown, stubs: Record<string, Kept>): unknown {
+    return this.#answer(stubs);
+  }
+}
+
 /**
  * A sandbox host in this isolate, over a real WebSocket and Cap'n Web: its
  * call answers at once, and keeps the capability it was given to call it
@@ -93,27 +113,15 @@ describe("why the sandbox ended a call", () => {
  * those when the call returns, so only a host of the test's own shows it).
  */
 const hostCallingLater = (afterMs: number): Fetcher => {
-  class Main extends RpcTarget {
-    // oxlint-disable-next-line class-methods-use-this -- called over Cap'n Web
-    run(
-      _call: unknown,
-      stubs: Record<
-        string,
-        {
-          ping: (n: number) => unknown;
-          dup: () => { ping: (n: number) => unknown };
-        }
-      >
-    ): string {
-      const kept = stubs.c0?.dup();
-      setTimeout(() => {
-        void Promise.resolve(kept?.ping(7)).catch(() => {
-          // Refused, as it should be.
-        });
-      }, afterMs);
-      return "returned";
-    }
-  }
+  const main = new SessionMain((stubs) => {
+    const kept = stubs.c0?.dup();
+    setTimeout(() => {
+      void Promise.resolve(kept?.ping(7)).catch(() => {
+        // Refused, as it should be.
+      });
+    }, afterMs);
+    return "returned";
+  });
   return {
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = new Request(input, init);
@@ -122,7 +130,7 @@ const hostCallingLater = (afterMs: number): Fetcher => {
       }
       const { 0: client, 1: server } = new WebSocketPair();
       server.accept();
-      void new RpcSession(new WebSocketTransport(server), new Main());
+      void new RpcSession(new WebSocketTransport(server), main);
       return new Response(null, {
         status: 101,
         webSocket: client,
@@ -171,5 +179,92 @@ describe("a call in a session that stays open for what it nested", () => {
     );
     expect(answer).toBe("returned");
     expect(reached).toStrictEqual([]);
+  });
+});
+
+/**
+ * A sandbox host whose isolate fails its call as its process dies: the
+ * call's error reaches core over a socket still open, and the supervisor
+ * keeps its verdict `verdictAfterMs` after core first asks for it (it
+ * waits for the process to exit before it judges), or never.
+ */
+const hostCrashingLate = (verdictAfterMs?: number): Fetcher => {
+  let firstAsked: number | undefined;
+  const main = new SessionMain(() => {
+    throw new Error("internal error; the isolate's process is exiting");
+  });
+  return {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const { pathname } = new URL(request.url);
+      if (pathname.startsWith("/verdict/")) {
+        firstAsked ??= Date.now();
+        const kept =
+          verdictAfterMs !== undefined &&
+          Date.now() - firstAsked >= verdictAfterMs;
+        return await Promise.resolve(
+          kept
+            ? Response.json({
+                verdict: "crashed",
+                message: "The App's code crashed its sandbox.",
+              })
+            : new Response("{}", { status: 404 })
+        );
+      }
+      if (pathname !== "/session") {
+        return await Promise.resolve(new Response("{}", { status: 200 }));
+      }
+      const { 0: client, 1: server } = new WebSocketPair();
+      server.accept();
+      void new RpcSession(new WebSocketTransport(server), main);
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+        headers: {
+          [sandboxCpuHeader]: request.headers.get(sandboxCpuHeader) ?? "",
+        },
+      });
+    },
+    connect: () => {
+      throw new Error("Not a socket host");
+    },
+  };
+};
+
+/** A call that fails on `host`: how it ended, and its verdict. */
+const failedOn = async (host: Fetcher) => {
+  try {
+    await runInSession(host, {
+      mainModule: "m.js",
+      modules: { "m.js": "" },
+      entrypoint: "E",
+      method: "go",
+      args: [],
+      owner: "app-test",
+      cpuMs: 1000,
+      wallMs: 5000,
+    });
+  } catch (error) {
+    return {
+      message: error instanceof Error ? error.message : String(error),
+      verdict: sandboxVerdictOf(error) ?? null,
+    };
+  }
+  return { message: "answered", verdict: null };
+};
+
+describe("a call that fails while its session looks open", () => {
+  it("is the sandbox's verdict when the supervisor keeps one a moment later", async () => {
+    await expect(failedOn(hostCrashingLate(300))).resolves.toStrictEqual({
+      message: "The App's code crashed its sandbox.",
+      verdict: "crashed",
+    });
+  });
+
+  it("is the App's own error when the supervisor keeps no verdict", async () => {
+    await expect(failedOn(hostCrashingLate())).resolves.toStrictEqual({
+      message: "internal error; the isolate's process is exiting",
+      verdict: null,
+    });
   });
 });

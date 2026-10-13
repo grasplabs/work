@@ -23,8 +23,10 @@ import { extractUpload, failUpload, finalFailures } from "./uploads.ts";
 // doubling, at most 5 minutes) and a new step tries again, so waiting for
 // a place spends none of the retries a failing file gets. Crafted files
 // holding the extractor's share, or Apps holding the pool, then delay
-// uploads without failing them. Only once it has waited an hour does the
-// upload fail, as `upload.extractor_busy`.
+// uploads without failing them. The hour runs from the first busy try,
+// and nothing runs past it (`busyPlan`): the last wait is cut short to
+// leave a try room, a try's attempts each end by it, and none starts
+// after it. Then the upload fails, as `upload.extractor_busy`.
 //
 // Replaying the run is safe: a step that finished isn't run again, and
 // one that ran without its result being kept finds the upload ready (or
@@ -32,13 +34,16 @@ import { extractUpload, failUpload, finalFailures } from "./uploads.ts";
 
 const inputSchema = z.object({ uploadId: z.string().min(1) });
 
+/** The longest one attempt of an extraction may run. */
+const attemptMaxMs = 10 * 60_000;
+
 /**
  * Retries of the extraction step: three, 30 seconds apart and doubling,
  * so a moment's outage passes and a failing file fails within minutes.
  */
 const extractConfig: WorkflowStepConfig = {
   retries: { limit: 3, delay: "30 seconds", backoff: "exponential" },
-  timeout: "10 minutes",
+  timeout: attemptMaxMs,
 };
 
 /** The first wait for a place in the sandbox, and the longest. */
@@ -47,6 +52,40 @@ const busyWaitMaxMs = 5 * 60_000;
 
 /** How long an upload waits for a place in the sandbox before it fails. */
 const busyForMs = 60 * 60_000;
+
+/** The least time worth a try after a wait: less, and the wait is over. */
+const busyTryMinMs = 60_000;
+
+/** What comes after a busy try: a wait and a try, within the hour. */
+export type BusyPlan =
+  | { over: true }
+  | { over: false; sleepMs: number; attemptMs: number; deadline: number };
+
+/**
+ * After a try found the extractor busy at `at`, the first busy one having
+ * been at `since`: the wait before the next try, `waitMs` or what the hour
+ * leaves once a try has room, and how long each of that try's attempts
+ * may run, so it ends by the hour; or `over` once the hour leaves no room
+ * for a try. Pure, so a replay plans the same.
+ */
+export const busyPlan = (
+  since: number,
+  at: number,
+  waitMs: number
+): BusyPlan => {
+  const deadline = since + busyForMs;
+  const left = deadline - at;
+  if (left < busyTryMinMs) {
+    return { over: true };
+  }
+  const sleepMs = Math.min(waitMs, left - busyTryMinMs);
+  return {
+    over: false,
+    sleepMs,
+    attemptMs: Math.min(attemptMaxMs, left - sleepMs),
+    deadline,
+  };
+};
 
 /**
  * What an extraction step ends with: `null` once the upload is extracted
@@ -105,13 +144,22 @@ const extractWaitingForPlace = async (
   step: RunStep
 ): Promise<void> => {
   let busySince: number | undefined;
+  // After a busy try: when the hour ends, and how long an attempt may run.
+  let bound: { deadline: number; attemptMs: number } | undefined;
   for (let attempt = 0; ; attempt += 1) {
+    const within = bound;
     // In order: each try follows the wait after the one before.
     // oxlint-disable-next-line no-await-in-loop
     const ended = await step.do(
       attempt === 0 ? "extract" : `extract:${attempt}`,
-      extractConfig,
+      within === undefined
+        ? extractConfig
+        : { ...extractConfig, timeout: within.attemptMs },
       async () => {
+        // An attempt (a retry's too) never starts past the hour.
+        if (within !== undefined && Date.now() >= within.deadline) {
+          throw new NonRetryableError("upload.extractor_busy");
+        }
         try {
           await extractUpload(env, uploadId);
         } catch (error) {
@@ -129,11 +177,13 @@ const extractWaitingForPlace = async (
       return;
     }
     busySince ??= busy.at;
-    if (busy.at - busySince >= busyForMs) {
+    const plan = busyPlan(busySince, busy.at, busyWaitOf(env, attempt));
+    if (plan.over) {
       throw new NonRetryableError("upload.extractor_busy");
     }
+    bound = { deadline: plan.deadline, attemptMs: plan.attemptMs };
     // oxlint-disable-next-line no-await-in-loop
-    await step.sleep(`extract:wait:${attempt}`, busyWaitOf(env, attempt));
+    await step.sleep(`extract:wait:${attempt}`, plan.sleepMs);
   }
 };
 

@@ -190,6 +190,18 @@ describe("extracting an upload on the on-prem sandbox", () => {
     ).toBe(3);
   }, 120_000);
 
+  it("fails as too complex an extractor that fills V8's own heap with a read in flight", async () => {
+    const outcome = await extract(
+      "travel-policy.docx",
+      `type=${types.docx}&extractor=heap&pad=${3 * 1024 * 1024}`
+    );
+
+    expect({ status: outcome.status, code: outcome.code }).toStrictEqual({
+      status: "failed",
+      code: "upload.too_complex",
+    });
+  }, 60_000);
+
   it("fails as too complex an extractor that answers more than a session takes", async () => {
     const outcome = await extract(
       "expense-policy.pdf",
