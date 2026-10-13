@@ -40,6 +40,38 @@ const personApi = async (role: Role) => {
   return { ...person, api: core.authenticate() };
 };
 
+type Api = Awaited<ReturnType<typeof personApi>>;
+
+/**
+ * What a run's history tells of its task `task`: its step entries, how
+ * many steps they are of, and whether it waited, held.
+ */
+const historyOfTask = async (person: Api, run: string, task: string) => {
+  const { items } = await person.api.workflows.history(run, {
+    pageSize: 100,
+  });
+  const ofTask = items.filter(({ taskId }) => taskId === task);
+  return {
+    steps: ofTask.flatMap((entry) => {
+      if (entry.kind !== "step") {
+        return [];
+      }
+      return entry.state === "failed"
+        ? [`failed ${entry.attempt} ${entry.error.code}`]
+        : [`${entry.state} ${entry.attempt}`];
+    }),
+    stepIds: new Set(
+      ofTask.flatMap((entry) => (entry.kind === "step" ? [entry.stepId] : []))
+    ).size,
+    held: ofTask.some(
+      (entry) =>
+        entry.kind === "wait" &&
+        entry.waitKind === "blocked" &&
+        entry.state === "opened"
+    ),
+  };
+};
+
 describe("a run's held side effects", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
 
@@ -100,6 +132,9 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
       server: await mail.did(),
       searched: await mail.searched(),
       audited: await runEvents(run.id, "workflow.run.completed"),
+      // Its history: the held end no completion, the run again the step's
+      // next attempt, the wait between them a wait of the step.
+      history: await historyOfTask(admin, run.id, "send"),
     }).toMatchObject({
       held: [
         { mode: "workflow", restricted: true },
@@ -122,6 +157,11 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
         "workflow.step.completed $params",
         "workflow.step.completed send",
       ],
+      history: {
+        steps: ["started 1", "started 2", "completed 2"],
+        stepIds: 1,
+        held: true,
+      },
     });
   });
 
@@ -396,9 +436,11 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     await admin.api.pendingActions.decline(held.id);
     await finished(run.id);
     const audited = await runEvents(run.id, "workflow.run.failed");
+    const { steps } = await historyOfTask(admin, run.id, "send");
     expect({
       run: await admin.api.workflows.status(run.id),
       server: await mail.did(),
+      history: steps,
       audited: audited.filter(
         (event) =>
           event.startsWith("workflow.run.waiting") ||
@@ -407,6 +449,8 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     }).toMatchObject({
       run: { status: "failed" },
       server: { calls: 0, sent: [] },
+      // The step's run again failed, by the decline's code.
+      history: ["started 1", "started 2", "failed 2 connect.declined"],
       // Failed once, not retried: a decline is final.
       audited: ["workflow.run.waiting held", "workflow.step.failed send"],
     });

@@ -76,6 +76,7 @@ export const screenTests = [
   "test/run-retention.test.ts",
   "test/run-controls.test.ts",
   "test/run-summary.test.ts",
+  "test/run-history.test.ts",
   "test/rpc-targets.test.ts",
 ];
 

@@ -1,6 +1,8 @@
 import type {
   RunActivity,
   RunActivityQuery,
+  RunHistoryPage,
+  RunHistoryPageQuery,
   RunsPage,
   RunFilter,
   WorkflowDetail,
@@ -15,6 +17,7 @@ import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { runActivity } from "./activity.ts";
 import { cancelRun } from "./controls.ts";
+import { runHistory } from "./history.ts";
 import {
   dryRunWorkflow,
   listAllRuns,
@@ -61,6 +64,16 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await runStatus(this.#env, by, run)
+    );
+  }
+
+  async history(
+    run: string,
+    page?: RunHistoryPageQuery
+  ): Promise<RunHistoryPage> {
+    return await withPerson(
+      this.#check,
+      async (by) => await runHistory(this.#env, by, run, page)
     );
   }
 

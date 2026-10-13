@@ -294,6 +294,15 @@ describe("email triggers", () => {
     ]);
   });
 
+  it("show with their workflow, by the address they receive at", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("shown"));
+
+    const { triggers } = await builder.api.workflows.get(app, "intake");
+
+    expect(triggers).toStrictEqual([{ type: "email", address: "shown" }]);
+  });
+
   it("keep nothing of a message without attachments, or with inline ones only", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, intake("unkept"));
