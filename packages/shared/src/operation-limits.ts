@@ -5,6 +5,7 @@
 // root module can't bring Zod along.
 
 import { platformErrorNamespaces } from "./error-namespaces.ts";
+import { platformLimits } from "./platform-limits.ts";
 
 /**
  * The most bytes of one operation's input, as UTF-8 JSON: the public
@@ -13,7 +14,7 @@ import { platformErrorNamespaces } from "./error-namespaces.ts";
  * another of the App's functions alike. A store's own bound on one
  * transaction (`commitMaxInputBytes`) is larger and separate.
  */
-export const operationInputMaxBytes = 128 * 1024;
+export const operationInputMaxBytes = platformLimits.operationInputBytes;
 
 /**
  * The most bytes of one call's request as a screen or agent sends it, as

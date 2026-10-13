@@ -4,7 +4,12 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
-import { workflowDecisions, workflowRuns } from "../db/core/schema.ts";
+import {
+  runLineageAttempts,
+  runLineages,
+  workflowDecisions,
+  workflowRuns,
+} from "../db/core/schema.ts";
 import { runEngine, runRetentionDays } from "./engine.ts";
 
 // Retention of workflow runs. A run reads what its person may read (a
@@ -153,6 +158,48 @@ const unkeyed = (step: SQL): SQL =>
   sql`CASE WHEN instr(${step}, ':') > 0 THEN substr(${step}, 1, instr(${step}, ':') - 1) ELSE ${step} END`;
 
 /**
+ * The statements that remove the receipts of the steps' attempts of
+ * `runs` (IDs of runs marked, at most {@link receiptRunsPerBatch}, as
+ * each is bound several times), quotas.ts's: a receipt names
+ * its step by the engine's key, which can hold a keyed step's data, so
+ * none outlives its run's details. One still holding (a last attempt
+ * that never returned: its run has ended) is settled first, as an
+ * admission would, charging its lineage up to its deadline (now, at the
+ * latest), so the lineage's row, which stays, neither keeps holding it nor
+ * loses what it used. Every receipt of the runs goes. Run before its runs
+ * are marked, so a sweep that stops before marking them leaves them due,
+ * and none of a marked run is left.
+ */
+const receiptsPruned = (
+  db: DrizzleD1Database,
+  runs: readonly string[],
+  now: Date
+) => {
+  const held = runLineageAttempts;
+  const lapsed = and(inArray(held.runId, runs), isNull(held.settledAt));
+  // What it could use: up to its deadline, or until now.
+  const used = sql`min(${held.deadline}, ${now.getTime()}) - ${held.admittedAt}`;
+  const lapsedOf = (sum: SQL) =>
+    sql`(SELECT coalesce(sum(${sum}), 0) FROM ${held} WHERE ${lapsed} AND ${held.rootRunId} = ${runLineages.rootRunId})`;
+  return [
+    db
+      .update(runLineages)
+      .set({
+        activeUsedMs: sql`${runLineages.activeUsedMs} + ${lapsedOf(used)}`,
+        activeHeldMs: sql`${runLineages.activeHeldMs} - ${lapsedOf(sql`${held.reservedMs}`)}`,
+      })
+      .where(
+        inArray(
+          runLineages.rootRunId,
+          db.select({ root: held.rootRunId }).from(held).where(lapsed)
+        )
+      ),
+    db.update(held).set({ usedMs: used, settledAt: now }).where(lapsed),
+    db.delete(held).where(inArray(held.runId, runs)),
+  ] as const;
+};
+
+/**
  * The statements that mark `runs`, those of them still `due`, as having
  * had their details removed at `now`, and empty what their rows and their
  * decisions kept of them: the failure's message, and the key of the step
@@ -201,6 +248,23 @@ const marked = (
         )
       ),
   ] as const;
+};
+
+/** Most runs whose attempt receipts one batch removes (`receiptsPruned`). */
+const receiptRunsPerBatch = 10;
+
+/** Removes the attempt receipts of `runs`, each marked (`receiptsPruned`). */
+const pruneReceipts = async (
+  db: DrizzleD1Database,
+  runs: readonly string[],
+  now: Date
+): Promise<void> => {
+  for (let from = 0; from < runs.length; from += receiptRunsPerBatch) {
+    // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+    await db.batch(
+      receiptsPruned(db, runs.slice(from, from + receiptRunsPerBatch), now)
+    );
+  }
 };
 
 /** A run to sweep, as the sweep reads it. */
@@ -297,6 +361,10 @@ export const sweepRunDetails = async (env: Env, now: Date): Promise<void> => {
     // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
     const gone = await removedElsewhere(env, rows);
     if (gone.length > 0) {
+      // Its receipts first, the row marked last: a sweep that stops in
+      // between leaves the run due, and the next does it all again.
+      // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
+      await pruneReceipts(db, gone, now);
       // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
       await db.batch(marked(db, gone, now, due));
     }

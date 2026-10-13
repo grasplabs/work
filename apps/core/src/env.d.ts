@@ -31,6 +31,12 @@ interface __BaseEnv_Env {
   /** Days an ended workflow run keeps its details (src/workflows/retention.ts). */
   RUN_RETENTION_DAYS?: unknown;
   /**
+   * The limits the operator lowered, with the policy's generation
+   * (`quotaLimitsSchema` in @grasp-os/shared/quota-policy;
+   * src/workflows/quotas.ts).
+   */
+  QUOTA_LIMITS?: unknown;
+  /**
    * `cloudflare` where core runs on Cloudflare's runtime, which enforces
    * Code Mode's CPU limit; anything else, unset included, is taken as a
    * runtime that doesn't (src/code-mode.ts). Tests, local development and
@@ -58,11 +64,6 @@ interface __BaseEnv_Env {
   SANDBOX_IN_PROCESS?: string;
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */
   DURABLE_OBJECT_JURISDICTION?: string;
-  /**
-   * Tests only: the engine's step limit, when a test lowers it with the
-   * workflow's `stepLimit` (src/workflows/host.ts).
-   */
-  WORKFLOW_STEP_LIMIT?: string;
   /**
    * Tests only: a shorter wait between a run's checks of a held side
    * effect (src/workflows/host.ts).

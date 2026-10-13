@@ -44,6 +44,12 @@ export const workflowErrors = defineErrorFamily({
     "The run has ended, so it can't be paused, resumed or cancelled.",
   "workflow.too_many_steps":
     "This run has taken as many steps as a workflow run may: split the work over more runs.",
+  "workflow.too_many_attempts":
+    "This step has been tried as many times as a step may be, its first attempt included.",
+  "workflow.lineage_limit":
+    "This workflow run, with the runs it started, has reached a limit it may have: how many steps a run takes, how deep its runs nest, how many runs it starts, how long its steps run in all, or how old it is. No more of it can be admitted.",
+  "workflow.lineage_busy":
+    "Steps still running in this workflow run, or in runs it started, hold what's left of its run time. Try again once they finish.",
   "workflow.idempotency_key_invalid":
     "A workflow's connection calls take their step's own idempotency key (the `idempotencyKey` a side-effect step gets), or none: the platform keeps side effects to once per step and run.",
   "workflow.param_not_found":
@@ -407,6 +413,8 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "connect.call_in_progress",
   "model.failed",
   "model.budget_busy",
+  // Nothing ran; room comes back as the lineage's attempts under way settle.
+  "workflow.lineage_busy",
   "internal.unexpected",
   "workflow.invalid_model_output",
 ]);
@@ -840,7 +848,7 @@ export interface WorkflowCalls {
 const engineNameSeparator = /[:#]/u;
 
 /** The SDK's own step, which reads the run's parameters and calls nothing. */
-const paramsStep = "$params";
+export const paramsStep = "$params";
 
 /**
  * The name a step has in its outline, from its engine name (`name`,

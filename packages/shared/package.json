@@ -50,6 +50,8 @@
     "./packages": "./src/packages.ts",
     "./permissions": "./src/permissions.ts",
     "./platform-change": "./src/platform-change.ts",
+    "./platform-limits": "./src/platform-limits.ts",
+    "./quota-policy": "./src/quota-policy.ts",
     "./record-ids": "./src/record-ids.ts",
     "./release": "./src/release.ts",
     "./resource-bindings": "./src/resource-bindings.ts",

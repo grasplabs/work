@@ -593,12 +593,13 @@ describe("model rules", { timeout: 60_000 }, () => {
 
   it("ask the ledger for a busy step at most every 15 seconds, however short its attempts' timeout, and fail a step with no retry left at once", async () => {
     const builder = await signedInApi(idp, "builder");
-    // Attempts that time out after a second, retried a millisecond on; and
-    // a step with no retry at all.
+    // Attempts that time out after four seconds, retried a millisecond on:
+    // the five a step may have span past the 15 seconds; and a step with
+    // no retry at all.
     const app = await appWith(builder, {
       ...workflowFiles(
         "reader",
-        llm("timeout: 1000, retries: { limit: 40, delay: 1 },"),
+        llm("timeout: 4000, retries: { limit: 4, delay: 1 },"),
         {
           extract: { total: 1234 },
         }
@@ -654,7 +655,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         await finished(once.id);
         const onceTook = Date.now() - startedOnce;
         const run = await builder.api.workflows.start(app, "reader");
-        // Eight seconds of attempts a second apart, all while held.
+        // Eight seconds of attempts four seconds apart, all while held.
         await scheduler.wait(8000);
         const whileHeld = await eventsOf(actor(run.id));
         release.resolve(true);
@@ -688,7 +689,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         },
       },
       onceQuick: true,
-      // Asked once in eight seconds of attempts; the rest answered by the
+      // Asked once in eight seconds of attempts; the next answered by the
       // host from that refusal.
       whileHeld: ["model.refused"],
       run: { status: "completed", output: { total: 1234 } },

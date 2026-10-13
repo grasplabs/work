@@ -13,12 +13,14 @@ import { modelErrors } from "@grasp-os/shared/models";
 import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   callReviewed,
   coreStepPrefix,
   executionErrors,
   stepReviewed,
   isRetryable,
+  paramsStep,
   maxAttemptTimeoutMs,
   stepIdempotencyKey,
   inboundEmailIndexSchema,
@@ -65,6 +67,8 @@ import type { AttemptFence } from "./attempt-fence.ts";
 import { AttemptHost } from "./attempt-host.ts";
 import type { Settled, StepError } from "./code.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
+import { quotaPolicy } from "./quotas.ts";
+import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 
 // The engine a run's workflow code runs on, as core's side of it: the SDK's
 // `WorkflowEngine` (`@grasp-os/sdk/engine`) on the engine's `step` API
@@ -161,6 +165,8 @@ interface StepAttempt {
   leaseId: string;
   /** Its number, from 1, as the engine counts the step's attempts. */
   number: number;
+  /** Its step's place among the run's steps (`countedStep`), if counted. */
+  ordinal?: number;
   /** Its step's idempotency key in the engine, which names its lease. */
   key: string;
   /** The generation of the activation that claimed it. */
@@ -259,6 +265,63 @@ const stepTokens = (
     ? { maxTokens: maxOutputTokens, askAgain: false }
     : { maxTokens: Math.floor(maxOutputTokens / 2), askAgain: true };
 
+/** The field of a step's result that says its lineage was busy (`busyMarker`). */
+const busyField = `${coreStepPrefix}busy`;
+
+/**
+ * What an attempt of a step answers when its run lineage's active time is
+ * all held by attempts under way (quotas.ts, `workflow.lineage_busy`):
+ * recorded as the step's result, with the seconds to wait, so the run
+ * waits durably, holding no compute, and runs the step again under a step
+ * of its own, as a held step does. The refusal spends none of the step's
+ * attempts: the step that runs again has all of its own. The lineage's
+ * age and the run's steps still bound how long it waits. Workflow code
+ * can't return it (`do` refuses it).
+ */
+const busyMarker = (seconds: number) => ({ [busyField]: seconds });
+
+/** The seconds a busy step's result says to wait; none for any other. */
+const busyWaitOf = (value: unknown): number | undefined => {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const seconds: unknown = Reflect.get(value, busyField);
+  return typeof seconds === "number" ? seconds : undefined;
+};
+
+/** Whether `value` is one of core's markers, which workflow code can't return. */
+const isCoreMarker = (value: unknown): boolean =>
+  isHeldMarker(value) ||
+  (typeof value === "object" &&
+    value !== null &&
+    Object.hasOwn(value, busyField));
+
+/**
+ * The longest a busy step waits before it asks again, in seconds, whatever
+ * the refusal said: what attempts under way hold is what they may take,
+ * and most give it back far sooner. Each wait and its next run are two of
+ * the run's steps, so a run waits about 40 minutes at the platform's step
+ * limit, longer than its lineage's active time.
+ */
+const maxBusyWaitSeconds = 5;
+
+/** A test's host of its own admits every attempt, with nothing to settle. */
+const unadmitted: AttemptAdmission = {
+  attemptsAllowed: platformLimits.workflowAttemptsPerStep,
+  settle: async () => {
+    // Nothing was held.
+  },
+};
+
+/** The seconds a `workflow.lineage_busy` refusal says to wait, at least one. */
+const busySeconds = (error: unknown): number | undefined => {
+  if (!isExpectedError(error) || error.code !== "workflow.lineage_busy") {
+    return undefined;
+  }
+  const seconds = error.details?.retryAfterSeconds;
+  return typeof seconds === "number" && seconds >= 1 ? seconds : 1;
+};
+
 /** Longest step name taken: a key and a decision's part fit well within. */
 const maxStepName = 256;
 
@@ -277,10 +340,11 @@ const stepNameSchema = z
   });
 
 /**
- * The most a step may return, as JSON in UTF-8: the engine refuses to
- * record more than 1 MiB, and fails the whole run when it does.
+ * The most a step may return, as JSON in UTF-8: a step's result limit
+ * (spec 18.1), which is also what the engine records at most, failing the
+ * whole run past it.
  */
-const maxStepResultBytes = 1024 * 1024;
+const maxStepResultBytes = platformLimits.stepPayloadBytes;
 
 const milliseconds = z
   .int()
@@ -427,7 +491,25 @@ export const fromIsolate = (value: unknown): Settled<unknown> => {
 /** The engine's delay before a retry when the SDK names none. */
 const defaultRetryDelayMs = 10_000;
 
-/** The step config the engine takes; its defaults where the SDK gave none. */
+/**
+ * The engine's retries of a step when the SDK names none: the engine's
+ * own default, which it journals as the step's config.
+ */
+const defaultRetryLimit = 5;
+
+/**
+ * The step config the engine takes: what the SDK gave, its defaults
+ * where it gave none, exactly as the engine has always journaled it.
+ *
+ * Never held to the platform's ceiling on a step's attempts here: the
+ * engine journals a step's config, and a replay must give it the same,
+ * so any change to what this returns for a step (a clamp, another
+ * default, another `defaultRetryDelayMs`) halts every run in flight on
+ * replay. The ceiling (spec 18.1's five attempts, all counted, or the
+ * operator's lower one) is enforced as each attempt is admitted instead
+ * (quotas.ts, `admitAttempt`), which refuses an attempt past it, and
+ * `isLastAttempt` takes it into account.
+ */
 const stepConfig = ({
   retries,
   timeout,
@@ -453,23 +535,6 @@ const timedOut = /^(?:WorkflowTimeoutError: )?Execution timed out\b/u;
 const isTimeout = (error: unknown): boolean =>
   error instanceof Error &&
   (error.name === "WorkflowTimeoutError" || timedOut.test(error.message));
-
-/**
- * Core's limit on the steps one activation of a run takes: so a run
- * whose code loops on steps without end can't journal without bound.
- * Only tests lower it (`WORKFLOW_STEP_LIMIT`, vite.config.ts).
- */
-const defaultStepLimit = 10_000;
-
-/**
- * Steps kept back for core's own (`$grasp:…`), so the step that records
- * how the run ended always fits, with room to spare. A run's own steps
- * are refused this far short of the limit; past the limit, the engine
- * would refuse core's end too. Core's steps that the run's code causes
- * without bound count as the run's own: the steps of a wait while a
- * side effect is held ({@link waitStepPrefix}).
- */
-const coreStepReserve = 5;
 
 /**
  * The steps a run waits in while a side effect is held. They are core's
@@ -523,13 +588,12 @@ const waitMsOf = (env: Env): number => {
  */
 const budgetBusyWaitMs = 15_000;
 
-/** The engine's retries of a step when the SDK names none. */
-const defaultRetryLimit = 5;
-
 /** What core reads of the context the engine gives a step's attempt. */
 const attemptContextSchema = z.object({
   attempt: z.int().positive(),
   idempotencyKey: z.string().min(1),
+  /** Its step's place among the run's steps, as `countedStep` counts them. */
+  stepOrdinal: z.int().positive().optional(),
   config: z
     .object({
       retries: z.object({ limit: z.int().min(0) }).optional(),
@@ -542,6 +606,8 @@ const attemptContextSchema = z.object({
  * `context` says, else `tries`, the attempts this execution made (fewer,
  * if an earlier execution made some: never the last too soon), against
  * its retries as the engine says, else `configured`, else the default.
+ * The attempts the quota policy admits are its admission's to say
+ * (`RunHost.#admit`).
  */
 const isLastAttempt = (
   context: unknown,
@@ -638,33 +704,82 @@ export const newAiCalls = (): AiCalls => ({
   unclaimed: new Map(),
 });
 
-/** Core's step limit for this deployment. */
-export const stepLimitOf = (env: Env): number => {
-  const set = Number(env.WORKFLOW_STEP_LIMIT);
-  return Number.isInteger(set) && set > 0 && set < defaultStepLimit
-    ? set
-    : defaultStepLimit;
+/** The step limit this isolate last read from the quota policy. */
+let lastStepLimit: number | undefined;
+
+/**
+ * The steps a run may take (spec 18.1's logical steps, 1000 a run), as
+ * the deployment's quota policy has it now: so a run whose code loops on
+ * steps without end can't journal without bound. Counted over each
+ * activation's replay of the run's journal (`countedStep`), so a restart,
+ * a retry or a new activation counts every step the run took before.
+ *
+ * Read before any of the run's steps, where a throw would end the run for
+ * good, so a policy that can't be read (the database failing for a
+ * moment) is logged, and the limit this isolate last read applies, else
+ * the platform's: the run goes on. It admits nothing more: every attempt
+ * of a step reads the policy again as it is admitted (quotas.ts,
+ * `admitAttempt`), and one that can't is refused as the platform's
+ * unexpected error, which the engine retries. The limit only bounds what
+ * the run journals, and the next activation reads it again.
+ */
+export const stepLimitOf = async (env: Env): Promise<number> => {
+  try {
+    const { limits } = await quotaPolicy(env);
+    lastStepLimit = limits.workflowSteps;
+    return lastStepLimit;
+  } catch (error) {
+    log.warn("workflow.quota_policy_unread", errorFields(error));
+    return lastStepLimit ?? platformLimits.workflowSteps;
+  }
 };
 
 /**
- * `step`, counting every call, as each journals a step, and refusing the
- * run's own ones {@link coreStepReserve} short of `stepLimit`, as a
- * failure of that step.
+ * `step`, counting the run's own steps (`stepLimit` is the operator's
+ * allowance of them) and refusing one past it, as a failure of that step.
+ * Core's own steps (`$grasp:…`, but for a wait's, which the run's code
+ * causes without bound: {@link waitStepPrefix}) and the SDK's first
+ * `$params` step are outside the allowance: a run of one step fits an
+ * allowance of one. Counted over every replay, so each step keeps its
+ * place.
  */
 export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
-  let taken = 0;
-  const take = (name: string): void => {
-    taken += 1;
-    const reserved =
+  let own = 0;
+  let params = false;
+  /** The step's place among the run's own steps; none for core's own. */
+  const take = (name: string): number | undefined => {
+    const core =
       name.startsWith(coreStepPrefix) && !name.startsWith(waitStepPrefix);
-    if (!reserved && taken > stepLimit - coreStepReserve) {
+    const sdk = name === paramsStep && !params;
+    params ||= sdk;
+    if (core || sdk) {
+      return undefined;
+    }
+    own += 1;
+    if (own > stepLimit) {
       throw workflowErrors.create("workflow.too_many_steps");
     }
+    return own;
   };
   return {
     do: async (name, config, fn) => {
-      take(name);
-      return await step.do(name, config, fn);
+      const ordinal = take(name);
+      if (ordinal === undefined) {
+        return await step.do(name, config, fn);
+      }
+      // Each attempt is told its step's place, for its admission against
+      // the policy as it is then (quotas.ts, `admitAttempt`): the limit
+      // this activation counts by may be a fallback (`stepLimitOf`).
+      return await step.do(
+        name,
+        config,
+        async (context) =>
+          await fn(
+            typeof context === "object" && context !== null
+              ? { ...context, stepOrdinal: ordinal }
+              : context
+          )
+      );
     },
     sleep: async (name, duration) => {
       take(name);
@@ -870,6 +985,13 @@ export interface HostHooks {
     input: unknown,
     idempotencyKey: string
   ) => Promise<OperationResult>;
+  /**
+   * Admits a step's attempt against its run lineage's quotas before its
+   * code runs (quotas.ts, `admitAttempt`), throwing the refusal, or
+   * answering what settles the attempt once its function has returned.
+   * The dispatcher's always does; none only for a test's host of its own.
+   */
+  admitAttempt?: (attempt: QuotaAttempt) => Promise<AttemptAdmission>;
 }
 
 /**
@@ -967,7 +1089,7 @@ export class RunHost extends RpcTarget {
    * a durable sleep, a minute first (`waitMsOf`), doubling up to 15
    * minutes, in steps named after `prefix`. The wait is recorded once, in
    * a step of its own. Each check and sleep is a step of the run's budget,
-   * so a run waits about 52 days at the default limit. A decline or a drop
+   * so a run waits about five days at the platform's limit. A decline or a drop
    * ends the wait too: the step's next run fails with `connect.declined`.
    */
   async #waitWhileHeld(
@@ -1062,6 +1184,65 @@ export class RunHost extends RpcTarget {
   }
 
   /**
+   * Admits `attempt` against its run lineage's quotas (`admitAttempt`),
+   * throwing the refusal; nothing to settle for a host of its own.
+   */
+  async #admit(
+    attempt: StepAttempt
+  ): Promise<AttemptAdmission | { busyFor: number }> {
+    if (this.#hooks.admitAttempt === undefined) {
+      return unadmitted;
+    }
+    try {
+      const admission = await this.#hooks.admitAttempt({
+        key: attempt.key,
+        number: attempt.number,
+        ...(attempt.ordinal === undefined ? {} : { ordinal: attempt.ordinal }),
+        generation: attempt.generation,
+        deadline: attempt.deadline,
+      });
+      // No attempt after it is admitted: it is the step's last.
+      if (attempt.number >= admission.attemptsAllowed) {
+        attempt.last = true;
+      }
+      return admission;
+    } catch (error) {
+      const busyFor = busySeconds(error);
+      if (busyFor === undefined) {
+        throw error;
+      }
+      return { busyFor };
+    }
+  }
+
+  /**
+   * Waits durably before the step `step` runs again, its attempt having
+   * answered `value`, in round `round`: until the person decided on its
+   * held side effect (`#waitWhileHeld`), or the seconds its busy lineage
+   * said (a sleep, which holds no attempt). Answers the prefix of the
+   * steps it waited in, which the step's next run is named after.
+   */
+  async #waitBefore(
+    step: string,
+    value: unknown,
+    round: number
+  ): Promise<string> {
+    const key = await waitKeyOf(step);
+    const busyFor = busyWaitOf(value);
+    if (busyFor === undefined) {
+      const prefix = `${waitStepPrefix}${key}:held:${round}`;
+      await this.#waitWhileHeld(step, prefix, heldKeysOf(value));
+      return prefix;
+    }
+    const prefix = `${waitStepPrefix}${key}:busy:${round}`;
+    await this.#step.sleep(
+      prefix,
+      Math.min(busyFor, maxBusyWaitSeconds) * 1000
+    );
+    return prefix;
+  }
+
+  /**
    * The person the run acts for must still be there: checked before every
    * step, and inside one (a model call, an App call). One who has
    * left fails the step, and with it the run.
@@ -1124,6 +1305,9 @@ export class RunHost extends RpcTarget {
         const attempt: StepAttempt = {
           leaseId: crypto.randomUUID(),
           number: told.attempt,
+          ...(told.stepOrdinal === undefined
+            ? {}
+            : { ordinal: told.stepOrdinal }),
           key: told.idempotencyKey,
           generation: lease.generation,
           deadline: lease.deadline,
@@ -1135,6 +1319,19 @@ export class RunHost extends RpcTarget {
           calledApp: false,
           last: isLastAttempt(context, tries, parsed.retries?.limit),
         };
+        // Admitted before its code runs, or failed with the refusal: a
+        // limit reached fails the step; a lineage whose time attempts
+        // under way hold ends the step as busy, and the run waits
+        // (`busyMarker`).
+        const admitted = await settle(async () => await this.#admit(attempt));
+        if (!admitted.ok) {
+          failed = admitted.error;
+          throw toStepError(failed);
+        }
+        const { value: admission } = admitted;
+        if ("busyFor" in admission) {
+          return busyMarker(admission.busyFor);
+        }
         let result: Settled<unknown>;
         // Whether the attempt still held its lease as its function
         // returned: one the engine gave up on (it timed out, or its
@@ -1152,6 +1349,8 @@ export class RunHost extends RpcTarget {
           if (attempt.calledApp) {
             this.#hooks.revokeAttempt?.(this.#fenceOf(attempt));
           }
+          // What it held of its lineage's time turns into what it used.
+          await admission.settle();
         }
         // Connect held a side effect of it for the person the run acts
         // for: the step ends as held, not failed, whatever the workflow
@@ -1180,7 +1379,7 @@ export class RunHost extends RpcTarget {
           failed = result.error;
           throw toStepError(result.error);
         }
-        if (isHeldMarker(result.value)) {
+        if (isCoreMarker(result.value)) {
           failed = {
             name: "Error",
             message: `Step "${step}" returned a value core keeps for itself`,
@@ -1224,13 +1423,13 @@ export class RunHost extends RpcTarget {
         return result.value;
       };
       let value = await this.#step.do(step, stepConfig(parsed), attemptStep);
-      // Held: wait until the person decided, then run the step again under the same key, in a step of its own
-      // each time, so every execution replays the same steps.
-      for (let round = 1; isHeldMarker(value); round += 1) {
+      // Held, or its lineage busy: wait until the person decided, or the
+      // seconds the lineage said, then run the step again under the same
+      // key, in a step of its own each time, so every execution replays the
+      // same steps.
+      for (let round = 1; isCoreMarker(value); round += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        const prefix = `${waitStepPrefix}${await waitKeyOf(step)}:held:${round}`;
-        // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        await this.#waitWhileHeld(step, prefix, heldKeysOf(value));
+        const prefix = await this.#waitBefore(step, value, round);
         tries = 0;
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         value = await this.#step.do(
