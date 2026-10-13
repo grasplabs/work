@@ -313,8 +313,12 @@ export const keepBackfillGoing = async (
 ): Promise<BackfillStatus | null> =>
   await keepStoreBackfillGoing(env, remoteStore(env, storeId));
 
-/** Keeps the backfill going for a seal, which never fails for it. */
-const keepGoingForSeal = async (env: Env, storeId: StoreId): Promise<void> => {
+/**
+ * Keeps the backfill going for a seal or an activation, which never fail
+ * for it: what it says of the backfill is read from the store, not from
+ * this (the engine may be unavailable, the store's alarm keeps it going).
+ */
+const keepGoingQuietly = async (env: Env, storeId: StoreId): Promise<void> => {
   try {
     await keepBackfillGoing(env, storeId);
   } catch (error) {
@@ -344,12 +348,12 @@ export const defineSchemaOnStore = async (
       (error.code === "migration.pending" ||
         error.code === "migration.backfill_failed")
     ) {
-      await keepGoingForSeal(env, store.id);
+      await keepGoingQuietly(env, store.id);
     }
     throw error;
   }
   if (defined.contract.pending) {
-    await keepGoingForSeal(env, store.id);
+    await keepGoingQuietly(env, store.id);
   }
   return defined;
 };
@@ -396,7 +400,7 @@ export const requireStoreSchemaActive = async (
       "The store doesn't hold the schema its release was sealed on"
     );
   }
-  await keepBackfillGoing(env, storeId);
+  await keepGoingQuietly(env, storeId);
   // Asked again: the store's pending target may have moved on meanwhile
   // (this schema's finished and a newer one began), and only this
   // schema's own state refuses its release.

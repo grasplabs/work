@@ -207,8 +207,10 @@ const writeReceipt = async (
       summaryRevision: nextRevision,
       ...(cancelling
         ? {
+            // A start still pending stays, so the start repair ends the
+            // run should the rest of the cancel not happen (runs.ts,
+            // `repairStart`).
             cancelRequestedAt: sql`COALESCE(${workflowRuns.cancelRequestedAt}, ${cancelledAt ?? now})`,
-            pendingStart: null,
           }
         : {}),
     })
