@@ -129,9 +129,10 @@ export const idempotentCalls = sqliteTable(
       .notNull()
       .default(sql`0`),
     /**
-     * The native connector release (`name@version`) that first claimed the
-     * key; null for a remote server's call. A call is recovered only by the
-     * release that made it: another may tag, find or repeat differently.
+     * The native connector build (`name@version+<code hash>`) that first
+     * claimed the key; null for a remote server's call. A call is recovered
+     * only by the build that made it: another may tag, find or repeat
+     * differently, whether or not its version was bumped.
      */
     connectorVersion: text("connector_version"),
     /**

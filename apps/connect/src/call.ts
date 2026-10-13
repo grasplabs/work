@@ -23,7 +23,7 @@ import {
   usableConnection,
 } from "./connections.ts";
 import type { Connection } from "./connections.ts";
-import { nativeAction, nativeServer } from "./connectors.ts";
+import { nativeAction, nativeRelease, nativeServer } from "./connectors.ts";
 import {
   effectKeyOf,
   hashCall,
@@ -223,17 +223,16 @@ const actionFor = async (
 ): Promise<{
   tool: McpTool;
   recovery: RecoveryMode;
-  /** The native connector release that serves it (`name@version`). */
+  /** The native connector build that serves it (`nativeRelease`). */
   release: string | null;
   open: () => Promise<McpServer>;
 }> => {
   if (connection.serverKind === "native") {
     const native = nativeAction(connection, action);
-    const { name, version } = native.connector.manifest;
     return {
       tool: native.tool,
       recovery: native.declared.recovery,
-      release: `${name}@${version}`,
+      release: await nativeRelease(native.connector),
       open: async () => await nativeServer(env, connection, native, claims),
     };
   }
@@ -527,7 +526,8 @@ interface Sent {
  */
 const sendClaimed = async (
   { callId, connection, tool, input, meta, store }: Sent,
-  server: McpServer
+  server: McpServer,
+  recovering = false
 ): Promise<Omit<CallDone, "sideEffect">> => {
   let done: McpToolResult;
   try {
@@ -563,9 +563,12 @@ const sendClaimed = async (
     throw connectErrors.create("connect.outcome_unknown");
   }
   // ...or the tool is one connect trusts to say it did nothing: then the
-  // key is free, and the caller may try again.
+  // key is free, and the caller may try again. A recovery's send leaves
+  // the call as it was, unknown, instead: the earlier send may still have
+  // happened, and freeing the key would start the horizon of its first
+  // claim (and its connector build) afresh.
   if (didNothing(connection.serverKind, done)) {
-    await store.release();
+    await (recovering ? store.spend() : store.release());
     throw notPerformed(done);
   }
   const answer = answerOf(done);
@@ -659,9 +662,9 @@ const recover = async (
     // out: a lookup that ran long sends nothing under a claim another took.
     const fresh = await sent.open();
     await sent.store.restamp();
-    return { ...(await sendClaimed(sent, fresh)), recovery };
+    return { ...(await sendClaimed(sent, fresh, true)), recovery };
   }
-  return { ...(await sendClaimed(sent, server)), recovery };
+  return { ...(await sendClaimed(sent, server, true)), recovery };
 };
 
 /**

@@ -99,8 +99,12 @@ import { idempotentCalls } from "./db/schema.ts";
 //   copy may be elsewhere) isn't declared at all.
 // - Another connector release recovers a call: it may tag, find or repeat
 //   differently (one that didn't tag yet would look for a tag that isn't
-//   there, and send), so only the release that claimed the key
-//   (`connector_version`) recovers its call.
+//   there, and send), so only the build that claimed the key recovers its
+//   call (`connector_version`: name, version and a hash of the bundled
+//   code, so a change nobody bumped the version for counts too).
+// - A recovery's send the provider turns away (did nothing) starts the
+//   horizon afresh: it leaves the call unknown instead of freeing the key,
+//   so the horizon still counts from the first claim.
 // - A call writes to the key after another took it over (a late answer,
 //   freeing or spending it): every write of a call to its key requires the
 //   claim time it set, and after an "absent" lookup the call claims anew,

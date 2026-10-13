@@ -103,6 +103,19 @@ const statesOf = async ({ id }: Connection): Promise<string[]> => {
   return results.map(({ state }) => state);
 };
 
+/** One column of the connection's stored calls. */
+const columnOf = async (
+  { id }: Connection,
+  column: "claimed_at" | "connector_version"
+): Promise<unknown[]> => {
+  const { results } = await env.DB.prepare(
+    `SELECT ${column} AS value FROM idempotent_calls WHERE connection_id = ?`
+  )
+    .bind(id)
+    .all<{ value: unknown }>();
+  return results.map(({ value }) => value);
+};
+
 /** Sets the connection's stored calls' columns, as SQL `assignments` say. */
 const storedCalls = async (
   { id }: Connection,
@@ -388,6 +401,90 @@ describe("a Microsoft 365 write of unknown outcome", () => {
       requests: requests().length,
       lookups: lookups().length,
     }).toStrictEqual({ requests: 1, lookups: 0 });
+  });
+
+  it("is left unknown when another build of the same connector version claimed it", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await outcome(draft(connection, "run-15:draft"));
+    const [claimedBy] = await columnOf(connection, "connector_version");
+    // The same version, other code: a build nobody bumped the version for.
+    await storedCalls(
+      connection,
+      "connector_version = substr(connector_version, 1, instr(connector_version, '+')) || '0000000000000000'"
+    );
+    await claimedAgo(connection);
+    const ended = await retryable(draft(connection, "run-15:draft"));
+    expect({
+      claimedBy: /^microsoft-365@[^+]+\+[0-9a-f]{16}$/u.test(String(claimedBy)),
+      ended,
+      requests: requests().length,
+      lookups: lookups().length,
+    }).toStrictEqual({
+      claimedBy: true,
+      ended: { code: "connect.outcome_unknown" },
+      requests: 1,
+      lookups: 0,
+    });
+  });
+
+  it("sends nothing when another call takes the key over while its lookup runs", async () => {
+    const connection = await connected();
+    graph.failWrite(500);
+    await outcome(draft(connection, "run-16:draft"));
+    await claimedAgo(connection);
+    // Between the "absent" answer and the send, another recovery claims
+    // the key.
+    let taken: unknown;
+    graph.whileLookingUp(async () => {
+      await storedCalls(connection, "claimed_at = claimed_at + 60000");
+      [taken] = await columnOf(connection, "claimed_at");
+    });
+    const ended = await outcome(draft(connection, "run-16:draft"));
+    expect({
+      ended,
+      writes: writes().length,
+      lookups: lookups().length,
+      states: await statesOf(connection),
+      claimedAt: await columnOf(connection, "claimed_at"),
+    }).toStrictEqual({
+      ended: "connect.outcome_unknown",
+      // The first, failed write, and no other.
+      writes: 1,
+      lookups: 1,
+      // As the other claim left it.
+      states: ["running"],
+      claimedAt: [taken],
+    });
+  });
+
+  it("keeps the horizon of its first claim when a recovery's send is throttled", async () => {
+    const connection = await connected();
+    graph.failWrite(500);
+    await outcome(draft(connection, "run-17:draft"));
+    // Near the end of the horizon, a recovery finds nothing and sends;
+    // Graph throttles the write, which did nothing.
+    await claimedAgo(connection, 23 * 60 * 60 * 1000);
+    graph.throttleWrite();
+    const throttled = await outcome(draft(connection, "run-17:draft"));
+    const stateThen = await statesOf(connection);
+    // Past 24 hours from the first claim, it isn't recovered again.
+    await claimedAgo(connection, 2 * 60 * 60 * 1000);
+    const later = await retryable(draft(connection, "run-17:draft"));
+    expect({
+      throttled,
+      stateThen,
+      later,
+      writes: writes().length,
+      lookups: lookups().length,
+    }).toStrictEqual({
+      throttled: "connect.server_unavailable",
+      stateThen: ["unknown"],
+      later: { code: "connect.outcome_unknown" },
+      // The first write, the throttled one, and no third.
+      writes: 2,
+      lookups: 1,
+    });
   });
 
   it("whose lookup fails stays unknown, and waits a window anew", async () => {

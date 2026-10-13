@@ -5,6 +5,7 @@ import type {
 } from "@grasp-os/connector-kit/manifest";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { isolateBase } from "@grasp-os/shared/runtime";
 import { exports } from "cloudflare:workers";
@@ -47,6 +48,36 @@ for (const { manifest, code } of bundled) {
     log.error("connectors.invalid_manifest", {});
   }
 }
+
+/** The build a connector's code makes (`nativeRelease`). */
+const releaseOf = async ({
+  manifest,
+  code,
+}: NativeConnector): Promise<string> => {
+  const hash = await sha256Hex(code);
+  return `${manifest.name}@${manifest.version}+${hash.slice(0, 16)}`;
+};
+
+/** Each connector's release, as `nativeRelease` derives it, once. */
+const releases = new Map<NativeConnector, Promise<string>>();
+
+/**
+ * Which build of a connector this is: `name@version+<hash>`, the hash the
+ * first 16 hex characters of its bundled code's SHA-256. A call of unknown
+ * outcome is recovered only by the build that claimed it, so any change
+ * of its code (how it tags, finds or repeats) stops recovery of calls the
+ * old build claimed, whether or not anyone bumped the version.
+ */
+export const nativeRelease = async (
+  connector: NativeConnector
+): Promise<string> => {
+  let release = releases.get(connector);
+  if (release === undefined) {
+    release = releaseOf(connector);
+    releases.set(connector, release);
+  }
+  return await release;
+};
 
 /** The connector named `name` in this release, if there is one. */
 export const nativeConnector = (name: string): NativeConnector | undefined =>

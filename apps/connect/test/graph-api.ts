@@ -78,6 +78,9 @@ const keepTag = (mailbox: string, id: string, made: unknown): void => {
   }
 };
 
+/** Runs once while Graph answers the next lookup by effect key. */
+let duringLookup: (() => Promise<void>) | undefined;
+
 /** The effect key a lookup's `$filter` asks for, if it asks for one. */
 const keyFilter =
   /^singleValueExtendedProperties\/Any\(ep: ep\/id eq '(?<id>[^']+)' and ep\/value eq '(?<key>[^']+)'\)$/u;
@@ -113,11 +116,15 @@ const graphRoutes: ProviderRoute<Part>[] = [
   route(
     "GET",
     `${users}(?:/mailFolders/[^/]+)?/messages`,
-    ({ mailbox, query }) => {
+    async ({ mailbox, query }) => {
       const filter = query.get("$filter") ?? "";
-      return filter.startsWith("singleValueExtendedProperties/")
-        ? foundByKey(mailbox, filter)
-        : json(messagePage(mailbox, Number(query.get("$skip") ?? 0)));
+      if (!filter.startsWith("singleValueExtendedProperties/")) {
+        return json(messagePage(mailbox, Number(query.get("$skip") ?? 0)));
+      }
+      const meanwhile = duringLookup;
+      duringLookup = undefined;
+      await meanwhile?.();
+      return foundByKey(mailbox, filter);
     }
   ),
   route("GET", `${users}/messages/(?<id>[^/]+)`, ({ mailbox, id, request }) => {
@@ -215,6 +222,7 @@ const sharePointAnswer = (url: URL): Response => {
 export const fakeGraph = () => {
   beforeEach(() => {
     tagged.clear();
+    duringLookup = undefined;
   });
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
@@ -267,6 +275,10 @@ export const fakeGraph = () => {
         writesOnly: true,
         meanwhile,
       });
+    },
+    /** Runs `meanwhile` while Graph answers the next lookup by effect key. */
+    whileLookingUp: (meanwhile: () => Promise<void>) => {
+      duringLookup = meanwhile;
     },
     /** Makes Graph answer the next request, a read too, with `status`. */
     failNext: (status: number) => {
