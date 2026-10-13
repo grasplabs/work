@@ -221,8 +221,9 @@ interface RunCallHost {
 /**
  * The `run` of a run's entrypoint `target`, with the Loader stopping the
  * isolate past its CPU time as each attempt of step `step` that `kills`
- * picks starts (`counted`, from 1, across activations): the attempt's
- * call and the run's own call into the isolate both reject with it.
+ * picks starts (`counted`, from 1, across activations): that attempt's
+ * call, every other call into the isolate still out, and the run's own
+ * call all reject with it.
  */
 const killingRun =
   (
@@ -249,7 +250,8 @@ const killingRun =
               throw error;
             }
           }
-          return await fn(attempt);
+          // Every call into the isolate still out ends with it.
+          return await Promise.race([fn(attempt), killed.promise]);
         }),
       sleep: async (...waitArgs) => await host.sleep(...waitArgs),
       waitForDecision: async (...waitArgs) =>
@@ -530,6 +532,38 @@ describe("run lineage quotas", { timeout: 90_000 }, () => {
         { attempt: 2, ended: "succeeded" },
       ],
     });
+  });
+
+  it("retry the attempt the Loader cut off past its CPU time, though an earlier step's attempt that timed out was still out in the isolate", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "outlives",
+        `  try {
+    await step.do("hang", { description: "Hang", timeout: "1 second", retries: { limit: 0 } }, async () => {
+      await new Promise(() => {});
+    });
+  } catch {
+    // Timed out, its attempt still out: caught, the run goes on.
+  }
+  return await step.do("work", { description: "Work" }, async () => 2);`,
+        { hang: null, work: 2 }
+      )
+    );
+
+    const result = await withCpuKills(
+      "work",
+      (attempt) => attempt === 1,
+      async () => {
+        const run = await builder.api.workflows.start(app, "outlives");
+        await finished(run.id);
+        const { status, output } = await builder.api.workflows.status(run.id);
+        return { status, output };
+      }
+    );
+
+    expect(result).toStrictEqual({ status: "completed", output: 2 });
   });
 
   it("fail a run whose step's last attempt the Loader cut off past its CPU time, with that timeout", async () => {

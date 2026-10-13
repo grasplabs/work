@@ -132,6 +132,12 @@ interface AttemptCall {
   call: Promise<unknown>;
   /** Settles once the attempt's step ends in this activation. */
   stepDone: Promise<unknown>;
+  /**
+   * Whether its step has ended (`stepDone` settled): an attempt that timed
+   * out may still be out in the isolate after its step failed, and the
+   * workflow caught that and went on.
+   */
+  ended: boolean;
 }
 
 /**
@@ -161,9 +167,15 @@ const afterCpuKill = async (
     attempts.push(call);
   }
   const outcomes = await Promise.allSettled(attempts);
-  const cutOff = calls.filter((_, index) => {
+  // Only attempts whose steps are still under way: one whose step ended
+  // before (it timed out, and the workflow went on) is no step to retry.
+  const cutOff = calls.filter((attempt, index) => {
     const outcome = outcomes[index];
-    return outcome?.status === "rejected" && isCpuLimitKill(outcome.reason);
+    return (
+      !attempt.ended &&
+      outcome?.status === "rejected" &&
+      isCpuLimitKill(outcome.reason)
+    );
   });
   if (cutOff.length > 0) {
     const steps: Promise<unknown>[] = [];
@@ -329,7 +341,12 @@ const runWorkflow = async (
       attemptCall: (call, stepDone) => {
         // Observed, never left to reject unhandled: the host awaits it.
         call.catch(() => null);
-        calls.push({ call, stepDone });
+        const attempt: AttemptCall = { call, stepDone, ended: false };
+        // It never rejects (host.ts, `do`).
+        void stepDone.finally(() => {
+          attempt.ended = true;
+        });
+        calls.push(attempt);
       },
       busyRefusals: memory.busyRefusals,
       aiCalls: memory.aiCalls,
