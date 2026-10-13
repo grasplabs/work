@@ -141,6 +141,17 @@ describe("event triggers", () => {
     ).toStrictEqual([["system", "event", true]]);
   });
 
+  it("show with their workflow, by the event they start on", async () => {
+    const builder = await personApi("builder");
+    const app = await inboxApp(builder);
+
+    const { triggers } = await builder.api.workflows.get(app, "inbox");
+
+    expect(triggers).toStrictEqual([
+      { type: "event", event: "m365.mail.received" },
+    ]);
+  });
+
   it("start a workflow once for an event two of its triggers match, and count it once", async () => {
     const builder = await personApi("builder");
     const app = await inboxApp(builder, {

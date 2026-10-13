@@ -136,9 +136,13 @@ import {
   endedBy,
   forgetHistoryIn,
   lastEventId,
+  maxHistoryRecords,
+  readHistoryRecords,
   readNextEvent,
+  readStepIdentities,
   recordStartIn,
 } from "./history.ts";
+import type { HistoryRecord, StepIdentity } from "./history.ts";
 import type { Schedule } from "./identity.ts";
 import {
   createJournal,
@@ -184,6 +188,47 @@ export type { RunNotification } from "./notifications.ts";
 
 /** What `WorkflowRun.journal()` returns. */
 export type { Journal } from "./journal.ts";
+
+/** What `WorkflowRun.history` returns each event as. */
+export type {
+  HistoryRecord,
+  ReadableHistoryRecord,
+  StepIdentity,
+  UnreadableHistoryRecord,
+} from "./history.ts";
+
+/** Which of the run's steps a history read also tells of. */
+export interface StepIdentitiesQuery {
+  /** Only steps of this kind; every kind when null. */
+  readonly kind: StepType | null;
+  /** Only steps whose name starts with this; every name when null. */
+  readonly prefix: string | null;
+}
+
+/** What `WorkflowRun.history` is asked for. */
+export interface HistoryCommand {
+  /** The last event ID the caller has; 0 for the first. */
+  readonly after: number;
+  /** The most records to return, 1 to {@link maxHistoryRecords}. */
+  readonly limit: number;
+  /**
+   * Steps to tell of beside the page, each query's in the order they were
+   * first reached: read with the page, so they stand as its records do.
+   */
+  readonly steps?: readonly StepIdentitiesQuery[];
+}
+
+/**
+ * A page of the run's history, whether more of it follows, and the steps
+ * asked for, all of one moment of the run: read in one synchronous turn,
+ * with no write between them.
+ */
+export interface HistoryPage {
+  readonly records: readonly HistoryRecord[];
+  readonly more: boolean;
+  /** Each query's steps (`HistoryCommand.steps`), in its order. */
+  readonly steps: readonly (readonly StepIdentity[])[];
+}
 
 /** What `WorkflowRun.attemptLease` returns. */
 export type { AttemptLease } from "./journal.ts";
@@ -1417,6 +1462,38 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     return hasJournal(this.ctx.storage.sql)
       ? readJournal(this.ctx.storage.sql)
       : undefined;
+  }
+
+  /**
+   * The run's history after `after`, as metadata (history.ts,
+   * `HistoryRecord`): the events subscribers see, in order, without any
+   * value of the run's (no params, output or step result, sensitive or
+   * not). For a host's own history of the run, read a page at a time and
+   * taken up again from the last event ID it has. Undefined when there is
+   * no run. Who may see it is the host's to decide, and its cursor the
+   * host's to check: a page holds at least one record and at most
+   * {@link maxHistoryRecords}, whatever `limit` says. The steps a host
+   * asks for beside it (`HistoryCommand.steps`, as metadata:
+   * `StepIdentity`, who each is and its latest attempt, never what it
+   * holds) come from the same moment, for a host relating its own steps
+   * to each other in its history.
+   */
+  history(command: HistoryCommand): HistoryPage | undefined {
+    if (this.#run() === undefined) {
+      return undefined;
+    }
+    const { sql } = this.ctx.storage;
+    const limit = Number.isSafeInteger(command.limit)
+      ? Math.min(Math.max(command.limit, 1), maxHistoryRecords)
+      : maxHistoryRecords;
+    // One synchronous turn: no write lands between the page and its steps,
+    // so the steps stand as they did when the page's records were read.
+    return {
+      ...readHistoryRecords(sql, command.after, limit),
+      steps: (command.steps ?? []).map(({ kind, prefix }) =>
+        readStepIdentities(sql, kind, prefix)
+      ),
+    };
   }
 
   /**

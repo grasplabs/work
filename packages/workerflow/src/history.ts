@@ -34,12 +34,13 @@
 // moves forward.
 import { decode, streamResultOf } from "./codec.ts";
 import type {
+  WorkflowError,
   WorkflowInstanceEvent,
   WorkflowInstanceEventType,
   WorkflowStepEventConfig,
 } from "./contracts.ts";
 import { parseError } from "./errors.ts";
-import type { RunRow } from "./journal.ts";
+import type { RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
 import { replayStream } from "./streams.ts";
 
@@ -427,7 +428,7 @@ interface Detail {
   retryDelayMs?: number | null;
 }
 
-const detailOf = (row: EventRow): Detail => {
+const detailOf = (row: Pick<EventRow, "detail">): Detail => {
   if (row.detail === null) {
     return {};
   }
@@ -563,3 +564,266 @@ export const buildEvent = async (
     }
   }
 };
+
+/** The most records one `readHistoryRecords` returns. */
+export const maxHistoryRecords = 500;
+
+/**
+ * One event of a run's history as plain metadata, for a host to project
+ * its own history from: which step it is of and how that step stands,
+ * never a value the run holds. No params, no output, no step result, no
+ * event payload: a host shows what happened and when without being handed
+ * what the run read or made. A step's kind, name, count and event type
+ * are fixed once it is first reached; an error is the one the event
+ * copied as it was written (an attempt's, a rollback's, the run's), or,
+ * for a step's failure, the step's own, which it never changes once it
+ * failed.
+ *
+ * What a record reads of its step as it stands now (whether a failed
+ * attempt was its last) is told once the step has ended: read while the
+ * step is still deciding whether to try again, a failed attempt reads as
+ * one it tries again, and a later read can find it was the last. A
+ * restart forgets the events of what it runs again, with their records.
+ */
+export interface ReadableHistoryRecord {
+  readonly unreadable: false;
+  readonly eventId: number;
+  readonly at: number;
+  readonly type: WorkflowInstanceEventType;
+  /** The step it is of; null for one of the run's own. */
+  readonly step: {
+    /**
+     * The step's place in the run, never given to another: what tells two
+     * steps of one name apart, and one step's attempts from another's.
+     */
+    readonly ordinal: number;
+    readonly name: string;
+    readonly occurrence: number;
+    readonly kind: StepType;
+    /** For an event wait: the event type it waits for. */
+    readonly eventType: string | null;
+  } | null;
+  /**
+   * The attempt it is of, for an attempt's events, and the one a step's
+   * failure came at (which the step never changes once failed); null
+   * otherwise.
+   */
+  readonly attempt: number | null;
+  /**
+   * For a failed attempt: it was the step's last, the step having failed
+   * at it. False for one the step tries again, or whose retry delay is
+   * still being decided.
+   */
+  readonly final: boolean;
+  /** What failed, for the events of a failure; null otherwise. */
+  readonly error: WorkflowError | null;
+  /** For a sleep that started: how long it sleeps. */
+  readonly durationMs: number | null;
+  /**
+   * For a rolling back that started: how the run ends once it is done,
+   * `errored` after a failure, `terminated` after a termination; fixed
+   * as it starts.
+   */
+  readonly rollbackEnd: "errored" | "terminated" | null;
+}
+
+/**
+ * An event this engine can't read back (its row changed under it): told
+ * by its ID and time alone, so one bad row doesn't stop every read after
+ * it. It is logged as it is read.
+ */
+export interface UnreadableHistoryRecord {
+  readonly unreadable: true;
+  readonly eventId: number;
+  readonly at: number;
+}
+
+export type HistoryRecord = ReadableHistoryRecord | UnreadableHistoryRecord;
+
+interface RecordRow extends Record<string, SqlStorageValue> {
+  seq: number;
+  at: number;
+  type: string;
+  ordinal: number | null;
+  attempt: number | null;
+  detail: string | null;
+  name: string | null;
+  occurrence: number | null;
+  kind: string | null;
+  event_type: string | null;
+  step_state: string | null;
+  step_attempt: number | null;
+  step_error: string | null;
+  rollback_end: string | null;
+}
+
+const stepTypes: ReadonlySet<string> = new Set<StepType>([
+  "do",
+  "sleep",
+  "waitForEvent",
+  "rollback",
+]);
+
+const isStepType = (value: string | null): value is StepType =>
+  value !== null && stepTypes.has(value);
+
+/** A journaled error, or null where there is none. */
+const recordedError = (
+  text: string | null | undefined
+): WorkflowError | null => (typeof text === "string" ? parseError(text) : null);
+
+const stepOfRecord = (row: RecordRow): ReadableHistoryRecord["step"] => {
+  if (row.ordinal === null) {
+    return null;
+  }
+  if (row.name === null || row.occurrence === null || !isStepType(row.kind)) {
+    throw unreadable(row.seq);
+  }
+  return {
+    ordinal: row.ordinal,
+    name: row.name,
+    occurrence: row.occurrence,
+    kind: row.kind,
+    eventType: row.event_type,
+  };
+};
+
+const rollbackEndOf = (
+  row: RecordRow
+): ReadableHistoryRecord["rollbackEnd"] => {
+  if (row.type !== "rollback_started") {
+    return null;
+  }
+  if (row.rollback_end !== "errored" && row.rollback_end !== "terminated") {
+    throw unreadable(row.seq);
+  }
+  return row.rollback_end;
+};
+
+const readableOf = (row: RecordRow): ReadableHistoryRecord => {
+  if (!isEventType(row.type)) {
+    throw unreadable(row.seq);
+  }
+  const detail = detailOf(row);
+  const attemptFailed =
+    row.type === "attempt_errored" || row.type === "rollback_attempt_errored";
+  const stepFailed = row.step_state === "failed" || row.step_state === "fatal";
+  const endsStep =
+    row.type === "step_errored" || row.type === "rollback_step_errored";
+  return {
+    unreadable: false,
+    eventId: row.seq,
+    at: row.at,
+    type: row.type,
+    step: stepOfRecord(row),
+    attempt: endsStep && stepFailed ? row.step_attempt : row.attempt,
+    final: attemptFailed && stepFailed && row.attempt === row.step_attempt,
+    // A `do` step's failure copies nothing as it is written: its error is
+    // the step's own, fixed once it failed. A rollback's copies its own.
+    error: recordedError(
+      row.type === "step_errored" ? row.step_error : detail.error
+    ),
+    durationMs:
+      typeof detail.durationMs === "number" ? detail.durationMs : null,
+    rollbackEnd: rollbackEndOf(row),
+  };
+};
+
+const recordOf = (row: RecordRow): HistoryRecord => {
+  try {
+    return readableOf(row);
+  } catch (error) {
+    warnRecovered("workflow_history_record_unreadable", error);
+    return { unreadable: true, eventId: row.seq, at: row.at };
+  }
+};
+
+/**
+ * At most `limit` events after event ID `after` (0 for the first), in the
+ * order they happened, as metadata (`HistoryRecord`), and whether more
+ * follow.
+ */
+export const readHistoryRecords = (
+  sql: SqlStorage,
+  after: number,
+  limit: number
+): { records: HistoryRecord[]; more: boolean } => {
+  const rows = sql
+    .exec<RecordRow>(
+      `SELECT h.seq, h.at, h.type, h.ordinal, h.attempt, h.detail,
+         s.name, s.occurrence, s.type AS kind, s.event_type,
+         s.state AS step_state, s.attempt AS step_attempt, s.error AS step_error,
+         CASE WHEN h.type = 'rollback_started' THEN (SELECT rollback_end FROM run) END AS rollback_end
+       FROM history AS h
+       LEFT JOIN steps AS s ON s.ordinal = h.ordinal
+       WHERE h.seq > ?1
+       ORDER BY h.seq LIMIT ?2`,
+      after,
+      limit + 1
+    )
+    .toArray();
+  return {
+    records: rows.slice(0, limit).map(recordOf),
+    more: rows.length > limit,
+  };
+};
+
+/**
+ * A step as a history read tells it (`readStepIdentities`): who it is and
+ * how far it got, never what it holds.
+ */
+export interface StepIdentity {
+  readonly ordinal: number;
+  readonly name: string;
+  readonly occurrence: number;
+  readonly kind: StepType;
+  /** Its latest attempt; 0 for a step that takes none (a sleep, a wait). */
+  readonly attempt: number;
+}
+
+interface IdentityRow extends Record<string, SqlStorageValue> {
+  ordinal: number;
+  name: string;
+  occurrence: number;
+  kind: string;
+  attempt: number;
+}
+
+/**
+ * The run's steps of kind `kind` (every kind when null), in the order
+ * they were first reached, only those whose name starts with `prefix`
+ * (every name when null).
+ */
+export const readStepIdentities = (
+  sql: SqlStorage,
+  kind: StepType | null,
+  prefix: string | null
+): StepIdentity[] =>
+  sql
+    .exec<IdentityRow>(
+      `SELECT ordinal, name, occurrence, type AS kind, attempt FROM steps
+       WHERE (?1 IS NULL OR type = ?1)
+         AND (?2 IS NULL OR substr(name, 1, length(?2)) = ?2)
+       ORDER BY ordinal`,
+      kind,
+      prefix
+    )
+    .toArray()
+    .flatMap((row) =>
+      isStepType(row.kind)
+        ? [
+            {
+              ordinal: row.ordinal,
+              name: row.name,
+              occurrence: row.occurrence,
+              kind: row.kind,
+              // A sleep or an event wait journals an attempt count of its
+              // own, but runs no attempt.
+              attempt:
+                row.kind === "sleep" || row.kind === "waitForEvent"
+                  ? 0
+                  : row.attempt,
+            },
+          ]
+        : []
+    );

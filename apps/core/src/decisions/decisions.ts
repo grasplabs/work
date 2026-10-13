@@ -109,9 +109,21 @@ const summaryChanged = (db: DrizzleD1Database, run: string) =>
     .set({ summaryRevision: sql`${workflowRuns.summaryRevision} + 1` })
     .where(and(eq(workflowRuns.id, run), sql`changes() > 0`));
 
+const decisionEventPrefix = "grasp-decision-";
+
 /** The event that wakes a run waiting on `decision`: core's own type. */
 export const decisionEventType = (decision: string): string =>
-  `grasp-decision-${decision}`;
+  `${decisionEventPrefix}${decision}`;
+
+/**
+ * The decision an event type of `decisionEventType` wakes a run for;
+ * nothing for any other type.
+ */
+export const decisionOfEventType = (type: string): string | undefined =>
+  type.startsWith(decisionEventPrefix) &&
+  type.length > decisionEventPrefix.length
+    ? type.slice(decisionEventPrefix.length)
+    : undefined;
 
 /** The longest description of a decision kept; the rest is cut. */
 const maxDescription = 500;
