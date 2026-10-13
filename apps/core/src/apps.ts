@@ -50,11 +50,12 @@ import type { Acting, Member } from "./auth/identity.ts";
 import {
   appVersions,
   apps,
+  auditOutbox,
   businessStores,
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "./db/core/schema.ts";
-import { isUniqueViolation } from "./db/d1.ts";
+import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { requireOwnTypes } from "./knowledge/record-types.ts";
 import { madeCurrent } from "./permissions.ts";
@@ -1085,9 +1086,11 @@ const requireRunnableRelease = async (
 const currentBatchTries = 3;
 
 /**
- * `batch`, tried again when it throws (D1 out of reach for a moment), up
- * to `currentBatchTries`: making a version current compares and sets, so
- * a try that committed only makes the next find the version current.
+ * `batch`, tried again when D1 fails for a moment (`isTransientD1Error`),
+ * up to `currentBatchTries`; any other failure is thrown at once. Making a
+ * version current compares and sets, so a try that committed though its
+ * answer was lost only makes the next change nothing: the caller tells
+ * that from losing to someone else by its own event (`setCurrentVersion`).
  */
 const retriedBatch = async <Result>(
   batch: () => Promise<Result>
@@ -1098,7 +1101,7 @@ const retriedBatch = async <Result>(
       // oxlint-disable-next-line no-await-in-loop -- see above
       return await batch();
     } catch (error) {
-      if (attempt >= currentBatchTries) {
+      if (attempt >= currentBatchTries || !isTransientD1Error(error)) {
         throw error;
       }
     }
@@ -1248,10 +1251,19 @@ export const setCurrentVersion = async (
       ])
   );
   if (!changed) {
-    const now = await appFor(env, by, appId, "builder");
-    if (now.currentVersion === number) {
-      // A batch whose answer was lost, retried: it had made it current.
-      return now;
+    // Only this call's batch stores its event, and only if it made the
+    // version current: found stored, an earlier try committed and its
+    // answer was lost. The version current by someone else's hand (or
+    // over changed triggers) is a conflict, even if it is this version.
+    // Once the outbox has drained the event, a lost answer is answered as
+    // a conflict too, and asking again finds the version current.
+    const ours = await db
+      .select({ id: auditOutbox.id })
+      .from(auditOutbox)
+      .where(eq(auditOutbox.id, event.id))
+      .get();
+    if (ours !== undefined) {
+      return await appFor(env, by, appId, "builder");
     }
     if (sealedLayout) {
       // Revoked or deleted since it was checked: refused as such.
