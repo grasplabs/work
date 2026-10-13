@@ -9,6 +9,7 @@ import type {
   SchemaConsumer,
   StagedWrites,
   StoredRecord,
+  StoreMigration,
 } from "@grasp-os/shared/stores";
 import { DurableObject } from "cloudflare:workers";
 
@@ -25,6 +26,7 @@ import type {
   BackfillStatus,
   BackfillStep,
   SchemaStatus,
+  TransformedBatch,
 } from "./store-host.ts";
 
 // A business store: one Durable Object per store, named by the store's ID
@@ -81,14 +83,35 @@ export class DataStore extends DurableObject<Env> {
   async defineTables(
     storeId: StoreId,
     manifest: string,
-    consumer?: SchemaConsumer
+    consumer?: SchemaConsumer,
+    declared?: StoreMigration[]
   ): Promise<DefinedTables> {
-    return await this.#live().defineTables(storeId, manifest, consumer);
+    return await this.#live().defineTables(
+      storeId,
+      manifest,
+      consumer,
+      declared
+    );
   }
 
-  /** `StoreHost.fillMissing`: one batch of the pending target's backfill. */
-  fillMissing(storeId: StoreId, step: BackfillStep): BackfillOutcome {
-    return this.#live().fillMissing(storeId, step);
+  /**
+   * `StoreHost.fillMissing`: one batch of the pending target's backfill,
+   * as JSON text (a migration's batch carries records, which RPC types
+   * can't carry deeply), read back with `backfillBatchSchema`.
+   */
+  fillMissing(storeId: StoreId, step: BackfillStep): string {
+    return JSON.stringify(this.#live().fillMissing(storeId, step));
+  }
+
+  /**
+   * `StoreHost.commitTransformed`: a migration's batch, transformed, as
+   * JSON text (`TransformedBatch`).
+   */
+  commitTransformed(storeId: StoreId, batch: string): BackfillOutcome {
+    const parsed: unknown = JSON.parse(batch);
+    // SAFETY: the host parses it with its schema before anything reads it.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return this.#live().commitTransformed(storeId, parsed as TransformedBatch);
   }
 
   /** `StoreHost.restartBackfill`. */
@@ -110,6 +133,15 @@ export class DataStore extends DurableObject<Env> {
     target: string
   ): Promise<BackfillStatus | null> {
     return await this.#live().retryBackfill(storeId, target);
+  }
+
+  /** `StoreHost.activateReady`. */
+  activateReady(
+    storeId: StoreId,
+    schemaHash: string,
+    consumer: SchemaConsumer
+  ): SchemaStatus {
+    return this.#live().activateReady(storeId, schemaHash, consumer);
   }
 
   /** `StoreHost.schemaStatus`. */

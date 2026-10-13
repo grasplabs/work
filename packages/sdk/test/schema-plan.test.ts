@@ -547,3 +547,56 @@ describe("a field the store reserved", () => {
     );
   });
 });
+
+describe("a table an explicit migration transforms", () => {
+  const migrated = new Set(["notes"]);
+  const target = notes({
+    title: v.string().min(1).max(500),
+    archivedAt: v.timestamp().optional(),
+    category: v.enum(["launch", "general"]),
+  });
+
+  test("takes a required field and a changed one, with the target's descriptors, filling nothing", () => {
+    expect(planSchemaChange(v1, target).accepted).toBeFalsy();
+
+    const plan = planSchemaChange(v1, target, {}, migrated);
+    const contract = contractOf(plan);
+
+    expect(plan).toMatchObject({
+      accepted: true,
+      migratedTables: ["notes"],
+      addedFields: [{ table: "notes", field: "category" }],
+      filledFields: [],
+    });
+    expect(manifestText(contract)).toBe(manifestText(target));
+  });
+
+  test("still refuses a reference added, a changed access, values that can't overlap and a table on one side only", () => {
+    const referring = notes({ ...noteFields, author: v.id("notes") });
+    const access = notes(noteFields, titleIndex, {
+      tables: { notes: { read: "appMembers", write: "owner" } },
+    });
+
+    expect(planSchemaChange(v1, referring, {}, migrated)).toMatchObject({
+      accepted: false,
+      refused: [
+        { table: "notes", field: "author", reason: "required_field_added" },
+      ],
+    });
+    expect(planSchemaChange(v1, access, {}, migrated)).toMatchObject({
+      accepted: false,
+      refused: [{ table: "notes", reason: "access_changed" }],
+    });
+    const disjoint = notes({ ...noteFields, title: v.number() });
+    expect(planSchemaChange(v1, disjoint, {}, migrated)).toMatchObject({
+      accepted: false,
+      refused: [{ table: "notes", field: "title", reason: "values_disjoint" }],
+    });
+    const elsewhere = planSchemaChange(v1, target, {}, new Set(["people"]));
+    expect(elsewhere.accepted).toBeFalsy();
+    expect(elsewhere.accepted ? [] : elsewhere.refused).toContainEqual({
+      table: "people",
+      reason: "migration_table_invalid",
+    });
+  });
+});

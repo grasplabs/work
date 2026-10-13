@@ -202,6 +202,15 @@ export const schemas = sqliteTable("sdk_schemas", {
    * consumer applies it again.
    */
   abandonedAt: integer("abandoned_at"),
+  /**
+   * When an explicit migration's target became the contract and this
+   * schema no longer fit it (store-host.ts, `#activate`): its records
+   * moved on, so a write under it is refused
+   * (`migration.incompatible_write`), and the check of the contract
+   * against the store's schemas leaves it out. Reads under it go on: a
+   * migration's output fits the contract it ran under.
+   */
+  supersededAt: integer("superseded_at"),
 });
 
 /**
@@ -350,6 +359,38 @@ export const backfills = sqliteTable(
     /** Where the scan is: the table and record it reached last. */
     cursorTable: text("cursor_table"),
     cursorRecord: text("cursor_record"),
+    /**
+     * For an explicit migration (`migrations`), the rest of where its scan
+     * is: it goes through a table's records by owner, then creation time,
+     * then ID, so a batch holds one owner's records where the table's
+     * access is `owner` (store-migrations.ts).
+     */
+    cursorOwner: text("cursor_owner"),
+    cursorCreatedAt: integer("cursor_created_at"),
+    /**
+     * The explicit migrations the target runs instead of filling, as
+     * canonical JSON `{ consumer: [resource, version], migrations:
+     * [[table, name], ...] }`: the release whose transforms run, one per
+     * table. Null for a fill-missing target.
+     */
+    migrations: text(),
+    /**
+     * An explicit migration's phase: `scan` through the records the
+     * tables held when it became pending, then `work` through the records
+     * concurrent writes left not fitting the target
+     * (`sdk_migration_work`).
+     */
+    phase: text({ enum: ["scan", "work"] })
+      .notNull()
+      .default("scan"),
+    /**
+     * When an explicit migration found its scan through and no work left:
+     * ready, its contract taking over only as a release sealed on it is
+     * made current (store-host.ts, `activateReady`), so the version
+     * still current goes on writing until then. Cleared when a write
+     * queues work again.
+     */
+    readyAt: integer("ready_at"),
     /** Records looked at, and records filled in, so far. */
     scanned: integer().notNull().default(0),
     filled: integer().notNull().default(0),
@@ -375,6 +416,36 @@ export const backfills = sqliteTable(
     uniqueIndex("sdk_schema_backfills_one_pending")
       .on(sql`(${table.state} <> 'complete')`)
       .where(sql`state <> 'complete'`),
+  ]
+);
+
+/**
+ * Records an explicit migration still has to transform once its scan is
+ * through (store-migrations.ts): written in the transaction of a commit
+ * that left a record of a migrated table not fitting the pending target,
+ * or of a batch whose record changed since it was read. Its activation
+ * waits until none is left; a record that fits by then is dropped.
+ */
+export const migrationWork = sqliteTable(
+  "sdk_migration_work",
+  {
+    targetHash: text("target_hash").notNull(),
+    tableId: text("table_id").notNull(),
+    recordId: text("record_id").notNull(),
+    ownerId: text("owner_id").notNull(),
+    queuedAt: integer("queued_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.targetHash, table.tableId, table.recordId],
+    }),
+    // A batch's records: one table's, by owner then ID.
+    index("sdk_migration_work_batches").on(
+      table.targetHash,
+      table.tableId,
+      table.ownerId,
+      table.recordId
+    ),
   ]
 );
 
