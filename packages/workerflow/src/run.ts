@@ -139,9 +139,10 @@ import {
   maxHistoryRecords,
   readHistoryRecords,
   readNextEvent,
+  readStepIdentities,
   recordStartIn,
 } from "./history.ts";
-import type { HistoryRecord } from "./history.ts";
+import type { HistoryRecord, StepIdentity } from "./history.ts";
 import type { Schedule } from "./identity.ts";
 import {
   createJournal,
@@ -189,7 +190,20 @@ export type { RunNotification } from "./notifications.ts";
 export type { Journal } from "./journal.ts";
 
 /** What `WorkflowRun.history` returns each event as. */
-export type { HistoryRecord } from "./history.ts";
+export type {
+  HistoryRecord,
+  ReadableHistoryRecord,
+  StepIdentity,
+  UnreadableHistoryRecord,
+} from "./history.ts";
+
+/** What `WorkflowRun.stepIdentities` is asked for. */
+export interface StepIdentitiesCommand {
+  /** Only steps of this kind; every kind when null. */
+  readonly kind: StepType | null;
+  /** Only steps whose name starts with this; every name when null. */
+  readonly prefix: string | null;
+}
 
 /** What `WorkflowRun.history` is asked for. */
 export interface HistoryCommand {
@@ -1457,6 +1471,23 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
       ? Math.min(Math.max(command.limit, 1), maxHistoryRecords)
       : maxHistoryRecords;
     return readHistoryRecords(this.ctx.storage.sql, command.after, limit);
+  }
+
+  /**
+   * The run's steps as metadata (history.ts, `StepIdentity`), in the order
+   * they were first reached, narrowed by kind and name prefix: who each is
+   * and its latest attempt, never what it holds. For a host relating its
+   * own steps to each other in its history. Undefined when there is no run.
+   */
+  stepIdentities(command: StepIdentitiesCommand): StepIdentity[] | undefined {
+    if (this.#run() === undefined) {
+      return undefined;
+    }
+    return readStepIdentities(
+      this.ctx.storage.sql,
+      command.kind,
+      command.prefix
+    );
   }
 
   /**

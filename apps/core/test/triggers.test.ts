@@ -343,10 +343,11 @@ const tries = [0, 1, 3, 7, 15, 31, 63, 127];
 /** Whether the Workflows page and the workflow's view say it stopped. */
 const shownStopped = async (builder: Person, app: string) => {
   const overview = await builder.api.workflows.overview();
-  const { summary } = await builder.api.workflows.get(app, "weekly");
+  const { summary, triggers } = await builder.api.workflows.get(app, "weekly");
   return [
     overview.find((workflow) => workflow.app === app)?.scheduleStopped,
     summary.scheduleStopped,
+    triggers.map((trigger) => trigger.type === "schedule" && trigger.stopped),
   ];
 };
 
@@ -383,6 +384,7 @@ describe("a schedule whose run keeps failing to start", () => {
     await expect(shownStopped(builder, app)).resolves.toStrictEqual([
       true,
       true,
+      [true],
     ]);
     const events = await allEvents();
     expect(
@@ -462,6 +464,7 @@ describe("a schedule whose run keeps failing to start", () => {
     await expect(shownStopped(builder, app)).resolves.toStrictEqual([
       false,
       false,
+      [false],
     ]);
     // A failed start then is its first: tried again the minute after.
     await expect(
@@ -502,6 +505,7 @@ describe("a schedule whose run keeps failing to start", () => {
     await expect(shownStopped(builder, app)).resolves.toStrictEqual([
       false,
       false,
+      [false],
     ]);
     const next = await nextRunOf(app);
     await expect(triedAt(builder, app, next, [0])).resolves.toStrictEqual([9]);

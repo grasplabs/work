@@ -578,8 +578,15 @@ export const maxHistoryRecords = 500;
  * copied as it was written (an attempt's, a rollback's, the run's), or,
  * for a step's failure, the step's own, which it never changes once it
  * failed.
+ *
+ * What a record reads of its step as it stands now (whether a failed
+ * attempt was its last) is told once the step has ended: read while the
+ * step is still deciding whether to try again, a failed attempt reads as
+ * one it tries again, and a later read can find it was the last. A
+ * restart forgets the events of what it runs again, with their records.
  */
-export interface HistoryRecord {
+export interface ReadableHistoryRecord {
+  readonly unreadable: false;
   readonly eventId: number;
   readonly at: number;
   readonly type: WorkflowInstanceEventType;
@@ -612,7 +619,26 @@ export interface HistoryRecord {
   readonly error: WorkflowError | null;
   /** For a sleep that started: how long it sleeps. */
   readonly durationMs: number | null;
+  /**
+   * For a rolling back that started: how the run ends once it is done,
+   * `errored` after a failure, `terminated` after a termination; fixed
+   * as it starts.
+   */
+  readonly rollbackEnd: "errored" | "terminated" | null;
 }
+
+/**
+ * An event this engine can't read back (its row changed under it): told
+ * by its ID and time alone, so one bad row doesn't stop every read after
+ * it. It is logged as it is read.
+ */
+export interface UnreadableHistoryRecord {
+  readonly unreadable: true;
+  readonly eventId: number;
+  readonly at: number;
+}
+
+export type HistoryRecord = ReadableHistoryRecord | UnreadableHistoryRecord;
 
 interface RecordRow extends Record<string, SqlStorageValue> {
   seq: number;
@@ -628,6 +654,7 @@ interface RecordRow extends Record<string, SqlStorageValue> {
   step_state: string | null;
   step_attempt: number | null;
   step_error: string | null;
+  rollback_end: string | null;
 }
 
 const stepTypes: ReadonlySet<string> = new Set<StepType>([
@@ -645,7 +672,7 @@ const recordedError = (
   text: string | null | undefined
 ): WorkflowError | null => (typeof text === "string" ? parseError(text) : null);
 
-const stepOfRecord = (row: RecordRow): HistoryRecord["step"] => {
+const stepOfRecord = (row: RecordRow): ReadableHistoryRecord["step"] => {
   if (row.ordinal === null) {
     return null;
   }
@@ -661,7 +688,19 @@ const stepOfRecord = (row: RecordRow): HistoryRecord["step"] => {
   };
 };
 
-const recordOf = (row: RecordRow): HistoryRecord => {
+const rollbackEndOf = (
+  row: RecordRow
+): ReadableHistoryRecord["rollbackEnd"] => {
+  if (row.type !== "rollback_started") {
+    return null;
+  }
+  if (row.rollback_end !== "errored" && row.rollback_end !== "terminated") {
+    throw unreadable(row.seq);
+  }
+  return row.rollback_end;
+};
+
+const readableOf = (row: RecordRow): ReadableHistoryRecord => {
   if (!isEventType(row.type)) {
     throw unreadable(row.seq);
   }
@@ -669,24 +708,34 @@ const recordOf = (row: RecordRow): HistoryRecord => {
   const attemptFailed =
     row.type === "attempt_errored" || row.type === "rollback_attempt_errored";
   const stepFailed = row.step_state === "failed" || row.step_state === "fatal";
+  const endsStep =
+    row.type === "step_errored" || row.type === "rollback_step_errored";
   return {
+    unreadable: false,
     eventId: row.seq,
     at: row.at,
     type: row.type,
     step: stepOfRecord(row),
-    attempt:
-      row.type === "step_errored" && stepFailed
-        ? row.step_attempt
-        : row.attempt,
+    attempt: endsStep && stepFailed ? row.step_attempt : row.attempt,
     final: attemptFailed && stepFailed && row.attempt === row.step_attempt,
-    // A step's failure copies nothing as it is written: its error is the
-    // step's own, fixed once it failed.
+    // A `do` step's failure copies nothing as it is written: its error is
+    // the step's own, fixed once it failed. A rollback's copies its own.
     error: recordedError(
       row.type === "step_errored" ? row.step_error : detail.error
     ),
     durationMs:
       typeof detail.durationMs === "number" ? detail.durationMs : null,
+    rollbackEnd: rollbackEndOf(row),
   };
+};
+
+const recordOf = (row: RecordRow): HistoryRecord => {
+  try {
+    return readableOf(row);
+  } catch (error) {
+    warnRecovered("workflow_history_record_unreadable", error);
+    return { unreadable: true, eventId: row.seq, at: row.at };
+  }
 };
 
 /**
@@ -703,7 +752,8 @@ export const readHistoryRecords = (
     .exec<RecordRow>(
       `SELECT h.seq, h.at, h.type, h.ordinal, h.attempt, h.detail,
          s.name, s.occurrence, s.type AS kind, s.event_type,
-         s.state AS step_state, s.attempt AS step_attempt, s.error AS step_error
+         s.state AS step_state, s.attempt AS step_attempt, s.error AS step_error,
+         CASE WHEN h.type = 'rollback_started' THEN (SELECT rollback_end FROM run) END AS rollback_end
        FROM history AS h
        LEFT JOIN steps AS s ON s.ordinal = h.ordinal
        WHERE h.seq > ?1
@@ -717,3 +767,58 @@ export const readHistoryRecords = (
     more: rows.length > limit,
   };
 };
+
+/**
+ * A step as `readStepIdentities` tells it: who it is and how far it got,
+ * never what it holds.
+ */
+export interface StepIdentity {
+  readonly ordinal: number;
+  readonly name: string;
+  readonly occurrence: number;
+  readonly kind: StepType;
+  /** Its latest attempt; 0 for a step that takes none (a sleep, a wait). */
+  readonly attempt: number;
+}
+
+interface IdentityRow extends Record<string, SqlStorageValue> {
+  ordinal: number;
+  name: string;
+  occurrence: number;
+  kind: string;
+  attempt: number;
+}
+
+/**
+ * The run's steps of kind `kind` (every kind when null), in the order
+ * they were first reached, only those whose name starts with `prefix`
+ * (every name when null).
+ */
+export const readStepIdentities = (
+  sql: SqlStorage,
+  kind: StepType | null,
+  prefix: string | null
+): StepIdentity[] =>
+  sql
+    .exec<IdentityRow>(
+      `SELECT ordinal, name, occurrence, type AS kind, attempt FROM steps
+       WHERE (?1 IS NULL OR type = ?1)
+         AND (?2 IS NULL OR substr(name, 1, length(?2)) = ?2)
+       ORDER BY ordinal`,
+      kind,
+      prefix
+    )
+    .toArray()
+    .flatMap((row) =>
+      isStepType(row.kind)
+        ? [
+            {
+              ordinal: row.ordinal,
+              name: row.name,
+              occurrence: row.occurrence,
+              kind: row.kind,
+              attempt: row.attempt,
+            },
+          ]
+        : []
+    );

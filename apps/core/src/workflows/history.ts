@@ -1,6 +1,12 @@
-import { runIdSchema } from "@grasp-os/shared/ids";
+import { appErrors } from "@grasp-os/shared/apps";
 import {
-  outlineNameOf,
+  appIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "@grasp-os/shared/ids";
+import { isPlatformCode } from "@grasp-os/shared/operations";
+import {
+  reviewedTaskOf,
   runHistoryPageSchema,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
@@ -8,16 +14,22 @@ import type {
   RunHistoryEntry,
   RunHistoryError,
   RunHistoryPage,
+  WorkflowCalls,
 } from "@grasp-os/shared/workflows";
 import type { WorkflowError } from "@grasp-os/workerflow/contracts";
-import type { HistoryRecord } from "@grasp-os/workerflow/run";
+import type {
+  ReadableHistoryRecord,
+  HistoryRecord,
+} from "@grasp-os/workerflow/run";
 
-import { appFor } from "../apps.ts";
+import { callsFor, appFor } from "../apps.ts";
 import type { Member } from "../auth/identity.ts";
 import { decisionOfEventType } from "../decisions/decisions.ts";
 import { runObjectOf } from "./engine.ts";
+import { waitKeyOf, waitStepPrefix } from "./host.ts";
 import { detailsRemoved } from "./retention.ts";
 import { findRun, seesDetails } from "./runs.ts";
+import type { RunRow } from "./runs.ts";
 
 // A run's history, as Grasp's run pages show it: projected, page by page,
 // from what the run's engine journaled (workerflow's `history`), never
@@ -28,32 +40,42 @@ import { findRun, seesDetails } from "./runs.ts";
 //
 // Who may read it: anyone the run's status is shown to (a role in its
 // App), checked again on every page, so a person whose role is taken
-// away reads no further. Another App's run, or none, is
-// `workflow.run_not_found`, whatever the person may do elsewhere.
+// away reads no further. Someone with no role in the run's App finds it
+// as the App isn't there (`app.not_found`), whatever they may do in
+// other Apps; a run that isn't there is `workflow.run_not_found`.
 //
 // What it holds: metadata only. The engine hands core no params, output,
 // step result or event payload for it, so none can reach a page: no
-// input, output, reviewer or review. A step's key (`name:key`, from the
-// App's data) is not shown either: an entry names its task by the step's
-// outline name, and its step by an opaque ID. A failure's message is the
+// input, output, reviewer or review. A step is named (`taskId`) only by a
+// name its version's review shows (`reviewedTaskOf`), without the key an
+// engine name adds (`name:key`, from the App's data); any other name can
+// be made of what the run read, so its entries name no task, and the
+// opaque `stepId` alone tells the step. A failure's message is the
 // workflow's own text, which can hold what the run read, so only those
 // who see the run's details (`seesDetails`: admins, and the person it
-// acts for) read it; anyone else reads its code and the code's words.
-// Once the run's details are removed, its retention over, the history is
-// empty, as the engine's record of it goes too.
+// acts for) read it, with the error's own code; anyone else reads a
+// platform code as it is, any other as `workflow.step_failed`, and
+// generic words. Once the run's details are removed, its retention over,
+// the history is empty, as the engine's record of it goes too.
 //
 // Each logical step is one `stepId` (the engine's ordinal for it, never
 // given to another step): its attempts, a retry's included, are entries
 // of it, numbered from 1; a replay journals nothing, so it adds none, and
 // an attempt whose answer came after another took over records no
-// outcome. Steps of the platform's own (named `$…`: the parameters, a
-// decision's bookkeeping, a held effect's waits) are left out. A
+// outcome. A step whose side effect connect held ends as held, and runs
+// again once the person decided, in steps of core's own
+// (`$grasp:wait:<key>:held:<round>:…`, host.ts): those runs are told as
+// more attempts of the step that was held, numbered on from its own, and
+// the waits between them as `blocked` waits of it, while its held end is
+// no completion. Core's other steps (named `$…`: the parameters, a
+// decision's bookkeeping, a held effect's checks) are left out. A
 // decision's wait is a wait of kind `decision` with the decision's ID;
 // what the decision itself became (answered, timed out) is the decision's
-// own record, read where decisions are.
+// own record, read where decisions are. An event the engine can't read
+// back is told by its place alone (`unreadable`), and the rest still is.
 
-/** The most engine records one page reads, a few at a time. */
-const recordsPerRead = 200;
+/** The most engine records one read asks for. */
+const maxRecordsPerRead = 200;
 
 /** The most reads one page makes, however many records it leaves out. */
 const maxReads = 5;
@@ -64,22 +86,45 @@ const maxMessage = 1000;
 /** What a step's failure reads as for those who don't see its message. */
 const stepFailedText = workflowErrors.create("workflow.step_failed").message;
 
-/** How a page shows failures, and why the run compensates. */
-interface Shown {
+/** A held step's run again, a wait between them, or a check of it. */
+const heldStep =
+  /^\$grasp:wait:(?<key>[0-9a-f]{16}):held:(?<round>[1-9]\d*):(?<rest>.+)$/u;
+
+/** A step whose side effect was held, and its runs since. */
+interface HeldStep {
+  ordinal: number;
+  name: string;
+  /** Its own attempts, the last of which ended as held. */
+  attempts: number;
+  /** Each round of runs again so far: how many attempts its run took. */
+  rounds: Map<number, number>;
+}
+
+/** How a page tells a run's steps. */
+interface Context {
+  /** Whether the person sees the run's details. */
   sees: boolean;
-  cause: "failure" | "cancellation";
+  /** What the run's version's review shows of it; none when none is kept. */
+  reviewed: WorkflowCalls | undefined;
+  /** The run's held steps, by the key core's steps name them by. */
+  heldByKey: ReadonlyMap<string, HeldStep>;
+  /** The same, by the held step's ordinal. */
+  heldByOrdinal: ReadonlyMap<number, HeldStep>;
 }
 
 const errorShown = (
   error: WorkflowError | null,
-  { sees }: Shown
-): RunHistoryError => ({
-  code: error?.code ?? "workflow.step_failed",
-  message:
-    sees && error !== null
-      ? error.message.slice(0, maxMessage)
-      : stepFailedText,
-});
+  { sees }: Context
+): RunHistoryError => {
+  const code = error?.code ?? "workflow.step_failed";
+  if (sees && error !== null) {
+    return { code, message: error.message.slice(0, maxMessage) };
+  }
+  return {
+    code: isPlatformCode(code) ? code : "workflow.step_failed",
+    message: stepFailedText,
+  };
+};
 
 type LifecycleStatus = Exclude<
   Extract<RunHistoryEntry, { kind: "lifecycle" }>["status"],
@@ -88,7 +133,7 @@ type LifecycleStatus = Exclude<
 
 /** The engine's events of the run's status, as the run's status. */
 const lifecycleStatuses: Partial<
-  Record<HistoryRecord["type"], LifecycleStatus>
+  Record<ReadableHistoryRecord["type"], LifecycleStatus>
 > = {
   workflow_queued: "queued",
   workflow_running: "running",
@@ -97,6 +142,35 @@ const lifecycleStatuses: Partial<
   workflow_completed: "completed",
   workflow_errored: "failed",
   workflow_terminated: "cancelled",
+};
+
+/** What an attempt's event tells of its step. */
+const attemptStates: Partial<
+  Record<ReadableHistoryRecord["type"], "started" | "completed" | "retrying">
+> = {
+  attempt_started: "started",
+  attempt_completed: "completed",
+  attempt_errored: "retrying",
+};
+
+/** What a rollback attempt's event tells of its compensation. */
+const compensationStates: Partial<
+  Record<ReadableHistoryRecord["type"], "started" | "completed" | "retrying">
+> = {
+  rollback_attempt_started: "started",
+  rollback_attempt_completed: "completed",
+  rollback_attempt_errored: "retrying",
+};
+
+/** What a sleep's or an event wait's event tells of the wait. */
+const waitStates: Partial<
+  Record<ReadableHistoryRecord["type"], "opened" | "closed">
+> = {
+  sleep_started: "opened",
+  wait_started: "opened",
+  sleep_completed: "closed",
+  wait_completed: "closed",
+  wait_timed_out: "closed",
 };
 
 /** The common fields of the entry `record` gives. */
@@ -109,15 +183,15 @@ const commonOf = (record: HistoryRecord, taskId: string | null) => ({
 
 /** The entry an event of the run's own gives, if any. */
 const lifecycleOf = (
-  record: HistoryRecord,
-  shown: Shown
+  record: ReadableHistoryRecord
 ): RunHistoryEntry | undefined => {
   if (record.type === "rollback_started") {
     return {
       ...commonOf(record, null),
       kind: "lifecycle",
       status: "compensating",
-      cause: shown.cause,
+      // How the run ends once it rolled back, as journaled when it began.
+      cause: record.rollbackEnd === "terminated" ? "cancellation" : "failure",
       activity: "running",
     };
   }
@@ -127,107 +201,88 @@ const lifecycleOf = (
     : { ...commonOf(record, null), kind: "lifecycle", status };
 };
 
-/** What an attempt's event tells of its step. */
-const attemptStates: Partial<
-  Record<HistoryRecord["type"], "started" | "completed" | "retrying">
-> = {
-  attempt_started: "started",
-  attempt_completed: "completed",
-  attempt_errored: "retrying",
-};
+/** The step an entry is told of: its ID and task. */
+interface Told {
+  stepId: string;
+  taskId: string | null;
+}
 
-/** What a rollback attempt's event tells of its compensation. */
-const compensationStates: Partial<
-  Record<HistoryRecord["type"], "started" | "completed" | "failed">
-> = {
-  rollback_attempt_started: "started",
-  rollback_attempt_completed: "completed",
-  rollback_attempt_errored: "failed",
-};
-
-/** What a sleep's or an event wait's event tells of the wait. */
-const waitStates: Partial<Record<HistoryRecord["type"], "opened" | "closed">> =
-  {
-    sleep_started: "opened",
-    wait_started: "opened",
-    sleep_completed: "closed",
-    wait_completed: "closed",
-    wait_timed_out: "closed",
-  };
-
-type RecordStep = NonNullable<HistoryRecord["step"]>;
+/** How a `do` step's events are told. */
+interface AsStep extends Told {
+  /** What its attempts are numbered on from. */
+  offset: number;
+  /** Its completion ended as held, so it is no completion. */
+  held: boolean;
+}
 
 /** The entry an event of a `do` step gives, if any. */
 const stepOf = (
-  record: HistoryRecord,
-  step: RecordStep,
-  shown: Shown
+  record: ReadableHistoryRecord,
+  as: AsStep,
+  context: Context
 ): RunHistoryEntry | undefined => {
   const common = {
-    ...commonOf(record, outlineNameOf(step.name)),
+    ...commonOf(record, as.taskId),
     kind: "step" as const,
-    stepId: `step-${step.ordinal}`,
+    stepId: as.stepId,
   };
+  const attempt = as.offset + Math.max(1, record.attempt ?? 1);
   if (record.type === "step_errored") {
     return {
       ...common,
       state: "failed",
-      // The attempt it failed at; the first for one refused before any.
-      attempt: Math.max(1, record.attempt ?? 1),
-      error: errorShown(record.error, shown),
+      attempt,
+      error: errorShown(record.error, context),
     };
   }
   const state = attemptStates[record.type];
-  // The step's last failure is told once, as the step's.
-  if (state === undefined || record.final) {
+  // The step's last failure is told once, as the step's; a held end is
+  // the start of a wait, told by the wait.
+  if (
+    state === undefined ||
+    record.final ||
+    (state === "completed" && as.held)
+  ) {
     return undefined;
   }
-  return { ...common, state, attempt: record.attempt ?? 1 };
+  return { ...common, state, attempt };
 };
 
 /** The entry an event of a rollback step gives, if any. */
 const compensationOf = (
-  record: HistoryRecord,
-  step: RecordStep,
-  shown: Shown
+  record: ReadableHistoryRecord,
+  as: Told,
+  context: Context
 ): RunHistoryEntry | undefined => {
-  const state = compensationStates[record.type];
-  if (state === undefined) {
-    return undefined;
-  }
   const common = {
-    ...commonOf(record, outlineNameOf(step.name)),
+    ...commonOf(record, as.taskId),
     kind: "compensation" as const,
-    stepId: `step-${step.ordinal}`,
-    attempt: record.attempt ?? 1,
+    stepId: as.stepId,
+    attempt: Math.max(1, record.attempt ?? 1),
   };
-  return state === "failed"
-    ? { ...common, state, error: errorShown(record.error, shown) }
-    : { ...common, state };
+  if (record.type === "rollback_step_errored") {
+    return {
+      ...common,
+      state: "failed",
+      error: errorShown(record.error, context),
+    };
+  }
+  const state = compensationStates[record.type];
+  // A rollback's last failure is told once, as the rollback's.
+  return state === undefined || record.final ? undefined : { ...common, state };
 };
 
-/** What a wait waits for: time, a decision, or another event. */
-const waitKindOf = (
-  step: RecordStep,
-  decision: string | undefined
-): "timer" | "event" | "decision" => {
-  if (step.kind === "sleep") {
-    return "timer";
-  }
-  return decision === undefined ? "event" : "decision";
-};
+type WaitKind = Extract<RunHistoryEntry, { kind: "wait" }>["waitKind"];
 
 /** The entry an event of a sleep or an event wait gives, if any. */
 const waitOf = (
-  record: HistoryRecord,
-  step: RecordStep
+  record: ReadableHistoryRecord,
+  as: { taskId: string | null; waitId: string; waitKind: WaitKind }
 ): RunHistoryEntry | undefined => {
   const state = waitStates[record.type];
   if (state === undefined) {
     return undefined;
   }
-  const decision =
-    step.eventType === null ? undefined : decisionOfEventType(step.eventType);
   // A sleep's length is fixed as it starts; an event wait's deadline
   // moves when a paused run resumes, so none is told.
   const deadline =
@@ -235,35 +290,172 @@ const waitOf = (
       ? record.at + record.durationMs
       : null;
   return {
-    ...commonOf(record, outlineNameOf(step.name)),
+    ...commonOf(record, as.taskId),
     kind: "wait",
-    waitId: decision ?? `step-${step.ordinal}`,
-    waitKind: waitKindOf(step, decision),
+    ...as,
     state,
     deadline,
   };
 };
 
-/** The entry `record` gives the page, or none for what it leaves out. */
-export const entryOf = (
-  record: HistoryRecord,
-  shown: Shown
+/** The entry an event of one of core's own steps gives, if any. */
+const coreStepOf = (
+  record: ReadableHistoryRecord,
+  step: NonNullable<ReadableHistoryRecord["step"]>,
+  context: Context
 ): RunHistoryEntry | undefined => {
-  const { step } = record;
-  if (step === null) {
-    return lifecycleOf(record, shown);
-  }
-  // The platform's own steps are no task of the workflow's.
-  if (step.name.startsWith("$")) {
+  const parts = heldStep.exec(step.name)?.groups;
+  const held =
+    parts?.key === undefined ? undefined : context.heldByKey.get(parts.key);
+  if (parts === undefined || held === undefined) {
     return undefined;
   }
+  const round = Number(parts.round);
+  const told = {
+    stepId: `step-${held.ordinal}`,
+    taskId: reviewedTaskOf(context.reviewed, held.name),
+  };
+  if (parts.rest === "run" && step.kind === "do") {
+    let offset = held.attempts;
+    for (const [earlier, attempts] of held.rounds) {
+      if (earlier < round) {
+        offset += attempts;
+      }
+    }
+    return stepOf(
+      record,
+      { ...told, offset, held: held.rounds.has(round + 1) },
+      context
+    );
+  }
+  if (step.kind === "sleep") {
+    return waitOf(record, {
+      taskId: told.taskId,
+      waitId: told.stepId,
+      waitKind: "blocked",
+    });
+  }
+  return undefined;
+};
+
+/** What a wait waits for: time, a decision, or another event. */
+const waitKindOf = (
+  step: NonNullable<ReadableHistoryRecord["step"]>,
+  decision: string | undefined
+): WaitKind => {
+  if (step.kind === "sleep") {
+    return "timer";
+  }
+  return decision === undefined ? "event" : "decision";
+};
+
+/** The entry `record` gives the page, or none for what it leaves out. */
+const entryOf = (
+  record: HistoryRecord,
+  context: Context
+): RunHistoryEntry | undefined => {
+  if (record.unreadable) {
+    return { ...commonOf(record, null), kind: "unreadable" };
+  }
+  const { step } = record;
+  if (step === null) {
+    return lifecycleOf(record);
+  }
+  if (step.name.startsWith("$")) {
+    return coreStepOf(record, step, context);
+  }
+  const told = {
+    stepId: `step-${step.ordinal}`,
+    taskId: reviewedTaskOf(context.reviewed, step.name),
+  };
   if (step.kind === "do") {
-    return stepOf(record, step, shown);
+    const held = context.heldByOrdinal.get(step.ordinal);
+    return stepOf(
+      record,
+      { ...told, offset: 0, held: held?.rounds.has(1) === true },
+      context
+    );
   }
   if (step.kind === "rollback") {
-    return compensationOf(record, step, shown);
+    return compensationOf(record, told, context);
   }
-  return waitOf(record, step);
+  const decision =
+    step.eventType === null ? undefined : decisionOfEventType(step.eventType);
+  return waitOf(record, {
+    taskId: told.taskId,
+    waitId: decision ?? told.stepId,
+    waitKind: waitKindOf(step, decision),
+  });
+};
+
+type RunStub = ReturnType<typeof runObjectOf>;
+
+/**
+ * The run's steps whose side effect was held, and their rounds of runs
+ * again: read only for a run that had one (its held steps are core's, so
+ * a short read of those alone tells), then matched to the steps they are
+ * of by the key core named them by (`waitKeyOf`).
+ */
+const heldStepsOf = async (stub: RunStub): Promise<HeldStep[]> => {
+  const waits =
+    (await stub.stepIdentities({ kind: null, prefix: waitStepPrefix })) ?? [];
+  const rounds = new Map<string, Map<number, number>>();
+  for (const wait of waits) {
+    const parts = heldStep.exec(wait.name)?.groups;
+    if (parts?.key !== undefined) {
+      const ofKey = rounds.get(parts.key) ?? new Map<number, number>();
+      const round = Number(parts.round);
+      const attempts =
+        parts.rest === "run" && wait.kind === "do" ? wait.attempt : 0;
+      ofKey.set(round, Math.max(ofKey.get(round) ?? 0, attempts));
+      rounds.set(parts.key, ofKey);
+    }
+  }
+  if (rounds.size === 0) {
+    return [];
+  }
+  const steps = (await stub.stepIdentities({ kind: "do", prefix: null })) ?? [];
+  const held: HeldStep[] = [];
+  for (const step of steps) {
+    if (!step.name.startsWith("$")) {
+      // oxlint-disable-next-line no-await-in-loop -- a digest each, of names alone
+      const ofKey = rounds.get(await waitKeyOf(step.name));
+      if (ofKey !== undefined) {
+        held.push({
+          ordinal: step.ordinal,
+          name: step.name,
+          attempts: step.attempt,
+          rounds: ofKey,
+        });
+      }
+    }
+  }
+  return held;
+};
+
+/**
+ * What the run's version's review shows of its workflow; none when the
+ * version keeps none (or is gone), and then no step is named.
+ */
+const reviewedOf = async (
+  env: Env,
+  row: RunRow
+): Promise<WorkflowCalls | undefined> => {
+  try {
+    return await callsFor(env, {
+      app: appIdSchema.parse(row.appId),
+      version: row.version,
+      workflow: workflowIdSchema.parse(row.workflowId),
+    });
+  } catch (error) {
+    if (
+      workflowErrors.codeOf(error) === "workflow.calls_not_kept" ||
+      appErrors.codeOf(error) === "app.version_not_found"
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
 };
 
 /**
@@ -291,12 +483,23 @@ export const runHistory = async (
   if (detailsRemoved(env, row)) {
     return done;
   }
-  const shown: Shown = {
+  const stub = runObjectOf(env, row.id);
+  const [reviewed, held] = await Promise.all([
+    reviewedOf(env, row),
+    heldStepsOf(stub),
+  ]);
+  const context: Context = {
     sees: seesDetails(by, row, owner),
-    cause: row.cancelRequestedAt === null ? "failure" : "cancellation",
+    reviewed,
+    heldByKey: new Map(
+      await Promise.all(
+        held.map(async (step) => [await waitKeyOf(step.name), step] as const)
+      )
+    ),
+    heldByOrdinal: new Map(held.map((step) => [step.ordinal, step])),
   };
   const { pageSize, cursor } = query.data;
-  const stub = runObjectOf(env, row.id);
+  const limit = Math.min(maxRecordsPerRead, pageSize * 4);
   const items: RunHistoryEntry[] = [];
   let after = cursor === null ? 0 : Number(cursor);
   let more = true;
@@ -306,7 +509,7 @@ export const runHistory = async (
     read += 1
   ) {
     // oxlint-disable-next-line no-await-in-loop -- each read goes on from the one before
-    const page = await stub.history({ after, limit: recordsPerRead });
+    const page = await stub.history({ after, limit });
     if (page === undefined) {
       // The engine has no record of it: still starting, or never started.
       return done;
@@ -319,7 +522,7 @@ export const runHistory = async (
         break;
       }
       after = record.eventId;
-      const entry = entryOf(record, shown);
+      const entry = entryOf(record, context);
       if (entry !== undefined) {
         items.push(entry);
       }

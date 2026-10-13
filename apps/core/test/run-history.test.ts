@@ -2,13 +2,14 @@ import type {
   RunHistoryEntry,
   RunHistoryPage,
 } from "@grasp-os/shared/workflows";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { approvalApp, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns, finished } from "./runs.ts";
+import { endLiveRuns, finished, runObject } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith, workflowFiles } from "./workflow-apps.ts";
 
@@ -58,6 +59,9 @@ const said = (entry: RunHistoryEntry): string => {
     }
     case "wait": {
       return `wait ${entry.taskId} ${entry.waitKind} ${entry.state}`;
+    }
+    case "unreadable": {
+      return "unreadable";
     }
     default: {
       return entry satisfies never;
@@ -165,7 +169,7 @@ describe("a run's history", { timeout: 60_000 }, () => {
     ).not.toContain(secret);
   });
 
-  it("shows a failure's message only to those who see the run's details, and nothing to someone without a role or once its details are removed", async () => {
+  it("shows a failure's message and App code only to those who see the run's details, and nothing to someone with a role only in another App or once its details are removed", async () => {
     const builder = await personApi("builder");
     const user = await personApi("user");
     const outsider = await personApi("user");
@@ -183,6 +187,16 @@ describe("a run's history", { timeout: 60_000 }, () => {
     await builder.api.apps.members.add(app, {
       type: "person",
       id: user.userId,
+      role: "user",
+    });
+    // A role in another App opens none of this one's runs.
+    const elsewhere = await appWith(
+      builder,
+      workflowFiles("idle", "  return null;")
+    );
+    await builder.api.apps.members.add(elsewhere, {
+      type: "person",
+      id: outsider.userId,
       role: "user",
     });
     const run = await builder.api.workflows.start(app, "failing");
@@ -232,8 +246,9 @@ describe("a run's history", { timeout: 60_000 }, () => {
         code: "invoice.missing",
         message: "Invoice INV-7 of Acme is missing",
       },
+      // An App's own code can be what it read, as its message can.
       other: {
-        code: "invoice.missing",
+        code: "workflow.step_failed",
         message: "A step of the workflow failed.",
       },
       byAdmin: {
@@ -299,9 +314,93 @@ describe("a run's history", { timeout: 60_000 }, () => {
         [decision, "decision", "closed"],
       ],
       open: 1,
-      tasks: [null, "review"],
+      // The approval workflow asks whoever its input names, so its review
+      // can't read its steps: no entry names a task.
+      tasks: [null],
       last: "run completed",
     });
     expect(JSON.stringify(entries)).not.toContain(admin.userId);
+  });
+
+  it("names a task only by a name the review shows, never by a step's key or a name made of what the run read", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, {
+      // Keyed by the customer: the key is the App's data.
+      ...workflowFiles(
+        "keyed",
+        `  await step.do("charge", { description: "Charge", key: String(input?.customer) }, async () => 1);`,
+        { charge: 1 }
+      ),
+      // A name made of the input: the review can't read the steps.
+      ...workflowFiles(
+        "dynamic",
+        `  await step.do("charge-" + String(input?.customer), { description: "Charge" }, async () => 1);`,
+        { "charge-undefined": 1 }
+      ),
+    });
+    const customer = `customer-${crypto.randomUUID()}`;
+    const keyed = await builder.api.workflows.start(app, "keyed", {
+      customer,
+    });
+    const dynamic = await builder.api.workflows.start(app, "dynamic", {
+      customer,
+    });
+    await Promise.all([finished(keyed.id), finished(dynamic.id)]);
+
+    const { entries: ofKeyed } = await historyOf(builder, keyed.id);
+    const { entries: ofDynamic } = await historyOf(builder, dynamic.id);
+
+    expect({
+      keyed: [
+        ...new Set(
+          ofKeyed
+            .filter(({ kind }) => kind === "step")
+            .map(({ taskId }) => taskId)
+        ),
+      ],
+      dynamic: [
+        ...new Set(
+          ofDynamic
+            .filter(({ kind }) => kind === "step")
+            .map(({ taskId }) => taskId)
+        ),
+      ],
+    }).toStrictEqual({ keyed: ["charge"], dynamic: [null] });
+    expect(JSON.stringify([ofKeyed, ofDynamic])).not.toContain(customer);
+  });
+
+  it("tells an event the engine can't read back by its place alone, and the rest as it was", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, flaky);
+    const run = await builder.api.workflows.start(app, "flaky", {
+      secret: "s",
+    });
+    await finished(run.id);
+    const { entries: before } = await historyOf(builder, run.id);
+    const broken = before.find(
+      (entry) => entry.kind === "step" && entry.state === "retrying"
+    );
+    await runInDurableObject(runObject(run.id), (_, state) => {
+      state.storage.sql.exec(
+        "UPDATE history SET detail = 'not json' WHERE seq = ?",
+        broken?.sequence ?? 0
+      );
+    });
+
+    const { entries: after } = await historyOf(builder, run.id, 4);
+
+    expect(after).toStrictEqual(
+      before.map((entry) =>
+        entry === broken
+          ? {
+              id: entry.id,
+              sequence: entry.sequence,
+              taskId: null,
+              at: entry.at,
+              kind: "unreadable",
+            }
+          : entry
+      )
+    );
   });
 });

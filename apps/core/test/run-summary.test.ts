@@ -139,9 +139,12 @@ describe("a run's summary", { timeout: 60_000 }, () => {
         })
       ),
     }).toStrictEqual({
+      // The approval workflow asks whoever its input names, so its review
+      // can't read its steps, and names none (a keyed decision of a
+      // workflow its review reads is named, below).
       waiting: {
         status: "waiting",
-        waits: [{ kind: "decision", name: "review", expiresAt: 0 }],
+        waits: [{ kind: "decision", name: "", expiresAt: 0 }],
         control: {
           canPause: true,
           canResume: false,
@@ -152,7 +155,7 @@ describe("a run's summary", { timeout: 60_000 }, () => {
       // Pausing keeps what it waits for.
       paused: {
         status: "paused",
-        waits: [{ kind: "decision", name: "review", expiresAt: 0 }],
+        waits: [{ kind: "decision", name: "", expiresAt: 0 }],
         control: {
           canPause: false,
           canResume: true,
@@ -210,6 +213,58 @@ describe("a run's summary", { timeout: 60_000 }, () => {
       control: none,
       otherApp: "workflow.run_not_found",
     });
+  });
+
+  it("name a decision it waits for as the version's review does, without the key it is asked under", async () => {
+    const builder = await personApi("builder");
+    const user = await personApi("user");
+    const invoice = `invoice-${crypto.randomUUID()}`;
+    const app = await appWith(builder, {
+      "workflows/keyed.ts": `import { person, workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow(
+  "keyed",
+  {
+    params: { reviewer: person({ label: "Reviewer", default: "role:admin" }) },
+    input: z.object({ invoice: z.string() }),
+  },
+  async (step, { input, params }) =>
+    await step.decision("review", {
+      key: input.invoice,
+      description: "Approve the invoice",
+      from: params.reviewer,
+      ask: async () => {},
+      timeout: "7 days",
+    })
+);
+`,
+      "workflows/keyed.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./keyed.ts";
+
+export default workflowTests(definition, [
+  { name: "waits", input: { invoice: "i" }, decisions: { review: { approved: true, by: "anna" } }, expect: {} },
+]);
+`,
+    });
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const { id: run } = await builder.api.screens.startRun(app, "keyed", {
+      invoice,
+    });
+
+    const waiting = await summaryWhen(
+      user,
+      app,
+      run,
+      ({ waits }) => waits.length === 1
+    );
+
+    expect(waiting.waits.map(({ name }) => name)).toStrictEqual(["review"]);
+    expect(JSON.stringify(waiting)).not.toContain(invoice);
   });
 
   it("show a pause still being applied, which leaves cancelling open, and a failed run's error", async () => {

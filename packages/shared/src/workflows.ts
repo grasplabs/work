@@ -522,9 +522,11 @@ export interface RunSummary {
 }
 
 /**
- * A step's or a compensation's failure as a run's history shows it: its
- * code, and its message only to those who see the run's details (admins,
- * and the person it acts for); anyone else reads the code's own words.
+ * A step's or a compensation's failure as a run's history shows it. To
+ * those who see the run's details (admins, and the person it acts for):
+ * its code and message. To anyone else: the code only when it is the
+ * platform's own (`isPlatformCode`), otherwise `workflow.step_failed`,
+ * and the code's own words, never the workflow's message.
  */
 export interface RunHistoryError {
   code: string;
@@ -534,11 +536,19 @@ export interface RunHistoryError {
 /**
  * One entry of a run's history (core's workflows/history.ts), projected
  * from the engine's journal, never guessed: what happened, in the order
- * it happened (`sequence`, the engine's event ID), when (`at`, Unix
- * milliseconds) and to which task (`taskId`, the step's name as its
- * outline has it; null for the run's own). Metadata only: no input,
- * output, parameter, reviewer or review. One logical step's retries are
- * one `stepId`, its attempts numbered from 1; a replay adds nothing.
+ * it happened (`sequence`, the engine's event ID) and when (`at`, Unix
+ * milliseconds). `taskId` is the step's name as the version's reviewed
+ * outline has it, and null for the run's own entries and for a step
+ * whose name the review doesn't show (it can be made of the App's data).
+ * Metadata only: no input, output, parameter, reviewer or review. One
+ * logical step's retries are one `stepId`, its attempts numbered from 1,
+ * its runs again after a held side effect included; a replay adds
+ * nothing.
+ *
+ * Read while a step is still deciding whether to try again, its failed
+ * attempt reads as `retrying`; once the step has failed at it, the same
+ * attempt reads as the step's `failed` instead. A restart forgets the
+ * history of what it runs again.
  */
 export type RunHistoryEntry = {
   id: string;
@@ -572,16 +582,20 @@ export type RunHistoryEntry = {
     }
   | {
       kind: "wait";
-      /** A decision's ID for a decision; the step's own otherwise. */
+      /** A decision's ID for a decision; the wait's own otherwise. */
       waitId: string;
-      waitKind: "timer" | "event" | "decision";
+      /**
+       * `blocked`: a side effect of the step `stepId` is held until the
+       * person the run acts for decides.
+       */
+      waitKind: "timer" | "event" | "decision" | "blocked";
       state: "opened" | "closed";
       deadline: number | null;
     }
   | {
       kind: "compensation";
       stepId: string;
-      state: "started" | "completed";
+      state: "started" | "completed" | "retrying";
       attempt: number;
     }
   | {
@@ -590,6 +604,13 @@ export type RunHistoryEntry = {
       state: "failed";
       attempt: number;
       error: RunHistoryError;
+    }
+  | {
+      /**
+       * An event the engine couldn't read back: told by its place and time
+       * alone, so the rest of the history still reads.
+       */
+      kind: "unreadable";
     }
 );
 
@@ -822,6 +843,22 @@ export const stepReviewed = (
   calls.steps === null ||
   engineStep === paramsStep ||
   Object.hasOwn(calls.steps, outlineNameOf(engineStep));
+
+/**
+ * The task a step of engine name `engineStep` is, as `calls` (its
+ * version's review) names it: its outline name, without the key or part
+ * an engine name adds. Null when the review doesn't show that name, or
+ * shows no steps at all (`steps` null, or no review kept): a name the
+ * review didn't read can be made of what the run read, so it isn't shown.
+ */
+export const reviewedTaskOf = (
+  calls: WorkflowCalls | undefined,
+  engineStep: string
+): string | null => {
+  const steps = calls?.steps ?? null;
+  const name = outlineNameOf(engineStep);
+  return steps !== null && Object.hasOwn(steps, name) ? name : null;
+};
 
 /**
  * Whether a step's function may call `binding`, by the step's engine name:

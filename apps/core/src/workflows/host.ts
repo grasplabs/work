@@ -426,7 +426,7 @@ const coreStepReserve = 5;
  * (workflow code can't name one), but count as the run's own against the
  * reserve, so waiting can't use up the steps core's end needs.
  */
-const waitStepPrefix = `${coreStepPrefix}wait:`;
+export const waitStepPrefix = `${coreStepPrefix}wait:`;
 
 /**
  * How long a run first waits before it checks a held side effect again;
@@ -447,7 +447,7 @@ const heldCheckRetries = 5;
  * A short, stable key for the step `name` a wait holds, as the wait's own
  * step names take it: a step's name can be as long as a step name may be.
  */
-const waitKeyOf = async (name: unknown): Promise<string> => {
+export const waitKeyOf = async (name: unknown): Promise<string> => {
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(String(name))
@@ -1018,14 +1018,7 @@ export class RunHost extends RpcTarget {
     try {
       this.#requireUntampered();
       step = checked(stepNameSchema, name);
-      // The step's name is the isolate's to say: one its review doesn't
-      // show can't run, so no code runs under a name of its own making.
-      // Caught or not, it ends the run (`#refuseTampering`).
-      if (!stepReviewed(this.#run.calls, step)) {
-        const error = workflowErrors.create("workflow.step_not_reviewed");
-        error.message = `Step "${step}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;
-        await this.#refuseTampering(error, { step, call: null });
-      }
+      await this.#requireStepReviewed(step);
       const parsed = checked(doOptionsSchema, options);
       sideEffect = parsed.sideEffect === true;
       input = inputShape(parsed.input);
@@ -1180,6 +1173,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       const step = checked(stepNameSchema, name);
+      await this.#requireStepReviewed(step);
       const ms = checked(milliseconds, duration);
       await this.#step.sleep(step, ms);
       return null;
@@ -1485,6 +1479,23 @@ export class RunHost extends RpcTarget {
    * (`#requireUntampered`), and the run fails with it (`tampered`).
    * Audited once per activation, which the run's failure ends.
    */
+  /**
+   * Refuses a step whose name the version's review doesn't show: a `do`,
+   * a sleep or a decision's wait alike. The name is the isolate's to say,
+   * so no code runs, and no wait is journaled, under a name of its own
+   * making (one made of what the run read, which its history would show).
+   * Caught or not, it ends the run (`#refuseTampering`). When the review
+   * couldn't read the steps, every name may run (`stepReviewed`), and the
+   * run's history names none of them.
+   */
+  async #requireStepReviewed(step: string): Promise<void> {
+    if (!stepReviewed(this.#run.calls, step)) {
+      const error = workflowErrors.create("workflow.step_not_reviewed");
+      error.message = `Step "${step}" isn't one the review of this version shows: run steps only as the workflow's function writes them.`;
+      await this.#refuseTampering(error, { step, call: null });
+    }
+  }
+
   async #refuseTampering(
     error: Error,
     { step, call }: { step: string | null; call: string | null }
@@ -1854,6 +1865,7 @@ export class RunHost extends RpcTarget {
     return await settle(async () => {
       this.#requireUntampered();
       const step = checked(stepNameSchema, name);
+      await this.#requireStepReviewed(step);
       const { decision, timeout, last } = checked(decisionWaitSchema, options);
       // Whether it was answered when the run first got here, and when that
       // was: recorded, so every replay decides as the first activation did

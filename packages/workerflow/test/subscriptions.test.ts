@@ -584,7 +584,9 @@ describe("the history a host reads", () => {
       after: 0,
       limit: 500,
     });
-    const steps = failing?.records.filter(({ step }) => step !== null) ?? [];
+    const steps = (failing?.records ?? []).flatMap((record) =>
+      record.unreadable || record.step === null ? [] : [record]
+    );
     const ordinals = new Set(steps.map(({ step }) => step?.ordinal));
     const done = await runObject("orders", again).history({
       after: 0,
@@ -646,9 +648,16 @@ describe("the history a host reads", () => {
       limit: 500,
     });
 
-    // A page holds at least one record, and never more than the bound.
+    // A page holds at least one record, and never more than the bound:
+    // a run of 130 steps has over 500 events.
+    const long = newId();
+    await workflow("many-steps").create({ id: long, params: { steps: 130 } });
+    await ended("many-steps", long);
     const least = await object.history({ after: 0, limit: 0 });
-    const most = await object.history({ after: 0, limit: 10_000 });
+    const most = await runObject("many-steps", long).history({
+      after: 0,
+      limit: 10_000,
+    });
     const none = await runObject("orders", newId()).history({
       after: 0,
       limit: 1,
@@ -658,15 +667,66 @@ describe("the history a host reads", () => {
       more: [first?.more, rest?.more],
       joined: [...(first?.records ?? []), ...(rest?.records ?? [])],
       least,
-      most,
+      most: [most?.records.length, most?.more],
       none,
     }).toStrictEqual({
       more: [true, false],
       joined: whole?.records,
       least: { records: whole?.records.slice(0, 1), more: true },
-      most: whole,
+      most: [500, true],
       none: undefined,
     });
+  });
+
+  it("tells an event it can't read back by its ID and time alone, and goes on past it", async () => {
+    const id = newId();
+    await workflow("orders").create({ id });
+    await ended("orders", id);
+    const object = runObject("orders", id);
+    const before = await object.history({ after: 0, limit: 500 });
+    const broken = before?.records[3];
+    await runInDurableObject(object, (_, state) => {
+      state.storage.sql.exec(
+        "UPDATE history SET detail = 'not json', type = 'attempt_errored' WHERE seq = ?",
+        broken?.eventId ?? 0
+      );
+    });
+
+    const after = await object.history({ after: 0, limit: 500 });
+
+    expect(after?.records).toStrictEqual(
+      before?.records.map((record) =>
+        record === broken
+          ? { unreadable: true, eventId: record.eventId, at: record.at }
+          : record
+      )
+    );
+  });
+
+  it("tells a host its steps by kind and name, and how far each got, without what they hold", async () => {
+    const id = newId();
+    const secret = `secret-${id}`;
+    await workflow("retrying").create({
+      id,
+      params: {
+        secret,
+        fails: 1,
+        config: { retries: { limit: 1, delay: 0, backoff: "constant" } },
+      },
+    });
+    await ended("retrying", id);
+    const object = runObject("retrying", id);
+
+    const all = await object.stepIdentities({ kind: null, prefix: null });
+    const named = await object.stepIdentities({ kind: "do", prefix: "fla" });
+    const none = await object.stepIdentities({ kind: "sleep", prefix: null });
+
+    expect({ all, named, none }).toMatchObject({
+      all: [{ name: "flaky", occurrence: 1, kind: "do", attempt: 2 }],
+      named: all,
+      none: [],
+    });
+    expect(JSON.stringify(all)).not.toContain(secret);
   });
 });
 
