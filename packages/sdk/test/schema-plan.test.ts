@@ -483,3 +483,67 @@ describe("changes that need a migration", () => {
     ).toStrictEqual([{ table: "", reason: "contract_invalid" }]);
   });
 });
+
+/** What a store reserved of `manifest`: its tables' fields, as declared. */
+const reservedOf = (manifest: SchemaManifest) =>
+  Object.fromEntries(
+    Object.entries(manifest.tables).map(([table, { fields }]) => [
+      table,
+      fields,
+    ])
+  );
+
+describe("a field the store reserved", () => {
+  const category = notes({
+    ...noteFields,
+    category: v.string().max(20).default("general"),
+  });
+
+  test("is added again as it was, and refused with any other descriptor", () => {
+    const reserved = reservedOf(category);
+    expect(planSchemaChange(v1, category, reserved)).toMatchObject({
+      accepted: true,
+      filledFields: [{ table: "notes", field: "category" }],
+    });
+    // Another type, or the same type without its default: either way the
+    // values a backfill filled in might not mean what the field says.
+    for (const other of [
+      v.number().optional(),
+      v.string().max(20).optional(),
+      v.string().max(20).default("news"),
+    ]) {
+      expect(
+        refusedOf(
+          planSchemaChange(
+            v1,
+            notes({ ...noteFields, category: other }),
+            reserved
+          )
+        )
+      ).toStrictEqual([
+        { table: "notes", field: "category", reason: "reserved_field_changed" },
+      ]);
+    }
+  });
+
+  test("is refused with another descriptor on a table the schema adds", () => {
+    const tags = (asNumber: boolean) =>
+      schemaManifest(
+        defineSchema({
+          notes: defineTable(noteFields),
+          tags: defineTable({ name: asNumber ? v.number() : v.string() }),
+        }),
+        {
+          tables: {
+            notes: { read: "owner", write: "owner" },
+            tags: { read: "owner", write: "owner" },
+          },
+        }
+      );
+    const reserved = reservedOf(tags(false));
+    expect(planSchemaChange(v1, tags(false), reserved).accepted).toBeTruthy();
+    expect(refusedOf(planSchemaChange(v1, tags(true), reserved))).toStrictEqual(
+      [{ table: "tags", field: "name", reason: "reserved_field_changed" }]
+    );
+  });
+});

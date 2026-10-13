@@ -50,6 +50,7 @@ export type {
   PlanRefusal,
   PlanRefusalReason,
   RefusedPlan,
+  ReservedFields,
   SchemaPlan,
 } from "./schema-plan.ts";
 export {

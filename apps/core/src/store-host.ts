@@ -1,8 +1,10 @@
 import { ValueDefinitionError } from "@grasp-os/sdk";
+import type { ValueDescriptor } from "@grasp-os/sdk";
 import {
   manifestText,
   planSchemaChange,
   readSchemaManifest,
+  schemaFromDescriptor,
   SchemaDefinitionError,
   schemaHash as hashOf,
 } from "@grasp-os/sdk/host";
@@ -10,6 +12,7 @@ import type {
   AcceptedPlan,
   PlannedField,
   ReadManifest,
+  ReservedFields,
   SchemaManifest,
   SchemaPlan,
 } from "@grasp-os/sdk/host";
@@ -79,11 +82,13 @@ import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import {
+  abandonedTargets,
   backfills,
   outbox,
   receipts,
   recordRefs,
   records,
+  reservedFields,
   schemaActivations,
   schemas,
   store,
@@ -100,6 +105,7 @@ import {
   handOver,
 } from "./outbox-delivery.ts";
 import type { DrainOptions, OutboxConsumers } from "./outbox-delivery.ts";
+import { recordBackfillAbandoned } from "./store-abandon.ts";
 import { keepStoreBackfillGoing } from "./store-backfill.ts";
 import { cursorKeysOf, openCursor, sealCursor } from "./store-cursors.ts";
 import type { CursorBinding, CursorKeys } from "./store-cursors.ts";
@@ -318,6 +324,8 @@ const purgedTables = [
   "sdk_records",
   "sdk_schemas",
   "sdk_schema_backfills",
+  "sdk_reserved_fields",
+  "sdk_abandoned_targets",
   "sdk_change_outbox",
   "sdk_mutation_receipts",
   "sdk_tables",
@@ -533,9 +541,14 @@ export interface BackfillOutcome {
   failure: BackfillFailure | null;
 }
 
-/** Whether a schema the store recorded is in force (`schemaStatus`). */
+/**
+ * Whether a schema the store recorded is in force (`schemaStatus`):
+ * `abandoned` when an admin abandoned the pending target that held it for
+ * the consumer asked about (`abandonBackfill`), or that alone held it.
+ */
 export type SchemaStatus =
   | { state: "active" }
+  | { state: "abandoned" }
   | {
       state: "pending" | "failed";
       target: string;
@@ -559,6 +572,56 @@ const failureSchema = z.union([
   }),
   z.strictObject({ reason: z.literal("stalled") }),
 ]);
+
+/**
+ * A failed pending target an admin abandoned (`abandonBackfill`): what
+ * its backfill had done and why it failed, the schemas and the consumers'
+ * receipts it took out of force, the fields it reserved, and who
+ * abandoned it when. The record its audit event is made from alone.
+ */
+export interface BackfillAbandonment {
+  target: string;
+  attempt: number;
+  scanned: number;
+  filled: number;
+  failure: BackfillFailure;
+  schemas: string[];
+  consumers: SchemaConsumer[];
+  reserved: { table: string; field: string }[];
+  abandonedBy: AuditActor;
+  abandonedAt: number;
+}
+
+/** An admin's abandonment of a failed target, as asked (`abandonBackfill`). */
+const abandonSchema = z.strictObject({
+  target: z.string().regex(/^[0-9a-f]{64}$/u),
+  attempt: z.number().int().min(1),
+});
+export type BackfillAbandon = z.input<typeof abandonSchema>;
+
+const consumersSchema = z.array(z.tuple([z.string(), z.number().int().min(1)]));
+
+const plannedFieldsSchema = z.array(z.tuple([z.string(), z.string()]));
+
+/** An abandonment as its row (`sdk_abandoned_targets`) keeps it, read back. */
+const abandonmentOf = (
+  row: typeof abandonedTargets.$inferSelect
+): BackfillAbandonment => ({
+  target: row.targetHash,
+  attempt: row.attempt,
+  scanned: row.scanned,
+  filled: row.filled,
+  failure: failureSchema.parse(JSON.parse(row.failure)),
+  schemas: z.array(z.string()).parse(JSON.parse(row.schemas)),
+  consumers: consumersSchema
+    .parse(JSON.parse(row.consumers))
+    .map(([resourceId, resourceVersion]) => ({ resourceId, resourceVersion })),
+  reserved: plannedFieldsSchema
+    .parse(JSON.parse(row.reserved))
+    .map(([table, field]) => ({ table, field })),
+  abandonedBy: auditActorSchema.parse(JSON.parse(row.abandonedBy)),
+  abandonedAt: row.abandonedAt,
+});
 
 /** Hand-overs in a row without progress that fail a backfill as stalled. */
 export const backfillStallLimit = 3;
@@ -627,6 +690,8 @@ const ontoPending = (
   // it couldn't run until the backfill is retried (`retryBackfill`).
   if (pending.state === "failed") {
     throw migrationErrors.create("migration.backfill_failed", {
+      target: pending.hash,
+      attempt: pending.attempt,
       failure: pending.failure === null ? null : { ...pending.failure },
     });
   }
@@ -765,6 +830,12 @@ export class StoreHost {
   #keys: CursorKeys | undefined;
   /** Each schema read so far, by hash (`#pinned`). */
   readonly #schemas = new Map<string, PinnedSchema>();
+  /**
+   * Moved on by every abandonment (`abandonBackfill`): a schema read while
+   * one committed isn't kept (`#pinned`), so none taken out of force stays
+   * cached.
+   */
+  #schemasGeneration = 0;
   /** The store's contract as last read, by its hash (`#contractNow`). */
   #contract: StoreContract | undefined;
   /** The defaulted fields of each contract read so far, by hash. */
@@ -804,8 +875,10 @@ export class StoreHost {
    * what it writes. The receipt names the pending contract and says it is
    * pending. While a target is pending, a schema it holds already is
    * taken onto it, and any other change is refused (`migration.pending`,
-   * retryable; `migration.backfill_failed` once its backfill failed).
-   * The contract is checked against the
+   * retryable; `migration.backfill_failed` once its backfill failed,
+   * until an admin abandons it, `abandonBackfill`). A field an abandoned
+   * target added is reserved: added again only as it was
+   * (`reserved_field_changed` otherwise). The contract is checked against the
    * store's own recorded schemas on every call: each must fit it
    * unchanged, or it is `migration.metadata_corrupt`, as is one whose text
    * doesn't read, isn't canonical or doesn't hash to its hash. A store
@@ -925,7 +998,11 @@ export class StoreHost {
         onto: false,
       };
     }
-    const plan = planSchemaChange(base?.manifest ?? null, target);
+    const plan = planSchemaChange(
+      base?.manifest ?? null,
+      target,
+      this.#reservedFields()
+    );
     if (!plan.accepted) {
       throw migrationErrors.create("migration.required", {
         changes: plan.refused.slice(0, refusalsListed).map((refusal) => ({
@@ -1056,10 +1133,18 @@ export class StoreHost {
       })
     );
     const kept = this.#db
-      .select({ planHash: schemaActivations.planHash })
+      .select({
+        planHash: schemaActivations.planHash,
+        abandonedAt: schemaActivations.abandonedAt,
+      })
       .from(schemaActivations)
       .where(eq(schemaActivations.receiptId, receiptId))
       .get();
+    // Its pending target was abandoned: its release never runs here, and
+    // isn't made pending again under the receipt that recorded that.
+    if (kept !== undefined && kept.abandonedAt !== null) {
+      throw migrationErrors.create("migration.abandoned");
+    }
     return { receiptId, kept };
   }
 
@@ -1192,9 +1277,11 @@ export class StoreHost {
    * back; one that doesn't read is `migration.metadata_corrupt`.
    */
   #recordedSchemas(): SchemaManifest[] {
+    // Not those only an abandoned target held: the contract never took them.
     return this.#db
       .select({ manifest: schemas.manifest })
       .from(schemas)
+      .where(isNull(schemas.abandonedAt))
       .orderBy(asc(schemas.createdAt), asc(schemas.schemaHash))
       .all()
       .map(({ manifest }) => {
@@ -1210,6 +1297,38 @@ export class StoreHost {
           throw error;
         }
       });
+  }
+
+  /**
+   * The fields the store reserved (`sdk_reserved_fields`), each with its
+   * descriptor, read back one at a time through the SDK's descriptor
+   * checks: a descriptor alone, so a reference to a table no reserved
+   * field names needs no resolving. One that doesn't read is
+   * `migration.metadata_corrupt`.
+   */
+  #reservedFields(): ReservedFields {
+    const reserved: Record<string, Record<string, ValueDescriptor>> = {};
+    const rows = this.#db
+      .select()
+      .from(reservedFields)
+      .orderBy(asc(reservedFields.tableName), asc(reservedFields.fieldName))
+      .all();
+    for (const row of rows) {
+      let descriptor: ValueDescriptor;
+      try {
+        ({ descriptor } = schemaFromDescriptor(row.descriptor));
+      } catch (error) {
+        if (error instanceof ValueDefinitionError) {
+          throw migrationErrors.create("migration.metadata_corrupt");
+        }
+        throw error;
+      }
+      reserved[row.tableName] = {
+        ...reserved[row.tableName],
+        [row.fieldName]: descriptor,
+      };
+    }
+    return reserved;
   }
 
   /**
@@ -1301,10 +1420,16 @@ export class StoreHost {
       };
     }
     installIndexes(this.ctx.storage.sql, plan);
+    // Applied again after an abandoned target held it (a later release
+    // adding the reserved fields as they were): in force or pending once
+    // more, as this change leaves it.
     this.#db
       .insert(schemas)
       .values({ schemaHash, manifest: text, createdAt: now })
-      .onConflictDoNothing()
+      .onConflictDoUpdate({
+        target: schemas.schemaHash,
+        set: { abandonedAt: null },
+      })
       .run();
     if (!change.onto && change.hash !== change.stored) {
       const byName = new Map(all.map(({ name, tableId }) => [name, tableId]));
@@ -1321,20 +1446,7 @@ export class StoreHost {
         // Records lack a field the contract would require: the change
         // waits as the pending target until they are filled in, and
         // every commit from now on fills in what it writes (`#apply`).
-        this.#db
-          .insert(backfills)
-          .values({
-            targetHash: change.hash,
-            targetManifest: change.text,
-            baseHash: change.stored,
-            fills: canonicalJson(
-              change.fills.map(({ table, field }) => [table, field])
-            ),
-            scanBounds: canonicalJson(this.#scanBounds(toFill, byName)),
-            state: "running",
-            createdAt: now,
-          })
-          .run();
+        this.#makePending(change, change.stored, toFill, byName, now);
       } else {
         this.#db
           .update(store)
@@ -1346,6 +1458,41 @@ export class StoreHost {
       ...definedTables(names, all),
       contract: this.#receive(schemaHash, change, now),
     };
+  }
+
+  /**
+   * Keeps `change`'s contract as the store's pending target, its backfill
+   * running (`sdk_schema_backfills`). A target abandoned before under the
+   * same hash goes on from the run after its last, so none of its runs is
+   * taken for this one's (store-backfill.ts names runs by target and run).
+   */
+  #makePending(
+    change: ContractChange,
+    base: string,
+    toFill: readonly PlannedField[],
+    byName: ReadonlyMap<string, string>,
+    now: number
+  ): void {
+    const [abandoned] = this.#db
+      .select({ attempt: max(abandonedTargets.attempt) })
+      .from(abandonedTargets)
+      .where(eq(abandonedTargets.targetHash, change.hash))
+      .all();
+    this.#db
+      .insert(backfills)
+      .values({
+        attempt: (abandoned?.attempt ?? 0) + 1,
+        targetHash: change.hash,
+        targetManifest: change.text,
+        baseHash: base,
+        fills: canonicalJson(
+          change.fills.map(({ table, field }) => [table, field])
+        ),
+        scanBounds: canonicalJson(this.#scanBounds(toFill, byName)),
+        state: "running",
+        createdAt: now,
+      })
+      .run();
   }
 
   /**
@@ -1809,16 +1956,25 @@ export class StoreHost {
     if (known !== undefined) {
       return known;
     }
+    const generation = this.#schemasGeneration;
     const row = this.ctx.storage.transactionSync(() => {
       this.#bind(storeId, false);
       return this.#db
-        .select({ manifest: schemas.manifest })
+        .select({
+          manifest: schemas.manifest,
+          abandonedAt: schemas.abandonedAt,
+        })
         .from(schemas)
         .where(eq(schemas.schemaHash, schemaHash))
         .get();
     });
     if (row === undefined) {
       throw dataErrors.create("data.unknown_schema");
+    }
+    // Only an abandoned target held it: nothing reads or writes under it
+    // (`abandonBackfill` forgets the schemas read before).
+    if (row.abandonedAt !== null) {
+      throw migrationErrors.create("migration.abandoned");
     }
     const { manifest } = readSchemaManifest(row.manifest);
     const tableIds = Object.fromEntries(
@@ -1833,8 +1989,27 @@ export class StoreHost {
       tableIds,
       indexes: await planIndexes(manifest, tableIds),
     };
-    this.#schemas.set(schemaHash, pinned);
+    // Kept only if no abandonment committed while its indexes were planned;
+    // a commit checks again in its transaction anyway (`#requireInForce`).
+    if (generation === this.#schemasGeneration) {
+      this.#schemas.set(schemaHash, pinned);
+    }
     return pinned;
+  }
+
+  /**
+   * Refuses (`migration.abandoned`) a schema only an abandoned target
+   * held. Call it inside the transaction that writes under the schema.
+   */
+  #requireInForce(schemaHash: string): void {
+    const row = this.#db
+      .select({ abandonedAt: schemas.abandonedAt })
+      .from(schemas)
+      .where(eq(schemas.schemaHash, schemaHash))
+      .get();
+    if (row !== undefined && row.abandonedAt !== null) {
+      throw migrationErrors.create("migration.abandoned");
+    }
   }
 
   /**
@@ -1969,6 +2144,9 @@ export class StoreHost {
       ) {
         throw submissionErrors.create("submission.intent_unsupported");
       }
+      // Checked again here, with nothing awaited between it and the
+      // writes: an abandonment that committed since `#pinned` read it.
+      this.#requireInForce(schemaHash);
       // The explicit guards first: a record the mutation asserted a
       // revision of, now at another, is a conflict for its caller
       // (`data.conflict`), never a stale read set to run again for, which
@@ -3118,28 +3296,349 @@ export class StoreHost {
   }
 
   /**
-   * Whether the schema `schemaHash`, which the store recorded, is in
-   * force: `active` when the store's contract holds it; `pending` or
-   * `failed`, with its backfill's progress, when only the pending target
-   * holds it; `unknown` for a schema the store wasn't handed (or holds in
-   * neither, which a store whose metadata is intact never does). What
-   * core asks before it makes a release current on the store.
+   * Abandons the failed backfill of `target` for `actor`, an admin core
+   * checked (store-abandon.ts), as of run `attempt`, the run the admin
+   * saw fail: the pending target and its backfill row go, and the
+   * contract stays as it was. In one transaction:
+   *
+   * - every field the target added over the contract is reserved with
+   *   its descriptor (`sdk_reserved_fields`): records the backfill filled
+   *   in keep the value, so a later schema may add the field again only
+   *   as it was (`#planContract`);
+   * - every recorded schema only the target held is marked abandoned, so
+   *   the check of the contract against the store's schemas leaves it
+   *   out until a later consumer applies it again;
+   * - every consumer's receipt that waited on the target is marked
+   *   abandoned: its release is refused as it is made current
+   *   (`schemaStatus`), and applying its schema for it again is refused
+   *   (`migration.abandoned`);
+   * - the abandonment's record (`sdk_abandoned_targets`), which its audit
+   *   event is made from.
+   *
+   * Refused for a backfill still running (`migration.not_failed`): it
+   * either finishes or fails, and abandoning it would race its run. A
+   * target no longer pending, or pending under another run than
+   * `attempt` (a retry took it on), is `migration.superseded`, unless it
+   * is this very abandonment, asked again: answered as recorded,
+   * changing nothing, so core can repeat one whose audit didn't land.
    */
-  schemaStatus(storeId: StoreId, schemaHash: string): SchemaStatus {
+  async abandonBackfill(
+    storeId: StoreId,
+    abandon: BackfillAbandon,
+    actor: AuditActor
+  ): Promise<BackfillAbandonment> {
+    const { target, attempt } = dataErrors.parse(
+      "data.invalid",
+      abandonSchema,
+      abandon
+    );
+    const abandonedBy = JSON.stringify(auditActorSchema.parse(actor));
+    // Checked as `defineTables` checks it, before the transaction, which
+    // hashing can't run in; the transaction checks it is still the same.
+    const row = this.#db
+      .select({
+        contractHash: store.contractHash,
+        contractManifest: store.contractManifest,
+      })
+      .from(store)
+      .get();
+    const kept = row === undefined ? null : await contractOf(row);
+    const abandoned = this.ctx.storage.transactionSync(
+      (): BackfillAbandonment => {
+        this.#bind(storeId, false);
+        const pending = this.#pendingTarget();
+        if (pending?.hash !== target || pending.attempt !== attempt) {
+          const done = this.#db
+            .select()
+            .from(abandonedTargets)
+            .where(
+              and(
+                eq(abandonedTargets.targetHash, target),
+                eq(abandonedTargets.attempt, attempt)
+              )
+            )
+            .get();
+          if (done !== undefined) {
+            return abandonmentOf(done);
+          }
+          throw migrationErrors.create("migration.superseded");
+        }
+        if (pending.state !== "failed" || pending.failure === null) {
+          throw migrationErrors.create("migration.not_failed", {
+            scanned: pending.scanned,
+            filled: pending.filled,
+          });
+        }
+        const now = this.#db
+          .select({ hash: store.contractHash })
+          .from(store)
+          .get();
+        if (
+          kept === null ||
+          now?.hash !== kept.hash ||
+          pending.baseHash !== kept.hash
+        ) {
+          throw migrationErrors.create("migration.metadata_corrupt");
+        }
+        return this.#abandon(pending, pending.failure, kept.manifest, {
+          abandonedBy,
+          actor,
+        });
+      }
+    );
+    this.#schemasGeneration += 1;
+    this.#schemas.clear();
+    await this.schedule();
+    return abandoned;
+  }
+
+  /** `abandonBackfill`'s writes, in its transaction. */
+  #abandon(
+    pending: PendingTarget,
+    failure: BackfillFailure,
+    contract: SchemaManifest,
+    { abandonedBy, actor }: { abandonedBy: string; actor: AuditActor }
+  ): BackfillAbandonment {
+    const at = Date.now();
+    const plan = planSchemaChange(contract, pending.manifest);
+    if (!plan.accepted) {
+      throw migrationErrors.create("migration.metadata_corrupt");
+    }
+    // Every field the target added: to tables the contract has, and the
+    // fields of tables it added (no record holds those, but a later
+    // schema reusing their names with another meaning is refused alike).
+    const added = [
+      ...plan.addedFields,
+      ...plan.addedTables.flatMap((table) =>
+        Object.keys(pending.manifest.tables[table]?.fields ?? {}).map(
+          (field) => ({ table, field })
+        )
+      ),
+    ].toSorted(
+      (a, b) => a.table.localeCompare(b.table) || a.field.localeCompare(b.field)
+    );
+    for (const { table, field } of added) {
+      const descriptor: ValueDescriptor | undefined =
+        pending.manifest.tables[table]?.fields[field];
+      if (descriptor === undefined) {
+        throw new Error("A planned field isn't in its target");
+      }
+      // Reserved once: a target planned under the reservation adds it
+      // only as it was reserved.
+      this.#db
+        .insert(reservedFields)
+        .values({
+          tableName: table,
+          fieldName: field,
+          // As the canonical manifest it came from orders it.
+          descriptor: JSON.stringify(descriptor),
+          targetHash: pending.hash,
+          reservedAt: at,
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+    const outOfForce = this.#db
+      .select({ hash: schemas.schemaHash, manifest: schemas.manifest })
+      .from(schemas)
+      .where(isNull(schemas.abandonedAt))
+      .orderBy(asc(schemas.schemaHash))
+      .all()
+      .filter(
+        ({ manifest }) =>
+          !covered(
+            planSchemaChange(contract, readSchemaManifest(manifest).manifest)
+          )
+      )
+      .map(({ hash }) => hash);
+    if (outOfForce.length > 0) {
+      this.#db
+        .update(schemas)
+        .set({ abandonedAt: at })
+        .where(inArray(schemas.schemaHash, outOfForce))
+        .run();
+    }
+    const consumers = this.#db
+      .update(schemaActivations)
+      .set({ abandonedAt: at })
+      .where(
+        and(
+          eq(schemaActivations.contractHash, pending.hash),
+          isNull(schemaActivations.abandonedAt)
+        )
+      )
+      .returning({
+        resourceId: schemaActivations.resourceId,
+        resourceVersion: schemaActivations.resourceVersion,
+      })
+      .all()
+      .toSorted(
+        (a, b) =>
+          a.resourceId.localeCompare(b.resourceId) ||
+          a.resourceVersion - b.resourceVersion
+      );
+    this.#db
+      .delete(backfills)
+      .where(eq(backfills.targetHash, pending.hash))
+      .run();
+    const record = {
+      baseHash: pending.baseHash,
+      attempt: pending.attempt,
+      scanned: pending.scanned,
+      filled: pending.filled,
+      failure: JSON.stringify(failure),
+      schemas: canonicalJson(outOfForce),
+      consumers: canonicalJson(
+        consumers.map(({ resourceId, resourceVersion }) => [
+          resourceId,
+          resourceVersion,
+        ])
+      ),
+      reserved: canonicalJson(added.map(({ table, field }) => [table, field])),
+      abandonedBy,
+      abandonedAt: at,
+      auditedAt: null,
+    };
+    // One record per run: the same target abandoned again (added back as
+    // it was, and failed again) goes on from a later run (`#makePending`),
+    // so each abandonment keeps its own record and its own event.
+    this.#db
+      .insert(abandonedTargets)
+      .values({ targetHash: pending.hash, ...record })
+      .run();
+    log.info("store.backfill_abandoned", {
+      target: pending.hash,
+      attempt: pending.attempt,
+    });
+    return {
+      target: pending.hash,
+      attempt: pending.attempt,
+      scanned: pending.scanned,
+      filled: pending.filled,
+      failure,
+      schemas: outOfForce,
+      consumers,
+      reserved: added.map(({ table, field }) => ({ table, field })),
+      abandonedBy: actor,
+      abandonedAt: at,
+    };
+  }
+
+  /**
+   * Notes that core's audit outbox holds the event of the abandonment of
+   * `target` as of run `attempt` (store-abandon.ts), so the alarm doesn't
+   * record it again.
+   */
+  markAbandonmentAudited(
+    storeId: StoreId,
+    target: string,
+    attempt: number
+  ): void {
+    this.ctx.storage.transactionSync(() => {
+      this.#bind(storeId, false);
+      this.#db
+        .update(abandonedTargets)
+        .set({ auditedAt: Date.now() })
+        .where(
+          and(
+            eq(abandonedTargets.targetHash, target),
+            eq(abandonedTargets.attempt, attempt)
+          )
+        )
+        .run();
+    });
+  }
+
+  /**
+   * Records in core's audit outbox every abandonment it isn't known to
+   * hold yet (one whose core call stopped after the store abandoned it),
+   * as core does (store-abandon.ts): the same event, made from the record
+   * alone, so it is held once whoever records it.
+   */
+  async #recordAbandonments(): Promise<void> {
+    const unaudited = this.#db
+      .select()
+      .from(abandonedTargets)
+      .where(isNull(abandonedTargets.auditedAt))
+      .all();
+    if (unaudited.length === 0) {
+      return;
+    }
+    const storeId = this.#storeId();
+    for (const row of unaudited) {
+      // One after the other: each is marked once its own event is held.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await recordBackfillAbandoned(this.env, storeId, abandonmentOf(row));
+      this.#db
+        .update(abandonedTargets)
+        .set({ auditedAt: Date.now() })
+        .where(
+          and(
+            eq(abandonedTargets.targetHash, row.targetHash),
+            eq(abandonedTargets.attempt, row.attempt)
+          )
+        )
+        .run();
+    }
+  }
+
+  /**
+   * Whether the schema `schemaHash`, which the store recorded, is in
+   * force (for `consumer`, when named): `abandoned` when the consumer's
+   * receipt for it waited on a target an admin abandoned, or no consumer
+   * is named and only such a target held it; `active` when the store's
+   * contract holds it; `pending` or `failed`, with its backfill's
+   * progress, when only the pending target holds it; `unknown` for a
+   * schema the store wasn't handed (or holds in neither, which a store
+   * whose metadata is intact never does). What core asks before it makes
+   * a release current on the store.
+   */
+  schemaStatus(
+    storeId: StoreId,
+    schemaHash: string,
+    consumer?: SchemaConsumer
+  ): SchemaStatus {
     const hash = dataErrors.parse(
       "data.invalid",
       backfillTargetSchema,
       schemaHash
     );
+    const named =
+      consumer === undefined
+        ? undefined
+        : dataErrors.parse("data.invalid", schemaConsumerSchema, consumer);
     return this.ctx.storage.transactionSync((): SchemaStatus => {
       this.#bind(storeId, false);
       const recorded = this.#db
-        .select({ manifest: schemas.manifest })
+        .select({
+          manifest: schemas.manifest,
+          abandonedAt: schemas.abandonedAt,
+        })
         .from(schemas)
         .where(eq(schemas.schemaHash, hash))
         .get();
       if (recorded === undefined) {
         return { state: "unknown" };
+      }
+      const receipt =
+        named === undefined
+          ? undefined
+          : this.#db
+              .select({ abandonedAt: schemaActivations.abandonedAt })
+              .from(schemaActivations)
+              .where(
+                and(
+                  eq(schemaActivations.resourceId, named.resourceId),
+                  eq(schemaActivations.resourceVersion, named.resourceVersion),
+                  eq(schemaActivations.schemaHash, hash)
+                )
+              )
+              .get();
+      if (
+        (receipt !== undefined && receipt.abandonedAt !== null) ||
+        recorded.abandonedAt !== null
+      ) {
+        return { state: "abandoned" };
       }
       const schema = readSchemaManifest(recorded.manifest).manifest;
       const row = this.#db
@@ -3508,6 +4007,12 @@ export class StoreHost {
       log.error("store.sweep_failed", errorFields(error));
     }
     try {
+      await this.#recordAbandonments();
+    } catch (error) {
+      failed = true;
+      log.error("store.abandonment_audit_failed", errorFields(error));
+    }
+    try {
       await this.#keepBackfillGoing();
     } catch (error) {
       // Not the alarm's failure: its next look is a lease's time away
@@ -3604,6 +4109,12 @@ export class StoreHost {
       .from(receipts)
       .where(isNotNull(receipts.expiredAt))
       .all();
+    // An abandonment core isn't known to hold the event of: recorded now.
+    const unaudited = this.#db
+      .select({ at: abandonedTargets.abandonedAt })
+      .from(abandonedTargets)
+      .where(isNull(abandonedTargets.auditedAt))
+      .get();
     // A running backfill: looked at when it is due (`backfillDueAt`).
     const backfill = this.#db
       .select({
@@ -3617,6 +4128,7 @@ export class StoreHost {
     const times = [
       entry?.at,
       receipt?.at,
+      unaudited === undefined ? null : Date.now(),
       backfill === undefined ? null : backfillDueAt(backfill),
       typeof tombstone?.at === "number" ? tombstone.at + tombstoneMs : null,
     ].filter((time): time is number => typeof time === "number");
@@ -3628,6 +4140,15 @@ export class StoreHost {
     if (set === null || set > next) {
       await this.ctx.storage.setAlarm(next);
     }
+  }
+
+  /** The ID of the store this object holds, once bound. */
+  #storeId(): StoreId {
+    const bound = this.#db.select({ storeId: store.storeId }).from(store).get();
+    if (bound === undefined) {
+      throw new Error("The store's object holds no store yet");
+    }
+    return storeIdSchema.parse(bound.storeId);
   }
 
   /** Whether the store was deleted. */
@@ -3721,6 +4242,8 @@ export class StoreHost {
     }
     if (bound.inventoriedAt === null) {
       const storeId = storeIdSchema.parse(bound.storeId);
+      // Its abandonments' events first: the purge takes their records.
+      await this.#recordAbandonments();
       await recordStoreDeleted(this.env, storeId, markOf(bound));
       // Only once core's inventory shows it: a row that went missing
       // (or a batch that didn't land) is retried, never purged past.

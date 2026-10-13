@@ -26,6 +26,7 @@ import { ScreensRpc } from "./screens-rpc.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
+import { StoresRpc } from "./stores-rpc.ts";
 import { TemplatesRpc } from "./templates-rpc.ts";
 import { WorkflowsRpc } from "./workflows/rpc.ts";
 
@@ -59,6 +60,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #members: MembersRpc;
   readonly #audit: AuditRpc;
   readonly #models: ModelsRpc;
+  readonly #stores: StoresRpc;
   readonly #pendingActions: PendingActionsRpc;
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
@@ -90,6 +92,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#members = new MembersRpc(env, full);
     this.#audit = new AuditRpc(env, full);
     this.#models = new ModelsRpc(env, full);
+    this.#stores = new StoresRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
@@ -190,6 +193,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get models(): ModelsRpc {
     return this.#models;
+  }
+
+  get stores(): StoresRpc {
+    return this.#stores;
   }
 
   get pendingActions(): PendingActionsRpc {
