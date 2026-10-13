@@ -77,9 +77,21 @@ msgstr "{app} heeft iemand nodig die zich opnieuw aanmeldt"
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Versie {version}"
 
+#: src/engines/package-approvals.tsx
+msgid "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
+msgstr "{approvals, plural, one {Hiermee eindigt # goedkeuring van deze pakketten.} other {Hiermee eindigen # goedkeuringen van deze pakketten.}}"
+
 #: src/routes/_shell.engines.index.tsx
 msgid "{apps, plural, one {# app} other {# apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
+msgstr "{artifacts, plural, one {# build die al gemaakt is ({targets}) blijft werken. Met deze pakketten wordt niets nieuws gebouwd.} other {# builds die al gemaakt zijn ({targets}) blijven werken. Met deze pakketten wordt niets nieuws gebouwd.} =0 {Met deze pakketten is nog niets gebouwd, en er wordt niets nieuws gebouwd.}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
+msgstr "{artifacts, plural, one {# build die ermee gemaakt is ({targets}) stopt meteen, en niets van deze pakketten draait nog.} other {# builds die ermee gemaakt zijn ({targets}) stoppen meteen, en niets van deze pakketten draait nog.} =0 {Niets van deze pakketten draait nog.}}"
 
 #: src/chat/builds.tsx
 msgid "{binding}: {actions} on {object}"
@@ -255,6 +267,7 @@ msgid "{monthly} a month"
 msgstr "{monthly} per maand"
 
 #: src/dashboard/dependency-requests.tsx
+#: src/engines/package-approvals.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 msgstr "{more, plural, one {{shown} en nog #} other {{shown} en nog #}}"
 
@@ -622,6 +635,7 @@ msgstr "Account"
 msgid "Action"
 msgstr "Actie"
 
+#: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Actions"
 msgstr "Acties"
@@ -916,6 +930,7 @@ msgid "Approve the packages for {engine}"
 msgstr "De pakketten voor {engine} goedkeuren"
 
 #: src/dashboard/runs-widget.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 msgid "Approved"
 msgstr "Goedgekeurd"
@@ -924,11 +939,16 @@ msgstr "Goedgekeurd"
 msgid "Approved an app's code"
 msgstr "De code van een app goedgekeurd"
 
+#: src/engines/package-approvals.tsx
+msgid "Approved by {decidedBy}, {decidedAt}"
+msgstr "Goedgekeurd door {decidedBy}, {decidedAt}"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Goedgekeurd door {name} op {date}."
 
 #: src/activity/audit-words.ts
+#: src/engines/package-approvals.tsx
 msgid "Approved packages"
 msgstr "Pakketten goedgekeurd"
 
@@ -1138,6 +1158,7 @@ msgstr "Een andere engine aangeroepen"
 msgid "Calls {tools} (any of their methods): may change things"
 msgstr "Roept {tools} aan (elk van hun methodes): kan iets wijzigen"
 
+#: src/engines/package-approvals.tsx
 #: src/knowledge/document.tsx
 msgid "Cancel"
 msgstr "Annuleren"
@@ -1322,6 +1343,7 @@ msgstr "Wissen"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 #: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
@@ -2868,6 +2890,10 @@ msgstr "Er is nog geen model ingesteld voor deze omgeving."
 msgid "No next run"
 msgstr "Geen volgende run"
 
+#: src/engines/package-approvals.tsx
+msgid "No packages are approved for this engine."
+msgstr "Voor deze engine zijn geen pakketten goedgekeurd."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this engine before."
 msgstr "Voor deze engine zijn nog niet eerder pakketten goedgekeurd."
@@ -3374,6 +3400,11 @@ msgstr "Jij bent eigenaar"
 msgid "Package"
 msgstr "Pakket"
 
+#: src/engines/package-approvals.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "Packages"
+msgstr "Pakketten"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Packages for {engine}"
 msgstr "Pakketten voor {engine}"
@@ -3576,6 +3607,10 @@ msgstr "Lezen"
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "Een kennisdocument gelezen"
+
+#: src/engines/package-approvals.tsx
+msgid "Read again"
+msgstr "Opnieuw lezen"
 
 #: src/activity/audit-words.ts
 msgid "Read an email attachment"
@@ -3826,6 +3861,26 @@ msgstr "Resultaat"
 msgid "Results"
 msgstr "Resultaten"
 
+#: src/engines/package-approvals.tsx
+msgid "Retire"
+msgstr "Uitfaseren"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}"
+msgstr "Pakketten voor {engine} uitfaseren"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}?"
+msgstr "Pakketten voor {engine} uitfaseren?"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired"
+msgstr "Uitgefaseerd"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
+msgstr "Uitgefaseerd door {endedBy}, {endedAt}: {endedReason}"
+
 #: src/dashboard/to-do.tsx
 msgid "Review"
 msgstr "Beoordelen"
@@ -3843,6 +3898,7 @@ msgid "Review the apps of {name}"
 msgstr "De apps van {name} beoordelen"
 
 #: src/connections/connection-list.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/resource-bindings.tsx
 msgid "Revoke"
 msgstr "Intrekken"
@@ -3858,6 +3914,14 @@ msgstr "Koppeling van {alias} intrekken"
 #: src/engines/resource-bindings.tsx
 msgid "Revoke the binding of {alias}?"
 msgstr "Koppeling van {alias} intrekken?"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}"
+msgstr "Pakketten voor {engine} intrekken"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}?"
+msgstr "Pakketten voor {engine} intrekken?"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
@@ -3962,6 +4026,10 @@ msgstr "Draait {how} {count, plural, one {# keer vaker} other {# keer vaker}} (n
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
 msgstr "Runs per dag waarop ze startten"
+
+#: src/engines/package-approvals.tsx
+msgid "Runs in"
+msgstr "Draait in"
 
 #: src/chat/builds-state.ts
 msgid "Runs now"
@@ -4302,6 +4370,7 @@ msgid "Started following what changes at a connection"
 msgstr "Begonnen te volgen wat er bij een verbinding verandert"
 
 #: src/connections/connection-list.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -4741,6 +4810,14 @@ msgstr "De onboarding"
 msgid "The one before"
 msgstr "De vorige"
 
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
+msgstr "De pakketten die voor deze engine zijn goedgekeurd. Je ziet ze omdat je pakketten mag goedkeuren; de rest van de engine is voor de leden."
+
+#: src/engines/package-approvals.tsx
+msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
+msgstr "De pakketten konden niet opnieuw worden gelezen, dus deze lijst is mogelijk verouderd: {unread}"
+
 #: src/workflows/triggers.tsx
 msgid "The part of the address before the @, on the mail domain set up for Grasp."
 msgstr "Het deel van het adres vóór de @, op het maildomein dat voor Grasp is ingesteld."
@@ -5018,6 +5095,10 @@ msgstr "Te doen"
 #: src/dashboard/report.ts
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "Om privé te houden wie er sprak, ontbreekt een team tot vijf van zijn mensen gevraagd zijn, en zijn aantal tot er drie gehoord zijn. Geen van beide betekent dat niemand meedeed."
+
+#: src/engines/package-approvals.tsx
+msgid "To use them again, someone who approves packages reviews them again."
+msgstr "Om ze weer te gebruiken, beoordeelt iemand die pakketten goedkeurt ze opnieuw."
 
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"
@@ -5477,6 +5558,10 @@ msgstr "Wie waar werkt"
 #: src/onboarding/staff-words.ts
 msgid "Who works where is in"
 msgstr "Wie waar werkt, is binnen"
+
+#: src/engines/package-approvals.tsx
+msgid "Why"
+msgstr "Waarom"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."

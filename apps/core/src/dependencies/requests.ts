@@ -5,6 +5,7 @@ import {
   canonicalGraph,
   dependencyApprovalsDigest,
   dependencyDecisionSchema,
+  dependencyApprovalsListed,
   dependencyEndingSchema,
   dependencyErrors,
   dependencyGraphHash,
@@ -19,6 +20,7 @@ import {
 } from "@grasp-os/shared/dependencies";
 import type {
   DependenciesWaiting,
+  DependencyApprovals,
   DependencyFinding,
   DependencyGraph,
   DependencyImpact,
@@ -33,7 +35,7 @@ import type {
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageLimits } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
@@ -238,7 +240,8 @@ const requestEntry = (
 /** `rows` as the API returns them, with the App's and the people's names. */
 const toRequests = async (
   env: Env,
-  rows: readonly Listed[]
+  rows: readonly Listed[],
+  names: "read" | "if they can be read" = "read"
 ): Promise<DependencyRequest[]> => {
   if (rows.length === 0) {
     return [];
@@ -251,16 +254,29 @@ const toRequests = async (
       )
     ),
   ];
-  const [appNames, personNames] = await Promise.all([
-    db
-      .select({ id: apps.id, name: apps.name })
-      .from(apps)
-      .where(inArray(apps.id, [...new Set(rows.map(({ appId }) => appId))])),
-    db
-      .select({ id: users.id, name: users.name })
-      .from(users)
-      .where(inArray(users.id, people)),
-  ]);
+  const read = async () =>
+    await Promise.all([
+      db
+        .select({ id: apps.id, name: apps.name })
+        .from(apps)
+        .where(inArray(apps.id, [...new Set(rows.map(({ appId }) => appId))])),
+      db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(inArray(users.id, people)),
+    ]);
+  let appNames: { id: string; name: string }[] = [];
+  let personNames: { id: string; name: string }[] = [];
+  try {
+    [appNames, personNames] = await read();
+  } catch (error) {
+    // After a change landed, its answer goes without the names rather
+    // than fail as if it hadn't.
+    if (names === "read") {
+      throw error;
+    }
+    log.warn("dependencies.names_unread", errorFields(error));
+  }
   const appName = new Map(appNames.map(({ id, name }) => [id, name]));
   const personName = new Map(personNames.map(({ id, name }) => [id, name]));
   const person = (userId: string) => ({
@@ -1238,6 +1254,54 @@ const endableIds = async (
     .from(dependencyRequests)
     .where(endable(app, graphHash, ending));
 
+/**
+ * App `input`'s approvals in force (approved or retired), the newest
+ * decision first, at most {@link dependencyApprovalsListed}: for one of
+ * its builders, or someone who holds `dependencies.approve` now, who may
+ * end them. `app.not_found` for anyone else, as for an App that isn't
+ * there. Never their graphs: a list selects what it shows.
+ */
+export const dependencyApprovals = async (
+  env: Env,
+  by: Identity,
+  input: unknown
+): Promise<DependencyApprovals> => {
+  const db = drizzle(env.DB);
+  const decides = await holdsApprove(env, by);
+  const parsed = appIdSchema.safeParse(input);
+  // Who may approve packages reads any App's, with its name, and nothing
+  // else of it: not its versions, screens, data or members.
+  const known =
+    decides && parsed.success
+      ? await db
+          .select({ id: apps.id, name: apps.name })
+          .from(apps)
+          .where(eq(apps.id, parsed.data))
+          .get()
+      : undefined;
+  const { id: app, name } = known ?? (await appFor(env, by, input, "builder"));
+  const [generation, rows] = await Promise.all([
+    policyGeneration(db),
+    db
+      .select(listed)
+      .from(dependencyRequests)
+      .where(
+        and(
+          eq(dependencyRequests.appId, app),
+          inArray(dependencyRequests.status, ["approved", "retired"])
+        )
+      )
+      .orderBy(desc(dependencyRequests.decidedAt), dependencyRequests.id)
+      .limit(dependencyApprovalsListed),
+  ]);
+  return {
+    policyGeneration: generation,
+    decides,
+    app: { id: appIdSchema.parse(app), name },
+    approvals: await toRequests(env, rows),
+  };
+};
+
 /** Only a person on their own session who holds `dependencies.approve` now. */
 const requireDecider = async (env: Env, by: Identity): Promise<void> => {
   const { actor, via }: Acting = by;
@@ -1530,8 +1594,11 @@ export const endDependency = async (
         : "dependency.forbidden"
     );
   }
+  // Landed: the answer is what the batch returned, and reading names
+  // can't turn it into a failure.
   return await toRequests(
     env,
-    ended.toSorted((a, b) => a.id.localeCompare(b.id))
+    ended.toSorted((a, b) => a.id.localeCompare(b.id)),
+    "if they can be read"
   );
 };

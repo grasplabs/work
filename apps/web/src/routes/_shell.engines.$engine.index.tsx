@@ -1,4 +1,5 @@
 import type { App, AppContents, AppMember } from "@grasp-os/shared/apps";
+import type { DependencyApprovals } from "@grasp-os/shared/dependencies";
 import { canBuild } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenTrustReview } from "@grasp-os/shared/screen-trust";
@@ -21,6 +22,7 @@ import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await, createFileRoute, Link } from "@tanstack/react-router";
 import { CogIcon, LayoutGridIcon } from "lucide-react";
+import { useState } from "react";
 import type { ReactElement } from "react";
 
 import { IntegrationRow } from "../connections/integration-row.tsx";
@@ -29,6 +31,9 @@ import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/to-do.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
+import { engineReaders, loadEnginePage } from "../engines/engine-page.ts";
+import type { EnginePage } from "../engines/engine-page.ts";
+import { PackageApprovals } from "../engines/package-approvals.tsx";
 import { ResourceBindings } from "../engines/resource-bindings.tsx";
 import type { ResourcesPage } from "../engines/resource-bindings.tsx";
 import { ScreenApproval } from "../engines/screen-approval.tsx";
@@ -42,6 +47,7 @@ import { SiteHeader } from "../frame/site-header.tsx";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { useCore } from "../use-core.ts";
 import { listRuns, listWorkflows } from "../workflows/reads.ts";
 import { RunsLog } from "../workflows/runs.tsx";
 import { WorkflowsTable } from "../workflows/workflows-table.tsx";
@@ -69,22 +75,6 @@ const onFirstUse = <T,>(start: () => Deferred<T>): OnFirstUse<T> => {
     started ??= start();
     return { read: started };
   };
-};
-
-interface EnginePage {
-  app: App;
-  contents: AppContents;
-}
-
-const loadEngine = async (
-  session: Session,
-  engine: string
-): Promise<EnginePage> => {
-  const [found, contents] = await Promise.all([
-    session.apps.get(engine),
-    session.apps.contents(engine),
-  ]);
-  return { app: found, contents };
 };
 
 /**
@@ -384,6 +374,44 @@ const Members = ({
   );
 };
 
+/** The engine's approved npm packages, as the tab's last read found them. */
+const Packages = ({
+  packages,
+}: {
+  packages: Deferred<DependencyApprovals>;
+}) => (
+  <Later promise={packages}>
+    {(listed) => <PackageApprovals key={listed.app.id} listed={listed} />}
+  </Later>
+);
+
+/**
+ * The Packages tab, for whoever core lets read the engine's approvals:
+ * its builders at once, and anyone else (someone who may approve
+ * packages) once the read says they may.
+ */
+const PackagesTab = ({
+  packages,
+}: {
+  /** The early read that says whether a non-builder may; none for a builder. */
+  packages: Deferred<DependencyApprovals> | undefined;
+}) => {
+  const trigger = (
+    <TabsTrigger value="packages">
+      <Trans>Packages</Trans>
+    </TabsTrigger>
+  );
+  // A builder's tab is there from the start, never swapped for another.
+  if (packages === undefined) {
+    return trigger;
+  }
+  return (
+    <Await fallback={null} promise={packages}>
+      {(loaded) => (loaded.state === "ready" ? trigger : null)}
+    </Await>
+  );
+};
+
 /** How many a tab holds, after its name. */
 const Count = ({ count }: { count: number }) => (
   <span className="text-muted-foreground tabular-nums">{count}</span>
@@ -398,8 +426,14 @@ const EngineView = ({ page }: { page: EnginePage }) => {
     approval,
     resources,
     storeChanges,
+    packages,
   } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
+  const core = useCore();
+  // The packages as they are each time their tab opens, not as they were
+  // when the page loaded.
+  const [packagesRead, setPackagesRead] =
+    useState<Deferred<DependencyApprovals>>();
   const { app, contents } = page;
   const { version } = contents;
   return (
@@ -421,7 +455,19 @@ const EngineView = ({ page }: { page: EnginePage }) => {
         </div>
       </div>
       <StoreChanges changes={storeChanges} engine={app} />
-      <Tabs defaultValue="apps">
+      <Tabs
+        defaultValue="apps"
+        onValueChange={(value) => {
+          if (value === "packages") {
+            setPackagesRead(
+              loadFromCore(
+                core,
+                async (session) => await session.dependencies.approvals(app.id)
+              )
+            );
+          }
+        }}
+      >
         <TabsList variant="line">
           <TabsTrigger value="apps">
             <Trans>Apps</Trans>
@@ -441,6 +487,7 @@ const EngineView = ({ page }: { page: EnginePage }) => {
               <Trans>Resources</Trans>
             </TabsTrigger>
           )}
+          <PackagesTab packages={packages} />
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
@@ -481,6 +528,13 @@ const EngineView = ({ page }: { page: EnginePage }) => {
             </div>
           </TabsContent>
         )}
+        <TabsContent value="packages">
+          <div className="pt-4">
+            {packagesRead === undefined ? null : (
+              <Packages packages={packagesRead} />
+            )}
+          </div>
+        </TabsContent>
         <TabsContent value="members">
           <div className="pt-4">
             <Members app={app} identity={identity} members={members} />
@@ -491,17 +545,73 @@ const EngineView = ({ page }: { page: EnginePage }) => {
   );
 };
 
+/**
+ * The engine for someone core lets read nothing of it but its approved
+ * packages: someone who may approve packages and isn't one of its
+ * members. Only what `dependencies.approvals` answers, its name and its
+ * approvals, and ending them; never its apps, workflows or members.
+ */
+const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
+  const { t } = useLingui();
+  return (
+    <>
+      <SiteHeader
+        crumbs={[
+          { label: t`Engines`, to: "/engines" },
+          { label: listed.app.name },
+        ]}
+      />
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm">
+        <div className="flex flex-col gap-0.5">
+          <h1 className="text-2xl font-medium tracking-tight">
+            {listed.app.name}
+          </h1>
+          <p className="text-muted-foreground">
+            <Trans>
+              The packages approved for this engine. You see them because you
+              may approve packages; the rest of the engine is for its members.
+            </Trans>
+          </p>
+        </div>
+        <section
+          aria-labelledby="engine-packages"
+          className="flex flex-col gap-3"
+        >
+          <h2 className="text-base font-medium" id="engine-packages">
+            <Trans>Packages</Trans>
+          </h2>
+          <PackageApprovals key={listed.app.id} listed={listed} />
+        </section>
+      </div>
+    </>
+  );
+};
+
 const EnginePageView = () => {
-  const { page } = Route.useLoaderData();
+  const { page, packagesOnly } = Route.useLoaderData();
   const { t } = useLingui();
   if (page.state !== "ready") {
-    return (
+    const notLoaded = (
       <PageNotLoaded
         crumbs={[{ label: t`Engines`, to: "/engines" }, { label: t`Engine` }]}
         icon={CogIcon}
         notFound={t`Engine not found`}
         page={page}
       />
+    );
+    // Not a member: someone who may approve packages still gets those.
+    return packagesOnly === undefined ? (
+      notLoaded
+    ) : (
+      <Await fallback={<PageLoading />} promise={packagesOnly}>
+        {(listed) =>
+          listed.state === "ready" ? (
+            <PackagesOnlyView listed={listed.data} />
+          ) : (
+            notLoaded
+          )
+        }
+      </Await>
     );
   }
   return (
@@ -564,9 +674,12 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
           async (session) => await loadIntegrations(session, params.engine)
         )
       : undefined,
-    page: await loadFromCore(
-      core,
-      async (session) => await loadEngine(session, params.engine)
-    ),
+    // Last, so the reads above start first. The engine, and its packages
+    // for whoever core lets read them: their tab, or the packages alone
+    // for who isn't a member.
+    ...(await loadEnginePage(
+      engineReaders(core, params.engine),
+      canBuild(identity.role)
+    )),
   }),
 });
