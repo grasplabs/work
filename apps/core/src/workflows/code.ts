@@ -25,8 +25,13 @@ import type {
 import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
+import { runInSession, sandboxVerdictOf } from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
-import { requireBoundedHere } from "../sandboxed.ts";
+import {
+  requireBoundedHere,
+  SandboxUnavailableError,
+  sessionHost,
+} from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
 import { collectionMethods, fromIsolate } from "./host.ts";
 
@@ -103,10 +108,6 @@ const testReportSchema = z.object({
     .max(500),
 });
 
-interface TestsEntrypoint extends Rpc.WorkerEntrypointBranded {
-  run: () => Promise<Settled<unknown>>;
-}
-
 /**
  * A workflow's parameters as its code declares them (the SDK's
  * `ParamMetadata`), within the bounds the SDK checks too. The isolate
@@ -139,10 +140,6 @@ const declaredMetadataSchema = z.object({
   triggers: z.unknown().optional(),
 });
 
-interface MetadataEntrypoint extends Rpc.WorkerEntrypointBranded {
-  read: () => Promise<Settled<unknown>>;
-}
-
 /**
  * How workflow code runs: as App server code does, with more CPU. One load
  * runs the workflow from its start (finished steps replayed) to its next
@@ -155,6 +152,106 @@ const workflowSandbox = {
   compatibilityFlags: [...sandbox.compatibilityFlags, "nodejs_als"],
   limits: { cpuMs: 30_000 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
+
+/**
+ * How long a workflow isolate's call of its metadata, tests or dry runs
+ * may take on-prem, waits included: its CPU time is bounded apart.
+ */
+const codeCallMs = 5 * 60_000;
+
+/**
+ * The sandbox's verdicts that are the code's own doing: anything else it
+ * says (its owner at its share, its call over) is the platform's, to try
+ * again (`isolateCall`).
+ */
+const codesVerdicts: ReadonlySet<string> = new Set([
+  "deadline",
+  "cpu",
+  "memory",
+  "crashed",
+  "refused",
+]);
+
+/**
+ * Calls `method` of `entrypoint` with JSON `args`, in a workflow isolate of
+ * `mainModule` and `modules`: on-prem in a sandbox session of its own, as
+ * `owner`, its CPU time and memory bounded by the supervisor, which plain
+ * workerd's Loader doesn't bound (sandbox-session.ts); elsewhere in core's
+ * Loader, kept under `key` (`null`: never kept). Throws what the isolate's
+ * entrypoint threw, or why the sandbox ended the call (`sandboxVerdictOf`).
+ */
+export const isolateCall = async (
+  env: Pick<
+    Env,
+    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+  >,
+  {
+    key,
+    owner,
+    mainModule,
+    modules,
+    entrypoint,
+    method,
+    args,
+    signal,
+  }: {
+    key: string | null;
+    owner: string;
+    mainModule: string;
+    modules: () => Promise<Record<string, string>>;
+    entrypoint: string;
+    method: string;
+    args: unknown[];
+    /** Gives up on it, freeing its process at once. */
+    signal?: AbortSignal;
+  }
+): Promise<unknown> => {
+  const host = sessionHost(env);
+  if (host !== undefined) {
+    try {
+      return await runInSession(
+        host,
+        {
+          mainModule,
+          modules: await modules(),
+          entrypoint,
+          method,
+          args: args.map((value) => ({ value })),
+          owner,
+          cpuMs: workflowSandbox.limits.cpuMs,
+          wallMs: codeCallMs,
+        },
+        signal === undefined ? {} : { signal }
+      );
+    } catch (error) {
+      // Its owner at its share of the sandbox, or anything else that isn't
+      // the code's doing: the platform's, to try again, never the code's.
+      const verdict = sandboxVerdictOf(error);
+      if (verdict !== undefined && !codesVerdicts.has(verdict)) {
+        throw new SandboxUnavailableError(
+          error instanceof Error ? error.message : "The sandbox is busy.",
+          { cause: error }
+        );
+      }
+      throw error;
+    }
+  }
+  const stub: unknown = env.LOADER.get(key, async () => ({
+    ...workflowSandbox,
+    mainModule,
+    modules: await modules(),
+    env: {},
+  })).getEntrypoint(entrypoint);
+  const fn: unknown =
+    typeof stub === "object" || typeof stub === "function"
+      ? Reflect.get(stub ?? {}, method)
+      : undefined;
+  if (typeof fn !== "function") {
+    throw new TypeError(`The workflow's isolate has no ${method}.`);
+  }
+  const answer: unknown = await Reflect.apply(fn, stub, args);
+  return answer;
+};
 
 const runModule = "grasp-run.js";
 const testsModule = "grasp-tests.js";
@@ -180,10 +277,6 @@ const dryRunsSchema = z
 
 /** Each test's dry run of a workflow. */
 export type DryRuns = z.infer<typeof dryRunsSchema>;
-
-interface DryRunsEntrypoint extends Rpc.WorkerEntrypointBranded {
-  run: (params: Record<string, string | number>) => Promise<Settled<unknown>>;
-}
 
 /**
  * The shared part of both main modules: settling a call into plain data
@@ -542,6 +635,19 @@ export const startFailure = (error: unknown): string | undefined => {
 };
 
 /**
+ * Whether `error` is the workflow code's failure to load or finish: a
+ * module that threw as it loaded, or (on-prem) the sandbox ending it past
+ * its CPU time, memory or time. Anything else is the platform's.
+ */
+export const codesFailure = (error: unknown): string | undefined => {
+  const verdict = sandboxVerdictOf(error);
+  if (verdict !== undefined && codesVerdicts.has(verdict)) {
+    return error instanceof Error ? error.message : "it was stopped";
+  }
+  return startFailure(error);
+};
+
+/**
  * What workflow `id` declares at an App version (with its `files`), read
  * from its code in an isolate of their own, kept by the loader for that
  * version: a version's code never changes. Each part is checked by
@@ -555,27 +661,40 @@ const declaredMetadata = async (
   id: WorkflowId,
   files: AppFiles
 ): Promise<{ params?: unknown; triggers?: unknown }> => {
-  requireBoundedHere(env, "a workflow's metadata");
-  const code = env.LOADER.get(
-    `workflow-metadata:${app}:${version}:${id}:${compilerVersion}`,
-    async () => ({
-      ...workflowSandbox,
-      mainModule: metadataModule,
-      modules: {
-        ...(await modulesOf(env, version, files)),
-        [metadataModule]: metadataMain(id),
-      },
-      env: {},
-    })
-  ).getEntrypoint<MetadataEntrypoint>("Metadata");
+  // Refused before anything is read where no sandbox may run it.
+  sessionHost(env);
+  // Read once a version: its code never changes, and every run load,
+  // parameter read and trigger registration asks again. Kept where its
+  // builds are (screens.ts), as what it read, never what it refused.
+  const cacheKey = `workflow-metadata/${app}/${version}/${id}/${compilerVersion}.json`;
+  const cached = await env.FILES.get(cacheKey);
+  if (cached !== null) {
+    const kept = declaredMetadataSchema.safeParse(await cached.json());
+    if (kept.success) {
+      return kept.data;
+    }
+  }
   let outcome: Settled<unknown>;
   try {
-    outcome = fromIsolate(await code.read());
+    outcome = fromIsolate(
+      await isolateCall(env, {
+        key: `workflow-metadata:${app}:${version}:${id}:${compilerVersion}`,
+        owner: app,
+        mainModule: metadataModule,
+        modules: async () => ({
+          ...(await modulesOf(env, version, files)),
+          [metadataModule]: metadataMain(id),
+        }),
+        entrypoint: "Metadata",
+        method: "read",
+        args: [],
+      })
+    );
   } catch (error) {
-    // A module threw as it loaded (a definition the SDK refuses): the
-    // code's failure, as `workflow.invalid`. Anything else is the
-    // platform's.
-    if (startFailure(error) === undefined) {
+    // A module threw as it loaded (a definition the SDK refuses), or it
+    // ran past its bounds: the code's failure, as `workflow.invalid`.
+    // Anything else is the platform's.
+    if (codesFailure(error) === undefined) {
       throw error;
     }
     throw workflowErrors.create("workflow.invalid");
@@ -586,6 +705,7 @@ const declaredMetadata = async (
   if (metadata?.success !== true) {
     throw workflowErrors.create("workflow.invalid");
   }
+  await env.FILES.put(cacheKey, JSON.stringify(metadata.data));
   return metadata.data;
 };
 
@@ -624,6 +744,16 @@ export const declaredTriggers = async (
   return parsed.data ?? [];
 };
 
+/** What a run of tests says: why they fail (none: they pass), and whether that may be kept. */
+export interface TestOutcome {
+  failures: string[];
+  /**
+   * Whether it says what the code does, and may be kept for the version:
+   * not when its isolate crashed, which may be the sandbox's doing.
+   */
+  keep: boolean;
+}
+
 /**
  * Why workflow `id`'s tests fail on a version's `modules`, one line each;
  * none if they pass. They run App code, once, as the version is made
@@ -631,48 +761,71 @@ export const declaredTriggers = async (
  * goes once they are done: workerd keeps a named isolate, the SDK's
  * modules in it, for as long as the process runs.
  */
-const testFailures = async (
-  env: Env,
+export const testOutcomeOf = async (
+  env: Pick<
+    Env,
+    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+  >,
+  app: AppId,
   id: WorkflowId,
   modules: Record<string, string>,
   calls: string
-): Promise<string[]> => {
-  requireBoundedHere(env, "a workflow's tests");
-  const tests = env.LOADER.get(null, () => ({
-    ...workflowSandbox,
-    mainModule: testsModule,
-    modules: { ...modules, [testsModule]: testsMain(id, calls) },
-    env: {},
-  })).getEntrypoint<TestsEntrypoint>("Tests");
+): Promise<TestOutcome> => {
   let outcome: Settled<unknown>;
   try {
-    outcome = fromIsolate(await tests.run());
+    outcome = fromIsolate(
+      await isolateCall(env, {
+        key: null,
+        owner: app,
+        mainModule: testsModule,
+        modules: async () =>
+          await Promise.resolve({
+            ...modules,
+            [testsModule]: testsMain(id, calls),
+          }),
+        entrypoint: "Tests",
+        method: "run",
+        args: [],
+      })
+    );
   } catch (error) {
     // The isolate didn't start because a module threw as it loaded, such
-    // as a workflow whose definition the SDK refuses: the code's failure,
-    // reported as its tests'. Anything else is the platform's.
-    const cause = startFailure(error);
+    // as a workflow whose definition the SDK refuses, or it ran past its
+    // bounds: the code's failure, reported as its tests'. Anything else is
+    // the platform's.
+    const cause = codesFailure(error);
     if (cause === undefined) {
       throw error;
     }
-    return [`${id}: its code doesn't load: ${cause}`];
+    return {
+      failures: [`${id}: its code doesn't load: ${cause}`],
+      // A crash may be the sandbox's own (its process killed from outside)
+      // as much as the code's: reported, never kept.
+      keep: sandboxVerdictOf(error) !== "crashed",
+    };
   }
   if (!outcome.ok) {
-    return [`${id}: ${outcome.error.message}`];
+    return { failures: [`${id}: ${outcome.error.message}`], keep: true };
   }
   const report = testReportSchema.safeParse(outcome.value);
   if (!report.success) {
-    return [`${id}: its tests didn't report as the test harness does`];
+    return {
+      failures: [`${id}: its tests didn't report as the test harness does`],
+      keep: true,
+    };
   }
   const { passed, results } = report.data;
   if (results.length === 0) {
-    return [`${id}: has no tests`];
+    return { failures: [`${id}: has no tests`], keep: true };
   }
-  return passed
-    ? []
-    : results.flatMap(({ name, failures }) =>
-        failures.map((failure) => `${id}, "${name}": ${failure}`)
-      );
+  return {
+    keep: true,
+    failures: passed
+      ? []
+      : results.flatMap(({ name, failures }) =>
+          failures.map((failure) => `${id}, "${name}": ${failure}`)
+        ),
+  };
 };
 
 /**
@@ -694,31 +847,39 @@ export const dryRunTests = async (
    * For a chat's draft over `version` (agent-builds.ts): its isolate is
    * loaded unnamed, never kept, as a draft's code changes with each write.
    */
-  { draft = false }: { draft?: boolean } = {}
+  {
+    draft = false,
+    signal,
+  }: {
+    draft?: boolean;
+    /** Gives up on the dry runs, freeing their process at once on-prem. */
+    signal?: AbortSignal;
+  } = {}
 ): Promise<DryRuns> => {
-  requireBoundedHere(env, "a workflow's dry runs");
   const calls = callsOf(files, id);
-  const code = env.LOADER.get(
-    draft
-      ? null
-      : `workflow-dry-run:${app}:${version}:${id}:${compilerVersion}`,
-    async () => ({
-      ...workflowSandbox,
-      mainModule: dryRunModule,
-      modules: {
-        ...(await modulesOf(env, version, files)),
-        [dryRunModule]: dryRunMain(id, calls),
-      },
-      env: {},
-    })
-  ).getEntrypoint<DryRunsEntrypoint>("DryRuns");
   let outcome: Settled<unknown>;
   try {
-    outcome = fromIsolate(await code.run(params));
+    outcome = fromIsolate(
+      await isolateCall(env, {
+        key: draft
+          ? null
+          : `workflow-dry-run:${app}:${version}:${id}:${compilerVersion}`,
+        owner: app,
+        mainModule: dryRunModule,
+        modules: async () => ({
+          ...(await modulesOf(env, version, files)),
+          [dryRunModule]: dryRunMain(id, calls),
+        }),
+        entrypoint: "DryRuns",
+        method: "run",
+        args: [params],
+        ...(signal === undefined ? {} : { signal }),
+      })
+    );
   } catch (error) {
-    // As for parameters: a module that threw as it loaded is the code's
-    // failure, anything else the platform's.
-    if (startFailure(error) === undefined) {
+    // As for parameters: a module that threw as it loaded, or one that ran
+    // past its bounds, is the code's failure, anything else the platform's.
+    if (codesFailure(error) === undefined) {
       throw error;
     }
     throw workflowErrors.create("workflow.invalid");
@@ -736,23 +897,29 @@ export const dryRunTests = async (
  * nothing when all pass, or there are no workflows. Refuses workflows that
  * don't build (`workflow.build_failed`).
  */
-export const workflowTestFailures = async (
+export const workflowTestOutcome = async (
   env: Env,
+  /** Whose tests they are: the App, which the sandbox caps per owner. */
+  app: AppId,
   version: number,
   files: AppFiles
-): Promise<string[]> => {
+): Promise<TestOutcome> => {
   const ids = workflowIdsIn(files);
   if (ids.length === 0) {
-    return [];
+    return { failures: [], keep: true };
   }
-  requireBoundedHere(env, "a workflow's tests");
+  // Refused before anything is built where no sandbox may run them.
+  sessionHost(env);
   const modules = await modulesOf(env, version, files);
   const failures: string[] = [];
+  let keep = true;
   for (const id of ids) {
     if (Object.hasOwn(files, workflowPaths(id).tests)) {
       const calls = callsOf(files, id);
       // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
-      failures.push(...(await testFailures(env, id, modules, calls)));
+      const outcome = await testOutcomeOf(env, app, id, modules, calls);
+      failures.push(...outcome.failures);
+      keep &&= outcome.keep;
     } else {
       // Often a helper, not a workflow: say where shared code goes.
       failures.push(
@@ -760,6 +927,18 @@ export const workflowTestFailures = async (
       );
     }
   }
+  return { failures, keep };
+};
+
+/** Why the workflows' tests in `files` fail (`workflowTestOutcome`). */
+export const workflowTestFailures = async (
+  env: Env,
+  /** Whose tests they are: the App, which the sandbox caps per owner. */
+  app: AppId,
+  version: number,
+  files: AppFiles
+): Promise<string[]> => {
+  const { failures } = await workflowTestOutcome(env, app, version, files);
   return failures;
 };
 
@@ -770,10 +949,11 @@ export const workflowTestFailures = async (
  */
 export const requireWorkflowTestsPass = async (
   env: Env,
+  app: AppId,
   version: number,
   files: AppFiles
 ): Promise<void> => {
-  const failures = await workflowTestFailures(env, version, files);
+  const failures = await workflowTestFailures(env, app, version, files);
   if (failures.length > 0) {
     throw workflowErrors.create("workflow.tests_failed", {
       version,

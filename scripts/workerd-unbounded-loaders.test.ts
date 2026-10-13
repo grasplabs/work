@@ -39,26 +39,22 @@ describe("App code no sandbox bounds, on plain workerd", () => {
     expect(refused).toContain("No sandbox bounds a workflow's run here yet");
   });
 
-  it("refuses to read a workflow's metadata", async () => {
+  it("refuses to read a workflow's metadata where no sandbox host is bound", async () => {
     const refused = await refusal("metadata");
     expect(refused).toContain("SandboxUnavailableError");
-    expect(refused).toContain(
-      "No sandbox bounds a workflow's metadata here yet"
-    );
+    expect(refused).toContain("No sandbox bounds App code here");
   });
 
-  it("refuses to run a workflow's tests", async () => {
+  it("refuses to run a workflow's tests where no sandbox host is bound", async () => {
     const refused = await refusal("tests");
     expect(refused).toContain("SandboxUnavailableError");
-    expect(refused).toContain("No sandbox bounds a workflow's tests here yet");
+    expect(refused).toContain("No sandbox bounds App code here");
   });
 
-  it("refuses to dry-run a workflow's tests", async () => {
+  it("refuses to dry-run a workflow's tests where no sandbox host is bound", async () => {
     const refused = await refusal("dry-run");
     expect(refused).toContain("SandboxUnavailableError");
-    expect(refused).toContain(
-      "No sandbox bounds a workflow's dry runs here yet"
-    );
+    expect(refused).toContain("No sandbox bounds App code here");
   });
 
   it("refuses to load a draft's preview", async () => {

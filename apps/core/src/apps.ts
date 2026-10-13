@@ -1156,7 +1156,7 @@ export const setCurrentVersion = async (
     const { requireAppTestsPass } = await import("./app-tests.ts");
     await requireAppTestsPass(env, appId, number, files);
   }
-  await requireWorkflowTestsPass(env, number, files);
+  await requireWorkflowTestsPass(env, appId, number, files);
   const triggers = await triggerRegistration(env, appId, number, files);
   const previous = found.currentVersion;
   const event = createAuditEvent(
