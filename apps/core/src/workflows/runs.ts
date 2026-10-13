@@ -313,10 +313,15 @@ const sendStart = async (
 /**
  * Sends `row`'s start again, the same, while the engine is still to
  * confirm it: the engine takes it as the start it already has, if it has
- * it, so the run is started once however often this runs.
+ * it, so the run is started once however often this runs. Never a run
+ * cancelled meanwhile: the repair ends that one (`repairStart`).
  */
 const resendStart = async (env: Env, row: RunRow): Promise<void> => {
-  if (row.pendingStart === null || row.status !== "starting") {
+  if (
+    row.pendingStart === null ||
+    row.status !== "starting" ||
+    row.cancelRequestedAt !== null
+  ) {
     return;
   }
   await sendStart(env, row, row.pendingStart.input);
@@ -506,88 +511,6 @@ const engineHas = async (env: Env, run: string): Promise<boolean | null> => {
     });
     return null;
   }
-};
-
-/**
- * Sends `row`'s start again (`repairStarts`). A start the engine still
- * won't take `repairGivesUpAfterMs` after it was written is marked failed,
- * but only once the engine says it has no record of the run: one it has
- * is confirmed, and one it can't say of is tried again by the next repair,
- * so a start whose answer was lost is never given up while it runs.
- */
-const repairStart = async (env: Env, row: RunRow): Promise<void> => {
-  try {
-    log.warn("workflow.start_resent", { runId: row.id });
-    await resendStart(env, row);
-  } catch (error) {
-    log.error("workflow.start_repair_failed", {
-      runId: row.id,
-      ...errorFields(error),
-    });
-    if (Date.now() - row.createdAt.getTime() <= repairGivesUpAfterMs) {
-      return;
-    }
-    const has = await engineHas(env, row.id);
-    if (has === false) {
-      await failStart(env, row, "no_instance");
-    }
-    if (has !== true) {
-      return;
-    }
-  }
-  await confirmStart(env, row.id);
-};
-
-/**
- * Sends again each start the engine hasn't confirmed `repairAfterMs`
- * after its row was written: what a start leaves when core stops between
- * writing the run's row and the engine's answer. The start is sent as it
- * was first (`pending_start`), under the run's ID, so the engine takes it
- * as the start it already has if it got it, and creates the run once if
- * it didn't. A start still unconfirmed `repairGivesUpAfterMs` on is marked
- * failed (`no_instance`).
- *
- * Each cron run takes at most `repairsPerRun` of them, in ID order from a
- * random ID (`from`), wrapping round: starts the engine keeps failing on
- * can't hold every run's budget, and every one is reached in time.
- */
-export const repairStarts = async (
-  env: Env,
-  from: string = crypto.randomUUID()
-): Promise<void> => {
-  const db = drizzle(env.DB);
-  const cutoff = new Date(Date.now() - repairAfterMs);
-  const slice = async (side: SQL, limit: number): Promise<RunRow[]> =>
-    await db
-      .select()
-      .from(workflowRuns)
-      .where(
-        and(
-          isNotNull(workflowRuns.pendingStart),
-          lt(workflowRuns.createdAt, cutoff),
-          side
-        )
-      )
-      .orderBy(asc(workflowRuns.id))
-      .limit(limit);
-  const onward = await slice(gte(workflowRuns.id, from), repairsPerRun);
-  const rows =
-    onward.length < repairsPerRun
-      ? [
-          ...onward,
-          ...(await slice(
-            lt(workflowRuns.id, from),
-            repairsPerRun - onward.length
-          )),
-        ]
-      : onward;
-  // Each on its own: one the engine or D1 fails on is tried again by the
-  // next cron run, and holds up none of the others.
-  await Promise.all(
-    rows.map(async (row) => {
-      await repairStart(env, row);
-    })
-  );
 };
 
 /**
@@ -1156,6 +1079,120 @@ export const projectStatus = async (
 };
 
 /**
+ * Ends a run cancelled while its start was pending (`completeCancel`
+ * keeps the start, so the repair finds the row): its start isn't sent
+ * again, the engine is told to terminate whatever it has of it, and once
+ * the engine has none, or has ended it, the row ends cancelled
+ * (`projectStatus`), its pending start with it. What a cancel whose
+ * request died before it got that far leaves behind. A failure is logged
+ * and tried again by the next repair.
+ */
+const endCancelledStart = async (env: Env, row: RunRow): Promise<void> => {
+  try {
+    const engine = runEngine(env);
+    await engine.terminate(row.id);
+    const live = await engine.status(row.id);
+    if (live === undefined || endedLive.has(live.status)) {
+      await projectStatus(env, row.id, {
+        status: live?.status ?? "terminated",
+        at: Date.now(),
+      });
+    }
+  } catch (error) {
+    log.error("workflow.start_cancel_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Sends `row`'s start again (`repairStarts`). A start the engine still
+ * won't take `repairGivesUpAfterMs` after it was written is marked failed,
+ * but only once the engine says it has no record of the run: one it has
+ * is confirmed, and one it can't say of is tried again by the next repair,
+ * so a start whose answer was lost is never given up while it runs.
+ */
+const repairStart = async (env: Env, row: RunRow): Promise<void> => {
+  if (row.cancelRequestedAt !== null) {
+    await endCancelledStart(env, row);
+    return;
+  }
+  try {
+    log.warn("workflow.start_resent", { runId: row.id });
+    await resendStart(env, row);
+  } catch (error) {
+    log.error("workflow.start_repair_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+    if (Date.now() - row.createdAt.getTime() <= repairGivesUpAfterMs) {
+      return;
+    }
+    const has = await engineHas(env, row.id);
+    if (has === false) {
+      await failStart(env, row, "no_instance");
+    }
+    if (has !== true) {
+      return;
+    }
+  }
+  await confirmStart(env, row.id);
+};
+
+/**
+ * Sends again each start the engine hasn't confirmed `repairAfterMs`
+ * after its row was written: what a start leaves when core stops between
+ * writing the run's row and the engine's answer. The start is sent as it
+ * was first (`pending_start`), under the run's ID, so the engine takes it
+ * as the start it already has if it got it, and creates the run once if
+ * it didn't. A start still unconfirmed `repairGivesUpAfterMs` on is marked
+ * failed (`no_instance`).
+ *
+ * Each cron run takes at most `repairsPerRun` of them, in ID order from a
+ * random ID (`from`), wrapping round: starts the engine keeps failing on
+ * can't hold every run's budget, and every one is reached in time.
+ */
+export const repairStarts = async (
+  env: Env,
+  from: string = crypto.randomUUID()
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const cutoff = new Date(Date.now() - repairAfterMs);
+  const slice = async (side: SQL, limit: number): Promise<RunRow[]> =>
+    await db
+      .select()
+      .from(workflowRuns)
+      .where(
+        and(
+          isNotNull(workflowRuns.pendingStart),
+          lt(workflowRuns.createdAt, cutoff),
+          side
+        )
+      )
+      .orderBy(asc(workflowRuns.id))
+      .limit(limit);
+  const onward = await slice(gte(workflowRuns.id, from), repairsPerRun);
+  const rows =
+    onward.length < repairsPerRun
+      ? [
+          ...onward,
+          ...(await slice(
+            lt(workflowRuns.id, from),
+            repairsPerRun - onward.length
+          )),
+        ]
+      : onward;
+  // Each on its own: one the engine or D1 fails on is tried again by the
+  // next cron run, and holds up none of the others.
+  await Promise.all(
+    rows.map(async (row) => {
+      await repairStart(env, row);
+    })
+  );
+};
+
+/**
  * Does in core's database what a cancel marked in the run's object
  * (`markRunCancelled`) asks: the run's row tombstoned and the cancel
  * audited, as of who cancelled it and when, once, whichever of the
@@ -1175,9 +1212,10 @@ export const completeCancel = async (
   await auditedBatch(env, db, [
     db
       .update(workflowRuns)
+      // A start still pending stays, so the repair finds the row should
+      // the rest of the cancel not happen, and ends it (`repairStart`).
       .set({
         cancelRequestedAt: new Date(mark.at),
-        pendingStart: null,
         // As a cancel's receipt does (controls.ts): a pause or resume
         // admitted before it is fenced, its generation no longer the run's.
         controlGeneration: sql`${workflowRuns.controlGeneration} + 1`,

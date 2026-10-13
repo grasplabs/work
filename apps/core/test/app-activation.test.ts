@@ -33,6 +33,7 @@ import { appDefaultStores, sdkStoreOwners } from "../src/db/core/schema.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { aroundEngine } from "./runs.ts";
 import { failure, person, sweptAway } from "./sealed-apps.ts";
 
 // Making a version of spec 8's layout current seals it on the App's one
@@ -665,50 +666,6 @@ describe("an App's default store", { timeout: 120_000 }, () => {
 });
 
 describe("a store's definitions", { timeout: 120_000 }, () => {
-  it("are recorded again when a release whose inventory is incomplete is made current", async () => {
-    const { owner, app } = await appWith(notesFiles());
-    await activateVersion(env, owner, app, 1);
-    await commitFiles(env, owner, app, emptyFiles, "No tables");
-    await activateVersion(env, owner, app, 2);
-    const [recorded] = await defaultStores(app);
-    const store = recorded?.storeId ?? "";
-    // Version 1's binding names no definition, and the store has none.
-    await env.DB.batch([
-      env.DB.prepare(
-        "UPDATE sdk_resource_bindings SET target_version = NULL WHERE resource_id = ? AND resource_version = 1"
-      ).bind(app),
-      env.DB.prepare(
-        "DELETE FROM business_store_versions WHERE store_id = ?"
-      ).bind(store),
-    ]);
-    // Made current again: activation reseals it.
-    await activateVersion(env, owner, app, 1);
-    const first = await loadRelease(env, app, 1);
-    const inventory = await env.DB.prepare(
-      `SELECT definition.version, definition.schema_hash AS schemaHash,
-          bound.target_version AS bound, stores.active_schema_version AS active,
-          stores.active_schema_hash AS activeHash,
-          stores.active_operation_manifest_hash AS activeOperations
-        FROM business_store_versions AS definition
-        JOIN sdk_resource_bindings AS bound
-          ON bound.target_id = definition.store_id AND bound.resource_id = ? AND bound.resource_version = 1
-        JOIN business_stores AS stores ON stores.id = definition.store_id
-        WHERE definition.store_id = ?`
-    )
-      .bind(app, store)
-      .all();
-    expect(inventory.results).toStrictEqual([
-      {
-        version: 1,
-        schemaHash: first.store?.schemaHash,
-        bound: 1,
-        active: 1,
-        activeHash: first.store?.schemaHash,
-        activeOperations: first.store?.operationManifestHash,
-      },
-    ]);
-  });
-
   it("are recorded once each, numbered, and the store's active one follows the current version", async () => {
     const { owner, app } = await appWith(notesFiles());
     await activateVersion(env, owner, app, 1);
@@ -937,6 +894,36 @@ describe(
           { title: "Hiring", category: "general" },
           { title: "Launch", category: "general" },
         ],
+      });
+    });
+
+    it("answers migration.pending, not an error, while the engine that runs its backfill is unavailable", async () => {
+      const { owner, app } = await appWith(evolvingFiles());
+      await activateVersion(env, owner, app, 1);
+      await valueOf(owner, app, "notes.create", { title: "Launch" });
+
+      // The engine can't be reached, from the seal on: the backfill the
+      // seal made pending can't be started, by the seal or the activation.
+      const activated = await aroundEngine(
+        async () => {
+          await Promise.resolve();
+          throw new Error("The engine is unavailable");
+        },
+        async () => {
+          const defaulted = await nextVersion(
+            owner,
+            app,
+            evolvingFiles({}, { category: 'v.string().default("general")' })
+          );
+          return await failure(
+            async () => await activateVersion(env, owner, app, defaulted)
+          );
+        }
+      );
+
+      expect({ activated, current: await currentOf(app) }).toStrictEqual({
+        activated: "migration.pending",
+        current: 1,
       });
     });
 

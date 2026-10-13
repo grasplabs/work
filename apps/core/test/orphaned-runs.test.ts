@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { repairStarts, startRun } from "../src/workflows/runs.ts";
+import { cancelRun, repairStarts, startRun } from "../src/workflows/runs.ts";
 import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
@@ -924,6 +924,44 @@ describe("starts core stopped in the middle of", () => {
       fromFirst: true,
       fromLater: false,
       unanswered: new Set([true]),
+    });
+  });
+
+  it("end a run cancelled before its start was sent as cancelled, though the cancel's request died before the engine could say", async () => {
+    const builder = await personApi("builder");
+    const identity = await builder.api.whoami();
+    const app = await appWith(builder, waiting);
+    const run = await orphanOf(builder, app, 0);
+    // The cancel writes its tombstone, then fails as it asks the engine
+    // where the run is.
+    const cancelled = await aroundEngine(
+      async (method, call) => {
+        if (method === "status") {
+          throw new Error("The engine is unavailable");
+        }
+        return await call();
+      },
+      async () => await outcome(cancelRun(env, identity, run))
+    );
+    const afterCancel = await rowStatus(run);
+    await setAge(run, 20 * minute);
+
+    await repairStarts(env);
+
+    expect({
+      cancelled,
+      afterCancel,
+      status: await rowStatus(run),
+      pending: await pending(run),
+      engine: await runEngine(env).status(run),
+      failed: await failedAtAll(run),
+    }).toStrictEqual({
+      cancelled: "Error: The engine is unavailable",
+      afterCancel: "starting",
+      status: "cancelled",
+      pending: false,
+      engine: undefined,
+      failed: false,
     });
   });
 });
