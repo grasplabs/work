@@ -42,8 +42,10 @@ import { collectionMethods, fromIsolate } from "./host.ts";
 // come from the release that runs it, and so does the engine contract
 // between them (step names, `$params`): that contract must stay
 // the same across releases, or runs started before a release replay
-// differently after it. `env.APP` calls the App's current server version,
-// as every caller of the App does.
+// differently after it. `env.APP.call` calls the App's current server
+// version, as every caller of the App does; `env.APP.callFunction` calls a
+// public function of the sealed release of the version the run is pinned
+// to (host.ts).
 //
 // A version's workflows ship with their tests, which run in an isolate of
 // their own before the version can be made current. That is a quality
@@ -279,6 +281,8 @@ export const bindings = ({ connections, apps, collections }) => {
     __proto__: null,
     APP: {
       call: async (method, ...args) => unwrapped(await currentAttempt().callApp(method, args)),
+      callFunction: async (reference, input) =>
+        unwrapped(await currentAttempt().callFunction(reference, input)),
     },
   };
   for (let index = 0; index < collections.length; index += 1) {

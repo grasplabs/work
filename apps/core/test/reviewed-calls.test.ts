@@ -173,6 +173,9 @@ const hostHeldTo = async (
       appCalls.push(method);
       return await Promise.resolve({ ok: true, value: null });
     },
+    callFunction: () => {
+      throw new Error("No App function call here");
+    },
   };
   const host = new RunHost(
     { ...env, DB: db },

@@ -1,7 +1,7 @@
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { decidersSchema } from "@grasp-os/shared/decisions";
-import { toHex } from "@grasp-os/shared/encoding";
+import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema, isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
@@ -9,6 +9,7 @@ import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import {
   callReviewed,
@@ -35,6 +36,7 @@ import type { Email } from "postal-mime";
 import { z } from "zod";
 
 import { callExport } from "../app-calls.ts";
+import type { RunCaller } from "../app-functions.ts";
 import type { AppAnswer, AppCallerInput } from "../app.ts";
 import { auditedBatch, outboxed, outboxedWhere } from "../audit-outbox.ts";
 import { forSandbox, requireStepKey, runStubCall } from "../bindings.ts";
@@ -177,6 +179,13 @@ interface StepAttempt {
   staleAudited?: boolean;
   step: string;
   held: boolean;
+  /**
+   * The keys of the side effects its App's functions asked for through
+   * their resource bindings that connect held (`BindingCaller.held`): the
+   * step waits while any of them, or one under its own key, does. At most
+   * `heldKeysKept`.
+   */
+  heldKeys: string[];
   calledApp: boolean;
   /**
    * The first of its calls refused as one its review doesn't show, or
@@ -197,17 +206,42 @@ export interface WaitReason {
 /** The code a held side effect answers a run's call with (connect). */
 const heldCode = "connect.held";
 
+/** The field of a held marker (`heldMarkerOf`). */
+const heldField = `${coreStepPrefix}held`;
+
 /**
  * What an attempt of a step answers when a side effect of it was held:
  * recorded as the step's result, so every execution replays it and waits
- * again. Workflow code can't return it (`do` refuses it).
+ * again, with the keys of the held side effects its App's functions asked
+ * for (`StepAttempt.heldKeys`), which a wait after a restart still checks.
+ * Workflow code can't return it (`do` refuses it).
  */
-const heldMarker = { [`${coreStepPrefix}held`]: true };
+const heldMarkerOf = (keys: readonly string[]) => ({
+  [heldField]: [...keys].toSorted(),
+});
 
 const isHeldMarker = (value: unknown): boolean =>
   typeof value === "object" &&
   value !== null &&
-  Object.hasOwn(value, `${coreStepPrefix}held`);
+  Object.hasOwn(value, heldField);
+
+/** The keys a held marker names (`heldMarkerOf`), as recorded. */
+const heldKeysOf = (marker: unknown): string[] => {
+  const keys: unknown =
+    typeof marker === "object" && marker !== null
+      ? Reflect.get(marker, heldField)
+      : undefined;
+  return Array.isArray(keys)
+    ? keys.filter((key): key is string => typeof key === "string")
+    : [];
+};
+
+/**
+ * The most held keys of one attempt a held marker keeps. Past it, the
+ * step waits for those it kept; run again, it is held again by any still
+ * waiting, and waits for those: never runs on while one waits.
+ */
+const heldKeysKept = 32;
 
 /** Longest step name taken: a key and a decision's part fit well within. */
 const maxStepName = 256;
@@ -804,6 +838,16 @@ export interface HostHooks {
     args: unknown[],
     ends: number | undefined
   ) => Promise<AppAnswer>;
+  /**
+   * Calls a public function of the run's App's release, for `caller`, a
+   * step of the run, under `idempotencyKey` (`callRunFunction`).
+   */
+  callFunction: (
+    caller: RunCaller,
+    reference: unknown,
+    input: unknown,
+    idempotencyKey: string
+  ) => Promise<OperationResult>;
 }
 
 /**
@@ -904,7 +948,11 @@ export class RunHost extends RpcTarget {
    * so a run waits about 52 days at the default limit. A decline or a drop
    * ends the wait too: the step's next run fails with `connect.declined`.
    */
-  async #waitWhileHeld(step: string, prefix: string): Promise<void> {
+  async #waitWhileHeld(
+    step: string,
+    prefix: string,
+    keys: readonly string[]
+  ): Promise<void> {
     const first = waitMsOf(this.#env);
     for (let checks = 0; ; checks += 1) {
       // Its answer is recorded, so a replay asks connect nothing, and a
@@ -919,7 +967,7 @@ export class RunHost extends RpcTarget {
             backoff: "exponential",
           },
         },
-        async () => await this.#stillHeld(step)
+        async () => await this.#stillHeld(step, keys)
       );
       if (held !== true) {
         return;
@@ -955,12 +1003,24 @@ export class RunHost extends RpcTarget {
     }
   }
 
-  /** Whether a side effect of the step `step` waits for the run's person. */
-  async #stillHeld(step: string): Promise<boolean> {
-    return await this.#env.CONNECT.anyPending({
-      onBehalfOf: this.#run.authority.onBehalfOf,
-      idempotencyKey: stepIdempotencyKey(this.#run.runId, step),
-    });
+  /**
+   * Whether a side effect of the step `step` waits for the run's person:
+   * one under the step's own key (its connection calls, its App's
+   * methods'), or one of `keys`, those its App's functions asked for
+   * through their resource bindings.
+   */
+  async #stillHeld(
+    step: string,
+    keys: readonly string[] = []
+  ): Promise<boolean> {
+    const { onBehalfOf } = this.#run.authority;
+    const waiting = await Promise.all(
+      [stepIdempotencyKey(this.#run.runId, step), ...keys].map(
+        async (idempotencyKey) =>
+          await this.#env.CONNECT.anyPending({ onBehalfOf, idempotencyKey })
+      )
+    );
+    return waiting.includes(true);
   }
 
   /** Records, once in step `step`, that the run waits, and why. */
@@ -1048,6 +1108,7 @@ export class RunHost extends RpcTarget {
           over: false,
           step,
           held: false,
+          heldKeys: [],
           calledApp: false,
           last: isLastAttempt(context, tries, parsed.retries?.limit),
         };
@@ -1090,7 +1151,7 @@ export class RunHost extends RpcTarget {
           throw toStepError(failed);
         }
         if (held) {
-          return heldMarker;
+          return heldMarkerOf(attempt.heldKeys);
         }
         if (!result.ok) {
           failed = result.error;
@@ -1146,7 +1207,7 @@ export class RunHost extends RpcTarget {
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         const prefix = `${waitStepPrefix}${await waitKeyOf(step)}:held:${round}`;
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        await this.#waitWhileHeld(step, prefix);
+        await this.#waitWhileHeld(step, prefix, heldKeysOf(value));
         tries = 0;
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         value = await this.#step.do(
@@ -1427,6 +1488,8 @@ export class RunHost extends RpcTarget {
           await this.#callConnection(attempt, binding, call),
         callApp: async (method, args) =>
           await this.#callApp(attempt, method, args),
+        callFunction: async (reference, input) =>
+          await this.#callFunction(attempt, reference, input),
         callExport: async (binding, method, input) =>
           await this.#callExport(attempt, binding, method, input),
         openDecision: async (request) =>
@@ -1740,6 +1803,57 @@ export class RunHost extends RpcTarget {
       } catch (error) {
         throw cutOffByAttempt(attempt, error) ? attemptTimedOut() : error;
       }
+    });
+  }
+
+  /**
+   * Calls a public function of the run's own App's sealed release
+   * (`env.APP.callFunction(reference, input)`), at the version the run is
+   * pinned to, for the person the run acts for, as the run, only inside a
+   * step whose code its review shows calling `APP` (`#requireReviewed`).
+   * Its key is the step's, so a rerun of the step (a retry, a replay, the
+   * run after a held side effect was decided) makes the same call: its
+   * mutations' receipts and its resource requests' keys are the same. Its
+   * every protected step (its start, each commit, each resource request)
+   * is admitted only while `attempt` still holds its lease
+   * (`runInvocationFor`). A side effect connect held for the person holds
+   * the step, whatever App code makes of the refusal. Answers what the
+   * function answered or why it failed, as data (`OperationResult`).
+   */
+  async #callFunction(
+    attempt: StepAttempt,
+    reference: unknown,
+    input: unknown
+  ): Promise<Settled<unknown>> {
+    return await settle(async () => {
+      this.#requireUntampered();
+      await this.#requireCurrent(attempt, "APP");
+      await this.#requireReviewed(attempt, "APP");
+      await this.#requirePerson();
+      const stepKey = this.#stepKeyOf(attempt);
+      return await this.#hooks.callFunction(
+        {
+          run: this.#run,
+          requestId: crypto.randomUUID(),
+          deadline: attempt.deadline,
+          stillCurrent: async () => {
+            await this.#requireCurrent(attempt, "APP");
+          },
+          held: (key) => {
+            attempt.held = true;
+            if (
+              attempt.heldKeys.length < heldKeysKept &&
+              !attempt.heldKeys.includes(key)
+            ) {
+              attempt.heldKeys.push(key);
+            }
+          },
+        },
+        reference,
+        input,
+        // Within what a submission key may be, whatever the step's name.
+        `step:${await sha256Hex(stepKey)}`
+      );
     });
   }
 

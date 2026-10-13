@@ -60,6 +60,19 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  * key on its caller (`caller.idempotencyKey`), the only one its own
  * connection calls take.
  *
+ * A public function of the App's own release (spec 8: a query, mutation
+ * or action) is `env.APP.callFunction(reference, input)`: `reference` is
+ * the function's generated reference, or just `{ contractId, kind }`. It
+ * runs in the release of the version the run is pinned to, as the run,
+ * and answers what the function answered or why it failed, as data:
+ * `{ ok: true, value }` or `{ ok: false, error }` (throw `error.code`
+ * yourself to fail or retry the step). Its call key is the step's, so the
+ * step run again makes the same call: its mutations and resource requests
+ * answer what they did, never again. An action's `ctx.resources` resolve
+ * through the App's approved bindings, as the run: a model request counts
+ * against the binding's caps and the run's budgets, and a side effect held
+ * for the person holds the step, as the run's own do.
+ *
  * Write each call out where it happens, in the function of the step that
  * makes it: `env.NAME.method(…)`, `appServer(env).method(…)` or
  * `appExports(env.NAME).method(…)`, so the workflow's step list names

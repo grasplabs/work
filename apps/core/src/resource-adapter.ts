@@ -1,4 +1,5 @@
 import type { AnyResource } from "@grasp-os/sdk";
+import type { AuditActor } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import type { ConnectorContract } from "@grasp-os/shared/connect";
 import type { AppId, ConnectionId } from "@grasp-os/shared/ids";
@@ -132,6 +133,22 @@ export interface BindingCaller {
   readonly authority: Authority;
   readonly context: WorkContext;
   readonly sources: InvocationSources;
+  /**
+   * Who the audit log names as making each request, and whose budgets a
+   * model request counts against besides the binding's own: the App, for
+   * a screen's or an agent's call (`delegateActorOf`); the workflow run,
+   * for a run's (`runActorOf`), so its workflow and run lineage budgets
+   * apply too.
+   */
+  readonly actor: AuditActor;
+  /**
+   * For a workflow run's call: hears that connect held the side effect of
+   * the request keyed `key` for the person the run acts for
+   * (`connect.held`), so the run's step waits for their decision whatever
+   * App code does with the refusal (workflows/host.ts). A person who is
+   * there gets the held action back instead, so none is needed.
+   */
+  readonly held?: (key: string) => void;
 }
 
 /** A declaration of one kind, as an adapter is given it. */

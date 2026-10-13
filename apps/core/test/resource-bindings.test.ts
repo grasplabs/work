@@ -1485,6 +1485,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
             },
             context: { type: "app", appId: sealed.app },
             sources: invocationSources(),
+            actor: { type: "app", appId: sealed.app, part: "server" },
           },
           { method: "read", args: [] },
           {

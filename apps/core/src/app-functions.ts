@@ -1,9 +1,10 @@
 import { appModuleName, kitModuleName } from "@grasp-os/compiler";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import { versionErrors } from "@grasp-os/shared/app-releases";
+import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
-import type { AppId } from "@grasp-os/shared/ids";
+import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import {
   appErrorDetailsMaxBytes,
@@ -21,10 +22,13 @@ import type {
   AppErrorPayload,
   OperationResult,
 } from "@grasp-os/shared/operations";
+import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { Authority } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { commitMaxInputBytes } from "@grasp-os/shared/stores";
+import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import type { RpcTarget } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -35,13 +39,19 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { callTimeoutMs } from "./app.ts";
 import { appFor } from "./apps.ts";
+import { memberRole } from "./auth/identity.ts";
 import type { CallTree, RunnerCall } from "./call-tree.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { sdkReleaseManifests } from "./db/core/schema.ts";
 import { hostJsonModule, hostJsonSource } from "./host-json.ts";
 import { callOperation } from "./operations.ts";
-import type { HostedApp, Invocation, Runner } from "./operations.ts";
+import type {
+  HostedApp,
+  Invocation,
+  ResourceBindings,
+  Runner,
+} from "./operations.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
   InvocationProvenance,
@@ -587,16 +597,18 @@ export const invocationFor = async (
   // SAFETY: a release's resource ID is the App it was sealed for.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const app = release.manifest.resourceId as AppId;
+  const authority: Authority = {
+    subject: { type: "app", appId: app },
+    onBehalfOf: by.userId,
+    mode: "interactive",
+    appVersion: release.manifest.resourceVersion,
+  };
   const bindings = resourceBindingsFor(env, {
     app,
-    authority: {
-      subject: { type: "app", appId: app },
-      onBehalfOf: by.userId,
-      mode: "interactive",
-      appVersion: release.manifest.resourceVersion,
-    },
+    authority,
     context: { type: "app", appId: app },
     sources,
+    actor: delegateActorOf(authority),
   });
   return {
     principal: by.userId,
@@ -626,6 +638,127 @@ export const invocationFor = async (
     // admits each commit, so nothing else is checked here.
     resources: bindings,
   };
+};
+
+/** What core resolved of a workflow run calling a function of its App. */
+export interface RunCaller {
+  /** The run, as its host loaded it: never anything its isolate sent. */
+  readonly run: {
+    readonly app: AppId;
+    readonly workflow: WorkflowId;
+    readonly runId: RunId;
+    readonly rootRunId?: RunId;
+    /** The version the run is pinned to: the release that runs. */
+    readonly version: number;
+    /** Who the run acts for in this execution, in workflow mode. */
+    readonly authority: Authority;
+  };
+  readonly requestId: string;
+  readonly deadline: number;
+  /**
+   * Throws once the step's attempt the call comes from no longer holds
+   * its lease: it timed out, the run was cancelled or paused, another
+   * activation took over, or its function returned.
+   */
+  readonly stillCurrent: () => Promise<void>;
+  /** Hears each side effect connect held for the person (`BindingCaller.held`). */
+  readonly held: (key: string) => void;
+}
+
+/**
+ * `bindings`, each request's key under the run's (`stepIdempotencyKey`):
+ * connect finds a run's held side effects, and drops them once the run
+ * has ended, by the run their key names (pending-actions.ts, workflows/
+ * retention.ts). Under it is still the key the operation host derived,
+ * so the same call made again sends the same key.
+ */
+const keyedUnderRun =
+  (bindings: ResourceBindings, runId: RunId): ResourceBindings =>
+  async (declaration) => {
+    const bound = await bindings(declaration);
+    return bound === undefined
+      ? undefined
+      : {
+          ...bound,
+          call: async (method, args, context) =>
+            await bound.call(method, args, {
+              ...context,
+              idempotencyKey: stepIdempotencyKey(runId, context.idempotencyKey),
+            }),
+        };
+  };
+
+/**
+ * The invocation of `release` (the run's own App, at the version the run
+ * is pinned to) for a step of `caller`'s run: as the person the run acts
+ * for, in workflow mode, with the run as its work context, and with the
+ * run as whoever the audit log names and whose budgets a model request
+ * counts against besides its binding's (`BindingCaller.actor`). Nothing
+ * of it comes from the run's isolate.
+ */
+export const runInvocationFor = async (
+  env: Env,
+  release: Release,
+  { run, requestId, deadline, stillCurrent, held }: RunCaller
+): Promise<Invocation> => {
+  const { app, runId, version, authority } = run;
+  const bindings = resourceBindingsFor(env, {
+    app,
+    authority: { ...authority, mode: "workflow", appVersion: version },
+    context: { type: "run", appId: app, runId },
+    sources: invocationSources(),
+    actor: runActorOf(run),
+    held,
+  });
+  return {
+    principal: authority.onBehalfOf,
+    consumer: { resourceId: app, resourceVersion: version },
+    store:
+      release.store === null
+        ? noStore()
+        : await openStore(env, release.store.storeId),
+    requestId,
+    deadline,
+    runId,
+    // The one gate, as for a screen's call: before the call starts, each
+    // mutation commits and each resource request. First the step's
+    // attempt, so nothing runs for an attempt the engine let go of; then
+    // the release, and the person, still a member with a role in the App.
+    authorize: async () => {
+      await stillCurrent();
+      await requireNotRevoked(env, app, version);
+      const role = await memberRole(env.DB, authority.onBehalfOf);
+      if (role === undefined) {
+        throw permissionErrors.create("permission.person_inactive");
+      }
+      return await operationRoles(
+        env,
+        { userId: authority.onBehalfOf, role },
+        app
+      );
+    },
+    resources: keyedUnderRun(bindings, runId),
+  };
+};
+
+/**
+ * The public function `reference` names in `release`, of its kind: an
+ * internal one is refused as one that doesn't exist.
+ */
+const publicFunctionOf = (
+  release: Release,
+  reference: { readonly contractId: string; readonly kind: string }
+) => {
+  const operation = Object.hasOwn(release.app.operations, reference.contractId)
+    ? release.app.operations[reference.contractId]
+    : undefined;
+  if (operation === undefined || operation.visibility !== "public") {
+    throw operationErrors.create("operation.not_found");
+  }
+  if (operation.kind !== reference.kind) {
+    throw operationErrors.create("operation.kind_mismatch");
+  }
+  return operation;
 };
 
 const encoder = new TextEncoder();
@@ -811,5 +944,71 @@ export const callAppFunction = async (
     };
   } catch (error) {
     return refused(error);
+  }
+};
+
+/**
+ * A function as a workflow step names it: a generated reference, or just
+ * its path and kind. Only those are read; a reference's App, version and
+ * fingerprint, where it has them, must be exactly the run's.
+ */
+const runReferenceSchema = z.object({
+  contractId: z.string().min(1).max(256),
+  kind: z.enum(["query", "mutation", "action"]),
+  resourceId: z.string().min(1).max(128).optional(),
+  resourceVersion: z.int().min(1).optional(),
+  fingerprint: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/u)
+    .optional(),
+});
+
+/**
+ * Calls a public function of a workflow run's own App for one of its
+ * steps (`env.APP.callFunction`, workflows/host.ts): only in the release
+ * of the version the run is pinned to, as the run (`runInvocationFor`),
+ * under `idempotencyKey`, which core derived from the step's. What it
+ * answers, or why it failed, as a screen's call gets it (spec 32.6).
+ * Never throws.
+ */
+export const callRunFunction = async (
+  env: Env,
+  caller: RunCaller,
+  reference: unknown,
+  input: unknown,
+  idempotencyKey: string
+): Promise<OperationResult> => {
+  const { app, version } = caller.run;
+  try {
+    const named = runReferenceSchema.safeParse(reference);
+    if (!named.success) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    const release = await loadRelease(env, app, version);
+    const operation = publicFunctionOf(release, named.data);
+    const { resourceId, resourceVersion, fingerprint } = named.data;
+    // Another App's function, another version's or another contract's:
+    // refused before any of its input is read.
+    if (
+      (resourceId !== undefined && resourceId !== app) ||
+      (resourceVersion !== undefined && resourceVersion !== version) ||
+      (fingerprint !== undefined &&
+        release.fingerprints[operation.path] !== fingerprint)
+    ) {
+      throw versionErrors.create("version.mismatch");
+    }
+    return await callOperation(
+      hostedRelease(env, release),
+      await runInvocationFor(env, release, {
+        ...caller,
+        // No longer than the step's attempt, nor than any call of an App's.
+        deadline: Math.min(caller.deadline, Date.now() + callTimeoutMs(env)),
+      }),
+      { path: operation.path, kind: operation.kind },
+      input,
+      { idempotencyKey }
+    );
+  } catch (error) {
+    return { ok: false, error: refusalOf(error, caller.requestId) };
   }
 };

@@ -1,5 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
-import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
+import { actorOf } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -273,7 +273,7 @@ export const templateAdapter: ResourceAdapter<"template"> = {
             // Recorded as Knowledge records an App's reads, through the
             // outbox, which never fails the read.
             await keepAuditEvent(env, drizzle(env.DB), {
-              actor: delegateActorOf(caller.authority),
+              actor: caller.actor,
               action: "resource.template.read",
               target: { type: "template", id: target.templateId },
               requestId: context.requestId,

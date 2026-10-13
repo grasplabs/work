@@ -49,7 +49,11 @@ import type {
 // - is held by connect for the person when it has a side effect and the
 //   person is there (or the App read restricted data): App code gets
 //   `resource.awaiting_confirmation`, and the same call made again finds
-//   the same held action, or its answer once the person confirmed it;
+//   the same held action, or its answer once the person confirmed it. A
+//   workflow run's side effect connect holds without an answer
+//   (`connect.held`): App code gets `resource.awaiting_confirmation` all
+//   the same, and the run's step waits for the person's decision
+//   (`BindingCaller.held`), then makes the same call again;
 // - has its answer checked against the contract's return descriptor, and
 //   must already be in its normalized form.
 //
@@ -369,6 +373,17 @@ const callAction = async (
     );
     answered = await env.CONNECT.call({ capability, ...scope, input: sent });
   } catch (error) {
+    // A run's side effect, held for its person: connect answers a run
+    // nothing it could carry on with. The run's step waits for their
+    // decision whatever App code makes of this (`BindingCaller.held`),
+    // then makes the same call again, under the same key.
+    if (
+      connectErrors.codeOf(error) === "connect.held" &&
+      caller.held !== undefined
+    ) {
+      caller.held(context.idempotencyKey);
+      throw operationErrors.create("resource.awaiting_confirmation");
+    }
     throw refusalOf(error);
   }
   if (answered.pending !== undefined) {

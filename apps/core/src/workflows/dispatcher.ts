@@ -6,6 +6,7 @@ import type {
   WorkflowStep,
 } from "@grasp-os/workerflow/contracts";
 
+import { callRunFunction } from "../app-functions.ts";
 import { callApp } from "../app.ts";
 import { callsFor, versionFiles } from "../apps.ts";
 import { runBackfill } from "../backfill-run.ts";
@@ -269,6 +270,8 @@ const runWorkflow = async (
       },
       callApp: async (caller, method, args, ends) =>
         await callApp(env, run.app, caller, method, args, ends),
+      callFunction: async (caller, reference, input, idempotencyKey) =>
+        await callRunFunction(env, caller, reference, input, idempotencyKey),
     });
     return await code.run(host, {
       runId,
