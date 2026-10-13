@@ -33,6 +33,7 @@ import type {
 } from "@grasp-os/shared/permissions";
 import {
   isAdmin,
+  isMemberAdmin,
   requireAdmin,
   requireBuilder,
   roleErrors,
@@ -896,7 +897,7 @@ const auditDetailSql = sql`json_patch(
  * of the organization, not Grasp staff, still an admin then.
  */
 const canGrantSql = (by: Identity): SQL =>
-  isAdmin(by.role) && !by.staff ? stillAdminSql(by) : sql`0`;
+  isMemberAdmin(by) ? stillAdminSql(by) : sql`0`;
 
 /**
  * That a permission lets an App change things for the person using it,
@@ -1320,7 +1321,7 @@ export const askedAgainBy = (
   keep: boolean
 ): boolean =>
   !keep &&
-  !(isAdmin(by.role) && !by.staff) &&
+  !isMemberAdmin(by) &&
   permission.actions.some((action) => changesThings(permission.object, action));
 
 /**
