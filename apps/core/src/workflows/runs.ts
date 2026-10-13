@@ -571,6 +571,30 @@ const deliveredBefore = async (
 };
 
 /**
+ * The run a trigger's key already started, for a delivery tried again of
+ * a run started under another (effect-stamps.ts): found before the start
+ * is admitted, so it takes no other slot of the lineage, which a delivery
+ * tried again until it fits could use up. None for any other start.
+ */
+const deliveredUnder = async (
+  env: Env,
+  trigger: RunRequest["trigger"],
+  parent: RunId | undefined
+): Promise<WorkflowRun | undefined> => {
+  if (trigger === undefined || parent === undefined) {
+    return undefined;
+  }
+  const before = await drizzle(env.DB)
+    .select({ id: workflowRuns.id })
+    .from(workflowRuns)
+    .where(eq(workflowRuns.triggerKey, trigger.key))
+    .get();
+  return before === undefined
+    ? undefined
+    : await deliveredBefore(env, trigger.key, before.id);
+};
+
+/**
  * What a start whose call to the engine failed with `error` leaves
  * (`startRun`): returns when the engine has the run after all, and throws
  * `error` otherwise.
@@ -646,6 +670,10 @@ export const startRun = async (
   }
   if (!hasWorkflow(await versionFiles(env, app, version), workflow)) {
     throw workflowErrors.create("workflow.not_found", { workflow, version });
+  }
+  const again = await deliveredUnder(env, trigger, parent);
+  if (again !== undefined) {
+    return again;
   }
   // Admitted last, once nothing else refuses the start: the slot it takes
   // in its lineage is never given back.

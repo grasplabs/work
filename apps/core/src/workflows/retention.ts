@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
+  runEffectStamps,
   runLineageAttempts,
   runLineages,
   workflowDecisions,
@@ -166,7 +167,8 @@ const unkeyed = (step: SQL): SQL =>
  * that never returned: its run has ended) is settled first, as an
  * admission would, charging its lineage up to its deadline (now, at the
  * latest), so the lineage's row, which stays, neither keeps holding it nor
- * loses what it used. Every receipt of the runs goes. Run before its runs
+ * loses what it used. Every receipt of the runs goes, and every stamp of
+ * their effects. Run before its runs
  * are marked, so a sweep that stops before marking them leaves them due,
  * and none of a marked run is left.
  */
@@ -196,6 +198,9 @@ const receiptsPruned = (
       ),
     db.update(held).set({ usedMs: used, settledAt: now }).where(lapsed),
     db.delete(held).where(inArray(held.runId, runs)),
+    // What the runs' effects were stamped with (effect-stamps.ts): a run
+    // they start this late is a root.
+    db.delete(runEffectStamps).where(inArray(runEffectStamps.runId, runs)),
   ] as const;
 };
 

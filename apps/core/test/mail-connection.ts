@@ -6,7 +6,7 @@
 import { z } from "zod";
 
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
-import type { MailAnswer } from "./mail-server.ts";
+import type { MailAnswer, ToolkitServer } from "./mail-server.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 const isFetcher = (value: unknown): value is Fetcher =>
@@ -56,6 +56,13 @@ export const mailConnection = async (
   });
   return {
     id,
+    /** Gives the server `toolkit`'s tools in place of the mail tools. */
+    serve: async (toolkit: ToolkitServer) => {
+      await providers().fetch(mailControlUrl(name), {
+        method: "POST",
+        body: JSON.stringify(toolkit),
+      });
+    },
     /** Whether the server holds a `slow` call now. */
     holding: async () => {
       const response = await providers().fetch(mailControlUrl(name));

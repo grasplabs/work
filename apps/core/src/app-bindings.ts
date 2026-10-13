@@ -3,6 +3,7 @@ import type { ConnectResult } from "@grasp-os/shared/connect";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
 import type { StatisticUse } from "@grasp-os/shared/statistics";
+import { runOfStepKey } from "@grasp-os/shared/workflows";
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -303,6 +304,13 @@ export class AppConnectionBinding extends WorkerEntrypoint<
           if (authority.mode === "workflow") {
             requireStepKey(key, idempotencyKey);
           }
+          // A run's step's call, by the key core gave the App's caller:
+          // what it leaves that may start a run starts it under the run
+          // (workflows/effect-stamps.ts).
+          const run =
+            authority.mode === "workflow" && idempotencyKey !== undefined
+              ? runOfStepKey(idempotencyKey)
+              : undefined;
           return {
             authority,
             readOnly: kind === "read",
@@ -310,6 +318,9 @@ export class AppConnectionBinding extends WorkerEntrypoint<
             stillAllowed: async () => {
               await stillAdmitted(this.env, app, token, "read");
             },
+            ...(run === undefined || idempotencyKey === undefined
+              ? {}
+              : { stamping: { run, stepKey: idempotencyKey } }),
           };
         },
         grant,

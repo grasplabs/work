@@ -1,10 +1,15 @@
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { readAtMost } from "@grasp-os/shared/http";
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   inboundEmailMaxBytes as maxMessageBytes,
   inboundEmailMaxListed as maxListed,
+  workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { and, eq } from "drizzle-orm";
@@ -13,6 +18,11 @@ import type { Address, Email } from "postal-mime";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
 import { apps, workflowTriggers } from "../db/core/schema.ts";
+import {
+  learnMailDomain,
+  lineageRefusals,
+  mailRecipient,
+} from "./effect-stamps.ts";
 import { isWorthKeeping, keepMessage, parsedOf } from "./kept-email.ts";
 import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 
@@ -69,8 +79,21 @@ import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 // every message here was sent to the deployment's domain, so it needs no
 // setting of its own, and can't be set wrong. A message from a person's
 // mailbox at the client's own domain still starts runs: people forward
-// mail to their workflows. Which runs a run's own mail starts, as its
-// descendants, is for a later change (GRA-273's follow-up).
+// mail to their workflows.
+//
+// A run's own mail to the domain carries its token: core put it on the
+// address as the run's call left (`local+<token>@domain`,
+// effect-stamps.ts). Mail to a tokened address goes to the address
+// without it, and starts its runs under the run that sent it, admitted
+// against that run's lineage (quotas.ts, `admitChild`); its key is the
+// token's, not its Message-ID's, so every copy of it starts one run of
+// each workflow, in that lineage. A token core didn't record is part of
+// the address, which no one receives at. Past the lineage's limits the
+// run is refused: the message is accepted and dropped, and the refusal
+// audited (`workflow.email.refused`, `lineage_limit`), as a delivery
+// tried again would be refused again. Each message also tells core its
+// mail domain, from the envelope recipient Email Routing sets, which no
+// sender chooses: a run's mail to it is what core stamps.
 
 /** Longest subject a run's input keeps, in characters. */
 const maxSubjectLength = 1000;
@@ -358,13 +381,22 @@ export const receiveEmail = async (
   message: ForwardableEmailMessage,
   env: Env
 ): Promise<void> => {
-  // Who receives it first, one query: mail nobody receives is never read.
+  // Who receives it first: mail nobody receives is never read. A token
+  // core recorded names the run that sent it (effect-stamps.ts).
   const at = message.to.lastIndexOf("@");
-  const address = message.to.slice(0, Math.max(at, 0)).toLowerCase();
+  const local = message.to.slice(0, Math.max(at, 0)).toLowerCase();
+  const { address, stamp } =
+    local === ""
+      ? { address: "", stamp: undefined }
+      : await mailRecipient(env, local);
   const receivers = address === "" ? [] : await receiversAt(env, address);
   if (receivers.length === 0) {
     message.setReject("No such address.");
     return;
+  }
+  const domain = domainOf(message.to);
+  if (domain !== undefined) {
+    await learnMailDomain(env, domain);
   }
   const raw = await readAtMost(message.raw, maxMessageBytes);
   if (raw === undefined) {
@@ -395,13 +427,16 @@ export const receiveEmail = async (
     );
     return;
   }
-  // Only a Message-ID with an `@` names one message: `<>` or `x` would
-  // make every message that carries it the same one.
+  // A run's mail is the same message by its token, whatever its copies
+  // say. Otherwise only a Message-ID with an `@` names one message: `<>`
+  // or `x` would make every message that carries it the same one.
   const { messageId } = parsed;
-  const same =
-    messageId !== undefined && messageId.includes("@")
-      ? await sha256Hex(messageId)
-      : id;
+  let same = id;
+  if (stamp !== undefined) {
+    same = await sha256Hex(`stamp:${stamp.token}`);
+  } else if (messageId !== undefined && messageId.includes("@")) {
+    same = await sha256Hex(messageId);
+  }
   // By workflow, not by trigger row: the rows are written anew each time
   // a version is made current.
   const keyOf = ({
@@ -458,11 +493,38 @@ export const receiveEmail = async (
             key: keyOf(receiver),
             version: receiver.version,
           },
+          ...(stamp === undefined
+            ? {}
+            : { parent: runIdSchema.parse(stamp.run) }),
         })
     )
   );
+  const refused = lineageRefusals(started, withRoom);
+  if (refused.length > 0) {
+    // Settled, never tried again: the lineage's limits refuse it for good.
+    const db = drizzle(env.DB);
+    await Promise.all(
+      refused.map(async ({ receiver, limit }) => {
+        await keepAuditEvent(env, db, {
+          actor: { type: "system" },
+          action: "workflow.email.refused",
+          target: { type: "app", id: receiver.appId },
+          detail: {
+            address,
+            workflow: receiver.workflowId,
+            reason: "lineage_limit",
+            limit,
+            message: id,
+          },
+        });
+      })
+    );
+  }
   const failures = started.flatMap((result): unknown[] =>
-    result.status === "rejected" ? [result.reason] : []
+    result.status === "rejected" &&
+    workflowErrors.codeOf(result.reason) !== "workflow.lineage_limit"
+      ? [result.reason]
+      : []
   );
   for (const failure of failures) {
     log.error("workflow.trigger_failed", {

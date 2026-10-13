@@ -2067,6 +2067,9 @@ export class RunHost extends RpcTarget {
                 stillAllowed: async () => {
                   await this.#requireCurrent(attempt, name);
                 },
+                // What the call leaves that may start a run starts it
+                // under this one (effect-stamps.ts).
+                stamping: { run: this.#run.runId, stepKey },
               });
             },
             grant,

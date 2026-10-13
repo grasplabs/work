@@ -1152,6 +1152,47 @@ export const runLineageAttempts = sqliteTable(
 );
 
 /**
+ * What a run's connection calls left behind that may start a run, each
+ * naming the run (src/workflows/effect-stamps.ts), so the run it starts
+ * joins that run's lineage. `key` says which:
+ *
+ * - `mail:<token>`: the token core put on an address of the deployment's
+ *   mail domain the run mailed (`local+<token>@domain`); `origin` is the
+ *   SHA-256 of the run's step key and the address, so the same call made
+ *   again carries the same token.
+ * - `item:<SHA-256 of the ID>`: the ID of what a call made (a message, a
+ *   file), as its provider answered; `origin` is null.
+ *
+ * Removed with its run's details (src/workflows/retention.ts).
+ */
+export const runEffectStamps = sqliteTable(
+  "run_effect_stamps",
+  {
+    key: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    origin: text(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("run_effect_stamps_origin_idx").on(table.origin),
+    index("run_effect_stamps_run_idx").on(table.runId),
+  ]
+);
+
+/**
+ * The domains Email Routing delivered mail for (src/workflows/
+ * inbound-email.ts): the deployment's mail domain, learned from the
+ * envelope recipient Email Routing sets, which no sender can choose. A
+ * run's mail to an address on one is stamped (`run_effect_stamps`).
+ */
+export const mailDomains = sqliteTable("mail_domains", {
+  domain: text().primaryKey(),
+  firstSeenAt: timestamp("first_seen_at").notNull(),
+});
+
+/**
  * Each quota policy generation core has applied (src/workflows/quotas.ts):
  * the limits the deployment's `QUOTA_LIMITS` set under it, as canonical
  * JSON, and their SHA-256. Written the first time core sees a generation,

@@ -512,6 +512,13 @@
       "when": 1791920735623,
       "tag": "0072_run_lineage_quotas",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1791929802099,
+      "tag": "0073_run_effect_stamps",
+      "breakpoints": true
     }
   ]
 }
