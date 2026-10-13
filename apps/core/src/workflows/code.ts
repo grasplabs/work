@@ -673,19 +673,35 @@ const noPlace = (error: unknown): boolean =>
   sandboxVerdictOf(error) === "busy" ||
   (error instanceof SandboxUnavailableError && error.status === 503);
 
+/** A run's load let go of: its run cancelled, or its activation superseded. */
+const letGoError = (): Error =>
+  new Error("The run was cancelled or taken over: its load let go.");
+
 /**
  * Runs `load` on the sandbox, asking again while no place is free
  * (`noPlace`), backing off up to {@link runLoadRetryMs}, for up to
- * {@link runLoadWaitMs}; never settles once `stopped` says the run is let
- * go of (its activation over: a wait suspended it, or a cancel ended it)
- * as it waits.
+ * {@link runLoadWaitMs}. It looks whether the run is still its
+ * activation's (`current`) at once before each ask, with nothing awaited
+ * in between, and every {@link runLoadCheckMs} as it waits: one cancelled
+ * or taken over is refused (`letGoError`), and never takes a place. One
+ * whose activation is over (`over`: a wait suspended it) never settles.
  */
 const waitingForPlace = async (
   load: () => Promise<unknown>,
-  stopped: () => boolean
+  { over, current }: { over: AbortSignal | undefined; current: () => boolean }
 ): Promise<unknown> => {
+  const stillWanted = async (): Promise<void> => {
+    if (over?.aborted === true) {
+      await neverSettles();
+    }
+    if (!current()) {
+      throw letGoError();
+    }
+  };
   const until = Date.now() + runLoadWaitMs;
   for (let wait = 1000; ; wait = Math.min(wait * 2, runLoadRetryMs)) {
+    // oxlint-disable-next-line no-await-in-loop -- one look at a time
+    await stillWanted();
     try {
       // oxlint-disable-next-line no-await-in-loop -- one ask at a time
       return await load();
@@ -695,16 +711,34 @@ const waitingForPlace = async (
       }
     }
     for (const next = Date.now() + wait; Date.now() < next;) {
-      if (stopped()) {
-        // oxlint-disable-next-line no-await-in-loop -- never comes back
-        return await neverSettles();
-      }
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      await stillWanted();
       // oxlint-disable-next-line no-await-in-loop -- one look at a time
       await scheduler.wait(Math.min(runLoadCheckMs, next - Date.now()));
     }
-    if (stopped()) {
-      // oxlint-disable-next-line no-await-in-loop -- never comes back
-      return await neverSettles();
+  }
+};
+
+/**
+ * Aborts `letGo` once the run is no longer its activation's (`current`),
+ * looking every {@link runLoadCheckMs} until `settled` aborts: a load
+ * running for a run cancelled or taken over ends, freeing its place.
+ */
+const watchCurrent = async (
+  current: () => boolean,
+  letGo: AbortController,
+  settled: AbortSignal
+): Promise<void> => {
+  while (!settled.aborted) {
+    if (!current()) {
+      letGo.abort(letGoError());
+      return;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      await scheduler.wait(runLoadCheckMs, { signal: settled });
+    } catch {
+      return;
     }
   }
 };
@@ -825,7 +859,17 @@ const runLoadFailure = (error: unknown): unknown => {
 export const loadRun = (
   env: Env,
   { app, version, workflow, files }: RunCode,
-  { over }: { over?: AbortSignal } = {}
+  {
+    over,
+    current = () => true,
+  }: {
+    over?: AbortSignal;
+    /**
+     * Whether the run is still its activation's: not cancelled, nor taken
+     * over by a newer activation (run-object.ts).
+     */
+    current?: () => boolean;
+  } = {}
 ): RunLoad => {
   const modules = async () => ({
     ...(await modulesOf(env, version, files)),
@@ -842,7 +886,6 @@ export const loadRun = (
     })).getEntrypoint<RunEntrypoint>("Run");
     return { run: async (host, start) => await entrypoint.run(host, start) };
   }
-  const stopped = (): boolean => over?.aborted === true;
   return {
     run: async (host, start) => {
       let sessionLive: (() => boolean) | undefined;
@@ -870,21 +913,39 @@ export const loadRun = (
         cpuMs: workflowSandbox.limits.cpuMs,
         wallMs: runLoadMs,
       };
+      // Let go of once the run is cancelled or taken over, as it runs.
+      const letGo = new AbortController();
+      const signal =
+        over === undefined
+          ? letGo.signal
+          : AbortSignal.any([over, letGo.signal]);
       try {
         const value = await waitingForPlace(
-          async () =>
-            await runInSession(sandboxHost, call, {
-              ...(over === undefined ? {} : { signal: over }),
-              opened: (_id, live) => {
-                sessionLive = live;
-              },
-            }),
-          stopped
+          async () => {
+            // Nothing awaited since `current` was last looked at.
+            const settled = new AbortController();
+            const watching = watchCurrent(current, letGo, settled.signal);
+            try {
+              return await runInSession(sandboxHost, call, {
+                signal,
+                opened: (_id, live) => {
+                  sessionLive = live;
+                },
+              });
+            } finally {
+              settled.abort();
+              await watching;
+            }
+          },
+          { over, current }
         );
         ended.resolve(null);
         return value;
       } catch (error) {
         ended.resolve(error);
+        if (letGo.signal.aborted) {
+          throw letGoError();
+        }
         if (over?.aborted === true) {
           // Let go of once its activation was over: as the engine leaves a
           // suspended call, it never settles, so nothing of the run acts on

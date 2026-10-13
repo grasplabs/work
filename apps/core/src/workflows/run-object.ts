@@ -271,6 +271,11 @@ export class WorkflowRuns extends WorkflowRun<Env> {
           ...(this.#activation === undefined
             ? {}
             : { over: this.#activation.signal }),
+          // Cancelled (its mark written), or taken over by a newer
+          // activation: read from the object's own storage, no await.
+          current: () =>
+            !cancelledIn(this.ctx.storage.sql) &&
+            this.generation() === generation,
         });
       },
     };

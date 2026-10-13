@@ -184,6 +184,11 @@ export interface RunMemory {
    * on-prem a sandbox session holding a process, is let go of then.
    */
   over?: AbortSignal;
+  /**
+   * Whether the run is still this activation's: not cancelled, nor taken
+   * over by a newer one (run-object.ts).
+   */
+  current?: () => boolean;
 }
 
 /** Runs (or resumes) one run of an App's workflow. */
@@ -262,7 +267,10 @@ const runWorkflow = async (
     const code = loadRun(
       env,
       { app: run.app, version: run.version, workflow: run.workflow, files },
-      memory.over === undefined ? {} : { over: memory.over }
+      {
+        ...(memory.over === undefined ? {} : { over: memory.over }),
+        ...(memory.current === undefined ? {} : { current: memory.current }),
+      }
     );
     const host = new RunHost(env, step, run, {
       stepFailed,
@@ -299,6 +307,11 @@ const runWorkflow = async (
       apps: Object.keys(apps),
     });
   });
+  if (!result.ok && memory.current?.() === false) {
+    // Cancelled or taken over as it ran (its load let go, say): whoever
+    // ended it, or the newer activation, records what comes of it.
+    throw new Error(`Run ${runId} is no longer this activation's`);
+  }
   const failed = tampered ?? (result.ok ? undefined : result.error);
   if (failed) {
     // A failed run stops here, whatever failed: the step's retries (only

@@ -15,6 +15,7 @@ import {
   runObject,
   sleeping,
   stepDone,
+  whileEngineRefuses,
   woken,
 } from "../runs.ts";
 import { signedInApi } from "../sign-in.ts";
@@ -243,21 +244,31 @@ describe("a workflow's runs on-prem", runTime, () => {
     });
   });
 
-  it("stops a run's wait for a place once the run is cancelled: it never loads", async () => {
+  it("stops a run's wait for a place once the run is cancelled, its activation not yet ended: it never takes one", async () => {
     const { builder, app } = await appWith(oneStep);
     // The App's runs' one place, held.
     const letGo = holdPlace(runOwnerOf(app));
     const run = await builder.api.workflows.start(app, "single");
-    await scheduler.wait(2000);
-    await builder.api.workflows.cancel(run.id);
+    // Well into its wait: it has asked for a place, and been refused, more
+    // than once.
+    await scheduler.wait(12_000);
+    // Marked cancelled in its object, but the engine not told yet: its
+    // activation goes on, as it does until a cancel is finished.
+    const cancelled = await whileEngineRefuses(
+      (method) => method === "terminate",
+      async () =>
+        await builder.api.workflows.cancel(run.id).then(
+          () => "cancelled",
+          () => "cancelled, the engine not yet told"
+        )
+    );
     await letGo();
-    // The App's next run takes the place at once: the cancelled one, no
-    // longer waiting, never took it.
-    const next = await builder.api.workflows.start(app, "single");
-    await finished(next.id);
+    // Longer than the longest wait between a load's asks (30 s): a load
+    // still waiting would have taken the place by now, and run.
+    await scheduler.wait(35_000);
     expect({
-      cancelled: await stepsOf(run.id),
-      next: await builder.api.workflows.status(next.id),
-    }).toMatchObject({ cancelled: [], next: { status: "completed" } });
+      cancelled: cancelled.startsWith("cancelled"),
+      steps: await stepsOf(run.id),
+    }).toStrictEqual({ cancelled: true, steps: [] });
   });
 });
