@@ -937,6 +937,16 @@ export const dropForEndedRuns = async (
       "run.ended",
       null
     );
+    // Its calls of unknown outcome stay obligations of their person (the
+    // effect may have happened), but nothing keeps their inputs past the
+    // run's retention either: listed on, by what they were, without it.
+    // oxlint-disable-next-line no-await-in-loop -- one App at a time
+    await drizzle(env.DB)
+      .update(idempotentCalls)
+      .set({ input: null })
+      .where(
+        sql`${idempotentCalls.subjectType} = 'app' AND ${idempotentCalls.subjectId} = ${appId} AND ${idempotentCalls.input} IS NOT NULL AND substr(${idempotentCalls.idempotencyKey}, 1, instr(${idempotentCalls.idempotencyKey}, ':') - 1) IN ${runs}`
+      );
   }
 };
 

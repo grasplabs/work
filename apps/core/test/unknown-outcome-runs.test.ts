@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { endLiveRuns, finished, liveStatus } from "./runs.ts";
@@ -26,6 +27,8 @@ import {
 // worth of workers.)
 
 const idp = mockIdp();
+
+const day = 24 * 60 * 60 * 1000;
 
 /** A signed-in person's API, on a connection of their own. */
 const personApi = async (role: Role) => {
@@ -244,10 +247,14 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     const { mail, run, unknown } = await waitingRun(admin, ["lost"]);
     await admin.api.workflows.cancel(run.id);
     await finished(run.id);
+    const listed = await admin.api.unknownOutcomes.list();
+    // Past the run's retention its input goes; the obligation stays.
+    await runQuarterHourCron({}, new Date(Date.now() + 31 * day));
     const events = await allEvents();
     expect({
       run: await statusOf(admin, run.id),
-      listed: await admin.api.unknownOutcomes.list(),
+      listed,
+      afterRetention: await admin.api.unknownOutcomes.list(),
       undone: events.some(
         ({ action, target }) =>
           (target?.id === mail.id || target?.id === run.id) &&
@@ -257,6 +264,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       run: "cancelled",
       listed: [unknown],
+      afterRetention: [{ ...unknown, input: null }],
       undone: false,
     });
   });
