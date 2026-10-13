@@ -35,6 +35,8 @@ export {
   isAppLayout,
   isAppTestSuite,
   isUnderAppTests,
+  strayTestFileMessage,
+  strayTestFiles,
 } from "./app-code.ts";
 export {
   appCodeLimitErrors,

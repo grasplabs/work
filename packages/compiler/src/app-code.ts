@@ -109,6 +109,10 @@ export const strayTestFiles = (
     (path) => isUnderAppTests(path) && !isTestFile(path) && !isTestFixture(path)
   );
 
+/** Why `file`, one of `strayTestFiles`, is refused. */
+export const strayTestFileMessage = (file: string): string =>
+  `${file} is in tests/, which holds only test suites (*.test.ts), their helpers (*.ts) and fixtures (tests/fixtures/<name>.json).`;
+
 /** The kind of `path`'s code, or undefined for a file that isn't server code. */
 export const appCodeKind = (path: string): AppCodeKind | undefined => {
   if (path.endsWith(".d.ts")) {

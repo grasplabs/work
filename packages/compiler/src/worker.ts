@@ -29,6 +29,7 @@ import {
   isAppLayout,
   isAppTestSuite,
   maxAppTestSuites,
+  strayTestFileMessage,
   strayTestFiles,
 } from "./app-code.ts";
 import { extractCandidates } from "./candidates.ts";
@@ -620,11 +621,7 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
     return {
       ok: false,
       diagnostics: strays.map((file) =>
-        problem(
-          "tests",
-          `${file} is in tests/, which holds only test suites (*.test.ts), their helpers (*.ts) and fixtures (tests/fixtures/<name>.json).`,
-          { file }
-        )
+        problem("tests", strayTestFileMessage(file), { file })
       ),
     };
   }

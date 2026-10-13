@@ -562,6 +562,44 @@ export default appTest({
     ).rejects.toMatchObject({ code: "version.tests_unavailable" });
   });
 
+  it("need no runtime for fixtures and helpers alone, yet refuse a stray file anywhere", async () => {
+    /** Version 1 of an App with `files`, sealed where App code may run. */
+    const sealedWith = async (files: Record<string, string>) => {
+      const built = await appWith(files);
+      const store = await createStore(env, built.owner);
+      await sealRelease(env, {
+        app: built.app,
+        version: 1,
+        store,
+        by: built.owner,
+      });
+      return built;
+    };
+    // `appFiles` holds tests/fixtures/notes.json; a helper, but no suite.
+    const helpers = await sealedWith({
+      ...appFiles,
+      "tests/lib/owner.ts": "export const ownerName = 'note-owner';\n",
+    });
+    await expect(
+      setCurrentVersion(unbounded, helpers.owner, helpers.app, 1)
+    ).resolves.toMatchObject({ currentVersion: 1 });
+
+    const stray = await sealedWith({
+      ...appFiles,
+      "tests/notes.spec.js": "export default {};\n",
+    });
+    await expect(
+      setCurrentVersion(unbounded, stray.owner, stray.app, 1)
+    ).rejects.toMatchObject({
+      code: "version.tests_failed",
+      details: {
+        failures: [
+          "tests/notes.spec.js: tests/notes.spec.js is in tests/, which holds only test suites (*.test.ts), their helpers (*.ts) and fixtures (tests/fixtures/<name>.json).",
+        ],
+      },
+    });
+  });
+
   it("don't run again when the current version is made current again", async () => {
     const built = await appWith({
       ...appFiles,

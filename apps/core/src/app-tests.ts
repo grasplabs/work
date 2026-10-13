@@ -3,6 +3,8 @@ import {
   appModuleName,
   isAppTestSuite,
   isUnderAppTests,
+  strayTestFileMessage,
+  strayTestFiles,
   kitModuleName,
   workflowSdkModules,
 } from "@grasp-os/compiler";
@@ -597,12 +599,19 @@ export const appTestFailures = async (
   release: Release,
   files: AppFiles
 ): Promise<string[]> => {
-  // Anything under tests/ goes to the build, which refuses what isn't a
-  // suite, a helper or a fixture: nothing there is passed over.
-  if (!Object.keys(files).some(isUnderAppTests)) {
+  // What under tests/ is no suite, helper or fixture is refused by its
+  // path alone, with no runtime: nothing there is passed over.
+  const strays = strayTestFiles(files);
+  if (strays.length > 0) {
+    return strays
+      .slice(0, maxFailures)
+      .map((file) => `${file}: ${strayTestFileMessage(file)}`);
+  }
+  // Only suites need the runtime: fixtures and helpers alone run nothing.
+  const suites = Object.keys(files).filter(isAppTestSuite).toSorted();
+  if (suites.length === 0) {
     return [];
   }
-  const suites = Object.keys(files).filter(isAppTestSuite).toSorted();
   // Only where the runtime bounds App code's CPU, or a deployment accepts
   // that nothing does: on-prem the sandbox host doesn't run tests yet.
   if (
