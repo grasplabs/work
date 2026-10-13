@@ -4,8 +4,9 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
+import { cancelRun } from "../src/workflows/controls.ts";
 import { runEngine } from "../src/workflows/engine.ts";
-import { cancelRun, repairStarts, startRun } from "../src/workflows/runs.ts";
+import { repairStarts, startRun } from "../src/workflows/runs.ts";
 import { serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
@@ -927,16 +928,16 @@ describe("starts core stopped in the middle of", () => {
     });
   });
 
-  it("end a run cancelled before its start was sent as cancelled, though the cancel's request died before the engine could say", async () => {
+  it("end a run cancelled before its start was sent as cancelled, though the cancel's request died before the engine heard of it", async () => {
     const builder = await personApi("builder");
     const identity = await builder.api.whoami();
     const app = await appWith(builder, waiting);
     const run = await orphanOf(builder, app, 0);
-    // The cancel writes its tombstone, then fails as it asks the engine
-    // where the run is.
+    // The cancel writes its tombstone, then fails as it tells the engine
+    // to terminate the run.
     const cancelled = await aroundEngine(
       async (method, call) => {
-        if (method === "status") {
+        if (method === "terminate") {
           throw new Error("The engine is unavailable");
         }
         return await call();
