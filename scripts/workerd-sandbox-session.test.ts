@@ -655,6 +655,92 @@ describe("a session on the on-prem sandbox", () => {
     expect(outcome.reachedInternal).toBe(0);
   });
 
+  it("gives a capability core passes during a call only its methods, and only while its callback runs", async () => {
+    const outcome = await run("passed");
+    expect(outcome).toMatchObject({
+      status: "ok",
+      value: { inside: { ping: 103, internal: "refused" }, after: "refused" },
+    });
+    expect([outcome.reachedInternal, outcome.reachedAfter]).toStrictEqual([
+      0, 0,
+    ]);
+  });
+
+  /** What a workflow run's host case did (session-worker.ts, `/run-host`). */
+  const runHost = async (name: string) => {
+    const response = await fetch(`${coreUrl}run-host?case=${name}`);
+    return z
+      .object({
+        status: z.string(),
+        value: z.unknown().optional(),
+        verdict: z.string().nullable().optional(),
+        message: z.string().optional(),
+        reached: z.array(z.string()),
+        stepErrors: z.array(z.string()),
+      })
+      .parse(await response.json());
+  };
+
+  it("gives a run's step exactly its attempt's calls, and refuses its attempt's host once the step is over", async () => {
+    const outcome = await runHost("attempts");
+    const names = [
+      "callModel",
+      "callCollection",
+      "callConnection",
+      "callApp",
+      "callFunction",
+      "callExport",
+      "openDecision",
+      "decisionRecipients",
+      "readAttachment",
+    ];
+    expect(outcome).toMatchObject({
+      status: "ok",
+      value: {
+        inside: {
+          ok: true,
+          value: {
+            ...Object.fromEntries(names.map((name) => [name, "reached"])),
+            revokeAll: "refused",
+          },
+        },
+        late: { ok: true, value: "refused" },
+      },
+    });
+    // Attempt A's late call never reached core: only step A's own did.
+    expect(outcome.reached.toSorted()).toStrictEqual(names.toSorted());
+  });
+
+  it("refuses, in core, an attempt host's call once its step is over or its session given up on", async () => {
+    const response = await fetch(`${coreUrl}attempt-liveness`);
+    await expect(response.json()).resolves.toStrictEqual({
+      own: { ok: true, value: "reached" },
+      lateFromA: { ok: true, value: "refused" },
+      givenUp: { ok: true, value: "refused" },
+      reached: ["callModel"],
+    });
+  });
+
+  it("refuses a running step's attempt call once core gave up on the session", async () => {
+    const outcome = await runHost("givenUp");
+    expect(outcome.reached).toStrictEqual([]);
+  });
+
+  it("fails a step for good when the sandbox stopped its code, and as the platform's when core's own answer was too big", async () => {
+    const [spins, bigAnswer] = [
+      await runHost("spins"),
+      await runHost("bigAnswer"),
+    ];
+    expect({ spins, bigAnswer }).toMatchObject({
+      spins: { verdict: "cpu", stepErrors: ["NonRetryableError"] },
+      bigAnswer: {
+        status: "unavailable",
+        verdict: null,
+        stepErrors: ["SandboxUnavailableError"],
+      },
+    });
+  }, 30_000);
+
   it("passes on what the isolate threw, as the App's", async () => {
     await expect(run("throws")).resolves.toMatchObject({
       status: "refused",

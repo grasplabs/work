@@ -21,14 +21,17 @@
 import {
   // oxlint-disable-next-line no-restricted-imports -- its only caller is core, over the supervisor's private socket: nothing untrusted calls it
   RpcTarget as CapnwebTarget,
-  RpcPromise,
-  RpcStub,
   newWorkersWebSocketRpcResponse,
 } from "capnweb";
 import type { RpcTarget } from "cloudflare:workers";
 
 import { sessionMaxRuns } from "../call-limits.ts";
-import { invoke, objectCapability, outward } from "./sandbox-capability.ts";
+import {
+  declaredMethodsOf,
+  invoke,
+  objectCapability,
+  outward,
+} from "./sandbox-capability.ts";
 
 /** What the workerd config gives the sandbox host. */
 export interface SessionEnv {
@@ -61,26 +64,8 @@ interface SessionCall {
   capabilities: Record<string, CapabilitySpec>;
 }
 
-/** The most capabilities, and methods of one, a call may name. */
+/** The most capabilities a call may name. */
 const maxCapabilities = 32;
-const maxMethods = 64;
-
-/** A method name a capability may have: no getters, nothing internal. */
-const methodName = /^[a-zA-Z][a-zA-Z0-9_]{0,99}$/u;
-/**
- * Whether `name` is one a Cap'n Web stub or any object answers itself
- * (`then`, `map`, `toString`, `hasOwnProperty`, ...): never a capability's,
- * as a call by it would never reach core. Read from the classes, so a
- * name either gains is refused too.
- */
-const isReserved = (name: string): boolean =>
-  name in Object.prototype ||
-  name in RpcPromise.prototype ||
-  name in RpcStub.prototype ||
-  // A Worker's own (a WorkerEntrypoint's), and what disposes a stub.
-  name === "fetch" ||
-  name === "connect" ||
-  name === "dispose";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -96,18 +81,8 @@ const capabilitySpecOf = (value: unknown): CapabilitySpec | undefined => {
   if (value.function === true) {
     return { function: true };
   }
-  const { methods } = value;
-  if (
-    Array.isArray(methods) &&
-    methods.length <= maxMethods &&
-    methods.every(
-      (name) =>
-        typeof name === "string" && methodName.test(name) && !isReserved(name)
-    )
-  ) {
-    return { methods: methods.map(String) };
-  }
-  return undefined;
+  const methods = declaredMethodsOf(value.methods);
+  return methods === undefined ? undefined : { methods };
 };
 
 /** `body` as a call, or undefined for anything else. */

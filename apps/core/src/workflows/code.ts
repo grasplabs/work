@@ -22,17 +22,21 @@ import type {
   TriggerDeclaration,
   WorkflowCalls,
 } from "@grasp-os/shared/workflows";
+import { NonRetryableError } from "@grasp-os/workerflow/errors";
 import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
-import { runInSession, sandboxVerdictOf } from "../sandbox-session.ts";
-import { sandbox } from "../sandbox.ts";
 import {
-  requireBoundedHere,
-  SandboxUnavailableError,
-  sessionHost,
-} from "../sandboxed.ts";
+  capability,
+  passedCapability,
+  runInSession,
+  sandboxVerdictOf,
+} from "../sandbox-session.ts";
+import { sandbox } from "../sandbox.ts";
+import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
+import { attemptCallLabels } from "./attempt-host.ts";
+import type { AttemptHost } from "./attempt-host.ts";
 import { collectionMethods, fromIsolate } from "./host.ts";
 
 // An App's workflows are its code, written by the agent: they run as its
@@ -582,6 +586,8 @@ const modulesOf = async (
 
 /** What a run's isolate is loaded for: its code. */
 export interface RunCode {
+  /** Whose run it is: the App, which the sandbox caps per owner. */
+  app: AppId;
   /** The version the run is pinned to. */
   version: number;
   workflow: WorkflowId;
@@ -590,26 +596,366 @@ export interface RunCode {
 }
 
 /**
- * The run's main module, in an isolate of its own running the run's
- * pinned version. Each load is a new isolate, which the loader keeps for
- * no other (it has no name): its env is empty, as every binding it has
- * goes through the host, and no two runs, or loads of one run, share
- * memory. Loads are few: a run's start, and each resume after a wait.
+ * The host's calls a run's code makes (`RunHost`'s, host.ts): its main
+ * module calls only these (`runMain`), and on-prem the isolate gets no
+ * other.
  */
-export const loadRun = (env: Env, { version, workflow, files }: RunCode) => {
-  // On-prem, nothing bounds a run's isolate yet: refused unless the
-  // deployment says that's fine (GRA-501).
-  requireBoundedHere(env, "a workflow's run");
-  return env.LOADER.get(null, async () => ({
-    ...workflowSandbox,
-    mainModule: runModule,
-    modules: {
-      ...(await modulesOf(env, version, files)),
-      [runBindingsModule]: runBindings,
-      [runModule]: runMain(workflow),
+export interface RunHostCalls {
+  do: (
+    name: unknown,
+    options: unknown,
+    fn: (attempt: AttemptHost) => Promise<unknown>
+  ) => Promise<Settled<unknown>>;
+  sleep: (name: unknown, duration: unknown) => Promise<Settled<null>>;
+  waitForDecision: (
+    name: unknown,
+    options: unknown
+  ) => Promise<Settled<unknown>>;
+}
+
+/** A run's code, loaded: `run` runs it once, from its start or a resume. */
+export interface RunLoad {
+  run: (host: RunHostCalls & RpcTarget, start: RunStart) => Promise<unknown>;
+}
+
+/**
+ * The longest one load of a run may take on-prem, in wall-clock time: from
+ * its start or a resume to its next wait, the supervisor's longest session.
+ * A load past it is stopped, as the App's: its steps wait on model and
+ * connector calls, which cost it no CPU time, and its CPU time is bounded
+ * on its own (`workflowSandbox`).
+ */
+const runLoadMs = 15 * 60_000;
+
+/**
+ * How long a run's load waits, in all, for a place in the sandbox: its
+ * App's runs may hold their share, and other calls the pool, for as long
+ * as their own loads take. Nothing of the run ran yet, so waiting is safe;
+ * past it, the load fails as the platform's.
+ */
+const runLoadWaitMs = 10 * 60_000;
+
+/** The longest one wait between asks for a place. */
+const runLoadRetryMs = 30_000;
+
+/** How often a load waiting for a place looks whether its activation is over. */
+const runLoadCheckMs = 1000;
+
+/**
+ * How long a step whose function failed waits for its session's verdict
+ * (`sessionRunHost`): the session ends at once when its process does.
+ */
+const verdictWaitMs = 5000;
+
+/**
+ * Whose a run's loads are in the sandbox: the App's runs, an owner apart
+ * from the App's interactive calls (its functions, screens, Code Mode,
+ * metadata and tests), so runs, whose loads hold their places for as long
+ * as their steps take, never hold the places those wait for.
+ */
+export const runOwnerOf = (app: AppId): string => `workflow:${app}`;
+
+/**
+ * What never settles: a load let go of once its activation is over, as
+ * the engine leaves a suspended call.
+ */
+const neverSettles = async (): Promise<never> =>
+  // oxlint-disable-next-line promise/avoid-new -- a promise that never settles, which nothing else makes
+  await new Promise<never>(() => {
+    // Never settles.
+  });
+
+/**
+ * Whether `error` refused a load before any of its code ran, for want of a
+ * place: its owner at its share (`busy`), or the pool full (503).
+ */
+const noPlace = (error: unknown): boolean =>
+  sandboxVerdictOf(error) === "busy" ||
+  (error instanceof SandboxUnavailableError && error.status === 503);
+
+/** A run's load let go of: its run cancelled, or its activation superseded. */
+const letGoError = (): Error =>
+  new Error("The run was cancelled or taken over: its load let go.");
+
+/**
+ * Runs `load` on the sandbox, asking again while no place is free
+ * (`noPlace`), backing off up to {@link runLoadRetryMs}, for up to
+ * {@link runLoadWaitMs}. It looks whether the run is still its
+ * activation's (`current`) at once before each ask, with nothing awaited
+ * in between, and every {@link runLoadCheckMs} as it waits: one cancelled
+ * or taken over is refused (`letGoError`), and never takes a place. One
+ * whose activation is over (`over`: a wait suspended it) never settles.
+ */
+const waitingForPlace = async (
+  load: () => Promise<unknown>,
+  { over, current }: { over: AbortSignal | undefined; current: () => boolean }
+): Promise<unknown> => {
+  const stillWanted = async (): Promise<void> => {
+    if (over?.aborted === true) {
+      await neverSettles();
+    }
+    if (!current()) {
+      throw letGoError();
+    }
+  };
+  const until = Date.now() + runLoadWaitMs;
+  for (let wait = 1000; ; wait = Math.min(wait * 2, runLoadRetryMs)) {
+    // oxlint-disable-next-line no-await-in-loop -- one look at a time
+    await stillWanted();
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+      return await load();
+    } catch (error) {
+      if (!noPlace(error) || Date.now() + wait > until) {
+        throw error;
+      }
+    }
+    for (const next = Date.now() + wait; Date.now() < next;) {
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      await stillWanted();
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      await scheduler.wait(Math.min(runLoadCheckMs, next - Date.now()));
+    }
+  }
+};
+
+/**
+ * Aborts `letGo` once the run is no longer its activation's (`current`),
+ * looking every {@link runLoadCheckMs} until `settled` aborts: a load
+ * running for a run cancelled or taken over ends, freeing its place.
+ */
+const watchCurrent = async (
+  current: () => boolean,
+  letGo: AbortController,
+  settled: AbortSignal
+): Promise<void> => {
+  while (!settled.aborted) {
+    if (!current()) {
+      letGo.abort(letGoError());
+      return;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      await scheduler.wait(runLoadCheckMs, { signal: settled });
+    } catch {
+      return;
+    }
+  }
+};
+
+/** The calls of a step's attempt host (`AttemptHost`): the isolate's, on-prem. */
+export const attemptMethods = Object.keys(attemptCallLabels);
+
+/** The run's session, as the capabilities passed during it see it. */
+export interface RunSession {
+  /** Whether its call is open now: not once it answered or was given up on. */
+  live: () => boolean;
+  /** The load's failure once it ended (null for none). */
+  ended: Promise<unknown>;
+}
+
+/**
+ * Fails a step whose function failed rather than answered, as its
+ * session ended: for good when the sandbox stopped the code (its CPU time,
+ * memory or time past, its process gone, what it sent refused), so the
+ * step is never tried again in an isolate that is no more; as it failed,
+ * the platform's to try again, otherwise (a socket dropped, a refusal of
+ * core's own, or no verdict yet).
+ */
+const stepCodeFailure = async (
+  thrown: unknown,
+  session: RunSession
+): Promise<Error> => {
+  const failure = await Promise.race([
+    session.ended,
+    (async (): Promise<undefined> => {
+      await scheduler.wait(verdictWaitMs);
+      return undefined;
+    })(),
+  ]);
+  const verdict = sandboxVerdictOf(failure);
+  if (verdict !== undefined && codesVerdicts.has(verdict)) {
+    return new NonRetryableError(
+      `The sandbox stopped the step's code: ${failure instanceof Error ? failure.message : verdict}`
+    );
+  }
+  return thrown instanceof Error
+    ? thrown
+    : new Error("The step's code failed.");
+};
+
+/**
+ * `host` as the run's capability in a session: its three calls, and the
+ * attempt host each step's function gets, passed as a capability of its
+ * calls alone, live while that function runs and the session's call is
+ * open (`passedCapability`). A function that fails rather than answering
+ * fails its step as `stepCodeFailure` says.
+ */
+export const sessionRunHost = (
+  host: RunHostCalls,
+  session: RunSession
+): RunHostCalls => ({
+  do: async (name, options, fn) => {
+    if (typeof fn !== "function") {
+      return await host.do(name, options, fn);
+    }
+    return await host.do(name, options, async (attempt) => {
+      let live = true;
+      try {
+        return await fn(
+          // SAFETY: what the sandbox host makes of a passed capability
+          // for the isolate: `fn` is the isolate's, over the session.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          passedCapability(
+            attempt,
+            attemptMethods,
+            () => live && session.live()
+          ) as never
+        );
+      } catch (error) {
+        throw await stepCodeFailure(error, session);
+      } finally {
+        live = false;
+      }
+    });
+  },
+  sleep: async (name, duration) => await host.sleep(name, duration),
+  waitForDecision: async (name, options) =>
+    await host.waitForDecision(name, options),
+});
+
+/**
+ * What a run's load failing on-prem fails the run with: the sandbox
+ * stopping its code (its CPU time, memory or time past, its process gone,
+ * what it sent refused) as the App's, a workflow error saying so; anything
+ * else as it is, the platform's. Never a step's retryable failure.
+ */
+const runLoadFailure = (error: unknown): unknown => {
+  const verdict = sandboxVerdictOf(error);
+  if (verdict === undefined || !codesVerdicts.has(verdict)) {
+    return error;
+  }
+  const failure = workflowErrors.create("workflow.run_failed");
+  failure.message = `The sandbox stopped the workflow's code: ${error instanceof Error ? error.message : verdict}`;
+  return failure;
+};
+
+/**
+ * The run's main module, in an isolate of its own running the run's
+ * pinned version. Each load is a new isolate, which nothing else shares
+ * (it has no name): its env is empty, as every binding it has goes
+ * through the host, and no two runs, or loads of one run, share memory.
+ * Loads are few: a run's start, and each resume after a wait.
+ *
+ * On-prem it runs as a sandbox session of its own, owned by the App's runs
+ * (`runOwnerOf`), its CPU time and memory bounded by the supervisor, with
+ * only the host's calls (`sessionRunHost`). `over` says the activation it
+ * runs for is over (a wait suspended it, which never settles its call):
+ * the session ends then, freeing its process, and a load waiting for a
+ * place stops waiting: a cancel, which ends the activation, so stops it.
+ * A pause is taken at the first step boundary once loaded, as the engine
+ * takes every pause.
+ */
+export const loadRun = (
+  env: Env,
+  { app, version, workflow, files }: RunCode,
+  {
+    over,
+    current = () => true,
+  }: {
+    over?: AbortSignal;
+    /**
+     * Whether the run is still its activation's: not cancelled, nor taken
+     * over by a newer activation (run-object.ts).
+     */
+    current?: () => boolean;
+  } = {}
+): RunLoad => {
+  const modules = async () => ({
+    ...(await modulesOf(env, version, files)),
+    [runBindingsModule]: runBindings,
+    [runModule]: runMain(workflow),
+  });
+  const sandboxHost = sessionHost(env);
+  if (sandboxHost === undefined) {
+    const entrypoint = env.LOADER.get(null, async () => ({
+      ...workflowSandbox,
+      mainModule: runModule,
+      modules: await modules(),
+      env: {},
+    })).getEntrypoint<RunEntrypoint>("Run");
+    return { run: async (host, start) => await entrypoint.run(host, start) };
+  }
+  return {
+    run: async (host, start) => {
+      let sessionLive: (() => boolean) | undefined;
+      const ended = Promise.withResolvers<unknown>();
+      const session: RunSession = {
+        live: () => sessionLive?.() === true && over?.aborted !== true,
+        ended: ended.promise,
+      };
+      const call = {
+        mainModule: runModule,
+        modules: await modules(),
+        entrypoint: "Run",
+        method: "run",
+        args: [
+          {
+            capability: capability(sessionRunHost(host, session), [
+              "do",
+              "sleep",
+              "waitForDecision",
+            ]),
+          },
+          { value: start },
+        ],
+        owner: runOwnerOf(app),
+        cpuMs: workflowSandbox.limits.cpuMs,
+        wallMs: runLoadMs,
+      };
+      // Let go of once the run is cancelled or taken over, as it runs.
+      const letGo = new AbortController();
+      const signal =
+        over === undefined
+          ? letGo.signal
+          : AbortSignal.any([over, letGo.signal]);
+      try {
+        const value = await waitingForPlace(
+          async () => {
+            // Nothing awaited since `current` was last looked at.
+            const settled = new AbortController();
+            const watching = watchCurrent(current, letGo, settled.signal);
+            try {
+              return await runInSession(sandboxHost, call, {
+                signal,
+                opened: (_id, live) => {
+                  sessionLive = live;
+                },
+              });
+            } finally {
+              settled.abort();
+              await watching;
+            }
+          },
+          { over, current }
+        );
+        ended.resolve(null);
+        return value;
+      } catch (error) {
+        ended.resolve(error);
+        if (letGo.signal.aborted) {
+          throw letGoError();
+        }
+        if (over?.aborted === true) {
+          // Let go of once its activation was over: as the engine leaves a
+          // suspended call, it never settles, so nothing of the run acts on
+          // an activation that is over.
+          return await neverSettles();
+        }
+        throw runLoadFailure(error);
+      }
     },
-    env: {},
-  })).getEntrypoint<RunEntrypoint>("Run");
+  };
 };
 
 /** The most of why an isolate didn't start that a failure keeps. */
