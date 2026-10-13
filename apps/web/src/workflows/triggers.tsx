@@ -44,12 +44,22 @@ const Trigger = ({ trigger }: { trigger: WorkflowTrigger }) => {
     return <ScheduleTrigger trigger={trigger} />;
   }
   if (trigger.type === "email") {
-    const { address } = trigger;
+    // Core keeps only the part before the `@`: the mail domain is set up
+    // with Email Routing, outside core, so no domain is known to show.
+    const { address: localPart } = trigger;
     return (
       <>
         <MailIcon aria-hidden="true" className="mt-0.5 size-4" />
-        <span className="min-w-0 flex-1 font-medium">
-          {t`When an email arrives at ${address}`}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="font-medium">
+            {t`When an email arrives for ${localPart}`}
+          </span>
+          <span className="text-muted-foreground text-xs">
+            <Trans>
+              The part of the address before the @, on the mail domain set up
+              for Grasp.
+            </Trans>
+          </span>
         </span>
       </>
     );

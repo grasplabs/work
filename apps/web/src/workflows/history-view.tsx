@@ -28,6 +28,7 @@ import {
   formatDuration,
   historyItems,
   firstHistory,
+  historyFor,
   stepOrdinal,
   withPage,
 } from "./run-history.ts";
@@ -356,14 +357,19 @@ export const RunHistory = ({
   first: RunHistoryPage;
 }) => {
   const { busy, failure, run: read } = useCoreAction();
-  // Read once: the page keys this by `run`, so another run starts afresh.
-  const [loaded, setLoaded] = useState<LoadedHistory>(() =>
+  const [kept, setKept] = useState<LoadedHistory>(() =>
     firstHistory(run, first)
   );
+  // A first page read again (the page's loader ran again) starts the
+  // history anew; the page also keys this by `run`.
+  const loaded = historyFor(kept, run, first);
+  if (loaded !== kept) {
+    setKept(loaded);
+  }
   const more = async (): Promise<void> => {
-    // The run and cursor of the history as it is now: the page read is
-    // added only to that same history, at that same place.
-    const { run: of, cursor } = loaded;
+    // The history as it is now: the page read is added only to that same
+    // history, at that same place.
+    const { run: of, first: on, cursor } = loaded;
     if (cursor === null) {
       return;
     }
@@ -375,7 +381,9 @@ export const RunHistory = ({
         })
     );
     if (page !== undefined) {
-      setLoaded((previous) => withPage(previous, { run: of, cursor }, page));
+      setKept((previous) =>
+        withPage(previous, { run: of, first: on, cursor }, page)
+      );
     }
   };
   return (
