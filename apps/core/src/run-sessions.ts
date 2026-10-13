@@ -91,9 +91,17 @@ export const inTurn = async <T>(
     return await work();
   } finally {
     finish(true);
-    if (turns.get(key) === mine) {
-      turns.delete(key);
-    }
+    // Forgotten once its own turn is over, not as it stops waiting: a call
+    // that gave up still holds its place behind one that runs on (past its
+    // deadline, say, while its sandbox lets go), so the next call made waits
+    // for that one, never running beside it.
+    const forget = async (): Promise<void> => {
+      await mine;
+      if (turns.get(key) === mine) {
+        turns.delete(key);
+      }
+    };
+    void forget();
     const left = (queued.get(key) ?? 1) - 1;
     if (left === 0) {
       queued.delete(key);
