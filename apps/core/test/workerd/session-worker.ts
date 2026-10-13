@@ -298,6 +298,10 @@ const run = async (
         error instanceof SandboxUnavailableError ? "unavailable" : "refused",
       message: error instanceof Error ? error.message : String(error),
       verdict: sandboxVerdictOf(error) ?? null,
+      refusedStatus:
+        error instanceof SandboxUnavailableError
+          ? (error.status ?? null)
+          : null,
       ms: Date.now() - started,
     };
   } finally {

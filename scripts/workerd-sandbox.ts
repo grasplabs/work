@@ -171,6 +171,8 @@ export interface SandboxStats {
   inFlight: number;
   /** Sessions waiting for their owner's room. */
   waitingForOwners: number;
+  /** Owners' places held now, by sessions waiting, running or dying. */
+  ownerPlaces: number;
   /** Child sessions running, and those waiting for their parent's place. */
   children: number;
   waitingForParents: number;
@@ -685,6 +687,10 @@ class SandboxPool {
       waiting: this.#waiting,
       inFlight: this.#inFlight,
       waitingForOwners: this.#waitingForOwners,
+      ownerPlaces: [...this.#owners.values()].reduce(
+        (sum, held) => sum + held,
+        0
+      ),
       children: this.#children.size,
       waitingForParents: this.#childWaiting.size,
     };
@@ -1205,8 +1211,10 @@ class SandboxPool {
       }
       return;
     }
-    // Given back as soon as the session ends for core, before its process
-    // is killed: core may start the owner's next call at once.
+    // Given back once the session's process is gone, not as the session
+    // ends for core: a process dying (a crash judged on its exit, a kill
+    // still going through) holds its owner's place, so no owner holds more
+    // processes than its share, however fast it starts its next call.
     let ownerHeld = true;
     const giveBack = (): void => {
       if (ownerHeld) {
@@ -1257,7 +1265,6 @@ class SandboxPool {
           parent === undefined ? undefined : () => this.#running.has(parent),
         orphaned: parent === undefined ? undefined : orphaned,
         ended: () => {
-          giveBack();
           letGoOfChild();
           this.#endChildOf(callId);
         },
@@ -1405,9 +1412,10 @@ class SandboxPool {
         abortOf(finished.signal),
       ]);
       ending = true;
-      // Over for core, whatever its process does now: its owner's place
-      // and its parent's child place come back at once, not after the wait
-      // for a dying process to go, which only its verdict needs.
+      // Over for core, whatever its process does now: its parent's child
+      // place comes back at once, not after the wait for a dying process
+      // to go, which only its verdict needs. Its owner's place comes back
+      // once the process is gone.
       ended();
       const endedAs = guard.signal.aborted
         ? await this.#cutShort(host, guard, endsAt)

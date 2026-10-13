@@ -45,6 +45,8 @@ const outcomeSchema = z.object({
   nestedRefused: z.number(),
   refusedVerdict: z.string().nullable(),
   verdict: z.string().nullable().optional(),
+  /** The status the sandbox host refused with, as core's error carries it. */
+  refusedStatus: z.number().nullable().optional(),
   logged: z.array(z.unknown()),
 });
 
@@ -444,6 +446,47 @@ describe("a session on the on-prem sandbox", () => {
     }
   );
 
+  it(
+    "holds a crashed session's owner place until its process is gone",
+    { timeout: 60_000 },
+    async () => {
+      // A process slow to exit after V8 aborted it, as above.
+      const slow = path.join(tempDir(), "slow-to-exit-owner.sh");
+      writeFileSync(
+        slow,
+        `#!/bin/sh\n"${nativeWorkerd}" "$@"\ncode=$?\nsleep 2\nexit $code\n`
+      );
+      chmodSync(slow, 0o755);
+      const small = await startSandboxSupervisor({
+        workerd: slow,
+        processes: 2,
+        memoryLimitBytes: 64 * 1024 ** 3,
+        log: () => {},
+      });
+      try {
+        const url = await serveStandIn("session-worker.ts", small.socket);
+        const state = { settled: false };
+        const crashing = run("crashes", "app-dying", url).finally(() => {
+          state.settled = true;
+        });
+        // Every moment its process lives, its owner holds its place.
+        const placeless: number[] = [];
+        while (!state.settled) {
+          const { inFlight, ownerPlaces } = small.stats();
+          if (inFlight > 0 && ownerPlaces === 0) {
+            placeless.push(inFlight);
+          }
+          // oxlint-disable-next-line no-await-in-loop -- sampled until it settles
+          await sleep(20);
+        }
+        await expect(crashing).resolves.toMatchObject({ verdict: "crashed" });
+        expect(placeless).toStrictEqual([]);
+      } finally {
+        await small.stop();
+      }
+    }
+  );
+
   it("refuses a child named after a parent that has ended", async () => {
     const parent = crypto.randomUUID();
     const opened = await rawOpen(parent, { owner: "run-parent" });
@@ -792,8 +835,10 @@ describe("a session on the on-prem sandbox", () => {
           .poll(() => small.stats().waitingForOwners, { timeout: 2000 })
           .toBe(1);
         const fourth = await run("capabilities", "app-three", url);
-        expect(fourth.status).toBe("unavailable");
-        expect(fourth.message).toContain("503");
+        expect(fourth).toMatchObject({
+          status: "unavailable",
+          refusedStatus: 503,
+        });
         expect(fourth.ms).toBeLessThan(1000);
         await Promise.all([holdingOne, holdingTwo, waiting]);
       } finally {

@@ -137,4 +137,37 @@ describe("a chat's App calls on-prem", () => {
       .parse(await run(notes, code));
     expect(results.map(({ ok }) => ok)).toStrictEqual([true, true, true]);
   });
+
+  it("refuses a run's calls past the eight it may have queued at once, as busy", async () => {
+    const notes = await notesApp();
+    const calls = Array.from({ length: 20 }, (_, index) =>
+      callOf(notes.release, "notes.create", { title: `note ${index}` })
+    );
+    // Each call's outcome: its result, or why it was refused.
+    const code = `export default async (self, env) => {
+      const calls = ${JSON.stringify(calls)};
+      const settled = await Promise.allSettled(calls.map((call) => env.apps.call(${JSON.stringify(notes.app)}, new Blob([call]).stream())));
+      return settled.map((one) => one.status === "fulfilled" ? { ok: one.value.result.ok } : { refused: one.reason.message });
+    };`;
+    const outcomes = z
+      .array(
+        z.object({ ok: z.boolean() }).or(z.object({ refused: z.string() }))
+      )
+      .parse(await run(notes, code));
+    const refused = outcomes.flatMap((outcome) =>
+      "refused" in outcome ? [outcome.refused] : []
+    );
+    // The first eight queue, one taking its turn; the rest find it full.
+    expect({
+      ran: outcomes.length - refused.length >= 8,
+      someRefused: refused.length > 0,
+      why: [...new Set(refused)],
+    }).toStrictEqual({
+      ran: true,
+      someRefused: true,
+      why: [
+        "This App runs as many calls at once as it may. Try again shortly.",
+      ],
+    });
+  });
 });

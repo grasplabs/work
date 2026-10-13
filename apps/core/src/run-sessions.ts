@@ -27,10 +27,22 @@ export const runSessionOf = (key: string): string | undefined =>
 /** The last call to take its turn, by run: the next waits for it. */
 const turns = new Map<string, Promise<void>>();
 
+/** The calls each run has in its queue now, the one taking its turn among them. */
+const queued = new Map<string, number>();
+
+/**
+ * The most calls one run may have queued at once, the one taking its turn
+ * among them: past it, a call is refused as busy, to try again, so a run
+ * making calls by the thousand holds no more than this many in core.
+ */
+export const maxQueuedPerRun = 8;
+
 /**
  * Runs `work` once the calls run `key` made before it have finished, one
  * at a time (no key: at once), or refuses with
- * `operation.deadline_exceeded` if its turn doesn't come by `until`.
+ * `operation.deadline_exceeded` if its turn doesn't come by `until`, and
+ * with `operation.sandbox_busy` if the run has {@link maxQueuedPerRun}
+ * calls queued already.
  */
 export const inTurn = async <T>(
   key: string | undefined,
@@ -40,6 +52,11 @@ export const inTurn = async <T>(
   if (key === undefined) {
     return await work();
   }
+  const count = queued.get(key) ?? 0;
+  if (count >= maxQueuedPerRun) {
+    throw operationErrors.create("operation.sandbox_busy");
+  }
+  queued.set(key, count + 1);
   const before = turns.get(key) ?? Promise.resolve();
   const { promise: done, resolve: finish } = Promise.withResolvers<true>();
   // Over once the one before it is, and it is: a call that gives up
@@ -76,6 +93,12 @@ export const inTurn = async <T>(
     finish(true);
     if (turns.get(key) === mine) {
       turns.delete(key);
+    }
+    const left = (queued.get(key) ?? 1) - 1;
+    if (left === 0) {
+      queued.delete(key);
+    } else {
+      queued.set(key, left);
     }
   }
 };

@@ -16,7 +16,7 @@ import { admitEffect, chatAuthority, chatContext } from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { callAppFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
-import { requestText } from "./app-requests.ts";
+import { cancelRequest, requestText } from "./app-requests.ts";
 import {
   appExports,
   appFor,
@@ -144,67 +144,84 @@ export class AppsApi extends WorkerEntrypoint<Env, AgentScope> {
         : () => false,
       method: "apps.call",
       read: async (person, permissions) => {
-        const text = await requestText(request);
-        try {
-          ({
-            reference: { kind },
-          } = requestKindSchema.parse(JSON.parse(text)));
-        } catch {
-          throw operationErrors.create("contract.invalid_request");
-        }
-        const action = actionFor(kind);
-        // The `allowed` check above passed, so the App's ID is valid.
-        const appId = appIdSchema.parse(app);
-        if (!callsApp(appId, action)(permissions)) {
-          throw readDenied(action);
-        }
-        if (action === "write") {
-          // Only someone with a role in the App reaches it at all, so a
-          // restricted chat can't restrict an App its person can't use.
-          await appFor(this.env, person, appId, "user");
-          await this.#carryChatRestricted(appId);
-        }
         const deadline = Date.now() + functionCallMs;
         // On-prem, a child of the calling run's sandbox session, which runs
         // one child at a time: the run's calls take their turns here, each
-        // within its own deadline, rather than contend for it.
+        // within its own deadline, rather than contend for it. A call waits
+        // for its turn before its request is read, so calls queued behind
+        // others hold none of theirs.
         const parentSession = runSessionOf(scope.runId);
-        const answer = await inTurn(
-          parentSession === undefined ? undefined : scope.runId,
-          deadline,
-          async () =>
-            await callAppFunction(
-              this.env,
-              person,
-              appId,
-              text,
-              deadline,
-              async () => {
-                // The code run still open (not ended, cancelled or closed by a
-                // revocation), and the grant for the call's kind still held.
-                await admitEffect(this.env, scope);
-                const now = await grantedPermissions(
+        let read = false;
+        try {
+          return await inTurn(
+            parentSession === undefined ? undefined : scope.runId,
+            deadline,
+            async () => {
+              read = true;
+              const text = await requestText(request);
+              try {
+                ({
+                  reference: { kind },
+                } = requestKindSchema.parse(JSON.parse(text)));
+              } catch {
+                throw operationErrors.create("contract.invalid_request");
+              }
+              const action = actionFor(kind);
+              // The `allowed` check above passed, so the App's ID is valid.
+              const appId = appIdSchema.parse(app);
+              if (!callsApp(appId, action)(permissions)) {
+                throw readDenied(action);
+              }
+              if (action === "write") {
+                // Only someone with a role in the App reaches it at all, so a
+                // restricted chat can't restrict an App its person can't use.
+                await appFor(this.env, person, appId, "user");
+                await this.#carryChatRestricted(appId);
+              }
+              const answer = await callAppFunction(
+                this.env,
+                person,
+                appId,
+                text,
+                deadline,
+                async () => {
+                  // The code run still open (not ended, cancelled or closed by a
+                  // revocation), and the grant for the call's kind still held.
+                  await admitEffect(this.env, scope);
+                  const now = await grantedPermissions(
+                    this.env,
+                    chatAuthority(scope)
+                  );
+                  if (!callsApp(appId, action)(now)) {
+                    throw readDenied(action);
+                  }
+                },
+                // On-prem, a child of the calling run's sandbox session: never
+                // waiting for a process the run holds while it waits for it.
+                parentSession
+              );
+              if (
+                answer.manifestHash !== null &&
+                (await appHost(this.env, appId).isRestricted())
+              ) {
+                await restrict(
                   this.env,
-                  chatAuthority(scope)
+                  chatAuthority(scope),
+                  chatContext(scope),
+                  [`app:${appId}`]
                 );
-                if (!callsApp(appId, action)(now)) {
-                  throw readDenied(action);
-                }
-              },
-              // On-prem, a child of the calling run's sandbox session: never
-              // waiting for a process the run holds while it waits for it.
-              parentSession
-            )
-        );
-        if (
-          answer.manifestHash !== null &&
-          (await appHost(this.env, appId).isRestricted())
-        ) {
-          await restrict(this.env, chatAuthority(scope), chatContext(scope), [
-            `app:${appId}`,
-          ]);
+              }
+              return answer;
+            }
+          );
+        } catch (error) {
+          // Refused before its turn came (the run's queue full, or its
+          // deadline past while it waited): its request is never read.
+          if (!read) {
+            await cancelRequest(request);
+          }
+          throw error;
         }
-        return answer;
       },
       detail: () => ({
         app: id.success ? id.data : null,
@@ -306,7 +323,7 @@ apps: {
    * call as JSON text, \`{ reference, input, idempotencyKey? }\`, sent as a
    * stream: \`env.apps.call(app, new Blob([JSON.stringify(call)]).stream())\`.
    * At most 132 KiB, sent in full within 5 seconds. Calls made at once may run one at a time, in
-   * the order made, each within its own 30 seconds. Needs a permission on the App (\`read\` for a query,
+   * the order made, each within its own 30 seconds, and at most 8 at once (more answer \`operation.sandbox_busy\`). Needs a permission on the App (\`read\` for a query,
    * \`write\` otherwise), granted by an admin. Answers the result as data:
    * \`{ result: { ok: true, value } | { ok: false, error }, fingerprint, manifestHash }\`.
    */

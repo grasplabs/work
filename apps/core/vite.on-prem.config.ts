@@ -12,6 +12,10 @@ export default coreProject(
     include: ["test/on-prem/**/*.test.ts"],
     // Projects run in groups, lowest first: this one after the others.
     sequence: { groupOrder: 2 },
+    // One file at a time: they share one supervisor, whose small pool two
+    // files running at once would share too, each refused places the
+    // other holds.
+    fileParallelism: false,
   },
   { sandboxSocket: () => readFileSync(sandboxSocketFile, "utf-8") }
 );
