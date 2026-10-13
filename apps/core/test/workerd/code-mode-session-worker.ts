@@ -124,11 +124,11 @@ const cases: Record<
   }
 > = {
   complete: {
-    code: "export default async (self, env) => { console.log('working'); return (await env.caps.double(2)) + (await env.caps.double(3)); };",
+    code: "export default async (self, env) => { console.log('working'); return (await env.apps.double(2)) + (await env.apps.double(3)); };",
   },
   noSuchApi: { code: "export default async (self, env) => env.mail.send();" },
   objectMethod: {
-    code: "export default async (self, env) => env.caps.hasOwnProperty('double');",
+    code: "export default async (self, env) => env.apps.hasOwnProperty('double');",
   },
   misconfigured: {
     code: "export default async () => 1;",
@@ -143,13 +143,17 @@ const cases: Record<
   },
   // An App call, its request a stream, as AppsApi.call documents it.
   streamedRequest: {
-    code: "export default async (self, env) => await env.caps.call('app', new Blob([JSON.stringify({ reference: { kind: 'query' }, input: { n: 1 } })]).stream());",
+    code: "export default async (self, env) => await env.apps.call('app', new Blob([JSON.stringify({ reference: { kind: 'query' }, input: { n: 1 } })]).stream());",
   },
   tooLargeRequest: {
-    code: "export default async (self, env) => await env.caps.call('app', new Blob(['x'.repeat(140_000)]).stream());",
+    code: "export default async (self, env) => await env.apps.call('app', new Blob(['x'.repeat(140_000)]).stream());",
+  },
+  // A stream where the API takes none: only an App call's request is one.
+  streamElsewhere: {
+    code: "export default async (self, env) => await env.apps.double(new Blob(['2']).stream());",
   },
   callsFunction: {
-    code: "export default async (self, env) => await env.caps.callsFunction();",
+    code: "export default async (self, env) => await env.apps.callsFunction();",
   },
   waitsPastItsTime: {
     code: "export default async () => { await scheduler.wait(60_000); };",
@@ -199,7 +203,7 @@ export default {
     const run = await runCode(
       env.LOADER,
       chosen.code,
-      { caps: api(runId) },
+      { apps: api(runId) },
       {
         sessionKey: runId,
         sandbox: () =>

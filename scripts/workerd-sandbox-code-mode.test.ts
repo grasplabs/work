@@ -98,6 +98,12 @@ describe("a Code Mode run on the on-prem sandbox", () => {
     expect(outcome.text).toContain('"kind":"query"');
   });
 
+  it("refuses a stream passed anywhere but an App call's request", async () => {
+    const outcome = await run("streamElsewhere");
+    expect(outcome.status).toBe("threw");
+    expect(outcome.text).toContain("isn't a call of one of this chat's APIs");
+  });
+
   it("refuses an App call's request past what a request may be, as too large", async () => {
     const outcome = await run("tooLargeRequest");
     expect(outcome.status).toBe("threw");

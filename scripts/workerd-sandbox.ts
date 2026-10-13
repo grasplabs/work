@@ -167,6 +167,9 @@ export interface SandboxStats {
   inFlight: number;
   /** Sessions waiting for their owner's room. */
   waitingForOwners: number;
+  /** Child sessions running, and those waiting for their parent's place. */
+  children: number;
+  waitingForParents: number;
 }
 
 /** A running supervisor. */
@@ -640,8 +643,12 @@ class SandboxPool {
   >();
   /** Sessions each owner holds now, waiting or running. */
   readonly #owners = new Map<string, number>();
-  /** Child sessions running now, by their parent's call ID: one each. */
-  readonly #children = new Set<string>();
+  /** The child each parent runs now, by the parent's call ID: one each. */
+  readonly #children = new Map<string, string>();
+  /** Every child's call ID while it runs or waits: never a parent itself. */
+  readonly #childIds = new Set<string>();
+  /** Parents with a child waiting for their one child place, at most one each. */
+  readonly #childWaiting = new Set<string>();
   /** Sessions each owner has waiting for its room, and all of them. */
   readonly #ownerWaiters = new Map<string, number>();
   #waitingForOwners = 0;
@@ -669,6 +676,8 @@ class SandboxPool {
       waiting: this.#waiting,
       inFlight: this.#inFlight,
       waitingForOwners: this.#waitingForOwners,
+      children: this.#children.size,
+      waitingForParents: this.#childWaiting.size,
     };
   }
 
@@ -1104,33 +1113,24 @@ class SandboxPool {
     // A child of a session running now (an App function a Code Mode run
     // calls, which the run waits for): one at a time for each parent, on a
     // process past the pool's size, so it never waits for the process its
-    // own parent holds. A parent that isn't running gives nothing.
+    // own parent holds. Only a top-level session may be a parent: a child's
+    // child is refused, so the pool runs at most twice its size. A parent
+    // that isn't running gives nothing.
     const parentOf = request.headers[parentHeader];
+    if (typeof parentOf === "string" && this.#childIds.has(parentOf)) {
+      refuse(400, "A child session can't be a parent.");
+      return;
+    }
     const parent =
       typeof parentOf === "string" &&
       callIdPattern.test(parentOf) &&
       this.#running.has(parentOf)
         ? parentOf
         : undefined;
-    if (
-      parent !== undefined &&
-      !(await this.#childRoom(parent, waitMs, client))
-    ) {
-      refuse(429, "This session's parent already runs a child.");
-      return;
-    }
-    let childHeld = parent !== undefined;
-    const letGoOfChild = (): void => {
-      if (childHeld && parent !== undefined) {
-        childHeld = false;
-        this.#children.delete(parent);
-        this.#released.dispatchEvent(new Event("released"));
-      }
-    };
     // One owner holds at most its share of the pool, waiting or running: a
-    // session past it waits, as for a process, then is refused.
+    // session past it waits, as for a process, then is refused. Its place
+    // first, then its parent's child place.
     if (!(await this.#ownerRoom(owner, waitMs, client))) {
-      letGoOfChild();
       refuse(429, "This owner already holds as many sessions as it may.");
       return;
     }
@@ -1150,6 +1150,23 @@ class SandboxPool {
       }
       this.#released.dispatchEvent(new Event("released"));
     };
+    if (
+      parent !== undefined &&
+      !(await this.#childRoom(parent, callId, waitMs, client))
+    ) {
+      giveBack();
+      refuse(429, "This session's parent already runs a child.");
+      return;
+    }
+    let childHeld = parent !== undefined;
+    const letGoOfChild = (): void => {
+      if (childHeld && parent !== undefined) {
+        childHeld = false;
+        this.#children.delete(parent);
+        this.#childIds.delete(callId);
+        this.#released.dispatchEvent(new Event("released"));
+      }
+    };
     // Counted as it waited, so never past: checked again all the same, as
     // nothing else may take its place meanwhile.
     if (this.#inFlight >= settings.processes + settings.maxWaiting) {
@@ -1166,16 +1183,21 @@ class SandboxPool {
         waitMs,
         callId,
         refuse,
-        child: parent !== undefined,
+        // A child keeps its place past the pool's size only while its
+        // parent runs.
+        reserved:
+          parent === undefined ? undefined : () => this.#running.has(parent),
         ended: () => {
           giveBack();
           letGoOfChild();
+          this.#endChildOf(callId);
         },
       });
     } finally {
       this.#inFlight -= 1;
       giveBack();
       letGoOfChild();
+      this.#endChildOf(callId);
     }
   }
 
@@ -1189,13 +1211,13 @@ class SandboxPool {
       waitMs: number;
       callId: string;
       refuse: (status: number, message: string) => void;
-      /** Whether it's a parent's child, on a process past the pool's size. */
-      child: boolean;
+      /** For a parent's child: whether it may take a process past the pool's size now. */
+      reserved: (() => boolean) | undefined;
       /** Called once the session is over for core. */
       ended: () => void;
     }
   ): Promise<void> {
-    const { deadlineMs, cpuLimitMs, waitMs, callId, refuse, child, ended } =
+    const { deadlineMs, cpuLimitMs, waitMs, callId, refuse, reserved, ended } =
       session;
     // Gone: core closed its end, done or giving up.
     const caller = new AbortController();
@@ -1209,7 +1231,7 @@ class SandboxPool {
     client.on("error", ignore);
     const host = await this.#acquire(
       AbortSignal.any([caller.signal, AbortSignal.timeout(waitMs)]),
-      child
+      reserved
     );
     if (host === undefined) {
       if (!caller.signal.aborted) {
@@ -1426,7 +1448,10 @@ class SandboxPool {
    */
   #full(): boolean {
     const { processes, maxWaiting } = this.#settings;
-    return this.#inFlight + this.#waitingForOwners >= processes + maxWaiting;
+    return (
+      this.#inFlight + this.#waitingForOwners + this.#childWaiting.size >=
+      processes + maxWaiting
+    );
   }
 
   /**
@@ -1483,15 +1508,22 @@ class SandboxPool {
   }
 
   /**
-   * Takes `parent`'s one child place, waiting up to `waitMs` (or until the
-   * caller leaves) for its child running now to end; false if it doesn't.
+   * Takes `parent`'s one child place for `child`, waiting up to `waitMs`
+   * (or until the caller leaves) for its child running now to end; false
+   * if it doesn't, or if another of its children waits already: at most
+   * one waits, counted as the pool takes it (`#full`).
    */
   async #childRoom(
     parent: string,
+    child: string,
     waitMs: number,
     client: Socket
   ): Promise<boolean> {
     if (this.#children.has(parent)) {
+      if (this.#childWaiting.has(parent)) {
+        return false;
+      }
+      this.#childWaiting.add(parent);
       const gone = new AbortController();
       const leave = (): void => {
         gone.abort();
@@ -1510,11 +1542,25 @@ class SandboxPool {
         return false;
       } finally {
         client.off("close", leave);
+        this.#childWaiting.delete(parent);
+      }
+      // Its parent ended while it waited: it's no child of anything now.
+      if (!this.#running.has(parent)) {
+        return false;
       }
     }
     // Taken in the same turn as the check, as an owner's place is.
-    this.#children.add(parent);
+    this.#children.set(parent, child);
+    this.#childIds.add(child);
     return true;
+  }
+
+  /** Cancels the child session `parent` runs, if any: it ends with it. */
+  #endChildOf(parent: string): void {
+    const child = this.#children.get(parent);
+    if (child !== undefined) {
+      this.cancel(child);
+    }
   }
 
   /** Ends session `callId` as its caller gave up on it; false if none runs. */
@@ -1659,7 +1705,7 @@ class SandboxPool {
   /** An idle process for one call, or undefined once `signal` aborts first. */
   async #acquire(
     signal: AbortSignal,
-    child = false
+    reserved?: () => boolean
   ): Promise<HostProcess | undefined> {
     // Gone already: nothing to wait for, no process to take.
     if (signal.aborted) {
@@ -1669,7 +1715,7 @@ class SandboxPool {
     // child, past it: each running parent has at most one, so the pool
     // never runs more than twice its size.
     const take = (): HostProcess | undefined =>
-      child || this.#busy < this.#settings.processes
+      reserved?.() === true || this.#busy < this.#settings.processes
         ? this.#idle.shift()
         : undefined;
     this.#waiting += 1;
@@ -1966,8 +2012,9 @@ export const startSandboxSupervisor = async (
     }
   );
   // What may hold a connection at once, with C = processes + maxWaiting:
-  // - calls and sessions, running or waiting for a process or their owner's
-  //   room: at most C (`#full`), one connection each;
+  // - calls and sessions, running or waiting for a process, their owner's
+  //   room or their parent's child place: at most C (`#full`), one
+  //   connection each;
   // - core's word on each of them: one `/end`, `/cancel` or `/verdict` (the
   //   last after a kill, once the session's own is gone) at a time, as
   //   core asks one after the other for a call: at most C more;

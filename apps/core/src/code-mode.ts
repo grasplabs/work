@@ -594,21 +594,32 @@ const notApiMethod = (name: string): boolean =>
   name === "connect" ||
   name === "dispose";
 
+/** The one argument a stream may be passed as: an App call's request. */
+const streamArguments: Readonly<Record<string, number>> = {
+  "apps.call": 1,
+};
+
 /**
  * `args` with each argument `streamed` names, the bytes of a stream the
  * code passed (as the harness read it, no further than an App call's
  * request may be), a stream again: what the API takes. Only bytes become
- * one; the bridge itself takes no stream.
+ * one, and only where the API takes a stream (`streamArguments`); the
+ * bridge itself takes no stream.
  */
-const asStreams = (args: unknown[], streamed: unknown): unknown[] => {
+const asStreams = (
+  call: string,
+  args: unknown[],
+  streamed: unknown
+): unknown[] => {
+  const allowed = Object.hasOwn(streamArguments, call)
+    ? streamArguments[call]
+    : undefined;
   if (
     !Array.isArray(streamed) ||
     !streamed.every(
-      (at): at is number =>
-        Number.isInteger(at) &&
+      (at: unknown): at is number =>
         typeof at === "number" &&
-        at >= 0 &&
-        at < args.length &&
+        at === allowed &&
         args[at] instanceof Uint8Array
     )
   ) {
@@ -650,7 +661,7 @@ const apiBridge = (env: Readonly<Record<string, Fetcher>>) => ({
     const answer: unknown = await Reflect.apply(
       fn,
       env[api],
-      asStreams(args, streamed)
+      asStreams(`${api}.${method}`, args, streamed)
     );
     return answer;
   },
