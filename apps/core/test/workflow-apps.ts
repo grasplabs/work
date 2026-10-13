@@ -35,6 +35,11 @@ export class App extends DurableObject {
     return Number(row?.count ?? 0);
   }
 
+  // Takes \`ms\` milliseconds, holding the App's turn meanwhile.
+  async pause(_caller: Caller, ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   purchaseOrder(_caller: Caller, number: string): { amount: number } | null {
     return number === "PO-1" ? { amount: 800_000 } : null;
   }
@@ -87,12 +92,24 @@ export class App extends DurableObject {
     }
   }
 
+  // Waits at the mail server, its search naming its caller's token, until
+  // the test lets it go, then counts \`parked:done\`.
+  async parkAtMail(caller: Caller): Promise<void> {
+    await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + ((caller as { token?: string }).token ?? "") });
+    this.hit(caller, "parked:done");
+  }
+
   // Waits at the mail server, which holds its search until the test lets
   // it go (MAIL, granted \`mail.search\`), then records a point of
   // \`measure\`, and counts whether the call was taken
-  // (\`measure\`:recorded) or refused.
+  // (\`measure\`:recorded) or refused, the search's answer or the point.
   async pointAfter(caller: Caller, measure: string): Promise<void> {
-    await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + measure });
+    try {
+      await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + measure });
+    } catch {
+      this.hit(caller, measure + ":refused");
+      return;
+    }
     try {
       await this.point(caller, measure);
       this.hit(caller, measure + ":recorded");

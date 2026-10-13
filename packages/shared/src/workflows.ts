@@ -15,6 +15,16 @@ import { permissionActionSchema } from "./permissions.ts";
 /** A workflow parameter's value: a number, or text. */
 export type ParamValue = string | number;
 
+/**
+ * Why a call of a run's code was refused for the execution it came from,
+ * named as the engine's contract names them (`execution.*`), whatever
+ * workflow the run is of.
+ */
+export const executionErrors = defineErrorFamily({
+  "execution.stale_attempt":
+    "This step's attempt has ended (it ran out of time, or the run was paused or cancelled): what its code still does acts no more.",
+});
+
 /** Why a workflow call was refused. */
 export const workflowErrors = defineErrorFamily({
   "workflow.invalid": "That isn't a valid request for a workflow.",
