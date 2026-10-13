@@ -587,7 +587,8 @@ export interface MigrationFailure {
     | "too_large"
     | "invalid_answer"
     | "outside_contract"
-    | "reference_changed";
+    | "reference_changed"
+    | "fixtures_failed";
   issues: string[];
 }
 

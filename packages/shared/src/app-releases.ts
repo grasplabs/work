@@ -69,6 +69,52 @@ export const resourceBindingSchema = z.strictObject({
   fingerprint: sha256Schema,
 });
 
+/** Why a migration's fixture failed as the host ran it (see below). */
+export const migrationFixtureReasons = [
+  "invalid_input",
+  "threw",
+  "invalid_output",
+  "too_large",
+  "invalid_answer",
+  "unexpected_output",
+] as const;
+
+/**
+ * What the host found running one of a release's explicit migrations on
+ * its fixtures as it sealed the release (spec 17.2): the release's own
+ * code, in the sandbox, every output validated against the target table
+ * and compared with what the fixture expects. The host's own record,
+ * sealed into the manifest, so its hash binds it to the source tree, the
+ * schemas and the release; nothing App code answers is taken for it. A
+ * failure names the fixture (by its index in the migration's `fixtures`,
+ * or null when none is to blame) and why; fixtures are the App's own
+ * data, never real records. Only a migration whose fixtures all passed
+ * runs on records or is made current (apps/core/src/migration-evidence.ts).
+ */
+export const migrationEvidenceSchema = z
+  .strictObject({
+    migration: z.string().min(1).max(64),
+    table: z.string().min(1).max(64),
+    fromSchema: sha256Schema,
+    toSchema: sha256Schema,
+    /** SHA-256 of the canonical JSON of its fixtures, as the App declares them. */
+    fixturesHash: sha256Schema,
+    fixtures: z.int().min(1).max(16),
+    passed: z.boolean(),
+    failure: z
+      .strictObject({
+        fixture: z.int().min(0).max(15).nullable(),
+        reason: z.enum(migrationFixtureReasons),
+        issues: z.array(z.string().max(500)).max(20),
+      })
+      .nullable(),
+  })
+  .refine(({ passed, failure }) => passed === (failure === null), {
+    message: "A migration's evidence fails exactly when it names a failure",
+  });
+
+export type MigrationEvidence = z.infer<typeof migrationEvidenceSchema>;
+
 /** A release's manifest (spec 16.1). */
 export const releaseManifestSchema = z.strictObject({
   formatVersion: z.literal(releaseFormatVersion),
@@ -87,6 +133,8 @@ export const releaseManifestSchema = z.strictObject({
   artifacts: z.array(releaseArtifactSchema).min(1).max(1024),
   bindings: z.array(resourceBindingSchema).max(64),
   verificationReportHash: sha256Schema,
+  /** One per explicit migration the App declares, in its order. */
+  migrationEvidence: z.array(migrationEvidenceSchema).max(16),
   // Always `unreviewed` as sealed: trust is never the manifest's to say
   // (approval and revocation are the host's records of its hash).
   artifactTrust: z.literal("unreviewed"),
@@ -131,4 +179,6 @@ export const versionErrors = defineErrorFamily({
     "This version has App tests, which run only where a sandbox bounds them: on this deployment they need the sandbox host, which doesn't run them yet. Until it does, a version with App tests can't be made current here.",
   "version.invalid_migration":
     "One of this version's migrations doesn't transform records to this version's schema: set its toSchema to the schema hash these details name.",
+  "version.migration_fixtures_failed":
+    "One of this version's migrations failed on its fixtures as the version was sealed, so it runs on no records and the version can't be made current. These details name the migration, the fixture and why.",
 });

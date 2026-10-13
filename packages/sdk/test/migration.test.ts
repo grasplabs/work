@@ -29,6 +29,13 @@ const deriveCategory = migration({
   table: "notes",
   input: v.object({ title: noteFields.title, body: noteFields.body }),
   output: v.object(noteFields),
+  fixtures: [
+    {
+      row: { title: "Plan", body: "Launch day" },
+      expect: { title: "Plan", body: "Launch day", category: "launch" },
+    },
+    { row: { title: "Idea" } },
+  ],
   handler: (ctx, row) => ({
     ...row,
     category: row.body.toLowerCase().includes("launch")
@@ -61,8 +68,18 @@ const declaration = {
   toSchema,
   table: "notes",
   output: v.object(noteFields),
+  fixtures: [{ row: { title: "Note" } }],
   handler: (_ctx: unknown, row: unknown) => row,
 };
+
+/** A row whose own key is `__proto__`, as JSON text can make one. */
+const prototypeRow: unknown = JSON.parse('{"__proto__": {"x": 1}}');
+
+/** `count` fixtures of a note each. */
+const manyFixtures = (count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    row: { title: `Note ${index}` },
+  }));
 
 describe("a migration's declaration", () => {
   test.each([
@@ -73,6 +90,27 @@ describe("a migration's declaration", () => {
     ["an input that isn't an object", { input: v.array(v.string()) }],
     ["a handler that isn't a function", { handler: "row => row" }],
     ["a key it doesn't have", { connector: "mail" }],
+    ["no fixtures", { fixtures: undefined }],
+    ["an empty list of fixtures", { fixtures: [] }],
+    ["more fixtures than it may have", { fixtures: manyFixtures(17) }],
+    ["a fixture that isn't `{ row, expect? }`", { fixtures: [{ title: "x" }] }],
+    ["a fixture's row that isn't an object", { fixtures: [{ row: [1] }] }],
+    [
+      "a fixture's row that isn't JSON",
+      { fixtures: [{ row: { at: new Date(0) } }] },
+    ],
+    [
+      "a fixture's number that isn't finite",
+      { fixtures: [{ row: { n: Number.NaN } }] },
+    ],
+    [
+      "a fixture's key that reaches a prototype",
+      { fixtures: [{ row: prototypeRow }] },
+    ],
+    [
+      "fixtures past their bytes",
+      { fixtures: [{ row: { body: "x".repeat(70 * 1024) } }] },
+    ],
   ])("is refused with %s", (_case, change) => {
     expect(() => looseMigration({ ...declaration, ...change })).toThrow(
       expect.objectContaining({ code: "migration.invalid_definition" })
@@ -103,6 +141,13 @@ describe("an App's migrations", () => {
         toSchema,
         input: { kind: "object" },
         output: { kind: "object" },
+        fixtures: [
+          {
+            row: { title: "Plan", body: "Launch day" },
+            expect: { title: "Plan", body: "Launch day", category: "launch" },
+          },
+          { row: { title: "Idea" }, expect: null },
+        ],
       },
     });
   });
@@ -157,6 +202,9 @@ describe("an App's migrations", () => {
     );
     expect(() => readAppManifest(forged({ uses: ["model"] }))).toThrow(
       /isn't a migration as a manifest holds one/u
+    );
+    expect(() => readAppManifest(forged({ fixtures: [] }))).toThrow(
+      /between 1 and 16/u
     );
   });
 });

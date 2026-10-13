@@ -32,6 +32,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import {
   exportChangeText,
+  migrationFixturesText,
   pendingToShow,
   readyToMakeCurrent,
   triggerChangeText,
@@ -317,14 +318,23 @@ const ReviewDetails = ({
             </Badge>
           ) : (
             <ul className="flex flex-col gap-1">
-              {review.migrations.map(({ name, table, change }) => (
-                <li className="flex flex-col gap-1" key={name}>
-                  <code className="font-mono">{name}</code>
-                  <Badge variant="destructive">
-                    {migrationWarning(change, table)}
-                  </Badge>
-                </li>
-              ))}
+              {review.migrations.map((migration) => {
+                const { name, table, change } = migration;
+                const fixtures = migrationFixturesText(migration);
+                return (
+                  <li className="flex flex-col gap-1" key={name}>
+                    <code className="font-mono">{name}</code>
+                    <Badge variant="destructive">
+                      {migrationWarning(change, table)}
+                    </Badge>
+                    {fixtures.failed ? (
+                      <Badge variant="destructive">{fixtures.text}</Badge>
+                    ) : (
+                      <p className="text-muted-foreground">{fixtures.text}</p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

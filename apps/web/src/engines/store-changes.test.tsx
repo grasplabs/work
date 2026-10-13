@@ -1,3 +1,4 @@
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import type { App } from "@grasp-os/shared/apps";
 import { appErrors } from "@grasp-os/shared/apps";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -569,6 +570,33 @@ describe("why a version wasn't made current", () => {
         text: "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress.",
         link: "No record is to blame, so an admin can only abandon the change, on the engine's page.",
       },
+    });
+  });
+
+  it("names the migration, the fixture and why when a migration failed on its fixtures", () => {
+    expect({
+      fixture: makeCurrentFailure(
+        versionErrors.create("version.migration_fixtures_failed", {
+          migration: "derive-category",
+          fixture: 2,
+          reason: "unexpected_output",
+          issues: ["It answered {}"],
+        })
+      ),
+      none: makeCurrentFailure(
+        versionErrors.create("version.migration_fixtures_failed", {
+          migration: "derive-category",
+          fixture: null,
+          reason: "invalid_answer",
+          issues: [],
+        })
+      ).text,
+    }).toStrictEqual({
+      fixture: {
+        text: "The migration derive-category failed on its fixture 2 when this version was sealed: its output isn't what the fixture expects. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again.",
+        link: undefined,
+      },
+      none: "The migration derive-category failed on its fixtures when this version was sealed: it answered something that isn't its records. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again.",
     });
   });
 

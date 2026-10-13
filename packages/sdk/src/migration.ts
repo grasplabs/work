@@ -1,5 +1,12 @@
-import { isPlainObject } from "./value-descriptor.ts";
-import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
+import { canonicalText } from "@grasp-os/shared/json";
+import { valueDepth } from "@grasp-os/shared/value-depth";
+
+import { isPlainObject, unsafeKeys } from "./value-descriptor.ts";
+import type {
+  FrozenJson,
+  JsonValue,
+  ValueDescriptor,
+} from "./value-descriptor.ts";
 import { descriptorOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer, InferInput } from "./values.ts";
@@ -19,6 +26,12 @@ import type { Infer, InferInput } from "./values.ts";
 // each row against `input` before the handler sees it, and what the
 // handler returns against the target table's fields (which `output` must
 // declare exactly), and keeps the record's managed fields itself.
+//
+// A migration carries fixtures: records it is run on as its release is
+// sealed, before it touches the store (spec 17.2's representative
+// fixtures). Each fixture's output must fit the target table, and match
+// what it `expect`s when it says; a fixture that fails refuses the seal.
+// They are data the reviewer reads with the migration, never real records.
 
 /** What a migration's handler is told besides the row: data only. */
 export interface MigrationContext {
@@ -38,6 +51,31 @@ export interface MigrationContext {
 type RowOf<Input> = Input extends AnySchema
   ? Infer<Input>
   : Readonly<Record<string, JsonValue>>;
+
+/** The target table's fields a fixture expects after the transform. */
+type ExpectedOf<Output> = Output extends AnySchema ? Infer<Output> : never;
+
+/** A fixture's row: what `input` accepts when declared, else stored JSON. */
+type FixtureRowOf<Input> = Input extends AnySchema
+  ? InferInput<Input>
+  : Readonly<Record<string, JsonValue>>;
+
+/** One record a migration is run on before it runs on the store. */
+export interface MigrationFixture<Row, Expected> {
+  /** The record's fields, as the store would hand them to the transform. */
+  readonly row: Row;
+  /**
+   * The target table's fields after the transform, exactly. Left out, the
+   * output only has to fit the table.
+   */
+  readonly expect?: Expected;
+}
+
+/** The most fixtures a migration declares. */
+export const migrationMaxFixtures = 16;
+
+/** The most bytes a migration's fixtures take as canonical JSON. */
+export const migrationFixturesMaxBytes = 64 * 1024;
 
 /** What `migration` is declared with. */
 export interface MigrationDefinition<
@@ -59,6 +97,14 @@ export interface MigrationDefinition<
   readonly input?: Input;
   /** The target table's fields, as a `v.object`: exactly what it declares. */
   readonly output: Output;
+  /**
+   * The records it is run on as its release is sealed: at least one, at
+   * most `migrationMaxFixtures`. Any that fails refuses the seal.
+   */
+  readonly fixtures: readonly MigrationFixture<
+    FixtureRowOf<Input>,
+    ExpectedOf<Output>
+  >[];
   /** The transform of one row: pure, and synchronous. */
   readonly handler: (
     ctx: MigrationContext,
@@ -75,6 +121,14 @@ export interface MigrationManifest {
   /** Its `input`'s descriptor, or null when it declares none. */
   readonly input: ValueDescriptor | null;
   readonly output: ValueDescriptor;
+  /** Its fixtures, as data: `expect` null when one expects nothing exact. */
+  readonly fixtures: readonly MigrationFixtureManifest[];
+}
+
+/** A fixture as the manifest records it. */
+export interface MigrationFixtureManifest {
+  readonly row: Readonly<Record<string, FrozenJson>>;
+  readonly expect: Readonly<Record<string, FrozenJson>> | null;
 }
 
 /** A declared migration, as `migration` answers it. */
@@ -113,6 +167,7 @@ const definitionKeys: ReadonlySet<string> = new Set([
   "input",
   "output",
   "handler",
+  "fixtures",
 ]);
 
 /** The handler of each migration declared, by its value. */
@@ -147,6 +202,103 @@ const dataOf = (definition: object, key: string): unknown => {
   return property?.value;
 };
 
+const fixtureKeys: ReadonlySet<string> = new Set(["row", "expect"]);
+
+/**
+ * `value` as frozen JSON, copied: plain objects, arrays, strings, finite
+ * numbers, booleans and null, nested at most `valueDepth` levels, no key
+ * that reaches a prototype; refused (naming `what`) otherwise.
+ */
+const frozenJson = (value: unknown, what: string, depth = 1): FrozenJson => {
+  if (depth > valueDepth) {
+    return refuse(`${what} nests deeper than ${valueDepth} levels.`);
+  }
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  ) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return Object.freeze(
+      value.map((item) => frozenJson(item, what, depth + 1))
+    );
+  }
+  if (isPlainObject(value)) {
+    const copy: Record<string, FrozenJson> = {};
+    for (const [key, member] of Object.entries(value)) {
+      if (unsafeKeys.has(key)) {
+        return refuse(`${what} holds the key \`${key}\`.`);
+      }
+      Object.defineProperty(copy, key, {
+        enumerable: true,
+        value: frozenJson(member, what, depth + 1),
+      });
+    }
+    return Object.freeze(copy);
+  }
+  return refuse(`${what} is JSON data only.`);
+};
+
+/** A fixture's object of fields (`what` names it), as frozen JSON. */
+const fixtureFields = (
+  value: unknown,
+  what: string
+): Readonly<Record<string, FrozenJson>> => {
+  if (!isPlainObject(value)) {
+    return refuse(`${what} is an object of fields.`);
+  }
+  const fields = frozenJson(value, what);
+  if (typeof fields !== "object" || fields === null || Array.isArray(fields)) {
+    return refuse(`${what} is an object of fields.`);
+  }
+  // SAFETY: a plain object copied as one, checked just above.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return fields as Readonly<Record<string, FrozenJson>>;
+};
+
+/** A migration's fixtures, checked and copied as the manifest records them. */
+const fixturesOf = (fixtures: unknown): MigrationFixtureManifest[] => {
+  if (
+    !Array.isArray(fixtures) ||
+    fixtures.length === 0 ||
+    fixtures.length > migrationMaxFixtures
+  ) {
+    return refuse(
+      `A migration's \`fixtures\` lists between 1 and ${migrationMaxFixtures} records it is checked against: \`{ row, expect? }\`.`
+    );
+  }
+  const read = fixtures.map((fixture: unknown, index) => {
+    const what = `Fixture ${index + 1}`;
+    if (!isPlainObject(fixture)) {
+      return refuse(`${what} is \`{ row, expect? }\`.`);
+    }
+    for (const key of Object.keys(fixture)) {
+      if (!fixtureKeys.has(key)) {
+        refuse(`${what} has no \`${key}\`.`);
+      }
+    }
+    return Object.freeze({
+      row: fixtureFields(dataOf(fixture, "row"), `${what}'s \`row\``),
+      expect:
+        dataOf(fixture, "expect") === undefined
+          ? null
+          : fixtureFields(dataOf(fixture, "expect"), `${what}'s \`expect\``),
+    });
+  });
+  if (
+    new TextEncoder().encode(canonicalText(read)).byteLength >
+    migrationFixturesMaxBytes
+  ) {
+    refuse(
+      `A migration's \`fixtures\` take at most ${migrationFixturesMaxBytes} bytes of JSON.`
+    );
+  }
+  return read;
+};
+
 /**
  * Declares a migration (see the header): throws `MigrationDefinitionError`
  * for a declaration that isn't one. Whether its table, its hashes and its
@@ -174,6 +326,7 @@ export const migration = <
   const input = dataOf(definition, "input");
   const output = dataOf(definition, "output");
   const handler = dataOf(definition, "handler");
+  const fixtures = dataOf(definition, "fixtures");
   if (typeof name !== "string" || !migrationNamePattern.test(name)) {
     refuse(
       "A migration's `name` is lower-case letters, digits and dashes, starting with a letter, at most 64 characters."
@@ -205,6 +358,7 @@ export const migration = <
     toSchema: String(toSchema),
     input: input === undefined ? null : objectDescriptor(input, "input"),
     output: objectDescriptor(output, "output"),
+    fixtures: Object.freeze(fixturesOf(fixtures)),
   });
   const made: Migration = Object.freeze({ "~migration": manifest });
   // SAFETY: checked to be a function above; the runner calls it as one.

@@ -114,6 +114,7 @@ const notesManifest = (() => {
         fromSchema: "a".repeat(64),
         toSchema: "b".repeat(64),
         output: v.object(fields),
+        fixtures: [{ row: { title: "Note" } }],
         handler: (_ctx, row) => ({
           title: typeof row.title === "string" ? row.title : "",
           category: "general",

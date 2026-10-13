@@ -132,6 +132,7 @@ const migrationSource = (
     toSchema = placeholder,
     input = "",
     prelude = "",
+    fixtures = '[{ row: { title: "Fixture" } }]',
   } = {}
 ): string => `import { migration, v } from "@grasp-os/sdk";
 import { noteFields } from "../schema.ts";
@@ -143,6 +144,7 @@ export default migration({
   table: ${JSON.stringify(tableOf(name))},
   ${input}
   output: v.object(noteFields),
+  fixtures: ${fixtures},
   handler: ${handler},
 });
 `;
@@ -347,7 +349,7 @@ describe("an explicit migration", { timeout: 120_000 }, () => {
     });
   });
 
-  it("is listed in its version's review with its table, every one when no version is current", async () => {
+  it("is listed in its version's review with its table and what its fixtures found, every one when no version is current", async () => {
     const { fixture } = await sealed();
     const review = await reviewVersion(env, fixture.owner, fixture.app, 3);
 
@@ -355,6 +357,16 @@ describe("an explicit migration", { timeout: 120_000 }, () => {
       name: "derive-category",
       table: "derive_category",
       change: "added",
+      fixtures: 1,
+      fixturesPassed: true,
+    });
+    // Its output on its fixture holds a managed field.
+    expect(review.migrations).toContainEqual({
+      name: "writes-managed",
+      table: "writes_managed",
+      change: "added",
+      fixtures: 1,
+      fixturesPassed: false,
     });
     expect(review.migrations).toHaveLength(Object.keys(handlers).length);
   });
@@ -378,6 +390,7 @@ export default app({
       toSchema: ${JSON.stringify(placeholder)},
       table: "notes",
       output: v.object(noteFields),
+      fixtures: [{ row: { title: "Fixture" } }],
       handler: (ctx, row) => ({ ...row, category: "general" }),
     }),
   ],
@@ -387,7 +400,14 @@ export default app({
     const review = await reviewVersion(env, fixture.owner, fixture.app, 1);
 
     expect(review.migrations).toStrictEqual([
-      { name: "inline-category", table: "notes", change: "added" },
+      {
+        name: "inline-category",
+        table: "notes",
+        change: "added",
+        fixtures: 1,
+        // Not sealed yet: its fixtures haven't run.
+        fixturesPassed: null,
+      },
     ]);
   });
 
@@ -421,7 +441,13 @@ export default app({
 
     expect(review.files.map(({ path }) => path)).toStrictEqual(["app.ts"]);
     expect(review.migrations).toStrictEqual([
-      { name: "derive-category", table: "derive_category", change: "added" },
+      {
+        name: "derive-category",
+        table: "derive_category",
+        change: "added",
+        fixtures: 1,
+        fixturesPassed: null,
+      },
     ]);
   });
 
