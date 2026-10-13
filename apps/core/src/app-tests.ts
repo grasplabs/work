@@ -274,6 +274,11 @@ class FixtureSession extends TestTarget {
     if (this.#release.store === null) {
       return noStore();
     }
+    // Closed meanwhile (a test past its deadline): no store is made that
+    // nothing would discard but the sweep.
+    if (this.#closed) {
+      throw new Error("This test has ended: its calls change nothing more.");
+    }
     this.#store ??= createFixtureStore(this.#env, this.#release);
     return await this.#store;
   }
@@ -365,6 +370,8 @@ class FixtureHost extends TestTarget {
   readonly #release: Release;
   readonly #files: AppFiles;
   readonly #sessions = new Set<FixtureSession>();
+  #opened = 0;
+  #closed = false;
 
   constructor(env: Env, release: Release, files: AppFiles) {
     super();
@@ -380,6 +387,12 @@ class FixtureHost extends TestTarget {
    */
   // oxlint-disable-next-line require-await
   async open(fixtures: unknown, _name: unknown): Promise<FixtureSession> {
+    // A suite past its deadline opens nothing more, and no suite opens
+    // more sessions than it may have tests: each may make a store.
+    if (this.#closed || this.#opened >= maxAppTests) {
+      throw new Error("This suite may open no more tests.");
+    }
+    this.#opened += 1;
     if (typeof fixtures !== "string" || !testNamePattern.test(fixtures)) {
       throw new Error("A suite names its fixture by a name like `notes`.");
     }
@@ -399,6 +412,7 @@ class FixtureHost extends TestTarget {
 
   /** Closes every session still open, such as a test's that ran past its deadline. */
   async closeAll(): Promise<void> {
+    this.#closed = true;
     await Promise.all(
       [...this.#sessions].map(async (s) => {
         await s.close();
