@@ -85,6 +85,13 @@
       "when": 1791895223232,
       "tag": "0011_abandoned_targets",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1791902012260,
+      "tag": "0012_custom_migrations",
+      "breakpoints": true
     }
   ]
 }

@@ -42,6 +42,7 @@ import {
   schemaConsumerSchema,
   stagedWritesSchema,
   storeIntentSchema,
+  storeMigrationSchema,
   storedFieldsSchema,
   tableNameSchema,
 } from "@grasp-os/shared/stores";
@@ -52,8 +53,10 @@ import type {
   Commit,
   Committed,
   DefinedTables,
+  MigrationFailure,
   SchemaConsumer,
   StagedWrites,
+  StoreMigration,
   StoreFields,
   StoredRecord,
   WriterRoles,
@@ -84,6 +87,7 @@ import { z } from "zod";
 import {
   abandonedTargets,
   backfills,
+  migrationWork,
   outbox,
   receipts,
   recordRefs,
@@ -114,6 +118,23 @@ import type { StoreDeletionMark } from "./store-deletion.ts";
 import { defaultedFieldsOf, filledIn } from "./store-fills.ts";
 import type { DefaultedField, DefaultedFields } from "./store-fills.ts";
 import { installIndexes, planIndexes } from "./store-indexes.ts";
+import {
+  dropWork,
+  fieldsOf as tableFieldsOf,
+  fitsTable,
+  nextScanBatch,
+  nextWorkBatch,
+  outputRefusal,
+  pendingMigrationsSchema,
+  queueWork,
+  scanPositionSchema,
+} from "./store-migrations.ts";
+import type {
+  MigratedTable,
+  MigrationRow,
+  PendingMigrations,
+  ScanPosition,
+} from "./store-migrations.ts";
 import {
   pagePlans,
   planQuery,
@@ -439,6 +460,7 @@ const planRecord = (
   canonicalJson({
     ...identities,
     addedTables: [...plan.addedTables],
+    migratedTables: [...plan.migratedTables],
     addedFields: plan.addedFields.map(({ table, field }) => [table, field]),
     filledFields: plan.filledFields.map(({ table, field }) => [table, field]),
     addedIndexes: plan.addedIndexes.map(({ table, index }) => [table, index]),
@@ -480,6 +502,11 @@ interface ContractChange {
    * nothing to it): its receipt waits on that target's backfill.
    */
   readonly onto: boolean;
+  /**
+   * The explicit migrations the change runs instead of filling in, with
+   * the release whose transforms they are; null for none.
+   */
+  readonly migrations: PendingMigrations | null;
 }
 
 /** A pending target (`sdk_schema_backfills`), read back and checked. */
@@ -497,7 +524,18 @@ interface PendingTarget {
   readonly filled: number;
   readonly failure: BackfillFailure | null;
   readonly failureRevision: number | null;
+  /** Its explicit migrations, when it runs them instead of filling. */
+  readonly migrations: PendingMigrations | null;
 }
+
+/** Refuses a schema's explicit migration (`migration.invalid`), saying why. */
+const refuseMigration = (migration: string, reason: string): never => {
+  throw migrationErrors.create("migration.invalid", { migration, reason });
+};
+
+/** The tables `pending`'s explicit migrations transform, by name. */
+const migratedSet = (pending: { migrations: PendingMigrations | null }) =>
+  new Set((pending.migrations?.migrations ?? []).map(([table]) => table));
 
 /**
  * The store's pending target and its backfill, as core drives it
@@ -529,7 +567,27 @@ export interface RecordFailure {
  * one after the other without any moving the scan on (`stalled`), which a
  * store error no retry mends leaves.
  */
-export type BackfillFailure = RecordFailure | { reason: "stalled" };
+export type BackfillFailure =
+  | RecordFailure
+  | MigrationFailure
+  | { reason: "stalled" };
+
+/**
+ * One batch of an explicit migration for core to transform (`fillMissing`,
+ * then `commitTransformed`): the records of one table, read at their
+ * revisions, the migration and the release whose transform it is, and
+ * where a scan batch ends.
+ */
+export interface MigrationBatch {
+  state: "transform";
+  batch: number;
+  phase: "scan" | "work";
+  table: string;
+  migration: string;
+  consumer: SchemaConsumer;
+  rows: MigrationRow[];
+  through: ScanPosition | null;
+}
 
 /** What one batch of a backfill (`fillMissing`) did, and where it is. */
 export interface BackfillOutcome {
@@ -563,6 +621,22 @@ const fillsSchema = z.array(z.tuple([tableNameSchema, z.string().min(1)]));
 
 const scanBoundsSchema = z.record(z.string(), recordIdSchema);
 
+const migrationFailureSchema = z.strictObject({
+  table: z.string(),
+  id: z.string().nullable(),
+  migration: z.string(),
+  reason: z.enum([
+    "invalid_input",
+    "threw",
+    "invalid_output",
+    "too_large",
+    "invalid_answer",
+    "outside_contract",
+    "reference_changed",
+  ]),
+  issues: z.array(z.string().max(500)).max(20),
+});
+
 const failureSchema = z.union([
   z.strictObject({
     table: z.string(),
@@ -570,8 +644,46 @@ const failureSchema = z.union([
     id: z.string(),
     reason: z.enum(["invalid_value", "too_large"]),
   }),
+  migrationFailureSchema,
   z.strictObject({ reason: z.literal("stalled") }),
 ]);
+
+/**
+ * `failure` as someone other than the migration's own App is shown it:
+ * what its transform threw may carry other records' content, so its
+ * issues are left out.
+ */
+const shownFailure = (
+  failure: BackfillFailure | null,
+  migrations: PendingMigrations | null,
+  consumer: SchemaConsumer | undefined
+): BackfillFailure | null =>
+  failure !== null &&
+  "migration" in failure &&
+  consumer?.resourceId !== migrations?.consumer[0]
+    ? { ...failure, issues: [] }
+    : failure;
+
+/** A batch's transformed records, as core commits them (`commitTransformed`). */
+const transformedSchema = z.strictObject({
+  target: z.string().regex(/^[0-9a-f]{64}$/u),
+  attempt: z.number().int().min(1),
+  batch: z.number().int().min(1),
+  phase: z.enum(["scan", "work"]),
+  table: tableNameSchema,
+  through: scanPositionSchema.nullable(),
+  rows: z
+    .array(
+      z.strictObject({
+        id: recordIdSchema,
+        revision: z.number().int().min(1),
+        fields: storedFieldsSchema,
+      })
+    )
+    .max(100),
+  failure: migrationFailureSchema.optional(),
+});
+export type TransformedBatch = z.input<typeof transformedSchema>;
 
 /**
  * A failed pending target an admin abandoned (`abandonBackfill`): what
@@ -634,6 +746,28 @@ const outcomeSchema = z.strictObject({
   failure: failureSchema.nullable(),
 });
 
+/** What a backfill's batch answered (`fillMissing`), read back from JSON. */
+export const backfillBatchSchema = z.union([
+  z.strictObject({
+    state: z.literal("transform"),
+    batch: z.number().int().min(1),
+    phase: z.enum(["scan", "work"]),
+    table: tableNameSchema,
+    migration: z.string().min(1),
+    consumer: schemaConsumerSchema,
+    rows: z.array(
+      z.strictObject({
+        id: recordIdSchema,
+        owner: z.string(),
+        revision: z.number().int().min(1),
+        fields: storedFieldsSchema,
+      })
+    ),
+    through: scanPositionSchema.nullable(),
+  }),
+  outcomeSchema,
+]);
+
 /** Records one batch of a backfill looks at, at most (spec 17.2). */
 export const backfillBatchSize = 100;
 
@@ -684,15 +818,17 @@ const covered = (plan: SchemaPlan): boolean =>
  */
 const ontoPending = (
   pending: PendingTarget,
-  target: SchemaManifest
+  target: SchemaManifest,
+  consumer: SchemaConsumer | undefined
 ): AcceptedPlan => {
   // A failed target refuses even a schema it holds: a release sealed on
   // it couldn't run until the backfill is retried (`retryBackfill`).
   if (pending.state === "failed") {
+    const failure = shownFailure(pending.failure, pending.migrations, consumer);
     throw migrationErrors.create("migration.backfill_failed", {
       target: pending.hash,
       attempt: pending.attempt,
-      failure: pending.failure === null ? null : { ...pending.failure },
+      failure: failure === null ? null : { ...failure },
     });
   }
   const onto = planSchemaChange(pending.manifest, target);
@@ -872,8 +1008,14 @@ export class StoreHost {
    * store's pending target (`sdk_schema_backfills`), apart from the
    * contract, which moves to it only once a backfill has filled the field
    * in everywhere (`fillMissing`); every commit from then on fills in
-   * what it writes. The receipt names the pending contract and says it is
-   * pending. While a target is pending, a schema it holds already is
+   * what it writes. A schema applied with explicit migrations
+   * (`migrations`, checked by `#requireMigrations`) may also add required
+   * fields and change fields of the tables they transform
+   * (`planSchemaChange`'s `migrated`): it is pending while those tables
+   * hold records, until the transforms rewrote them all
+   * (store-migrations.ts, `commitTransformed`), and its activation leaves
+   * behind the schemas it no longer fits (`#supersede`). The receipt
+   * names the pending contract and says it is pending. While a target is pending, a schema it holds already is
    * taken onto it, and any other change is refused (`migration.pending`,
    * retryable; `migration.backfill_failed` once its backfill failed,
    * until an admin abandons it, `abandonBackfill`). A field an abandoned
@@ -905,13 +1047,19 @@ export class StoreHost {
   async defineTables(
     storeId: StoreId,
     manifest: string,
-    consumer?: SchemaConsumer
+    consumer?: SchemaConsumer,
+    migrations: readonly StoreMigration[] = []
   ): Promise<DefinedTables> {
     const read = readSchema(manifest);
     const named =
       consumer === undefined
         ? undefined
         : dataErrors.parse("data.invalid", schemaConsumerSchema, consumer);
+    const declared = dataErrors.parse(
+      "data.invalid",
+      z.array(storeMigrationSchema).max(16),
+      migrations
+    );
     const schemaHash = await hashOf(read.manifest);
     const names = Object.keys(read.manifest.tables);
     const text = manifestText(read.manifest);
@@ -925,7 +1073,12 @@ export class StoreHost {
       const before = this.#tableRows();
       // Planned before anything is written.
       // oxlint-disable-next-line no-await-in-loop -- see above
-      const change = await this.#planContract(read.manifest, schemaHash, named);
+      const change = await this.#planContract(
+        read.manifest,
+        schemaHash,
+        named,
+        declared
+      );
       const known = new Map(before.map(({ name, tableId }) => [name, tableId]));
       const planned = Object.fromEntries(
         names.map((name) => [name, known.get(name) ?? crypto.randomUUID()])
@@ -955,11 +1108,13 @@ export class StoreHost {
    * the contract its row holds now; refused when it needs a migration or
    * the contract can't be trusted.
    */
-  async #planContract(
-    target: SchemaManifest,
-    schemaHash: string,
-    consumer: SchemaConsumer | undefined
-  ): Promise<ContractChange> {
+  /**
+   * The contract the store's row holds, as `#planContract` reads it;
+   * `data.store_unavailable` for a store being deleted.
+   */
+  #liveContractRow():
+    | { contractHash: string | null; contractManifest: string | null }
+    | undefined {
     const row = this.#db
       .select({
         contractHash: store.contractHash,
@@ -971,6 +1126,16 @@ export class StoreHost {
     if (row !== undefined && row.deletedAt !== null) {
       throw dataErrors.create("data.store_unavailable");
     }
+    return row;
+  }
+
+  async #planContract(
+    target: SchemaManifest,
+    schemaHash: string,
+    consumer: SchemaConsumer | undefined,
+    migrations: readonly z.output<typeof storeMigrationSchema>[] = []
+  ): Promise<ContractChange> {
+    const row = this.#liveContractRow();
     this.#requireTablesFit(target);
     const pending = this.#pendingTarget();
     const { stored, base } = await this.#currentContract(row, pending);
@@ -996,20 +1161,14 @@ export class StoreHost {
         fills: [],
         pendingSeen,
         onto: false,
+        migrations: null,
       };
     }
-    const plan = planSchemaChange(
+    const { plan, migrated } = this.#acceptedPlan(
       base?.manifest ?? null,
       target,
-      this.#reservedFields()
+      { migrations, schemaHash, consumer }
     );
-    if (!plan.accepted) {
-      throw migrationErrors.create("migration.required", {
-        changes: plan.refused.slice(0, refusalsListed).map((refusal) => ({
-          ...refusal,
-        })),
-      });
-    }
     // While a target is pending, the contract moves to it and nowhere
     // else: a schema it holds already waits on its backfill; one that
     // would change it further waits until it is in force (or, failed,
@@ -1037,10 +1196,11 @@ export class StoreHost {
         fills: [],
         pendingSeen,
         onto: false,
+        migrations: null,
       };
     }
     if (plan.changed && pending !== null) {
-      const record = planRecord(ontoPending(pending, target), {
+      const record = planRecord(ontoPending(pending, target, consumer), {
         base: baseHash,
         schema: schemaHash,
         contract: pending.hash,
@@ -1059,6 +1219,7 @@ export class StoreHost {
         fills: [],
         pendingSeen,
         onto: true,
+        migrations: null,
       };
     }
     const contractText = manifestText(plan.contract);
@@ -1082,6 +1243,94 @@ export class StoreHost {
       fills: plan.filledFields,
       pendingSeen,
       onto: false,
+      migrations: plan.changed ? migrated : null,
+    };
+  }
+
+  /**
+   * The plan of `target` onto `contract`, with the explicit migrations
+   * it is applied with (checked, `#requireMigrations`); refused
+   * (`migration.required`, listing each change and why) when a change
+   * needs a migration none covers.
+   */
+  #acceptedPlan(
+    contract: SchemaManifest | null,
+    target: SchemaManifest,
+    {
+      migrations,
+      schemaHash,
+      consumer,
+    }: {
+      migrations: readonly z.output<typeof storeMigrationSchema>[];
+      schemaHash: string;
+      consumer: SchemaConsumer | undefined;
+    }
+  ): { plan: AcceptedPlan; migrated: PendingMigrations | null } {
+    const migrated = this.#requireMigrations(migrations, schemaHash, consumer);
+    const plan = planSchemaChange(
+      contract,
+      target,
+      this.#reservedFields(),
+      new Set(migrated?.migrations.map(([table]) => table))
+    );
+    if (!plan.accepted) {
+      throw migrationErrors.create("migration.required", {
+        changes: plan.refused.slice(0, refusalsListed).map((refusal) => ({
+          ...refusal,
+        })),
+      });
+    }
+    return { plan, migrated };
+  }
+
+  /**
+   * The explicit migrations a schema is applied with, checked against
+   * the store (`migration.invalid`, naming the migration and why): a
+   * consumer whose release holds their transforms, each to `schemaHash`
+   * itself, one per table, from a schema the store recorded and still
+   * holds in force. Null for none.
+   */
+  #requireMigrations(
+    migrations: readonly z.output<typeof storeMigrationSchema>[],
+    schemaHash: string,
+    consumer: SchemaConsumer | undefined
+  ): PendingMigrations | null {
+    if (migrations.length === 0) {
+      return null;
+    }
+    if (consumer === undefined) {
+      return refuseMigration(migrations[0]?.name ?? "", "no_consumer");
+    }
+    const tablesSeen = new Set<string>();
+    for (const { name, table, fromSchema, toSchema } of migrations) {
+      if (toSchema !== schemaHash) {
+        refuseMigration(name, "wrong_target");
+      }
+      if (tablesSeen.has(table)) {
+        refuseMigration(name, "shared_table");
+      }
+      tablesSeen.add(table);
+      const source = this.#db
+        .select({
+          abandonedAt: schemas.abandonedAt,
+          supersededAt: schemas.supersededAt,
+        })
+        .from(schemas)
+        .where(eq(schemas.schemaHash, fromSchema))
+        .get();
+      if (
+        source === undefined ||
+        source.abandonedAt !== null ||
+        source.supersededAt !== null
+      ) {
+        refuseMigration(name, "unknown_source");
+      }
+    }
+    return {
+      consumer: [consumer.resourceId, consumer.resourceVersion],
+      migrations: migrations
+        .map(({ table, name }): [string, string] => [table, name])
+        .toSorted(([a], [b]) => a.localeCompare(b)),
     };
   }
 
@@ -1176,19 +1425,27 @@ export class StoreHost {
       ) {
         throw migrationErrors.create("migration.metadata_corrupt");
       }
-      const onto = planSchemaChange(kept.manifest, pending.manifest);
+      const onto = planSchemaChange(
+        kept.manifest,
+        pending.manifest,
+        {},
+        migratedSet(pending)
+      );
       if (!onto.accepted || !onto.changed) {
         throw migrationErrors.create("migration.metadata_corrupt");
       }
     }
     if (kept !== null) {
-      // The store's schemas fit the pending target, when there is one:
-      // the schema that made it pending is recorded already.
-      const widest = pending?.manifest ?? kept.manifest;
+      // The store's schemas fit the contract or the pending target, when
+      // there is one: the schema that made it pending is recorded already.
       for (const manifest of recorded) {
         // Its tables, fields and access all in the contract already; its
         // indexes are physical, installed whatever the contract lists.
-        if (!covered(planSchemaChange(widest, manifest))) {
+        if (
+          !covered(planSchemaChange(kept.manifest, manifest)) &&
+          (pending === null ||
+            !covered(planSchemaChange(pending.manifest, manifest)))
+        ) {
           throw migrationErrors.create("migration.metadata_corrupt");
         }
       }
@@ -1258,6 +1515,10 @@ export class StoreHost {
             ? null
             : failureSchema.parse(JSON.parse(row.failure)),
         failureRevision: row.failureRevision,
+        migrations:
+          row.migrations === null
+            ? null
+            : pendingMigrationsSchema.parse(JSON.parse(row.migrations)),
       };
     } catch (error) {
       if (
@@ -1277,11 +1538,12 @@ export class StoreHost {
    * back; one that doesn't read is `migration.metadata_corrupt`.
    */
   #recordedSchemas(): SchemaManifest[] {
-    // Not those only an abandoned target held: the contract never took them.
+    // Not those only an abandoned target held: the contract never took
+    // them; nor those a migration left behind: it moved past them.
     return this.#db
       .select({ manifest: schemas.manifest })
       .from(schemas)
-      .where(isNull(schemas.abandonedAt))
+      .where(and(isNull(schemas.abandonedAt), isNull(schemas.supersededAt)))
       .orderBy(asc(schemas.createdAt), asc(schemas.schemaHash))
       .all()
       .map(({ manifest }) => {
@@ -1432,32 +1694,111 @@ export class StoreHost {
       })
       .run();
     if (!change.onto && change.hash !== change.stored) {
-      const byName = new Map(all.map(({ name, tableId }) => [name, tableId]));
-      const toFill = change.fills.filter(({ table }) =>
-        this.#holdsRecords(byName.get(table))
-      );
-      if (toFill.length > 0) {
-        // A contract rebuilt from the store's schemas, its row holding
-        // none, is repaired first: activation compares and sets against
-        // the row's own.
-        if (change.stored === null) {
-          throw migrationErrors.create("migration.metadata_missing");
-        }
-        // Records lack a field the contract would require: the change
-        // waits as the pending target until they are filled in, and
-        // every commit from now on fills in what it writes (`#apply`).
-        this.#makePending(change, change.stored, toFill, byName, now);
-      } else {
-        this.#db
-          .update(store)
-          .set({ contractHash: change.hash, contractManifest: change.text })
-          .run();
-      }
+      this.#moveContract(change, all, now);
     }
     return {
       ...definedTables(names, all),
       contract: this.#receive(schemaHash, change, now),
     };
+  }
+
+  /**
+   * `#defineIn`'s move of the contract to `change`'s: at once, or kept as
+   * the pending target while records lack what it adds (a fill), or a
+   * migration has records to transform (`#migrateIn`).
+   */
+  #moveContract(
+    change: ContractChange,
+    all: readonly { name: string; tableId: string }[],
+    now: number
+  ): void {
+    const byName = new Map(all.map(({ name, tableId }) => [name, tableId]));
+    const toFill = change.fills.filter(({ table }) =>
+      this.#holdsRecords(byName.get(table))
+    );
+    if (change.migrations !== null) {
+      this.#migrateIn(change, toFill, byName, now);
+    } else if (toFill.length > 0) {
+      // A contract rebuilt from the store's schemas, its row holding
+      // none, is repaired first: activation compares and sets against
+      // the row's own.
+      if (change.stored === null) {
+        throw migrationErrors.create("migration.metadata_missing");
+      }
+      // Records lack a field the contract would require: the change
+      // waits as the pending target until they are filled in, and
+      // every commit from now on fills in what it writes (`#apply`).
+      this.#makePending(change, change.stored, toFill, byName, now);
+    } else {
+      this.#db
+        .update(store)
+        .set({ contractHash: change.hash, contractManifest: change.text })
+        .run();
+    }
+  }
+
+  /**
+   * Applies `change`, which runs explicit migrations, in `#defineIn`'s
+   * transaction: refused (`migration.invalid`) when it also has defaults
+   * to fill in elsewhere (`toFill`); kept as the pending target while a
+   * table it migrates holds records; otherwise in force at once, leaving
+   * behind the schemas it no longer fits (`#supersede`).
+   */
+  #migrateIn(
+    change: ContractChange,
+    toFill: readonly PlannedField[],
+    byName: ReadonlyMap<string, string>,
+    now: number
+  ): void {
+    const migrations = change.migrations?.migrations ?? [];
+    if (toFill.length > 0) {
+      throw migrationErrors.create("migration.invalid", {
+        migration: migrations[0]?.[1] ?? "",
+        reason: "fills_elsewhere",
+      });
+    }
+    const holding = migrations
+      .map(([table]) => ({ table, field: "" }))
+      .filter(({ table }) => this.#holdsRecords(byName.get(table)));
+    if (holding.length > 0) {
+      if (change.stored === null) {
+        throw migrationErrors.create("migration.metadata_missing");
+      }
+      this.#makePending(change, change.stored, holding, byName, now);
+      return;
+    }
+    this.#db
+      .update(store)
+      .set({ contractHash: change.hash, contractManifest: change.text })
+      .run();
+    this.#supersede(readSchemaManifest(change.text).manifest, now);
+  }
+
+  /**
+   * Marks every schema in force that `contract` no longer covers as left
+   * behind by a migration (`sdk_schemas.superseded_at`): writes under it
+   * are refused from now on (`#requireInForce`).
+   */
+  #supersede(contract: SchemaManifest, now: number): void {
+    const behind = this.#db
+      .select({ hash: schemas.schemaHash, manifest: schemas.manifest })
+      .from(schemas)
+      .where(and(isNull(schemas.abandonedAt), isNull(schemas.supersededAt)))
+      .all()
+      .filter(
+        ({ manifest }) =>
+          !covered(
+            planSchemaChange(contract, readSchemaManifest(manifest).manifest)
+          )
+      )
+      .map(({ hash }) => hash);
+    if (behind.length > 0) {
+      this.#db
+        .update(schemas)
+        .set({ supersededAt: now })
+        .where(inArray(schemas.schemaHash, behind))
+        .run();
+    }
   }
 
   /**
@@ -1489,6 +1830,8 @@ export class StoreHost {
           change.fills.map(({ table, field }) => [table, field])
         ),
         scanBounds: canonicalJson(this.#scanBounds(toFill, byName)),
+        migrations:
+          change.migrations === null ? null : canonicalJson(change.migrations),
         state: "running",
         createdAt: now,
       })
@@ -1999,16 +2342,24 @@ export class StoreHost {
 
   /**
    * Refuses (`migration.abandoned`) a schema only an abandoned target
-   * held. Call it inside the transaction that writes under the schema.
+   * held, and (`migration.incompatible_write`) one an explicit migration
+   * left behind (`#supersede`): its writes no longer fit the records.
+   * Call it inside the transaction that writes under the schema.
    */
   #requireInForce(schemaHash: string): void {
     const row = this.#db
-      .select({ abandonedAt: schemas.abandonedAt })
+      .select({
+        abandonedAt: schemas.abandonedAt,
+        supersededAt: schemas.supersededAt,
+      })
       .from(schemas)
       .where(eq(schemas.schemaHash, schemaHash))
       .get();
     if (row !== undefined && row.abandonedAt !== null) {
       throw migrationErrors.create("migration.abandoned");
+    }
+    if (row !== undefined && row.supersededAt !== null) {
+      throw migrationErrors.create("migration.incompatible_write");
     }
   }
 
@@ -2730,7 +3081,26 @@ export class StoreHost {
     // moves on once, so a read of it (even one that matched nothing) is
     // known to be stale.
     const changed = new Set<string>();
+    // While an explicit migration runs, a record of a table it migrates
+    // that this commit leaves not fitting the target is queued for its
+    // transform, in this transaction (store-migrations.ts).
+    const migrating = this.#migrating();
     for (const { table, tableId, recordId, base, fields } of staged) {
+      const migratedFields = migrating?.tables.get(table);
+      if (
+        migrating !== null &&
+        migratedFields !== undefined &&
+        fields !== null &&
+        !fitsTable(migratedFields, fields)
+      ) {
+        queueWork(
+          this.#db,
+          migrating.target,
+          tableId,
+          { recordId, ownerId: base?.ownerId ?? ownerId },
+          now
+        );
+      }
       const where = and(
         eq(records.tableId, tableId),
         eq(records.recordId, recordId)
@@ -2818,12 +3188,211 @@ export class StoreHost {
    * A complete backfill answers complete to any run. Each batch renews
    * the run's lease.
    */
-  fillMissing(storeId: StoreId, step: BackfillStep): BackfillOutcome {
+  fillMissing(
+    storeId: StoreId,
+    step: BackfillStep
+  ): BackfillOutcome | MigrationBatch {
     const { target, attempt, batch } = dataErrors.parse(
       "data.invalid",
       backfillStepSchema,
       step
     );
+    const answered = this.ctx.storage.transactionSync(
+      (): BackfillOutcome | MigrationBatch => {
+        this.#bind(storeId, false);
+        const row = this.#db
+          .select()
+          .from(backfills)
+          .where(eq(backfills.targetHash, target))
+          .get();
+        if (row === undefined) {
+          throw migrationErrors.create("migration.superseded");
+        }
+        if (row.state === "complete") {
+          return {
+            state: "complete",
+            batch,
+            scanned: row.scanned,
+            filled: row.filled,
+            failure: null,
+          };
+        }
+        if (row.attempt !== attempt) {
+          throw migrationErrors.create("migration.superseded");
+        }
+        if (row.lastOutcome !== null && batch === row.lastBatch) {
+          return outcomeSchema.parse(JSON.parse(row.lastOutcome));
+        }
+        if (row.state === "failed" || batch !== row.lastBatch + 1) {
+          throw migrationErrors.create("migration.superseded");
+        }
+        const pending = this.#pendingTarget();
+        if (pending?.hash !== target) {
+          throw new Error("A running backfill isn't the pending target");
+        }
+        if (pending.migrations !== null) {
+          return this.#migrationBatch(pending, row, batch, Date.now());
+        }
+        return this.#fillBatch(pending, row, batch, Date.now());
+      }
+    );
+    if (answered.state === "complete") {
+      // A migration's activation may have left schemas behind: nothing
+      // pinned to one is kept from before it.
+      this.#schemasGeneration += 1;
+      this.#schemas.clear();
+    }
+    return answered;
+  }
+
+  /**
+   * The migrated tables of `pending`, by table ID, as its batches go
+   * through them (store-migrations.ts).
+   */
+  #migratedTables(pending: PendingTarget): MigratedTable[] {
+    const ids = new Map(
+      this.#tableRows().map(({ name, tableId }) => [name, tableId])
+    );
+    return (pending.migrations?.migrations ?? [])
+      .map(([table, migration]): MigratedTable => {
+        const tableId = ids.get(table);
+        const access = pending.manifest.tables[table]?.access;
+        if (tableId === undefined || access === undefined) {
+          throw migrationErrors.create("migration.metadata_corrupt");
+        }
+        return {
+          table,
+          tableId,
+          migration,
+          owned: access.read === "owner" || access.write === "owner",
+          bound: pending.scanBounds[tableId] ?? "",
+        };
+      })
+      .toSorted((a, b) => (a.tableId < b.tableId ? -1 : 1));
+  }
+
+  /**
+   * `fillMissing`'s batch of an explicit migration, in its transaction:
+   * the next records to transform, scan first, then queued work, for core
+   * to transform and commit (`commitTransformed`); or, once neither has
+   * any left, the target activated, as a fill's last batch does.
+   */
+  #migrationBatch(
+    pending: PendingTarget,
+    row: typeof backfills.$inferSelect,
+    batch: number,
+    now: number
+  ): BackfillOutcome | MigrationBatch {
+    const migrated = this.#migratedTables(pending);
+    const [resourceId = "", resourceVersion = 1] =
+      pending.migrations?.consumer ?? [];
+    const consumer = { resourceId, resourceVersion };
+    if (row.phase === "scan") {
+      const cursor =
+        row.cursorTable === null ||
+        row.cursorRecord === null ||
+        row.cursorOwner === null ||
+        row.cursorCreatedAt === null
+          ? null
+          : {
+              tableId: row.cursorTable,
+              ownerId: row.cursorOwner,
+              createdAt: row.cursorCreatedAt,
+              recordId: row.cursorRecord,
+            };
+      const scanned = nextScanBatch(this.#db, migrated, cursor);
+      if (scanned !== null) {
+        return {
+          state: "transform",
+          batch,
+          phase: "scan",
+          table: scanned.table.table,
+          migration: scanned.table.migration,
+          consumer,
+          rows: scanned.rows,
+          through: scanned.through,
+        };
+      }
+      this.#db
+        .update(backfills)
+        .set({
+          phase: "work",
+          cursorTable: null,
+          cursorRecord: null,
+          cursorOwner: null,
+          cursorCreatedAt: null,
+        })
+        .where(eq(backfills.targetHash, pending.hash))
+        .run();
+    }
+    const work = nextWorkBatch(
+      this.#db,
+      pending.hash,
+      migrated,
+      (table, fields) =>
+        fitsTable(tableFieldsOf(pending.manifest, table.table), fields)
+    );
+    if (work !== null) {
+      return {
+        state: "transform",
+        batch,
+        phase: "work",
+        table: work.table.table,
+        migration: work.table.migration,
+        consumer,
+        rows: work.rows,
+        through: null,
+      };
+    }
+    // Scan through and no work left, in this transaction: no record of a
+    // migrated table fails to fit the target, so it may take over.
+    this.#activate(pending);
+    const outcome: BackfillOutcome = {
+      state: "complete",
+      batch,
+      scanned: row.scanned,
+      filled: row.filled,
+      failure: null,
+    };
+    this.#db
+      .update(backfills)
+      .set({
+        state: "complete",
+        lastBatch: batch,
+        lastOutcome: JSON.stringify(outcome),
+        leaseUntil: null,
+        completedAt: now,
+      })
+      .where(eq(backfills.targetHash, pending.hash))
+      .run();
+    return outcome;
+  }
+
+  /**
+   * Commits batch `batch` of the explicit migration of the pending target
+   * `target`, which core transformed (store-backfill.ts) from what
+   * `fillMissing` handed it, for run `attempt`, in one transaction under
+   * the same fence, numbering and receipt as a fill's batch: a batch
+   * committed already is answered from its receipt, never compared with
+   * this one (a transform run again may answer otherwise); one from a run
+   * the store moved past, or not the next, is `migration.superseded`.
+   *
+   * Each record commits only at the revision it was read at; one that
+   * moved on (a concurrent edit) is queued and transformed again from its
+   * new revision, never overwritten; one that's gone is skipped. Each
+   * output must fit the target table and the contract in force, and keep
+   * every field that can refer to a record as it was
+   * (store-migrations.ts, `outputRefusal`): otherwise the backfill fails
+   * on that record, writing nothing of the batch, as it does with the
+   * `failure` core found. A scan batch moves the cursor to `through`; a
+   * work batch drops the work it did.
+   */
+  commitTransformed(
+    storeId: StoreId,
+    input: TransformedBatch
+  ): BackfillOutcome {
+    const parsed = dataErrors.parse("data.invalid", transformedSchema, input);
+    const { target, attempt, batch } = parsed;
     return this.ctx.storage.transactionSync((): BackfillOutcome => {
       this.#bind(storeId, false);
       const row = this.#db
@@ -2853,11 +3422,212 @@ export class StoreHost {
         throw migrationErrors.create("migration.superseded");
       }
       const pending = this.#pendingTarget();
-      if (pending?.hash !== target) {
-        throw new Error("A running backfill isn't the pending target");
+      if (pending?.hash !== target || pending.migrations === null) {
+        throw new Error("A migration's batch isn't for the pending target");
       }
-      return this.#fillBatch(pending, row, batch, Date.now());
+      return this.#commitBatch(pending, row, parsed, Date.now());
     });
+  }
+
+  /** `commitTransformed`'s writes, in its transaction. */
+  #commitBatch(
+    pending: PendingTarget,
+    row: typeof backfills.$inferSelect,
+    input: z.output<typeof transformedSchema>,
+    now: number
+  ): BackfillOutcome {
+    const table = this.#migratedTables(pending).find(
+      ({ table: name }) => name === input.table
+    );
+    if (
+      table === undefined ||
+      (input.phase === "scan") !== (input.through !== null)
+    ) {
+      throw new Error("A migration's batch doesn't fit where it is");
+    }
+    const checked =
+      input.failure === undefined
+        ? this.#checkedWrites(pending, table, input.rows, now)
+        : { writes: [], failure: { ...input.failure } };
+    const { failure } = checked;
+    const changed = checked.writes.filter(
+      ({ record, valueJson }) => valueJson !== record.valueJson
+    );
+    if (failure === null) {
+      this.#writeTransformed(pending.hash, table.tableId, checked.writes);
+    }
+    const outcome: BackfillOutcome = {
+      state: failure === null ? "running" : "failed",
+      batch: input.batch,
+      scanned: row.scanned + (failure === null ? input.rows.length : 0),
+      filled: row.filled + (failure === null ? changed.length : 0),
+      failure,
+    };
+    this.#recordBatch(pending.hash, table.tableId, outcome, {
+      through: failure === null ? input.through : null,
+      now,
+    });
+    return outcome;
+  }
+
+  /**
+   * The writes a migration's batch makes, each record at the revision it
+   * was read at and its output refused or not (`commitTransformed`), or
+   * the failure that writes none of them. Queues a record edited since
+   * it was read, and drops the work of one that's gone.
+   */
+  #checkedWrites(
+    pending: PendingTarget,
+    table: MigratedTable,
+    rows: z.output<typeof transformedSchema>["rows"],
+    now: number
+  ): {
+    writes: { record: typeof records.$inferSelect; valueJson: string }[];
+    failure: MigrationFailure | null;
+  } {
+    const contract = this.#contractNow();
+    if (contract === undefined) {
+      throw migrationErrors.create("migration.metadata_corrupt");
+    }
+    const targetFields = tableFieldsOf(pending.manifest, table.table);
+    const contractFields = tableFieldsOf(contract, table.table);
+    const writes: { record: typeof records.$inferSelect; valueJson: string }[] =
+      [];
+    for (const transformed of rows) {
+      const record = this.#db
+        .select()
+        .from(records)
+        .where(
+          and(
+            eq(records.tableId, table.tableId),
+            eq(records.recordId, transformed.id)
+          )
+        )
+        .get();
+      if (record === undefined) {
+        dropWork(this.#db, pending.hash, table.tableId, transformed.id);
+      } else if (record.revision === transformed.revision) {
+        const valueJson = storedText(transformed.fields);
+        const refusal =
+          outputRefusal(
+            targetFields,
+            contractFields,
+            fieldsOf(record),
+            transformed.fields
+          ) ??
+          (encoder.encode(valueJson).byteLength > documentMaxBytes
+            ? {
+                reason: "too_large" as const,
+                issues: [`A record holds at most ${documentMaxBytes} bytes`],
+              }
+            : undefined);
+        if (refusal !== undefined) {
+          return {
+            writes: [],
+            failure: {
+              table: table.table,
+              id: record.recordId,
+              migration: table.migration,
+              ...refusal,
+            },
+          };
+        }
+        writes.push({ record, valueJson });
+      } else {
+        // Edited since it was read: transformed again from its new
+        // revision, never overwritten with what the old one became.
+        queueWork(this.#db, pending.hash, table.tableId, record, now);
+      }
+    }
+    return { writes, failure: null };
+  }
+
+  /** Writes a migration batch's checked records, dropping their work. */
+  #writeTransformed(
+    target: string,
+    tableId: string,
+    writes: readonly {
+      record: typeof records.$inferSelect;
+      valueJson: string;
+    }[]
+  ): void {
+    let wrote = false;
+    for (const { record, valueJson } of writes) {
+      if (valueJson !== record.valueJson) {
+        // Its revision moves on, as for any change of its document; its
+        // update time stays the last time someone edited it.
+        this.#db
+          .update(records)
+          .set({ revision: record.revision + 1, valueJson })
+          .where(
+            and(
+              eq(records.tableId, record.tableId),
+              eq(records.recordId, record.recordId),
+              eq(records.revision, record.revision)
+            )
+          )
+          .run();
+        wrote = true;
+      }
+      dropWork(this.#db, target, tableId, record.recordId);
+    }
+    if (wrote) {
+      this.#db
+        .update(tables)
+        .set({ generation: sql`${tables.generation} + 1` })
+        .where(eq(tables.tableId, tableId))
+        .run();
+    }
+  }
+
+  /**
+   * A migration batch's outcome, as its receipt, with the cursor moved to
+   * `through` (a scan batch's) and, for a failure, the revision of the
+   * record that failed it, which a retry waits to see move on.
+   */
+  #recordBatch(
+    target: string,
+    tableId: string,
+    outcome: BackfillOutcome,
+    { through, now }: { through: ScanPosition | null; now: number }
+  ): void {
+    const { failure } = outcome;
+    const failedId =
+      failure !== null && "migration" in failure ? failure.id : null;
+    const failedAt =
+      failedId === null
+        ? undefined
+        : this.#db
+            .select({ revision: records.revision })
+            .from(records)
+            .where(
+              and(eq(records.tableId, tableId), eq(records.recordId, failedId))
+            )
+            .get();
+    const cursor =
+      through === null
+        ? {}
+        : {
+            cursorTable: through.tableId,
+            cursorOwner: through.ownerId,
+            cursorCreatedAt: through.createdAt,
+            cursorRecord: through.recordId,
+          };
+    this.#db
+      .update(backfills)
+      .set({
+        state: failure === null ? "running" : "failed",
+        lastBatch: outcome.batch,
+        lastOutcome: JSON.stringify(outcome),
+        scanned: outcome.scanned,
+        filled: outcome.filled,
+        failure: failure === null ? null : JSON.stringify(failure),
+        failureRevision: failedAt?.revision ?? null,
+        leaseUntil: failure === null ? now + backfillLeaseMs : null,
+        ...cursor,
+      })
+      .where(eq(backfills.targetHash, target))
+      .run();
   }
 
   /** `fillMissing`'s batch, in its transaction. */
@@ -3115,6 +3885,13 @@ export class StoreHost {
     if (moved === undefined) {
       throw migrationErrors.create("migration.metadata_corrupt");
     }
+    if (pending.migrations !== null) {
+      this.#supersede(pending.manifest, Date.now());
+      this.#db
+        .delete(migrationWork)
+        .where(eq(migrationWork.targetHash, pending.hash))
+        .run();
+    }
   }
 
   /**
@@ -3237,6 +4014,11 @@ export class StoreHost {
         if (pending.state !== "failed" || failure === null) {
           return statusOf(pending);
         }
+        if ("migration" in failure && failure.id === null) {
+          // The transform failed as a whole (its code, not a record):
+          // nothing to watch change, so it stays failed until abandoned.
+          return statusOf(pending);
+        }
         if (failure.reason !== "stalled") {
           const tableId = this.#tableRows().find(
             ({ name }) => name === failure.table
@@ -3247,7 +4029,7 @@ export class StoreHost {
             .where(
               and(
                 eq(records.tableId, tableId ?? ""),
-                eq(records.recordId, failure.id)
+                eq(records.recordId, failure.id ?? "")
               )
             )
             .get();
@@ -3400,7 +4182,16 @@ export class StoreHost {
     { abandonedBy, actor }: { abandonedBy: string; actor: AuditActor }
   ): BackfillAbandonment {
     const at = Date.now();
-    const plan = planSchemaChange(contract, pending.manifest);
+    const plan = planSchemaChange(
+      contract,
+      pending.manifest,
+      {},
+      migratedSet(pending)
+    );
+    this.#db
+      .delete(migrationWork)
+      .where(eq(migrationWork.targetHash, pending.hash))
+      .run();
     if (!plan.accepted) {
       throw migrationErrors.create("migration.metadata_corrupt");
     }
@@ -3665,7 +4456,7 @@ export class StoreHost {
         attempt: pending.attempt,
         scanned: pending.scanned,
         filled: pending.filled,
-        failure: pending.failure,
+        failure: shownFailure(pending.failure, pending.migrations, named),
       };
     });
   }
@@ -3679,7 +4470,11 @@ export class StoreHost {
    */
   #defaultedFields(): DefaultedFields {
     const pending = this.#db
-      .select({ hash: backfills.targetHash, text: backfills.targetManifest })
+      .select({
+        hash: backfills.targetHash,
+        text: backfills.targetManifest,
+        migrations: backfills.migrations,
+      })
       .from(backfills)
       .where(sql`${backfills.state} <> 'complete'`)
       .get();
@@ -3701,11 +4496,52 @@ export class StoreHost {
     if (known !== undefined) {
       return known;
     }
-    const defaulted = defaultedFieldsOf(
-      readSchemaManifest(widest.text).manifest
-    );
+    let defaulted = defaultedFieldsOf(readSchemaManifest(widest.text).manifest);
+    if (pending?.migrations !== null && pending?.migrations !== undefined) {
+      // A table an explicit migration transforms is filled in as the
+      // contract in force has it, not the target: a write the target
+      // doesn't fit yet is queued for the transform (`#flush`), never
+      // made to fit with a default.
+      const migrated = new Set(
+        pendingMigrationsSchema
+          .parse(JSON.parse(pending.migrations))
+          .migrations.map(([table]) => table)
+      );
+      const kept =
+        contract?.text === null || contract?.text === undefined
+          ? new Map<string, readonly DefaultedField[]>()
+          : defaultedFieldsOf(readSchemaManifest(contract.text).manifest);
+      defaulted = new Map([
+        ...[...defaulted].filter(([table]) => !migrated.has(table)),
+        ...[...kept].filter(([table]) => migrated.has(table)),
+      ]);
+    }
     this.#defaults.set(widest.hash, defaulted);
     return defaulted;
+  }
+
+  /**
+   * The pending target's explicit migration, as a commit queues work for
+   * it (`#flush`): its hash and the target's fields of each table it
+   * migrates; null while none runs. Call it inside a transaction.
+   */
+  #migrating(): {
+    target: string;
+    tables: ReadonlyMap<string, Readonly<Record<string, ValueDescriptor>>>;
+  } | null {
+    const pending = this.#pendingTarget();
+    if (pending?.migrations === null || pending?.migrations === undefined) {
+      return null;
+    }
+    return {
+      target: pending.hash,
+      tables: new Map(
+        pending.migrations.migrations.map(([table]) => [
+          table,
+          tableFieldsOf(pending.manifest, table),
+        ])
+      ),
+    };
   }
 
   /**

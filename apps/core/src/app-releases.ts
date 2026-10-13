@@ -803,7 +803,15 @@ const boundStore = async (
     env,
     opened,
     manifestText(manifest.schema),
-    { resourceId: request.app, resourceVersion: request.version }
+    { resourceId: request.app, resourceVersion: request.version },
+    Object.values(manifest.migrations).map(
+      ({ name, table, fromSchema, toSchema }) => ({
+        name,
+        table,
+        fromSchema,
+        toSchema,
+      })
+    )
   );
   if (defined.schemaHash !== schema) {
     throw new Error("The store defined another schema than the App's");

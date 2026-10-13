@@ -94,10 +94,16 @@ export const backfillAbandonedEvent = async (
   abandonment: BackfillAbandonment
 ): Promise<AuditEvent> => {
   const { target, attempt, failure, abandonedAt } = abandonment;
-  const record =
-    failure.reason === "stalled"
-      ? {}
-      : { table: failure.table, field: failure.field, record: failure.id };
+  let record = {};
+  if ("migration" in failure) {
+    record = {
+      table: failure.table,
+      migration: failure.migration,
+      record: failure.id,
+    };
+  } else if (failure.reason !== "stalled") {
+    record = { table: failure.table, field: failure.field, record: failure.id };
+  }
   return auditEventSchema.parse({
     actor: abandonment.abandonedBy,
     action: "store.backfill_abandoned",

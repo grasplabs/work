@@ -62,8 +62,8 @@ import type { AnySchema } from "./value-schema.ts";
 //   segment `preferences` is the platform's, so no function registers
 //   under it and declaring preferences later never collides with one;
 // - migrations (spec 17.2, migration.ts) are `migration` declarations,
-//   each named once, of a table the schema has, whose `output` declares
-//   exactly that table's fields.
+//   each named once, one a table, of a table the schema has, whose
+//   `output` declares exactly that table's fields.
 //
 // What the host runs from is `inspectApp`: the registration as data
 // (descriptors, paths, the access each function may use), and the
@@ -583,6 +583,15 @@ const migrationsOf = (
     const manifest = declared["~migration"];
     if (byName.has(manifest.name)) {
       refuse(`Two of the App's migrations are named \`${manifest.name}\`.`);
+    }
+    if (
+      [...byName.values()].some(
+        (other) => other["~migration"].table === manifest.table
+      )
+    ) {
+      refuse(
+        `Two of the App's migrations transform \`${manifest.table}\`: a table takes one migration a version.`
+      );
     }
     const table = Object.hasOwn(schema.tables, manifest.table)
       ? schema.tables[manifest.table]

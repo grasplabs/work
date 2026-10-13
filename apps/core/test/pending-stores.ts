@@ -9,6 +9,7 @@ import { env } from "cloudflare:workers";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
+import { backfillBatchSchema } from "../src/store-host.ts";
 import type { BackfillOutcome } from "../src/store-host.ts";
 import { manifestHash, memberRoles, newRecordId } from "./store-schemas.ts";
 
@@ -119,8 +120,30 @@ export const fill = async (
   target: string,
   batch: number,
   attempt = 1
-): Promise<BackfillOutcome> =>
-  await objectOf(store).fillMissing(store.id, { target, attempt, batch });
+): Promise<BackfillOutcome> => {
+  const answered = backfillBatchSchema.parse(
+    JSON.parse(
+      await objectOf(store).fillMissing(store.id, { target, attempt, batch })
+    )
+  );
+  if (answered.state === "transform") {
+    throw new Error("A fill's batch asked for a transform");
+  }
+  return answered;
+};
+
+/** Batch `batch` of a migration's backfill: what the store hands core. */
+export const migrationBatch = async (
+  store: OpenStore,
+  target: string,
+  batch: number,
+  attempt = 1
+) =>
+  backfillBatchSchema.parse(
+    JSON.parse(
+      await objectOf(store).fillMissing(store.id, { target, attempt, batch })
+    )
+  );
 
 /** Runs batches from `from` until the backfill is no longer running. */
 export const fillAll = async (

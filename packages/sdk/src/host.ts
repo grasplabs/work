@@ -43,7 +43,7 @@ export type {
   SchemaReference,
   TableChange,
 } from "./schema-diff.ts";
-export { planSchemaChange } from "./schema-plan.ts";
+export { holdsId, planSchemaChange } from "./schema-plan.ts";
 export type {
   AcceptedPlan,
   PlannedChanges,

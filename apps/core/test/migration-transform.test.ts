@@ -50,17 +50,61 @@ import type { Fixture } from "./sealed-apps.ts";
 /** A schema hash no release seals: what an author writes before the seal tells them. */
 const placeholder = "0".repeat(64);
 
-/** The fields of a stored note before the migration: no category yet. */
-const schemaFile = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+/** The table migration `name` transforms: one of its own, as a store allows one migration a table. */
+const tableOf = (name: string): string => name.replaceAll("-", "_");
+
+/** The tables of an App migrating `names`: each one's own, or `notes` for none. */
+const tablesOf = (names: readonly string[]): string[] =>
+  names.length === 0 ? ["notes"] : names.map((name) => tableOf(name));
+
+/** The schema of `names`' tables, each with `fields`. */
+const schemaOf = (names: readonly string[], fields: string): string =>
+  `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export const noteFields = {
-  title: v.string().trim().min(1).max(200),
-  body: v.string().max(100_000).default(""),
-  category: v.enum(["launch", "general"]),
+${fields}
 };
 
-export default defineSchema({ notes: defineTable(noteFields) });
+export default defineSchema({
+${tablesOf(names)
+  .map((table) => `  ${table}: defineTable(noteFields),`)
+  .join("\n")}
+});
 `;
+
+const baseFields = `  title: v.string().trim().min(1).max(200),
+  body: v.string().max(100_000).default(""),`;
+
+/** The fields of a note after the migration: a category, required. */
+const migratedFields = `${baseFields}
+  category: v.enum(["launch", "general"]),`;
+
+/** The App's registration, with `names`' migrations from `migrations/`. */
+const appOf = (names: readonly string[], registered: boolean): string => {
+  const access = tablesOf(names)
+    .map((table) => `${table}: { read: "owner", write: "owner" }`)
+    .join(", ");
+  return `import { app } from "@grasp-os/sdk";
+import schema from "./schema.ts";
+${registered ? names.map((name, index) => `import m${index} from "./migrations/${name}.ts";`).join("\n") : ""}
+
+export default app({
+  name: "Notes",
+  schema,
+  access: { tables: { ${access} } },
+  operations: {},
+  screens: [],
+  uses: [],
+  migrations: [${registered ? names.map((_name, index) => `m${index}`).join(", ") : ""}],
+});
+`;
+};
+
+/** Notes before the migrations of `names`: no category yet. */
+const baseFiles = (names: readonly string[]): Record<string, string> => ({
+  "schema.ts": schemaOf(names, baseFields),
+  "app.ts": appOf(names, false),
+});
 
 /** Notes, with `migrations` (file name to source) registered in order. */
 const notesFiles = (
@@ -68,43 +112,35 @@ const notesFiles = (
 ): Record<string, string> => {
   const names = Object.keys(migrations);
   return {
-    "schema.ts": schemaFile,
+    "schema.ts": schemaOf(names, migratedFields),
     ...Object.fromEntries(
       Object.entries(migrations).map(([name, source]) => [
         `migrations/${name}.ts`,
         source,
       ])
     ),
-    "app.ts": `import { app } from "@grasp-os/sdk";
-import schema from "./schema.ts";
-${names.map((name, index) => `import m${index} from "./migrations/${name}.ts";`).join("\n")}
-
-export default app({
-  name: "Notes",
-  schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: {},
-  screens: [],
-  uses: [],
-  migrations: [${names.map((_name, index) => `m${index}`).join(", ")}],
-});
-`,
+    "app.ts": appOf(names, true),
   };
 };
 
-/** A migration of notes named `name`, transforming to `toSchema` with `handler`. */
+/** Migration `name` of its own table, `fromSchema` to `toSchema`, with `handler`. */
 const migrationSource = (
   name: string,
   handler: string,
-  { toSchema = placeholder, input = "", prelude = "" } = {}
+  {
+    fromSchema = "f".repeat(64),
+    toSchema = placeholder,
+    input = "",
+    prelude = "",
+  } = {}
 ): string => `import { migration, v } from "@grasp-os/sdk";
 import { noteFields } from "../schema.ts";
 ${prelude}
 export default migration({
   name: ${JSON.stringify(name)},
-  fromSchema: ${JSON.stringify("f".repeat(64))},
+  fromSchema: ${JSON.stringify(fromSchema)},
   toSchema: ${JSON.stringify(toSchema)},
-  table: "notes",
+  table: ${JSON.stringify(tableOf(name))},
   ${input}
   output: v.object(noteFields),
   handler: ${handler},
@@ -176,9 +212,10 @@ const inputs: Readonly<Record<string, string>> = {
   "never-runs": "input: v.object({ title: noteFields.title }),",
 };
 
-/** The App's files with every migration of `group`, to `toSchema`. */
+/** The App's files with every migration of `group`, `fromSchema` to `toSchema`. */
 const filesTo = (
   group: Readonly<Record<string, string>>,
+  fromSchema: string,
   toSchema: string
 ): Record<string, string> =>
   notesFiles(
@@ -186,6 +223,7 @@ const filesTo = (
       Object.entries(group).map(([name, handler]) => [
         name,
         migrationSource(name, handler, {
+          fromSchema,
           toSchema,
           input: Object.hasOwn(inputs, name) ? (inputs[name] ?? "") : "",
         }),
@@ -223,27 +261,44 @@ const namedSchema = (details: unknown): string => {
 };
 
 /**
- * An App with the migrations of `group` sealed as version 2, after version
- * 1 named a wrong `toSchema` and the seal answered the one it must name.
+ * Notes sealed as version 1 without a category, then version `files`
+ * makes (from version 1's schema) sealed as version 3, after version 2
+ * named a wrong `toSchema` and the seal answered the one it must name.
  */
-const sealedTransforms = async (
-  group: Readonly<Record<string, string>>
+const sealedMigrating = async (
+  names: readonly string[],
+  files: (fromSchema: string, toSchema: string) => Record<string, string>
 ): Promise<{
   fixture: Fixture;
   release: Release;
   refused: { code: unknown; details: unknown };
 }> => {
-  const fixture = await appWith(filesTo(group, placeholder));
-  const refused = await refusalOf(async () => await seal(fixture));
+  const fixture = await appWith(baseFiles(names));
+  const base = await seal(fixture);
+  const fromSchema = base.manifest.schemaHash;
   await commitFiles(
     env,
     fixture.owner,
     fixture.app,
-    filesTo(group, namedSchema(refused.details)),
+    files(fromSchema, placeholder),
+    "Migrate"
+  );
+  const refused = await refusalOf(async () => await seal(fixture, 2));
+  await commitFiles(
+    env,
+    fixture.owner,
+    fixture.app,
+    files(fromSchema, namedSchema(refused.details)),
     "Fix"
   );
-  return { fixture, release: await seal(fixture, 2), refused };
+  return { fixture, release: await seal(fixture, 3), refused };
 };
+
+/** An App with every migration of `group` sealed (`sealedMigrating`). */
+const sealedTransforms = async (group: Readonly<Record<string, string>>) =>
+  await sealedMigrating(Object.keys(group), (fromSchema, toSchema) =>
+    filesTo(group, fromSchema, toSchema)
+  );
 
 /** Each App sealed once for the whole file, when first asked: a seal takes seconds. */
 let sealedOnce: ReturnType<typeof sealedTransforms> | undefined;
@@ -287,18 +342,18 @@ describe("an explicit migration", { timeout: 120_000 }, () => {
       },
     });
     expect(release.app.migrations["derive-category"]).toMatchObject({
-      table: "notes",
+      table: "derive_category",
       toSchema: release.manifest.schemaHash,
     });
   });
 
   it("is listed in its version's review with its table, every one when no version is current", async () => {
     const { fixture } = await sealed();
-    const review = await reviewVersion(env, fixture.owner, fixture.app, 2);
+    const review = await reviewVersion(env, fixture.owner, fixture.app, 3);
 
     expect(review.migrations).toContainEqual({
       name: "derive-category",
-      table: "notes",
+      table: "derive_category",
       change: "added",
     });
     expect(review.migrations).toHaveLength(Object.keys(handlers).length);
@@ -345,8 +400,8 @@ export default app({
       }
     );
     const unregistered = {
-      ...notesFiles({}),
-      "migrations/derive-category.ts": source,
+      ...notesFiles({ "derive-category": source }),
+      "app.ts": appOf(["derive-category"], false),
     };
     const fixture = await appWith(unregistered);
     await activateVersion(env, fixture.owner, fixture.app, 1);
@@ -366,7 +421,7 @@ export default app({
 
     expect(review.files.map(({ path }) => path)).toStrictEqual(["app.ts"]);
     expect(review.migrations).toStrictEqual([
-      { name: "derive-category", table: "notes", change: "added" },
+      { name: "derive-category", table: "derive_category", change: "added" },
     ]);
   });
 
@@ -616,25 +671,26 @@ describe("App code that forges its answer", { timeout: 120_000 }, () => {
   it("refuses an answer that isn't its rows", async () => {
     // The App's code makes the runner in its isolate answer fewer rows
     // than it was sent, as though they had been transformed.
-    const forging = migrationSource("derive-category", "(ctx, row) => row", {
-      prelude: `const stringify = JSON.stringify;
+    const forgingPrelude = `const stringify = JSON.stringify;
 JSON.stringify = (value, ...rest) =>
   typeof value === "object" && value !== null && "ok" in value
     ? stringify({ ok: true, rows: [] })
-    : stringify(value, ...rest);`,
-    });
-    const fixture = await appWith(notesFiles({ "derive-category": forging }));
-    const { details } = await refusalOf(async () => await seal(fixture));
-    await commitFiles(
-      env,
-      fixture.owner,
-      fixture.app,
-      notesFiles({
-        "derive-category": forging.replace(placeholder, namedSchema(details)),
-      }),
-      "Fix"
+    : stringify(value, ...rest);`;
+    const { release } = await sealedMigrating(
+      ["derive-category"],
+      (fromSchema, toSchema) =>
+        notesFiles({
+          "derive-category": migrationSource(
+            "derive-category",
+            "(ctx, row) => row",
+            {
+              fromSchema,
+              toSchema,
+              prelude: forgingPrelude,
+            }
+          ),
+        })
     );
-    const release = await seal(fixture, 2);
 
     await expect(
       transformBatch(env, release, "derive-category", rows)

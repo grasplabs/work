@@ -526,6 +526,10 @@ export const migrationErrors = defineErrorFamily({
     "Only a failed schema change can be abandoned: this one's defaults are still being filled in.",
   "migration.abandoned":
     "An admin abandoned this schema change after its defaults couldn't be filled in, so a release sealed on it can't run on this store. Seal a new version.",
+  "migration.invalid":
+    "This version's migrations don't fit this store: each transforms one table, from a schema the store recorded, to this version's schema, and a migration can't share a change with defaults to fill in elsewhere.",
+  "migration.incompatible_write":
+    "This version's schema no longer fits the store: a migration moved its records on. Make the migrated version current.",
 });
 
 /**
@@ -548,7 +552,39 @@ export type StoreBackfillFailure =
       id: string;
       reason: "invalid_value" | "too_large";
     }
+  | MigrationFailure
   | { reason: "stalled" };
+
+/**
+ * Why an explicit migration's batch failed (spec 17.2): the record, when
+ * one is to blame, and what was wrong with it. `issues` (what the
+ * transform threw, or why its output was refused) may carry content of
+ * other records of the batch, so only the migration's App's builders and
+ * admins are shown it.
+ */
+export interface MigrationFailure {
+  table: string;
+  id: string | null;
+  migration: string;
+  reason:
+    | "invalid_input"
+    | "threw"
+    | "invalid_output"
+    | "too_large"
+    | "invalid_answer"
+    | "outside_contract"
+    | "reference_changed";
+  issues: string[];
+}
+
+/** The explicit migration a schema is applied with, for one table. */
+export const storeMigrationSchema = z.strictObject({
+  name: z.string().min(1).max(64),
+  table: z.string().min(1).max(64),
+  fromSchema: z.string().regex(/^[0-9a-f]{64}$/u),
+  toSchema: z.string().regex(/^[0-9a-f]{64}$/u),
+});
+export type StoreMigration = z.input<typeof storeMigrationSchema>;
 
 /**
  * A store's pending schema change and its backfill, as an admin sees it:
