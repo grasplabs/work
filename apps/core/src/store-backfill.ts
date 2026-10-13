@@ -3,17 +3,20 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { migrationErrors } from "@grasp-os/shared/stores";
+import {
+  compatibleVersionsMax,
+  migrationErrors,
+} from "@grasp-os/shared/stores";
 import type {
   DefinedTables,
   SchemaConsumer,
   StoreMigration,
 } from "@grasp-os/shared/stores";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import type { OpenStore } from "./data-stores.ts";
-import { sdkResourceBindings } from "./db/core/schema.ts";
+import { sdkReleaseManifests, sdkResourceBindings } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import type {
   BackfillRestart,
@@ -66,6 +69,12 @@ import { runEngine } from "./workflows/engine.ts";
 //   App can mend (a value under a key no schema declares) an admin
 //   abandons (store-abandon.ts): its releases are then refused for good
 //   (`migration.abandoned`).
+// - A rollback to a version whose schema an explicit migration left
+//   behind would run it over records it no longer fits: refused for good
+//   (`migration.rollback_incompatible`), naming the App's retained
+//   versions on the store that still fit (spec 17.4). The names come from
+//   the store's contract and core's own retained releases, for the App's
+//   builder making it current, who sees every version of it already.
 
 /** The store `storeId`'s object, for core's own questions of it. */
 const storeObject = (
@@ -84,6 +93,71 @@ export const schemaStatus = async (
   consumer: SchemaConsumer
 ): Promise<SchemaStatus> =>
   await storeObject(env, storeId).schemaStatus(storeId, schemaHash, consumer);
+
+/**
+ * The versions of `app` other than `version` that could be made current
+ * on store `storeId` in its place: of its newest retained releases bound
+ * to the store (sealed, not revoked: release-retention.ts deletes the
+ * rest), those whose schema the store's contract holds in force
+ * (`StoreHost.compatibleVersions`). Newest first. What a refused rollback
+ * names (spec 17.4); read for the App's builder making it current, who
+ * may see every version of it already.
+ */
+const compatibleVersions = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  storeId: StoreId
+): Promise<number[]> => {
+  const retained = await drizzle(env.DB)
+    .select({
+      resourceVersion: sdkResourceBindings.resourceVersion,
+      schemaHash: sdkResourceBindings.schemaHash,
+    })
+    .from(sdkResourceBindings)
+    .innerJoin(
+      sdkReleaseManifests,
+      and(
+        eq(sdkReleaseManifests.appId, sdkResourceBindings.resourceId),
+        eq(sdkReleaseManifests.version, sdkResourceBindings.resourceVersion)
+      )
+    )
+    .where(
+      and(
+        eq(sdkResourceBindings.resourceId, app),
+        eq(sdkResourceBindings.kind, "store"),
+        eq(sdkResourceBindings.targetId, storeId),
+        ne(sdkResourceBindings.resourceVersion, version),
+        isNull(sdkReleaseManifests.revokedAt)
+      )
+    )
+    .orderBy(desc(sdkResourceBindings.resourceVersion))
+    .limit(compatibleVersionsMax)
+    .all();
+  if (retained.length === 0) {
+    return [];
+  }
+  return await storeObject(env, storeId).compatibleVersions(
+    storeId,
+    app,
+    retained
+  );
+};
+
+/**
+ * Refuses making `version` of `app` current on a store a migration moved
+ * past its schema (`migration.rollback_incompatible`), naming the
+ * versions that would fit instead (`details.compatible`).
+ */
+const rollbackIncompatible = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  storeId: StoreId
+): Promise<Error> =>
+  migrationErrors.create("migration.rollback_incompatible", {
+    compatible: await compatibleVersions(env, app, version, storeId),
+  });
 
 /**
  * What keeping a backfill going asks of its store: core reaches it over
@@ -326,6 +400,12 @@ export const requireStoreSchemaActive = async (
   if (status.state === "abandoned") {
     throw migrationErrors.create("migration.abandoned");
   }
+  if (status.state === "incompatible") {
+    // A rollback past an explicit migration: its records moved on, and
+    // no backfill brings them back (destructive contraction is a release
+    // of its own, never a rollback).
+    throw await rollbackIncompatible(env, app, version, storeId);
+  }
   if (status.state === "unknown") {
     // A sealed release's schema the store never took: its records and
     // core's disagree, which no retry mends.
@@ -343,6 +423,9 @@ export const requireStoreSchemaActive = async (
   }
   if (after.state === "abandoned") {
     throw migrationErrors.create("migration.abandoned");
+  }
+  if (after.state === "incompatible") {
+    throw await rollbackIncompatible(env, app, version, storeId);
   }
   if (after.state === "failed") {
     throw migrationErrors.create("migration.backfill_failed", {

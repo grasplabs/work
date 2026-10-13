@@ -529,6 +529,14 @@ msgstr "A connection needs signing in again"
 msgid "A connection refused to say what changed"
 msgstr "A connection refused to say what changed"
 
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
+msgstr "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
+
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
+msgstr "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
+
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "A decision was put to people, or answered"

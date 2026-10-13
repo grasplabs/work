@@ -529,6 +529,14 @@ msgstr "Una conexión necesita volver a iniciar sesión"
 msgid "A connection refused to say what changed"
 msgstr "Una conexión se negó a decir qué cambió"
 
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
+msgstr "Una migración de datos transformó los registros de este motor después de esta versión, así que no puede volver a hacerse actual, y ninguna versión conservada encaja ya con ellos. Crea una versión nueva en su lugar."
+
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
+msgstr "Una migración de datos transformó los registros de este motor después de esta versión, así que no puede volver a hacerse actual. Versiones conservadas que aún encajan con ellos: {versions}."
+
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
 msgstr "Se planteó una decisión a personas, o se respondió"
