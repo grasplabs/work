@@ -161,14 +161,18 @@ export const historyItems = (
 export interface LoadedHistory {
   /** The run it is the history of. */
   run: string;
+  /** The first page it was read on from: a newer read starts it again. */
+  first: RunHistoryPage;
   entries: RunHistoryEntry[];
   /** The cursor of the next page; null once the last page is read. */
   cursor: string | null;
 }
 
-/** Where a page was read from: which run, after which cursor. */
+/** Where a page was read from: which history, after which cursor. */
 export interface PageRead {
   run: string;
+  /** The first page of the history it was read for. */
+  first: RunHistoryPage;
   cursor: string | null;
 }
 
@@ -178,29 +182,51 @@ export const firstHistory = (
   first: RunHistoryPage
 ): LoadedHistory => ({
   run,
+  first,
   entries: [...first.items],
   cursor: first.nextCursor,
 });
 
 /**
+ * The history to show for `run` now that its page has read `first`: the
+ * one read so far while it is of that same run and first page, or that
+ * page anew once the page read it again (its loader ran again, after the
+ * chat changed something, say), dropping the pages read after the old
+ * one, so nothing stale stays and more can be read from its own cursor.
+ */
+export const historyFor = (
+  loaded: LoadedHistory,
+  run: string,
+  first: RunHistoryPage
+): LoadedHistory =>
+  loaded.run === run && loaded.first === first
+    ? loaded
+    : firstHistory(run, first);
+
+/**
  * The history read so far once `page`, read from `from`, is read too. A
- * page of another run, or from a cursor this history has moved past (an
- * answer that came after the page went on to another run, or after the
- * same page was read again), changes nothing: each run's history holds
- * only its own entries, in its own order.
+ * page of another run, of a history read anew since, or from a cursor
+ * this history has moved past (an answer that came after the page went
+ * on to another run, or after the same page was read again), changes
+ * nothing: each run's history holds only its own entries, in its own
+ * order.
  */
 export const withPage = (
   loaded: LoadedHistory,
   from: PageRead,
   page: RunHistoryPage
 ): LoadedHistory => {
-  if (from.run !== loaded.run || from.cursor !== loaded.cursor) {
+  if (
+    from.run !== loaded.run ||
+    from.first !== loaded.first ||
+    from.cursor !== loaded.cursor
+  ) {
     return loaded;
   }
   // Each entry once, should a page repeat what the one before held.
   const known = new Set(loaded.entries.map(({ id }) => id));
   return {
-    run: loaded.run,
+    ...loaded,
     entries: [
       ...loaded.entries,
       ...page.items.filter(({ id }) => !known.has(id)),

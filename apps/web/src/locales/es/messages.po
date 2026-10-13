@@ -4697,6 +4697,10 @@ msgstr "El onboarding"
 msgid "The one before"
 msgstr "La anterior"
 
+#: src/workflows/triggers.tsx
+msgid "The part of the address before the @, on the mail domain set up for Grasp."
+msgstr "La parte de la dirección antes de la @, en el dominio de correo configurado para Grasp."
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
 msgstr "La plataforma está abierta a toda la empresa: nunca se cerró para el onboarding."
@@ -5366,8 +5370,8 @@ msgid "When"
 msgstr "Cuándo"
 
 #: src/workflows/triggers.tsx
-msgid "When an email arrives at {address}"
-msgstr "Cuando llega un correo a {address}"
+msgid "When an email arrives for {localPart}"
+msgstr "Cuando llega un correo para {localPart}"
 
 #: src/chat/builds-state.ts
 msgid "when someone starts it"

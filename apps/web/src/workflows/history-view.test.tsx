@@ -11,6 +11,7 @@ import { HistoryView } from "./history-view.tsx";
 import {
   firstHistory,
   formatDuration,
+  historyFor,
   historyItems,
   withPage,
 } from "./run-history.ts";
@@ -145,9 +146,9 @@ describe("a run's history", () => {
       hasMore: false,
     };
     const once = firstHistory("run-a", first);
-    const both = withPage(once, { run: "run-a", cursor: "2" }, later);
+    const both = withPage(once, { run: "run-a", first, cursor: "2" }, later);
     // The same page read twice adds nothing twice.
-    const again = withPage(both, { run: "run-a", cursor: "2" }, later);
+    const again = withPage(both, { run: "run-a", first, cursor: "2" }, later);
     expect({
       cursors: [once.cursor, both.cursor],
       items: historyItems(again.entries).map((item) =>
@@ -180,21 +181,70 @@ describe("a run's history", () => {
     const b = firstHistory("run-b", ofB);
     // Run A's next page, asked for before the page moved on to run B, at
     // the same cursor run B is at now.
-    const late = withPage(b, { run: "run-a", cursor: "1" }, laterOfA);
+    const late = withPage(
+      b,
+      { run: "run-a", first: ofA, cursor: "1" },
+      laterOfA
+    );
     // Run B's own next page goes on from where run B is.
-    const own = withPage(b, { run: "run-b", cursor: "1" }, laterOfA);
+    const own = withPage(
+      b,
+      { run: "run-b", first: ofB, cursor: "1" },
+      laterOfA
+    );
     // A page from a cursor run A has moved past changes nothing either.
     const a = withPage(
       firstHistory("run-a", ofA),
-      { run: "run-a", cursor: "1" },
+      { run: "run-a", first: ofA, cursor: "1" },
       laterOfA
     );
-    const stale = withPage(a, { run: "run-a", cursor: "1" }, ofA);
+    const stale = withPage(a, { run: "run-a", first: ofA, cursor: "1" }, ofA);
     expect({
       late: late === b,
       own: [own.run, own.cursor, own.entries.length],
       stale: stale === a,
     }).toStrictEqual({ late: true, own: ["run-b", null, 2], stale: true });
+  });
+
+  it("starts a run's history anew from a first page read again, and drops pages read before it", () => {
+    const first: RunHistoryPage = {
+      items: [step("step-1", "started", 1, 0, "fetch")],
+      nextCursor: "1",
+      hasMore: true,
+    };
+    const next: RunHistoryPage = {
+      items: [step("step-1", "completed", 1, 1, "fetch")],
+      nextCursor: "2",
+      hasMore: true,
+    };
+    // Read again once the run went on: a step more, and more to read.
+    const again: RunHistoryPage = {
+      items: [
+        step("step-1", "started", 1, 0, "fetch"),
+        step("step-1", "completed", 1, 1, "fetch"),
+        step("step-2", "started", 1, 2, "send"),
+      ],
+      nextCursor: "3",
+      hasMore: true,
+    };
+    const read = withPage(
+      firstHistory("run-a", first),
+      { run: "run-a", first, cursor: "1" },
+      next
+    );
+    const kept = historyFor(read, "run-a", first);
+    const anew = historyFor(read, "run-a", again);
+    // A page asked for before the first page was read again.
+    const late = withPage(
+      anew,
+      { run: "run-a", first, cursor: anew.cursor },
+      next
+    );
+    expect({
+      kept: kept === read,
+      anew: [anew.entries.length, anew.cursor],
+      late: late === anew,
+    }).toStrictEqual({ kept: true, anew: [3, "3"], late: true });
   });
 
   it("offers more while core has more, and not once it has none", () => {

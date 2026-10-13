@@ -50,14 +50,15 @@ describe("a workflow's triggers", () => {
     ]);
   });
 
-  it("shows an email trigger's address and an event trigger's event", () => {
+  it("shows an email trigger's address as the part before the @ it is, and an event trigger's event", () => {
+    // Core holds the local part only, as an email trigger declares it.
     expect(
       textOf([
-        { type: "email", position: 0, address: "invoices-acme@mail.example" },
+        { type: "email", position: 0, address: "invoices" },
         { type: "event", position: 1, event: "invoice.paid" },
       ])
     ).toBe(
-      "When an email arrives at invoices-acme@mail.example When the event invoice.paid happens"
+      "When an email arrives for invoices The part of the address before the @, on the mail domain set up for Grasp. When the event invoice.paid happens"
     );
   });
 

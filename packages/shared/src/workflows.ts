@@ -659,7 +659,14 @@ export type WorkflowTrigger = { position: number } & (
       /** Its runs failed to start {@link maxFailedStarts} times in a row. */
       stopped: boolean;
     }
-  | { type: "email"; address: string }
+  | {
+      type: "email";
+      /**
+       * The part of the address before the `@` ({@link emailLocalPartSchema}):
+       * the mail domain is Email Routing's, set up outside core.
+       */
+      address: string;
+    }
   | { type: "event"; event: string }
 );
 
