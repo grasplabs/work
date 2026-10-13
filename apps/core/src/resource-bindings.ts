@@ -28,7 +28,7 @@ import type {
 } from "@grasp-os/shared/resource-bindings";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -39,6 +39,9 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { personOf } from "./connections.ts";
 import { appResourceBindings, apps, permissions } from "./db/core/schema.ts";
+// Each list bound as one parameter: a review may name more permissions or
+// collections than D1's 100 bound parameters.
+import { inList } from "./db/d1.ts";
 import { collections } from "./db/knowledge/schema.ts";
 import { gatewaySettings } from "./models.ts";
 import type { BoundResource, ResourceBindings } from "./operations.ts";
@@ -664,7 +667,7 @@ const reviewGrants = async (
       : await drizzle(env.KNOWLEDGE)
           .select({ id: collections.id, name: collections.name })
           .from(collections)
-          .where(inArray(collections.id, ids));
+          .where(inList(collections.id, ids));
   return {
     connections,
     collections: { rows: readable, truncated: collectionGrants.truncated },
@@ -785,7 +788,7 @@ const targetLabels = async (
       : await drizzle(env.DB)
           .select({ id: permissions.id, objectId: permissions.objectId })
           .from(permissions)
-          .where(inArray(permissions.id, permissionIds));
+          .where(inList(permissions.id, permissionIds));
   const objectOf = new Map(objects.map(({ id, objectId }) => [id, objectId]));
   const connectorBound = [...targets.values()].some(
     ({ kind }) => kind === "connector"
@@ -806,7 +809,7 @@ const targetLabels = async (
       : await drizzle(env.KNOWLEDGE)
           .select({ id: collections.id, name: collections.name })
           .from(collections)
-          .where(inArray(collections.id, [...new Set(collectionIds)]));
+          .where(inList(collections.id, [...new Set(collectionIds)]));
   const nameOf = new Map(named.map(({ id, name }) => [id, name]));
   return (row) => {
     const target = targets.get(row.id);
