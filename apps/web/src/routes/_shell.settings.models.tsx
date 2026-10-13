@@ -1,4 +1,5 @@
 import type {
+  ModelBindingSpend,
   ModelBudget,
   ModelBudgetScope,
   ModelRulesSettings,
@@ -37,7 +38,9 @@ import {
 // budgets). They are deployment config that Grasp sets as agreed with the
 // client, so the page only shows them, as core reads them; core checks
 // the role. What was spent against the budgets is AI spend's
-// (`_shell.settings.spend.tsx`).
+// (`_shell.settings.spend.tsx`). Beside them, each engine's model binding
+// with the caps an admin set on it (on the engine's Resources tab) and
+// what it spent against them today and this month.
 
 /** A list of IDs for a sentence, or `none`. */
 const listed = (ids: readonly string[]): string =>
@@ -236,6 +239,190 @@ const Budgets = ({ budgets }: { budgets: ModelBudget[] }) => {
   );
 };
 
+/** A binding's caps, each on a line of its own; or why it has none. */
+const BindingCaps = ({ binding }: { binding: ModelBindingSpend }) => {
+  if (binding.budgetDamaged) {
+    return (
+      <span className="text-destructive">
+        <Trans>Its budget can&apos;t be read, so it serves nothing.</Trans>
+      </span>
+    );
+  }
+  const { budget } = binding;
+  if (budget === null) {
+    return (
+      <span className="text-muted-foreground">
+        <Trans>No caps of its own</Trans>
+      </span>
+    );
+  }
+  const { perRequest, perDay, perMonth } = budget;
+  const request = perRequest === undefined ? null : dollars(perRequest);
+  const daily = perDay === undefined ? null : dollars(perDay);
+  const monthly = perMonth === undefined ? null : dollars(perMonth);
+  const alertAt = percent(budget.alertAt);
+  return (
+    <ul className="flex flex-col gap-0.5">
+      {request === null ? null : (
+        <li>
+          <Trans>{request} a request</Trans>
+        </li>
+      )}
+      {daily === null ? null : (
+        <li>
+          <Trans>{daily} a day</Trans>
+        </li>
+      )}
+      {monthly === null ? null : (
+        <li>
+          <Trans>{monthly} a month</Trans>
+        </li>
+      )}
+      {daily === null && monthly === null ? null : (
+        <li className="text-muted-foreground">
+          <Trans>Admins alerted at {alertAt}</Trans>
+        </li>
+      )}
+    </ul>
+  );
+};
+
+/** What a binding spent in a period, and of what cap when it has one. */
+const SpentOf = ({
+  amount,
+  cap,
+}: {
+  amount: number;
+  cap: number | undefined;
+}) => {
+  const spent = dollars(amount);
+  if (cap === undefined) {
+    return <span className="tabular-nums">{spent}</span>;
+  }
+  const limit = dollars(cap);
+  return (
+    <span className="tabular-nums">
+      <Trans>
+        {spent} of {limit}
+      </Trans>
+    </span>
+  );
+};
+
+/** How far a binding's spend is into its caps, when it is anywhere near them. */
+const BindingAlert = ({ binding }: { binding: ModelBindingSpend }) => {
+  if (binding.alert === "reached") {
+    return (
+      <Badge variant="destructive">
+        <Trans>Cap reached</Trans>
+      </Badge>
+    );
+  }
+  if (binding.alert === "alerted") {
+    return (
+      <Badge variant="secondary">
+        <Trans>Past the alert</Trans>
+      </Badge>
+    );
+  }
+  return null;
+};
+
+/** Each engine's model binding, its caps, and what it spent against them. */
+const BindingBudgets = ({
+  bindings,
+  day,
+}: {
+  bindings: ModelSettings["bindings"];
+  day: string;
+}) => {
+  const { listed: bound, more } = bindings;
+  if (bound.length === 0) {
+    return (
+      <p className="text-muted-foreground text-sm">
+        <Trans>No engine has a model bound to it.</Trans>
+      </p>
+    );
+  }
+  const shown = bound.length;
+  return (
+    <div className="flex flex-col gap-3">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>
+              <Trans>Engine</Trans>
+            </TableHead>
+            <TableHead>
+              <Trans>Caps</Trans>
+            </TableHead>
+            <TableHead className="text-right">
+              <Trans>Today ({day}, UTC)</Trans>
+            </TableHead>
+            <TableHead className="text-right">
+              <Trans>This month</Trans>
+            </TableHead>
+            <TableHead>
+              <span className="sr-only">
+                <Trans>Alert</Trans>
+              </span>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {bound.map((binding) => (
+            <TableRow key={`${binding.appId}/${binding.alias}`}>
+              <TableCell>
+                <span className="flex flex-col gap-0.5">
+                  <Link
+                    className="underline underline-offset-4"
+                    params={{ engine: binding.appId }}
+                    to="/engines/$engine"
+                  >
+                    {binding.appName}
+                  </Link>
+                  <span className="text-muted-foreground font-mono">
+                    {binding.alias}
+                  </span>
+                  {/* A model ID can be long: cut, with all of it on hover. */}
+                  <span
+                    className="text-muted-foreground block max-w-64 truncate font-mono text-xs"
+                    title={binding.model}
+                  >
+                    {binding.model}
+                  </span>
+                </span>
+              </TableCell>
+              <TableCell>
+                <BindingCaps binding={binding} />
+              </TableCell>
+              <TableCell className="text-right">
+                <SpentOf amount={binding.today} cap={binding.budget?.perDay} />
+              </TableCell>
+              <TableCell className="text-right">
+                <SpentOf
+                  amount={binding.thisMonth}
+                  cap={binding.budget?.perMonth}
+                />
+              </TableCell>
+              <TableCell>
+                <BindingAlert binding={binding} />
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+      {more ? (
+        <p className="text-muted-foreground text-sm">
+          <Trans>
+            The first {shown} by engine; more engines have models bound.
+          </Trans>
+        </p>
+      ) : null}
+    </div>
+  );
+};
+
 const Settings = ({ settings }: { settings: ModelSettings }) => {
   const { t } = useLingui();
   if (settings.models.length === 0) {
@@ -283,6 +470,19 @@ const Settings = ({ settings }: { settings: ModelSettings }) => {
           </Section>
         </>
       )}
+      <Section
+        description={
+          <Trans>
+            Caps an admin set on an engine&apos;s model, on the engine&apos;s
+            Resources tab, on top of the budgets above, and what the
+            engine&apos;s actions spent through it. A workflow&apos;s own AI
+            steps don&apos;t count here.
+          </Trans>
+        }
+        title={t`Engine budgets`}
+      >
+        <BindingBudgets bindings={settings.bindings} day={settings.day} />
+      </Section>
     </>
   );
 };

@@ -9,6 +9,8 @@ import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { bindingSpendListed } from "@grasp-os/shared/models";
+import type { ModelBindingAlert, ModelSettings } from "@grasp-os/shared/models";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import {
   bindingApprovalSchema,
@@ -28,7 +30,7 @@ import type {
 } from "@grasp-os/shared/resource-bindings";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -43,6 +45,10 @@ import { appResourceBindings, apps, permissions } from "./db/core/schema.ts";
 // collections than D1's 100 bound parameters.
 import { inList } from "./db/d1.ts";
 import { collections } from "./db/knowledge/schema.ts";
+import { bindingScopes } from "./model-budgets.ts";
+import { modelLedger } from "./model-ledger.ts";
+import type { LedgerScope, ScopeSpend } from "./model-ledger.ts";
+import { microsPerDollar } from "./model-prices.ts";
 import { gatewaySettings } from "./models.ts";
 import type { BoundResource, ResourceBindings } from "./operations.ts";
 import {
@@ -1063,4 +1069,116 @@ export const requireHeldBinding = async (
   ) {
     throw notServed();
   }
+};
+
+/** How far `spentMicros` is into `scope`'s cap: the ledger alerts at the same points. */
+const alertOf = (
+  { limitMicros, alertMicros }: LedgerScope,
+  spentMicros: number
+): ModelBindingAlert => {
+  if (limitMicros !== null && spentMicros >= limitMicros) {
+    return "reached";
+  }
+  return alertMicros !== null && spentMicros >= alertMicros
+    ? "alerted"
+    : "none";
+};
+
+const alertRank: Readonly<Record<ModelBindingAlert, number>> = {
+  none: 0,
+  alerted: 1,
+  reached: 2,
+};
+
+/** The further into its cap of a month's and a day's alert. */
+const furthest = (
+  month: ModelBindingAlert,
+  day: ModelBindingAlert
+): ModelBindingAlert => (alertRank[day] > alertRank[month] ? day : month);
+
+/** What each key of a scope spent, in micros. */
+const spentByKey = (spent: readonly ScopeSpend[]): Map<string, number> =>
+  new Map(spent.map(({ key, spentMicros }) => [key, spentMicros]));
+
+/**
+ * The Apps' active model bindings, by App name and alias (at most
+ * `bindingSpendListed`, and whether more are bound), each with its own
+ * caps and what its requests spent in `periods`' month and day: for
+ * admins to read (models-rpc.ts), who core checks.
+ *
+ * Spend is read under the very scopes a request through the binding
+ * counts against (`bindingScopes`), keyed by App and alias, so it is what
+ * the next request's admission counts, settled: reservations still held
+ * aren't spend yet. A binding without caps is listed too, its spend
+ * counted all the same. One whose caps can't be read is listed as
+ * damaged, as it serves nothing.
+ */
+export const modelBindingSpend = async (
+  env: Pick<Env, "DB" | "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">,
+  periods: { month: string; day: string }
+): Promise<ModelSettings["bindings"]> => {
+  // One more than are listed, to tell whether any are left out.
+  const rows = await drizzle(env.DB)
+    .select({ row: appResourceBindings, appName: apps.name })
+    .from(appResourceBindings)
+    .innerJoin(apps, eq(apps.id, appResourceBindings.appId))
+    .where(
+      and(
+        eq(appResourceBindings.status, "active"),
+        eq(appResourceBindings.kind, "model")
+      )
+    )
+    .orderBy(
+      asc(apps.name),
+      asc(appResourceBindings.alias),
+      asc(appResourceBindings.appId)
+    )
+    .limit(bindingSpendListed + 1);
+  const listed = rows
+    .slice(0, bindingSpendListed)
+    .flatMap(({ row, appName }) => {
+      const binding = toBinding(row);
+      const [month, day] = bindingScopes(
+        { app: row.appId, alias: row.alias, budget: binding.budget },
+        periods.day
+      );
+      const { target } = binding;
+      return target.kind === "model" && month !== undefined && day !== undefined
+        ? [{ binding, model: target.model, appName, month, day }]
+        : [];
+    });
+  const ledger = modelLedger(env);
+  const [monthSpend, daySpend] = await Promise.all([
+    ledger.spendOfKeys(
+      periods.month,
+      "binding",
+      listed.map(({ month }) => month.key)
+    ),
+    // A day's spend is kept under its month, keyed by the day.
+    ledger.spendOfKeys(
+      periods.month,
+      "binding_day",
+      listed.map(({ day }) => day.key)
+    ),
+  ]);
+  const monthSpent = spentByKey(monthSpend);
+  const daySpent = spentByKey(daySpend);
+  return {
+    listed: listed.map(({ binding, model, appName, month, day }) => {
+      const monthMicros = monthSpent.get(month.key) ?? 0;
+      const dayMicros = daySpent.get(day.key) ?? 0;
+      return {
+        appId: binding.appId,
+        appName,
+        alias: binding.alias,
+        model,
+        budget: binding.budget,
+        budgetDamaged: binding.budgetDamaged,
+        today: dayMicros / microsPerDollar,
+        thisMonth: monthMicros / microsPerDollar,
+        alert: furthest(alertOf(month, monthMicros), alertOf(day, dayMicros)),
+      };
+    }),
+    more: rows.length > bindingSpendListed,
+  };
 };
