@@ -18,12 +18,41 @@ import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, grantMail, workflowFiles } from "./workflow-apps.ts";
+import {
+  appWith as serverAppWith,
+  bindModel,
+  grantMail,
+  modelRegistration,
+  workflowFiles,
+} from "./workflow-apps.ts";
 
 // The client's rules for model calls, checked on every call before
 // anything is sent. AI Gateway is the outside system: a fake behind the AI
 // binding. Everything else is real, down to the audit log and, for the
 // rules a workflow run meets, the run.
+
+/**
+ * A new App with the sample server and `files`, declaring the model
+ * resources its workflows' AI steps go through, which a test binds.
+ */
+const appWith = async (
+  builder: Parameters<typeof serverAppWith>[0],
+  files: Record<string, string>
+): Promise<string> =>
+  await serverAppWith(builder, {
+    ...modelRegistration({ reader: 32_768, anywhere: 12_000, eu: 32_768 }),
+    ...files,
+  });
+
+/** An AI step reading a total through the App's `reader`, with `retries`. */
+const llm = (retries: string) => `  return await step.llm("extract", {
+    description: "Read the total",
+    binding: "reader",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+    ${retries}
+  });`;
 
 const idp = mockIdp();
 
@@ -465,7 +494,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         "reader",
         `  return await step.llm("extract", {
     description: "Read the total",
-    model: "${anthropic}",
+    binding: "reader",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
@@ -491,6 +520,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
       ],
       async () => {
+        await bindModel(app, "reader", anthropic);
         const holding = outcome(
           models(env).call(
             hello(anthropic, {
@@ -558,14 +588,6 @@ describe("model rules", { timeout: 60_000 }, () => {
 
   it("ask the ledger for a busy step at most every 15 seconds, however short its attempts' timeout, and fail a step with no retry left at once", async () => {
     const builder = await signedInApi(idp, "builder");
-    const llm = (retries: string) => `  return await step.llm("extract", {
-    description: "Read the total",
-    model: "${anthropic}",
-    instructions: "Read the total in cents.",
-    input: "Total 12.34 EUR",
-    schema: z.object({ total: z.int() }),
-    ${retries}
-  });`;
     // Attempts that time out after a second, retried a millisecond on; and
     // a step with no retry at all.
     const app = await appWith(builder, {
@@ -598,6 +620,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
       ],
       async () => {
+        await bindModel(app, "reader", anthropic);
         const holding = Promise.all(
           ["reader", "once"].map(
             async (workflow) =>
@@ -676,7 +699,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         "reader",
         `  return await step.llm("extract", {
     description: "Read the total",
-    model: "${anthropic}",
+    binding: "reader",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
@@ -701,6 +724,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         { text: '{ "total": 9999 }', inputTokens: 10, outputTokens: 5 },
       ],
       async () => {
+        await bindModel(app, "reader", anthropic);
         const run = await builder.api.workflows.start(app, "reader");
         await scheduler.wait(2500);
         release.resolve(true);
@@ -733,7 +757,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         "reader",
         `  return await step.llm("extract", {
     description: "Read the total",
-    model: "${anthropic}",
+    binding: "reader",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
@@ -758,6 +782,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
       ],
       async () => {
+        await bindModel(app, "reader", anthropic);
         const holding = outcome(
           models(env).call(
             hello(anthropic, {
@@ -813,7 +838,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         "reader",
         `  return await step.llm("extract", {
     description: "Read the total",
-    model: "${anthropic}",
+    binding: "reader",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
@@ -831,6 +856,7 @@ describe("model rules", { timeout: 60_000 }, () => {
       },
       [{ text: '{ "total": 1234 }', inputTokens: 1_000_000, outputTokens: 10 }],
       async () => {
+        await bindModel(app, "reader", anthropic);
         const paid = await builder.api.workflows.start(app, "reader");
         await finished(paid.id);
         const stopped = await builder.api.workflows.start(app, "reader");
@@ -880,7 +906,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         "reader",
         `  return await step.llm("extract", {
     description: "Read the total",
-    model: "${workersAi}",
+    binding: "reader",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
@@ -898,6 +924,7 @@ describe("model rules", { timeout: 60_000 }, () => {
       },
       [],
       async () => {
+        await bindModel(app, "reader", workersAi);
         const started = await builder.api.workflows.start(app, "reader");
         await finished(started.id);
         return started;
@@ -932,13 +959,13 @@ describe("model rules", { timeout: 60_000 }, () => {
       sensitive: true,
     });
     // Reads the note, then asks a model about it: the prompt holds it.
-    const summarizer = (id: string, model: string) =>
+    const summarizer = (id: string) =>
       workflowFiles(
         id,
         `  const note = await step.do("read", { description: "Read the note" }, async () => await env.HANDBOOK.getDocument("${payroll.noteId}"));
   return await step.llm("summarize", {
     description: "Summarize the note",
-    model: "${model}",
+    binding: "${id}",
     instructions: "Summarize the note.",
     input: note.version.text,
     schema: z.object({ summary: z.string() }),
@@ -949,8 +976,8 @@ describe("model rules", { timeout: 60_000 }, () => {
         }
       );
     const app = await appWith(admin, {
-      ...summarizer("anywhere", workersAi),
-      ...summarizer("eu", euModel),
+      ...summarizer("anywhere"),
+      ...summarizer("eu"),
     });
     await requestGranted(
       idp,
@@ -969,6 +996,8 @@ describe("model rules", { timeout: 60_000 }, () => {
       },
       [{ text: '{ "summary": "A note." }', inputTokens: 10, outputTokens: 5 }],
       async () => {
+        await bindModel(app, "anywhere", workersAi);
+        await bindModel(app, "eu", euModel);
         // One after another: the second starts restricted.
         const refused = await admin.api.workflows.start(app, "anywhere");
         await finished(refused.id);
@@ -1007,5 +1036,171 @@ describe("model rules", { timeout: 60_000 }, () => {
     ).toMatchObject([
       { detail: { reason: "model.sensitive_data", because: "restricted" } },
     ]);
+  });
+
+  it("refuse a workflow's AI step through an alias no admin bound, or one its App doesn't declare, before any model is asked", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, {
+      ...workflowFiles("reader", llm("retries: { limit: 2, delay: 1 },"), {
+        extract: { total: 1234 },
+      }),
+      ...workflowFiles(
+        "stranger",
+        llm("retries: { limit: 2, delay: 1 },").replace(
+          'binding: "reader"',
+          'binding: "missing"'
+        ),
+        { extract: { total: 1234 } }
+      ),
+    });
+    const { fake, result: runs } = await withDeploymentRules(
+      { gateway, models: [workersAi, anthropic] },
+      [],
+      async () => {
+        const unbound = await builder.api.workflows.start(app, "reader");
+        const undeclared = await builder.api.workflows.start(app, "stranger");
+        await finished(unbound.id);
+        await finished(undeclared.id);
+        return { unbound: unbound.id, undeclared: undeclared.id };
+      }
+    );
+    const refused = {
+      status: "failed",
+      failure: { error: { code: "resource.unavailable" } },
+    };
+    await expect(
+      Promise.all([
+        builder.api.workflows.status(runs.unbound),
+        builder.api.workflows.status(runs.undeclared),
+      ])
+    ).resolves.toMatchObject([refused, refused]);
+    // Not retried, and nothing reached the gateway or its ledger.
+    expect(fake.requests).toStrictEqual([]);
+    const events = await eventsOf(
+      runActorOf({ runId: runs.unbound, app, workflow: "reader" })
+    );
+    expect(modelActions(events)).toStrictEqual([]);
+  });
+
+  it("stop a workflow's AI steps once their binding's cap for the day is used up, at once and with the reason", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles("reader", llm("retries: { limit: 2, delay: 1 },"), {
+        extract: { total: 1234 },
+      })
+    );
+    // A million tokens in costs $3: well past the binding's dollar a day.
+    const { fake, result: runs } = await withDeploymentRules(
+      { gateway, models: [workersAi, anthropic] },
+      [{ text: '{ "total": 1234 }', inputTokens: 1_000_000, outputTokens: 10 }],
+      async () => {
+        await bindModel(app, "reader", anthropic, { perDay: 1 });
+        const paid = await builder.api.workflows.start(app, "reader");
+        await finished(paid.id);
+        const stopped = await builder.api.workflows.start(app, "reader");
+        await finished(stopped.id);
+        return { paid: paid.id, stopped: stopped.id };
+      }
+    );
+
+    await expect(
+      Promise.all([
+        builder.api.workflows.status(runs.paid),
+        builder.api.workflows.status(runs.stopped),
+      ])
+    ).resolves.toMatchObject([
+      { status: "completed", output: { total: 1234 } },
+      { status: "failed", failure: { error: { code: "model.over_budget" } } },
+    ]);
+    const refusals = await eventsOf(
+      runActorOf({ runId: runs.stopped, app, workflow: "reader" })
+    );
+    expect({
+      // The second run's step was refused once, not retried, unsent.
+      sent: fake.requests.length,
+      refused: refusals
+        .filter(({ action }) => action === "model.refused")
+        .map(({ detail }) => [detail.reason, detail.because]),
+    }).toStrictEqual({
+      sent: 1,
+      refused: [["model.over_budget", "binding_day"]],
+    });
+  });
+
+  it("retry a workflow's AI step its binding turned away while other calls hold its cap, and answer once they finish", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles("reader", llm("retries: { limit: 1, delay: 1 },"), {
+        extract: { total: 1234 },
+      })
+    );
+    const release = Promise.withResolvers<boolean>();
+    const actor = (runId: string) =>
+      runActorOf({ runId, app, workflow: "reader" });
+
+    // Another call through the same binding holds most of its dollar a
+    // day while it answers, until released.
+    const { result } = await withDeploymentRules(
+      { gateway, models: [workersAi, anthropic] },
+      [
+        { ...cheapAnswer, pause: { at: 1, until: release.promise } },
+        { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
+      ],
+      async () => {
+        await bindModel(app, "reader", anthropic, { perDay: 1 });
+        const holding = outcome(
+          models(env).call(
+            hello(anthropic, {
+              purpose: "workflow.step",
+              trigger: actor(`run-${crypto.randomUUID()}`),
+              binding: {
+                app: appIdSchema.parse(app),
+                alias: "reader",
+                budget: { perDay: 1, alertAt: 80 },
+              },
+            })
+          )
+        );
+        await vi.waitFor(async () => {
+          const read = await modelLedger(env).spendOf(
+            env.MODEL_BUDGET_MONTH ?? "",
+            ["binding_day"],
+            10
+          );
+          expect(read.binding_day?.[0]?.reservedMicros).toBeGreaterThan(0);
+        });
+        const run = await builder.api.workflows.start(app, "reader");
+        await vi.waitFor(
+          async () => {
+            const events = await eventsOf(actor(run.id));
+            expect(modelActions(events)).toContain("model.refused");
+          },
+          { timeout: 10_000, interval: 200 }
+        );
+        release.resolve(true);
+        await finished(run.id);
+        return {
+          held: await holding,
+          run: await builder.api.workflows.status(run.id),
+          events: await eventsOf(actor(run.id)),
+        };
+      }
+    );
+
+    expect({
+      held: result.held,
+      run: result.run,
+      refused: result.events
+        .filter(({ action }) => action === "model.refused")
+        .map(({ detail }) => [detail.reason, detail.because]),
+      actions: modelActions(result.events),
+    }).toMatchObject({
+      held: "ok",
+      run: { status: "completed", output: { total: 1234 } },
+      refused: [["model.budget_busy", "binding_day"]],
+      actions: ["model.refused", "model.call"],
+    });
   });
 });

@@ -45,7 +45,7 @@ declare const context: WorkflowContext<typeof params, undefined>;
 const { params: p } = context;
 const llm = {
   description: "Extract",
-  model: p.extractionModel,
+  binding: "extractor",
   instructions: "Read the total.",
   input: "",
   schema: extractionSchema,
@@ -59,9 +59,9 @@ expectTypeOf(context.runId).toEqualTypeOf<RunId>();
 expectTypeOf<string>().not.toExtend<Person>();
 
 // A parameter of the wrong kind doesn't compile.
-// @ts-expect-error -- a person isn't a model
-await step.llm("extract", { ...llm, model: p.reviewer });
-// @ts-expect-error -- models come from a model parameter, not a literal
+// @ts-expect-error -- a binding is named by its alias, a string
+await step.llm("extract", { ...llm, binding: 1 });
+// @ts-expect-error -- a model isn't named: its binding is
 await step.llm("extract", { ...llm, model: "mistral-large" });
 await step.decision("review", {
   description: "Review",

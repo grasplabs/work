@@ -72,8 +72,9 @@ describe("the sample invoice workflow", () => {
         description: "Read the total and currency from the invoice",
         sideEffect: false,
         locked: false,
-        params: ["extractionModel"],
+        params: [],
         options: {
+          binding: "extractor",
           instructions:
             "Read the invoice's total amount in whole minor units (cents for EUR) and its ISO 4217 currency code.",
           retries: { limit: 2 },
@@ -110,7 +111,7 @@ describe("the sample invoice workflow", () => {
     ]);
   });
 
-  it("asks the model with the instructions and the model parameter", async () => {
+  it("asks the model through the App's binding, with the instructions", async () => {
     const { engine, modelRequests } = createFakeEngine({
       model: modelSays(400_000),
     });
@@ -120,7 +121,7 @@ describe("the sample invoice workflow", () => {
     expect(modelRequests).toMatchObject([
       {
         step: "extract",
-        model: "mistral-large",
+        binding: "extractor",
         instructions:
           "Read the invoice's total amount in whole minor units (cents for EUR) and its ISO 4217 currency code.",
         input: "Total €8,000",
@@ -147,13 +148,6 @@ describe("the sample invoice workflow", () => {
         label: "Reviewer",
         default: "team:finance",
         sensitive: false,
-      },
-      {
-        name: "extractionModel",
-        kind: "model",
-        label: "Extraction model",
-        default: "mistral-large",
-        sensitive: true,
       },
     ]);
     expect(metadata.triggers).toStrictEqual([
@@ -254,7 +248,7 @@ describe("the sample invoice workflow", () => {
   it("uses the values people set instead of the defaults", async () => {
     const systems = fakeSystems();
     const { engine, modelRequests } = createFakeEngine({
-      params: { threshold: 1_000_000, extractionModel: "small-model" },
+      params: { threshold: 1_000_000 },
       model: modelSays(800_000),
     });
 
@@ -262,7 +256,7 @@ describe("the sample invoice workflow", () => {
 
     expect(result.status).toBe("booked");
     expect(systems.asked).toStrictEqual([]);
-    expect(modelRequests[0]?.model).toBe("small-model");
+    expect(modelRequests).toHaveLength(1);
   });
 
   it("fails a run whose parameter value doesn't fit its kind, or is empty", async () => {

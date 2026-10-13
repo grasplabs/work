@@ -4,6 +4,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -999,6 +1000,84 @@ export const resourceBindingsFor =
 
 /** A held call its binding no longer serves. */
 const notServed = () => operationErrors.create("resource.unavailable");
+
+/** What a workflow's AI step asks the model gateway through (`stepModelBinding`). */
+export interface StepModel {
+  /** The model the binding's admin approved. */
+  readonly model: string;
+  /** The binding, with its caps, as the gateway counts it. */
+  readonly binding: {
+    readonly app: AppId;
+    readonly alias: string;
+    readonly budget: ModelBindingBudget | null;
+  };
+  /** The declaration's bound on the answer, for the step's request as a whole. */
+  readonly maxOutputTokens: number;
+}
+
+/**
+ * The model binding a workflow's AI step of App `app`, at the version
+ * `version` its run is pinned to, goes through (`step.llm`'s `binding`):
+ * `alias` must name a model resource that release declares, without a
+ * structured output (the step brings its own schema), whose active
+ * binding serves it now, as a request of the App's own would resolve it
+ * (`resolved`): approved for exactly that declaration, its model still
+ * allowed, its caps readable. Anything else, an App with no release
+ * among it, is `resource.unavailable`. Read again for every attempt.
+ */
+export const stepModelBinding = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  alias: string
+): Promise<StepModel> => {
+  let release: Release;
+  try {
+    release = await loadRelease(env, app, version);
+  } catch (error) {
+    // No sealed release (an App of the earlier layout) declares nothing;
+    // a revoked one runs no more.
+    if (
+      isExpectedError(error) &&
+      (error.code === "version.not_sealed" || error.code === "version.revoked")
+    ) {
+      throw notServed();
+    }
+    throw error;
+  }
+  const declaration = Object.hasOwn(release.app.resources, alias)
+    ? release.app.resources[alias]
+    : undefined;
+  if (
+    declaration?.["~resource"] !== "model" ||
+    declaration.structuredOutput !== null
+  ) {
+    throw notServed();
+  }
+  const row = await activeRow(env, app, alias);
+  if (row === undefined) {
+    throw notServed();
+  }
+  const resolution = await resolved(env, app, declaration, row);
+  const target = bindingTargetSchema.safeParse(JSON.parse(row.target));
+  if (
+    resolution.state !== "served" ||
+    !target.success ||
+    target.data.kind !== "model"
+  ) {
+    log.warn("resource_binding.not_served", {
+      binding: row.id,
+      contractId: row.contractId,
+      state: resolution.state,
+    });
+    throw notServed();
+  }
+  return {
+    model: target.data.model,
+    binding: { app, alias, budget: resolution.budget },
+    maxOutputTokens: declaration.maxOutputTokens,
+  };
+};
 
 /**
  * Refuses a held call of App `app` through binding `pin` unless the

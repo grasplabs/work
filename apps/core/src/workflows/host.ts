@@ -10,6 +10,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
+import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import {
@@ -58,6 +59,7 @@ import type {
 import type { CollectionBinding } from "../knowledge/binding.ts";
 import { models } from "../models.ts";
 import { requireActivePerson, requireApprovedVersion } from "../permissions.ts";
+import type { StepModel } from "../resource-bindings.ts";
 import { commitStepStatistics } from "../statistic-steps.ts";
 import type { AttemptFence } from "./attempt-fence.ts";
 import { AttemptHost } from "./attempt-host.ts";
@@ -244,6 +246,19 @@ const heldKeysOf = (marker: unknown): string[] => {
  */
 const heldKeysKept = 32;
 
+/**
+ * How an AI step's request spends its binding's bound on the answer: the
+ * request as a whole, as an App's request does (resource-model.ts). It may
+ * ask once more for an answer that doesn't fit, so each ask gets half; a
+ * bound too small to halve allows one ask only.
+ */
+const stepTokens = (
+  maxOutputTokens: number
+): { maxTokens: number; askAgain: boolean } =>
+  maxOutputTokens < 2
+    ? { maxTokens: maxOutputTokens, askAgain: false }
+    : { maxTokens: Math.floor(maxOutputTokens / 2), askAgain: true };
+
 /** Longest step name taken: a key and a decision's part fit well within. */
 const maxStepName = 256;
 
@@ -298,7 +313,7 @@ const modelAnswerSchema = z.object({ output: z.unknown() });
 
 const modelRequestSchema = z.object({
   step: stepNameSchema,
-  model: z.string().min(1).max(200),
+  binding: z.string().regex(resourceAliasPattern),
   instructions: z.string(),
   input: z.json(),
   outputSchema: z
@@ -840,6 +855,12 @@ export interface HostHooks {
     ends: number | undefined
   ) => Promise<AppAnswer>;
   /**
+   * The App's model binding of `alias` an AI step goes through, as it
+   * serves now (`stepModelBinding`): `resource.unavailable` when none
+   * does.
+   */
+  modelBinding: (alias: string) => Promise<StepModel>;
+  /**
    * Calls a public function of the run's App's release, for `caller`, a
    * step of the run, under `idempotencyKey` (`callRunFunction`).
    */
@@ -1370,7 +1391,7 @@ export class RunHost extends RpcTarget {
       await this.#requireCurrent(attempt, "model");
       requireUnrefused(attempt);
       await this.#requirePerson();
-      const { model, instructions, input, outputSchema } = checked(
+      const { binding, instructions, input, outputSchema } = checked(
         modelRequestSchema,
         request
       );
@@ -1383,36 +1404,57 @@ export class RunHost extends RpcTarget {
       const { output } = modelAnswerSchema.parse(
         await this.#waitingOutBusyBudget(
           attempt,
-          JSON.stringify([model, instructions, input, outputSchema]),
+          JSON.stringify([binding, instructions, input, outputSchema]),
           async () => {
+            // The App's binding of the alias, as it serves now: read again
+            // for every attempt, so one revoked or changed meanwhile stops
+            // the next.
+            const bound = await this.#hooks.modelBinding(binding);
             // Last, after every read: an attempt the engine gave up on
             // meanwhile asks the gateway nothing.
             await this.#requireCurrent(attempt, "model");
-            return await models(this.#env).call({
-              model,
-              system: instructions,
-              input,
-              schema,
-              purpose: "workflow.step",
-              trigger: this.#actor,
-              // The step may have read any of them into its input.
-              connections: [
-                ...new Set(
-                  Object.values(this.#run.connections).map(
-                    ({ connection }) => connection.connectionId
-                  )
-                ),
-              ],
-              // The run's restricted mode, which is its App's.
-              work: {
-                authority: this.#run.authority,
-                context: {
-                  type: "run",
-                  appId: this.#run.app,
-                  runId: this.#run.runId,
+            try {
+              return await models(this.#env).call({
+                model: bound.model,
+                // Its caps count each attempt as a request of its own.
+                binding: bound.binding,
+                ...stepTokens(bound.maxOutputTokens),
+                system: instructions,
+                input,
+                schema,
+                purpose: "workflow.step",
+                trigger: this.#actor,
+                // The step may have read any of them into its input.
+                connections: [
+                  ...new Set(
+                    Object.values(this.#run.connections).map(
+                      ({ connection }) => connection.connectionId
+                    )
+                  ),
+                ],
+                // The run's restricted mode, which is its App's.
+                work: {
+                  authority: this.#run.authority,
+                  context: {
+                    type: "run",
+                    appId: this.#run.app,
+                    runId: this.#run.runId,
+                  },
                 },
-              },
-            });
+                // After the ledger admitted each provider request, with
+                // nothing awaited before it is sent.
+                beforeSend: () => {
+                  if (!this.#holds(attempt)) {
+                    throw executionErrors.create("execution.stale_attempt");
+                  }
+                },
+              });
+            } catch (error) {
+              // Stopped before it was sent, as the engine gave up on the
+              // attempt: said so, whatever the gateway made of the stop.
+              await this.#requireCurrent(attempt, "model");
+              throw error;
+            }
           }
         )
       );

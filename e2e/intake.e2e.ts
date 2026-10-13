@@ -1,3 +1,4 @@
+import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -44,6 +45,20 @@ const intakeFor = async (admin: Person): Promise<string> => {
       await api.permissions.grant(id, { version: null });
     }
     await api.apps.versions.setCurrent(created.app.id, 1);
+    // The model its reading goes through (app.ts), bound as an admin binds
+    // it on the engine's Resources tab: to the deployment's first model,
+    // capped at a cent a request. The local stack reaches no model, and a
+    // call it can't reach is tried again for minutes; a reading's request
+    // reserves more than a cent, so the binding's cap refuses it at once,
+    // before anything is sent. Core's tests read notes with a scripted
+    // model (apps/core/test/intake.test.ts).
+    await api.resourceBindings.approve({
+      app: created.app.id,
+      alias: "extractor",
+      target: { kind: "model", model: defaultGatewayModels[0] },
+      reviewed: { version: 1 },
+      budget: { perRequest: 0.01 },
+    });
     const { generation } = await api.screenTrust.review(created.app.id);
     await api.screenTrust.classify(created.app.id, "ordinary", generation);
     return created.app.id;
@@ -156,21 +171,7 @@ test("an admin sends notes to be read, and follows the reading to its end", asyn
   const { admin } = peopleIn("intake");
   const title = `Notes ${crypto.randomUUID().slice(0, 8)}`;
   const app = await intakeFor(admin);
-  // The local stack reaches no model. A call to the model it allows (the
-  // workflow's default) fails and is tried again for minutes, so the
-  // reading asks for one it doesn't allow, which fails at once; core's
-  // tests read notes with a scripted model (apps/core/test/intake.test.ts).
-  const { core, api } = apiOf(admin);
-  try {
-    await api.workflows.params.set(
-      app,
-      "extract",
-      "model",
-      "anthropic/claude-sonnet-5"
-    );
-  } finally {
-    core[Symbol.dispose]();
-  }
+  // Its binding's cap refuses the reading's request at once (`intakeFor`).
   const page = await pageOf(browser, admin);
   const screen = await openIntake(page, app);
 

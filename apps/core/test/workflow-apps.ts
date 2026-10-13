@@ -3,11 +3,75 @@
  * they are split across: one file holds only so many runs' worth of
  * workers.
  */
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { ModelBindingBudgetInput } from "@grasp-os/shared/resource-bindings";
+import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
+import { findApp } from "../src/apps.ts";
+import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
+import { person } from "./sealed-apps.ts";
+
+/**
+ * A registration of spec 8's layout beside an App's server, declaring a
+ * text model resource for each of `bounds`' aliases, which its workflows'
+ * AI steps go through (`step.llm`'s `binding`), each with that bound on
+ * the answer. A step may ask twice, so each ask gets half: twice what the
+ * gateway gives a model's answer when a call says nothing (16,384 tokens,
+ * and a quarter of Llama 3.3's window, 6,000) asks for as much as before.
+ */
+export const modelRegistration = (
+  bounds: Record<string, number>
+): Record<string, string> => ({
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+
+import schema from "./schema.ts";
+
+${Object.entries(bounds)
+  .map(
+    ([alias, tokens]) =>
+      `export const ${alias} = resource.model("${alias}", { maxOutputTokens: ${tokens} });\n`
+  )
+  .join("")}
+export default app({
+  name: "Models",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  internalOperations: {},
+  screens: [],
+  uses: [${Object.keys(bounds).join(", ")}],
+});
+`,
+});
+
+/**
+ * An admin's binding of App `app`'s model resource `alias` to `model`,
+ * with `budget`, for the version current now: the model must be one the
+ * deployment allows as it is approved.
+ */
+export const bindModel = async (
+  app: string,
+  alias: string,
+  model: string,
+  budget?: ModelBindingBudgetInput
+) => {
+  const { currentVersion } = await findApp(env, appIdSchema.parse(app));
+  return await approveResourceBinding(env, await person("admin"), {
+    app,
+    alias,
+    target: { kind: "model", model },
+    reviewed: { version: currentVersion ?? 0 },
+    ...(budget === undefined ? {} : { budget }),
+  });
+};
 
 /** Someone signed in, with their API. */
 type Builder = Parameters<typeof release>[0];

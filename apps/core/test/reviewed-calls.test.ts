@@ -176,6 +176,9 @@ const hostHeldTo = async (
     callFunction: () => {
       throw new Error("No App function call here");
     },
+    modelBinding: () => {
+      throw new Error("No model step here");
+    },
   };
   const host = new RunHost(
     { ...env, DB: db },

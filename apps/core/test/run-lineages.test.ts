@@ -20,7 +20,12 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { finished, woken } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
-import { appWith, workflowFiles } from "./workflow-apps.ts";
+import {
+  appWith as serverAppWith,
+  bindModel,
+  modelRegistration,
+  workflowFiles,
+} from "./workflow-apps.ts";
 
 // A run lineage's model calls: a run and every run started under it count
 // their model spend and provider requests together, against the lineage's
@@ -50,10 +55,26 @@ const dearTotal = {
   outputTokens: 100,
 };
 
+/**
+ * A new App with the sample server and `files`, its model resource
+ * `reader`, which its runs' AI steps go through, bound to Llama 3.3.
+ */
+const appWith = async (
+  builder: Parameters<typeof serverAppWith>[0],
+  files: Record<string, string>
+): Promise<string> => {
+  const app = await serverAppWith(builder, {
+    ...modelRegistration({ reader: 12_000 }),
+    ...files,
+  });
+  await bindModel(app, "reader", workersAi);
+  return app;
+};
+
 /** A run's AI step, with `more` options. */
 const llmStep = (more = "") => `  return await step.llm("extract", {
     description: "Read the total",
-    model: "${workersAi}",
+    binding: "reader",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
