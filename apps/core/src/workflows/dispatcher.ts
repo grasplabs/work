@@ -1,6 +1,7 @@
 import { appIdSchema, runIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId } from "@grasp-os/shared/ids";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { coreStepPrefix } from "@grasp-os/shared/workflows";
 import type {
   WorkflowEvent,
   WorkflowStep,
@@ -20,7 +21,6 @@ import { runParamsSchema } from "./engine.ts";
 import type { InternalWorkflow, PinnedRun, RunPin } from "./engine.ts";
 import {
   countedStep,
-  coreStepPrefix,
   fromIsolate,
   RunHost,
   settle,

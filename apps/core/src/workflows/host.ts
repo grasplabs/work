@@ -6,6 +6,7 @@ import { errorPayloadSchema, isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { identifierSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
@@ -13,6 +14,7 @@ import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Authority } from "@grasp-os/shared/permissions";
 import {
   callReviewed,
+  coreStepPrefix,
   executionErrors,
   stepReviewed,
   isRetryable,
@@ -139,12 +141,6 @@ export interface RunStep {
 }
 
 /**
- * Core's own steps of a run start with this (dispatcher.ts), and a
- * workflow's never do, so workflow code can't replay one of them.
- */
-export const coreStepPrefix = "$grasp:";
-
-/**
  * One attempt of a step, from when the engine claims it: who it is (its
  * number, its step's key in the engine, the generation of the activation
  * that claimed it, its deadline and a lease ID of core's own), whether
@@ -186,6 +182,11 @@ interface StepAttempt {
    * `heldKeysKept`.
    */
   heldKeys: string[];
+  /**
+   * How many of its App's functions its code has called so far: each
+   * call's place, which its key is derived from (`#callFunction`).
+   */
+  functionCalls: number;
   calledApp: boolean;
   /**
    * The first of its calls refused as one its review doesn't show, or
@@ -1109,6 +1110,7 @@ export class RunHost extends RpcTarget {
           step,
           held: false,
           heldKeys: [],
+          functionCalls: 0,
           calledApp: false,
           last: isLastAttempt(context, tries, parsed.retries?.limit),
         };
@@ -1811,20 +1813,28 @@ export class RunHost extends RpcTarget {
    * (`env.APP.callFunction(reference, input)`), at the version the run is
    * pinned to, for the person the run acts for, as the run, only inside a
    * step whose code its review shows calling `APP` (`#requireReviewed`).
-   * Its key is the step's, so a rerun of the step (a retry, a replay, the
-   * run after a held side effect was decided) makes the same call: its
-   * mutations' receipts and its resource requests' keys are the same. Its
-   * every protected step (its start, each commit, each resource request)
-   * is admitted only while `attempt` still holds its lease
-   * (`runInvocationFor`). A side effect connect held for the person holds
-   * the step, whatever App code makes of the refusal. Answers what the
-   * function answered or why it failed, as data (`OperationResult`).
+   * Its key is the step's key and the call's place among the attempt's
+   * function calls (`StepAttempt.functionCalls`), counted as each call
+   * comes in: two calls of one step never share a key, and a rerun of the
+   * step (a retry, a replay, the run after a held side effect was
+   * decided) whose code calls in the same order makes the same calls, so
+   * its mutations' receipts and its resource requests' keys are the same.
+   * As for an action's own requests (`runAction`), calls made at once
+   * count in the order they come. Its every protected step (its start,
+   * each commit, each resource request) is admitted only while `attempt`
+   * still holds its lease (`runInvocationFor`). A side effect connect
+   * held for the person holds the step, whatever App code makes of the
+   * refusal. Answers what the function answered or why it failed, as data
+   * (`OperationResult`).
    */
   async #callFunction(
     attempt: StepAttempt,
     reference: unknown,
     input: unknown
   ): Promise<Settled<unknown>> {
+    // Counted before anything is awaited, in the order calls come.
+    attempt.functionCalls += 1;
+    const place = attempt.functionCalls;
     return await settle(async () => {
       this.#requireUntampered();
       await this.#requireCurrent(attempt, "APP");
@@ -1839,6 +1849,14 @@ export class RunHost extends RpcTarget {
           stillCurrent: async () => {
             await this.#requireCurrent(attempt, "APP");
           },
+          requireHolds: () => {
+            if (!this.#holds(attempt)) {
+              // Audited once per attempt, as any stale call is; the call
+              // is refused here, with nothing awaited.
+              void this.#leaseRefusal(attempt, "APP");
+              throw executionErrors.create("execution.stale_attempt");
+            }
+          },
           held: (key) => {
             attempt.held = true;
             if (
@@ -1852,7 +1870,7 @@ export class RunHost extends RpcTarget {
         reference,
         input,
         // Within what a submission key may be, whatever the step's name.
-        `step:${await sha256Hex(stepKey)}`
+        `step:${await sha256Hex(canonicalJson([stepKey, place]))}`
       );
     });
   }

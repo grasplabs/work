@@ -66,9 +66,12 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  * runs in the release of the version the run is pinned to, as the run,
  * and answers what the function answered or why it failed, as data:
  * `{ ok: true, value }` or `{ ok: false, error }` (throw `error.code`
- * yourself to fail or retry the step). Its call key is the step's, so the
- * step run again makes the same call: its mutations and resource requests
- * answer what they did, never again. An action's `ctx.resources` resolve
+ * yourself to fail or retry the step). Each call's key is the step's and
+ * its place among the step's calls of `callFunction`: two calls in one
+ * step each do what they do, and the step run again, calling in the same
+ * order, makes the same calls, so their mutations and resource requests
+ * answer what they did, never again. Make the calls one after another
+ * (calls made at once count in the order they reach core). An action's `ctx.resources` resolve
  * through the App's approved bindings, as the run: a model request counts
  * against the binding's caps and the run's budgets, and a side effect held
  * for the person holds the step, as the run's own do.

@@ -28,7 +28,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { commitMaxInputBytes } from "@grasp-os/shared/stores";
-import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
+import { coreStepPrefix, stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import type { RpcTarget } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -661,21 +661,36 @@ export interface RunCaller {
    * activation took over, or its function returned.
    */
   readonly stillCurrent: () => Promise<void>;
+  /**
+   * The same, synchronously: for the last check before an effect, with
+   * nothing awaited between it and the effect's start.
+   */
+  readonly requireHolds: () => void;
   /** Hears each side effect connect held for the person (`BindingCaller.held`). */
   readonly held: (key: string) => void;
 }
 
 /**
- * `bindings`, each request's key under the run's (`stepIdempotencyKey`):
- * connect finds a run's held side effects, and drops them once the run
- * has ended, by the run their key names (pending-actions.ts, workflows/
- * retention.ts). Under it is still the key the operation host derived,
- * so the same call made again sends the same key.
+ * `bindings` for a run: each request's key under the run's
+ * (`stepIdempotencyKey`), behind core's own prefix, so no step's own key
+ * is ever one of them, and connect finds a run's held side effects, and
+ * drops them once the run has ended, by the run their key names
+ * (pending-actions.ts, workflows/retention.ts). Under it is still the key
+ * the operation host derived, so the same call made again sends the same
+ * key. The attempt's lease is checked once more as the binding is
+ * resolved, with nothing awaited between that and the request's start
+ * (`resourceCall`, operations.ts): a cancel landing during the gate's or
+ * the binding's reads stops it.
  */
 const keyedUnderRun =
-  (bindings: ResourceBindings, runId: RunId): ResourceBindings =>
+  (
+    bindings: ResourceBindings,
+    runId: RunId,
+    requireHolds: () => void
+  ): ResourceBindings =>
   async (declaration) => {
     const bound = await bindings(declaration);
+    requireHolds();
     return bound === undefined
       ? undefined
       : {
@@ -683,10 +698,28 @@ const keyedUnderRun =
           call: async (method, args, context) =>
             await bound.call(method, args, {
               ...context,
-              idempotencyKey: stepIdempotencyKey(runId, context.idempotencyKey),
+              idempotencyKey: stepIdempotencyKey(
+                runId,
+                `${coreStepPrefix}${context.idempotencyKey}`
+              ),
             }),
         };
   };
+
+/**
+ * `store`, its commits made only while the attempt still holds its lease,
+ * checked with nothing awaited between that and the commit.
+ */
+const fencedStore = (
+  store: OpenStore,
+  requireHolds: () => void
+): OpenStore => ({
+  ...store,
+  commit: async (commit) => {
+    requireHolds();
+    return await store.commit(commit);
+  },
+});
 
 /**
  * The invocation of `release` (the run's own App, at the version the run
@@ -699,7 +732,7 @@ const keyedUnderRun =
 export const runInvocationFor = async (
   env: Env,
   release: Release,
-  { run, requestId, deadline, stillCurrent, held }: RunCaller
+  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller
 ): Promise<Invocation> => {
   const { app, runId, version, authority } = run;
   const bindings = resourceBindingsFor(env, {
@@ -716,28 +749,34 @@ export const runInvocationFor = async (
     store:
       release.store === null
         ? noStore()
-        : await openStore(env, release.store.storeId),
+        : fencedStore(
+            await openStore(env, release.store.storeId),
+            requireHolds
+          ),
     requestId,
     deadline,
     runId,
     // The one gate, as for a screen's call: before the call starts, each
-    // mutation commits and each resource request. First the step's
-    // attempt, so nothing runs for an attempt the engine let go of; then
-    // the release, and the person, still a member with a role in the App.
+    // mutation commits and each resource request. The release, and the
+    // person, still a member with a role in the App; then, last, after
+    // every read, the step's attempt, so nothing runs for an attempt the
+    // engine let go of meanwhile. The commit and the request check the
+    // lease once more, synchronously, just before they start.
     authorize: async () => {
-      await stillCurrent();
       await requireNotRevoked(env, app, version);
       const role = await memberRole(env.DB, authority.onBehalfOf);
       if (role === undefined) {
         throw permissionErrors.create("permission.person_inactive");
       }
-      return await operationRoles(
+      const roles = await operationRoles(
         env,
         { userId: authority.onBehalfOf, role },
         app
       );
+      await stillCurrent();
+      return roles;
     },
-    resources: keyedUnderRun(bindings, runId),
+    resources: keyedUnderRun(bindings, runId, requireHolds),
   };
 };
 

@@ -1264,7 +1264,10 @@ const resourceCall = async (
   // The one gate (`admit`): the same admission a mutation's commit runs,
   // so a request is made only while the caller may still act.
   await admit(run.invocation);
-  const bound = await run.invocation.resources?.(declaration);
+  // Core's own resolution: what it refuses with is the host's.
+  const bound = await trusted(
+    async () => await run.invocation.resources?.(declaration)
+  );
   const contract =
     declaration["~resource"] === "connector" ||
     declaration["~resource"] === "template"

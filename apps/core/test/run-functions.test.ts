@@ -1,20 +1,31 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "@grasp-os/shared/ids";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
+import type { RunCaller } from "../src/app-functions.ts";
+import { loadRelease } from "../src/app-releases.ts";
 import { appHost } from "../src/durable-objects.ts";
 import { budgetMonth } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns, finished, sleeping, woken } from "./runs.ts";
+import { endLiveRuns, finished, liveStatus, sleeping, woken } from "./runs.ts";
+import { person } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { routed, signedInApi } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
@@ -47,14 +58,26 @@ interface CallingStep {
   /** The function, as the step names it to `env.APP.callFunction`. */
   reference: Record<string, unknown>;
   input: unknown;
-  /** Code the step runs after the call, before it answers. */
+  /** More calls after it, one after another: the step answers them all. */
+  more?: readonly { reference: Record<string, unknown>; input: unknown }[];
+  /** Code the step runs after the calls, before it answers. */
   after?: string;
 }
 
+/** The code of a step's calls, `answered` their answers. */
+const callsOf = ({ reference, input, more = [] }: CallingStep): string =>
+  [{ reference, input }, ...more]
+    .map(
+      (call) =>
+        `    answered.push(await env.APP.callFunction(${JSON.stringify(call.reference)}, ${JSON.stringify(call.input)}));\n`
+    )
+    .join("");
+
 /**
- * A workflow `id` of `steps`, each calling a function of its App and
- * answering what that answered, with `options`, and `between` each two;
- * it answers every step's answer. Its test mocks every step.
+ * A workflow `id` of `steps`, each calling functions of its App and
+ * answering what that answered (one answer, or each of its calls'), with
+ * `options`, and `between` each two; it answers every step's answer. Its
+ * test mocks every step.
  */
 const callingWorkflow = (
   id: string,
@@ -67,11 +90,11 @@ export default workflow("${id}", { params: {}, input: z.unknown() }, async (step
   const answers = [];
 ${steps
   .map(
-    ({ name, reference, input, after = "" }, index) =>
-      `${index === 0 ? "" : between}  answers.push(await step.do("${name}", { description: "Call a function", sideEffect: true, input: null, ${options} }, async () => {
-    const answered = await env.APP.callFunction(${JSON.stringify(reference)}, ${JSON.stringify(input)});
-    ${after}
-    return answered;
+    (calling, index) =>
+      `${index === 0 ? "" : between}  answers.push(await step.do("${calling.name}", { description: "Call a function", sideEffect: true, input: null, ${options} }, async () => {
+    const answered = [];
+${callsOf(calling)}    ${calling.after ?? ""}
+    return answered.length === 1 ? answered[0] : answered;
   }));
 `
   )
@@ -106,9 +129,11 @@ export default defineSchema({ notes: defineTable({ title: v.string() }) });
 const modelFiles = (): Record<string, string> => ({
   "schema.ts": schemaFile,
   "operations/assist.ts": `import { resource, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+import { action, internalQuery } from "#grasp/server";
 
 export const writer = resource.model("writer", { maxOutputTokens: 300 });
+
+export const secret = internalQuery({ args: {}, returns: v.string(), handler: () => "hidden" });
 
 export const draft = action({
   args: { prompt: v.string().min(1) },
@@ -134,7 +159,7 @@ export const twice = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { draft, twice, writer } from "./operations/assist.ts";
+import { draft, secret, twice, writer } from "./operations/assist.ts";
 import schema from "./schema.ts";
 
 export default app({
@@ -142,18 +167,33 @@ export default app({
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
   operations: { assist: { draft, twice } },
-  internalOperations: {},
+  internalOperations: { hidden: { secret } },
   screens: [],
   uses: [writer],
 });
 `,
 });
 
-/** An App whose action sends mail through Microsoft 365. */
+/**
+ * An App whose actions send mail through Microsoft 365, with a mutation
+ * that keeps a note and a query that counts the caller's notes.
+ */
 const mailFiles = (): Record<string, string> => ({
   "schema.ts": schemaFile,
   "operations/mail.ts": `import { resource, v } from "@grasp-os/sdk";
-import { action } from "#grasp/server";
+import { action, mutation, query } from "#grasp/server";
+
+export const note = mutation({
+  args: { title: v.string().min(1) },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+export const count = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => (await ctx.db.query("notes").take(100)).length,
+});
 
 export const mail = resource.connector("mail", {
   contract: "microsoft-365.mail@1",
@@ -174,16 +214,40 @@ export const send = action({
     return typeof sent === "object" && sent !== null && Reflect.get(sent, "sent") === true;
   },
 });
+
+/** Sends \`count\` mails, \`prefix\` and a number each: how many were sent. */
+export const sendMany = action({
+  args: { prefix: v.string().min(1), count: v.number().integer().min(1).max(30) },
+  returns: v.number(),
+  uses: [mail],
+  handler: async (ctx, args) => {
+    let sent = 0;
+    for (let index = 0; index < args.count; index += 1) {
+      try {
+        await ctx.resources.mail.call("send", {
+          mailbox: "team@acme.test",
+          subject: args.prefix + " " + index,
+          body: "Hello.",
+          to: ["ada@acme.test"],
+        });
+        sent += 1;
+      } catch {
+        // Held, or refused: the next one.
+      }
+    }
+    return sent;
+  },
+});
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { mail, send } from "./operations/mail.ts";
+import { count, mail, note, send, sendMany } from "./operations/mail.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Mailer",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { mail: { send } },
+  operations: { mail: { send, sendMany, note, count } },
   internalOperations: {},
   screens: [],
   uses: [mail],
@@ -305,6 +369,200 @@ const mailerApp = async (workflow: Record<string, string>) => {
   return { admin, builder, app };
 };
 
+/**
+ * What `who`'s screen gets calling the query `contractId` of the App's
+ * current version, as a screen calls it.
+ */
+const queryAs = async (
+  who: Person,
+  app: string,
+  { contractId }: { contractId: string }
+): Promise<OperationResult> => {
+  const released = await loadRelease(env, appIdSchema.parse(app), 1);
+  const answered = await callAppFunction(
+    env,
+    await who.api.whoami(),
+    app,
+    JSON.stringify({
+      reference: {
+        resourceId: app,
+        resourceVersion: 1,
+        contractId,
+        fingerprint: released.fingerprints[contractId] ?? "",
+        kind: "query",
+      },
+      input: {},
+    })
+  );
+  return answered.result;
+};
+
+/** What a call of an attempt no longer holding its lease is refused with. */
+const stale = () => executionErrors.create("execution.stale_attempt");
+
+/** A workflow `sleeper` that waits a day, so its run is there to act as. */
+const sleeper = {
+  "workflows/sleeper.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow("sleeper", { params: {}, input: z.unknown() }, async (step) => {
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  return null;
+});
+`,
+  "workflows/sleeper.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./sleeper.ts";
+
+export default workflowTests(definition, [{ name: "runs", mocks: {}, expect: {} }]);
+`,
+};
+
+/** A run of `sleeper` in an App of `files`, asleep: its App and run. */
+const sleepingRun = async (files: Record<string, string>) => {
+  const admin = await personApi("admin");
+  const builder = await personApi("builder");
+  const app = await appWith(builder, { ...files, ...sleeper });
+  const run = await builder.api.workflows.start(app, "sleeper");
+  await sleeping(run.id, "go");
+  return { admin, builder, app, runId: run.id };
+};
+
+/**
+ * A step of `sleepingRun`'s run, as core resolves it for its call
+ * (`RunCaller`), whose attempt holds its lease while `lease.holds`: the
+ * run's own identity, with the lease in the test's hands, for what only a
+ * run's timing could bring about otherwise.
+ */
+const stepOf = (
+  { app, builder, runId }: Awaited<ReturnType<typeof sleepingRun>>,
+  lease: { holds: boolean }
+): RunCaller => ({
+  run: {
+    app: appIdSchema.parse(app),
+    workflow: workflowIdSchema.parse("sleeper"),
+    runId: runIdSchema.parse(runId),
+    version: 1,
+    authority: {
+      subject: { type: "app", appId: appIdSchema.parse(app) },
+      onBehalfOf: builder.userId,
+      mode: "workflow",
+      appVersion: 1,
+    },
+  },
+  requestId: crypto.randomUUID(),
+  deadline: Date.now() + 30_000,
+  stillCurrent: async () => {
+    await Promise.resolve();
+    if (!lease.holds) {
+      throw stale();
+    }
+  },
+  requireHolds: () => {
+    if (!lease.holds) {
+      throw stale();
+    }
+  },
+  held: () => {
+    throw new Error("Nothing is held here");
+  },
+});
+
+/**
+ * Core's env with AI Gateway answering `replies` behind the AI binding,
+ * the model gateway's `rules`, and `db` as its database.
+ */
+const callEnv = (
+  replies: GatewayReply[],
+  { rules = {}, db = env.DB }: { rules?: object; db?: D1Database } = {}
+) => {
+  const gateway = fakeGateway(...replies);
+  const changed: Env = {
+    ...env,
+    DB: db,
+    MODEL_GATEWAY: {
+      gateway: "grasp-os-test",
+      models: [allowedModel],
+      ...rules,
+    },
+  };
+  Reflect.set(changed, "AI", gateway.binding);
+  return { gateway, env: changed };
+};
+
+/**
+ * Core's database, with `onRead` run as the `nth` query that reads from
+ * `table` starts: a change landing while a call reads.
+ */
+const racingRead = (
+  table: string,
+  nth: number,
+  onRead: () => void
+): D1Database => {
+  const reading = new RegExp(`from "${table}"`, "iu");
+  let reads = 0;
+  return new Proxy(env.DB, {
+    get: (target, property) => {
+      if (property === "prepare") {
+        return (query: string) => {
+          if (reading.test(query)) {
+            reads += 1;
+            if (reads === nth) {
+              onRead();
+            }
+          }
+          return target.prepare(query);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+};
+
+/**
+ * The Assistant with a workflow of two steps a day apart, each drafting
+ * through its writer, which an admin bound.
+ */
+const twoStepApp = async () => {
+  const admin = await personApi("admin");
+  const builder = await personApi("builder");
+  const app = await appWith(builder, {
+    ...modelFiles(),
+    ...callingWorkflow(
+      "assist",
+      [
+        { name: "first", reference: draft, input: { prompt: "One" } },
+        { name: "second", reference: draft, input: { prompt: "Two" } },
+      ],
+      { between: aDay }
+    ),
+  });
+  return { admin, builder, app, binding: await bindWriter(admin, app) };
+};
+
+/**
+ * A run of the two-step workflow (`twoStepApp`) `starter` starts, with
+ * `change` made while it waits between its steps: its output, as
+ * `reader`, an admin, sees it, and how many requests reached the gateway.
+ */
+const changedBetween = async (
+  reader: Person,
+  starter: Person,
+  app: string,
+  change: () => Promise<void>
+) => {
+  const gateway = gatewayAnswering(answer("One."), answer("Never sent."));
+  const run = await starter.api.workflows.start(app, "assist");
+  await sleeping(run.id, "go");
+  await change();
+  await woken(run.id);
+  await finished(run.id);
+  const { status, output } = await reader.api.workflows.status(run.id);
+  return { status, output, asked: gateway.requests.length };
+};
+
 describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
   afterEach(async () => {
     vi.restoreAllMocks();
@@ -371,36 +629,57 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
   });
 
   it("stop serving a binding revoked between two steps of a run", async () => {
-    const admin = await personApi("admin");
-    const builder = await personApi("builder");
-    const app = await appWith(builder, {
-      ...modelFiles(),
-      ...callingWorkflow(
-        "assist",
-        [
-          { name: "first", reference: draft, input: { prompt: "One" } },
-          { name: "second", reference: draft, input: { prompt: "Two" } },
-        ],
-        { between: aDay }
-      ),
+    const { admin, builder, app, binding } = await twoStepApp();
+    const ended = await changedBetween(admin, builder, app, async () => {
+      await admin.api.resourceBindings.revoke(binding.id);
     });
-    const binding = await bindWriter(admin, app);
-    const gateway = gatewayAnswering(answer("One."), answer("Never sent."));
-    const run = await builder.api.workflows.start(app, "assist");
-    await sleeping(run.id, "go");
-    await admin.api.resourceBindings.revoke(binding.id);
-    await woken(run.id);
-    expect({
-      ended: await endedRun(builder, run.id),
-      asked: gateway.requests.length,
-    }).toMatchObject({
-      ended: {
-        status: "completed",
-        output: [
-          { ok: true, value: "One." },
-          { ok: false, error: { code: "resource.unavailable" } },
-        ],
-      },
+    expect(ended).toMatchObject({
+      output: [
+        { ok: true, value: "One." },
+        { ok: false, error: { code: "resource.unavailable" } },
+      ],
+      asked: 1,
+    });
+  });
+
+  it("refuse a run's next step once the person it acts for lost the App", async () => {
+    const { admin, builder, app } = await twoStepApp();
+    const member = await personApi("user");
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: member.userId,
+      role: "user",
+    });
+    const ended = await changedBetween(admin, member, app, async () => {
+      await builder.api.apps.members.remove(app, {
+        type: "person",
+        id: member.userId,
+      });
+    });
+    expect(ended).toMatchObject({
+      output: [
+        { ok: true, value: "One." },
+        { ok: false, error: { code: "app.not_found" } },
+      ],
+      asked: 1,
+    });
+  });
+
+  it("refuse a run's next step once its release is revoked", async () => {
+    const { admin, builder, app } = await twoStepApp();
+    const ended = await changedBetween(admin, builder, app, async () => {
+      await revokeRelease(
+        env,
+        await person("admin"),
+        { app: appIdSchema.parse(app), version: 1 },
+        "Compromised"
+      );
+    });
+    expect(ended).toMatchObject({
+      output: [
+        { ok: true, value: "One." },
+        { ok: false, error: { code: "version.revoked" } },
+      ],
       asked: 1,
     });
   });
@@ -425,6 +704,21 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
           reference: { ...draft, resourceVersion: 2 },
           input: { prompt: "Hi" },
         },
+        {
+          name: "reshaped",
+          reference: { ...draft, fingerprint: "0".repeat(64) },
+          input: { prompt: "Hi" },
+        },
+        {
+          name: "internal",
+          reference: { contractId: "hidden.secret", kind: "query" },
+          input: {},
+        },
+        {
+          name: "kind",
+          reference: { ...draft, kind: "query" },
+          input: { prompt: "Hi" },
+        },
       ]),
     });
     const gateway = gatewayAnswering(answer("Never sent."));
@@ -441,6 +735,10 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
           { ok: false, error: { code: "resource.unavailable" } },
           { ok: false, error: { code: "version.mismatch" } },
           { ok: false, error: { code: "version.mismatch" } },
+          { ok: false, error: { code: "version.mismatch" } },
+          // An internal function is refused as one that doesn't exist.
+          { ok: false, error: { code: "operation.not_found" } },
+          { ok: false, error: { code: "operation.kind_mismatch" } },
         ],
       },
       asked: 0,
@@ -496,17 +794,24 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     });
   });
 
-  it("make the same call when a step runs again, so its side effect happens once", async () => {
+  it("do each of a step's calls, and make the same calls when the step runs again, so each effect happens once", async () => {
     const subject = `Invoice ${crypto.randomUUID()}`;
+    const note = { contractId: "mail.note", kind: "mutation" };
     const { builder, app } = await mailerApp(
       callingWorkflow(
         "mailer",
         [
           {
-            name: "send",
-            reference: send,
-            input: { subject },
-            // Runs out of time after the call, every attempt: retried
+            name: "work",
+            // Two notes, and the same mail sent twice on purpose.
+            reference: note,
+            input: { title: "First" },
+            more: [
+              { reference: note, input: { title: "Second" } },
+              { reference: send, input: { subject } },
+              { reference: send, input: { subject } },
+            ],
+            // Runs out of time after the calls, every attempt: retried
             // once, as a timeout is.
             after: `await new Promise((resolve) => setTimeout(resolve, 3000));`,
           },
@@ -528,18 +833,19 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     expect({
       status: ended.status,
       sent: await sentCount(subject),
-      // Both attempts called it, under one key: the second got the
-      // first's answer.
-      calls: calls.map(({ detail }) => [detail.outcome, detail.mode]),
+      // Each attempt sent twice, under two keys: the second attempt got
+      // the first's answers.
+      calls: calls
+        .map(({ detail }) => String(detail.outcome))
+        .toSorted((one, other) => one.localeCompare(other)),
       keys: new Set(calls.map(({ detail }) => detail.idempotencyKeyHash)).size,
+      notes: await queryAs(builder, app, { contractId: "mail.count" }),
     }).toStrictEqual({
       status: "failed",
-      sent: 1,
-      calls: [
-        ["ok", "workflow"],
-        ["replayed", "workflow"],
-      ],
-      keys: 1,
+      sent: 2,
+      calls: ["ok", "ok", "replayed", "replayed"],
+      keys: 2,
+      notes: { ok: true, value: 2 },
     });
   });
 
@@ -577,6 +883,208 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       ended: { status: "completed", output: [{ ok: true, value: true }] },
       sent: 1,
       waitedHeld: true,
+    });
+  });
+
+  it("keep a step waiting while any of more side effects than its marker keeps still waits", async () => {
+    const prefix = `Batch ${crypto.randomUUID()}`;
+    const sendMany = { contractId: "mail.sendMany", kind: "action" };
+    const { builder, app } = await mailerApp(
+      callingWorkflow("mailer", [
+        {
+          name: "send",
+          reference: sendMany,
+          input: { prefix: `${prefix} a`, count: 20 },
+          more: [
+            {
+              reference: sendMany,
+              input: { prefix: `${prefix} b`, count: 20 },
+            },
+          ],
+        },
+      ])
+    );
+    await appHost(env, appIdSchema.parse(app)).restrict();
+    const run = await builder.api.workflows.start(app, "mailer");
+    await runEvents(run.id, "workflow.run.waiting");
+    const pending = builder.api.pendingActions;
+    const held = await pending.list();
+    // All but one confirmed: the step waits on, whichever was left.
+    const [last, ...rest] = held;
+    for (const action of rest) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await pending.confirm(action.id, action.inputHash);
+    }
+    await vi.waitFor(
+      async () => {
+        await expect(liveStatus(run.id)).resolves.toBe("waiting");
+      },
+      { timeout: 20_000, interval: 100 }
+    );
+    const { status: whileOneWaits } = await builder.api.workflows.status(
+      run.id
+    );
+    if (last !== undefined) {
+      await pending.confirm(last.id, last.inputHash);
+    }
+    const ended = await endedRun(builder, run.id);
+    const sent = await Promise.all(
+      ["a", "b"].flatMap((batch) =>
+        Array.from(
+          { length: 20 },
+          async (_, index) => await sentCount(`${prefix} ${batch} ${index}`)
+        )
+      )
+    );
+    expect({
+      held: held.length,
+      whileOneWaits,
+      ended: { status: ended.status, output: ended.output },
+      sent: sent.every((count) => count === 1),
+    }).toStrictEqual({
+      held: 40,
+      whileOneWaits: "waiting",
+      ended: {
+        status: "completed",
+        output: [
+          [
+            { ok: true, value: 20 },
+            { ok: true, value: 20 },
+          ],
+        ],
+      },
+      sent: true,
+    });
+  });
+
+  it("refuse a resource request whose attempt was let go of while the gate read", async () => {
+    const asleep = await sleepingRun(modelFiles());
+    await bindWriter(asleep.admin, asleep.app);
+    const lease = { holds: true };
+    // The call's start reads the membership once, the request again.
+    const { gateway, env: racing } = callEnv([answer("Never sent.")], {
+      db: racingRead("members", 2, () => {
+        lease.holds = false;
+      }),
+    });
+    const result = await callRunFunction(
+      racing,
+      stepOf(asleep, lease),
+      draft,
+      { prompt: "Hi" },
+      `step:${crypto.randomUUID()}`
+    );
+    expect({
+      failed: result.ok ? null : result.error.code,
+      asked: gateway.requests.length,
+    }).toStrictEqual({ failed: "execution.stale_attempt", asked: 0 });
+  });
+
+  it("refuse a resource request whose attempt was let go of while its binding was read", async () => {
+    const asleep = await sleepingRun(modelFiles());
+    await bindWriter(asleep.admin, asleep.app);
+    const lease = { holds: true };
+    // After the gate: the request reads its binding, then asks.
+    const { gateway, env: racing } = callEnv([answer("Never sent.")], {
+      db: racingRead("app_resource_bindings", 1, () => {
+        lease.holds = false;
+      }),
+    });
+    const result = await callRunFunction(
+      racing,
+      stepOf(asleep, lease),
+      draft,
+      { prompt: "Hi" },
+      `step:${crypto.randomUUID()}`
+    );
+    expect({
+      failed: result.ok ? null : result.error.code,
+      asked: gateway.requests.length,
+    }).toStrictEqual({ failed: "execution.stale_attempt", asked: 0 });
+  });
+
+  it("commit nothing for an attempt let go of while the gate read", async () => {
+    const asleep = await sleepingRun(mailFiles());
+    const lease = { holds: true };
+    // The call's start reads the membership once, the commit again.
+    const { env: racing } = callEnv([], {
+      db: racingRead("members", 2, () => {
+        lease.holds = false;
+      }),
+    });
+    const result = await callRunFunction(
+      racing,
+      stepOf(asleep, lease),
+      { contractId: "mail.note", kind: "mutation" },
+      { title: "Late" },
+      `step:${crypto.randomUUID()}`
+    );
+    const counted = await callRunFunction(
+      env,
+      stepOf(asleep, { holds: true }),
+      { contractId: "mail.count", kind: "query" },
+      {},
+      `step:${crypto.randomUUID()}`
+    );
+    expect({
+      failed: result.ok ? null : result.error.code,
+      counted,
+    }).toStrictEqual({
+      failed: "execution.stale_attempt",
+      counted: { ok: true, value: 0 },
+    });
+  });
+
+  it("count a run's requests through a binding against its run lineage's budget, which a screen's don't", async () => {
+    const asleep = await sleepingRun(modelFiles());
+    await bindWriter(asleep.admin, asleep.app);
+    // The first answer costs far more than the run lineage may spend.
+    const { gateway, env: budgeted } = callEnv(
+      [
+        { text: "Costly.", inputTokens: 10_000_000, outputTokens: 20 },
+        // The run's second request never reaches it: the screen's does.
+        answer("For the screen."),
+      ],
+      { rules: { budgets: { run: { limit: 0.01 } } } }
+    );
+    const step = stepOf(asleep, { holds: true });
+    const call = async () =>
+      await callRunFunction(
+        budgeted,
+        { ...step, requestId: crypto.randomUUID() },
+        draft,
+        { prompt: "Hi" },
+        `step:${crypto.randomUUID()}`
+      );
+    const first = await call();
+    const second = await call();
+    const app = appIdSchema.parse(asleep.app);
+    const released = await loadRelease(env, app, 1);
+    const screen = await callAppFunction(
+      budgeted,
+      await asleep.builder.api.whoami(),
+      app,
+      JSON.stringify({
+        reference: {
+          resourceId: app,
+          resourceVersion: 1,
+          contractId: "assist.draft",
+          fingerprint: released.fingerprints["assist.draft"] ?? "",
+          kind: "action",
+        },
+        input: { prompt: "Hi" },
+      })
+    );
+    expect({
+      first,
+      second: second.ok ? null : second.error.code,
+      screen: screen.result,
+      asked: gateway.requests.length,
+    }).toMatchObject({
+      first: { ok: true, value: "Costly." },
+      second: "resource.budget_exhausted",
+      screen: { ok: true, value: "For the screen." },
+      asked: 2,
     });
   });
 });
