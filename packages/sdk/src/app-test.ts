@@ -67,6 +67,15 @@ export interface TestPrincipal {
     reference: Reference,
     args: ArgsOf<Reference>
   ) => Promise<ReturnOf<Reference>>;
+  /**
+   * Calls one of the App's public actions. A fixture binds no resources,
+   * so an action that reaches one is refused (`resource.unavailable`):
+   * outside systems aren't the tests' to touch.
+   */
+  action: <Reference extends PublicReference<"action">>(
+    reference: Reference,
+    args: ArgsOf<Reference>
+  ) => Promise<ReturnOf<Reference>>;
 }
 
 /** What each test of an `appTest` suite gets. */
@@ -267,12 +276,12 @@ const unwrapped = (answer: string): unknown => {
 /** The request a principal sends for `reference`, of `kind`, with `args`. */
 const requestFor = (
   reference: unknown,
-  kind: "query" | "mutation",
+  kind: ReferenceKind,
   args: unknown
 ): string => {
   if (!isRecord(reference) || reference.kind !== kind) {
     throw new TestAssertionError(
-      `expected a reference to one of the App's ${kind === "query" ? "queries" : "mutations"}, from #grasp`
+      `expected a reference to one of the App's ${kind === "query" ? "queries" : `${kind}s`}, from #grasp`
     );
   }
   const { resourceId, resourceVersion, contractId, fingerprint } = reference;
@@ -284,7 +293,7 @@ const requestFor = (
 
 const principalOf = (session: AppTestSession, name: string): TestPrincipal => {
   const call =
-    (kind: "query" | "mutation") =>
+    (kind: ReferenceKind) =>
     async (reference: unknown, args: unknown): Promise<never> =>
       // SAFETY: the host checked the value against the function's
       // contract (its `returns`), which `ReturnOf` types.
@@ -292,7 +301,11 @@ const principalOf = (session: AppTestSession, name: string): TestPrincipal => {
       unwrapped(
         await session.call(name, requestFor(reference, kind, args))
       ) as never;
-  return Object.freeze({ query: call("query"), mutation: call("mutation") });
+  return Object.freeze({
+    query: call("query"),
+    mutation: call("mutation"),
+    action: call("action"),
+  });
 };
 
 // Values as they cross from the host (JSON), in canonical JSON, so equal
@@ -354,18 +367,16 @@ const failureOf = (error: unknown): string => {
 };
 
 /**
- * Runs `test` for at most `appTestTimeoutMs`: a test that never finishes
- * fails, and the next one runs.
+ * Runs `test` for at most `ms`: a test that never finishes fails, and the
+ * next one runs.
  */
-const withinTime = async (run: Promise<void>): Promise<void> => {
-  const limit = deadline(appTestTimeoutMs);
+const withinTime = async (run: Promise<void>, ms: number): Promise<void> => {
+  const limit = deadline(ms);
   try {
     await Promise.race([run, whenAborted(limit.signal)]);
   } catch (error) {
     if (limit.stopped() === "timeout") {
-      throw new TestAssertionError(
-        `didn't finish within ${appTestTimeoutMs / 1000} seconds`
-      );
+      throw new TestAssertionError(`didn't finish within ${ms / 1000} seconds`);
     }
     throw error;
   } finally {
@@ -388,12 +399,15 @@ const disposed = (stub: object): void => {
  * Runs `suite` (a test file's default export) over core's `host`, one
  * test after another, each in a session of its own that is closed after
  * it. Never throws for a test: each failure is in the report. Throws for
- * a file whose default export isn't an `appTest` suite.
+ * a file whose default export isn't an `appTest` suite. Each test may run
+ * `testTimeoutMs`: `appTestTimeoutMs`, or less where core says so.
  */
 export const runAppSuite = async (
   suite: unknown,
-  host: AppTestHost
+  host: AppTestHost,
+  { testTimeoutMs = appTestTimeoutMs }: { testTimeoutMs?: number } = {}
 ): Promise<AppTestReport> => {
+  const timeoutMs = Math.min(testTimeoutMs, appTestTimeoutMs);
   if (!isRecord(suite) || suite.kind !== "app") {
     return refuseSuite(
       "A test file (tests/*.test.ts) default-exports an appTest suite."
@@ -408,7 +422,7 @@ export const runAppSuite = async (
     const failures: string[] = [];
     try {
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await withinTime(test(contextFor(session)));
+      await withinTime(test(contextFor(session)), timeoutMs);
     } catch (error) {
       failures.push(failureOf(error));
     } finally {

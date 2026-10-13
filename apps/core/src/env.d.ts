@@ -89,6 +89,11 @@ interface __BaseEnv_Env {
   CODE_RUN_TIMEOUT_MS?: string;
   /** Tests only: a shorter limit for one call into an App (src/app.ts). */
   APP_CALL_TIMEOUT_MS?: string;
+  /**
+   * Tests only: shorter limits on an App's tests, in milliseconds,
+   * `test/suite/run` (src/app-tests.ts): never longer than the defaults.
+   */
+  APP_TEST_LIMITS_MS?: string;
   /** Tests only: a shorter bound on one build of a save (src/save-builds.ts). */
   BUILD_WAIT_MS?: string;
   /**

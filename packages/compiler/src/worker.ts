@@ -27,6 +27,8 @@ import {
   appCodeKind,
   appTestFiles,
   isAppLayout,
+  isAppTestSuite,
+  maxAppTestSuites,
 } from "./app-code.ts";
 import { extractCandidates } from "./candidates.ts";
 import { compileModule, stripTypes, transformModule } from "./compile.ts";
@@ -609,6 +611,18 @@ export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
   const tooMuch = limitErrors(code);
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
+  }
+  const suites = Object.keys(code).filter(isAppTestSuite).length;
+  if (suites > maxAppTestSuites) {
+    return {
+      ok: false,
+      diagnostics: [
+        problem(
+          "tests",
+          `An App has at most ${maxAppTestSuites} test suites (tests/*.test.ts); this one has ${suites}. Put more tests in each suite.`
+        ),
+      ],
+    };
   }
   const known = new Set(Object.keys(code));
   const modules: Record<string, string> = {};

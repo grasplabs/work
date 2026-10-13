@@ -38,18 +38,43 @@ import type {
  * the store's RPC surface, and take nothing a caller could choose to bend
  * time or delivery with.
  */
+/** The key a discarded fixture store keeps, alone (`discardFixture`). */
+const discardedKey = "grasp_fixture_discarded";
+
 export class DataStore extends DurableObject<Env> {
   readonly #host: StoreHost;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    migrateOnWake(ctx, migrations);
     this.#host = new StoreHost(ctx, env);
+    // A discarded fixture store wakes to nothing: no tables made again, no
+    // alarm armed (`discardFixture`).
+    if (this.#discarded()) {
+      return;
+    }
+    migrateOnWake(ctx, migrations);
     // A commit whose object died before it set the alarm left its outbox
     // without one: set it again on every wake-up.
     void ctx.blockConcurrencyWhile(async () => {
-      await this.#host.schedule();
+      await this.#live().schedule();
     });
+  }
+
+  /** Whether this object is a fixture store that was discarded. */
+  #discarded(): boolean {
+    return this.ctx.storage.kv.get<true>(discardedKey) === true;
+  }
+
+  /**
+   * The store's host, unless this object was discarded: then every call
+   * is refused, a call that was already running when it was too, at its
+   * next step.
+   */
+  #live(): StoreHost {
+    if (this.#discarded()) {
+      throw new Error("This fixture store was discarded.");
+    }
+    return this.#host;
   }
 
   /** `StoreHost.defineTables`. */
@@ -58,12 +83,12 @@ export class DataStore extends DurableObject<Env> {
     manifest: string,
     consumer?: SchemaConsumer
   ): Promise<DefinedTables> {
-    return await this.#host.defineTables(storeId, manifest, consumer);
+    return await this.#live().defineTables(storeId, manifest, consumer);
   }
 
   /** `StoreHost.fillMissing`: one batch of the pending target's backfill. */
   fillMissing(storeId: StoreId, step: BackfillStep): BackfillOutcome {
-    return this.#host.fillMissing(storeId, step);
+    return this.#live().fillMissing(storeId, step);
   }
 
   /** `StoreHost.restartBackfill`. */
@@ -71,12 +96,12 @@ export class DataStore extends DurableObject<Env> {
     storeId: StoreId,
     restart: BackfillRestart
   ): Promise<number> {
-    return await this.#host.restartBackfill(storeId, restart);
+    return await this.#live().restartBackfill(storeId, restart);
   }
 
   /** `StoreHost.backfillStatus`. */
   backfillStatus(storeId: StoreId): BackfillStatus | null {
-    return this.#host.backfillStatus(storeId);
+    return this.#live().backfillStatus(storeId);
   }
 
   /** `StoreHost.retryBackfill`. */
@@ -84,7 +109,7 @@ export class DataStore extends DurableObject<Env> {
     storeId: StoreId,
     target: string
   ): Promise<BackfillStatus | null> {
-    return await this.#host.retryBackfill(storeId, target);
+    return await this.#live().retryBackfill(storeId, target);
   }
 
   /** `StoreHost.schemaStatus`. */
@@ -93,7 +118,7 @@ export class DataStore extends DurableObject<Env> {
     schemaHash: string,
     consumer?: SchemaConsumer
   ): SchemaStatus {
-    return this.#host.schemaStatus(storeId, schemaHash, consumer);
+    return this.#live().schemaStatus(storeId, schemaHash, consumer);
   }
 
   /** `StoreHost.abandonBackfill`. */
@@ -102,7 +127,7 @@ export class DataStore extends DurableObject<Env> {
     abandon: BackfillAbandon,
     actor: AuditActor
   ): Promise<BackfillAbandonment> {
-    return await this.#host.abandonBackfill(storeId, abandon, actor);
+    return await this.#live().abandonBackfill(storeId, abandon, actor);
   }
 
   /** `StoreHost.markAbandonmentAudited`. */
@@ -111,12 +136,12 @@ export class DataStore extends DurableObject<Env> {
     target: string,
     attempt: number
   ): void {
-    this.#host.markAbandonmentAudited(storeId, target, attempt);
+    this.#live().markAbandonmentAudited(storeId, target, attempt);
   }
 
   /** `StoreHost.get`. */
   get(storeId: StoreId, table: string, id: string): StoredRecord | null {
-    return this.#host.get(storeId, table, id);
+    return this.#live().get(storeId, table, id);
   }
 
   /**
@@ -130,13 +155,13 @@ export class DataStore extends DurableObject<Env> {
     staged?: StagedWrites
   ): Promise<string> {
     return JSON.stringify(
-      await this.#host.read(storeId, scope, request, staged)
+      await this.#live().read(storeId, scope, request, staged)
     );
   }
 
   /** `StoreHost.generations`. */
   generations(storeId: StoreId, names: string[]): Record<string, number> {
-    return this.#host.generations(storeId, names);
+    return this.#live().generations(storeId, names);
   }
 
   /**
@@ -145,12 +170,12 @@ export class DataStore extends DurableObject<Env> {
    * deeply (`openStore` parses it).
    */
   async claim(input: ClaimInput): Promise<string> {
-    return JSON.stringify(await this.#host.claim(input));
+    return JSON.stringify(await this.#live().claim(input));
   }
 
   /** `StoreHost.close`. */
   async close(storeId: StoreId, actor: AuditActor): Promise<StoreDeletionMark> {
-    return await this.#host.close(storeId, actor);
+    return await this.#live().close(storeId, actor);
   }
 
   /**
@@ -158,35 +183,47 @@ export class DataStore extends DurableObject<Env> {
    * JSON text of its `Committed`, as for `claim`.
    */
   async commit(input: Commit): Promise<string> {
-    return JSON.stringify(await this.#host.commit(input, outboxConsumers));
+    return JSON.stringify(await this.#live().commit(input, outboxConsumers));
   }
 
   /**
    * Discards a fixture store an App's tests ran on (app-tests.ts):
-   * everything the object holds, and its alarm. Refused for any store
-   * core's inventory lists, whatever asks: a business store is only ever
+   * everything the object holds, and its alarm, and marks it discarded,
+   * so it refuses every call after (`#live`) and wakes to nothing. Only
+   * for a store core recorded as a fixture (`app_test_fixtures`) and its
+   * inventory doesn't list, whatever asks: a business store is only ever
    * deleted through its deletion (store-deletion.ts), audited and kept
-   * until nothing refers to it. A fixture store never is listed, so this
-   * can only ever empty one.
+   * until nothing refers to it. Both are read in one query, and nothing
+   * is awaited between it and emptying the object.
    */
   async discardFixture(storeId: StoreId): Promise<void> {
     if (this.ctx.id.name !== undefined && this.ctx.id.name !== storeId) {
       throw new Error("That isn't this object's store.");
     }
-    const listed = await this.env.DB.prepare(
-      "SELECT 1 FROM business_stores WHERE id = ?"
+    const found = await this.env.DB.prepare(
+      "SELECT EXISTS (SELECT 1 FROM business_stores WHERE id = ?1) AS listed, EXISTS (SELECT 1 FROM app_test_fixtures WHERE store_id = ?1) AS fixture"
     )
       .bind(storeId)
-      .first();
-    if (listed !== null) {
+      .first<{ listed: number; fixture: number }>();
+    if (found?.listed !== 0) {
       throw new Error("A listed store is deleted, never discarded.");
     }
-    await this.ctx.storage.deleteAlarm();
+    if (found.fixture !== 1) {
+      throw new Error("Only a fixture store core recorded is discarded.");
+    }
     await this.ctx.storage.deleteAll();
+    this.ctx.storage.kv.put(discardedKey, true);
+    await this.ctx.storage.deleteAlarm();
   }
 
-  /** `StoreHost.runAlarm`, with the deployment's outbox consumers. */
+  /**
+   * `StoreHost.runAlarm`, with the deployment's outbox consumers; nothing
+   * for a discarded fixture store, which arms no alarm again.
+   */
   override async alarm(): Promise<void> {
-    await this.#host.runAlarm(outboxConsumers);
+    if (this.#discarded()) {
+      return;
+    }
+    await this.#live().runAlarm(outboxConsumers);
   }
 }

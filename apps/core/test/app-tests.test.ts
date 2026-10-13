@@ -1,7 +1,7 @@
 import { manifestText } from "@grasp-os/sdk/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { storeIdSchema } from "@grasp-os/shared/ids";
-import type { AppId } from "@grasp-os/shared/ids";
+import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -9,9 +9,15 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { activateVersion } from "../src/app-activation.ts";
 import { callAppFunction } from "../src/app-functions.ts";
-import { loadRelease } from "../src/app-releases.ts";
+import { loadRelease, sealRelease } from "../src/app-releases.ts";
+import type { Release } from "../src/app-releases.ts";
 import { sweepTestFixtures } from "../src/app-tests.ts";
-import { commitFiles, createApp, findApp } from "../src/apps.ts";
+import {
+  commitFiles,
+  createApp,
+  findApp,
+  setCurrentVersion,
+} from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import {
   createStore,
@@ -21,23 +27,25 @@ import {
 } from "../src/data-stores.ts";
 import { person } from "./sealed-apps.ts";
 
-// An App's tests (`appTest`, spec 28.2), as core runs them when a version
-// is made current: each suite in its own isolate, every call through the
-// real operation host on a fixture store of the test's own. What the
-// tests here check is what that host did: the App's access rules held
-// between two principals, a store per test, refusals a screen's call
-// would get, failures named as people read them, and nothing left in the
-// App's own store or behind in fixture stores.
+// An App's tests (`appTest`, spec 28.2), as core runs them whenever a
+// version is made current: each suite in its own isolate, every call
+// through the real operation host on a fixture store of the test's own.
+// What the tests here check is what that host did: the App's access
+// rules held between principals and roles, a store per test, refusals a
+// screen's call would get, failures named as people read them, the
+// limits on a run, and nothing left in the App's own store or behind in
+// fixture stores.
 
 const appFiles: Record<string, string> = {
   "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
 export default defineSchema({
   notes: defineTable({ title: v.string().min(1).max(200) }),
+  mottos: defineTable({ text: v.string().min(1).max(200) }),
 });
 `,
-  "operations/notes.ts": `import { AppError, v } from "@grasp-os/sdk";
-import { internalQuery, mutation, query } from "#grasp/server";
+  "operations/notes.ts": `import { AppError, resource, v } from "@grasp-os/sdk";
+import { action, internalQuery, mutation, query } from "#grasp/server";
 
 export const create = mutation({
   args: { title: v.string().min(1).max(200) },
@@ -64,6 +72,25 @@ export const find = query({
   },
 });
 
+/** Only the App's builders may set its motto. */
+export const setMotto = mutation({
+  args: { text: v.string().min(1).max(200) },
+  returns: v.id("mottos"),
+  handler: async (ctx, args) => await ctx.db.insert("mottos", args),
+});
+
+export const help = resource.knowledge("help", {
+  operations: ["search"],
+  collections: ["handbook"],
+});
+
+export const searchHelp = action({
+  args: { text: v.string().min(1) },
+  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
+  uses: [help],
+  handler: async (ctx, args) => await ctx.resources.help.search({ text: args.text, limit: 5 }),
+});
+
 export const count = internalQuery({
   args: {},
   returns: v.number(),
@@ -71,23 +98,29 @@ export const count = internalQuery({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { count, create, find, titles } from "./operations/notes.ts";
+import { count, create, find, help, searchHelp, setMotto, titles } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
-  access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { create, titles, find } },
+  access: {
+    tables: {
+      notes: { read: "owner", write: "owner" },
+      mottos: { read: "appMembers", write: "appBuilders" },
+    },
+  },
+  operations: { notes: { create, titles, find, setMotto, searchHelp } },
   internalOperations: { notes: { count } },
   screens: [],
-  uses: [],
+  uses: [help],
 });
 `,
   "tests/fixtures/notes.json": JSON.stringify({
     principals: {
       "note-owner": { role: "user" },
       "other-owner": { role: "user" },
+      "note-builder": { role: "builder" },
     },
   }),
 };
@@ -115,6 +148,16 @@ export default appTest({
       t.equal(await other.query(api.notes.titles, {}), []);
       await t.rejectsCode(other.query(api.notes.find, { id }), "note.not_found");
     },
+    "a builder sets the motto, a user may not": async (t) => {
+      const builder = await t.as("note-builder");
+      const user = await t.as("note-owner");
+      await builder.mutation(api.notes.setMotto, { text: "Write it down" });
+      await t.rejectsCode(user.mutation(api.notes.setMotto, { text: "Mine" }), "data.write_denied");
+    },
+    "no outside system is reached": async (t) => {
+      const owner = await t.as("note-owner");
+      await t.rejectsCode(owner.action(api.notes.searchHelp, { text: "leave" }), "resource.unavailable");
+    },
     "the host refuses what a screen's call is refused": async (t) => {
       const owner = await t.as("note-owner");
       const internal = { ...api.notes.titles, contractId: "notes.count" };
@@ -128,6 +171,10 @@ export default appTest({
         () => owner.mutation(api.notes.create, { title: "" }),
         "contract.invalid_args"
       );
+    },
+    "a call it doesn't wait for ends with it": async (t) => {
+      const owner = await t.as("note-owner");
+      void owner.mutation(api.notes.create, { title: "Late" }).catch(() => null);
     },
   },
 });
@@ -163,6 +210,24 @@ export default appTest({
 });
 `;
 
+/** A suite of one test, which runs `body` with an owner at hand. */
+const suiteOf = (
+  body: string,
+  before = ""
+): string => `import { appTest } from "@grasp-os/sdk/testing";
+import { api } from "#grasp";
+${before}
+export default appTest({
+  fixtures: "notes",
+  tests: {
+    "runs": async (t) => {
+      const owner = await t.as("note-owner");
+      ${body}
+    },
+  },
+});
+`;
+
 interface Built {
   owner: Acting & Identity;
   app: AppId;
@@ -176,13 +241,25 @@ const appWith = async (files: Record<string, string>): Promise<Built> => {
   return { owner, app: id };
 };
 
+/** Core's env as code reads it, with `changes` over it; env itself unchanged. */
+const envWith = (changes: Partial<Env>): Env =>
+  new Proxy(env, {
+    get: (target, key, receiver): unknown =>
+      Object.hasOwn(changes, key)
+        ? Reflect.get(changes, key)
+        : Reflect.get(target, key, receiver),
+  });
+
+/** A deployment where nothing bounds App code: on-prem, without the sandbox host. */
+const unbounded = envWith({ SANDBOX_IN_PROCESS: undefined });
+
 /** What activating version 1 failed with: its code and failures. */
-const refusal = async ({
-  owner,
-  app,
-}: Built): Promise<{ code: unknown; failures: unknown }> => {
+const refusal = async (
+  { owner, app }: Built,
+  on: Env = env
+): Promise<{ code: unknown; failures: unknown }> => {
   try {
-    await activateVersion(env, owner, app, 1);
+    await activateVersion(on, owner, app, 1);
   } catch (error) {
     if (!isExpectedError(error)) {
       throw error;
@@ -212,6 +289,13 @@ const tablesIn = async (id: string): Promise<number> =>
         .toArray();
       return row?.n ?? -1;
     }
+  );
+
+/** The alarm store `id`'s object has armed, if any. */
+const alarmOf = async (id: string): Promise<number | null> =>
+  await runInDurableObject(
+    env.DATA_STORES.getByName(id),
+    async (_instance, state) => await state.storage.getAlarm()
   );
 
 describe("an App's tests", { timeout: 180_000 }, () => {
@@ -300,45 +384,225 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
       ),
     ]);
   });
+
+  it("fail closed on a report that leaves a test out", async () => {
+    // The suite's own code rewrites what the isolate reports: one failing
+    // test reported as none.
+    const forging = `const stringify = JSON.stringify;
+JSON.stringify = (value, ...rest) =>
+  value !== null && typeof value === "object" && "results" in value
+    ? stringify({ fixtures: value.fixtures, results: [] })
+    : stringify(value, ...rest);`;
+    const built = await appWith({
+      ...appFiles,
+      "tests/forged.test.ts": suiteOf("t.equal(1, 2);", forging),
+    });
+    const { code, failures } = await refusal(built);
+    expect(code).toBe("version.tests_failed");
+    expect(failures).toStrictEqual([
+      "tests/forged.test.ts: its report doesn't hold one result for each of the 1 tests it ran",
+    ]);
+  });
+
+  it("fail a test that never finishes, and a suite that runs past its deadline", async () => {
+    const waiting = `const owner = await t.as("note-owner");
+      await owner.mutation(api.notes.create, { title: "Held" });
+      await new Promise((resolve) => { setTimeout(resolve, 2500); });`;
+    const built = await appWith({
+      ...appFiles,
+      "tests/hanging-test.test.ts": suiteOf(
+        `await owner.mutation(api.notes.create, { title: "Held" });
+      await new Promise(() => {});`
+      ),
+      // Each test within its 3 s, both together past the suite's 4 s.
+      "tests/hanging-suite.test.ts": `import { appTest } from "@grasp-os/sdk/testing";
+import { api } from "#grasp";
+export default appTest({
+  fixtures: "notes",
+  tests: {
+    "first": async (t) => { ${waiting} },
+    "second": async (t) => { ${waiting} },
+  },
 });
+`,
+    });
+    const { code, failures } = await refusal(
+      built,
+      envWith({ APP_TEST_LIMITS_MS: "3000/4000" })
+    );
+    expect(code).toBe("version.tests_failed");
+    expect(failures).toStrictEqual([
+      "tests/hanging-suite.test.ts: it stopped: didn't finish within 4 seconds",
+      'tests/hanging-test.test.ts, "runs": didn\'t finish within 3 seconds',
+    ]);
+    // Both sessions were closed, and their stores discarded.
+    await expect(fixturesLeft()).resolves.toBe(0);
+  });
+
+  it("run no suite past the run's deadline", async () => {
+    const built = await appWith({
+      ...appFiles,
+      "tests/a.test.ts": suiteOf(
+        "await new Promise((resolve) => { setTimeout(resolve, 2000); });"
+      ),
+      "tests/b.test.ts": suiteOf("t.equal(1, 1);"),
+    });
+    // The suites may take 500 ms in all: the first starts with that much
+    // left and runs out of it, the second can't start.
+    const { code, failures } = await refusal(
+      built,
+      envWith({ APP_TEST_LIMITS_MS: "//500" })
+    );
+    expect(code).toBe("version.tests_failed");
+    expect(failures).toStrictEqual([
+      "tests/a.test.ts: it stopped: didn't finish within 0.5 seconds",
+      "tests/b.test.ts: didn't run: the version's tests ran past their 0.5 seconds",
+    ]);
+  });
+
+  it("refuse more suites than an App may have", async () => {
+    const suites = Object.fromEntries(
+      Array.from({ length: 21 }, (_unused, index) => [
+        `tests/suite-${index}.test.ts`,
+        suiteOf("t.equal(1, 1);"),
+      ])
+    );
+    const built = await appWith({ ...appFiles, ...suites });
+    const { code, failures } = await refusal(built);
+    expect(code).toBe("version.tests_failed");
+    expect(failures).toStrictEqual([
+      "tests: An App has at most 20 test suites (tests/*.test.ts); this one has 21. Put more tests in each suite.",
+    ]);
+  });
+
+  it("say so where nothing could bound them", async () => {
+    const built = await appWith({
+      ...appFiles,
+      "tests/notes.test.ts": passingSuite,
+    });
+    // Sealed where App code may run; made current where it may not.
+    const store = await createStore(env, built.owner);
+    await sealRelease(env, {
+      app: built.app,
+      version: 1,
+      store,
+      by: built.owner,
+    });
+    await expect(
+      setCurrentVersion(unbounded, built.owner, built.app, 1)
+    ).rejects.toMatchObject({ code: "version.tests_unavailable" });
+  });
+
+  it("don't run again when the current version is made current again", async () => {
+    const built = await appWith({
+      ...appFiles,
+      "tests/notes.test.ts": passingSuite,
+    });
+    await activateVersion(env, built.owner, built.app, 1);
+    // Where the tests can't run at all, the current version is still
+    // made current again: nothing ran them.
+    await expect(
+      setCurrentVersion(unbounded, built.owner, built.app, 1)
+    ).resolves.toMatchObject({ currentVersion: 1 });
+  });
+});
+
+/** A sealed App's release, for fixture stores with its schema. */
+const sealed = async (): Promise<{ built: Built; release: Release }> => {
+  const built = await appWith(appFiles);
+  await activateVersion(env, built.owner, built.app, 1);
+  return { built, release: await loadRelease(env, built.app, 1) };
+};
+
+/** A fixture store with `release`'s tables, recorded `ago` ms back. */
+const fixtureStore = async (
+  { built, release }: { built: Built; release: Release },
+  ago = 0
+): Promise<StoreId> => {
+  const id = storeIdSchema.parse(crypto.randomUUID());
+  await env.DB.prepare(
+    "INSERT INTO app_test_fixtures (store_id, app_id, version, created_at) VALUES (?, ?, 1, ?)"
+  )
+    .bind(id, built.app, Date.now() - ago)
+    .run();
+  await openFixtureStore(env, id).defineTables(
+    manifestText(release.app.schema),
+    { resourceId: built.app, resourceVersion: 1 }
+  );
+  return id;
+};
 
 describe("fixture stores", () => {
   it("are discarded by the sweep once a run that left them is long over", async () => {
-    const built = await appWith(appFiles);
-    await activateVersion(env, built.owner, built.app, 1);
-    const release = await loadRelease(env, built.app, 1);
-    const now = Date.now();
-    /** A fixture store a test run left, recorded `ago` milliseconds back. */
-    const left = async (ago: number): Promise<string> => {
-      const id = storeIdSchema.parse(crypto.randomUUID());
-      await env.DB.prepare(
-        "INSERT INTO app_test_fixtures (store_id, app_id, version, created_at) VALUES (?, ?, 1, ?)"
-      )
-        .bind(id, built.app, now - ago)
-        .run();
-      await openFixtureStore(env, id).defineTables(
-        manifestText(release.app.schema),
-        { resourceId: built.app, resourceVersion: 1 }
-      );
-      return id;
-    };
-    const old = await left(2 * 60 * 60_000);
-    const fresh = await left(60_000);
+    const app = await sealed();
+    const old = await fixtureStore(app, 2 * 60 * 60_000);
+    const fresh = await fixtureStore(app, 60_000);
     await expect(tablesIn(old)).resolves.toBeGreaterThan(0);
 
-    await sweepTestFixtures(env, new Date(now));
+    await sweepTestFixtures(env, new Date());
 
     await expect(tablesIn(old)).resolves.toBe(0);
     await expect(tablesIn(fresh)).resolves.toBeGreaterThan(0);
     await expect(fixturesLeft()).resolves.toBe(1);
   });
 
-  it("never discard a store the inventory lists", async () => {
-    const builder = await person("builder");
-    const store = await createStore(env, builder);
+  it("refuse every call once discarded, one already made included, and arm no alarm", async () => {
+    const app = await sealed();
+    const id = await fixtureStore(app);
+    const store = openFixtureStore(env, id);
+    // A read under way as the store is discarded, never awaited before.
+    const late = store.generations(["notes"]);
+    await discardFixtureStore(env, id);
+    await late.catch(() => null);
+
+    await expect(store.generations(["notes"])).rejects.toThrow(
+      "This fixture store was discarded."
+    );
+    await expect(
+      store.defineTables(manifestText(app.release.app.schema), {
+        resourceId: app.built.app,
+        resourceVersion: 1,
+      })
+    ).rejects.toThrow("This fixture store was discarded.");
+    await expect(tablesIn(id)).resolves.toBe(0);
+    await expect(alarmOf(id)).resolves.toBeNull();
+  });
+
+  it("are never opened as business stores", async () => {
+    const id = await fixtureStore(await sealed());
+    await expect(openStore(env, id)).rejects.toMatchObject({
+      code: "data.store_unavailable",
+    });
+  });
+
+  it("never discard a store the inventory lists, whose data stays", async () => {
+    const app = await sealed();
+    const store = await createStore(env, app.built.owner);
+    const opened = await openStore(env, store);
+    await opened.defineTables(manifestText(app.release.app.schema), {
+      resourceId: app.built.app,
+      resourceVersion: 1,
+    });
+    await runInDurableObject(env.DATA_STORES.getByName(store), (_i, state) => {
+      state.storage.kv.put("probe", "kept");
+    });
+
     await expect(discardFixtureStore(env, store)).rejects.toThrow(
       "A listed store is deleted, never discarded."
     );
-    await expect(openStore(env, store)).resolves.toMatchObject({ id: store });
+    await expect(
+      runInDurableObject(env.DATA_STORES.getByName(store), (_i, state) =>
+        state.storage.kv.get("probe")
+      )
+    ).resolves.toBe("kept");
+    await expect(tablesIn(store)).resolves.toBeGreaterThan(0);
+    await expect(opened.generations(["notes"])).resolves.toBeDefined();
+  });
+
+  it("never discard a store core didn't record as a fixture", async () => {
+    const id = storeIdSchema.parse(crypto.randomUUID());
+    await expect(discardFixtureStore(env, id)).rejects.toThrow(
+      "Only a fixture store core recorded is discarded."
+    );
   });
 });

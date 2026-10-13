@@ -8,7 +8,6 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { sealRelease } from "./app-releases.ts";
-import { requireAppTestsPass } from "./app-tests.ts";
 import {
   appFor,
   findVersion,
@@ -109,18 +108,17 @@ const needsStore = (error: unknown): boolean =>
 /**
  * Seals `version` of `app` when it is of spec 8's layout: on the App's
  * default store when it has one, and when the App's schema has tables
- * but no default store exists yet, on one created now. Answers the
- * version's files when it sealed it, nothing for another layout.
+ * but no default store exists yet, on one created now.
  */
 const sealForActivation = async (
   env: Env,
   by: Identity,
   app: AppId,
   version: number
-): Promise<Readonly<Record<string, string>> | undefined> => {
+): Promise<void> => {
   const files = await versionFiles(env, app, version);
   if (!isAppLayout(files)) {
-    return undefined;
+    return;
   }
   const found = await defaultStoreOf(env, app);
   const store = found?.live === true ? found.store : undefined;
@@ -137,13 +135,11 @@ const sealForActivation = async (
       by,
     });
   }
-  return files;
 };
 
 /**
  * Makes `version` of `app` the one that runs, for one of its builders:
- * sealed first when it is of spec 8's layout (see the header), and only
- * once its App tests pass (app-tests.ts), on fixture stores of their own.
+ * sealed first when it is of spec 8's layout (see the header).
  */
 export const activateVersion = async (
   env: Env,
@@ -153,9 +149,6 @@ export const activateVersion = async (
 ): Promise<App> => {
   const found = await appFor(env, by, app, "builder");
   const { version: number } = await findVersion(env, found.id, version);
-  const sealed = await sealForActivation(env, by, found.id, number);
-  if (sealed !== undefined && found.currentVersion !== number) {
-    await requireAppTestsPass(env, found.id, number, sealed);
-  }
+  await sealForActivation(env, by, found.id, number);
   return await setCurrentVersion(env, by, found.id, number);
 };

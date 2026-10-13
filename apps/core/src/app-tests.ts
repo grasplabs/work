@@ -6,7 +6,12 @@ import {
   workflowSdkModules,
 } from "@grasp-os/compiler";
 import { manifestText } from "@grasp-os/sdk/host";
-import { maxAppTests, testNamePattern } from "@grasp-os/sdk/testing";
+import {
+  appTestTimeoutMs,
+  maxAppTestName,
+  maxAppTests,
+  testNamePattern,
+} from "@grasp-os/sdk/testing";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
@@ -35,13 +40,13 @@ import { appTestFixtures } from "./db/core/schema.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation } from "./operations.ts";
 import { sandbox } from "./sandbox.ts";
-import { requireBoundedHere } from "./sandboxed.ts";
 import { buildAppTests } from "./screens.ts";
 import { startFailure } from "./workflows/code.ts";
 
 // The trusted test runner for an App's tests (spec 28.2): every suite in
-// `tests/*.test.ts` runs when a version of the App is made current, and a
-// failing test refuses it (`requireAppTestsPass`, apps.ts). The suites are
+// `tests/**.test.ts` runs whenever a version of the App is made current,
+// rollbacks included, and a failing test refuses it (`requireAppTestsPass`,
+// called by `setCurrentVersion` in apps.ts). The suites are
 // App code, written with `appTest` (`@grasp-os/sdk/testing`); the host
 // they call is core's, and real. Threat model, and how each is closed:
 //
@@ -71,10 +76,16 @@ import { startFailure } from "./workflows/code.ts";
 //   goes only once the object is discarded, so the quarter-hour sweep
 //   discards what a run left (`sweepTestFixtures`).
 // - Test code spins, hangs or answers nonsense: its isolate has a CPU
-//   limit, each test and the whole suite a deadline (the SDK's and
-//   `suiteTimeoutMs`), and the report is read through a bounded schema;
-//   a call on a session that has ended is refused, so a test that ran
-//   past its deadline changes nothing more.
+//   limit; each test, each suite and the whole run a deadline (`limitsOf`),
+//   and an App at most `maxAppTestSuites` suites; the report is read
+//   through a bounded schema and must hold one result for each test the
+//   suite opened, by name, in order, or the suite fails. A call on a
+//   session that has ended is refused, and a store discarded refuses
+//   every call after, so a test that ran past its deadline changes
+//   nothing more.
+// - App tests run where nothing bounds them: off Cloudflare they need the
+//   sandbox host, which doesn't run them yet (GRA-529); there a version
+//   with App tests is refused (`version.tests_unavailable`), saying so.
 
 /** An App's files at one version, by path. */
 type AppFiles = Readonly<Record<string, string>>;
@@ -85,11 +96,49 @@ const testSandbox = {
   limits: { cpuMs: 30_000 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
-/** The longest one suite may run, in milliseconds, all its tests together. */
-export const suiteTimeoutMs = 120_000;
+/** How long a test, a suite and a version's whole test run may take. */
+interface TestLimits {
+  testMs: number;
+  suiteMs: number;
+  runMs: number;
+}
 
-/** How long a test run may take before its leftover stores are swept. */
+/**
+ * The limits on an App's tests: one test the SDK's `appTestTimeoutMs`,
+ * one suite 2 minutes, and all of a version's suites 10 minutes, checked
+ * before each suite starts. `APP_TEST_LIMITS_MS` (tests only) lowers them.
+ */
+const defaultLimits: TestLimits = {
+  testMs: appTestTimeoutMs,
+  suiteMs: 120_000,
+  runMs: 10 * 60_000,
+};
+
+/**
+ * How long ago a fixture store must have been recorded for the sweep to
+ * discard it: well past the longest a version's test run may take
+ * (`defaultLimits.runMs`), so the sweep never discards the store of a
+ * test still running. Raise it with the run's limit.
+ */
 const fixtureLeftAfterMs = 60 * 60_000;
+
+/** `set` where it is a whole number of milliseconds below `most`, else `most`. */
+const lower = (set: number | undefined, most: number): number =>
+  set !== undefined && Number.isInteger(set) && set > 0 && set < most
+    ? set
+    : most;
+
+/** The limits in force: the defaults, or lower ones where tests set them. */
+const limitsOf = (env: Pick<Env, "APP_TEST_LIMITS_MS">): TestLimits => {
+  const [testMs, suiteMs, runMs] = (env.APP_TEST_LIMITS_MS ?? "")
+    .split("/")
+    .map(Number);
+  return {
+    testMs: lower(testMs, defaultLimits.testMs),
+    suiteMs: lower(suiteMs, defaultLimits.suiteMs),
+    runMs: lower(runMs, defaultLimits.runMs),
+  };
+};
 
 /** Most leftover fixture stores one sweep discards. */
 const sweepPage = 50;
@@ -104,14 +153,15 @@ const mainModule = "grasp-app-tests.js";
 
 /** The main module that runs suite `path` over core's host. */
 const testsMain = (
-  path: string
+  path: string,
+  testMs: number
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
 import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/testing"))};
 import suite from ${JSON.stringify(appModuleName(path))};
 export class AppTests extends WorkerEntrypoint {
   async run(host) {
     try {
-      return { ok: true, value: JSON.parse(JSON.stringify(await runAppSuite(suite, host))) };
+      return { ok: true, value: JSON.parse(JSON.stringify(await runAppSuite(suite, host, { testTimeoutMs: ${testMs} }))) };
     } catch (error) {
       return { ok: false, message: String(error?.message ?? error) };
     }
@@ -370,7 +420,8 @@ class FixtureHost extends TestTarget {
   readonly #release: Release;
   readonly #files: AppFiles;
   readonly #sessions = new Set<FixtureSession>();
-  #opened = 0;
+  /** The tests the suite opened, by name, in order: what it must report. */
+  readonly opened: string[] = [];
   #closed = false;
 
   constructor(env: Env, release: Release, files: AppFiles) {
@@ -386,13 +437,16 @@ class FixtureHost extends TestTarget {
    * or that isn't a fixture, which fails the suite.
    */
   // oxlint-disable-next-line require-await
-  async open(fixtures: unknown, _name: unknown): Promise<FixtureSession> {
+  async open(fixtures: unknown, name: unknown): Promise<FixtureSession> {
     // A suite past its deadline opens nothing more, and no suite opens
     // more sessions than it may have tests: each may make a store.
-    if (this.#closed || this.#opened >= maxAppTests) {
+    if (this.#closed || this.opened.length >= maxAppTests) {
       throw new Error("This suite may open no more tests.");
     }
-    this.#opened += 1;
+    if (typeof name !== "string" || name.length > maxAppTestName) {
+      throw new Error("A test is opened by its name.");
+    }
+    this.opened.push(name);
     if (typeof fixtures !== "string" || !testNamePattern.test(fixtures)) {
       throw new Error("A suite names its fixture by a name like `notes`.");
     }
@@ -448,7 +502,8 @@ const suiteFailures = async (
   release: Release,
   files: AppFiles,
   path: string,
-  modules: Record<string, string>
+  modules: Record<string, string>,
+  { testMs, suiteMs }: { testMs: number; suiteMs: number }
 ): Promise<string[]> => {
   const failed = (failure: string): string[] => [
     `${path}: ${failure}`.slice(0, maxFailureLength),
@@ -457,12 +512,12 @@ const suiteFailures = async (
   const entry = env.LOADER.get(null, () => ({
     ...testSandbox,
     mainModule,
-    modules: { ...modules, [mainModule]: testsMain(path) },
+    modules: { ...modules, [mainModule]: testsMain(path, testMs) },
     env: {},
   })).getEntrypoint<AppTestsEntrypoint>("AppTests");
   let answer: unknown;
   try {
-    answer = await within(entry.run(host), suiteTimeoutMs);
+    answer = await within(entry.run(host), suiteMs);
   } catch (error) {
     const cause = startFailure(error);
     return failed(
@@ -480,7 +535,20 @@ const suiteFailures = async (
   if (!outcome.data.ok) {
     return failed(outcome.data.message);
   }
-  return outcome.data.value.results.flatMap(({ name, failures }) =>
+  // One result for each test the suite opened, by name, in order: a report
+  // that leaves one out, or adds one, isn't the run's, and fails closed.
+  const { results } = outcome.data.value;
+  const reported = results.map(({ name }) => name);
+  if (
+    reported.length === 0 ||
+    reported.length !== host.opened.length ||
+    reported.some((name, index) => name !== host.opened[index])
+  ) {
+    return failed(
+      `its report doesn't hold one result for each of the ${host.opened.length} tests it ran`
+    );
+  }
+  return results.flatMap(({ name, failures }) =>
     failures.map((failure) =>
       `${path}, "${name}": ${failure}`.slice(0, maxFailureLength)
     )
@@ -502,7 +570,15 @@ export const appTestFailures = async (
   if (suites.length === 0) {
     return [];
   }
-  requireBoundedHere(env, "an App's tests");
+  // Only where the runtime bounds App code's CPU, or a deployment accepts
+  // that nothing does: on-prem the sandbox host doesn't run tests yet.
+  if (
+    env.RUNTIME_PROFILE !== "cloudflare" &&
+    env.SANDBOX_IN_PROCESS !== "unbounded"
+  ) {
+    throw versionErrors.create("version.tests_unavailable");
+  }
+  const limits = limitsOf(env);
   const build = await buildAppTests(env, { ...files });
   if (!build.ok) {
     return build.diagnostics
@@ -523,10 +599,26 @@ export const appTestFailures = async (
     ...release.sdk,
   };
   const failures: string[] = [];
+  // The suites' time: the build is the compiler's, bounded on its own.
+  const started = Date.now();
   for (const path of suites) {
-    // One suite at a time: each runs its own isolate and stores.
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    failures.push(...(await suiteFailures(env, release, files, path, modules)));
+    // Within the run's deadline, checked before each suite, which gets
+    // what is left of it at most: a suite that can't start fails.
+    const left = limits.runMs - (Date.now() - started);
+    if (left <= 0) {
+      failures.push(
+        `${path}: didn't run: the version's tests ran past their ${limits.runMs / 1000} seconds`
+      );
+    } else {
+      failures.push(
+        // One suite at a time: each runs its own isolate and stores.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        ...(await suiteFailures(env, release, files, path, modules, {
+          testMs: limits.testMs,
+          suiteMs: Math.min(limits.suiteMs, left),
+        }))
+      );
+    }
   }
   return failures.slice(0, maxFailures);
 };

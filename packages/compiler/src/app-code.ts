@@ -55,6 +55,12 @@ const operationFile = /^operations\/(?:[\w-]+\/)*[\w.-]+\.ts$/u;
 const generatedFile = /^\.grasp\/[\w.-]+\.ts$/u;
 const testFile = /^tests\/(?:[\w-]+\/)*[\w.-]+\.ts$/u;
 
+/**
+ * The most test suites an App has: each runs in an isolate of its own
+ * when a version is made current, within one deadline for them all.
+ */
+export const maxAppTestSuites = 20;
+
 /** Whether `path` is one of an App's test suites: `tests/**.test.ts`. */
 export const isAppTestSuite = (path: string): boolean =>
   testFile.test(path) && path.endsWith(".test.ts");
