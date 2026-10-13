@@ -20,7 +20,6 @@ import {
   endLiveRuns,
   finished,
   liveStatus,
-  runInstance,
   runObject,
   sleeping,
   woken,
@@ -111,6 +110,16 @@ const receiptsOf = async (run: string) => {
 const receiptStates = async (run: string): Promise<string[][]> => {
   const receipts = await receiptsOf(run);
   return receipts.map(({ kind, state }) => [kind, state]);
+};
+
+/** The run's receipts, oldest first, as their kind and generation. */
+const receiptsGenerations = async (run: string) => {
+  const { results } = await env.DB.prepare(
+    "SELECT kind, generation FROM workflow_run_controls WHERE run_id = ? ORDER BY created_at, id"
+  )
+    .bind(run)
+    .all<{ kind: string; generation: number }>();
+  return results;
 };
 
 /** The run's status as a screen of `app` shows it to `person`. */
@@ -358,7 +367,7 @@ describe(
       });
       await sleeping(run, "go");
       await env.DB.prepare(
-        "UPDATE workflow_run_controls SET created_at = ? WHERE run_id = ?"
+        "UPDATE workflow_run_controls SET created_at = ?1, retry_at = ?1 WHERE run_id = ?2"
       )
         .bind(Date.now() - 60_000, run)
         .run();
@@ -470,13 +479,13 @@ describe(
               "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, ended_at) VALUES (?, ?, 'napper', 1, ?, 'failed', ?, ?)"
             ).bind(ended, app, builder.userId, old, old),
             env.DB.prepare(
-              "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?)"
-            ).bind(crypto.randomUUID(), ended, builder.userId, old),
+              "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at, retry_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?, ?)"
+            ).bind(crypto.randomUUID(), ended, builder.userId, old, old),
           ]
         )
       );
       await env.DB.prepare(
-        "UPDATE workflow_run_controls SET created_at = ? WHERE run_id = ?"
+        "UPDATE workflow_run_controls SET created_at = ?1, retry_at = ?1 WHERE run_id = ?2"
       )
         .bind(Date.now() - 60_000, run)
         .run();
@@ -501,9 +510,9 @@ describe(
       await sleeping(run, "go");
       // A pause admitted that the engine hasn't taken.
       await env.DB.prepare(
-        "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?)"
+        "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at, retry_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?, ?)"
       )
-        .bind(crypto.randomUUID(), run, builder.userId, Date.now())
+        .bind(crypto.randomUUID(), run, builder.userId, Date.now(), Date.now())
         .run();
       await env.DB.prepare(
         "UPDATE workflow_runs SET control_generation = 1 WHERE id = ?"
@@ -518,7 +527,7 @@ describe(
         sequence: 1_000_000,
       });
       const afterNotification = await receiptStates(run);
-      await settleControls(env, run, await runInstance(run).status());
+      await settleControls(env, run, await runEngine(env).controlState(run));
 
       expect({
         afterNotification,
@@ -552,7 +561,7 @@ describe(
       );
       const admitted = await receiptsOf(run);
       await env.DB.prepare(
-        "UPDATE workflow_run_controls SET created_at = ? WHERE run_id = ?"
+        "UPDATE workflow_run_controls SET created_at = ?1, retry_at = ?1 WHERE run_id = ?2"
       )
         .bind(Date.now() - 60_000, run)
         .run();
@@ -615,6 +624,138 @@ describe(
         receipts: [["pause", "superseded"]],
         fenced: true,
       });
+    });
+
+    it("leave a run running when a pause older than its resume reaches the engine late", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(builder, napper);
+      const { id: run } = await builder.api.screens.startRun(app, "napper");
+      await sleeping(run, "go");
+      await builder.api.screens.control(app, run, "pause");
+      await until(async () => (await liveStatus(run)) === "paused");
+      await builder.api.screens.control(app, run, "resume");
+      await until(async () => (await liveStatus(run)) !== "paused");
+      const generations = await receiptsGenerations(run);
+      const pause =
+        generations.find(({ kind }) => kind === "pause")?.generation ?? 0;
+
+      // The pause's call to the engine, delivered again after the resume.
+      await runEngine(env).pause(run, pause);
+
+      expect({
+        engine: await liveStatus(run),
+        receipts: await receiptStates(run),
+      }).toStrictEqual({
+        engine: "waiting",
+        receipts: [
+          ["pause", "applied"],
+          ["resume", "applied"],
+        ],
+      });
+    });
+
+    it("settle no pause the engine hasn't taken, however the run's status read before it looks", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(builder, napper);
+      const { id: run } = await builder.api.screens.startRun(app, "napper");
+      await sleeping(run, "go");
+      await builder.api.screens.control(app, run, "pause");
+      await until(async () => (await liveStatus(run)) === "paused");
+      // Read while it is paused, and handed on late.
+      const read = await runEngine(env).controlState(run);
+      await builder.api.screens.control(app, run, "resume");
+      await until(async () => (await liveStatus(run)) !== "paused");
+      // A newer pause admitted, its call to the engine failing.
+      await aroundEngine(
+        async (method, call) => {
+          if (method === "pause") {
+            throw new Error("The engine is unavailable");
+          }
+          return await call();
+        },
+        async () =>
+          await outcome(builder.api.screens.control(app, run, "pause"))
+      );
+
+      await settleControls(env, run, read);
+
+      expect({
+        engine: await liveStatus(run),
+        receipts: await receiptStates(run),
+      }).toStrictEqual({
+        engine: "waiting",
+        receipts: [
+          ["pause", "applied"],
+          ["resume", "applied"],
+          ["pause", "admitted"],
+        ],
+      });
+    });
+
+    it("reach a live run's receipt within two repairs, past more receipts that never settle than one repair takes", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(builder, napper);
+      const { id: run } = await builder.api.screens.startRun(app, "napper");
+      await sleeping(run, "go");
+      await until(async () => (await sleepDeadline(run)) !== undefined);
+      // Its pause admitted, the engine's answer lost.
+      await aroundEngine(
+        async (method, call) => {
+          if (method === "pause") {
+            throw new Error("The engine is unavailable");
+          }
+          return await call();
+        },
+        async () =>
+          await outcome(builder.api.screens.control(app, run, "pause"))
+      );
+      // More pauses than a repair takes, each of a run the engine has no
+      // record of, so none ever settles, all of them due before it.
+      const old = Date.now() - 120_000;
+      await env.DB.batch(
+        Array.from({ length: 60 }, () => crypto.randomUUID()).flatMap(
+          (stuck) => [
+            env.DB.prepare(
+              "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'napper', 1, ?, 'running', ?)"
+            ).bind(stuck, app, builder.userId, old),
+            env.DB.prepare(
+              "INSERT INTO workflow_run_controls (id, run_id, kind, state, generation, requested_by, created_at, retry_at) VALUES (?, ?, 'pause', 'admitted', 1, ?, ?, ?)"
+            ).bind(crypto.randomUUID(), stuck, builder.userId, old, old),
+          ]
+        )
+      );
+      await env.DB.prepare(
+        "UPDATE workflow_run_controls SET created_at = ?1, retry_at = ?1 WHERE run_id = ?2"
+      )
+        .bind(Date.now() - 60_000, run)
+        .run();
+
+      await repairControls(env);
+      await repairControls(env);
+
+      await expect(receiptStates(run)).resolves.toStrictEqual([
+        ["pause", "applied"],
+      ]);
+    });
+
+    it("refuse to resume a run the engine has ended, its row still to hear of it", async () => {
+      const builder = await personApi("builder");
+      const app = await appWith(
+        builder,
+        workflowFiles("quick", "  return null;", {})
+      );
+      const { id: run } = await builder.api.screens.startRun(app, "quick");
+      await finished(run);
+      // The row behind the engine: still running, as it was.
+      await env.DB.prepare(
+        "UPDATE workflow_runs SET status = 'running', ended_at = NULL WHERE id = ?"
+      )
+        .bind(run)
+        .run();
+
+      await expect(
+        outcome(builder.api.screens.control(app, run, "resume"))
+      ).resolves.toBe("workflow.control_refused");
     });
   }
 );

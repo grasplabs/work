@@ -550,7 +550,8 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       sequence: latest.sequence,
     });
     // A pause or resume settles from where the engine has the run now,
-    // read here from its journal, not from the notification.
-    await settleControls(this.env, latest.instanceId, this.status());
+    // and which controls it took, read together here from its journal,
+    // not from the notification.
+    await settleControls(this.env, latest.instanceId, this.controlState());
   }
 }

@@ -5,7 +5,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { RunControl, WorkflowRun } from "@grasp-os/shared/workflows";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
-import { and, asc, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -40,8 +40,12 @@ import type { RunRow } from "./runs.ts";
 // - Cancel has priority. It supersedes a pause or resume still unresolved,
 //   writes the run's tombstone (the dispatcher runs nothing more of it),
 //   and takes the next control generation, so a pause or resume admitted
-//   before it can no longer reach the engine: a control is sent only while
-//   its generation is the run's. A pause or resume asked for while a cancel
+//   before it can no longer reach the engine.
+// - Every control goes to the engine with its generation, and the run
+//   ignores one older than the newest it took, in the same write as the
+//   change (engine.ts): a pause delivered late can't undo a newer resume.
+//   A receipt settles from the generation the engine says it took, read
+//   with the run's status, never from a status alone. A pause or resume asked for while a cancel
 //   is admitted, or while the other is unresolved, is refused as a
 //   conflict; one the run's lifecycle doesn't allow (an ended run) is
 //   refused outright. Nothing is waited for: the engine, which serializes
@@ -73,6 +77,15 @@ const requestedAction = {
   resume: "workflow.run.resume_requested",
   cancel: "workflow.run.cancelled",
 } as const satisfies Record<ControlKind, `workflow.run.${string}`>;
+
+/** How long a receipt is left to the request that admitted it. */
+const repairAfterMs = 30_000;
+
+/** The longest the repair waits before sending a receipt again. */
+const maxRepairMs = 60 * 60 * 1000;
+
+/** Most receipts one repair sends again. */
+const repairsPerRun = 50;
 
 /** The run's receipts the engine is still to confirm. */
 const unresolvedOf = async (env: Env, run: string): Promise<ControlRow[]> =>
@@ -133,6 +146,11 @@ const admissionOf = (
     )
   ) {
     return { type: "refused", code: "workflow.control_conflict" };
+  }
+  // A run the engine has ended, its row still to hear of it, has nothing
+  // left to pause or resume: not a resume already applied.
+  if (engine !== undefined && endedLive.has(engine.status)) {
+    return { type: "refused", code: "workflow.control_refused" };
   }
   // A run the engine has no record of yet is still starting: a pause of
   // it is admitted, and applies once it starts (`apply`); it has nothing
@@ -196,7 +214,7 @@ const writeReceipt = async (
   const receipt = db
     .insert(workflowRunControls)
     .select(
-      sql`SELECT ${id}, ${row.id}, ${kind}, ${done ? "applied" : "admitted"}, ${generation}, ${by.userId}, ${now}, ${done ? now : null} WHERE changes() > 0`
+      sql`SELECT ${id}, ${row.id}, ${kind}, ${done ? "applied" : "admitted"}, ${generation}, ${by.userId}, ${now}, ${done ? now : null}, ${now + repairAfterMs}, 0 WHERE changes() > 0`
     );
   await (cancelling
     ? auditedBatch(env, db, [
@@ -262,11 +280,51 @@ const holdsFor = (kind: ControlKind, live: InstanceStatus): boolean =>
       live.status !== "paused" &&
       live.status !== "waitingForPause";
 
+/** Where the engine has a run, with the newest control it took. */
+interface ControlState {
+  status: InstanceStatus;
+  fence: number | null;
+}
+
 /**
- * Sends an admitted receipt to the engine, unless a newer control
- * superseded it (its generation is no longer the run's), and settles it
- * as soon as the engine says it holds: paused, no longer paused, or ended.
- * A cancel whose engine run has ended (or never existed) brings the run's
+ * Settles each unresolved pause or resume of `receipts` from `state`, the
+ * engine's own word on which controls reached the run, not from a status
+ * alone: one of a generation the engine hasn't taken yet (above `fence`)
+ * stays as it is, whatever the run's status says; one of the generation
+ * it took last is applied once the run is where it asked; one older than
+ * that was overtaken by a newer control, and is superseded.
+ */
+const settleFrom = async (
+  env: Env,
+  receipts: readonly ControlRow[],
+  state: ControlState
+): Promise<void> => {
+  const { fence } = state;
+  if (fence === null) {
+    return;
+  }
+  await Promise.all(
+    receipts
+      .filter(
+        ({ kind, state: unresolved }) =>
+          kind !== "cancel" && unresolved === "admitted"
+      )
+      .map(async ({ id, kind, generation }) => {
+        if (generation < fence) {
+          await settle(env, id, "superseded");
+        } else if (generation === fence && holdsFor(kind, state.status)) {
+          await settle(env, id, "applied");
+        }
+      })
+  );
+};
+
+/**
+ * Sends an admitted receipt to the engine with its generation, which the
+ * engine takes only if no newer control reached the run (engine.ts), and
+ * settles it from what the engine then says it took (`settleFrom`). A
+ * pause or resume a newer control overtook in core already isn't sent. A
+ * cancel whose engine run has ended (or never existed) brings the run's
  * row to its end now (runs.ts, `projectStatus`).
  */
 const apply = async (env: Env, control: ControlRow): Promise<void> => {
@@ -278,10 +336,11 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
     return;
   }
   // A pause or resume a newer control overtook, or of a run that has
-  // ended (its start failed, say), has nothing left to apply to.
+  // ended (its start failed, say), has nothing left to apply to. Only a
+  // shortcut: the engine fences an older control however late it lands.
   if (
     control.kind !== "cancel" &&
-    (control.generation !== row.controlGeneration ||
+    (control.generation < row.controlGeneration ||
       !unended.includes(row.status))
   ) {
     await settle(env, control.id, "superseded");
@@ -289,7 +348,7 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
   }
   const engine = runEngine(env);
   if (control.kind === "cancel") {
-    await engine.terminate(row.id);
+    await engine.terminate(row.id, control.generation);
     await settleRunCancel(env, row.id);
   } else {
     // A run the engine has no record of yet hasn't started: nothing to
@@ -300,19 +359,19 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
       return;
     }
     await (control.kind === "pause"
-      ? engine.pause(row.id)
-      : engine.resume(row.id));
+      ? engine.pause(row.id, control.generation)
+      : engine.resume(row.id, control.generation));
   }
-  const live = await engine.status(row.id);
-  if (live === undefined && control.kind !== "cancel") {
+  const state = await engine.controlState(row.id);
+  if (state === undefined && control.kind !== "cancel") {
     return;
   }
-  if (live === undefined || endedLive.has(live.status)) {
+  if (state === undefined || endedLive.has(state.status.status)) {
     // Ended: whatever was asked, the run is past it. Its row says so, and
     // the receipt settles with it: a cancel as done once the run ended
     // cancelled, anything else as overtaken by the end.
     await projectStatus(env, row.id, {
-      status: live?.status ?? "terminated",
+      status: state?.status.status ?? "terminated",
       at: Date.now(),
     });
     const ended = await findRun(env, runIdSchema.parse(row.id));
@@ -325,34 +384,25 @@ const apply = async (env: Env, control: ControlRow): Promise<void> => {
     );
     return;
   }
-  if (holdsFor(control.kind, live)) {
-    await settle(env, control.id, "applied");
-  }
+  await settleFrom(env, [control], state);
 };
 
 /**
- * Settles the run's unresolved pause and resume as `live`, where the
- * engine has the run as it is read now, says: each only from such a
- * read, never from a notification, which may be older than the receipt
- * (a late "paused" says nothing of a pause asked for after it). Asked by
- * the run's object as it hands on its status changes (run-object.ts).
+ * Settles the run's unresolved pause and resume from `state`, where the
+ * engine has the run and which controls it took, read together by the
+ * run's object as it hands on its status changes (run-object.ts): never
+ * from a notification, nor from a status alone, which says nothing of a
+ * control admitted after it was read.
  */
 export const settleControls = async (
   env: Env,
   run: string,
-  live: InstanceStatus | undefined
+  state: ControlState | undefined
 ): Promise<void> => {
-  if (live === undefined) {
+  if (state === undefined) {
     return;
   }
-  const unresolved = await unresolvedOf(env, run);
-  await Promise.all(
-    unresolved
-      .filter(({ kind }) => kind !== "cancel" && holdsFor(kind, live))
-      .map(async ({ id }) => {
-        await settle(env, id, "applied");
-      })
-  );
+  await settleFrom(env, await unresolvedOf(env, run), state);
 };
 
 /**
@@ -498,18 +548,12 @@ export const controlScreenRun = async (
   return await control(env, by, row, asked.data, "screen");
 };
 
-/** How long a receipt is left to the request that admitted it. */
-const repairAfterMs = 30_000;
-
-/** Most receipts one repair sends again. */
-const repairsPerRun = 50;
-
 /**
- * Sends again each receipt the engine hasn't confirmed `repairAfterMs`
- * after it was admitted, oldest first, at most `repairsPerRun` a run: one
- * whose answer was lost on the way, or a pause the engine ignored while
- * the run was still queued. Each on its own: one that fails is tried
- * again by the next repair.
+ * Sends again each receipt the engine hasn't confirmed once it is due
+ * (`retryAt`: `repairAfterMs` after it was admitted, then backing off
+ * each time, up to `maxRepairMs`), next due first, at most
+ * `repairsPerRun` a run: one whose answer was lost on the way, or a pause
+ * the engine ignored while the run was still queued.
  */
 export const repairControls = async (env: Env): Promise<void> => {
   const db = drizzle(env.DB);
@@ -526,21 +570,37 @@ export const repairControls = async (env: Env): Promise<void> => {
         sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${workflowRunControls.runId} AND ${workflowRuns.endedAt} IS NOT NULL)`
       )
     );
+  const now = Date.now();
+  // Next due first: each receipt sent again is put off further each time
+  // (`retryAt`), so receipts the engine never confirms (a run it doesn't
+  // take controls of, say) fall behind newer ones rather than fill every
+  // repair's budget.
   const due = await db
     .select()
     .from(workflowRunControls)
     .where(
       and(
         eq(workflowRunControls.state, "admitted"),
-        lt(workflowRunControls.createdAt, new Date(Date.now() - repairAfterMs)),
+        lte(workflowRunControls.retryAt, new Date(now)),
         isNull(workflowRunControls.settledAt)
       )
     )
-    .orderBy(asc(workflowRunControls.createdAt), asc(workflowRunControls.id))
+    .orderBy(asc(workflowRunControls.retryAt), asc(workflowRunControls.id))
     .limit(repairsPerRun);
+  // Each on its own, put off before it is sent: one that fails, or never
+  // settles, waits longer for the next.
   await Promise.all(
     due.map(async (receipt) => {
       try {
+        await db
+          .update(workflowRunControls)
+          .set({
+            retries: receipt.retries + 1,
+            retryAt: new Date(
+              now + Math.min(repairAfterMs * 2 ** receipt.retries, maxRepairMs)
+            ),
+          })
+          .where(eq(workflowRunControls.id, receipt.id));
         await apply(env, receipt);
       } catch (error) {
         log.error("workflow.control_repair_failed", {

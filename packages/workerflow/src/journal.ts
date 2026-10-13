@@ -204,6 +204,12 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   notify_at: number | null;
   /** How many deliveries in a row the host failed: the backoff's count. */
   notify_failures: number;
+  /**
+   * The newest fence a pause, resume or terminate came with (run.ts,
+   * `ControlFence`), or null before any did: a control with an older one
+   * is ignored, so a late command can't undo a newer one.
+   */
+  control_fence: number | null;
 }
 
 /**
@@ -380,7 +386,8 @@ export const createJournal = (sql: SqlStorage): void => {
       purge_at INTEGER,
       executions INTEGER NOT NULL DEFAULT 1,
       notify_at INTEGER,
-      notify_failures INTEGER NOT NULL DEFAULT 0
+      notify_failures INTEGER NOT NULL DEFAULT 0,
+      control_fence INTEGER
     );
     CREATE TABLE IF NOT EXISTS activations (
       generation INTEGER PRIMARY KEY,
@@ -638,7 +645,7 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures, control_fence FROM run"
     )
     .toArray()[0];
 };

@@ -1056,15 +1056,23 @@ export const workflowRunControls = sqliteTable(
     requestedBy: text("requested_by").notNull(),
     createdAt: timestamp("created_at").notNull(),
     settledAt: timestamp("settled_at"),
+    /**
+     * When the repair next sends it again (src/workflows/controls.ts),
+     * moved on further each time it does, so receipts that never settle
+     * don't keep newer ones waiting.
+     */
+    retryAt: timestamp("retry_at").notNull(),
+    /** How often the repair sent it again. */
+    retries: integer().notNull().default(0),
   },
   (table) => [
     uniqueIndex("workflow_run_controls_unresolved_idx")
       .on(table.runId, table.kind)
       .where(sql`state = 'admitted'`),
     // The repair (src/workflows/controls.ts): receipts the engine is
-    // still to confirm, oldest first.
+    // still to confirm, next due first.
     index("workflow_run_controls_admitted_idx")
-      .on(table.createdAt, table.id)
+      .on(table.retryAt, table.id)
       .where(sql`state = 'admitted'`),
   ]
 );

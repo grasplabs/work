@@ -135,22 +135,30 @@ export interface RunEngine {
   /** Where the engine has the run; nothing when it has no such run. */
   status: (id: string) => Promise<InstanceStatus | undefined>;
   /**
+   * Where the engine has the run, with the newest control generation it
+   * took (`fence`, null before any), read together; nothing when it has
+   * no such run. A control of a generation at most `fence` reached it.
+   */
+  controlState: (
+    id: string
+  ) => Promise<{ status: InstanceStatus; fence: number | null } | undefined>;
+  /**
    * Terminates the run; one that has ended already, that is rolling back,
    * or that the engine has no record of, stays as it is.
    */
-  terminate: (id: string) => Promise<void>;
+  terminate: (id: string, generation?: number) => Promise<void>;
   /**
    * Pauses the run at its next safe boundary: a run asleep or waiting at
    * once, a running one once the steps it has out end. One that is queued,
    * paused or ended, or that the engine has no record of, stays as it is.
    */
-  pause: (id: string) => Promise<void>;
+  pause: (id: string, generation: number) => Promise<void>;
   /**
    * Resumes a paused run, its deadlines where they were: paused time
    * counts, so a sleep or a wait that came due meanwhile is taken at once.
    * Any other run stays as it is.
    */
-  resume: (id: string) => Promise<void>;
+  resume: (id: string, generation: number) => Promise<void>;
   /**
    * Delivers the run an event of `type`, which ends a wait on that type: it
    * carries nothing (`RunHost.waitForDecision`). `key` names the delivery:
@@ -277,16 +285,23 @@ export const runEngine = (env: Env): RunEngine => ({
     await admit(env, id, { type: "internal", workflow }, input);
   },
   status: async (id) => await runStub(env, id).status(),
-  terminate: async (id) => {
+  controlState: async (id) => await runStub(env, id).controlState(),
+  terminate: async (id, generation) => {
     // Ended, rolling back or missing: nothing to terminate, and nothing
     // to fail over (a cancel racing a run's own end finds it ended).
-    await runStub(env, id).terminate({ rollback: false });
+    await runStub(env, id).terminate({
+      rollback: false,
+      ...(generation === undefined ? {} : { fence: generation }),
+    });
   },
-  pause: async (id) => {
-    await runStub(env, id).pause();
+  // Each with the run's control generation it was admitted under: the run
+  // ignores one older than the newest it took, in the same write as the
+  // pause or resume (controls.ts), so a late one can't undo a newer one.
+  pause: async (id, generation) => {
+    await runStub(env, id).pause({ fence: generation });
   },
-  resume: async (id) => {
-    await runStub(env, id).resume({ keepDeadlines: true });
+  resume: async (id, generation) => {
+    await runStub(env, id).resume({ keepDeadlines: true, fence: generation });
   },
   sendEvent: async (id, type, key) => {
     const outcome = await runStub(env, id).sendEvent({
