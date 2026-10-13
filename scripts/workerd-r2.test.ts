@@ -249,9 +249,19 @@ const config :Workerd.Config = (
   };
 };
 
+/**
+ * How long a read waits for workerd's write lock on a bucket's file. workerd
+ * writes while the test reads, and without a wait SQLite answers "database is
+ * locked" at once instead of retrying.
+ */
+const BUSY_TIMEOUT_MS = 2000;
+
 /** The chunks one SQLite file of the R2 service holds. */
 const chunksIn = (file: string): number => {
-  const db = new DatabaseSync(file, { readOnly: true });
+  const db = new DatabaseSync(file, {
+    readOnly: true,
+    timeout: BUSY_TIMEOUT_MS,
+  });
   try {
     // Only a bucket's file has the table; workerd keeps others there.
     const hasChunks =
