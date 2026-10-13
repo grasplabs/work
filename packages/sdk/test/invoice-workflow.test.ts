@@ -247,7 +247,7 @@ describe("the sample invoice workflow", () => {
 
   it("uses the values people set instead of the defaults", async () => {
     const systems = fakeSystems();
-    const { engine, modelRequests } = createFakeEngine({
+    const { engine } = createFakeEngine({
       params: { threshold: 1_000_000 },
       model: modelSays(800_000),
     });
@@ -256,7 +256,6 @@ describe("the sample invoice workflow", () => {
 
     expect(result.status).toBe("booked");
     expect(systems.asked).toStrictEqual([]);
-    expect(modelRequests).toHaveLength(1);
   });
 
   it("fails a run whose parameter value doesn't fit its kind, or is empty", async () => {

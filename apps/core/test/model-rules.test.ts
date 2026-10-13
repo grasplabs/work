@@ -9,14 +9,19 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { modelLedger } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall, ModelsEnv } from "../src/models.ts";
+import {
+  listResourceBindings,
+  revokeResourceBinding,
+} from "../src/resource-bindings.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { requestGranted } from "./apps.ts";
+import { release as nextVersion, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, newTeam, readCollection } from "./knowledge.ts";
 import { mailConnection } from "./mail-connection.ts";
-import { finished } from "./runs.ts";
+import { finished, sleeping, woken } from "./runs.ts";
+import { person } from "./sealed-apps.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import {
   appWith as serverAppWith,
@@ -1201,6 +1206,252 @@ describe("model rules", { timeout: 60_000 }, () => {
       run: { status: "completed", output: { total: 1234 } },
       refused: [["model.budget_busy", "binding_day"]],
       actions: ["model.refused", "model.call"],
+    });
+  });
+
+  it("refuse a workflow's AI step through a model resource with a structured output: the step brings its own schema", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, {
+      // A declaration whose answers are the App's own shape.
+      "app.ts": `import { app, resource, v } from "@grasp-os/sdk";
+
+import schema from "./schema.ts";
+
+export const reader = resource.model("reader", {
+  structuredOutput: v.object({ total: v.number() }),
+  maxOutputTokens: 32_768,
+});
+
+export default app({
+  name: "Models",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  internalOperations: {},
+  screens: [],
+  uses: [reader],
+});
+`,
+      ...workflowFiles("reader", llm("retries: { limit: 2, delay: 1 },"), {
+        extract: { total: 1234 },
+      }),
+    });
+    const { fake, result: run } = await withDeploymentRules(
+      { gateway, models: [workersAi, anthropic] },
+      [],
+      async () => {
+        // Bound by an admin all the same: it serves the App's actions.
+        await bindModel(app, "reader", anthropic);
+        const started = await builder.api.workflows.start(app, "reader");
+        await finished(started.id);
+        return started.id;
+      }
+    );
+    await expect(builder.api.workflows.status(run)).resolves.toMatchObject({
+      status: "failed",
+      failure: { error: { code: "resource.unavailable" } },
+    });
+    expect(fake.requests).toStrictEqual([]);
+  });
+
+  it("send a step's next attempt through its binding as it is then: none once revoked, the new one once replaced", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles("reader", llm("retries: { limit: 1, delay: 3000 },"), {
+        extract: { total: 1234 },
+      })
+    );
+    // Each attempt's first request fails as a server does, and the
+    // gateway's own retries with it: the step is tried again.
+    const failing: GatewayReply[] = [
+      { status: 500 },
+      { status: 500 },
+      { status: 500 },
+    ];
+    const attemptOnce = async (change: () => Promise<unknown>) =>
+      await withDeploymentRules(
+        { gateway, models: [workersAi, anthropic] },
+        [
+          ...failing,
+          { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
+        ],
+        async () => {
+          await bindModel(app, "reader", anthropic);
+          const run = await builder.api.workflows.start(app, "reader");
+          // The first attempt has failed, as the gateway recorded it: the
+          // binding changes before the next.
+          await vi.waitFor(
+            async () => {
+              const events = await eventsOf(
+                runActorOf({ runId: run.id, app, workflow: "reader" })
+              );
+              expect(modelActions(events)).not.toStrictEqual([]);
+            },
+            { timeout: 10_000, interval: 100 }
+          );
+          await change();
+          await finished(run.id);
+          return await builder.api.workflows.status(run.id);
+        }
+      );
+    const revoked = await attemptOnce(async () => {
+      const [binding] = await listResourceBindings(
+        env,
+        await person("admin"),
+        app
+      );
+      await revokeResourceBinding(
+        env,
+        await person("admin"),
+        binding?.id ?? ""
+      );
+    });
+    const replaced = await attemptOnce(
+      async () => await bindModel(app, "reader", workersAi)
+    );
+    expect({
+      revoked: {
+        run: revoked.result,
+        // Nothing more was sent once it was revoked.
+        sent: revoked.fake.requests.length,
+      },
+      replaced: {
+        run: replaced.result,
+        // The next attempt asked the model the new binding names.
+        lastToWorkersAi: replaced.fake.requests
+          .at(-1)
+          ?.url.includes("workers-ai"),
+      },
+    }).toMatchObject({
+      revoked: {
+        run: {
+          status: "failed",
+          failure: { error: { code: "resource.unavailable" } },
+        },
+        sent: failing.length,
+      },
+      replaced: {
+        run: { status: "completed", output: { total: 1234 } },
+        lastToWorkersAi: true,
+      },
+    });
+  });
+
+  it("refuse a run pinned to a version whose declaration its alias was rebound away from", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "later",
+        `  await step.sleep("go", { description: "Wait", duration: "1 day" });
+${llm("retries: { limit: 2, delay: 1 },")}`,
+        { extract: { total: 1234 } }
+      )
+    );
+    const { fake, result: run } = await withDeploymentRules(
+      { gateway, models: [workersAi, anthropic] },
+      [],
+      async () => {
+        await bindModel(app, "reader", anthropic);
+        const started = await builder.api.workflows.start(app, "later");
+        await sleeping(started.id, "go");
+        // The next version asks for shorter answers, and its admin binds
+        // that declaration: the run stays on the first version.
+        await nextVersion(builder, app, modelRegistration({ reader: 16_384 }));
+        await bindModel(app, "reader", anthropic);
+        await woken(started.id);
+        await finished(started.id);
+        return started.id;
+      }
+    );
+    await expect(builder.api.workflows.status(run)).resolves.toMatchObject({
+      status: "failed",
+      failure: { error: { code: "resource.unavailable" } },
+    });
+    expect(fake.requests).toStrictEqual([]);
+  });
+
+  it("refuse an attempt its binding's cap per request has no room for, once and unsent", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles("reader", llm("retries: { limit: 2, delay: 1 },"), {
+        extract: { total: 1234 },
+      })
+    );
+    // An attempt may cost some $0.25 (16,384 tokens at $15 a million).
+    const { fake, result: run } = await withDeploymentRules(
+      { gateway, models: [workersAi, anthropic] },
+      [],
+      async () => {
+        await bindModel(app, "reader", anthropic, { perRequest: 0.01 });
+        const started = await builder.api.workflows.start(app, "reader");
+        await finished(started.id);
+        return started.id;
+      }
+    );
+    const events = await eventsOf(
+      runActorOf({ runId: run, app, workflow: "reader" })
+    );
+    expect({
+      run: await builder.api.workflows.status(run),
+      sent: fake.requests.length,
+      refused: events
+        .filter(({ action }) => action === "model.refused")
+        .map(({ detail }) => [detail.reason, detail.because]),
+    }).toMatchObject({
+      run: {
+        status: "failed",
+        failure: { error: { code: "model.over_budget" } },
+      },
+      sent: 0,
+      refused: [["model.over_budget", "binding_request"]],
+    });
+  });
+
+  it("refuse an AI step's next attempt the answer its timed-out attempt left, once its binding was revoked meanwhile", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(
+      builder,
+      workflowFiles(
+        "reader",
+        llm("timeout: 1000, retries: { limit: 3, delay: 1 },"),
+        { extract: { total: 1234 } }
+      )
+    );
+    const release = Promise.withResolvers<boolean>();
+
+    // The gateway answers the first attempt only after its second began;
+    // the binding is revoked before it does.
+    const { fake, result } = await withDeploymentRules(
+      { gateway, models: [workersAi, anthropic] },
+      [
+        {
+          text: '{ "total": 1234 }',
+          inputTokens: 10,
+          outputTokens: 5,
+          pause: { at: 1, until: release.promise },
+        },
+      ],
+      async () => {
+        const binding = await bindModel(app, "reader", anthropic);
+        const run = await builder.api.workflows.start(app, "reader");
+        await scheduler.wait(1500);
+        await revokeResourceBinding(env, await person("admin"), binding.id);
+        await scheduler.wait(1000);
+        release.resolve(true);
+        await finished(run.id);
+        return await builder.api.workflows.status(run.id);
+      }
+    );
+
+    expect({ run: result, sent: fake.requests.length }).toMatchObject({
+      run: {
+        status: "failed",
+        failure: { error: { code: "resource.unavailable" } },
+      },
+      sent: 1,
     });
   });
 });

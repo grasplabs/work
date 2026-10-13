@@ -184,10 +184,14 @@ test("an admin sends notes to be read, and follows the reading to its end", asyn
     .fill("Closing the month takes three days.");
   await start.click();
 
-  // Followed live: the reading fails, saying so, and keeps no draft.
+  // Followed live: the reading fails, saying why (its binding's cap per
+  // request, the model gateway's `model.over_budget`), and keeps no draft.
   const reading = screen.getByRole("region", { name: "Notes being read" });
   const item = reading.getByRole("listitem").filter({ hasText: title });
-  await expect(item).toContainText("Failed:", { timeout: 30_000 });
+  await expect(item).toContainText(
+    "Failed: This month's model budget is used up",
+    { timeout: 30_000 }
+  );
   await item.getByRole("button", { name: "Dismiss" }).click();
   await expect(reading).toHaveCount(0);
   await expect(screen.getByText(title)).toHaveCount(0);

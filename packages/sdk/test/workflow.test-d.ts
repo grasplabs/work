@@ -8,7 +8,6 @@ import type { stepOptionSchemas } from "../src/steps.ts";
 import {
   appExports,
   appServer,
-  model,
   money,
   person,
   schedule,
@@ -21,7 +20,6 @@ import type {
   DecisionOptions,
   DoOptions,
   LlmOptions,
-  Model,
   Person,
   SideEffectContext,
   SleepOptions,
@@ -37,7 +35,6 @@ import {
 const params = {
   threshold: money({ label: "Above", currency: "EUR", default: 500_000 }),
   reviewer: person({ label: "Reviewer", default: "team:finance" }),
-  extractionModel: model({ label: "Model", default: "mistral-large" }),
   reminder: template({ label: "Reminder", default: "invoice-reminder" }),
 };
 declare const step: StepRunner;
@@ -54,7 +51,6 @@ const llm = {
 // Parameters are typed by their kind.
 expectTypeOf(p.threshold).toExtend<number>();
 expectTypeOf(p.reviewer).toEqualTypeOf<Person>();
-expectTypeOf(p.extractionModel).toEqualTypeOf<Model>();
 expectTypeOf(context.runId).toEqualTypeOf<RunId>();
 expectTypeOf<string>().not.toExtend<Person>();
 

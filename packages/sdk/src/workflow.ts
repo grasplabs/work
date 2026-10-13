@@ -147,7 +147,6 @@ const parseOrThrow = <Schema extends z.ZodType>(
 
 export type Person = ParamValue<"person">;
 export type Schedule = ParamValue<"schedule">;
-export type Model = ParamValue<"model">;
 export type Template = ParamValue<"template">;
 
 /** A tunable value people see and can change without touching the code. */
@@ -202,8 +201,6 @@ export const text = param("text");
 export const person = param("person");
 /** A schedule, as five cron fields; what a schedule trigger runs on. */
 export const schedule = param("schedule");
-/** A model from the model gateway. */
-export const model = param("model");
 /** A template, e.g. for an email. */
 export const template = param("template");
 
@@ -404,7 +401,9 @@ export interface StepRunner {
    * budget is used up (the binding's own caps per request, day and month,
    * or the deployment's, workflow's, run's or person's); the step then
    * fails with the reason, and isn't retried. Each attempt is a request of
-   * its own under the binding's cap per request. A budget whose rest is
+   * its own under the binding's cap per request, which covers both asks of
+   * an attempt whose first answer didn't fit, and the binding's bound on
+   * the answer is shared between them. A budget whose rest is
    * held by other calls still under way is retried, as the step's retries
    * allow, no sooner than 15 seconds on; the wait the refusal suggests is
    * advisory.

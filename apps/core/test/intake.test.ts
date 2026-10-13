@@ -972,10 +972,11 @@ describe("reading notes", { timeout: 60_000 }, () => {
     expect({
       run: await admin.api.workflows.status(run.id),
       asked: gateway.requests.length,
-      extractor: review.resources.map(({ alias, state, kind }) => ({
+      extractor: review.resources.map(({ alias, state, kind, usedBy }) => ({
         alias,
         state,
         kind,
+        usedBy,
       })),
     }).toMatchObject({
       run: {
@@ -984,7 +985,15 @@ describe("reading notes", { timeout: 60_000 }, () => {
       },
       asked: 0,
       // Shown to its admin to bind, as any declared resource.
-      extractor: [{ alias: "extractor", state: "unbound", kind: "model" }],
+      // Shown as used by the workflow step that reads with it.
+      extractor: [
+        {
+          alias: "extractor",
+          state: "unbound",
+          kind: "model",
+          usedBy: ["workflow:extract/extract"],
+        },
+      ],
     });
   });
 

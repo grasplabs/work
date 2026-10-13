@@ -1274,7 +1274,12 @@ export class RunHost extends RpcTarget {
   async #waitingOutBusyBudget(
     attempt: StepAttempt,
     request: string,
-    call: () => Promise<unknown>
+    call: () => Promise<unknown>,
+    /**
+     * What must still hold before an answer an earlier attempt left is
+     * taken, as it would before asking: its binding still serving.
+     */
+    stillServed: () => Promise<void>
   ): Promise<unknown> {
     await this.#untilAsking(attempt);
     // Out of time while it waited: the engine has given up on it, and
@@ -1284,6 +1289,8 @@ export class RunHost extends RpcTarget {
     }
     const left = this.#unclaimed.get(attempt.step);
     if (left?.request === request) {
+      // Revoked since it was asked: the answer it left serves nothing.
+      await stillServed();
       this.#unclaimed.delete(attempt.step);
       return left.answer;
     }
@@ -1455,6 +1462,9 @@ export class RunHost extends RpcTarget {
               await this.#requireCurrent(attempt, "model");
               throw error;
             }
+          },
+          async () => {
+            await this.#hooks.modelBinding(binding);
           }
         )
       );

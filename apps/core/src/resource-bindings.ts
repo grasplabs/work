@@ -1,4 +1,6 @@
+import { workflowIdOf } from "@grasp-os/compiler";
 import type { AnyResource } from "@grasp-os/sdk";
+import { readOutline } from "@grasp-os/sdk/describe";
 import { appErrors } from "@grasp-os/shared/apps";
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
@@ -31,13 +33,14 @@ import type {
 } from "@grasp-os/shared/resource-bindings";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { outlineSteps } from "@grasp-os/shared/workflows";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
-import { appFor, findApp } from "./apps.ts";
+import { appFor, findApp, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import { personOf } from "./connections.ts";
@@ -545,6 +548,8 @@ type Resolution =
       readonly served: ServedBinding;
       /** Its caps; null when it has none. */
       readonly budget: ModelBindingBudget | null;
+      /** What it binds, as its row names it. */
+      readonly target: BindingTarget;
     }
   | {
       readonly state: Exclude<BindingState, "served" | "unbound">;
@@ -592,7 +597,7 @@ const resolved = async (
   }
   return served.contractId === row.contractId &&
     served.fingerprint === row.fingerprint
-    ? { state: "served", served, budget }
+    ? { state: "served", served, budget, target: target.data }
     : { state: "contract_changed", why: "drift" };
 };
 
@@ -743,18 +748,56 @@ const choicesFor = async (
   };
 };
 
-/** The paths of `release`'s actions that use `alias`. */
-const usersOf = (release: Release, alias: string): string[] =>
-  Object.entries(release.app.operations)
-    .filter(
-      ([, operation]) =>
-        operation.kind === "action" &&
-        operation.uses.some(
-          (use) => use.type === "resource" && use.alias === alias
-        )
-    )
-    .map(([path]) => path)
-    .toSorted();
+/**
+ * The AI steps of `app`'s workflows at `version`, as `workflow:<id>/<step>`,
+ * by the model resource each goes through (`step.llm`'s `binding`, a
+ * literal its outline records): what a review shows using a resource
+ * besides actions. A workflow whose steps can't be read shows none.
+ */
+const workflowUsers = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<Map<string, string[]>> => {
+  const files = await versionFiles(env, app, version);
+  const users = new Map<string, string[]>();
+  for (const [path, source] of Object.entries(files)) {
+    const workflow = workflowIdOf(path);
+    const outline = workflow === undefined ? null : readOutline(source);
+    for (const step of outlineSteps(outline?.steps ?? [])) {
+      const { binding } = step.options;
+      if (step.kind === "ai" && typeof binding === "string") {
+        users.set(binding, [
+          ...(users.get(binding) ?? []),
+          `workflow:${workflow}/${step.name}`,
+        ]);
+      }
+    }
+  }
+  return users;
+};
+
+/**
+ * What uses `alias` in `release`: the paths of its actions that use it,
+ * and the AI steps of its workflows that go through it (`workflowUsers`).
+ */
+const usersOf = (
+  release: Release,
+  alias: string,
+  steps: ReadonlyMap<string, readonly string[]>
+): string[] =>
+  [
+    ...Object.entries(release.app.operations)
+      .filter(
+        ([, operation]) =>
+          operation.kind === "action" &&
+          operation.uses.some(
+            (use) => use.type === "resource" && use.alias === alias
+          )
+      )
+      .map(([path]) => path),
+    ...(steps.get(alias) ?? []),
+  ].toSorted();
 
 /**
  * How a review names each of `rows`' own bound target, for anyone who may
@@ -912,6 +955,10 @@ export const reviewResourceBindings = async (
     : undefined;
   const declaredRows = declared.flatMap(([alias]) => byAlias.get(alias) ?? []);
   const labelOf = await targetLabels(env, by, declaredRows);
+  const steps =
+    version === null
+      ? new Map<string, string[]>()
+      : await workflowUsers(env, found.id, version);
   const resources = await Promise.all(
     declared.map(async ([alias, declaration]): Promise<DeclaredResource> => {
       const row = byAlias.get(alias);
@@ -921,7 +968,7 @@ export const reviewResourceBindings = async (
           : await resolved(env, found.id, declaration, row, contracts.asks);
       return {
         ...declaredOf(declaration),
-        usedBy: release === undefined ? [] : usersOf(release, alias),
+        usedBy: release === undefined ? [] : usersOf(release, alias, steps),
         state: resolution?.state ?? "unbound",
         binding:
           row === undefined ? null : { ...toBinding(row), label: labelOf(row) },
@@ -1024,6 +1071,9 @@ export interface StepModel {
  * (`resolved`): approved for exactly that declaration, its model still
  * allowed, its caps readable. Anything else, an App with no release
  * among it, is `resource.unavailable`. Read again for every attempt.
+ * Accepted, as for an App's own requests: a revocation that lands while
+ * one attempt's request is being admitted (after this read, before the
+ * gateway sends it) doesn't stop that request; the next attempt finds it.
  */
 export const stepModelBinding = async (
   env: Env,
@@ -1059,12 +1109,7 @@ export const stepModelBinding = async (
     throw notServed();
   }
   const resolution = await resolved(env, app, declaration, row);
-  const target = bindingTargetSchema.safeParse(JSON.parse(row.target));
-  if (
-    resolution.state !== "served" ||
-    !target.success ||
-    target.data.kind !== "model"
-  ) {
+  if (resolution.state !== "served" || resolution.target.kind !== "model") {
     log.warn("resource_binding.not_served", {
       binding: row.id,
       contractId: row.contractId,
@@ -1073,7 +1118,7 @@ export const stepModelBinding = async (
     throw notServed();
   }
   return {
-    model: target.data.model,
+    model: resolution.target.model,
     binding: { app, alias, budget: resolution.budget },
     maxOutputTokens: declaration.maxOutputTokens,
   };
