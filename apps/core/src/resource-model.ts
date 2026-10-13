@@ -182,12 +182,20 @@ const generate = async (
       work: { authority: caller.authority, context: caller.context },
       requestId: context.requestId,
       binding: { app: caller.app, alias: record.alias, budget: record.budget },
+      // A run's attempt let go of while the gateway admitted the request
+      // sends nothing to the provider.
+      ...(caller.requireHolds === undefined
+        ? {}
+        : { beforeSend: caller.requireHolds }),
       ...(structuredOutput === null
         ? {}
         : { schema: answerSchema(structuredOutput) }),
     });
     return structuredOutput === null ? answer.text : answer.output;
   } catch (error) {
+    // Stopped before it was sent, as a run's attempt was let go of: said
+    // so, whatever the gateway made of the stop.
+    caller.requireHolds?.();
     throw refusalOf(error);
   }
 };

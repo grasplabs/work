@@ -149,6 +149,15 @@ export interface BindingCaller {
    * there gets the held action back instead, so none is needed.
    */
   readonly held?: (key: string) => void;
+  /**
+   * For a workflow run's call: throws, synchronously, once the run's
+   * step attempt no longer holds its lease. An adapter runs it last
+   * before its side effect leaves core (connect's call, the provider
+   * request), with nothing awaited in between, so a cancel landing while
+   * it prepared the request stops it. A screen's or agent's call has its
+   * gate (`authorize`) only.
+   */
+  readonly requireHolds?: () => void;
 }
 
 /** A declaration of one kind, as an adapter is given it. */

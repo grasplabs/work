@@ -63,6 +63,7 @@ import {
   idempotencyKeySchema,
   submissionErrors,
 } from "@grasp-os/shared/submissions";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
@@ -1187,6 +1188,11 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   }
   if (code === "permission.denied") {
     return hostError(operationErrors.create("resource.unavailable"));
+  }
+  // A workflow run's attempt let go of before the request left core
+  // (`BindingCaller.requireHolds`): nothing was sent.
+  if (code === "execution.stale_attempt") {
+    return hostError(executionErrors.create("execution.stale_attempt"));
   }
   // What a binding's adapter, core's own code, says of a request it
   // refused or couldn't complete, each in the operation host's own words.

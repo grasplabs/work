@@ -142,6 +142,17 @@ export const draft = action({
   handler: async (ctx, args) => await ctx.resources.writer.generate({ prompt: args.prompt }),
 });
 
+/** Asks the model once, then fails in a way nobody expected. */
+export const flaky = action({
+  args: {},
+  returns: v.string(),
+  uses: [writer],
+  handler: async (ctx) => {
+    await ctx.resources.writer.generate({ prompt: "Hi" });
+    throw new Error("Something broke");
+  },
+});
+
 /** Two requests in one call; says how the second ended. */
 export const twice = action({
   args: {},
@@ -159,14 +170,14 @@ export const twice = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { draft, secret, twice, writer } from "./operations/assist.ts";
+import { draft, flaky, secret, twice, writer } from "./operations/assist.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Assistant",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { assist: { draft, twice } },
+  operations: { assist: { draft, twice, flaky } },
   internalOperations: { hidden: { secret } },
   screens: [],
   uses: [writer],
@@ -1084,6 +1095,91 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       first: { ok: true, value: "Costly." },
       second: "resource.budget_exhausted",
       screen: { ok: true, value: "For the screen." },
+      asked: 2,
+    });
+  });
+
+  it("send nothing through connect for an attempt let go of while the request was signed", async () => {
+    const subject = `Invoice ${crypto.randomUUID()}`;
+    const mailer = await mailerApp(sleeper);
+    const run = await mailer.builder.api.workflows.start(mailer.app, "sleeper");
+    await sleeping(run.id, "go");
+    const lease = { holds: true };
+    // The binding's grant is read as it is resolved, then the permission
+    // again as the call is signed: the lease goes during the signing.
+    const { env: racing } = callEnv([], {
+      db: racingRead("permissions", 2, () => {
+        lease.holds = false;
+      }),
+    });
+    const result = await callRunFunction(
+      racing,
+      stepOf({ ...mailer, runId: run.id }, lease),
+      send,
+      { subject },
+      `step:${crypto.randomUUID()}`
+    );
+    expect({
+      failed: result.ok ? null : result.error.code,
+      sent: await sentCount(subject),
+    }).toStrictEqual({ failed: "execution.stale_attempt", sent: 0 });
+  });
+
+  it("send no provider request for an attempt let go of while the gateway admitted it", async () => {
+    const asleep = await sleepingRun(modelFiles());
+    await bindWriter(asleep.admin, asleep.app);
+    const lease = { holds: true };
+    // The gateway's rules read the run as they judge the request, after
+    // the binding was resolved and before the request is sent.
+    const { gateway, env: racing } = callEnv([answer("Never sent.")], {
+      db: racingRead("workflow_runs", 1, () => {
+        lease.holds = false;
+      }),
+    });
+    const result = await callRunFunction(
+      racing,
+      stepOf(asleep, lease),
+      draft,
+      { prompt: "Hi" },
+      `step:${crypto.randomUUID()}`
+    );
+    expect({
+      failed: result.ok ? null : result.error.code,
+      asked: gateway.requests.length,
+    }).toStrictEqual({ failed: "execution.stale_attempt", asked: 0 });
+  });
+
+  it("retry a step that throws a function's failed answer as it came, when trying again may fix it", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const app = await appWith(builder, {
+      ...modelFiles(),
+      ...callingWorkflow(
+        "assist",
+        [
+          {
+            name: "flaky",
+            reference: { contractId: "assist.flaky", kind: "action" },
+            input: {},
+            // As the SDK says to: the answer's error, thrown as it is.
+            after: "if (!answered[0].ok) throw answered[0].error;",
+          },
+        ],
+        { options: `retries: { limit: 1, delay: "1 second" }` }
+      ),
+    });
+    await bindWriter(admin, app);
+    const gateway = gatewayAnswering(answer("One."), answer("Two."));
+    const run = await builder.api.workflows.start(app, "assist");
+    const ended = await endedRun(admin, run.id);
+    expect({
+      status: ended.status,
+      code: ended.failure?.error.code,
+      // Each attempt asked once before its function failed.
+      asked: gateway.requests.length,
+    }).toStrictEqual({
+      status: "failed",
+      code: "internal.unexpected",
       asked: 2,
     });
   });

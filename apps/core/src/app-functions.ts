@@ -742,6 +742,7 @@ export const runInvocationFor = async (
     sources: invocationSources(),
     actor: runActorOf(run),
     held,
+    requireHolds,
   });
   return {
     principal: authority.onBehalfOf,

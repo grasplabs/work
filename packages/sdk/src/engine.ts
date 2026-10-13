@@ -65,8 +65,13 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  * the function's generated reference, or just `{ contractId, kind }`. It
  * runs in the release of the version the run is pinned to, as the run,
  * and answers what the function answered or why it failed, as data:
- * `{ ok: true, value }` or `{ ok: false, error }` (throw `error.code`
- * yourself to fail or retry the step). Each call's key is the step's and
+ * `{ ok: true, value }` or `{ ok: false, error }`, where `error` has the
+ * failure's `code`, `message` and `retryable`. To fail the step with it,
+ * throw it as it is: `if (!answered.ok) throw answered.error;`. It keeps
+ * its code, so a failure trying again may fix (`resource.budget_busy`,
+ * `internal.unexpected`) is retried as the step's retries allow, and any
+ * other fails the step at once; a thrown code alone (a string) is never
+ * retried. Each call's key is the step's and
  * its place among the step's calls of `callFunction`: two calls in one
  * step each do what they do, and the step run again, calling in the same
  * order, makes the same calls, so their mutations and resource requests

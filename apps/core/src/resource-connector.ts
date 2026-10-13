@@ -371,6 +371,10 @@ const callAction = async (
       },
       { action: action.raw.tool, idempotencyKey: context.idempotencyKey }
     );
+    // Last, after the permission's reads and the signing, with nothing
+    // awaited before the call leaves: a run's attempt let go of meanwhile
+    // sends nothing (`BindingCaller.requireHolds`).
+    caller.requireHolds?.();
     answered = await env.CONNECT.call({ capability, ...scope, input: sent });
   } catch (error) {
     // A run's side effect, held for its person: connect answers a run
