@@ -53,6 +53,7 @@ import {
 import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
 import type { Admitted } from "../dependencies/requests.ts";
+import { requireBoundedHere } from "../sandboxed.ts";
 import { windowedAccessEnd } from "../screen-frame.ts";
 import { packageArtifactAddress } from "./address.ts";
 import { clearBuildCleanup, recordCleanup } from "./cleanup-records.ts";
@@ -1059,6 +1060,10 @@ export const buildDependencies = async (
   by: Acting,
   input: unknown
 ): Promise<PackageBuild> => {
+  // As in resolveDependencies (resolve.ts): nothing bounds the package
+  // builder on plain workerd yet, so it runs only where
+  // `requireBoundedHere` allows, refused before any tarball is fetched.
+  requireBoundedHere(env, "the package builder");
   const asked = dependencyErrors.parse(
     "dependency.invalid",
     packageBuildRequestSchema,

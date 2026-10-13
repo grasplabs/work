@@ -1,7 +1,8 @@
 /**
  * On plain workerd, where no sandbox bounds them and the deployment hasn't
  * set `SANDBOX_IN_PROCESS=unbounded`, core refuses to load a workflow's run
- * or an App's server object (apps/core/test/workerd/unbounded-worker.ts):
+ * or an App's server object, or to start the screen compiler or the
+ * package builder (apps/core/test/workerd/unbounded-worker.ts):
  * a bound `SANDBOX_HOST` doesn't allow them, as nothing runs them there.
  */
 import path from "node:path";
@@ -64,6 +65,24 @@ describe("App code no sandbox bounds, on plain workerd", () => {
     const refused = await refusal("preview");
     expect(refused).toContain("SandboxUnavailableError");
     expect(refused).toContain("No sandbox bounds a draft's preview here yet");
+  });
+
+  it("refuses to compile an App's screens", async () => {
+    const refused = await refusal("screens");
+    expect(refused).toContain("SandboxUnavailableError");
+    expect(refused).toContain("No sandbox bounds the screen compiler here yet");
+  });
+
+  it("refuses to resolve or build an App's packages", async () => {
+    const refused = [await refusal("resolve"), await refusal("build")];
+    expect(refused).toStrictEqual([
+      expect.stringContaining(
+        "SandboxUnavailableError: No sandbox bounds the package builder here yet"
+      ),
+      expect.stringContaining(
+        "SandboxUnavailableError: No sandbox bounds the package builder here yet"
+      ),
+    ]);
   });
 
   it("refuses to load an App's server object, which a workflow's step calls", async () => {

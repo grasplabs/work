@@ -5,7 +5,7 @@
  * the sandbox supervisor's socket, as on-prem binds it.
  */
 import { execFileSync } from "node:child_process";
-import { readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { serveOnWorkerd, tempDir } from "./workerd-test-server.ts";
@@ -50,17 +50,28 @@ const bundle = (out: string, worker: string): string[] => {
   ];
 };
 
-/** Serves `worker` with `SANDBOX_HOST` at `socket`, and answers its URL. */
+/**
+ * Serves `worker` with `SANDBOX_HOST` at `socket`, and answers its URL:
+ * `bindings` as text bindings, and `files` as text bindings of the files'
+ * contents (too large to write into the config itself).
+ */
 export const serveStandIn = async (
   worker: string,
   socket: string,
-  bindings: Readonly<Record<string, string>> = {}
+  bindings: Readonly<Record<string, string>> = {},
+  files: Readonly<Record<string, string>> = {}
 ): Promise<string> => {
   const out = tempDir();
   const modules = bundle(out, worker);
-  const texts = Object.entries(bindings).map(
-    ([name, value]) => `(name = "${name}", text = "${value}")`
-  );
+  const texts = [
+    ...Object.entries(bindings).map(
+      ([name, value]) => `(name = "${name}", text = "${value}")`
+    ),
+    ...Object.entries(files).map(([name, file]) => {
+      copyFileSync(file, path.join(out, `${name}.txt`));
+      return `(name = "${name}", text = embed "${name}.txt")`;
+    }),
+  ];
   const served = await serveOnWorkerd(
     out,
     (address) => `using Workerd = import "/workerd/workerd.capnp";

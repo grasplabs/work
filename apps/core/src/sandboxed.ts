@@ -68,6 +68,16 @@ export interface SandboxedWorker {
 /** The sandbox didn't answer, or can't run here: nothing the App's code did. */
 export class SandboxUnavailableError extends Error {
   override name = "SandboxUnavailableError";
+  /**
+   * The status the sandbox host refused with, where it refused (503: no
+   * room in its pool, or no process free in time); undefined otherwise.
+   */
+  readonly status: number | undefined;
+
+  constructor(message: string, options?: ErrorOptions & { status?: number }) {
+    super(message, options);
+    this.status = options?.status;
+  }
 }
 
 /** The call's deadline: {@link sandboxDeadlineMs}, or less where tests set it. */
