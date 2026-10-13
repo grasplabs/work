@@ -709,7 +709,7 @@ export const loadServer = async (
   // On-prem, nothing bounds an App's server object (a facet of core's own
   // Loader, which the sandbox can't host): refused unless the deployment
   // says that's fine, until GRA-500 moves Apps onto sealed functions.
-  requireBoundedHere(env, "An App's server object");
+  requireBoundedHere(env, "an App's server object");
   const files = await versionFiles(env, app, version);
   const build = await buildServer(env, files);
   if (!build.ok) {

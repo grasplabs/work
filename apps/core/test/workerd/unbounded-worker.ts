@@ -7,7 +7,12 @@ import {
 
 import { loadServer } from "../../src/app.ts";
 import { loadPreview } from "../../src/preview.ts";
-import { declaredParams, loadRun } from "../../src/workflows/code.ts";
+import {
+  declaredParams,
+  dryRunTests,
+  loadRun,
+  workflowTestFailures,
+} from "../../src/workflows/code.ts";
 
 // A workflow's run and metadata, a draft's preview and an App's server
 // object on plain workerd with no
@@ -48,6 +53,32 @@ export default {
               appIdSchema.parse(crypto.randomUUID()),
               1,
               workflowIdSchema.parse("intake"),
+              {}
+            )
+        )
+      );
+    }
+    if (pathname === "/tests") {
+      return new Response(
+        await refusal(
+          async () =>
+            await workflowTestFailures(env, 1, {
+              "workflows/intake.ts": "export default {};",
+              "workflows/intake.workflow-tests.ts": "export default {};",
+            })
+        )
+      );
+    }
+    if (pathname === "/dry-run") {
+      return new Response(
+        await refusal(
+          async () =>
+            await dryRunTests(
+              env,
+              appIdSchema.parse(crypto.randomUUID()),
+              1,
+              workflowIdSchema.parse("intake"),
+              {},
               {}
             )
         )

@@ -178,7 +178,7 @@ export const requireBoundedHere = (
     env.SANDBOX_IN_PROCESS !== "unbounded"
   ) {
     throw new SandboxUnavailableError(
-      `${what} runs App code that no sandbox bounds here yet, not even with SANDBOX_HOST bound: run on Cloudflare, or set SANDBOX_IN_PROCESS=unbounded to accept that nothing bounds it.`
+      `No sandbox bounds ${what} here yet, not even with SANDBOX_HOST bound: run on Cloudflare, or set SANDBOX_IN_PROCESS=unbounded to accept that nothing bounds it.`
     );
   }
 };

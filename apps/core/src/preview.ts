@@ -47,7 +47,7 @@ export const loadPreview = async (
 ): Promise<DurableObjectClass> => {
   // On-prem, nothing bounds a draft's server object (a facet of core's own
   // Loader): refused unless the deployment says that's fine (GRA-501).
-  requireBoundedHere(env, "A draft's preview");
+  requireBoundedHere(env, "a draft's preview");
   const files = Object.fromEntries(await draftFiles(env, app, draft));
   const build = await buildServer(env, files);
   if (!build.ok) {

@@ -35,32 +35,42 @@ describe("App code no sandbox bounds, on plain workerd", () => {
   it("refuses to load a workflow's run", async () => {
     const refused = await refusal("run");
     expect(refused).toContain("SandboxUnavailableError");
-    expect(refused).toContain(
-      "A workflow's run runs App code that no sandbox bounds here yet"
-    );
+    expect(refused).toContain("No sandbox bounds a workflow's run here yet");
   });
 
   it("refuses to read a workflow's metadata", async () => {
     const refused = await refusal("metadata");
     expect(refused).toContain("SandboxUnavailableError");
     expect(refused).toContain(
-      "A workflow's metadata runs App code that no sandbox bounds here yet"
+      "No sandbox bounds a workflow's metadata here yet"
+    );
+  });
+
+  it("refuses to run a workflow's tests", async () => {
+    const refused = await refusal("tests");
+    expect(refused).toContain("SandboxUnavailableError");
+    expect(refused).toContain("No sandbox bounds a workflow's tests here yet");
+  });
+
+  it("refuses to dry-run a workflow's tests", async () => {
+    const refused = await refusal("dry-run");
+    expect(refused).toContain("SandboxUnavailableError");
+    expect(refused).toContain(
+      "No sandbox bounds a workflow's dry runs here yet"
     );
   });
 
   it("refuses to load a draft's preview", async () => {
     const refused = await refusal("preview");
     expect(refused).toContain("SandboxUnavailableError");
-    expect(refused).toContain(
-      "A draft's preview runs App code that no sandbox bounds here yet"
-    );
+    expect(refused).toContain("No sandbox bounds a draft's preview here yet");
   });
 
   it("refuses to load an App's server object, which a workflow's step calls", async () => {
     const refused = await refusal("app");
     expect(refused).toContain("SandboxUnavailableError");
     expect(refused).toContain(
-      "An App's server object runs App code that no sandbox bounds here yet"
+      "No sandbox bounds an App's server object here yet"
     );
   });
 });

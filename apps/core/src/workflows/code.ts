@@ -502,7 +502,7 @@ export interface RunCode {
 export const loadRun = (env: Env, { version, workflow, files }: RunCode) => {
   // On-prem, nothing bounds a run's isolate yet: refused unless the
   // deployment says that's fine (GRA-501).
-  requireBoundedHere(env, "A workflow's run");
+  requireBoundedHere(env, "a workflow's run");
   return env.LOADER.get(null, async () => ({
     ...workflowSandbox,
     mainModule: runModule,
@@ -551,7 +551,7 @@ const declaredMetadata = async (
   id: WorkflowId,
   files: AppFiles
 ): Promise<{ params?: unknown; triggers?: unknown }> => {
-  requireBoundedHere(env, "A workflow's metadata");
+  requireBoundedHere(env, "a workflow's metadata");
   const code = env.LOADER.get(
     `workflow-metadata:${app}:${version}:${id}:${compilerVersion}`,
     async () => ({
@@ -633,7 +633,7 @@ const testFailures = async (
   modules: Record<string, string>,
   calls: string
 ): Promise<string[]> => {
-  requireBoundedHere(env, "A workflow's tests");
+  requireBoundedHere(env, "a workflow's tests");
   const tests = env.LOADER.get(null, () => ({
     ...workflowSandbox,
     mainModule: testsModule,
@@ -692,7 +692,7 @@ export const dryRunTests = async (
    */
   { draft = false }: { draft?: boolean } = {}
 ): Promise<DryRuns> => {
-  requireBoundedHere(env, "A workflow's dry runs");
+  requireBoundedHere(env, "a workflow's dry runs");
   const calls = callsOf(files, id);
   const code = env.LOADER.get(
     draft
@@ -741,6 +741,7 @@ export const workflowTestFailures = async (
   if (ids.length === 0) {
     return [];
   }
+  requireBoundedHere(env, "a workflow's tests");
   const modules = await modulesOf(env, version, files);
   const failures: string[] = [];
   for (const id of ids) {
