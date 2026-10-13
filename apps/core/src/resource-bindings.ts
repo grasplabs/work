@@ -28,7 +28,7 @@ import type {
   ResourceBinding,
   ResourceBindingsReview,
 } from "@grasp-os/shared/resource-bindings";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -505,10 +505,9 @@ export const listResourceBindings = async (
   by: Identity,
   app: unknown
 ): Promise<ResourceBinding[]> => {
-  const found =
-    isAdmin(by.role) && !by.staff
-      ? await findApp(env, app)
-      : await appFor(env, by, app, "builder");
+  const found = isMemberAdmin(by)
+    ? await findApp(env, app)
+    : await appFor(env, by, app, "builder");
   const rows = await drizzle(env.DB)
     .select()
     .from(appResourceBindings)
@@ -882,7 +881,7 @@ export const reviewResourceBindings = async (
   /** How many times it may ask connect; only a test sets it lower. */
   contractAsksMax = reviewContractAsksMax
 ): Promise<ResourceBindingsReview> => {
-  const decides = isAdmin(by.role) && !by.staff;
+  const decides = isMemberAdmin(by);
   const found = decides
     ? await findApp(env, app)
     : await appFor(env, by, app, "builder");
@@ -1006,10 +1005,12 @@ const notServed = () => operationErrors.create("resource.unavailable");
  * binding would still serve it now, exactly as a live request of the App's
  * current version would resolve it (`resourceBindingsFor`): the binding is
  * the same one and still active, the current release declares exactly
- * what was approved and an action of it uses the alias, its target still serves exactly the contract pinned,
- * and that contract still names the call's tool. A binding revoked or
- * replaced since, a version that widened the declaration, a drifted
- * contract or a lost grant: `resource.unavailable`, and nothing runs.
+ * what was approved and an action of it uses the alias, the binding
+ * resolves as a live request's would (its target serving exactly the
+ * contract pinned, its budget readable), and that contract still names
+ * the call's tool. A binding revoked or replaced since, a version that
+ * widened the declaration, a drifted contract, a damaged budget or a lost
+ * grant: `resource.unavailable`, and nothing runs.
  */
 export const requireHeldBinding = async (
   env: Env,
@@ -1042,7 +1043,6 @@ export const requireHeldBinding = async (
   const declaration = Object.hasOwn(release.app.resources, row.alias)
     ? release.app.resources[row.alias]
     : undefined;
-  const target = bindingTargetSchema.safeParse(JSON.parse(row.target));
   // As a live request needs: an action of the current release lists the
   // alias in its `uses`, so a version that keeps the declaration but no
   // longer uses it runs nothing through it.
@@ -1053,19 +1053,16 @@ export const requireHeldBinding = async (
         (use) => use.type === "resource" && use.alias === row.alias
       )
   );
-  if (
-    declaration === undefined ||
-    !target.success ||
-    !used ||
-    (await declarationHash(declaration)) !== row.declarationHash
-  ) {
+  if (declaration === undefined || !used) {
     throw notServed();
   }
-  const served = await boundBy(env, found.id, declaration, target.data);
+  // Resolved as a live request resolves it (`resolved`): its kind, target,
+  // declaration, budget and contract, all as now. Then what only a held
+  // call needs: its contract still names the call's tool.
+  const resolution = await resolved(env, found.id, declaration, row);
   if (
-    served?.contractId !== row.contractId ||
-    served.fingerprint !== row.fingerprint ||
-    served.tools?.includes(tool) !== true
+    resolution.state !== "served" ||
+    resolution.served.tools?.includes(tool) !== true
   ) {
     throw notServed();
   }

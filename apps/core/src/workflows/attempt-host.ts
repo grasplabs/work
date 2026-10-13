@@ -45,13 +45,6 @@ export type AttemptFenceCheck = (
 ) => Promise<Settled<never> | undefined>;
 
 /**
- * `calls`, each fenced: refused before it runs once its attempt no longer
- * holds, and again as it returns, so what it read or got never leaves the
- * host for an attempt the engine let go of meanwhile, whatever the call
- * awaited on the way. Every entry of `calls` is wrapped, so a call added
- * to `AttemptCalls` is fenced without anyone remembering to.
- */
-/**
  * Each call of `AttemptCalls`, by the label a refusal of it is audited
  * with. A mapped type over `AttemptCalls`: a call added there and missing
  * here doesn't compile, and `fenced` wraps every call listed here.
@@ -74,6 +67,13 @@ const attemptCallNames = Object.keys(attemptCallLabels).filter(
   (name): name is keyof AttemptCalls => Object.hasOwn(attemptCallLabels, name)
 );
 
+/**
+ * `calls`, each fenced: refused before it runs once its attempt no longer
+ * holds, and again as it returns, so what it read or got never leaves the
+ * host for an attempt the engine let go of meanwhile, whatever the call
+ * awaited on the way. Every entry of `calls` is wrapped, so a call added
+ * to `AttemptCalls` is fenced without anyone remembering to.
+ */
 const fenced = (
   calls: AttemptCalls,
   check: AttemptFenceCheck

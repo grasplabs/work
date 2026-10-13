@@ -1192,6 +1192,7 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   // refused or couldn't complete, each in the operation host's own words.
   if (
     code === "resource.unavailable" ||
+    code === "resource.not_allowed" ||
     code === "resource.budget_exhausted" ||
     code === "resource.awaiting_confirmation" ||
     code === "resource.item_not_found" ||

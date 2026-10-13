@@ -13,6 +13,15 @@ import { appStatisticSteps } from "./db/core/schema.ts";
 // engine can't import.
 
 /**
+ * That run `?4` hasn't ended, as the statement runs: a run's end forgets
+ * its steps' points in the write that ends it (`stepStatisticsForgotten`),
+ * so a step completing after that adds up nothing and leaves no marker,
+ * whichever write comes first.
+ */
+const unendedRun =
+  "SELECT 1 FROM workflow_runs r WHERE r.id = ?4 AND r.ended_at IS NULL";
+
+/**
  * Adds up the points attempt `attempt` of the step `stepKey` recorded, in
  * every App whose methods recorded them, as the step completes: added to
  * their days' rows, with the step's marker (a row of no App and no
@@ -30,15 +39,6 @@ import { appStatisticSteps } from "./db/core/schema.ts";
  * the new rows the points would make, in the order of their measure and
  * dimensions, those past the bound are left out.
  */
-/**
- * That run `?4` hasn't ended, as the statement runs: a run's end forgets
- * its steps' points in the write that ends it (`stepStatisticsForgotten`),
- * so a step completing after that adds up nothing and leaves no marker,
- * whichever write comes first.
- */
-const unendedRun =
-  "SELECT 1 FROM workflow_runs r WHERE r.id = ?4 AND r.ended_at IS NULL";
-
 export const commitStepStatistics = async (
   env: Env,
   runId: string,

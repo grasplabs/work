@@ -5,6 +5,7 @@ import { defineErrorFamily } from "./errors.ts";
 import { connectionIdSchema, identifierSchema } from "./ids.ts";
 import type { AppId, RunId, WorkflowId } from "./ids.ts";
 import type { Json } from "./json.ts";
+import { isRetryableCode } from "./operations.ts";
 import { permissionActionSchema } from "./permissions.ts";
 
 // A workflow is code in an App (`workflows/<id>.ts`), written with the
@@ -378,27 +379,34 @@ export const runOfStepKey = (key: string): string | undefined => {
 };
 
 /**
- * Codes of the failures trying again may fix, and can't make happen twice.
- * A connection's server that took nothing (it turned the call away, or its
- * native connector said nothing was done); a call with the same
- * idempotency key still running, whose answer a retry gets; a model call
- * that failed, or that the model budget turned away only while other calls
- * under way hold it (nothing was sent), a model binding's too; something unplanned in the
- * platform, where connect's idempotency keys keep a retried side effect to
- * once; and a model's answer that didn't fit, which the SDK asks for
- * again. Any other failure stops the run: a refusal, a tool's own error (it
- * may have acted), a call whose outcome is unknown (an App method that
- * timed out, too), or an error the workflow's code throws.
+ * Codes of the failures trying again may fix, and can't make happen twice,
+ * beside every platform code an App's function may answer that is worth
+ * trying again unchanged (`isRetryableCode`, operations.ts): one list, so
+ * a step retries what a caller of the function would. A connection's
+ * server that took nothing (it turned the call away, or its native
+ * connector said nothing was done); a call with the same idempotency key
+ * still running, whose answer a retry gets; a model call that failed, or
+ * that the model budget turned away only while other calls under way hold
+ * it (nothing was sent); something unplanned in the platform, where
+ * connect's idempotency keys keep a retried side effect to once; and a
+ * model's answer that didn't fit, which the SDK asks for again. Any other
+ * failure stops the run: a refusal, a tool's own error (it may have
+ * acted), a call whose outcome is unknown (an App method that timed out,
+ * too), or an error the workflow's code throws.
  */
-const retryableCodes: ReadonlySet<unknown> = new Set([
+const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "connect.server_unavailable",
   "connect.call_in_progress",
   "model.failed",
   "model.budget_busy",
-  "resource.budget_busy",
   "internal.unexpected",
   "workflow.invalid_model_output",
 ]);
+
+/** Whether `code` is one trying a step again may fix. */
+const retryableCode = (code: unknown): boolean =>
+  workflowRetryableCodes.has(code) ||
+  (typeof code === "string" && isRetryableCode(code));
 
 /**
  * Whether a step that failed with `error` may be tried again, as far as its
@@ -409,7 +417,7 @@ const retryableCodes: ReadonlySet<unknown> = new Set([
 export const isRetryable = (error: unknown): boolean =>
   typeof error === "object" &&
   error !== null &&
-  (("code" in error && retryableCodes.has(error.code)) ||
+  (("code" in error && retryableCode(error.code)) ||
     ("name" in error && error.name === "TimeoutError"));
 
 /**
