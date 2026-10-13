@@ -300,22 +300,35 @@ export const sandboxVerdictOf = (error: unknown): string | undefined =>
 const verdictWaitMs = 1000;
 const verdictPollMs = 100;
 
-/** What the supervisor blamed the App for in session `id`, if anything. */
+/**
+ * What the supervisor says of session `id`: what it blamed the App for, or
+ * else whether the session still runs (`running`) or is ending with its
+ * verdict yet to come (`ending`); nothing it could say for sure otherwise.
+ */
 const verdictOf = async (
   host: Fetcher,
   id: string
-): Promise<Verdict | undefined> => {
+): Promise<{ verdict?: Verdict; state?: "running" | "ending" }> => {
   try {
     const response = await host.fetch(`http://sandbox/verdict/${id}`, {
       signal: AbortSignal.timeout(backstopMs),
     });
     if (response.status !== 200) {
       await response.body?.cancel();
-      return undefined;
+      return {};
     }
-    return verdictSchema(await response.json());
+    const body: unknown = await response.json();
+    const verdict = verdictSchema(body);
+    if (verdict !== undefined) {
+      return { verdict };
+    }
+    const state =
+      typeof body === "object" && body !== null && "state" in body
+        ? body.state
+        : undefined;
+    return state === "running" || state === "ending" ? { state } : {};
   } catch {
-    return undefined;
+    return {};
   }
 };
 
@@ -488,16 +501,18 @@ const failureOf = async (
   // Asked before trusting an open socket: the supervisor keeps its verdict
   // before it closes core's end, but a broken session (a process killed
   // mid-call, or one whose isolate failed the call as its process exits)
-  // can reject the call first. So it's asked again for a moment, until
-  // the socket closes (then once more, which settles it) or
-  // `verdictWaitMs` passes: only then is the error the App's own.
+  // can reject the call first. A session the supervisor says still runs
+  // threw it itself, at once. One it says is ending, or one it can't say
+  // of, is asked again for a moment, until the socket closes (then once
+  // more, which settles it) or `verdictWaitMs` passes.
   let verdict: Verdict | undefined;
   for (let asked = 0; asked <= verdictWaitMs / verdictPollMs; asked += 1) {
     const closedBefore = isClosed();
     // In order: each ask follows the wait after the one before.
     // oxlint-disable-next-line no-await-in-loop
-    verdict = await verdictOf(host, id);
-    if (verdict !== undefined || closedBefore) {
+    const said = await verdictOf(host, id);
+    ({ verdict } = said);
+    if (verdict !== undefined || closedBefore || said.state === "running") {
       break;
     }
     // oxlint-disable-next-line no-await-in-loop

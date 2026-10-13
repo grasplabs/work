@@ -185,6 +185,46 @@ describe("a session on the on-prem sandbox", () => {
     }
   };
 
+  /** What `GET /verdict/<id>` answers: its status and body. */
+  const verdictAnswer = async (
+    id: string
+  ): Promise<{ status: number; body: unknown }> => {
+    const asked = httpRequest({
+      socketPath: supervisor.socket,
+      path: `/verdict/${id}`,
+    });
+    asked.end();
+    const answered: unknown[] = await once(asked, "response");
+    const response = answered.at(0);
+    if (!(response instanceof IncomingMessage)) {
+      throw new TypeError("The verdict got no answer");
+    }
+    let text = "";
+    for await (const chunk of response) {
+      text += String(chunk);
+    }
+    return { status: response.statusCode ?? 0, body: JSON.parse(text) };
+  };
+
+  it("says a live session with no verdict is running, so core takes its error as the App's at once, and knows no other", async () => {
+    const id = crypto.randomUUID();
+    const opened = await rawOpen(id);
+    try {
+      expect(opened.status).toBe(101);
+      await expect(verdictAnswer(id)).resolves.toStrictEqual({
+        status: 200,
+        body: { verdict: null, state: "running" },
+      });
+      await expect(verdictAnswer(crypto.randomUUID())).resolves.toStrictEqual({
+        status: 404,
+        body: { verdict: null },
+      });
+    } finally {
+      await endRaw(id);
+      opened.socket?.destroy();
+    }
+  });
+
   it("cancels a parent's child as the parent ends, and frees its process", async () => {
     const parent = crypto.randomUUID();
     const child = crypto.randomUUID();

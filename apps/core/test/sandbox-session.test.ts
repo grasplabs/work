@@ -182,34 +182,46 @@ describe("a call in a session that stays open for what it nested", () => {
   });
 });
 
+/** How a test's supervisor speaks of a session whose call failed. */
+type Said =
+  /** Its process is ending; its verdict is kept `afterMs` after core first asks, or never. */
+  | { state: "ending"; afterMs?: number }
+  /** It still runs: the App's code threw. */
+  | { state: "running" };
+
 /**
- * A sandbox host whose isolate fails its call as its process dies: the
- * call's error reaches core over a socket still open, and the supervisor
- * keeps its verdict `verdictAfterMs` after core first asks for it (it
- * waits for the process to exit before it judges), or never.
+ * A sandbox host whose isolate fails its call: the call's error reaches
+ * core over a socket still open, and the supervisor answers for the
+ * session as `said` says (it judges a crash only once its process has
+ * exited). Counts how often core asked.
  */
-const hostCrashingLate = (verdictAfterMs?: number): Fetcher => {
+const hostFailing = (said: Said) => {
   let firstAsked: number | undefined;
+  let asked = 0;
   const main = new SessionMain(() => {
     throw new Error("internal error; the isolate's process is exiting");
   });
-  return {
+  const verdictAnswer = (): Response => {
+    asked += 1;
+    firstAsked ??= Date.now();
+    if (
+      said.state === "ending" &&
+      said.afterMs !== undefined &&
+      Date.now() - firstAsked >= said.afterMs
+    ) {
+      return Response.json({
+        verdict: "crashed",
+        message: "The App's code crashed its sandbox.",
+      });
+    }
+    return Response.json({ verdict: null, state: said.state });
+  };
+  const host: Fetcher = {
     fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = new Request(input, init);
       const { pathname } = new URL(request.url);
       if (pathname.startsWith("/verdict/")) {
-        firstAsked ??= Date.now();
-        const kept =
-          verdictAfterMs !== undefined &&
-          Date.now() - firstAsked >= verdictAfterMs;
-        return await Promise.resolve(
-          kept
-            ? Response.json({
-                verdict: "crashed",
-                message: "The App's code crashed its sandbox.",
-              })
-            : new Response("{}", { status: 404 })
-        );
+        return await Promise.resolve(verdictAnswer());
       }
       if (pathname !== "/session") {
         return await Promise.resolve(new Response("{}", { status: 200 }));
@@ -229,6 +241,7 @@ const hostCrashingLate = (verdictAfterMs?: number): Fetcher => {
       throw new Error("Not a socket host");
     },
   };
+  return { host, asked: () => asked };
 };
 
 /** A call that fails on `host`: how it ended, and its verdict. */
@@ -254,17 +267,34 @@ const failedOn = async (host: Fetcher) => {
 };
 
 describe("a call that fails while its session looks open", () => {
-  it("is the sandbox's verdict when the supervisor keeps one a moment later", async () => {
-    await expect(failedOn(hostCrashingLate(300))).resolves.toStrictEqual({
+  it("is the sandbox's verdict when the supervisor, its process ending, keeps one a moment later", async () => {
+    const { host } = hostFailing({ state: "ending", afterMs: 300 });
+
+    await expect(failedOn(host)).resolves.toStrictEqual({
       message: "The App's code crashed its sandbox.",
       verdict: "crashed",
     });
   });
 
-  it("is the App's own error when the supervisor keeps no verdict", async () => {
-    await expect(failedOn(hostCrashingLate())).resolves.toStrictEqual({
+  it("is the App's own error when its process ends with no verdict kept", async () => {
+    const { host, asked } = hostFailing({ state: "ending" });
+
+    await expect(failedOn(host)).resolves.toStrictEqual({
       message: "internal error; the isolate's process is exiting",
       verdict: null,
     });
+    // Asked for the moment it waits, then no longer.
+    expect(asked()).toBe(11);
+  });
+
+  it("is the App's own error at once when the supervisor says its session still runs", async () => {
+    const { host, asked } = hostFailing({ state: "running" });
+
+    await expect(failedOn(host)).resolves.toStrictEqual({
+      message: "internal error; the isolate's process is exiting",
+      verdict: null,
+    });
+    // Asked once, with no wait for a verdict.
+    expect(asked()).toBe(1);
   });
 });
