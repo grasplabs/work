@@ -26,7 +26,7 @@ import type {
   WorkflowDuration,
   WorkflowStepConfig,
 } from "@grasp-os/workerflow/contracts";
-import { NonRetryableError } from "@grasp-os/workerflow/errors";
+import { namedError } from "@grasp-os/workerflow/errors";
 import type { AttemptLease } from "@grasp-os/workerflow/run";
 import { RpcTarget } from "cloudflare:workers";
 import { and, eq, sql } from "drizzle-orm";
@@ -659,16 +659,16 @@ export const settle = async <T>(run: () => Promise<T>): Promise<Settled<T>> => {
  * limit, a server that took nothing, a timeout); anything else is
  * non-retryable, and stops the run. The engine knows a non-retryable error
  * by its name, so it keeps that name; the step's own error is reported
- * from what the isolate sent (`do`).
+ * from what the isolate sent (`do`). Either keeps the error's code, which
+ * the engine journals with its attempt, so a run's history tells what
+ * failed by the same code the run's report does.
  */
-const toStepError = (error: StepError): Error => {
-  if (!isRetryable(error)) {
-    return new NonRetryableError(error.message);
-  }
-  const thrown = new Error(error.message);
-  thrown.name = error.name;
-  return thrown;
-};
+const toStepError = (error: StepError): Error =>
+  namedError(
+    isRetryable(error) ? error.name : "NonRetryableError",
+    error.message,
+    error.code
+  );
 
 /**
  * Fails a call of an attempt that had a call refused, with that refusal:

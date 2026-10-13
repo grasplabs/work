@@ -563,6 +563,113 @@ describe("the history observers are shown", () => {
   });
 });
 
+describe("the history a host reads", () => {
+  it("tells one step's attempts by its ordinal, which failure was its last and why, without any value of the run's", async () => {
+    const id = newId();
+    const secret = `secret-${id}`;
+    await workflow("retrying").create({
+      id,
+      params: {
+        secret,
+        fails: 3,
+        config: { retries: { limit: 1, delay: 0, backoff: "constant" } },
+      },
+    });
+    await ended("retrying", id);
+    const again = newId();
+    await workflow("orders").create({ id: again, params: { secret } });
+    await ended("orders", again);
+
+    const failing = await runObject("retrying", id).history({
+      after: 0,
+      limit: 500,
+    });
+    const steps = failing?.records.filter(({ step }) => step !== null) ?? [];
+    const ordinals = new Set(steps.map(({ step }) => step?.ordinal));
+    const done = await runObject("orders", again).history({
+      after: 0,
+      limit: 500,
+    });
+
+    expect(ordinals.size).toBe(1);
+    expect(
+      steps.map(({ type, attempt, final, error }) => ({
+        type,
+        attempt,
+        final,
+        error,
+      }))
+    ).toStrictEqual([
+      { type: "step_started", attempt: null, final: false, error: null },
+      { type: "attempt_started", attempt: 1, final: false, error: null },
+      {
+        type: "attempt_errored",
+        attempt: 1,
+        final: false,
+        error: { name: "FlakyError", message: "attempt 1 failed" },
+      },
+      { type: "attempt_started", attempt: 2, final: false, error: null },
+      {
+        type: "attempt_errored",
+        attempt: 2,
+        final: true,
+        error: { name: "FlakyError", message: "attempt 2 failed" },
+      },
+      {
+        type: "step_errored",
+        attempt: 2,
+        final: false,
+        error: { name: "FlakyError", message: "attempt 2 failed" },
+      },
+    ]);
+    expect(steps[0]?.step).toMatchObject({
+      name: "flaky",
+      occurrence: 1,
+      kind: "do",
+      eventType: null,
+    });
+    // The params and every step's result stay in the journal.
+    expect(JSON.stringify([failing, done])).not.toContain(secret);
+    expect(done?.records.length).toBeGreaterThan(0);
+  });
+
+  it("is read a page at a time from the last event ID the host has, none missed and none twice", async () => {
+    const id = newId();
+    await workflow("orders").create({ id });
+    await ended("orders", id);
+    const object = runObject("orders", id);
+
+    const whole = await object.history({ after: 0, limit: 500 });
+    const first = await object.history({ after: 0, limit: 3 });
+    const rest = await object.history({
+      after: first?.records.at(-1)?.eventId ?? 0,
+      limit: 500,
+    });
+
+    // A page holds at least one record, and never more than the bound.
+    const least = await object.history({ after: 0, limit: 0 });
+    const most = await object.history({ after: 0, limit: 10_000 });
+    const none = await runObject("orders", newId()).history({
+      after: 0,
+      limit: 1,
+    });
+
+    expect({
+      more: [first?.more, rest?.more],
+      joined: [...(first?.records ?? []), ...(rest?.records ?? [])],
+      least,
+      most,
+      none,
+    }).toStrictEqual({
+      more: [true, false],
+      joined: whole?.records,
+      least: { records: whole?.records.slice(0, 1), more: true },
+      most: whole,
+      none: undefined,
+    });
+  });
+});
+
 describe("subscribe", () => {
   it("refuses options it doesn't take, before it reaches the run", async () => {
     const id = newId();

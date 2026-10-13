@@ -244,6 +244,39 @@ describe("schedule triggers", () => {
     await expect(nextRunOf(app)).rejects.toThrow("has no schedule");
   });
 
+  it("show with their workflow as its current version registered them, to anyone with a role in the App", async () => {
+    const builder = await personApi("builder");
+    const user = await personApi("user");
+    const app = await appWith(builder, weekly());
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const due = await nextRunOf(app);
+
+    const scheduled = await user.api.workflows.get(app, "weekly");
+    // A version that starts it only by hand registers nothing to show.
+    await release(builder, app, weekly(`[{ type: "manual" }]`));
+    const manual = await user.api.workflows.get(app, "weekly");
+
+    expect({
+      scheduled: scheduled.triggers,
+      manual: manual.triggers,
+    }).toStrictEqual({
+      scheduled: [
+        {
+          type: "schedule",
+          param: "every",
+          timeZone: "Europe/Amsterdam",
+          nextRunAt: due.toISOString(),
+          stopped: false,
+        },
+      ],
+      manual: [],
+    });
+  });
+
   it("start afresh when their version is made current again, whatever it left behind", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, weekly());

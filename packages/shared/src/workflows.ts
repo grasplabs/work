@@ -522,6 +522,124 @@ export interface RunSummary {
 }
 
 /**
+ * A step's or a compensation's failure as a run's history shows it: its
+ * code, and its message only to those who see the run's details (admins,
+ * and the person it acts for); anyone else reads the code's own words.
+ */
+export interface RunHistoryError {
+  code: string;
+  message: string;
+}
+
+/**
+ * One entry of a run's history (core's workflows/history.ts), projected
+ * from the engine's journal, never guessed: what happened, in the order
+ * it happened (`sequence`, the engine's event ID), when (`at`, Unix
+ * milliseconds) and to which task (`taskId`, the step's name as its
+ * outline has it; null for the run's own). Metadata only: no input,
+ * output, parameter, reviewer or review. One logical step's retries are
+ * one `stepId`, its attempts numbered from 1; a replay adds nothing.
+ */
+export type RunHistoryEntry = {
+  id: string;
+  sequence: number;
+  taskId: string | null;
+  at: number;
+} & (
+  | {
+      kind: "lifecycle";
+      status: Exclude<RunSummary["status"], "compensating">;
+    }
+  | {
+      kind: "lifecycle";
+      status: "compensating";
+      cause: "failure" | "cancellation";
+      activity: "running" | "waiting" | "paused";
+    }
+  | {
+      kind: "step";
+      /** The logical step, the same for each of its attempts. */
+      stepId: string;
+      state: "started" | "completed" | "retrying";
+      attempt: number;
+    }
+  | {
+      kind: "step";
+      stepId: string;
+      state: "failed";
+      attempt: number;
+      error: RunHistoryError;
+    }
+  | {
+      kind: "wait";
+      /** A decision's ID for a decision; the step's own otherwise. */
+      waitId: string;
+      waitKind: "timer" | "event" | "decision";
+      state: "opened" | "closed";
+      deadline: number | null;
+    }
+  | {
+      kind: "compensation";
+      stepId: string;
+      state: "started" | "completed";
+      attempt: number;
+    }
+  | {
+      kind: "compensation";
+      stepId: string;
+      state: "failed";
+      attempt: number;
+      error: RunHistoryError;
+    }
+);
+
+/** Most entries one page of a run's history holds. */
+export const runHistoryMaxPageSize = 100;
+
+/** What `WorkflowsApi.history` reads: a page size, and where to go on from. */
+export const runHistoryPageSchema = z
+  .strictObject({
+    pageSize: z.int().min(1).max(runHistoryMaxPageSize).default(50),
+    /** The `nextCursor` of the page before; null for the first. */
+    cursor: z
+      .string()
+      .regex(/^[1-9]\d{0,15}$/u)
+      .nullable()
+      .default(null),
+  })
+  .default({ pageSize: 50, cursor: null });
+
+/** What `WorkflowsApi.history` reads. */
+export type RunHistoryPageQuery = z.input<typeof runHistoryPageSchema>;
+
+/**
+ * One page of a run's history, oldest first; the last page has no cursor.
+ * Empty once the run's details are removed.
+ */
+export type RunHistoryPage =
+  | { items: RunHistoryEntry[]; nextCursor: null; hasMore: false }
+  | { items: RunHistoryEntry[]; nextCursor: string; hasMore: true };
+
+/**
+ * A trigger of a workflow, as its App's current version registered it:
+ * read from that registration, which was checked as the version was made
+ * current, never from the workflow's code again.
+ */
+export type WorkflowTrigger =
+  | {
+      type: "schedule";
+      /** The schedule parameter it runs on. */
+      param: string;
+      timeZone: string;
+      /** ISO 8601; null while it has no next run. */
+      nextRunAt: string | null;
+      /** Its runs failed to start {@link maxFailedStarts} times in a row. */
+      stopped: boolean;
+    }
+  | { type: "email"; address: string }
+  | { type: "event"; event: string };
+
+/**
  * The receipt of a pause, resume or cancel of a run the host admitted:
  * `admitted` until the engine confirms it, then `applied`; `superseded`
  * when a cancel overtook it first.
@@ -690,7 +808,7 @@ const paramsStep = "$params";
  * `name:key` for a keyed step, `name#ask` for a part of a decision): step
  * names hold neither `:` nor `#`.
  */
-const outlineNameOf = (engineStep: string): string =>
+export const outlineNameOf = (engineStep: string): string =>
   engineStep.split(engineNameSeparator, 1)[0] ?? "";
 
 /**
@@ -812,6 +930,11 @@ export interface WorkflowDetail {
   steps:
     | { ok: true; outline: WorkflowOutline }
     | { ok: false; message: string };
+  /**
+   * What starts it by itself, in the order its code declares them, as the
+   * current version registered them; none for one started only by people.
+   */
+  triggers: WorkflowTrigger[];
   /**
    * Its parameters, for those who build the App; null for anyone else,
    * who neither sees nor sets them.
@@ -941,6 +1064,11 @@ export interface WorkflowsApi {
   ) => Promise<WorkflowRun>;
   /** A run as it is now. */
   status: (run: string) => Promise<WorkflowRun>;
+  /**
+   * A page of a run's history, oldest first, for anyone `status` shows the
+   * run to: what its engine journaled, step by step and attempt by attempt.
+   */
+  history: (run: string, page?: RunHistoryPageQuery) => Promise<RunHistoryPage>;
   /**
    * An App's runs, newest first; a failed one with its report for those
    * `status` shows it to.
