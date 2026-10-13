@@ -180,9 +180,19 @@ export const RunsLog = ({
             {runs.map((run) => (
               <TableRow key={run.id}>
                 <TableCell className="align-top" variant="card">
-                  <span className="text-muted-foreground tabular-nums">
+                  {/* The run's own page, with its step history. */}
+                  <Link
+                    aria-label={t`Run history, ${ph({ time: formatDateTime(run.createdAt) })}`}
+                    className="text-muted-foreground tabular-nums underline-offset-4 hover:underline"
+                    params={{
+                      app: run.app,
+                      workflow: run.workflow,
+                      run: run.id,
+                    }}
+                    to="/workflows/$app/$workflow/runs/$run"
+                  >
                     {formatDateTime(run.createdAt)}
-                  </span>
+                  </Link>
                 </TableCell>
                 {withWorkflow ? (
                   <TableCell className="align-top" variant="card">

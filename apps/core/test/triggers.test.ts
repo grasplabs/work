@@ -267,6 +267,7 @@ describe("schedule triggers", () => {
       scheduled: [
         {
           type: "schedule",
+          position: 0,
           param: "every",
           timeZone: "Europe/Amsterdam",
           nextRunAt: due.toISOString(),

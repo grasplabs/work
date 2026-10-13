@@ -644,9 +644,11 @@ export type RunHistoryPage =
 /**
  * A trigger of a workflow, as its App's current version registered it:
  * read from that registration, which was checked as the version was made
- * current, never from the workflow's code again.
+ * current, never from the workflow's code again. `position` is its place
+ * among the triggers the workflow's code declares, its own alone: two
+ * triggers alike in all else (one event, two filters) still differ in it.
  */
-export type WorkflowTrigger =
+export type WorkflowTrigger = { position: number } & (
   | {
       type: "schedule";
       /** The schedule parameter it runs on. */
@@ -658,7 +660,8 @@ export type WorkflowTrigger =
       stopped: boolean;
     }
   | { type: "email"; address: string }
-  | { type: "event"; event: string };
+  | { type: "event"; event: string }
+);
 
 /**
  * The receipt of a pause, resume or cancel of a run the host admitted:

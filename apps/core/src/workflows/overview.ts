@@ -724,6 +724,7 @@ const registeredTriggers = async (
           : [
               {
                 type: "schedule",
+                position: row.position,
                 param: row.param,
                 timeZone: row.timeZone ?? defaultTimeZone,
                 nextRunAt: row.nextRunAt?.toISOString() ?? null,
@@ -734,10 +735,12 @@ const registeredTriggers = async (
       case "email": {
         return row.address === null
           ? []
-          : [{ type: "email", address: row.address }];
+          : [{ type: "email", position: row.position, address: row.address }];
       }
       case "event": {
-        return row.event === null ? [] : [{ type: "event", event: row.event }];
+        return row.event === null
+          ? []
+          : [{ type: "event", position: row.position, event: row.event }];
       }
       default: {
         return row.type satisfies never;
