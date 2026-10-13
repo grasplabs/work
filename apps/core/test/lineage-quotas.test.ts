@@ -517,6 +517,36 @@ ${working("c", 10)}
     expect(result.waited).toBeGreaterThan(0);
   });
 
+  it("name the seconds to a hold's deadline when a busy lineage refuses, for an attempt that runs past what it holds", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await noopApp(builder);
+    const root = await builder.api.workflows.start(app, "noop");
+    await finished(root.id);
+    const lineage = { run: root.id, root: root.id };
+
+    const wait = await withQuotas({ workflowActiveMs: 50_000 }, async () => {
+      // Its deadline two minutes on: it holds a minute (an attempt's
+      // default wall time), and that minute is already over.
+      await admitAttempt(env, lineage, attemptOf("long", 120_000));
+      await env.DB.prepare(
+        "UPDATE run_lineage_attempts SET admitted_at = admitted_at - 61000 WHERE step_key = 'long'"
+      ).run();
+      const refusal = await admitAttempt(
+        env,
+        lineage,
+        attemptOf("waiting")
+      ).then(
+        () => null,
+        (error: unknown) => refusalSchema.parse(error)
+      );
+      return refusal?.details.retryAfterSeconds ?? 0;
+    });
+
+    // Until its deadline, not a second: its hold goes only as it settles.
+    expect(wait).toBeGreaterThan(110);
+    expect(wait).toBeLessThanOrEqual(120);
+  });
+
   it("admit no attempt past its deadline, nor one already settled, as it returned or as its time passed", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await noopApp(builder);

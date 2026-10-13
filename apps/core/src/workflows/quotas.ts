@@ -376,7 +376,11 @@ const minRetryAfterSeconds = 1;
 
 /**
  * The seconds until the first of the lineage of `root`'s attempts still
- * holding is past what it holds: at least {@link minRetryAfterSeconds}.
+ * holding reaches its deadline, when its hold is given back at the latest
+ * (an admission settles it then): at least {@link minRetryAfterSeconds}.
+ * What it holds is no sooner given back, since a hold goes only as it
+ * settles; one may settle earlier, which the host finds by asking again
+ * every few seconds at most (host.ts, `maxBusyWaitSeconds`).
  */
 const busyFor = async (
   db: DrizzleD1Database,
@@ -386,7 +390,7 @@ const busyFor = async (
   const held = runLineageAttempts;
   const soonest = await db
     .select({
-      ends: sql<number | null>`min(${held.admittedAt} + ${held.reservedMs})`,
+      ends: sql<number | null>`min(${held.deadline})`,
     })
     .from(held)
     .where(and(eq(held.rootRunId, root), isNull(held.settledAt)))
