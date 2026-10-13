@@ -45,7 +45,10 @@ interface __BaseEnv_Env {
    * `SANDBOX_IN_PROCESS` says so; anywhere else it refuses.
    */
   SANDBOX_HOST?: Fetcher;
-  /** Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts). */
+  /**
+   * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts)
+   * and an extraction on the sandbox host (src/knowledge/extract.ts).
+   */
   SANDBOX_DEADLINE_MS?: string;
   /**
    * `unbounded` where core may run untrusted isolates itself without

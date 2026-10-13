@@ -7,6 +7,12 @@ import { z } from "zod";
 
 import { deploymentStaysInEu } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
+import {
+  functionCapability,
+  runInSession,
+  sandboxVerdictOf,
+} from "../sandbox-session.ts";
+import { sessionHost } from "../sandboxed.ts";
 import { extractorAsset } from "./extractor/asset.ts";
 import type ExtractorWorker from "./extractor/worker.ts";
 
@@ -33,6 +39,30 @@ import type ExtractorWorker from "./extractor/worker.ts";
 // one stream inflates to gigabytes, an archive of millions of tags) kills
 // that isolate, and the upload fails for good as `upload.too_complex`;
 // core, and whatever else it runs, carry on.
+//
+// That holds where the runtime enforces the isolate's CPU limit. Plain
+// workerd (on-prem) ignores `cpuMs` and runs a process's requests on one
+// thread, so a Dynamic Worker core loads itself there holds all of core
+// while a parser spins. Threat model on-prem, and how each is closed:
+// - A file exhausts a parser (CPU or memory), or takes it over and loops.
+//   With `SANDBOX_HOST` bound, the extraction runs on the sandbox host in
+//   a session (sandbox-session.ts), as App code does: the supervisor kills
+//   its process past `extractorCpuMs` of CPU time, its memory cap or
+//   `extractorWallMs`, and the upload fails as `upload.too_complex`.
+//   Chosen over bounding it here (a size limit doesn't bound how long
+//   pdf.js may spin on a small file, and workerd has no worker threads)
+//   and over a mechanism of its own: the session already bounds an
+//   untrusted isolate's time, memory and answer.
+// - Extractions take every sandbox process, starving Apps (or Apps starve
+//   uploads). They run as one owner of their own, `platform:extractor`,
+//   which the supervisor holds to its per-owner share of the pool like any
+//   App; past it the extraction is busy and retried, never failed.
+// - A deployment off Cloudflare forgets `SANDBOX_HOST`, and parsers run in
+//   core unbounded again. Refused, as `sessionHost` refuses App code (the
+//   extractor unavailable, retried and then failed), unless the
+//   deployment accepts it with `SANDBOX_IN_PROCESS=unbounded`.
+// - The extractor's answer is the file's doing: checked here whichever
+//   way it ran (`extractedSchema`, `markdownMaxBytes`).
 
 /** A file to extract: its name, its type (by its extension) and itself. */
 export interface ExtractInput {
@@ -129,27 +159,147 @@ const cachedSource = async (assets: Fetcher): Promise<string> => {
   return source;
 };
 
-/** Extracts in a fresh sandbox, whatever the file's collection. */
-export const localExtractor =
-  (env: Pick<Env, "ASSETS" | "LOADER">): Extractor =>
-  async ({ mediaType, bytes }) => {
-    const source = await cachedSource(env.ASSETS);
-    const worker = env.LOADER.load({
-      ...isolateSettings,
+/** What extracting runs as on the sandbox host: an owner of its own. */
+const extractorOwner = "platform:extractor";
+
+/** The CPU time an extraction may use: the isolate's limit on Cloudflare. */
+const extractorCpuMs = isolateSettings.limits.cpuMs;
+
+/**
+ * The wall-clock time an extraction may take on the sandbox host, the
+ * file's reads included: well past its CPU time, which bounds the work.
+ */
+const extractorWallMs = 60_000;
+
+/** The wall-clock time: {@link extractorWallMs}, or less where tests set it. */
+const wallMsOf = (env: Pick<Env, "SANDBOX_DEADLINE_MS">): number => {
+  const set = Number(env.SANDBOX_DEADLINE_MS);
+  return Number.isInteger(set) && set > 0 && set < extractorWallMs
+    ? set
+    : extractorWallMs;
+};
+
+/**
+ * How much of the file the sandbox host's isolate reads at a time: well
+ * within a session's message once Cap'n Web has encoded it.
+ */
+const readChunkBytes = 1024 * 1024;
+
+/**
+ * The supervisor's verdicts that say the file made the extractor run too
+ * long, use too much, crash or answer too much (sandbox-session.ts): no
+ * retry changes them. Any other (`busy` above all) means it couldn't try.
+ */
+const fileVerdicts = new Set([
+  "deadline",
+  "cpu",
+  "memory",
+  "crashed",
+  "refused",
+]);
+
+/** What the extractor answers in a Dynamic Worker of core's own. */
+const extractedInCore = async (
+  loader: WorkerLoader,
+  source: string,
+  { mediaType, bytes }: Pick<ExtractInput, "mediaType" | "bytes">
+): Promise<unknown> => {
+  const worker = loader.load({
+    ...isolateSettings,
+    mainModule: "extractor.js",
+    modules: { "extractor.js": source },
+  });
+  try {
+    return await worker
+      .getEntrypoint<ExtractorWorker>()
+      .extract({ mediaType, bytes });
+  } catch (error) {
+    if (error instanceof Error && overLimit.test(error.message)) {
+      throw uploadErrors.create("upload.too_complex");
+    }
+    throw new ExtractorUnavailableError({ cause: error });
+  }
+};
+
+/** What the extractor answers on the sandbox host, in a session. */
+const extractedOnHost = async (
+  host: Fetcher,
+  wallMs: number,
+  source: string,
+  { mediaType, bytes }: Pick<ExtractInput, "mediaType" | "bytes">
+): Promise<unknown> => {
+  // The isolate asks for the file a chunk at a time, from where it is.
+  const read = (offset: unknown): Uint8Array => {
+    if (
+      typeof offset !== "number" ||
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      offset >= bytes.byteLength
+    ) {
+      throw new RangeError("There is nothing of the file to read there.");
+    }
+    return bytes.slice(offset, offset + readChunkBytes);
+  };
+  try {
+    return await runInSession(host, {
       mainModule: "extractor.js",
       modules: { "extractor.js": source },
+      entrypoint: "default",
+      method: "extractRead",
+      args: [
+        { value: mediaType },
+        { value: bytes.byteLength },
+        { capability: functionCapability(read) },
+      ],
+      cpuMs: extractorCpuMs,
+      wallMs,
+      owner: extractorOwner,
     });
-    let answer: unknown;
+  } catch (error) {
+    const verdict = sandboxVerdictOf(error);
+    if (verdict !== undefined && fileVerdicts.has(verdict)) {
+      throw uploadErrors.create("upload.too_complex");
+    }
+    throw new ExtractorUnavailableError({ cause: error });
+  }
+};
+
+/** What `localExtractor` reads from core's env. */
+export type LocalExtractorEnv = Pick<
+  Env,
+  | "ASSETS"
+  | "LOADER"
+  | "RUNTIME_PROFILE"
+  | "SANDBOX_DEADLINE_MS"
+  | "SANDBOX_HOST"
+  | "SANDBOX_IN_PROCESS"
+>;
+
+/**
+ * Extracts in a fresh sandbox, whatever the file's collection: on the
+ * sandbox host where `SANDBOX_HOST` is bound, otherwise in a Dynamic
+ * Worker of core's own, only where the runtime bounds its CPU or the
+ * deployment accepts that nothing does (`sessionHost`).
+ */
+export const localExtractor =
+  (env: LocalExtractorEnv): Extractor =>
+  async ({ mediaType, bytes }) => {
+    let host: Fetcher | undefined;
     try {
-      answer = await worker
-        .getEntrypoint<ExtractorWorker>()
-        .extract({ mediaType, bytes });
+      host = sessionHost(env);
     } catch (error) {
-      if (error instanceof Error && overLimit.test(error.message)) {
-        throw uploadErrors.create("upload.too_complex");
-      }
+      // Nothing bounds a parser here: none starts.
+      log.error("extractor.unbounded", {});
       throw new ExtractorUnavailableError({ cause: error });
     }
+    const source = await cachedSource(env.ASSETS);
+    const answer =
+      host === undefined
+        ? await extractedInCore(env.LOADER, source, { mediaType, bytes })
+        : await extractedOnHost(host, wallMsOf(env), source, {
+            mediaType,
+            bytes,
+          });
     const parsed = extractedSchema.safeParse(answer);
     if (!parsed.success) {
       throw new Error("The extractor answered what it may not");
@@ -197,7 +347,7 @@ export type ExtractorName = "workers-ai" | "local";
  * binding (on-prem).
  */
 export const extractorFor = (
-  env: Omit<ModelsEnv, "AI"> & { AI?: Ai } & Pick<Env, "ASSETS" | "LOADER">,
+  env: Omit<ModelsEnv, "AI"> & { AI?: Ai } & LocalExtractorEnv,
   collection: { sensitive: boolean }
 ): { name: ExtractorName; extract: Extractor } => {
   const ai = env.AI;

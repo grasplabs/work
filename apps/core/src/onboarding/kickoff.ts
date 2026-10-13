@@ -20,6 +20,7 @@ import { uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
 import { localExtractor } from "../knowledge/extract.ts";
+import type { LocalExtractorEnv } from "../knowledge/extract.ts";
 import { gatewaySettings, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
 import { NAMED } from "./stephen.ts";
@@ -219,7 +220,7 @@ const kindOf = (name: string): TranscriptFileKind | undefined => {
  * in the Worker.
  */
 export const transcriptOf = async (
-  env: Pick<Env, "ASSETS" | "LOADER">,
+  env: LocalExtractorEnv,
   input: KickoffInput["transcript"]
 ): Promise<{ text: string; fileName: string | null }> => {
   let text: string;
