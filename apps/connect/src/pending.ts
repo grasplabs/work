@@ -105,18 +105,18 @@ export const callOf = (row: Row): Omit<ConnectCall, "capability"> => {
 };
 
 /** A held action with its connection, as a list reads them together. */
-const withConnection = {
-  row: pendingActions,
-  connection: {
-    provider: connections.provider,
-    accountName: connections.accountName,
-    serverKind: connections.serverKind,
-    server: connections.server,
-  },
+/** A connection's columns a list shows it by (`ShownConnection`). */
+export const shownConnection = {
+  provider: connections.provider,
+  accountName: connections.accountName,
+  serverKind: connections.serverKind,
+  server: connections.server,
 };
 
+const withConnection = { row: pendingActions, connection: shownConnection };
+
 /** What a held action's connection is, if connect still has it. */
-type ShownConnection = Pick<
+export type ShownConnection = Pick<
   Connection,
   "provider" | "accountName" | "serverKind" | "server"
 > | null;
@@ -141,8 +141,8 @@ const shownValue = (value: Json): string | string[] => {
  * are the stored input's own, so the person reads what will run; whatever
  * a Composio server says of its tools is never shown as a description.
  */
-const descriptionOf = (
-  row: Row,
+export const descriptionOf = (
+  call: Pick<ConnectCall, "action" | "input">,
   connection: ShownConnection
 ): ActionDescription | undefined => {
   if (connection?.serverKind !== "native") {
@@ -151,15 +151,15 @@ const descriptionOf = (
   const manifest = nativeConnector(connection.server)?.manifest;
   if (
     manifest?.provider !== connection.provider ||
-    !Object.hasOwn(manifest.actions, row.action)
+    !Object.hasOwn(manifest.actions, call.action)
   ) {
     return undefined;
   }
-  const describe = manifest.actions[row.action]?.describe;
+  const describe = manifest.actions[call.action]?.describe;
   if (describe === undefined) {
     return undefined;
   }
-  const { input } = callOf(row);
+  const { input } = call;
   if (typeof input !== "object" || input === null || Array.isArray(input)) {
     return undefined;
   }
@@ -205,7 +205,7 @@ const bindingOf = (row: Row): HeldBinding | "unreadable" | null => {
 };
 
 /** The connection's name for people: what it reaches, and its account. */
-const nameOf = (connection: ShownConnection): string | null => {
+export const nameOf = (connection: ShownConnection): string | null => {
   if (connection === null) {
     return null;
   }
@@ -222,7 +222,7 @@ const summaryOf = ({
   row: Row;
   connection: ShownConnection;
 }): PendingAction => {
-  const description = descriptionOf(row, connection);
+  const description = descriptionOf(callOf(row), connection);
   return {
     id: row.id,
     subject: subjectOf(row),
@@ -302,6 +302,9 @@ const deletion = (
           claimedAt: sql<Date>`${Date.now()}`.as("claimed_at"),
           connectorVersion: sql<null>`NULL`.as("connector_version"),
           resource: pendingActions.resource,
+          // Never of unknown outcome: nothing of the call is kept.
+          input: sql<null>`NULL`.as("input"),
+          origin: sql<null>`NULL`.as("origin"),
         })
         .from(pendingActions)
         .where(

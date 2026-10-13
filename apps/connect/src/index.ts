@@ -31,6 +31,7 @@ import type {
   PendingAction,
   StartConnection,
   StartToolkitConnection,
+  UnknownOutcome,
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -66,6 +67,13 @@ import {
   resealFlows,
   startConnection,
 } from "./oauth.ts";
+import {
+  listUnknownOutcomes,
+  refuseResolution,
+  resolveOutcome,
+  unknownOutcomeFor,
+  unresolvedUnder,
+} from "./outcomes.ts";
 import {
   anyPending,
   auditRefusedDecision,
@@ -355,7 +363,7 @@ export default class Connect
     let read: Awaited<ReturnType<typeof heldOutcome>>;
     try {
       claims = await verifyCapability(signingKeys(this.env), capability, call);
-      if (claims.confirms !== undefined) {
+      if (claims.confirms !== undefined || claims.resolves !== undefined) {
         throw capabilityErrors.create("capability.invalid", {
           reason: "scope",
         });
@@ -415,7 +423,31 @@ export default class Connect
   }
 
   async anyPending(request: unknown): Promise<boolean> {
-    return await anyPending(this.env, request);
+    return (
+      (await anyPending(this.env, request)) ||
+      (await unresolvedUnder(this.env, request))
+    );
+  }
+
+  // Calls of unknown outcome (src/outcomes.ts). Core names the person from
+  // their session; only they see and resolve what acted for them.
+
+  async listUnknownOutcomes(
+    person: ConnectionPerson
+  ): Promise<UnknownOutcome[]> {
+    return await listUnknownOutcomes(this.env, person);
+  }
+
+  async unknownOutcome(request: unknown): Promise<UnknownOutcome | null> {
+    return await unknownOutcomeFor(this.env, request);
+  }
+
+  async resolveOutcome(request: unknown): Promise<void> {
+    await resolveOutcome(this.env, signingKeys(this.env), request);
+  }
+
+  async refuseResolution(request: unknown): Promise<void> {
+    await refuseResolution(this.env, request);
   }
 
   async declineChatActions(request: unknown): Promise<number> {
@@ -468,6 +500,7 @@ export default class Connect
       // Not the App version: core signs the one the held action recorded.
       const forThisAction =
         claims.confirms === held.id &&
+        claims.resolves === undefined &&
         authority.mode === held.mode &&
         authority.onBehalfOf === person.userId &&
         authority.subject.type === held.subjectType &&
@@ -521,7 +554,7 @@ export default class Connect
       claims = await verifyCapability(signingKeys(this.env), capability, call);
       // A confirmation's capability runs a held action through
       // `confirmAction`, never anything here.
-      if (claims.confirms !== undefined) {
+      if (claims.confirms !== undefined || claims.resolves !== undefined) {
         throw capabilityErrors.create("capability.invalid", {
           reason: "scope",
         });

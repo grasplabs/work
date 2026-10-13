@@ -11,7 +11,10 @@ import {
   workspaceIdSchema,
 } from "./ids.ts";
 import type { PackageRegistryApi } from "./packages.ts";
-import { permissionActionSchema } from "./permissions.ts";
+import {
+  permissionActionSchema,
+  permissionSubjectSchema,
+} from "./permissions.ts";
 import type { PermissionSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
 import { eventTypeSchema } from "./workflows.ts";
@@ -603,6 +606,10 @@ export type HeldOutcome =
   | { state: "declined" }
   | { state: "done"; result: ConnectResult }
   | { state: "unknown"; reason: "connect.outcome_unknown" }
+  | {
+      state: "resolved";
+      reason: "connect.resolved_done" | "connect.resolved_not_done";
+    }
   | { state: "failed"; reason: string; output: string | null };
 
 /** Workflow runs that have ended, each with its App: at most 50. */
@@ -649,6 +656,100 @@ export interface PendingActionsApi {
    * on its next turn.
    */
   decline: (id: string) => Promise<void>;
+}
+
+// Calls of unknown outcome (spec 14.3). A side effect sent whose answer
+// was lost, and that connect couldn't recover, is an open obligation of
+// the person it acted for: connect lists it for them, with what was sent,
+// and they say what became of it, once they have looked. "It happened"
+// keeps its key spent for good, answering every repeat with
+// `connect.resolved_done`; "it didn't happen" frees its key for exactly one
+// more send of the same input. Core signs the resolution's capability only
+// while the call's permission still holds, as for confirming a held
+// action; connect records it, and never says anything was undone.
+
+/** What the person a call acted for says became of its unknown outcome. */
+export const resolutionChoiceSchema = z.enum(["happened", "not_happened"]);
+export type ResolutionChoice = z.infer<typeof resolutionChoiceSchema>;
+
+/** The call of unknown outcome: whose, where, and the key it was sent under. */
+export const unknownOutcomeKeySchema = z.strictObject({
+  subject: permissionSubjectSchema,
+  connectionId: connectionIdSchema,
+  action: permissionActionSchema,
+  idempotencyKey: identifierSchema,
+});
+export type UnknownOutcomeKey = z.infer<typeof unknownOutcomeKeySchema>;
+
+/** One call of unknown outcome, for the person it acted for. */
+export const unknownOutcomeRequestSchema = z.strictObject({
+  person: connectionPersonSchema,
+  key: unknownOutcomeKeySchema,
+});
+export type UnknownOutcomeRequest = z.input<typeof unknownOutcomeRequestSchema>;
+
+/** Resolves a call of unknown outcome, with core's capability for it. */
+export const resolveOutcomeSchema = z.strictObject({
+  capability: z.unknown(),
+  person: connectionPersonSchema,
+  key: unknownOutcomeKeySchema,
+  choice: resolutionChoiceSchema,
+});
+export type ResolveOutcome = z.input<typeof resolveOutcomeSchema>;
+
+/** A resolution core refused, with why, for the audit log. */
+export const refuseResolutionSchema = z.strictObject({
+  person: connectionPersonSchema,
+  key: unknownOutcomeKeySchema,
+  choice: resolutionChoiceSchema,
+  /** An error code, such as `permission.denied`: never free text. */
+  reason: z
+    .string()
+    .regex(/^[a-z][a-z_]*(?:\.[a-z][a-z_]*)+$/u)
+    .max(64),
+});
+export type RefuseResolution = z.input<typeof refuseResolutionSchema>;
+
+/**
+ * Where a call of unknown outcome came from, as its capability said: what
+ * core checks again before it signs a resolution of it.
+ */
+export interface UnknownOutcomeOrigin {
+  mode: "interactive" | "workflow";
+  appVersion: number | null;
+  permissionId: string;
+  context: WorkContext;
+}
+
+/** A call of unknown outcome, as the person it acted for sees it. */
+export interface UnknownOutcome {
+  key: UnknownOutcomeKey;
+  /** As `PendingAction.connectionName`. */
+  connectionName: string | null;
+  resource: string | null;
+  /** As `PendingAction.description`, of the input it was sent with. */
+  description?: ActionDescription;
+  /** The exact input it was sent with, as JSON text, while connect has it. */
+  input: string | null;
+  /** When it was first sent, ISO 8601. */
+  sentAt: string;
+  /** Null for a call whose origin connect doesn't have: it can't be resolved. */
+  origin: UnknownOutcomeOrigin | null;
+}
+
+/**
+ * The calls of unknown outcome of a signed-in person, over `/rpc`: only
+ * their own. Grasp staff have none, and resolve none.
+ */
+export interface UnknownOutcomesApi {
+  list: () => Promise<UnknownOutcome[]>;
+  /**
+   * Says what became of the call `key` names: `happened` keeps it from
+   * ever being sent again; `not_happened` lets it be sent once more, with
+   * the same input, under the same key. Refused once the call's permission
+   * is gone.
+   */
+  resolve: (key: UnknownOutcomeKey, choice: ResolutionChoice) => Promise<void>;
 }
 
 /**
@@ -865,10 +966,29 @@ export interface ConnectApi extends PackageRegistryApi {
   declineChatActions: (request: DeclineChatActions) => Promise<number>;
   /**
    * Whether any side effect with idempotency key `idempotencyKey`, acting
-   * for `onBehalfOf`, still waits for that person: a workflow run waits
-   * before running a step whose side effect was held again.
+   * for `onBehalfOf`, still waits for that person: held for them, or of
+   * unknown outcome, unresolved and not recoverable now. A workflow run
+   * waits before running a step whose side effect was held again.
    */
   anyPending: (request: PendingKey) => Promise<boolean>;
+  /**
+   * The calls of unknown outcome that acted for `person`, newest first (at
+   * most 200), that connect can't recover on its own: none for Grasp
+   * staff.
+   */
+  listUnknownOutcomes: (person: ConnectionPerson) => Promise<UnknownOutcome[]>;
+  /** One call of unknown outcome of the person's, or `null`. */
+  unknownOutcome: (
+    request: UnknownOutcomeRequest
+  ) => Promise<UnknownOutcome | null>;
+  /**
+   * Resolves a call of unknown outcome its person resolved: only with the
+   * capability core signed for that resolution, and only for that person.
+   * Recorded as `connection.call.resolved`.
+   */
+  resolveOutcome: (request: ResolveOutcome) => Promise<void>;
+  /** Records a resolution core refused before it reached connect. */
+  refuseResolution: (request: RefuseResolution) => Promise<void>;
   /**
    * Records a confirmation core refused before it reached connect (the
    * permission is gone, the person has left, the context is invalid): the
@@ -1024,6 +1144,12 @@ export const connectErrors = defineErrorFamily({
     "A call with this idempotency key is still running. Try again shortly.",
   "connect.outcome_unknown":
     "A call with this idempotency key was interrupted after it was sent, so it may or may not have taken effect. It won't be sent again blindly: where its connector can find what it did, or can't do it twice, trying again later (after `retryAfterSeconds`, when given) recovers it; otherwise check the outside system to see whether it did.",
+  "connect.resolved_done":
+    "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it took effect: it won't be sent again, and what it returned isn't known.",
+  "connect.resolved_not_done":
+    "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it didn't take effect: it may be sent once more, with the same input.",
+  "connect.outcome_not_found":
+    "There's no call of unknown outcome like that for you to resolve: it was resolved or recovered, or it isn't yours.",
   "connect.action_failed": "The action reported an error.",
   "connect.pending_not_found":
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",

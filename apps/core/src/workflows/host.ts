@@ -217,6 +217,9 @@ export interface WaitReason {
 /** The code a held side effect answers a run's call with (connect). */
 const heldCode = "connect.held";
 
+/** The code a side effect of unknown outcome answers a run's call with. */
+const unknownCode = "connect.outcome_unknown";
+
 /** The field of a held marker (`heldMarkerOf`). */
 const heldField = `${coreStepPrefix}held`;
 
@@ -876,10 +879,16 @@ const requireUnrefused = (attempt: StepAttempt): void => {
 /**
  * Runs `call` for the step attempt `attempt`, noting when it answered that
  * a side effect was held, whatever the workflow code does with the error.
+ * With `unknownHolds`, for a call under the step's own key, an outcome
+ * nobody can tell (`connect.outcome_unknown`) holds the step too: it waits
+ * until connect can recover the call or its person resolved it (connect's
+ * `anyPending` says so), then runs again under the same key, rather than
+ * spend its retries on the same answer or fail the run.
  */
 const heldNoted = async <T>(
   attempt: { held: boolean },
-  call: () => Promise<T>
+  call: () => Promise<T>,
+  unknownHolds = false
 ): Promise<T> => {
   try {
     return await call();
@@ -888,7 +897,7 @@ const heldNoted = async <T>(
       typeof error === "object" &&
       error !== null &&
       "code" in error &&
-      error.code === heldCode
+      (error.code === heldCode || (unknownHolds && error.code === unknownCode))
     ) {
       attempt.held = true;
     }
@@ -2074,7 +2083,9 @@ export class RunHost extends RpcTarget {
             },
             grant,
             checked(z.array(z.unknown()), call)
-          )
+          ),
+        // Its key is the step's: an unknown outcome holds the step.
+        true
       );
     });
   }
