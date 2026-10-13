@@ -14,6 +14,7 @@ import { runBackfill } from "../backfill-run.ts";
 import { runBindingsFor } from "../bindings.ts";
 import { runBuildJob } from "../build-jobs.ts";
 import { runExtraction } from "../knowledge/extraction.ts";
+import { stepModelBinding } from "../resource-bindings.ts";
 import type { WorkContext } from "../restricted.ts";
 import { declaredParams, loadRun } from "./code.ts";
 import type { Settled, StepError } from "./code.ts";
@@ -272,6 +273,8 @@ const runWorkflow = async (
         await callApp(env, run.app, caller, method, args, ends),
       callFunction: async (caller, reference, input, idempotencyKey) =>
         await callRunFunction(env, caller, reference, input, idempotencyKey),
+      modelBinding: async (alias) =>
+        await stepModelBinding(env, run.app, run.version, alias),
     });
     return await code.run(host, {
       runId,

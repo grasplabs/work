@@ -235,11 +235,11 @@ describe(describeWorkflow, () => {
         "isn't an option",
       ],
       [
-        `await step.llm("x", { description: "X", model: "m", instructions: "i", input: 1, schema });`,
-        "must be a parameter",
+        `await step.llm("x", { description: "X", binding: params.m, instructions: "i", input: 1, schema });`,
+        "must be a literal",
       ],
       [
-        `await step.llm("x", { description: "X", model: params.m, instructions: "i", input: 1, schema, locked: true });`,
+        `await step.llm("x", { description: "X", binding: "m", instructions: "i", input: 1, schema, locked: true });`,
         "isn't an option",
       ],
       [`await ${step}; await ${step};`, "appears twice"],

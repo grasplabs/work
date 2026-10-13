@@ -28,8 +28,6 @@ export const paramValueSchemas = {
     .string()
     .refine(isCronExpression, "Not five cron fields that name a time to come")
     .brand<"Schedule">(),
-  /** A model offered by the model gateway. */
-  model: z.string().min(1).brand<"Model">(),
   /** A template, e.g. for an email. */
   template: z.string().min(1).brand<"Template">(),
 };

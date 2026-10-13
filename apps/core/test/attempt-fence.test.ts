@@ -184,6 +184,9 @@ const runOf = async (
         callFunction: () => {
           throw new Error("No App function call here");
         },
+        modelBinding: () => {
+          throw new Error("No model step here");
+        },
       }
     );
   return {

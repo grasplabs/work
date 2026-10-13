@@ -6,7 +6,6 @@ import { testRun } from "../src/testing.ts";
 import {
   appExports,
   appServer,
-  model,
   money,
   number,
   person,
@@ -526,17 +525,14 @@ describe("step.do", () => {
 });
 
 const extraction = z.object({ total: z.number() });
-const modelParams = {
-  reader: model({ label: "Model", default: "small-model" }),
-};
 
 const llmWorkflow = workflow(
   "llm",
-  { params: modelParams },
-  async (step, { params }) =>
+  { params: {} },
+  async (step) =>
     await step.llm("read", {
       description: "Read the total",
-      model: params.reader,
+      binding: "reader",
       instructions: "Read the total.",
       input: "Total: 12",
       schema: extraction,
@@ -555,7 +551,7 @@ describe("step.llm", () => {
     });
     expect(modelRequests[0]).toMatchObject({
       step: "read",
-      model: "small-model",
+      binding: "reader",
       instructions: "Read the total.",
       input: "Total: 12",
       outputSchema: { type: "object", required: ["total"] },
@@ -597,11 +593,11 @@ describe("step.llm", () => {
   it("asks for what the schema accepts and returns what it makes of it", async () => {
     const dueDate = workflow(
       "due-date",
-      { params: modelParams },
-      async (step, { params }) =>
+      { params: {} },
+      async (step) =>
         await step.llm("read", {
           description: "Read the due date",
-          model: params.reader,
+          binding: "reader",
           instructions: "Read the due date.",
           input: "Due on 1 March 2026",
           schema: z.object({
@@ -629,7 +625,7 @@ describe("step.llm", () => {
     });
     const options = {
       description: "Read",
-      model: "small-model",
+      binding: "reader",
       instructions: "Read the total.",
       input: "",
       schema: extraction,
