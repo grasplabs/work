@@ -16,6 +16,7 @@ import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
+import { repairControls } from "./workflows/controls.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import { sweepRunDetails } from "./workflows/retention.ts";
@@ -72,7 +73,9 @@ export default {
   // a platform update (see src/platform-updates.ts), and workflows'
   // schedules due by the minute it runs for (see src/workflows/triggers.ts),
   // starts core stopped in the middle of, sent to the engine again (see
-  // `repairStarts`, src/workflows/runs.ts), and connector events:
+  // `repairStarts`, src/workflows/runs.ts) and pauses, resumes and
+  // cancels the engine is still to confirm (see `repairControls`,
+  // src/workflows/controls.ts), and connector events:
   // where connect listens, and the events it read, delivered (see
   // src/workflows/connector-events.ts).
   //
@@ -125,6 +128,7 @@ export default {
             recordPlatformUpdate(env),
             startDueSchedules(env, new Date(controller.scheduledTime)),
             repairStarts(env),
+            repairControls(env),
             pumpConnectorEvents(env),
           ];
     const results = await Promise.allSettled(jobs);

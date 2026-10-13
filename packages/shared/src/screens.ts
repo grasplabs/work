@@ -9,7 +9,7 @@ import {
   screenLimits,
 } from "./screen-limits.ts";
 import type { ScreenDelivery } from "./screen-trust.ts";
-import type { WorkflowRun } from "./workflows.ts";
+import type { RunControl, WorkflowRun } from "./workflows.ts";
 
 // An App's screens run in a sandboxed frame in the frontend (apps/web): a
 // document core serves for one build (core's screen-frame.ts), which runs
@@ -266,6 +266,20 @@ export interface ScreensApi {
     decision: string,
     answer: DecisionAnswerInput
   ) => Promise<DecisionView>;
+  /**
+   * Pauses, resumes or cancels one of the App's runs, for a builder of the
+   * App, and answers the host's receipt once it admitted the request: not
+   * that the run has got there yet, which its status says. The same
+   * request again, while its receipt is unresolved, answers that receipt.
+   * Refused with `workflow.control_conflict` while a cancel, or the other
+   * of pause and resume, is unresolved, and `workflow.control_refused`
+   * once the run has ended. Audited as asked on a screen.
+   */
+  control: (
+    app: string,
+    run: string,
+    kind: RunControl["kind"]
+  ) => Promise<RunControl>;
   /**
    * Calls `onChange` each time one of the App's runs of `workflow` starts,
    * waits for a decision, has it answered or closed, or ends, for as long

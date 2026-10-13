@@ -289,6 +289,13 @@ const appTarget = (
         async (screens) =>
           await screens.decide(app, run, decision, forCore(answer))
       ),
+    control: async (run, kind) =>
+      await framed(async (screens) => {
+        if (kind !== "pause" && kind !== "resume" && kind !== "cancel") {
+          throw screenErrors.create("screen.invalid");
+        }
+        return await screens.control(app, run, kind);
+      }),
     watchRuns: async (workflow, onChange) =>
       await framed(
         async (screens) =>
@@ -338,6 +345,7 @@ const previewTarget = (
     runs: async () => await Promise.resolve([]),
     run: refusedInPreview,
     decide: refusedInPreview,
+    control: refusedInPreview,
     watchRuns: async () =>
       await Promise.resolve({
         release: async () => {

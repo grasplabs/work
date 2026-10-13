@@ -74,6 +74,7 @@ export const screenTests = [
   "test/event-sources.test.ts",
   "test/orphaned-runs.test.ts",
   "test/run-retention.test.ts",
+  "test/run-controls.test.ts",
   "test/rpc-targets.test.ts",
 ];
 

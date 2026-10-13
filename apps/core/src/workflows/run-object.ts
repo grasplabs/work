@@ -13,6 +13,7 @@ import type { RunNotification } from "@grasp-os/workerflow/run";
 
 import { appHost } from "../durable-objects.ts";
 import type { AttemptFence } from "./attempt-fence.ts";
+import { settleControls } from "./controls.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
@@ -274,7 +275,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
 
   /**
    * Marks the run cancelled in its object, the first step of a cancel and
-   * its record (runs.ts, `cancelRun`): who cancelled it and when, kept with
+   * its record (controls.ts, `cancelRun`): who cancelled it and when, kept with
    * the run until the cancel is done in core's database and the engine
    * (`settleCancel`). From then on no attempt of the run holds
    * (`#leaseOf`), so every fenced call of it is refused at once, in this
@@ -548,5 +549,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       at: latest.timestamp,
       sequence: latest.sequence,
     });
+    // A pause or resume settles from where the engine has the run now,
+    // and which controls it took, read together here from its journal,
+    // not from the notification.
+    await settleControls(this.env, latest.instanceId, this.controlState());
   }
 }

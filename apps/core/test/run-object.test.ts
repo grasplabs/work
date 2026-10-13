@@ -5,9 +5,9 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
+import { cancelRun } from "../src/workflows/controls.ts";
 import { markRunCancelled } from "../src/workflows/engine.ts";
 import { busyRefusalsIn } from "../src/workflows/run-object.ts";
-import { cancelRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { asking } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
