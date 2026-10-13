@@ -1,6 +1,8 @@
 import { auditActorSchema } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type {
   DefinitionIdentity,
@@ -9,6 +11,8 @@ import type {
 import { WorkflowRun } from "@grasp-os/workerflow/run";
 import type { RunNotification } from "@grasp-os/workerflow/run";
 
+import { appHost } from "../durable-objects.ts";
+import type { AttemptFence } from "./attempt-fence.ts";
 import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
@@ -87,6 +91,28 @@ export const busyRefusalsIn = (sql: SqlStorage): BusyRefusals => ({
  */
 const cancelTable = "grasp_run_cancelled";
 
+/** Revokes App calls (`revoke`), logging rather than failing the run. */
+const revokeOrLog = async (
+  runId: string,
+  revoke: () => Promise<void>
+): Promise<void> => {
+  try {
+    await revoke();
+  } catch (error) {
+    log.error("workflow.revoke_calls_failed", {
+      runId,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * The Apps an attempt of the run started a method of (`attemptHolds`),
+ * whose calls for the run a cancel revokes (`revokeCalls`): a table the
+ * engine drops with the run, as `cancelTable`.
+ */
+const appsTable = "grasp_run_apps";
+
 /** How long a cancel's request has to finish it before the object does. */
 const cancelRepairMs = 5000;
 
@@ -160,12 +186,30 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       return undefined;
     }
     return {
-      run: async (event, step) =>
-        await runPinned(this.env, pin, event, step, {
+      run: async (event, step) => {
+        // A new activation: whatever an older one started in an App is let
+        // go of there too, before this one runs anything. Should an App
+        // not hear of it, the run goes on: its older attempts hold no
+        // lease, so every check of the run's object refuses them still;
+        // only a call already past that check, awaiting the App's, isn't
+        // refused there as well.
+        const generation = this.generation();
+        if (generation !== undefined) {
+          await revokeOrLog(event.instanceId, async () => {
+            await this.revokeCalls(event.instanceId, generation);
+          });
+        }
+        return await runPinned(this.env, pin, event, step, {
           busyRefusals: busyRefusalsIn(this.ctx.storage.sql),
           aiCalls: this.#aiCalls,
           leaseOf: (key, attempt) => this.#leaseOf(key, attempt),
-        }),
+          revokeAttempt: async (fence) => {
+            await revokeOrLog(event.instanceId, async () => {
+              await this.revokeAttemptCalls(fence);
+            });
+          },
+        });
+      },
     };
   }
 
@@ -180,8 +224,9 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * Should the rest of the cancel fail, or its request die, the object
    * finishes it on its next alarm (`alarm`), which is armed here. A run
    * the engine has no journal of yet has no attempt to fence, and nothing
-   * is kept: its start, should it come, finds its row cancelled. Answers
-   * the cancel the run is marked with.
+   * is kept: its start, should it come, finds its row cancelled. Once
+   * marked, the App calls the run's attempts started are revoked
+   * (`revokeCalls`). Answers the cancel the run is marked with.
    */
   async markCancelled(
     runId: string,
@@ -219,6 +264,13 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     if (armed === null || armed > due) {
       await this.ctx.storage.setAlarm(due);
     }
+    // Then, before the cancel is recorded anywhere else, every call the
+    // run's attempts started in an App is revoked there (`revokeCalls`):
+    // a stub call that passed this object's check before the mark, and
+    // awaits the App's own, is refused by it. Should an App not hear of
+    // it, this fails, and the alarm armed above revokes again before it
+    // finishes the cancel.
+    await this.revokeCalls(mark.runId, null);
     return mark;
   }
 
@@ -241,6 +293,7 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     const mark = cancelledIn(sql) ? cancelMarkIn(sql) : undefined;
     if (mark !== undefined && mark.settled !== true) {
       try {
+        await this.revokeCalls(mark.runId, null);
         await completeCancel(this.env, mark);
         await this.terminate({ rollback: false });
         this.settleCancel();
@@ -273,13 +326,75 @@ export class WorkflowRuns extends WorkflowRun<Env> {
    * export, and the stub calls they make) checks before it acts
    * (attempt-fence.ts). Read from the journal; tells nothing else.
    */
-  attemptHolds(key: string, attempt: number, generation: number): boolean {
+  attemptHolds(
+    key: string,
+    attempt: number,
+    generation: number,
+    app?: string
+  ): boolean {
     const lease = this.#leaseOf(key, attempt);
-    return (
+    const holds =
       lease !== undefined &&
       lease.generation === generation &&
-      Date.now() < lease.deadline
+      Date.now() < lease.deadline;
+    if (holds && app !== undefined) {
+      // An App whose method an attempt of the run starts: its calls for
+      // the run are revoked should the run be cancelled (`revokeCalls`).
+      const { sql } = this.ctx.storage;
+      sql.exec(
+        `CREATE TABLE IF NOT EXISTS ${appsTable} (app TEXT PRIMARY KEY)`
+      );
+      sql.exec(`INSERT OR IGNORE INTO ${appsTable} (app) VALUES (?)`, app);
+    }
+    return holds;
+  }
+
+  /**
+   * Revokes, in every App an attempt of run `runId` started a method of,
+   * the App's calls for it: of every attempt (`below` null), once it is
+   * cancelled, or of the activations before generation `below`, once
+   * another took over (App.ts, `revokeRunCalls`). The App's own
+   * synchronous checks then refuse them, so nothing awaited between a
+   * check here and one there lets such a call act. Repeating it changes
+   * nothing.
+   */
+  async revokeCalls(runId: string, below: number | null): Promise<void> {
+    await Promise.all(
+      this.#appsCalled().map(async (app) => {
+        await appHost(this.env, app).revokeRunCalls(runId, below);
+      })
     );
+  }
+
+  /**
+   * Revokes the calls of one attempt of the run (`fence`) in every App an
+   * attempt of it started a method of, once its function has returned.
+   */
+  async revokeAttemptCalls(fence: AttemptFence): Promise<void> {
+    await Promise.all(
+      this.#appsCalled().map(async (app) => {
+        await appHost(this.env, app).revokeAttemptCalls(fence);
+      })
+    );
+  }
+
+  /** The Apps an attempt of the run started a method of (`attemptHolds`). */
+  #appsCalled(): AppId[] {
+    const { sql } = this.ctx.storage;
+    const known =
+      sql
+        .exec(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+          appsTable
+        )
+        .toArray().length > 0;
+    if (!known) {
+      return [];
+    }
+    return sql
+      .exec<{ app: string }>(`SELECT app FROM ${appsTable}`)
+      .toArray()
+      .map(({ app }) => appIdSchema.parse(app));
   }
 
   /**

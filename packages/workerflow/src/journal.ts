@@ -715,6 +715,11 @@ export const readAttemptLease = (
     )
     .toArray()[0];
 
+/** The run's generation now: the activation that holds it, if one does. */
+export const readGeneration = (sql: SqlStorage): number | undefined =>
+  sql.exec<{ generation: number }>("SELECT generation FROM run").toArray()[0]
+    ?.generation;
+
 const eventColumns = "seq, type, payload, key, accepted_at, consumed_by";
 
 /** The event a wait took, if it took one. */

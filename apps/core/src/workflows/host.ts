@@ -777,6 +777,13 @@ export interface HostHooks {
    */
   leaseOf: (key: string, attempt: number) => AttemptLease | undefined;
   /**
+   * Revokes, in the Apps the run called, the calls an attempt (`fence`)
+   * started there, once its function has returned (run-object.ts,
+   * `revokeAttemptCalls`): whatever the attempt's code left running in an
+   * App is refused by the App's own checks. None for a host of its own.
+   */
+  revokeAttempt?: (fence: AttemptFence) => Promise<void>;
+  /**
    * Hears, once, that the run's isolate asked for what only code that
    * gets past the SDK could (a step its review doesn't show): the run
    * fails with `error`, whatever its code makes of the refusal.
@@ -1065,6 +1072,9 @@ export class RunHost extends RpcTarget {
           // the attempt's code still has out.
           attempt.over = true;
           this.#live.splice(this.#live.indexOf(attempt), 1);
+        }
+        if (attempt.calledApp) {
+          await this.#hooks.revokeAttempt?.(this.#fenceOf(attempt));
         }
         // Connect held a side effect of it for the person the run acts
         // for: the step ends as held, not failed, whatever the workflow

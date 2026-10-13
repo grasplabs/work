@@ -26,10 +26,14 @@ export interface AttemptFence {
  * Refuses, with `execution.stale_attempt`, what an attempt that no longer
  * holds its lease would do (`fence`); a call no attempt made (`undefined`)
  * passes. Asked of the run's object, the only authority on its leases.
+ * `app`: the App whose method the attempt starts, which the run's object
+ * keeps, to revoke that App's calls for the run should it be cancelled or
+ * an activation of it let go of (run-object.ts, `revokeCalls`).
  */
 export const requireAttemptHolds = async (
   env: Env,
-  fence: AttemptFence | undefined
+  fence: AttemptFence | undefined,
+  app?: string
 ): Promise<void> => {
   if (fence === undefined) {
     return;
@@ -37,7 +41,8 @@ export const requireAttemptHolds = async (
   const holds = await runObjectOf(env, fence.run).attemptHolds(
     fence.key,
     fence.number,
-    fence.generation
+    fence.generation,
+    app
   );
   if (!holds) {
     throw executionErrors.create("execution.stale_attempt");

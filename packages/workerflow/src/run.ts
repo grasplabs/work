@@ -147,6 +147,7 @@ import {
   JournalSchemaError,
   journalSchemaVersion,
   readAttemptLease,
+  readGeneration,
   readJournal,
   readRollbackWorklist,
   maxEventPayloadBytes,
@@ -1152,6 +1153,17 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   ): AttemptLease | undefined {
     const { sql } = this.ctx.storage;
     return hasJournal(sql) ? readAttemptLease(sql, key, attempt) : undefined;
+  }
+
+  /**
+   * The run's generation now (none before it has a journal): what the
+   * activation running its definition took, for the host to let go of
+   * anything an older one started. Read from the journal, in this object
+   * only.
+   */
+  protected generation(): number | undefined {
+    const { sql } = this.ctx.storage;
+    return hasJournal(sql) ? readGeneration(sql) : undefined;
   }
 
   /**

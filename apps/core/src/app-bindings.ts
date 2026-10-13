@@ -108,7 +108,15 @@ const admitted = async (
   await requireAttemptHolds(env, fence);
   // Last, with nothing awaited between it and the act: the host's word
   // that the call still runs (its token, its deadline, its code), so a
-  // call that ended while the checks above awaited acts no more.
+  // call that ended while the checks above awaited acts no more. A
+  // workflow run's call is refused here too once its run was cancelled,
+  // or its attempt let go of, while it awaited the attempt check above:
+  // the cancel revokes the run's calls in the App before it is recorded
+  // anywhere else (run-object.ts, `revokeCalls`), and this check is the
+  // App's own, synchronous. What is left: a call the App admitted before
+  // it heard of the revoke, already on its way to connect, is done; for
+  // an action, `afterEffect` withholds its answer from the attempt, and
+  // connect reports it as done (spec 14.4).
   return await host.admit(token, use);
 };
 

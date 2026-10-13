@@ -173,6 +173,7 @@ export interface RunMemory {
   /** Its AI calls in flight and answers no attempt took (host.ts). */
   aiCalls: AiCalls;
   leaseOf: HostHooks["leaseOf"];
+  revokeAttempt?: HostHooks["revokeAttempt"];
 }
 
 /** Runs (or resumes) one run of an App's workflow. */
@@ -258,6 +259,7 @@ const runWorkflow = async (
       busyRefusals: memory.busyRefusals,
       aiCalls: memory.aiCalls,
       leaseOf: memory.leaseOf,
+      revokeAttempt: memory.revokeAttempt,
       tampered: (error) => {
         tampered ??= error;
       },
