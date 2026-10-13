@@ -1,4 +1,5 @@
 import {
+  appCodeKind,
   compilerVersion,
   serverFiles,
   workflowPaths,
@@ -56,6 +57,17 @@ import {
 // the App asks for that no admin granted yet, what it holds and which of
 // that making it current would ask an admin for again, and its workflows'
 // tests, kept per version's files so they run once.
+
+/**
+ * The App's explicit migrations among `files`: each reads and rewrites
+ * every record of its table, whoever owns it, which its review says.
+ */
+const migrationFiles = (
+  files: Readonly<Record<string, string>>
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(files).filter(([path]) => appCodeKind(path) === "migration")
+  );
 
 /** Most test failures a review lists. */
 const maxFailures = 50;
@@ -568,6 +580,11 @@ export const reviewVersion = async (
     new Map(Object.entries(serverFiles(files))),
     (one, other) => one === other
   );
+  const migrationChanges = differences(
+    new Map(Object.entries(migrationFiles(before?.files ?? {}))),
+    new Map(Object.entries(migrationFiles(files))),
+    (one, other) => one === other
+  );
   // Asked for again only if not kept, as `madeCurrent` says: an App's
   // first version copied from a blueprint, made current for the first time.
   const keep = current === null && row.approved === 1;
@@ -592,6 +609,10 @@ export const reviewVersion = async (
     ),
     exports: exportChanges(exportsBefore, row.exports),
     serverFiles: serverChanges.map(({ name, change }) => ({
+      path: name,
+      change,
+    })),
+    migrations: migrationChanges.map(({ name, change }) => ({
       path: name,
       change,
     })),

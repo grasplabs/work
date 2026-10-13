@@ -669,6 +669,10 @@ msgstr "Workflow ajouté :"
 msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Ajouté : il agit pour quiconque utilise le moteur, avec tout ce que détient le moteur"
 
+#: src/chat/builds.tsx
+msgid "Added: it reads and rewrites every record of its table, whoever owns it"
+msgstr "Ajoutée : lit et réécrit chaque enregistrement de sa table, quel qu'en soit le propriétaire"
+
 #: src/labels.ts
 msgid "Admin"
 msgstr "Admin"
@@ -1209,6 +1213,10 @@ msgstr "Workflow modifié :"
 #: src/chat/builds.tsx
 msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Modifié : il agit pour quiconque utilise le moteur, avec tout ce que détient le moteur"
+
+#: src/chat/builds.tsx
+msgid "Changed: it reads and rewrites every record of its table, whoever owns it"
+msgstr "Modifiée : lit et réécrit chaque enregistrement de sa table, quel qu'en soit le propriétaire"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
@@ -2589,6 +2597,10 @@ msgstr "Mémoire"
 msgid "Messages"
 msgstr "Messages"
 
+#: src/chat/builds.tsx
+msgid "Migrations"
+msgstr "Migrations"
+
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
@@ -3633,6 +3645,10 @@ msgstr "Workflow supprimé :"
 #: src/chat/builds.tsx
 msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Supprimé : il agissait pour quiconque utilise le moteur, avec tout ce que détient le moteur"
+
+#: src/chat/builds.tsx
+msgid "Removed: it no longer rewrites records"
+msgstr "Supprimée : ne réécrit plus d'enregistrements"
 
 #: src/chat/chat-list.tsx
 msgid "Rename"

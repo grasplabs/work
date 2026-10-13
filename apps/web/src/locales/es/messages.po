@@ -669,6 +669,10 @@ msgstr "Flujo de trabajo añadido:"
 msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Añadido: actúa en nombre de quien use el motor, con todo lo que el motor tiene"
 
+#: src/chat/builds.tsx
+msgid "Added: it reads and rewrites every record of its table, whoever owns it"
+msgstr "Añadida: lee y reescribe todos los registros de su tabla, sea quien sea su propietario"
+
 #: src/labels.ts
 msgid "Admin"
 msgstr "Administrador"
@@ -1209,6 +1213,10 @@ msgstr "Flujo de trabajo cambiado:"
 #: src/chat/builds.tsx
 msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Cambiado: actúa en nombre de quien use el motor, con todo lo que el motor tiene"
+
+#: src/chat/builds.tsx
+msgid "Changed: it reads and rewrites every record of its table, whoever owns it"
+msgstr "Cambiada: lee y reescribe todos los registros de su tabla, sea quien sea su propietario"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
@@ -2589,6 +2597,10 @@ msgstr "Memoria"
 msgid "Messages"
 msgstr "Mensajes"
 
+#: src/chat/builds.tsx
+msgid "Migrations"
+msgstr "Migraciones"
+
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
@@ -3633,6 +3645,10 @@ msgstr "Flujo de trabajo eliminado:"
 #: src/chat/builds.tsx
 msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Eliminado: actúa en nombre de quien use el motor, con todo lo que el motor tiene"
+
+#: src/chat/builds.tsx
+msgid "Removed: it no longer rewrites records"
+msgstr "Eliminada: ya no reescribe registros"
 
 #: src/chat/chat-list.tsx
 msgid "Rename"

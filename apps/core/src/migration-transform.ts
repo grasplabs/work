@@ -45,9 +45,20 @@ import type { SandboxedEnv } from "./sandboxed.ts";
 //   as at inspection), and an answer past `transformAnswerMaxBytes` is
 //   refused. A sandbox that didn't answer at all is
 //   `SandboxUnavailableError`, never the App's failure.
+// - The transform carries one owner's data into another owner's record:
+//   module state survives between the rows of one call (a fresh isolate
+//   per call ends it between calls), so on a table whose read or write
+//   access is `owner` a batch holds one owner's records only. Each row
+//   carries its owner, which the host supplies and the handler never
+//   sees, and a batch that mixes owners there is refused as a caller's
+//   bug. A migration still reads and rewrites every record of its table,
+//   whoever owns it: the version review says so.
 // - The transform answers differently each time: randomness and clocks
-//   are taken away while it runs (sdk runner, `runMigration`); a retried
-//   batch is still the store's to answer from its receipt, never twice.
+//   are taken away while it runs and while its answer is serialized (sdk
+//   runner, `runMigration`). Best effort, not a boundary: a value captured
+//   as its modules loaded can still differ between calls, so a retried
+//   batch is answered from the store's receipt, never compared with an
+//   earlier answer.
 
 /** Rows one batch transforms, at most (spec 17.2's bounded batches). */
 export const transformBatchMaxRows = 100;
@@ -61,9 +72,14 @@ export const transformBatchMaxBytes = 2 * 1024 * 1024;
 /** The most bytes of JSON text a batch's answer may take. */
 export const transformAnswerMaxBytes = 4 * 1024 * 1024;
 
-/** One record a batch transforms: its ID and its stored fields. */
+/**
+ * One record a batch transforms: its ID, its owner (`_ownerId`, which the
+ * host supplies and the handler never sees) and its stored fields, managed
+ * fields never among them.
+ */
 export interface TransformRow {
   readonly id: string;
+  readonly owner: string;
   readonly fields: StoreFields;
 }
 
@@ -110,7 +126,7 @@ import request from ${JSON.stringify(requestModule)};
 
 export class Migrate extends WorkerEntrypoint {
   run() {
-    const text = JSON.stringify(runMigration(registered, JSON.parse(request)));
+    const text = JSON.stringify(runMigration(registered, request));
     if (typeof text !== "string" || text.length > ${transformAnswerMaxBytes}) {
       throw new Error("The migration's answer is too large.");
     }
@@ -235,7 +251,7 @@ const handedRows = (
         },
       };
     }
-    handed.push({ id: row.id, fields: checked.fields });
+    handed.push({ id: row.id, owner: row.owner, fields: checked.fields });
   }
   return { rows: handed };
 };
@@ -283,6 +299,36 @@ const answerOf = (
 };
 
 /**
+ * Refuses a batch only a caller's bug sends: past its bounds, holding a
+ * managed field, or mixing owners of a table whose read or write access
+ * is `owner` (see the header).
+ */
+const requireBatch = (
+  managed: readonly string[],
+  access: { readonly read: string; readonly write: string },
+  rows: readonly TransformRow[]
+): void => {
+  if (
+    rows.length > transformBatchMaxRows ||
+    encoder.encode(canonicalJson(rows.map(({ fields }) => fields))).byteLength >
+      transformBatchMaxBytes
+  ) {
+    throw new Error("A transform's batch is past its bounds");
+  }
+  if (
+    rows.some(({ fields }) => managed.some((key) => Object.hasOwn(fields, key)))
+  ) {
+    throw new Error("A transform's rows hold managed fields");
+  }
+  const owned = access.read === "owner" || access.write === "owner";
+  if (owned && new Set(rows.map(({ owner }) => owner)).size > 1) {
+    throw new Error(
+      "A transform's batch of a table with owner access mixes owners"
+    );
+  }
+};
+
+/**
  * Runs migration `name` of `release` on `rows` (at most
  * `transformBatchMaxRows`, `transformBatchMaxBytes` of JSON): each
  * record's fields after it, in order, the transform's output validated
@@ -310,13 +356,7 @@ export const transformBatch = async (
   if (target === undefined) {
     throw new Error("A migration's table isn't in its release's schema");
   }
-  if (
-    rows.length > transformBatchMaxRows ||
-    encoder.encode(canonicalJson(rows.map(({ fields }) => fields))).byteLength >
-      transformBatchMaxBytes
-  ) {
-    throw new Error("A transform's batch is past its bounds");
-  }
+  requireBatch(release.app.schema.managedFields, target.access, rows);
   if (rows.length === 0) {
     return { ok: true, rows: [] };
   }
@@ -335,9 +375,12 @@ export const transformBatch = async (
         modules: {
           ...release.modules,
           ...release.sdk,
-          [requestModule]: `export default ${JSON.stringify(
-            JSON.stringify({ name, rows: handed.rows })
-          )};\n`,
+          // JSON is a JavaScript expression: the request as data, its
+          // owners left out.
+          [requestModule]: `export default ${JSON.stringify({
+            name,
+            rows: handed.rows.map(({ id, fields }) => ({ id, fields })),
+          })};\n`,
           [migrateModule]: migrateMain,
         },
       },
@@ -412,7 +455,7 @@ export const transformBatch = async (
         },
       };
     }
-    transformed.push({ id: row.id, fields });
+    transformed.push({ id: row.id, owner: row.owner, fields });
   }
   return { ok: true, rows: transformed };
 };

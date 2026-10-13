@@ -112,6 +112,13 @@ const serverChangeWarnings = {
   removed: msg`Removed: it acts for whoever uses the engine, with everything the engine holds`,
 } as const;
 
+/** How a migration changed, as a whole sentence for its warning. */
+const migrationChangeWarnings = {
+  added: msg`Added: it reads and rewrites every record of its table, whoever owns it`,
+  modified: msg`Changed: it reads and rewrites every record of its table, whoever owns it`,
+  removed: msg`Removed: it no longer rewrites records`,
+} as const;
+
 /** How a workflow changed, before its ID. */
 const workflowChangeWords = {
   added: msg`Added workflow`,
@@ -291,6 +298,25 @@ const ReviewDetails = ({
             {i18n._(serverChangeWarnings[review.server])}
           </Badge>
           <ServerCode code={serverCode} onRetry={onRetryServerCode} />
+        </section>
+      )}
+      {review.migrations.length === 0 ? null : (
+        <section aria-label={t`Migrations`} className="flex flex-col gap-1">
+          <h4 className="font-medium">
+            <Trans>Migrations</Trans>
+          </h4>
+          <ul className="flex flex-col gap-1">
+            {review.migrations.map(({ path, change }) => (
+              <li className="flex flex-col gap-1" key={path}>
+                <code className="font-mono">{path}</code>
+                <Badge
+                  variant={change === "removed" ? "outline" : "destructive"}
+                >
+                  {i18n._(migrationChangeWarnings[change])}
+                </Badge>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
       {review.workflows.length === 0 ? null : (

@@ -298,21 +298,80 @@ const clocklessDate = (): DateConstructor =>
   });
 
 /**
+ * The prototypes the shadows reach the real functions through, as they
+ * were when the runner loaded, before any App module did: `Date` is also
+ * reachable as `Date.prototype.constructor`, and `crypto`'s methods live
+ * on its prototype.
+ */
+const datePrototype = Date.prototype;
+const cryptoPrototype: unknown = Object.getPrototypeOf(crypto);
+const dateFormatPrototype: object = Intl.DateTimeFormat.prototype;
+const formatGetter: unknown = Reflect.getOwnPropertyDescriptor(
+  dateFormatPrototype,
+  "format"
+)?.get;
+const formatToParts: unknown = Reflect.getOwnPropertyDescriptor(
+  dateFormatPrototype,
+  "formatToParts"
+)?.value;
+
+/**
+ * `Intl.DateTimeFormat`'s `format`, refusing to format the current time:
+ * formatting a date it is given is pure.
+ */
+const datelessFormat = function datelessFormat(
+  this: unknown,
+  ...args: unknown[]
+): unknown {
+  if (args[0] === undefined || typeof formatGetter !== "function") {
+    return unavailable("the clock")();
+  }
+  const bound: unknown = Reflect.apply(formatGetter, this, []);
+  return typeof bound === "function" ? Reflect.apply(bound, this, args) : "";
+};
+
+/** `Intl.DateTimeFormat`'s `formatToParts`, as `datelessFormat`. */
+const datelessFormatToParts = function datelessFormatToParts(
+  this: unknown,
+  ...args: unknown[]
+): unknown {
+  if (args[0] === undefined || typeof formatToParts !== "function") {
+    return unavailable("the clock")();
+  }
+  const parts: unknown = Reflect.apply(formatToParts, this, args);
+  return parts;
+};
+
+/**
  * Runs `work` with randomness and the clocks taken away (`Math.random`,
- * `crypto`'s random values, `Date.now`, `new Date()`, `performance.now`),
- * restoring them after, so a transform answers the same for the same row
- * however often a batch is retried. Not a boundary: App code that kept a
- * reference to one from before still has it, and the isolate has no
- * capability for it to misuse either way. The host's receipt, not this,
- * keeps a retried batch from writing twice.
+ * `crypto`'s random values on the object and its prototype, `Date.now`,
+ * `new Date()` through `Date` or `Date.prototype.constructor`,
+ * `performance.now`, and `Intl.DateTimeFormat` formatting the current
+ * time), restoring them after, so a transform answers the same for the
+ * same row however often a batch is retried. Best effort, not a boundary:
+ * App code that kept a reference to one from before, or a value computed
+ * as its modules loaded, still differs between calls, and the isolate has
+ * no capability for it to misuse either way. So a retried batch is
+ * answered from the store's receipt and never compared with an earlier
+ * answer.
  */
 const deterministically = <Result>(work: () => Result): Result => {
+  const clockless = clocklessDate();
+  const prototypeOfCrypto =
+    typeof cryptoPrototype === "object" && cryptoPrototype !== null
+      ? cryptoPrototype
+      : crypto;
   const saved = [
     shadow(Math, "random", unavailable("randomness")),
     shadow(crypto, "getRandomValues", unavailable("randomness")),
     shadow(crypto, "randomUUID", unavailable("randomness")),
+    shadow(prototypeOfCrypto, "getRandomValues", unavailable("randomness")),
+    shadow(prototypeOfCrypto, "randomUUID", unavailable("randomness")),
     shadow(performance, "now", unavailable("the clock")),
-    shadow(globalThis, "Date", clocklessDate()),
+    shadow(globalThis, "Date", clockless),
+    shadow(datePrototype, "constructor", clockless),
+    shadow(dateFormatPrototype, "format", datelessFormat),
+    shadow(dateFormatPrototype, "formatToParts", datelessFormatToParts),
   ];
   try {
     return work();
@@ -321,6 +380,20 @@ const deterministically = <Result>(work: () => Result): Result => {
       restore(one);
     }
   }
+};
+
+/**
+ * `output` as JSON data, serialized here, inside the deterministic window,
+ * so a `toJSON` App code put on it runs without randomness or clocks too.
+ * `undefined` (what JSON can't hold) answers null, for the host to refuse.
+ */
+const asJson = (output: unknown): unknown => {
+  const text = JSON.stringify(output);
+  if (text === undefined) {
+    return null;
+  }
+  const json: unknown = JSON.parse(text);
+  return json;
 };
 
 /** Whether `value` looks like a promise: anything with a `then` function. */
@@ -365,7 +438,7 @@ export const runMigration = (
             "A migration's handler answers its row, not a promise: it has nothing to wait for."
           );
         }
-        rows.push(output);
+        rows.push(asJson(output));
       } catch (error) {
         return {
           ok: false,

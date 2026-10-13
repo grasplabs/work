@@ -1,7 +1,8 @@
 /**
- * The on-prem sandbox on plain workerd. First a seal's inspection, the same
- * `inspected` a seal runs (apps/core/test/workerd/inspection-worker.ts), in
- * a workerd of its own standing in for core, with `SANDBOX_HOST` bound to
+ * The on-prem sandbox on plain workerd. First a seal's inspection and a
+ * migration's transform, the same `inspected` and `transformBatch` core
+ * runs (apps/core/test/workerd/inspection-worker.ts), in a workerd of its
+ * own standing in for core, with `SANDBOX_HOST` bound to
  * the supervisor (workerd-sandbox.ts) as on-prem binds it; then the
  * supervisor's own bounds, called directly on its socket. No Wrangler dev
  * server, no Miniflare: plain workerd enforces no CPU limit, so only the
@@ -342,7 +343,25 @@ const outcomeSchema = z.object({
   ms: z.number(),
 });
 
-describe("a seal's inspection on plain workerd", () => {
+const transformedSchema = z.object({
+  status: z.enum(["transformed", "unavailable"]),
+  outcome: z
+    .object({
+      ok: z.boolean(),
+      failure: z
+        .object({
+          id: z.string().nullable(),
+          reason: z.string(),
+          issues: z.array(z.string()),
+        })
+        .optional(),
+    })
+    .optional(),
+  message: z.string().optional(),
+  ms: z.number(),
+});
+
+describe("a seal's inspection and a migration's transform on plain workerd", () => {
   let supervisor: SandboxSupervisor;
   let modules: string[];
   /** Where the bundle is, and each config of the stand-in core. */
@@ -465,6 +484,64 @@ describe("a seal's inspection on plain workerd", () => {
     });
   });
 
+  const transform = async (app: string, url = coreUrl, query = "") => {
+    const response = await fetch(`${url}transform?app=${app}${query}`);
+    return transformedSchema.parse(await response.json());
+  };
+
+  it("transforms a migration's rows on the sandbox host", async () => {
+    await expect(transform("good")).resolves.toMatchObject({
+      status: "transformed",
+      outcome: { ok: true },
+    });
+  });
+
+  it("refuses a transform that never returns within the deadline, blaming no record", async () => {
+    const outcome = await transform("busy");
+    expect(outcome).toMatchObject({
+      status: "transformed",
+      outcome: { ok: false, failure: { id: null, reason: "invalid_answer" } },
+    });
+    expect(outcome.outcome?.failure?.issues.join(",")).toContain(
+      "ran past its time"
+    );
+    expect(outcome.ms).toBeGreaterThanOrEqual(DEADLINE_MS);
+    expect(outcome.ms).toBeLessThan(DEADLINE_MS + SLACK_MS);
+  });
+
+  it("sends nothing out of a transform that reaches for the network as it runs", async () => {
+    const leaks: string[] = [];
+    const server = createServer((incoming, response) => {
+      leaks.push(incoming.url ?? "");
+      response.end();
+    }).listen(0, "127.0.0.1");
+    await once(server, "listening");
+    try {
+      const address = server.address();
+      const port =
+        typeof address === "object" && address !== null ? address.port : 0;
+      await expect(
+        transform("leaky", coreUrl, `&port=${port}`)
+      ).resolves.toMatchObject({
+        status: "transformed",
+        outcome: { ok: true },
+      });
+      // Whatever a fetch left running had its time to land.
+      await sleep(500);
+      expect(leaks).toStrictEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it("refuses to transform off Cloudflare when no sandbox is bound", async () => {
+    await expect(transform("good", coreUrl, "&unbound")).resolves.toMatchObject(
+      {
+        status: "unavailable",
+      }
+    );
+  });
+
   it("blames no App for a 504 that isn't the supervisor's own verdict", async () => {
     // A proxy in front of the supervisor gives up with a 504 of its own.
     const proxy = path.join(tempDir(), "proxy.sock");
@@ -480,6 +557,9 @@ describe("a seal's inspection on plain workerd", () => {
       await expect(inspect("good", served.url)).resolves.toMatchObject({
         status: "unavailable",
       });
+      await expect(transform("good", served.url)).resolves.toMatchObject({
+        status: "unavailable",
+      });
     } finally {
       server.close();
     }
@@ -488,6 +568,9 @@ describe("a seal's inspection on plain workerd", () => {
   it("says the sandbox is unavailable, not the App's fault, when the supervisor is gone", async () => {
     await supervisor.stop();
     await expect(inspect("good")).resolves.toMatchObject({
+      status: "unavailable",
+    });
+    await expect(transform("good")).resolves.toMatchObject({
       status: "unavailable",
     });
   });

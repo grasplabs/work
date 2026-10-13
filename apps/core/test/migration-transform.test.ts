@@ -8,26 +8,43 @@ import {
   transformBatchMaxRows,
 } from "../src/migration-transform.ts";
 import type { TransformRow } from "../src/migration-transform.ts";
+import { SandboxUnavailableError } from "../src/sandboxed.ts";
+import { reviewVersion } from "../src/version-review.ts";
 import { appWith, failure, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 
 // An App's explicit migrations (spec 17.2), sealed with its release and
 // run by the host on batches of records, through the real compiler, seal
 // and Loader isolates. What can go wrong, and the test that shows it
-// doesn't:
+// doesn't (the sandbox's deadline, an unanswering supervisor and the
+// network at run time on plain workerd: scripts/workerd-sandbox.test.ts):
 //
 // - A reviewer approves a transform to another schema than the release
-//   seals: "is sealed only when it transforms to the release's schema".
+//   seals: "is sealed only when it transforms to the release's schema";
+//   or doesn't learn that it rewrites every record of its table: "is
+//   listed in its version's review".
 // - A migration is built from server code, or reaches the network while
-//   its code loads: "is refused at the seal".
-// - The transform writes a managed field, an undeclared key, a value of
-//   the wrong type or a document past the store's limit, or drops a field
-//   the target doesn't declare: "validates every output against the
-//   target table, and keeps what the target doesn't declare".
+//   its code loads: "is refused at the seal when …".
+// - The transform writes a managed field, an undeclared key or a value of
+//   the wrong type: "validates every output against the target table";
+//   a document past the store's limit: "refuses a record its output would
+//   make larger than a store holds"; drops or rewrites a field the target
+//   doesn't declare: "derives each record's fields, keeping what the
+//   target doesn't declare" and "passes a field the target doesn't
+//   declare through unchanged, and refuses changing it".
 // - App code sees a row it wasn't written for: "refuses a row that doesn't
-//   fit its input before App code sees it".
-// - App code forges the runner's answer, or fails outside a handler:
-//   "refuses an answer that isn't its rows".
+//   fit its input before App code sees it", "hands the handler only the
+//   fields its input declares".
+// - One owner's data reaches another owner's record through module state:
+//   "refuses a batch that mixes owners of a table with owner access".
+// - A caller hands it managed fields, or a batch past its bounds: "refuses
+//   rows holding managed fields", "refuses a batch past its bounds".
+// - The transform answers differently each time, through the prototypes,
+//   `Intl` or a `toJSON`: "takes away randomness and clocks …".
+// - App code forges the runner's answer, answers too much, or fails
+//   outside a handler: "refuses an answer that isn't its rows", "refuses
+//   an answer past its bound".
+// - The sandbox can't run it: "is unavailable, never the App's failure".
 
 /** A schema hash no release seals: what an author writes before the seal tells them. */
 const placeholder = "0".repeat(64);
@@ -117,7 +134,29 @@ const handlers = {
   "never-runs": `() => { throw new Error("App code ran"); }`,
 } as const;
 
-type Name = keyof typeof handlers;
+/**
+ * More transforms, sealed in an App of their own: an App registers at most
+ * `appMaxMigrations`.
+ */
+const moreHandlers = {
+  "answers-too-much": `(ctx, row) => ({ title: row.title, body: "x".repeat(100000), category: "general" })`,
+  "remembers-rows": `(() => {
+    let seen = "";
+    return (ctx, row) => {
+      const title = seen === "" ? row.title : seen;
+      seen = row.title;
+      return { ...row, title, category: "general" };
+    };
+  })()`,
+  "crypto-prototype": `(ctx, row) => ({ ...row, category: Object.getPrototypeOf(crypto).randomUUID.call(crypto) })`,
+  "date-prototype": `(ctx, row) => ({ ...row, category: String(new (Object.getPrototypeOf(new Date(0)).constructor)()) })`,
+  "intl-format": `(ctx, row) => ({ ...row, category: new Intl.DateTimeFormat("en").format() })`,
+  "intl-parts": `(ctx, row) => ({ ...row, category: new Intl.DateTimeFormat("en").formatToParts()[0].value })`,
+  "late-json": `(ctx, row) => ({ ...row, category: { toJSON: () => String(Math.random()) } })`,
+  "formats-given-date": `(ctx, row) => ({ ...row, title: new Intl.DateTimeFormat("en", { timeZone: "UTC" }).format(new Date(0)), category: "general" })`,
+} as const;
+
+type Name = keyof typeof handlers | keyof typeof moreHandlers;
 
 /** What each migration declares as its input, when it declares one. */
 const inputs: Readonly<Record<string, string>> = {
@@ -128,11 +167,14 @@ const inputs: Readonly<Record<string, string>> = {
   "never-runs": "input: v.object({ title: noteFields.title }),",
 };
 
-/** The App's files with every migration of `handlers`, to `toSchema`. */
-const filesTo = (toSchema: string): Record<string, string> =>
+/** The App's files with every migration of `group`, to `toSchema`. */
+const filesTo = (
+  group: Readonly<Record<string, string>>,
+  toSchema: string
+): Record<string, string> =>
   notesFiles(
     Object.fromEntries(
-      Object.entries(handlers).map(([name, handler]) => [
+      Object.entries(group).map(([name, handler]) => [
         name,
         migrationSource(name, handler, {
           toSchema,
@@ -172,38 +214,55 @@ const namedSchema = (details: unknown): string => {
 };
 
 /**
- * The fixture's App sealed as version 2, after version 1 named a wrong
- * `toSchema` and the seal answered the one it must name.
+ * An App with the migrations of `group` sealed as version 2, after version
+ * 1 named a wrong `toSchema` and the seal answered the one it must name.
  */
-const sealedTransforms = async (): Promise<{
+const sealedTransforms = async (
+  group: Readonly<Record<string, string>>
+): Promise<{
   fixture: Fixture;
   release: Release;
   refused: { code: unknown; details: unknown };
 }> => {
-  const fixture = await appWith(filesTo(placeholder));
+  const fixture = await appWith(filesTo(group, placeholder));
   const refused = await refusalOf(async () => await seal(fixture));
   await commitFiles(
     env,
     fixture.owner,
     fixture.app,
-    filesTo(namedSchema(refused.details)),
+    filesTo(group, namedSchema(refused.details)),
     "Fix"
   );
   return { fixture, release: await seal(fixture, 2), refused };
 };
 
-/** The App sealed once for the whole file, when first asked: a seal takes seconds. */
+/** Each App sealed once for the whole file, when first asked: a seal takes seconds. */
 let sealedOnce: ReturnType<typeof sealedTransforms> | undefined;
-const sealed = async () => await (sealedOnce ??= sealedTransforms());
+let moreOnce: ReturnType<typeof sealedTransforms> | undefined;
+const sealed = async () => await (sealedOnce ??= sealedTransforms(handlers));
+const sealedMore = async () =>
+  await (moreOnce ??= sealedTransforms(moreHandlers));
+
+/** The owner of the records the tests transform. */
+const owner = "u_owner";
+
+/** A record of `owner` (by default the tests' one) with `fields`. */
+const note = (id: string, fields: TransformRow["fields"], of = owner) => ({
+  id,
+  owner: of,
+  fields,
+});
 
 /** Rows of notes, as a store holds them. */
 const rows: TransformRow[] = [
-  { id: "n1", fields: { title: "Plan", body: "Launch on Monday" } },
-  { id: "n2", fields: { title: "Idea", body: "", legacy: "kept" } },
+  note("n1", { title: "Plan", body: "Launch on Monday" }),
+  note("n2", { title: "Idea", body: "", legacy: "kept" }),
 ];
 
 const run = async (name: Name, batch: readonly TransformRow[] = rows) => {
-  const { release } = await sealed();
+  const { release } = await (Object.hasOwn(handlers, name)
+    ? sealed()
+    : sealedMore());
   return await transformBatch(env, release, name, batch);
 };
 
@@ -222,6 +281,17 @@ describe("an explicit migration", { timeout: 120_000 }, () => {
       table: "notes",
       toSchema: release.manifest.schemaHash,
     });
+  });
+
+  it("is listed in its version's review, which says it rewrites every record of its table", async () => {
+    const { fixture } = await sealed();
+    const review = await reviewVersion(env, fixture.owner, fixture.app, 2);
+
+    expect(review.migrations).toContainEqual({
+      path: "migrations/derive-category.ts",
+      change: "added",
+    });
+    expect(review.migrations).toHaveLength(Object.keys(handlers).length);
   });
 
   it.each([
@@ -262,44 +332,35 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
     await expect(run("derive-category")).resolves.toStrictEqual({
       ok: true,
       rows: [
-        {
-          id: "n1",
-          fields: {
-            title: "Plan",
-            body: "Launch on Monday",
-            category: "launch",
-          },
-        },
-        {
-          id: "n2",
-          fields: {
-            title: "Idea",
-            body: "",
-            category: "general",
-            legacy: "kept",
-          },
-        },
+        note("n1", {
+          title: "Plan",
+          body: "Launch on Monday",
+          category: "launch",
+        }),
+        note("n2", {
+          title: "Idea",
+          body: "",
+          category: "general",
+          legacy: "kept",
+        }),
       ],
     });
   });
 
   it("hands the handler only the fields its input declares, normalized", async () => {
     const outcome = await run("sees-input-only", [
-      { id: "n1", fields: { title: "Plan", legacy: "kept" } },
+      note("n1", { title: "Plan", legacy: "kept" }),
     ]);
 
     expect(outcome).toStrictEqual({
       ok: true,
       rows: [
-        {
-          id: "n1",
-          fields: {
-            title: "body,title",
-            body: "",
-            category: "general",
-            legacy: "kept",
-          },
-        },
+        note("n1", {
+          title: "body,title",
+          body: "",
+          category: "general",
+          legacy: "kept",
+        }),
       ],
     });
   });
@@ -307,8 +368,8 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
   it("refuses a row that doesn't fit its input before App code sees it", async () => {
     await expect(
       run("never-runs", [
-        { id: "n1", fields: { title: "Plan" } },
-        { id: "n2", fields: { title: 7 } },
+        note("n1", { title: "Plan" }),
+        note("n2", { title: 7 }),
       ])
     ).resolves.toMatchObject({
       ok: false,
@@ -333,7 +394,7 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
   it("refuses a record its output would make larger than a store holds", async () => {
     await expect(
       run("writes-too-much", [
-        { id: "n1", fields: { title: "Plan", legacy: "y".repeat(40_000) } },
+        note("n1", { title: "Plan", legacy: "y".repeat(40_000) }),
       ])
     ).resolves.toMatchObject({
       ok: false,
@@ -342,20 +403,17 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
   });
 
   it("passes a field the target doesn't declare through unchanged, and refuses changing it", async () => {
-    const retained = [{ id: "n2", fields: { title: "Idea", legacy: "kept" } }];
+    const retained = [note("n2", { title: "Idea", legacy: "kept" })];
 
     await expect(run("spreads-row", retained)).resolves.toStrictEqual({
       ok: true,
       rows: [
-        {
-          id: "n2",
-          fields: {
-            title: "Idea",
-            body: "",
-            category: "general",
-            legacy: "kept",
-          },
-        },
+        note("n2", {
+          title: "Idea",
+          body: "",
+          category: "general",
+          legacy: "kept",
+        }),
       ],
     });
     await expect(run("rewrites-retained", retained)).resolves.toMatchObject({
@@ -375,13 +433,98 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
     });
   });
 
+  it("refuses a batch that mixes owners of a table with owner access, which only a caller's bug sends", async () => {
+    // The handler carries the previous row's title into the next one:
+    // within one owner's batch that's their own data; across owners it
+    // would hand one owner's note to another.
+    const mixed = [
+      note("n1", { title: "Mine" }, "u_alice"),
+      note("n2", { title: "Theirs" }, "u_bob"),
+    ];
+    await expect(run("remembers-rows", mixed)).rejects.toThrow(/mixes owners/u);
+    await expect(
+      run("remembers-rows", [
+        note("n1", { title: "Mine" }, "u_alice"),
+        note("n2", { title: "Also mine" }, "u_alice"),
+      ])
+    ).resolves.toMatchObject({
+      ok: true,
+      rows: [
+        { owner: "u_alice", fields: { title: "Mine" } },
+        { owner: "u_alice", fields: { title: "Mine" } },
+      ],
+    });
+  });
+
+  it("refuses rows holding managed fields, which only a caller's bug sends", async () => {
+    await expect(
+      run("spreads-row", [note("n1", { title: "Plan", _ownerId: "u_bob" })])
+    ).rejects.toThrow(/managed fields/u);
+  });
+
+  it.each([
+    ["crypto-prototype", "randomness"],
+    ["date-prototype", "the clock"],
+    ["intl-format", "the clock"],
+    ["intl-parts", "the clock"],
+    ["late-json", "randomness"],
+  ] as const)(
+    "takes away randomness and clocks: %s is refused",
+    async (name, refused) => {
+      const outcome = await run(name, [note("n1", { title: "Plan" })]);
+      expect(outcome).toMatchObject({
+        ok: false,
+        failure: { id: "n1", reason: "threw" },
+      });
+      expect(outcome.ok ? [] : outcome.failure.issues).toStrictEqual([
+        `A migration is pure: ${refused} isn't available while it transforms rows.`,
+      ]);
+    }
+  );
+
+  it("still formats a date it is given", async () => {
+    await expect(
+      run("formats-given-date", [note("n1", { title: "Plan" })])
+    ).resolves.toMatchObject({
+      ok: true,
+      rows: [{ fields: { title: "1/1/1970" } }],
+    });
+  });
+
+  it("refuses an answer past its bound", async () => {
+    const many = Array.from({ length: 45 }, (_, index) =>
+      note(`n${index}`, { title: "Note" })
+    );
+    const outcome = await run("answers-too-much", many);
+    expect(outcome).toMatchObject({
+      ok: false,
+      failure: { id: null, reason: "invalid_answer" },
+    });
+    expect(outcome.ok ? "" : outcome.failure.issues.join(",")).toContain(
+      "The migration's answer is too large."
+    );
+  });
+
+  it("is unavailable, never the App's failure, where no sandbox bounds it", async () => {
+    const { release } = await sealed();
+    await expect(
+      transformBatch(
+        {
+          ...env,
+          RUNTIME_PROFILE: "workerd",
+          SANDBOX_HOST: undefined,
+          SANDBOX_IN_PROCESS: undefined,
+        },
+        release,
+        "derive-category",
+        rows
+      )
+    ).rejects.toBeInstanceOf(SandboxUnavailableError);
+  });
+
   it("refuses a batch past its bounds, which only a caller's bug sends", async () => {
-    const many = Array.from(
-      { length: transformBatchMaxRows + 1 },
-      (_, index) => ({
-        id: `n${index}`,
-        fields: { title: "Note", body: "" },
-      })
+    const many = Array.from({ length: transformBatchMaxRows + 1 }, (_, index) =>
+      note(`n${index}`, { title: "Note", body: "" })
     );
     await expect(run("derive-category", many)).rejects.toThrow(
       /past its bounds/u

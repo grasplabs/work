@@ -195,6 +195,12 @@ export interface VersionReview {
   server: ReviewChange | null;
   serverFiles: { path: string; change: ReviewChange }[];
   /**
+   * Its explicit migrations (`migrations/*.ts`, spec 17.2) that differ: each
+   * reads and rewrites every record of its table, whoever owns it, once a
+   * release sealed on it runs on the App's store.
+   */
+  migrations: { path: string; change: ReviewChange }[];
+  /**
    * Its workflows that differ from the current version's: their own files,
    * or code outside `screens/` they may import (`shared`), such as the
    * server code their steps call.
