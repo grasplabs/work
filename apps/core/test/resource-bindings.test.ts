@@ -1989,6 +1989,47 @@ export default app({
 `,
 });
 
+/** An App whose actions search knowledge `aliases`, each of `names`. */
+const manyCollectionFiles = (
+  aliases: readonly string[],
+  names: readonly string[]
+): Record<string, string> => ({
+  "schema.ts": modelFiles()["schema.ts"] ?? "",
+  "operations/shelves.ts": `import { resource, v } from "@grasp-os/sdk";
+import { action } from "#grasp/server";
+
+${aliases
+  .map(
+    (alias) => `export const ${alias} = resource.knowledge("${alias}", {
+  operations: ["search"],
+  collections: ${JSON.stringify(names)},
+});
+
+export const find_${alias} = action({
+  args: { text: v.string().min(1) },
+  returns: v.array(v.object({ title: v.string(), excerpt: v.string() })).max(20),
+  uses: [${alias}],
+  handler: async (ctx, args) => await ctx.resources.${alias}.search({ text: args.text }),
+});
+`
+  )
+  .join("\n")}`,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { ${aliases.flatMap((alias) => [alias, `find_${alias}`]).join(", ")} } from "./operations/shelves.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Shelves",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: { shelves: { ${aliases.map((alias) => `find_${alias}`).join(", ")} } },
+  internalOperations: {},
+  screens: [],
+  uses: [${aliases.join(", ")}],
+});
+`,
+});
+
 /** A template contract of the test's own: templates are the organization's. */
 const ownContract = (): string =>
   `grasp.desk-${crypto.randomUUID().slice(0, 8)}@1`;
@@ -2262,6 +2303,73 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     });
   });
 
+  it("names bound collections past D1's 100 bound parameters", async () => {
+    // Four knowledge resources of 26 collections each, every one bound to
+    // a collection of its own: 104 permissions and collections to name.
+    const aliases = ["k1", "k2", "k3", "k4"];
+    const names = Array.from({ length: 26 }, (_, index) => `c${index}`);
+    const sealed = await sealedApp(manyCollectionFiles(aliases, names));
+    const admin = await person("admin");
+    const first = await createCollection(env, admin, {
+      name: "Shelf 0",
+      access: "everyone",
+    });
+    const granted = await grantedCollection(sealed, admin, first.id, "SHELF");
+    const db = drizzle(env.DB);
+    const row = await db
+      .select()
+      .from(permissionRows)
+      .where(eq(permissionRows.id, granted))
+      .get();
+    if (row === undefined) {
+      throw new Error("Expected the grant");
+    }
+    const bound: Record<string, Record<string, string>> = {};
+    for (const [aliasIndex, alias] of aliases.entries()) {
+      const collectionsOf: Record<string, string> = {};
+      for (const [nameIndex, name] of names.entries()) {
+        const number = aliasIndex * names.length + nameIndex;
+        // oxlint-disable-next-line no-await-in-loop -- one shelf at a time
+        const shelf = await createCollection(env, admin, {
+          name: `Shelf ${number}`,
+          access: "everyone",
+        });
+        const id = crypto.randomUUID();
+        // oxlint-disable-next-line no-await-in-loop -- one grant at a time
+        await db.insert(permissionRows).values({
+          ...row,
+          id,
+          objectId: shelf.id,
+          binding: `SHELF_${number}`,
+        });
+        collectionsOf[name] = id;
+      }
+      bound[alias] = collectionsOf;
+      // oxlint-disable-next-line no-await-in-loop -- one alias at a time
+      await approveResourceBinding(env, admin, {
+        app: sealed.app,
+        alias,
+        target: { kind: "knowledge", collections: collectionsOf },
+        reviewed: { version: 1 },
+      });
+    }
+    const review = await reviewResourceBindings(env, sealed.owner, sealed.app);
+    const labelled = review.resources.flatMap(({ binding }) =>
+      Object.values(binding?.label.collections ?? {})
+    );
+    expect({
+      states: statesOf(review),
+      labelled: labelled.length,
+      unnamed: labelled.filter((name) => name === null).length,
+      first: review.resources[0]?.binding?.label.collections.c0,
+    }).toStrictEqual({
+      states: { k1: "served", k2: "served", k3: "served", k4: "served" },
+      labelled: 104,
+      unnamed: 0,
+      first: "Shelf 0",
+    });
+  });
+
   it("shows the App's builders its bindings with nothing to choose, and nobody else", async () => {
     const desk = await deskApp();
     await bindDesk(desk);
@@ -2282,6 +2390,8 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     expect({
       states: statesOf(builders),
       choices: builders.resources.map(({ choices }) => choices),
+      // The bound target named, for builders too: only the collection bound.
+      labels: builders.resources.map(({ binding }) => binding?.label),
       staff: staff.resources.map(({ choices }) => choices),
       member: await failure(
         async () => await reviewResourceBindings(env, member, desk.sealed.app)
@@ -2293,6 +2403,14 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       states: { help: "served", letter: "served", writer: "served" },
       choices: [null, null, null],
+      labels: [
+        {
+          connection: null,
+          collections: { handbook: "Handbook", salaries: "Handbook" },
+        },
+        { connection: null, collections: {} },
+        { connection: null, collections: {} },
+      ],
       staff: [null, null, null],
       member: "app.not_found",
       otherBuilder: "app.not_found",

@@ -29,6 +29,8 @@ import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
 import { decidesRequests } from "../dashboard/to-do.tsx";
 import { EngineIcon } from "../engines/engine-icon.tsx";
+import { ResourceBindings } from "../engines/resource-bindings.tsx";
+import type { ResourcesPage } from "../engines/resource-bindings.tsx";
 import { ScreenApproval } from "../engines/screen-approval.tsx";
 import {
   LoadingLines,
@@ -114,6 +116,22 @@ const loadIntegrations = async (
       connections: integration.connections.filter(({ id }) => used.has(id)),
     }))
     .filter(({ connections: held }) => held.length > 0);
+};
+
+/**
+ * The engine's declared resources and their bindings and, for an admin,
+ * the connections the page names connection permissions by.
+ */
+const loadResources = async (
+  session: Session,
+  engine: string,
+  decides: boolean
+): Promise<ResourcesPage> => {
+  const [review, connections] = await Promise.all([
+    session.resourceBindings.review(engine),
+    decides ? session.connections.list() : [],
+  ]);
+  return { review, connections };
 };
 
 /** What a tab shows of a read: a skeleton while it comes, why it didn't, or `children` once it did. */
@@ -371,7 +389,7 @@ const Count = ({ count }: { count: number }) => (
 );
 
 const EngineView = ({ page }: { page: EnginePage }) => {
-  const { workflows, runs, members, integrations, approval } =
+  const { workflows, runs, members, integrations, approval, resources } =
     Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const { app, contents } = page;
@@ -409,6 +427,11 @@ const EngineView = ({ page }: { page: EnginePage }) => {
               <Trans>Integrations</Trans>
             </TabsTrigger>
           )}
+          {resources === undefined ? null : (
+            <TabsTrigger value="resources">
+              <Trans>Resources</Trans>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="members">
             <Trans>Members</Trans>
           </TabsTrigger>
@@ -432,6 +455,20 @@ const EngineView = ({ page }: { page: EnginePage }) => {
           <TabsContent value="integrations">
             <div className="pt-4">
               <Integrations identity={identity} integrations={integrations} />
+            </div>
+          </TabsContent>
+        )}
+        {resources === undefined ? null : (
+          <TabsContent value="resources">
+            <div className="pt-4">
+              <Later promise={resources}>
+                {(declared) => (
+                  <ResourceBindings
+                    decides={decidesRequests(identity)}
+                    page={declared}
+                  />
+                )}
+              </Later>
             </div>
           </TabsContent>
         )}
@@ -495,6 +532,18 @@ export const Route = createFileRoute("/_shell/engines/$engine/")({
       ? loadFromCore(
           core,
           async (session) => await session.screenTrust.review(params.engine)
+        )
+      : undefined,
+    // For who reads them: admins, who decide them, and builders.
+    resources: canBuild(identity.role)
+      ? loadFromCore(
+          core,
+          async (session) =>
+            await loadResources(
+              session,
+              params.engine,
+              decidesRequests(identity)
+            )
         )
       : undefined,
     integrations: canBuild(identity.role)

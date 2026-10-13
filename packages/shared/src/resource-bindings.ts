@@ -224,6 +224,23 @@ export type BindingChoices = { truncated: boolean } & (
   | { kind: "template"; versions: PublishedTemplate[] }
 );
 
+/**
+ * How a review names a binding's own target, for everyone who may read the
+ * review: only the target bound, never the App's other grants.
+ */
+export interface BindingLabel {
+  /**
+   * A connector binding's connection, while the reviewer can see it among
+   * their own connections; null otherwise, and for other kinds.
+   */
+  connection: { account: string | null; provider: string } | null;
+  /**
+   * A knowledge binding's collections, by the names App code uses: each
+   * bound collection's name, null once it is gone. Empty for other kinds.
+   */
+  collections: Record<string, string | null>;
+}
+
 /** A resource the App's current version declares for its actions. */
 export interface DeclaredResource {
   alias: string;
@@ -243,8 +260,11 @@ export interface DeclaredResource {
   /** The paths of the App's actions that use it. */
   usedBy: string[];
   state: BindingState;
-  /** Its active binding, serving or not; null when `unbound`. */
-  binding: ResourceBinding | null;
+  /**
+   * Its active binding, serving or not, with how its own target is named;
+   * null when `unbound`.
+   */
+  binding: (ResourceBinding & { label: BindingLabel }) | null;
   /** What it may be bound to: for admins of the organization only. */
   choices: BindingChoices | null;
 }
