@@ -73,6 +73,13 @@ export interface SessionCall {
    */
   readonly owner: string;
   /**
+   * The session (its call ID) this one is the child of: a call the parent
+   * made and waits for (an App function a Code Mode run calls). The
+   * supervisor gives it a process of the parent's own reserve, never one
+   * it would wait for while the parent holds it.
+   */
+  readonly parent?: string;
+  /**
    * Tests only: how long the session stays open once the call settled, to
    * show its capabilities refuse once the call is over, open or not.
    */
@@ -103,6 +110,8 @@ export interface SessionOptions {
    * unless a test gives a pool of its own.
    */
   readonly held?: HeldPool;
+  /** Gets the session's call ID once it's open, for its children's calls. */
+  readonly opened?: (callId: string) => void;
   /**
    * Lets more calls run in the session while it's open (`open` gets how),
    * and keeps it open, once its own call settled, until they have
@@ -229,6 +238,9 @@ const backstopMs = 2000;
 
 /** The header core gives a session's ID in, which its verdict is asked by. */
 export const sandboxCallIdHeader = "x-grasp-sandbox-call";
+
+/** The header core names a session's parent in (`SessionCall.parent`). */
+export const sandboxParentHeader = "x-grasp-sandbox-parent";
 
 /** The header core says whose session it is in, for the per-owner cap. */
 export const sandboxOwnerHeader = "x-grasp-sandbox-owner";
@@ -381,7 +393,14 @@ const openSession = async (
         [sandboxCpuHeader]: String(call.cpuMs),
         [sandboxWaitHeader]: String(sandboxWaitMs),
         [sandboxCallIdHeader]: id,
-        [sandboxOwnerHeader]: call.owner,
+        ...(call.parent === undefined
+          ? {}
+          : { [sandboxParentHeader]: call.parent }),
+        // As the supervisor takes an owner: what else it holds, it holds
+        // as `_`, whatever an ID's own form.
+        [sandboxOwnerHeader]: call.owner
+          .replaceAll(/[^A-Za-z0-9:_.-]/gu, "_")
+          .slice(0, 200),
       },
       signal:
         signal === undefined
@@ -464,11 +483,12 @@ const failureOf = async (
 export const runInSession = async (
   host: Fetcher,
   call: SessionCall,
-  { signal, held = sessionsHeld, nesting }: SessionOptions = {}
+  { signal, held = sessionsHeld, nesting, opened }: SessionOptions = {}
 ): Promise<unknown> => {
   signal?.throwIfAborted();
   const id = crypto.randomUUID();
   const socket = await openSession(host, call, id, signal);
+  opened?.(id);
   let closed = false;
   socket.addEventListener("close", () => {
     closed = true;

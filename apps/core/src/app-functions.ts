@@ -376,21 +376,27 @@ const inSession = async (
     Promise.withResolvers<unknown>();
   const session = (async (): Promise<unknown> => {
     try {
-      return await runInSession(host, sessionCall, {
-        ...(signal === undefined ? {} : { signal }),
-        nesting: {
-          open: (run: NestedRun) => {
-            entry.run = run;
-            openSessions.set(tree, entry);
+      return await runInSession(
+        host,
+        tree.parentSession === undefined
+          ? sessionCall
+          : { ...sessionCall, parent: tree.parentSession },
+        {
+          ...(signal === undefined ? {} : { signal }),
+          nesting: {
+            open: (run: NestedRun) => {
+              entry.run = run;
+              openSessions.set(tree, entry);
+            },
+            answered: answer,
+            // Every nested call the operation host started, those they
+            // start too: from the moment it starts each (`CallTree`).
+            drain: async () => {
+              await tree.settled();
+            },
           },
-          answered: answer,
-          // Every nested call the operation host started, those they
-          // start too: from the moment it starts each (`CallTree`).
-          drain: async () => {
-            await tree.settled();
-          },
-        },
-      });
+        }
+      );
     } finally {
       // Ended however it did: no function runs in it any more. A run of
       // the named function again (stale reads) opened a session of its own.
@@ -686,7 +692,9 @@ export const callAppFunction = async (
   app: unknown,
   request: unknown,
   deadline = Date.now() + 60_000,
-  stillAllowed?: () => Promise<void>
+  stillAllowed?: () => Promise<void>,
+  /** The sandbox session (its call ID) of the Code Mode run that calls. */
+  parentSession?: string
 ): Promise<FunctionAnswer> => {
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
@@ -759,9 +767,12 @@ export const callAppFunction = async (
       invocation,
       { path, kind: call.reference.kind },
       call.input,
-      call.idempotencyKey === undefined
-        ? {}
-        : { idempotencyKey: call.idempotencyKey }
+      {
+        ...(call.idempotencyKey === undefined
+          ? {}
+          : { idempotencyKey: call.idempotencyKey }),
+        ...(parentSession === undefined ? {} : { parentSession }),
+      }
     );
     return {
       result,

@@ -215,7 +215,10 @@ class Session extends CapnwebTarget {
       modules: parsed.modules,
       env: {},
       globalOutbound: null,
-    })).getEntrypoint(parsed.entrypoint);
+    })).getEntrypoint(
+      // `default`: the module's default export, as workerd names it.
+      parsed.entrypoint === "default" ? undefined : parsed.entrypoint
+    );
     // Never undefined, which capnweb would send as such: always a value.
     return (await invoke(entrypoint, parsed.method, args)) ?? null;
   }

@@ -206,6 +206,12 @@ export interface OperationReference {
 export interface CallOptions {
   /** A mutation's submission key: one per logical submission, reused by retries. */
   readonly idempotencyKey?: string;
+  /**
+   * On-prem, the sandbox session (its call ID) of the call this one is
+   * made from (a Code Mode run's): its functions' session is that one's
+   * child (`CallTree.parentSession`).
+   */
+  readonly parentSession?: string;
 }
 
 /** A table of the App's schema, as staged writes are checked against it. */
@@ -2102,7 +2108,7 @@ export const callOperation = async (
         invocation,
         depth: 0,
         budget: callBudget(),
-        call: new CallTree(),
+        call: new CallTree(options.parentSession),
       },
       operation,
       admitted,
