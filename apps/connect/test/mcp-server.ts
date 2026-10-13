@@ -49,7 +49,10 @@ export interface FakeTool {
 export interface FakeResult {
   output: Record<string, unknown>;
   /** Content blocks to answer with instead of `output`, such as an image. */
-  content?: { type: "image"; data: string; mimeType: string }[];
+  content?: (
+    | { type: "image"; data: string; mimeType: string }
+    | { type: "text"; text: string }
+  )[];
   /** The IDs of the resources it read. */
   provenance?: string[];
   /** It failed, and says so in its result. */
@@ -262,7 +265,12 @@ export const mcpServerWith = (
     unkeyed: number;
     /** How the next tool call fares; back to `ok` after it. */
     network: Network;
-  } = { ran: [], requests: 0, unkeyed: 0, network: "ok" };
+    /**
+     * Whether the next `tools/list` is turned away with a 401, as for a
+     * key the server refuses; back to `false` after it.
+     */
+    refuseList: boolean;
+  } = { ran: [], requests: 0, unkeyed: 0, network: "ok", refuseList: false };
 
   const answer = async (request: Request): Promise<Response> => {
     state.requests += 1;
@@ -273,6 +281,10 @@ export const mcpServerWith = (
     const network = isToolCall(body) ? state.network : "ok";
     if (isToolCall(body)) {
       state.network = "ok";
+    }
+    if (isToolList(body) && state.refuseList) {
+      state.refuseList = false;
+      return new Response("Unauthorized", { status: 401 });
     }
     if (network === "unauthorised") {
       return new Response("Unauthorized", { status: 401 });
@@ -309,6 +321,7 @@ export const mcpServerWith = (
     state.requests = 0;
     state.unkeyed = 0;
     state.network = "ok";
+    state.refuseList = false;
   };
 
   return { state, answer, reset };

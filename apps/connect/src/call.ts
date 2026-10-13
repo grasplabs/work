@@ -7,6 +7,8 @@ import type {
   PendingReference,
 } from "@grasp-os/shared/connect";
 import type { Json } from "@grasp-os/shared/json";
+import { log } from "@grasp-os/shared/log";
+import { redact } from "@grasp-os/shared/redact";
 import type { BatchItem } from "drizzle-orm/batch";
 import { z } from "zod";
 
@@ -33,6 +35,7 @@ import {
   composioTool,
   didNothing,
   hasSideEffect,
+  uncertainFailure,
   withProvenance,
 } from "./policy.ts";
 
@@ -59,6 +62,57 @@ const notPerformed = ({ output }: McpToolResult): Error => {
     "connect.server_unavailable",
     wait === undefined ? undefined : { retryAfterSeconds: wait }
   );
+};
+
+/** Most characters of a tool's error text connect logs. */
+const maxLoggedErrorChars = 500;
+
+/**
+ * What a tool's error said, as the server sent it: each text block's own
+ * text, or its structured content as JSON. Never the output as connect
+ * stores it, where text is JSON-quoted once more and a credential's name
+ * and quotes come escaped (`\"password\"`). Content other than text (an
+ * image, a resource) is left out, and only noted.
+ */
+const errorParts = (output: string): string[] => {
+  let said: unknown;
+  try {
+    said = JSON.parse(output);
+  } catch {
+    return [output];
+  }
+  if (typeof said === "string") {
+    return [said];
+  }
+  if (!Array.isArray(said)) {
+    return [output];
+  }
+  // Blocks as `resultOf` keeps them when not every one is text.
+  const texts = said.flatMap((block: unknown) =>
+    typeof block === "object" &&
+    block !== null &&
+    "type" in block &&
+    block.type === "text" &&
+    "text" in block &&
+    typeof block.text === "string"
+      ? [block.text]
+      : []
+  );
+  return texts.length < said.length
+    ? [...texts, "(content other than text)"]
+    : texts;
+};
+
+/**
+ * A tool's error as connect logs it: what it said ({@link errorParts}),
+ * credentials redacted, then cut to {@link maxLoggedErrorChars}, so
+ * neither a secret it echoed nor its size reaches the log.
+ */
+const loggedError = (output: string): string => {
+  const redacted = redact(errorParts(output).join("\n"));
+  return redacted.length > maxLoggedErrorChars
+    ? `${redacted.slice(0, maxLoggedErrorChars)}…`
+    : redacted;
 };
 
 /**
@@ -416,21 +470,29 @@ export const carryOut = async (
       tool.name,
       await server.call(tool.name, input)
     );
-  } catch (error) {
-    // Only a server that turned the call away frees the key. A tool that
-    // reports an error may have acted first, so its answer is kept below.
-    if (error instanceof McpError && error.declined) {
-      await store.release();
-      throw connectErrors.create("connect.server_unavailable");
-    }
+  } catch {
+    // However the request failed, it may have reached the tool, and the
+    // tool may have acted (mcp.ts `McpError`): the key is spent. Only a
+    // native connector that says it did nothing frees it (below).
     await store.spend();
     throw connectErrors.create("connect.outcome_unknown");
   }
-  // ...unless the tool says it can't tell whether its write took effect:
-  // then, as for an answer lost on its way to connect, the key is spent,
-  // and the error isn't kept as the answer, which would tell every repeat
-  // the action failed when it may have happened.
-  if (done.outcomeUnknown) {
+  // Its error is kept as the answer to every repeat, unless it leaves open
+  // whether the write took effect (the tool says so, or it is a Composio
+  // tool's, which can't tell): then, as for an answer lost on its way to
+  // connect, the key is spent, and the error isn't kept, which would tell
+  // every repeat the action failed when it may have happened.
+  if (uncertainFailure(connection.serverKind, tool, done)) {
+    if (done.isError && connection.serverKind === "composio") {
+      // Nobody is told what it said, as it would read as a failure: kept
+      // for whoever looks into the call, never replayed or audited.
+      log.warn("connect.composio_error_unknown", {
+        callId: claims.jti,
+        connectionId: connection.id,
+        action: tool.name,
+        error: loggedError(done.output),
+      });
+    }
     await store.spend();
     throw connectErrors.create("connect.outcome_unknown");
   }
