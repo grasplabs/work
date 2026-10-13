@@ -18,12 +18,13 @@ import type { Address, Email } from "postal-mime";
 
 import { keepAuditEvent } from "../audit-outbox.ts";
 import { apps, workflowTriggers } from "../db/core/schema.ts";
+import { isWorthKeeping, keepMessage, parsedOf } from "./kept-email.ts";
 import {
   learnMailDomain,
   lineageRefusals,
   mailRecipient,
-} from "./effect-stamps.ts";
-import { isWorthKeeping, keepMessage, parsedOf } from "./kept-email.ts";
+  runsOwnMail,
+} from "./mail-stamps.ts";
 import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 
 // Mail to workflows' email triggers (trigger-registry.ts). Email Routing
@@ -82,18 +83,22 @@ import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 // mail to their workflows.
 //
 // A run's own mail to the domain carries its token: core put it on the
-// address as the run's call left (`local+<token>@domain`,
-// effect-stamps.ts). Mail to a tokened address goes to the address
-// without it, and starts its runs under the run that sent it, admitted
-// against that run's lineage (quotas.ts, `admitChild`); its key is the
-// token's, not its Message-ID's, so every copy of it starts one run of
-// each workflow, in that lineage. A token core didn't record is part of
-// the address, which no one receives at. Past the lineage's limits the
-// run is refused: the message is accepted and dropped, and the refusal
-// audited (`workflow.email.refused`, `lineage_limit`), as a delivery
-// tried again would be refused again. Each message also tells core its
-// mail domain, from the envelope recipient Email Routing sets, which no
-// sender chooses: a run's mail to it is what core stamps.
+// recipient as the run's send left (`local+<token>@domain`,
+// mail-stamps.ts). Mail to a tokened address goes to the address without
+// the token. It is the run's own mail, and starts its runs under the run,
+// admitted against its lineage (quotas.ts, `admitChild`), only when it
+// goes to the address the token was put on and comes from the run's
+// sender (its envelope sender or its From); its key is then the token's,
+// so every copy of it starts one run of each workflow, in that lineage.
+// Anything else to a tokened address (a customer's reply to all, the
+// token on another address) is mail like any other: a root, keyed by its
+// Message-ID. A token core didn't record is part of the address, which
+// no one receives at. Past the lineage's limits the run is refused: the
+// message bounces, and the refusal is audited (`workflow.email.refused`,
+// `lineage_limit`). Each message also tells core its mail domain, from
+// the envelope recipient Email Routing sets, which no sender chooses: a
+// run's mail to it is what core stamps, from the first message on, so a
+// fresh deployment's first hop is a root.
 
 /** Longest subject a run's input keeps, in characters. */
 const maxSubjectLength = 1000;
@@ -382,12 +387,13 @@ export const receiveEmail = async (
   env: Env
 ): Promise<void> => {
   // Who receives it first: mail nobody receives is never read. A token
-  // core recorded names the run that sent it (effect-stamps.ts).
+  // core recorded goes, and names the run that may have sent it
+  // (mail-stamps.ts).
   const at = message.to.lastIndexOf("@");
   const local = message.to.slice(0, Math.max(at, 0)).toLowerCase();
-  const { address, stamp } =
+  const { local: address, stamp: recorded } =
     local === ""
-      ? { address: "", stamp: undefined }
+      ? { local: "", stamp: undefined }
       : await mailRecipient(env, local);
   const receivers = address === "" ? [] : await receiversAt(env, address);
   if (receivers.length === 0) {
@@ -409,6 +415,11 @@ export const receiveEmail = async (
     return;
   }
   const id = toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", raw)));
+  // The run's own mail only to the address it mailed, from its sender.
+  const stamp = runsOwnMail(recorded, `${address}@${domain ?? ""}`, [
+    message.from,
+    parsed.from?.address,
+  ]);
   const loop = loopOf(message.to, message.from, parsed);
   if (loop !== undefined) {
     // Once for each App it would have started a run of. Identifiers only:
@@ -501,7 +512,7 @@ export const receiveEmail = async (
   );
   const refused = lineageRefusals(started, withRoom);
   if (refused.length > 0) {
-    // Settled, never tried again: the lineage's limits refuse it for good.
+    // Refused for good: the lineage's limits would refuse it again.
     const db = drizzle(env.DB);
     await Promise.all(
       refused.map(async ({ receiver, limit }) => {
@@ -535,6 +546,14 @@ export const receiveEmail = async (
   }
   if (failures.length > 0) {
     throw new Error(`Message ${id} didn't start every run it should`);
+  }
+  if (refused.length > 0) {
+    // Bounced, so its sender hears of it: the run that sent it reached
+    // its lineage's limits.
+    message.setReject(
+      "This message would start a workflow run past the limits of the run that sent it."
+    );
+    return;
   }
   if (withRoom.length < receivers.length) {
     // Fails for now, so its sender tries again once the hour allows: the

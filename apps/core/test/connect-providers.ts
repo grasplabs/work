@@ -35,7 +35,7 @@ export const graphControlUrl = "https://graph-control.test/receive";
 
 /**
  * Where tests read the mail Microsoft Graph sent for them (`sendMail`), in
- * order: `{ mailbox, subject, to }` each.
+ * order: `{ mailbox, subject, to, replyTo }` each.
  */
 export const graphSentUrl = "https://graph-control.test/sent";
 
@@ -86,6 +86,7 @@ export default {
           mailbox,
           subject: message.subject,
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
+          replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
         });
         return new Response(null, { status: 202 });
       }

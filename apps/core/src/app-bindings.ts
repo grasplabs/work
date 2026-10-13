@@ -305,8 +305,8 @@ export class AppConnectionBinding extends WorkerEntrypoint<
             requireStepKey(key, idempotencyKey);
           }
           // A run's step's call, by the key core gave the App's caller:
-          // what it leaves that may start a run starts it under the run
-          // (workflows/effect-stamps.ts).
+          // its mail to the deployment's domain is stamped with the run
+          // (workflows/mail-stamps.ts).
           const run =
             authority.mode === "workflow" && idempotencyKey !== undefined
               ? runOfStepKey(idempotencyKey)

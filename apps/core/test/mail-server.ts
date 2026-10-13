@@ -35,8 +35,7 @@ export type MailAnswer = "sent" | "unavailable" | "invalid" | "slow" | "lost";
  * A server's tools, set by a test in place of the mail tools: what
  * `tools/list` answers (`list`, each tool as MCP lists it), and each tool's
  * result by its name (`answers`, an MCP tool result). Every call that
- * reached one of them is recorded. A tool's answer given as a list is one
- * answer per call, in order (the last answering every call after it).
+ * reached one of them is recorded.
  */
 export interface ToolkitServer {
   list?: unknown[];
@@ -103,8 +102,7 @@ const mailServer = async (request, url) => {
   }
   if (Object.hasOwn(server.answers, params.name)) {
     server.ran.push({ tool: params.name, arguments: params.arguments });
-    const answers = server.answers[params.name];
-    return rpcResult(id, Array.isArray(answers) ? (answers.length > 1 ? answers.shift() : answers[0]) : answers);
+    return rpcResult(id, server.answers[params.name]);
   }
   if (params.name === "mail.search") {
     server.searched.push(params.arguments.query);

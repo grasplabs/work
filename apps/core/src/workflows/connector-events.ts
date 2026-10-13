@@ -8,11 +8,7 @@ import type {
   OutboxedConnectorEvent,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import {
-  appIdSchema,
-  runIdSchema,
-  workflowIdSchema,
-} from "@grasp-os/shared/ids";
+import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   connectorEventSchema,
@@ -23,13 +19,11 @@ import type { ConnectorEvent } from "@grasp-os/shared/workflows";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { keepAuditEvent } from "../audit-outbox.ts";
 import { apps, permissions, workflowTriggers } from "../db/core/schema.ts";
 import {
   allowingPermissionSql,
   listeningPermissionSql,
 } from "../permissions.ts";
-import { itemStampedRun, lineageRefusals } from "./effect-stamps.ts";
 import { deliveryRoom, startRun } from "./runs.ts";
 
 // Events connections report, to workflows' event triggers
@@ -63,15 +57,6 @@ import { deliveryRoom, startRun } from "./runs.ts";
 // the event waits in connect's outbox and is delivered again later. A
 // start that fails fails the delivery, after every other has been tried,
 // so the event is delivered again and starts only what didn't start.
-//
-// An event of something a run made through a connection (a message it
-// sent, a file it wrote) starts its runs under that run: core recorded
-// the ID the provider answered for it (effect-stamps.ts), and an event
-// names what it is of by the same ID, which no one else can give
-// anything. Those runs are admitted against the run's lineage (quotas.ts,
-// `admitChild`); past its limits each is refused, the event settled for
-// it and the refusal audited (`workflow.event.refused`), never delivered
-// again to be refused again. An event of anything else starts roots.
 
 /**
  * The event triggers of Apps' current versions for `event`'s type, in
@@ -118,23 +103,8 @@ const receiversOf = async (env: Env, event: ConnectorEvent) =>
     );
 
 /**
- * The ID of what `event` is of, as its provider names it: its payload's
- * `id`, in full, or the event's own.
- */
-const itemIdOf = (event: ConnectorEvent): string => {
-  const { payload } = event;
-  return typeof payload === "object" &&
-    payload !== null &&
-    !Array.isArray(payload) &&
-    typeof payload.id === "string"
-    ? payload.id
-    : event.id;
-};
-
-/**
- * Starts the runs an event a connection reported starts, under the run
- * that made what it is of, if a run did; how many workflows it started
- * (or had started, delivered before), less those its lineage refused.
+ * Starts the runs an event a connection reported starts; how many
+ * workflows it started (or had started, delivered before).
  */
 export const deliverConnectorEvent = async (
   env: Env,
@@ -187,10 +157,6 @@ export const deliverConnectorEvent = async (
     )
   );
   const withRoom = receivers.filter((_, index) => rooms[index] !== "capped");
-  const parent =
-    withRoom.length === 0
-      ? undefined
-      : await itemStampedRun(env, itemIdOf(event));
   const started = await Promise.allSettled(
     withRoom.map(
       async (receiver) =>
@@ -205,38 +171,11 @@ export const deliverConnectorEvent = async (
             key: keyOf(receiver),
             version: receiver.version,
           },
-          ...(parent === undefined
-            ? {}
-            : { parent: runIdSchema.parse(parent) }),
         })
     )
   );
-  const refused = lineageRefusals(started, withRoom);
-  if (refused.length > 0) {
-    // Settled, never delivered again: the lineage's limits refuse it for
-    // good. Identifiers only: the type, the workflow and the limit.
-    const db = drizzle(env.DB);
-    await Promise.all(
-      refused.map(async ({ receiver, limit }) => {
-        await keepAuditEvent(env, db, {
-          actor: { type: "system" },
-          action: "workflow.event.refused",
-          target: { type: "app", id: receiver.appId },
-          detail: {
-            event: event.type,
-            workflow: receiver.workflowId,
-            reason: "lineage_limit",
-            limit,
-          },
-        });
-      })
-    );
-  }
   const failures = started.flatMap((result): unknown[] =>
-    result.status === "rejected" &&
-    workflowErrors.codeOf(result.reason) !== "workflow.lineage_limit"
-      ? [result.reason]
-      : []
+    result.status === "rejected" ? [result.reason] : []
   );
   for (const failure of failures) {
     log.error("workflow.trigger_failed", {
@@ -259,7 +198,7 @@ export const deliverConnectorEvent = async (
     });
     throw new Error(`Event ${event.type} is over a workflow's hourly limit`);
   }
-  return { runs: receivers.length - refused.length };
+  return { runs: receivers.length };
 };
 
 /**

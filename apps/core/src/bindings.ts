@@ -23,8 +23,8 @@ import type { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
-import { stampOutput, stampedInput } from "./workflows/effect-stamps.ts";
-import type { StampingRun } from "./workflows/effect-stamps.ts";
+import { stampedMail } from "./workflows/mail-stamps.ts";
+import type { StampingRun } from "./workflows/mail-stamps.ts";
 
 // What Apps and agents get in their env: one stub per granted permission,
 // and nothing else. Each stub is a loopback entrypoint of core whose props
@@ -196,8 +196,9 @@ export interface StubCaller {
   stillAllowed?: () => Promise<void>;
   /**
    * The workflow run the call is a step of, and the step's key, as core
-   * knows them, never as the call names them: what the call leaves that
-   * may start a run is stamped with the run (workflows/effect-stamps.ts).
+   * knows them, never as the call names them: mail it sends to the
+   * deployment's own domain is stamped with the run
+   * (workflows/mail-stamps.ts).
    */
   stamping?: StampingRun;
 }
@@ -291,24 +292,18 @@ export const runStubCall = async (
     call
   );
   try {
-    // A run's call: its mail to the deployment's domain carries the run's
-    // token, recorded before the call leaves, and what it made is
-    // recorded once it returns, so the runs either starts join its
-    // lineage. A record that fails fails the call: the step's retry makes
-    // it again, under its key, and connect answers it as before.
+    // A run's mail to the deployment's domain carries the run's token,
+    // recorded before the call leaves, so the runs it starts join its
+    // lineage. A record that fails fails the call, which sent nothing.
     const sent =
       stamping === undefined
         ? request
         : {
             ...request,
-            input: await stampedInput(env, stamping, request.input),
+            input: await stampedMail(env, stamping, request),
           };
     await stillAllowed?.();
-    const result = await env.CONNECT.call(sent);
-    if (stamping !== undefined) {
-      await stampOutput(env, stamping, result);
-    }
-    return result;
+    return await env.CONNECT.call(sent);
   } catch (error) {
     throw forSandbox(error);
   }

@@ -1152,32 +1152,32 @@ export const runLineageAttempts = sqliteTable(
 );
 
 /**
- * What a run's connection calls left behind that may start a run, each
- * naming the run (src/workflows/effect-stamps.ts), so the run it starts
- * joins that run's lineage. `key` says which:
- *
- * - `mail:<token>`: the token core put on an address of the deployment's
- *   mail domain the run mailed (`local+<token>@domain`); `origin` is the
- *   SHA-256 of the run's step key and the address, so the same call made
- *   again carries the same token.
- * - `item:<SHA-256 of the ID>`: the ID of what a call made (a message, a
- *   file), as its provider answered; `origin` is null.
- *
- * Removed with its run's details (src/workflows/retention.ts).
+ * The token core put on each address of the deployment's mail domain that
+ * a workflow run's step mailed through a native mail connector
+ * (src/workflows/mail-stamps.ts): `local+<token>@domain`. Mail back to
+ * the tokened address starts its runs under the run, in its lineage, only
+ * when it goes to `address` (the address the run mailed, without the
+ * token) and comes from one of `senders` (the mailbox the run sent from,
+ * and its connection's account). `origin` is the SHA-256 of the step's
+ * key, the connection and the address, so the same call made again under
+ * its key carries the same token. Removed with its run's details
+ * (src/workflows/retention.ts).
  */
-export const runEffectStamps = sqliteTable(
-  "run_effect_stamps",
+export const runMailStamps = sqliteTable(
+  "run_mail_stamps",
   {
-    key: text().primaryKey(),
+    token: text().primaryKey(),
     runId: text("run_id")
       .notNull()
       .references(() => workflowRuns.id),
-    origin: text(),
+    origin: text().notNull(),
+    address: text().notNull(),
+    senders: text({ mode: "json" }).$type<string[]>().notNull(),
     createdAt: timestamp("created_at").notNull(),
   },
   (table) => [
-    uniqueIndex("run_effect_stamps_origin_idx").on(table.origin),
-    index("run_effect_stamps_run_idx").on(table.runId),
+    uniqueIndex("run_mail_stamps_origin_idx").on(table.origin),
+    index("run_mail_stamps_run_idx").on(table.runId),
   ]
 );
 
@@ -1185,7 +1185,7 @@ export const runEffectStamps = sqliteTable(
  * The domains Email Routing delivered mail for (src/workflows/
  * inbound-email.ts): the deployment's mail domain, learned from the
  * envelope recipient Email Routing sets, which no sender can choose. A
- * run's mail to an address on one is stamped (`run_effect_stamps`).
+ * run's mail to an address on one is stamped (`run_mail_stamps`).
  */
 export const mailDomains = sqliteTable("mail_domains", {
   domain: text().primaryKey(),

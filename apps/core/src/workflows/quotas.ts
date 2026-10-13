@@ -52,7 +52,8 @@ import {
 //   another joins the lineage of its parent's root and sits one deeper,
 //   both read from the parent's row, never from what any run is given.
 //   Its slot is counted on the root's row, and is never given back, even
-//   when its start then fails.
+//   when its start then fails, but for a start that lost to another
+//   under the same trigger key, which started nothing (`releaseChild`).
 // - Admissions racing past a limit: each is one conditional statement in
 //   one batch (a transaction), which changes the counters only if the work
 //   fits as they stand then. No count is read first and written after.
@@ -345,6 +346,22 @@ export const admitChild = async (
   parent: { id: string; rootRunId: string | null; depth: number }
 ): Promise<ChildPlace> =>
   await admitChildOnce(env, parent, await quotaPolicy(env), false);
+
+/**
+ * Gives back the slot `admitChild` took in the lineage of `root` for a
+ * start that started nothing, because another start under the same
+ * trigger key wrote its run first: the one run they are counts once.
+ * Never below none.
+ */
+export const releaseChild = async (
+  env: Pick<Env, "DB">,
+  root: string
+): Promise<void> => {
+  await drizzle(env.DB)
+    .update(runLineages)
+    .set({ descendants: sql`max(${runLineages.descendants} - 1, 0)` })
+    .where(eq(runLineages.rootRunId, root));
+};
 
 /** A step's attempt, as the engine claimed it and its host knows it. */
 export interface QuotaAttempt {

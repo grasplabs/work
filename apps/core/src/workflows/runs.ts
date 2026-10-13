@@ -53,7 +53,7 @@ import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
-import { admitChild, lineageCreated } from "./quotas.ts";
+import { admitChild, lineageCreated, releaseChild } from "./quotas.ts";
 import type { ChildPlace } from "./quotas.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
@@ -572,7 +572,7 @@ const deliveredBefore = async (
 
 /**
  * The run a trigger's key already started, for a delivery tried again of
- * a run started under another (effect-stamps.ts): found before the start
+ * a run started under another (mail-stamps.ts): found before the start
  * is admitted, so it takes no other slot of the lineage, which a delivery
  * tried again until it fits could use up. None for any other start.
  */
@@ -592,6 +592,23 @@ const deliveredUnder = async (
   return before === undefined
     ? undefined
     : await deliveredBefore(env, trigger.key, before.id);
+};
+
+/**
+ * The run of `row`'s trigger key, which another delivery wrote first while
+ * this one was admitted too: this one started nothing, so the slot it
+ * took in its lineage (`rootRunId`, for a run started under another)
+ * goes back (`releaseChild`), and no lineage pays twice for one run.
+ */
+const lostToDelivery = async (
+  env: Env,
+  row: Pick<RunRow, "id" | "triggerKey">,
+  rootRunId: string | null
+): Promise<WorkflowRun> => {
+  if (rootRunId !== null) {
+    await releaseChild(env, rootRunId);
+  }
+  return await deliveredBefore(env, row.triggerKey ?? "", row.id);
 };
 
 /**
@@ -720,7 +737,7 @@ export const startRun = async (
     ...(rootRunId === null ? [lineageCreated(db, row.id)] : []),
   ]);
   if (inserted.length === 0) {
-    return await deliveredBefore(env, row.triggerKey ?? "", row.id);
+    return await lostToDelivery(env, row, rootRunId);
   }
   try {
     await sendStart(env, row, input);

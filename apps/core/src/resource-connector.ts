@@ -31,8 +31,8 @@ import type {
   DeclarationOf,
   ResourceAdapter,
 } from "./resource-adapter.ts";
-import { stampOutput, stampedInput } from "./workflows/effect-stamps.ts";
-import type { StampingRun } from "./workflows/effect-stamps.ts";
+import { stampedMail } from "./workflows/mail-stamps.ts";
+import type { StampingRun } from "./workflows/mail-stamps.ts";
 
 // A connector resource (spec 12, 32.3): the declared actions of a
 // generated connector contract, on one of the App's own connection
@@ -359,8 +359,8 @@ const callAction = async (
   if (valid === undefined) {
     throw operationErrors.create("resource.invalid_args");
   }
-  // A run's request: what it leaves that may start a run starts it under
-  // the run (workflows/effect-stamps.ts), by the run its actor names and
+  // A run's request: its mail to the deployment's domain is stamped with
+  // the run (workflows/mail-stamps.ts), by the run its actor names and
   // the key core made for the request, never by what App code says.
   const stamping: StampingRun | undefined =
     caller.actor.type === "workflow"
@@ -369,7 +369,13 @@ const callAction = async (
   let answered: Awaited<ReturnType<Env["CONNECT"]["call"]>>;
   try {
     const sent =
-      stamping === undefined ? valid : await stampedInput(env, stamping, valid);
+      stamping === undefined
+        ? valid
+        : await stampedMail(env, stamping, {
+            connectionId: grant.connection.connectionId,
+            action: action.raw.tool,
+            input: valid,
+          });
     const { capability, scope } = await signedCall(
       env,
       {
@@ -403,9 +409,6 @@ const callAction = async (
   }
   if (answered.pending !== undefined) {
     throw operationErrors.create("resource.awaiting_confirmation");
-  }
-  if (stamping !== undefined) {
-    await stampOutput(env, stamping, answered);
   }
   caller.sources.noteConnection(
     grant.connection.connectionId,
