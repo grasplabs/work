@@ -3,6 +3,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { isolateCall, runOwnerOf } from "../../src/workflows/code.ts";
 import { fakeGateway } from "../ai-gateway.ts";
 import { release } from "../apps.ts";
 import { allEvents } from "../audit-events.ts";
@@ -13,6 +14,7 @@ import {
   liveStatus,
   runObject,
   sleeping,
+  stepDone,
   woken,
 } from "../runs.ts";
 import { signedInApi } from "../sign-in.ts";
@@ -21,8 +23,8 @@ import { workflowFiles } from "../workflow-apps.ts";
 // A workflow's runs on-prem: each load of a run (its start, and each
 // resume after a wait) runs as a sandbox session owned by its App, through
 // the real engine and host, with `SANDBOX_HOST` bound to the sandbox
-// supervisor this project starts. Its two processes give each App one
-// session at a time.
+// supervisor this project starts. Its two processes give each owner (an
+// App's runs, the App's other calls) one session at a time.
 
 const idp = mockIdp();
 
@@ -71,6 +73,41 @@ const journaled = async (run: string, name: string) =>
       }>("SELECT state, attempt FROM steps WHERE name = ?", name)
       .toArray()
   );
+
+/**
+ * Holds one of the sandbox's places as `owner`, spinning, until the
+ * returned function lets go of it.
+ */
+const holdPlace = (owner: string): (() => Promise<void>) => {
+  const giveUp = new AbortController();
+  const held = isolateCall(env, {
+    key: null,
+    owner,
+    mainModule: "spin.js",
+    modules: async () =>
+      await Promise.resolve({
+        "spin.js":
+          'import { WorkerEntrypoint } from "cloudflare:workers"; export class Spin extends WorkerEntrypoint { async go() { for (;;) {} } }',
+      }),
+    entrypoint: "Spin",
+    method: "go",
+    args: [],
+    signal: giveUp.signal,
+  }).catch(() => {
+    // Let go of.
+  });
+  return async () => {
+    giveUp.abort();
+    await held;
+  };
+};
+
+/** A workflow of one step, as `workflowFiles` writes it. */
+const oneStep = workflowFiles(
+  "single",
+  `  return await step.do("only", { description: "The only step" }, async () => "done");`,
+  { only: "done" }
+);
 
 // Each test builds its App's workflows and runs their tests on the
 // sandbox, then runs them: a minute is room for a slow runner.
@@ -155,14 +192,23 @@ describe("a workflow's runs on-prem", runTime, () => {
       )
     );
     const run = await builder.api.workflows.start(app, "spinner");
+    await stepDone(run.id, "before");
+    // While the run's load holds its place, the App's next version is made
+    // current: its tests run as the App's own calls, not as its runs.
+    const released = await release(builder, app, oneStep).then(
+      () => "released",
+      (error: unknown) => (error instanceof Error ? error.message : "refused")
+    );
     await endedPastCpuTime(run.id);
     const { status, error } = await builder.api.workflows.status(run.id);
     expect({
+      released,
       status,
       stoppedForCpu: error?.message.includes("CPU time"),
       spin: await journaled(run.id, "spin"),
       steps: await stepsOf(run.id),
     }).toStrictEqual({
+      released: "released",
       status: "failed",
       stoppedForCpu: true,
       spin: [{ state: "failed", attempt: 1 }],
@@ -172,5 +218,46 @@ describe("a workflow's runs on-prem", runTime, () => {
         "workflow.step.failed spin",
       ],
     });
+  });
+
+  it("waits for a place while the sandbox is full, then loads, rather than failing the run", async () => {
+    const { builder, app } = await appWith(oneStep);
+    // Both processes held, by calls of two others.
+    const letGo = [holdPlace("app-full-a"), holdPlace("app-full-b")];
+    const run = await builder.api.workflows.start(app, "single");
+    // Long enough for its load to be refused, the pool full, more than once.
+    await scheduler.wait(8000);
+    const whileFull = await liveStatus(run.id);
+    await Promise.all(
+      letGo.map(async (free) => {
+        await free();
+      })
+    );
+    await finished(run.id);
+    expect({
+      whileFull,
+      after: await builder.api.workflows.status(run.id),
+    }).toMatchObject({
+      whileFull: "running",
+      after: { status: "completed", output: "done" },
+    });
+  });
+
+  it("stops a run's wait for a place once the run is cancelled: it never loads", async () => {
+    const { builder, app } = await appWith(oneStep);
+    // The App's runs' one place, held.
+    const letGo = holdPlace(runOwnerOf(app));
+    const run = await builder.api.workflows.start(app, "single");
+    await scheduler.wait(2000);
+    await builder.api.workflows.cancel(run.id);
+    await letGo();
+    // The App's next run takes the place at once: the cancelled one, no
+    // longer waiting, never took it.
+    const next = await builder.api.workflows.start(app, "single");
+    await finished(next.id);
+    expect({
+      cancelled: await stepsOf(run.id),
+      next: await builder.api.workflows.status(next.id),
+    }).toMatchObject({ cancelled: [], next: { status: "completed" } });
   });
 });

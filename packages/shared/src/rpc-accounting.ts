@@ -815,7 +815,14 @@ export interface TextRpcTransport {
 export const accountedTransport = (
   inner: TextRpcTransport,
   limits: RpcAccountingLimits,
-  onRefused: (refusal: AccountingRefusal) => Error,
+  /**
+   * Makes the error that ends the session, for the bound passed, and
+   * which way: a message the peer sent, or one of ours.
+   */
+  onRefused: (
+    refusal: AccountingRefusal,
+    direction: "received" | "sent"
+  ) => Error,
   pool?: HeldPool
 ): {
   encodingLevel: "jsonCompatible";
@@ -824,8 +831,17 @@ export const accountedTransport = (
   abort: (reason: unknown) => void;
 } => {
   const { account, recordSent, dispose } = messageAccountant(limits, pool);
+  // Rejects once one of our own messages was refused: the session is over,
+  // so a receive waiting on the peer ends too, and with it every call still
+  // waiting for an answer, rather than waiting on a socket we closed.
+  const { promise: refusedWith, resolve: endReceive } =
+    Promise.withResolvers<Error>();
+  // One promise, raced by every receive, which handles its rejection.
+  const ended = (async (): Promise<never> => {
+    throw await refusedWith;
+  })();
   const refuse = (refusal: AccountingRefusal): never => {
-    const error = onRefused(refusal);
+    const error = onRefused(refusal, "received");
     dispose();
     inner.abort?.(error);
     throw error;
@@ -837,9 +853,10 @@ export const accountedTransport = (
       if (refusal !== undefined) {
         // Our answer would hold more than this session or the isolate may:
         // end the session instead of sending it.
-        const error = onRefused(refusal);
+        const error = onRefused(refusal, "sent");
         dispose();
         inner.abort?.(error);
+        endReceive(error);
         return;
       }
       // Cap'n Web's custom-encoding transport sends synchronously; our inner
@@ -849,7 +866,7 @@ export const accountedTransport = (
     receive: async (): Promise<unknown> => {
       let raw: unknown;
       try {
-        raw = await inner.receive();
+        raw = await Promise.race([inner.receive(), ended]);
       } catch (error) {
         // The other side closed, or the transport failed: the session ends.
         dispose();

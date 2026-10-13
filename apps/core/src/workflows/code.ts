@@ -628,24 +628,61 @@ export interface RunLoad {
 const runLoadMs = 15 * 60_000;
 
 /**
- * How long a run's load waits, in all, for its App's place in the sandbox:
- * the App's other runs and calls may hold it for as long as their own
- * loads take. Nothing of the run ran yet, so waiting is safe; past it, the
- * load fails as the platform's.
+ * How long a run's load waits, in all, for a place in the sandbox: its
+ * App's runs may hold their share, and other calls the pool, for as long
+ * as their own loads take. Nothing of the run ran yet, so waiting is safe;
+ * past it, the load fails as the platform's.
  */
 const runLoadWaitMs = 10 * 60_000;
 
-/** The longest one wait between asks for the App's place. */
+/** The longest one wait between asks for a place. */
 const runLoadRetryMs = 30_000;
 
+/** How often a load waiting for a place looks whether its activation is over. */
+const runLoadCheckMs = 1000;
+
 /**
- * Runs `load` on the sandbox, asking again while its App's place is held
- * (`busy`, which the sandbox says before any of its code runs), for up to
- * {@link runLoadWaitMs}, or until `over`.
+ * How long a step whose function failed waits for its session's verdict
+ * (`sessionRunHost`): the session ends at once when its process does.
+ */
+const verdictWaitMs = 5000;
+
+/**
+ * Whose a run's loads are in the sandbox: the App's runs, an owner apart
+ * from the App's interactive calls (its functions, screens, Code Mode,
+ * metadata and tests), so runs, whose loads hold their places for as long
+ * as their steps take, never hold the places those wait for.
+ */
+export const runOwnerOf = (app: AppId): string => `workflow:${app}`;
+
+/**
+ * What never settles: a load let go of once its activation is over, as
+ * the engine leaves a suspended call.
+ */
+const neverSettles = async (): Promise<never> =>
+  // oxlint-disable-next-line promise/avoid-new -- a promise that never settles, which nothing else makes
+  await new Promise<never>(() => {
+    // Never settles.
+  });
+
+/**
+ * Whether `error` refused a load before any of its code ran, for want of a
+ * place: its owner at its share (`busy`), or the pool full (503).
+ */
+const noPlace = (error: unknown): boolean =>
+  sandboxVerdictOf(error) === "busy" ||
+  (error instanceof SandboxUnavailableError && error.status === 503);
+
+/**
+ * Runs `load` on the sandbox, asking again while no place is free
+ * (`noPlace`), backing off up to {@link runLoadRetryMs}, for up to
+ * {@link runLoadWaitMs}; never settles once `stopped` says the run is let
+ * go of (its activation over: a wait suspended it, or a cancel ended it)
+ * as it waits.
  */
 const waitingForPlace = async (
   load: () => Promise<unknown>,
-  over: AbortSignal | undefined
+  stopped: () => boolean
 ): Promise<unknown> => {
   const until = Date.now() + runLoadWaitMs;
   for (let wait = 1000; ; wait = Math.min(wait * 2, runLoadRetryMs)) {
@@ -653,28 +690,77 @@ const waitingForPlace = async (
       // oxlint-disable-next-line no-await-in-loop -- one ask at a time
       return await load();
     } catch (error) {
-      if (sandboxVerdictOf(error) !== "busy" || Date.now() + wait > until) {
+      if (!noPlace(error) || Date.now() + wait > until) {
         throw error;
       }
     }
-    // oxlint-disable-next-line no-await-in-loop -- one ask at a time
-    await scheduler.wait(wait, over === undefined ? {} : { signal: over });
+    for (const next = Date.now() + wait; Date.now() < next;) {
+      if (stopped()) {
+        // oxlint-disable-next-line no-await-in-loop -- never comes back
+        return await neverSettles();
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      await scheduler.wait(Math.min(runLoadCheckMs, next - Date.now()));
+    }
+    if (stopped()) {
+      // oxlint-disable-next-line no-await-in-loop -- never comes back
+      return await neverSettles();
+    }
   }
 };
 
 /** The calls of a step's attempt host (`AttemptHost`): the isolate's, on-prem. */
-const attemptMethods = Object.keys(attemptCallLabels);
+export const attemptMethods = Object.keys(attemptCallLabels);
+
+/** The run's session, as the capabilities passed during it see it. */
+export interface RunSession {
+  /** Whether its call is open now: not once it answered or was given up on. */
+  live: () => boolean;
+  /** The load's failure once it ended (null for none). */
+  ended: Promise<unknown>;
+}
+
+/**
+ * Fails a step whose function failed rather than answered, as its
+ * session ended: for good when the sandbox stopped the code (its CPU time,
+ * memory or time past, its process gone, what it sent refused), so the
+ * step is never tried again in an isolate that is no more; as it failed,
+ * the platform's to try again, otherwise (a socket dropped, a refusal of
+ * core's own, or no verdict yet).
+ */
+const stepCodeFailure = async (
+  thrown: unknown,
+  session: RunSession
+): Promise<Error> => {
+  const failure = await Promise.race([
+    session.ended,
+    (async (): Promise<undefined> => {
+      await scheduler.wait(verdictWaitMs);
+      return undefined;
+    })(),
+  ]);
+  const verdict = sandboxVerdictOf(failure);
+  if (verdict !== undefined && codesVerdicts.has(verdict)) {
+    return new NonRetryableError(
+      `The sandbox stopped the step's code: ${failure instanceof Error ? failure.message : verdict}`
+    );
+  }
+  return thrown instanceof Error
+    ? thrown
+    : new Error("The step's code failed.");
+};
 
 /**
  * `host` as the run's capability in a session: its three calls, and the
  * attempt host each step's function gets, passed as a capability of its
- * calls alone, live while that function runs (`passedCapability`). A
- * function that fails rather than answering (its isolate does: the
- * session ended, its CPU time or memory past, its process gone) fails its
- * step for good: the session's end is the run's, never a retry of the
- * step in an isolate that is no more.
+ * calls alone, live while that function runs and the session's call is
+ * open (`passedCapability`). A function that fails rather than answering
+ * fails its step as `stepCodeFailure` says.
  */
-const sessionRunHost = (host: RunHostCalls): RunHostCalls => ({
+export const sessionRunHost = (
+  host: RunHostCalls,
+  session: RunSession
+): RunHostCalls => ({
   do: async (name, options, fn) => {
     if (typeof fn !== "function") {
       return await host.do(name, options, fn);
@@ -686,12 +772,14 @@ const sessionRunHost = (host: RunHostCalls): RunHostCalls => ({
           // SAFETY: what the sandbox host makes of a passed capability
           // for the isolate: `fn` is the isolate's, over the session.
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-          passedCapability(attempt, attemptMethods, () => live) as never
+          passedCapability(
+            attempt,
+            attemptMethods,
+            () => live && session.live()
+          ) as never
         );
       } catch (error) {
-        throw new NonRetryableError(
-          `The step's code stopped: ${error instanceof Error ? error.message : "its session ended"}`
-        );
+        throw await stepCodeFailure(error, session);
       } finally {
         live = false;
       }
@@ -725,11 +813,14 @@ const runLoadFailure = (error: unknown): unknown => {
  * through the host, and no two runs, or loads of one run, share memory.
  * Loads are few: a run's start, and each resume after a wait.
  *
- * On-prem it runs as a sandbox session of its own, owned by the App, its
- * CPU time and memory bounded by the supervisor, with only the host's
- * calls (`sessionRunHost`). `over` says the activation it runs for is
- * over (a wait suspended it, which never settles its call): the session
- * ends then, freeing its process.
+ * On-prem it runs as a sandbox session of its own, owned by the App's runs
+ * (`runOwnerOf`), its CPU time and memory bounded by the supervisor, with
+ * only the host's calls (`sessionRunHost`). `over` says the activation it
+ * runs for is over (a wait suspended it, which never settles its call):
+ * the session ends then, freeing its process, and a load waiting for a
+ * place stops waiting: a cancel, which ends the activation, so stops it.
+ * A pause is taken at the first step boundary once loaded, as the engine
+ * takes every pause.
  */
 export const loadRun = (
   env: Env,
@@ -751,8 +842,15 @@ export const loadRun = (
     })).getEntrypoint<RunEntrypoint>("Run");
     return { run: async (host, start) => await entrypoint.run(host, start) };
   }
+  const stopped = (): boolean => over?.aborted === true;
   return {
     run: async (host, start) => {
+      let sessionLive: (() => boolean) | undefined;
+      const ended = Promise.withResolvers<unknown>();
+      const session: RunSession = {
+        live: () => sessionLive?.() === true && over?.aborted !== true,
+        ended: ended.promise,
+      };
       const call = {
         mainModule: runModule,
         modules: await modules(),
@@ -760,7 +858,7 @@ export const loadRun = (
         method: "run",
         args: [
           {
-            capability: capability(sessionRunHost(host), [
+            capability: capability(sessionRunHost(host, session), [
               "do",
               "sleep",
               "waitForDecision",
@@ -768,29 +866,30 @@ export const loadRun = (
           },
           { value: start },
         ],
-        owner: app,
+        owner: runOwnerOf(app),
         cpuMs: workflowSandbox.limits.cpuMs,
         wallMs: runLoadMs,
       };
       try {
-        return await waitingForPlace(
+        const value = await waitingForPlace(
           async () =>
-            await runInSession(
-              sandboxHost,
-              call,
-              over === undefined ? {} : { signal: over }
-            ),
-          over
+            await runInSession(sandboxHost, call, {
+              ...(over === undefined ? {} : { signal: over }),
+              opened: (_id, live) => {
+                sessionLive = live;
+              },
+            }),
+          stopped
         );
+        ended.resolve(null);
+        return value;
       } catch (error) {
+        ended.resolve(error);
         if (over?.aborted === true) {
           // Let go of once its activation was over: as the engine leaves a
           // suspended call, it never settles, so nothing of the run acts on
           // an activation that is over.
-          // oxlint-disable-next-line promise/avoid-new -- a promise that never settles, which nothing else makes
-          return await new Promise<never>(() => {
-            // Never settles.
-          });
+          return await neverSettles();
         }
         throw runLoadFailure(error);
       }
