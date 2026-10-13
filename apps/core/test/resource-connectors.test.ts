@@ -670,6 +670,33 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
     }).toStrictEqual({ refused: "resource.unavailable", sent: 0, waiting: 0 });
   });
 
+  it("refuse to confirm a held side effect whose binding's budget was damaged since", async () => {
+    const mailer = await mailerApp();
+    await call(
+      mailer,
+      "mail.send",
+      { to: "ada@acme.test", subject: "Damaged" },
+      "damaged-1"
+    );
+    const held = await heldSend(mailer);
+    // Its caps no longer read, as a live request would find them: it
+    // would run uncapped, so it runs nothing.
+    await drizzle(env.DB)
+      .update(appResourceBindings)
+      .set({ budget: "not a budget" })
+      .where(eq(appResourceBindings.id, mailer.binding?.id ?? ""));
+    const refused = await failure(
+      async () =>
+        await mailer.builder.api.pendingActions.confirm(held.id, held.inputHash)
+    );
+    const waiting = await mailer.builder.api.pendingActions.list();
+    expect({
+      refused,
+      sent: await sentCount("Damaged"),
+      waiting: waiting.length,
+    }).toStrictEqual({ refused: "resource.unavailable", sent: 0, waiting: 0 });
+  });
+
   it("refuse to confirm a held side effect whose contract drifted since", async () => {
     const mailer = await mailerApp();
     await call(

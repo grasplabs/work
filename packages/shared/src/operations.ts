@@ -157,6 +157,19 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "operation.deadline_exceeded": "operational",
   "operation.sandbox_busy": "operational",
   "operation.sandbox_unavailable": "operational",
+  // The call ended (its caller went, or it was stopped): nothing the App's
+  // code or its caller did wrong.
+  "operation.ended": "operational",
+  // The App's own code went past a bound of one call: its source, not the
+  // caller's request or the platform.
+  "operation.cpu_exceeded": "source",
+  "operation.memory_exceeded": "source",
+  "operation.sandbox_refused": "source",
+  "operation.call_limit": "source",
+  "operation.depth_exceeded": "source",
+  // A call it started outlived the operation's deadline: the operation
+  // broke its contract to end with its calls.
+  "operation.unfinished_call": "contract",
 };
 
 /** The platform codes worth trying again, unchanged, a little later. */

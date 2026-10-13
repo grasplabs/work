@@ -607,9 +607,8 @@ export const appContents = async (
 
 /**
  * What an App's current version exports to other Apps, for anyone with a
- * role in it: read from its row alone, no files. Off with calls between
- * Apps (`app_calls`), as everything about them is, for people and the
- * agent alike.
+ * role in it, people and the agent alike: read from its row alone, no
+ * files.
  */
 export const appExports = async (
   env: Env,
