@@ -183,10 +183,12 @@ export const coreProject = (
             // No sandbox supervisor in tests but the on-prem project's: App
             // code is inspected in the test's own workerd, where a busy loop
             // would hold it (src/sandboxed.ts). scripts/workerd-sandbox.test.ts
-            // tests the supervisor on plain workerd.
-            ...(sandboxSocket === undefined
-              ? { SANDBOX_IN_PROCESS: "unbounded" }
-              : {}),
+            // tests the supervisor on plain workerd. The on-prem project
+            // accepts it too, for what no sandbox runs yet (the screen
+            // compiler, App tests, an App's server object): wherever one
+            // does, a bound SANDBOX_HOST comes first, so App code still runs
+            // in its sessions there.
+            SANDBOX_IN_PROCESS: "unbounded",
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
             // Core's step limit, lowered so a test reaches it.
