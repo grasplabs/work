@@ -8,6 +8,7 @@ import { chatIdSchema } from "@grasp-os/shared/ids";
 import { memoryMaxLimit } from "@grasp-os/shared/memory";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { redact } from "@grasp-os/shared/redact";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -24,7 +25,6 @@ import {
   codeRuntime,
   cutMarker,
   cutToBytes,
-  redact,
   sourceHash,
   utf8Bytes,
 } from "../src/code-mode.ts";
@@ -2421,6 +2421,10 @@ describe("chat agent code output", () => {
         "secret='two words' and more",
         '{"password":"a b c","user":"ann"}',
         'token: "never closed',
+        '{"access_token":"ya29.abc","client_secret":"shh"}',
+        String.raw`"{\"password\":\"hunter2\",\"user\":\"ann\"}"`,
+        String.raw`"{\"refresh_token\":\"1//abc def\"}"`,
+        String.raw`password=abc\def next`,
       ].map(redact)
     ).toStrictEqual([
       "authorization: [redacted]",
@@ -2429,6 +2433,10 @@ describe("chat agent code output", () => {
       "secret='[redacted]' and more",
       '{"password":"[redacted]","user":"ann"}',
       'token: "[redacted]',
+      '{"access_token":"[redacted]","client_secret":"[redacted]"}',
+      String.raw`"{\"password\":\"[redacted]\",\"user\":\"ann\"}"`,
+      String.raw`"{\"refresh_token\":\"[redacted]\"}"`,
+      "password=[redacted] next",
     ]);
   });
 
@@ -2446,7 +2454,10 @@ describe("chat agent code output", () => {
       "AIza-",
       "AKIA",
       "token:",
+      "access_token:",
       'password: "',
+      String.raw`password\":\"`,
+      String.raw`password=abc\def`,
       "secret='\\",
       "authorization: Basic ",
       "-----BEGIN PRIVATE KEY-----",

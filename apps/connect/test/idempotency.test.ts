@@ -1,3 +1,4 @@
+import { connectErrors } from "@grasp-os/shared/connect";
 import { exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -19,7 +20,12 @@ import { fakeMcpServer } from "./mcp-server.ts";
 // connection and input.
 
 let sent = 0;
-let rateLimited = false;
+/** What `mail.forward` answers its next calls with: an error, or its result. */
+let forwardError: Record<string, unknown> | undefined;
+/** An error `mail.forward` answers with as a text block, in its place. */
+let forwardText: string | undefined;
+/** Whether that error carries an image after its text block. */
+let forwardImage = false;
 /** Holds `mail.archive` until the test lets it finish. */
 let archiveDone: Promise<unknown> = Promise.resolve();
 
@@ -33,10 +39,29 @@ const server = fakeMcpServer(serverUrl, [
   },
   {
     name: "mail.forward",
-    run: () =>
-      rateLimited
-        ? { output: { error: "Too many requests" }, isError: true }
-        : { output: { forwarded: true } },
+    run: () => {
+      if (forwardText !== undefined) {
+        return {
+          output: {},
+          content: [
+            { type: "text", text: forwardText },
+            ...(forwardImage
+              ? [
+                  {
+                    type: "image" as const,
+                    data: "aGVsbG8=",
+                    mimeType: "image/png",
+                  },
+                ]
+              : []),
+          ],
+          isError: true,
+        };
+      }
+      return forwardError === undefined
+        ? { output: { forwarded: true } }
+        : { output: forwardError, isError: true };
+    },
   },
   {
     name: "mail.bounce",
@@ -193,15 +218,33 @@ describe("a side effect", () => {
     expect(server.ran).toHaveLength(1);
   });
 
-  it("that the server turned away can be retried with its key", async () => {
+  it("that the server turned away before its key was taken can be retried with it", async () => {
     const connectionId = await addConnection();
     const call = send(connectionId, "run-1:send");
-    server.network = "unauthorised";
+    // A key or session the server refuses is refused on the look at its
+    // tools, before connect takes the call's key.
+    server.refuseList = true;
     await expect(outcome(callAs(anna, call))).resolves.toBe(
       "connect.server_unavailable"
     );
     await expect(outcome(callAs(anna, call))).resolves.toBe("ok");
     expect(server.ran).toHaveLength(1);
+  });
+
+  it("that a remote server answered 401 to the call itself is never sent again", async () => {
+    const connectionId = await addConnection();
+    const call = send(connectionId, "run-1:send");
+    // It may be the provider's refusal of a later request, passed on after
+    // the tool's first one went through.
+    server.network = "unauthorised";
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    const requestsBefore = server.requests;
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    expect(server.requests).toBe(requestsBefore);
   });
 
   it("that a remote server answered 429 is never sent again", async () => {
@@ -229,12 +272,12 @@ describe("a side effect", () => {
       idempotencyKey: "run-1:bounce",
     };
     // A tool we don't review could say so after acting: its word frees no
-    // key, and its error is the answer to every repeat.
+    // key, and its error, like any of a Composio tool's, is unknown.
     await expect(outcome(callAs(anna, call))).resolves.toBe(
-      "connect.action_failed"
+      "connect.outcome_unknown"
     );
     await expect(outcome(callAs(anna, call))).resolves.toBe(
-      "connect.action_failed"
+      "connect.outcome_unknown"
     );
     expect(server.ran).toHaveLength(1);
   });
@@ -288,15 +331,19 @@ describe("a side effect", () => {
     expect(server.ran).toHaveLength(1);
   });
 
-  it("that the server has no method for can be retried with its key", async () => {
+  it("that a remote server says it has no method for is never sent again", async () => {
     const connectionId = await addConnection();
     const call = send(connectionId, "run-1:send");
+    // Its word, like a 401's, proves nothing once the call went out.
     server.network = "no-method";
     await expect(outcome(callAs(anna, call))).resolves.toBe(
-      "connect.server_unavailable"
+      "connect.outcome_unknown"
     );
-    await expect(outcome(callAs(anna, call))).resolves.toBe("ok");
-    expect(server.ran).toHaveLength(1);
+    const requestsBefore = server.requests;
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    expect(server.requests).toBe(requestsBefore);
   });
 
   it("with an answer too large to keep returns it once, and never runs again", async () => {
@@ -336,7 +383,79 @@ describe("a side effect", () => {
     expect(server.ran).toHaveLength(2);
   });
 
-  it("that the tool reported as failed answers a repeat with that error", async () => {
+  // Composio's answer carries no provider status of its own: a provider's
+  // 5xx or timeout after it acted reads like a refusal of the input, and a
+  // status a toolkit puts in its data proves nothing.
+  it.each([
+    ["a provider's server error", { error: "502 Bad Gateway" }],
+    ["a timeout", { error: "The request timed out" }],
+    ["a dropped connection", { error: "Connection reset by peer" }],
+    [
+      "a refusal it says the provider gave",
+      { successful: false, error: "Invalid recipient", data: { status: 400 } },
+    ],
+    ["nothing it can read", { unexpected: true }],
+  ])(
+    "that a Composio tool answered with %s is of unknown outcome, never sent again",
+    async (_kind, error) => {
+      const connectionId = await addConnection();
+      const call = {
+        connectionId,
+        action: "mail.forward",
+        input: {},
+        idempotencyKey: "run-1:forward",
+      };
+      forwardError = error;
+      try {
+        await expect(outcome(callAs(anna, call))).resolves.toBe(
+          "connect.outcome_unknown"
+        );
+        // Even once it would go through, the key stays spent.
+        forwardError = undefined;
+        const requestsBefore = server.requests;
+        await expect(outcome(callAs(anna, call))).resolves.toBe(
+          "connect.outcome_unknown"
+        );
+        expect(server.requests).toBe(requestsBefore);
+      } finally {
+        forwardError = undefined;
+      }
+      expect(server.ran).toHaveLength(1);
+    }
+  );
+
+  it("on a Composio tool the admin marked read-only keeps its error as the failure, on the read path", async () => {
+    const connectionId = await addConnection({
+      tools: JSON.stringify([{ name: "mail.forward", read: true }]),
+    });
+    const call = {
+      connectionId,
+      action: "mail.forward",
+      input: {},
+      idempotencyKey: "run-1:forward",
+    };
+    forwardError = { error: "Not found" };
+    try {
+      const failed = await callAs(anna, call).catch((error: unknown) => error);
+      expect({
+        code: connectErrors.codeOf(failed),
+        details:
+          failed instanceof Error && "details" in failed
+            ? failed.details
+            : undefined,
+      }).toStrictEqual({
+        code: "connect.action_failed",
+        details: { output: JSON.stringify({ error: "Not found" }) },
+      });
+    } finally {
+      forwardError = undefined;
+    }
+    // A read keeps no answer under a key: it can't have acted, so it runs.
+    await expect(outcome(callAs(anna, call))).resolves.toBe("ok");
+    expect(server.ran).toHaveLength(2);
+  });
+
+  it("whose Composio tool answered with an error logs what it said, redacted and cut short, for the call", async () => {
     const connectionId = await addConnection();
     const call = {
       connectionId,
@@ -344,16 +463,127 @@ describe("a side effect", () => {
       input: {},
       idempotencyKey: "run-1:forward",
     };
-    rateLimited = true;
-    await expect(outcome(callAs(anna, call))).resolves.toBe(
-      "connect.action_failed"
+    const secret = "Bearer abcdefghijklmnopqrstuvwxyz0123456789";
+    forwardError = {
+      error: `Upstream refused: Authorization: ${secret}`,
+      detail: "x".repeat(5000),
+    };
+    const warn = vi.spyOn(console, "warn");
+    try {
+      await expect(outcome(callAs(anna, call))).resolves.toBe(
+        "connect.outcome_unknown"
+      );
+    } finally {
+      forwardError = undefined;
+    }
+    const logged = warn.mock.calls
+      .map(([entry]: unknown[]) => entry)
+      .find(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === "object" &&
+          entry !== null &&
+          "event" in entry &&
+          entry.event === "connect.composio_error_unknown"
+      );
+    const text = typeof logged?.error === "string" ? logged.error : "";
+    expect({
+      callId: typeof logged?.callId,
+      action: logged?.action,
+      said: text.includes("Upstream refused"),
+      redacted: !text.includes("abcdefghijklmnop"),
+      bounded: text.length <= 501,
+    }).toStrictEqual({
+      callId: "string",
+      action: "mail.forward",
+      said: true,
+      redacted: true,
+      bounded: true,
+    });
+  });
+
+  // A text block's JSON is quoted once more in the output connect keeps
+  // (`\"password\"`): what is logged is redacted as the server sent it.
+  it.each([
+    ["a password", JSON.stringify({ password: "hunter2" }), "hunter2"],
+    [
+      "an access token",
+      JSON.stringify({ access_token: "ya29.a0AfH6SMBxyz" }),
+      "ya29.a0AfH6SMBxyz",
+    ],
+    [
+      "a bearer token",
+      "Request failed: Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123",
+      "abcdefghijklmnopqrstuvwxyz0123",
+    ],
+  ])(
+    "whose Composio tool answered with %s in a text block logs it redacted",
+    async (_kind, text, secret) => {
+      const connectionId = await addConnection();
+      const warn = vi.spyOn(console, "warn");
+      forwardText = text;
+      try {
+        await expect(
+          outcome(
+            callAs(anna, {
+              connectionId,
+              action: "mail.forward",
+              input: {},
+              idempotencyKey: "run-1:forward",
+            })
+          )
+        ).resolves.toBe("connect.outcome_unknown");
+      } finally {
+        forwardText = undefined;
+      }
+      const logged = warn.mock.calls
+        .map(([entry]: unknown[]) => entry)
+        .find(
+          (entry): entry is Record<string, unknown> =>
+            typeof entry === "object" &&
+            entry !== null &&
+            "event" in entry &&
+            entry.event === "connect.composio_error_unknown"
+        );
+      expect({
+        logged: typeof logged?.error,
+        leaked: JSON.stringify(logged).includes(secret),
+        redacted: JSON.stringify(logged).includes("[redacted]"),
+      }).toStrictEqual({ logged: "string", leaked: false, redacted: true });
+    }
+  );
+
+  it("whose Composio tool answered with text and an image logs the text, redacted, and notes the image", async () => {
+    const connectionId = await addConnection();
+    const warn = vi.spyOn(console, "warn");
+    forwardText = "Upload refused: password=hunter2 for ann";
+    forwardImage = true;
+    try {
+      await expect(
+        outcome(
+          callAs(anna, {
+            connectionId,
+            action: "mail.forward",
+            input: {},
+            idempotencyKey: "run-1:forward",
+          })
+        )
+      ).resolves.toBe("connect.outcome_unknown");
+    } finally {
+      forwardText = undefined;
+      forwardImage = false;
+    }
+    const logged = warn.mock.calls
+      .map(([entry]: unknown[]) => entry)
+      .find(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === "object" &&
+          entry !== null &&
+          "event" in entry &&
+          entry.event === "connect.composio_error_unknown"
+      );
+    expect(logged?.error).toBe(
+      "Upload refused: password=[redacted] for ann\n(content other than text)"
     );
-    // The tool may have acted before it failed: never run it again.
-    rateLimited = false;
-    await expect(outcome(callAs(anna, call))).resolves.toBe(
-      "connect.action_failed"
-    );
-    expect(server.ran).toHaveLength(1);
   });
 
   it("running at the same time as a repeat runs once", async () => {

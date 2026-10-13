@@ -382,9 +382,10 @@ describe("chats", () => {
     const ann = await person();
     const admin = await signedInApi(idp, "admin");
     // Five writes, each on a mail connection of its own; the third one's
-    // server refuses the mail once it is confirmed, connect fails
-    // unexpectedly on the fourth once it took it, and the fifth's server
-    // sends the mail and loses its answer.
+    // server refuses the mail once it is confirmed (on Composio, connect
+    // can't tell that from a refusal after acting, so it is unknown too),
+    // connect fails unexpectedly on the fourth once it took it, and the
+    // fifth's server sends the mail and loses its answer.
     const mails = {
       OUTCOME_SENT: await mailConnection(),
       OUTCOME_DECLINED: await mailConnection(),
@@ -474,7 +475,7 @@ describe("chats", () => {
       told: [
         `(pending ID ${sent.id}), was decided. The person confirmed it and it was carried out. Don't ask for it again.`,
         `(pending ID ${declined.id}), was decided. The person declined it: it was not carried out and won't be.`,
-        `(pending ID ${failed.id}), was decided. The person confirmed it, but carrying it out failed`,
+        `(pending ID ${failed.id}), was decided. The person confirmed it and it was sent, but whether it took effect is unknown`,
         `(pending ID ${broken.id}), was decided. The person confirmed it, but carrying it out failed`,
         // Never told it failed: it may have been sent.
         `(pending ID ${unknown.id}), was decided. The person confirmed it and it was sent, but whether it took effect is unknown`,
@@ -497,7 +498,7 @@ describe("chats", () => {
         refused: "connect.pending_changed",
         sent: "ok",
         declined: "ok",
-        failed: "connect.action_failed",
+        failed: "connect.outcome_unknown",
         broken: "connect.action_failed",
         unknown: "connect.outcome_unknown",
       },
