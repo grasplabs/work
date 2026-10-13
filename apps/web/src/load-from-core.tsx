@@ -54,7 +54,7 @@ const isNotFound = (error: unknown): boolean =>
  * then is never sent.
  */
 export const loadFromCore = async <T,>(
-  core: CoreConnection,
+  core: Pick<CoreConnection, "withSession">,
   read: (session: Session) => Promise<T>,
   left?: AbortSignal
 ): Promise<Loaded<T>> => {

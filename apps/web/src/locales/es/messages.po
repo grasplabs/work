@@ -177,6 +177,10 @@ msgstr "{engine} podrá usar exactamente estos paquetes a partir de ahora."
 msgid "{engine}: run of {workflowId}"
 msgstr "{engine}: ejecución de {workflowId}"
 
+#: src/engines/store-changes.tsx
+msgid "{engineName}, version {version}"
+msgstr "{engineName}, versión {version}"
+
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# fallida en los últimos {days} días} other {# fallidas en los últimos {days} días}}"
@@ -497,6 +501,14 @@ msgstr "Un archivo .txt, .vtt, .srt o .docx, o texto pegado."
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Un cambio se aplica a las ejecuciones que empiezan después: las que ya están en marcha conservan los valores con los que empezaron. Cada cambio queda registrado, sin su valor."
 
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} can't be applied"
+msgstr "No se puede aplicar un cambio en el almacén {name}"
+
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} is being applied"
+msgstr "Se está aplicando un cambio en el almacén {name}"
+
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
 msgstr "Una conexión necesita volver a iniciar sesión"
@@ -545,6 +557,10 @@ msgstr "Una plantilla nueva"
 msgid "A new version of this engine is available."
 msgstr "Hay una nueva versión de este motor."
 
+#: src/engines/store-change-errors.ts
+msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
+msgstr "Ya empezó un nuevo intento de este cambio, así que no se abandonó. La página muestra ahora en qué punto está."
+
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
 msgstr "Una ejecución de un flujo de trabajo pidió esta respuesta."
@@ -556,6 +572,18 @@ msgstr "Una ejecución de un flujo de trabajo espera esta respuesta."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Una búsqueda en {where} no encontró nada {searches, plural, one {una vez} other {# veces}}, por parte de {askers, plural, one {# persona} other {# personas}}."
+
+#: src/engines/store-changes.tsx
+msgid "Abandon the change"
+msgstr "Abandonar el cambio"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change"
+msgstr "Abandonar este cambio"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change?"
+msgstr "¿Abandonar este cambio?"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "About {ending}"
@@ -743,6 +771,14 @@ msgstr "Ya decidido: {model}"
 #: src/connections/connection-list.tsx
 msgid "An admin"
 msgstr "Un administrador"
+
+#: src/engines/store-change-errors.ts
+msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
+msgstr "Un administrador abandonó el cambio de datos que necesita esta versión, así que nunca podrá hacerse actual. Pide que se vuelva a crear el motor."
+
+#: src/engines/store-change-errors.ts
+msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
+msgstr "Un administrador puede ver en la página del motor el registro que lo impide y abandonar el cambio."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
@@ -1190,6 +1226,10 @@ msgstr "cambia los datos del motor"
 msgid "Changes the engine's data"
 msgstr "Cambia los datos del motor"
 
+#: src/engines/store-changes.tsx
+msgid "Changes to the engine's stores"
+msgstr "Cambios en los almacenes del motor"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
 msgstr "Cobrar"
@@ -1238,6 +1278,7 @@ msgstr "Borrar"
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
 #: src/engines/resource-bindings.tsx
+#: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -1721,6 +1762,10 @@ msgstr "Correo electrónico"
 msgid "Engine"
 msgstr "Motor"
 
+#: src/engines/store-changes.tsx
+msgid "engine {app}, version {version}"
+msgstr "motor {app}, versión {version}"
+
 #: src/connections/connection-list.tsx
 msgid "Engine {engine}"
 msgstr "Motor {engine}"
@@ -1904,6 +1949,14 @@ msgstr "Archivo"
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Files"
 msgstr "Archivos"
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
+msgstr "Rellenar el nuevo campo {field} de la tabla {table} haría el registro {record} más grande de lo que puede ser un registro."
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new fields stopped making progress, and trying again didn't help."
+msgstr "El relleno de los nuevos campos dejó de avanzar, y volver a intentarlo no sirvió."
 
 #: src/activity/audit-log.tsx
 msgid "Filter"
@@ -2294,6 +2347,10 @@ msgstr "No se pudo leer su contenido."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Sus mensajes se eliminan para siempre y se rechaza cada cambio que su agente retiene para ti. Lo que hizo el agente queda en el registro de auditoría."
+
+#: src/engines/store-changes.tsx
+msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
+msgstr "Se están rellenando los valores predeterminados de sus nuevos campos. Las versiones que lo necesitan podrán hacerse actuales cuando termine."
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -2721,6 +2778,10 @@ msgstr "Antes no se había aprobado ningún paquete para este motor."
 msgid "No permissions."
 msgstr "Sin permisos."
 
+#: src/engines/store-change-errors.ts
+msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
+msgstr "Ningún registro tiene la culpa, así que un administrador solo puede abandonar el cambio, en la página del motor."
+
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
 msgstr "Ninguna ejecución pidió una decisión a nadie."
@@ -3068,6 +3129,10 @@ msgstr "Solo tú"
 #: src/connections/connect-dialog.tsx
 msgid "Only you can use it."
 msgstr "Solo tú puedes usarlo."
+
+#: src/engines/store-change-errors.ts
+msgid "Only your organization's admins can abandon a change to a store."
+msgstr "Solo los administradores de tu organización pueden abandonar un cambio en un almacén."
 
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
@@ -3464,6 +3529,10 @@ msgstr "Listo"
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"
 msgstr "Chats recientes"
+
+#: src/engines/store-changes.tsx
+msgid "Records checked: {scanned}. Filled in: {filled}."
+msgstr "Registros revisados: {scanned}. Rellenados: {filled}."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Registry and hash"
@@ -4137,6 +4206,10 @@ msgstr "Dejó de seguir lo que cambia en una conexión"
 msgid "Stopped."
 msgstr "Detenido."
 
+#: src/engines/store-changes.tsx
+msgid "Store ID: {store}"
+msgstr "ID del almacén: {store}"
+
 #: src/engines/resource-bindings.tsx
 msgid "Structured, at most {tokens} tokens"
 msgstr "Estructurada, como máximo {tokens} tokens"
@@ -4321,6 +4394,10 @@ msgstr "El catálogo no incluye {app}, así que no se pueden mostrar sus herrami
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "No se pudo leer el catálogo de integraciones, así que esta página muestra solo lo que tus cuentas dicen de ella."
 
+#: src/engines/store-changes.tsx
+msgid "The change to the store {name} was abandoned"
+msgstr "Se abandonó el cambio en el almacén {name}"
+
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
 msgstr "El código de la versión {version}"
@@ -4471,6 +4548,10 @@ msgstr "La llamada al modelo falló."
 msgid "The most pressing first."
 msgstr "Lo más urgente primero."
 
+#: src/engines/store-changes.tsx
+msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
+msgstr "No se puede rellenar el nuevo campo {field} de la tabla {table}: el registro {record} ya tiene con ese nombre un valor que el campo no acepta."
+
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
 msgstr "La siguiente"
@@ -4512,6 +4593,10 @@ msgstr "La respuesta del patrocinador"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "Los pasos no se pueden leer del código de este flujo de trabajo: {message}"
+
+#: src/engines/store-changes.tsx
+msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+msgstr "El almacén mantiene sus tablas como están y vuelve a aceptar cambios. La versión que necesitaba este cambio nunca podrá hacerse actual, ni en este motor ni en ningún otro que use el almacén: hay que volver a crearla. Los nuevos campos quedan reservados con el significado que les dio este cambio: una versión posterior solo puede volver a añadirlos exactamente como eran. Los valores ya rellenados se quedan en los registros, sin mostrarse. Esto no se puede deshacer."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."
@@ -4564,6 +4649,14 @@ msgstr "Aún no hay motores que puedas abrir. Los motores se crean en el chat: d
 msgid "There is no data rule: any allowed model may take sensitive data."
 msgstr "No hay ninguna regla de datos: cualquier modelo permitido puede recibir datos sensibles."
 
+#: src/engines/store-changes.tsx
+msgid "These fields stay reserved with their current meaning: {reserved}."
+msgstr "Estos campos quedan reservados con su significado actual: {reserved}."
+
+#: src/engines/store-changes.tsx
+msgid "These releases can never be made current: {releases}."
+msgstr "Estas versiones nunca podrán hacerse actuales: {releases}."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Se cierran todas sus sesiones, se desconectan sus conexiones personales y no podrá volver a iniciar sesión."
@@ -4587,6 +4680,14 @@ msgstr "Esta aplicación salió de su marco y se detuvo."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "Esta aplicación perdió su conexión con la página y se detuvo."
+
+#: src/engines/store-change-errors.ts
+msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
+msgstr "Este cambio se está aplicando de nuevo, así que ahora no se puede abandonar. La página muestra ahora en qué punto está."
+
+#: src/engines/store-change-errors.ts
+msgid "This change was already abandoned."
+msgstr "Este cambio ya se abandonó."
 
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
@@ -4680,6 +4781,26 @@ msgstr "Este solo se puede liberar: un registro de presupuesto en el que cuenta 
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Esta página no se ha cargado"
+
+#: src/engines/store-change-errors.ts
+msgid "This store no longer exists, so there is nothing to abandon."
+msgstr "Este almacén ya no existe, así que no hay nada que abandonar."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
+msgstr "Esta versión cambia los datos del motor y el cambio no se puede aplicar: un registro ya tiene un valor que uno de sus nuevos campos no acepta."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgstr "Esta versión cambia los datos del motor y el cambio no se puede aplicar: el relleno de sus nuevos campos dejó de avanzar."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgstr "Esta versión cambia los datos del motor y el cambio no se puede aplicar: rellenar uno de sus nuevos campos haría un registro más grande de lo que puede ser un registro."
+
+#: src/engines/store-change-errors.ts
+msgid "This version's data change is still being applied. Try again in a moment."
+msgstr "El cambio de datos de esta versión todavía se está aplicando. Vuelve a intentarlo en un momento."
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -4782,6 +4903,14 @@ msgstr "Desconocida"
 #: src/dashboard/activity.tsx
 msgid "Unreadable event"
 msgstr "Evento ilegible"
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
+msgstr "Hasta que se resuelva, ninguna versión que cambie las tablas de este almacén podrá hacerse actual, ni en este motor ni en ningún otro que use el almacén. Corrige el registro desde el motor y el cambio se volverá a intentar, o abandónalo."
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgstr "Hasta que se resuelva, ninguna versión que cambie las tablas de este almacén podrá hacerse actual, ni en este motor ni en ningún otro que use el almacén. Ningún registro tiene la culpa, así que no hay nada que corregir: abandona el cambio para que el almacén vuelva a aceptar cambios."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"

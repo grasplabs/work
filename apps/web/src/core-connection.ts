@@ -329,7 +329,7 @@ export const loadCoreStatus = async (
  * its answer is no longer waited for.
  */
 export const readWithin = async <T>(
-  core: CoreConnection,
+  core: Pick<CoreConnection, "withSession">,
   read: (session: Session) => Promise<T>,
   signal = deadline()
 ): Promise<T> => await unlessAborted(core.withSession(read, signal), signal);
