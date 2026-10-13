@@ -564,6 +564,20 @@ export interface StoreBackfill {
 }
 
 /**
+ * A store an App uses, and its pending schema change
+ * (`StoresApi.appBackfills`).
+ */
+export interface AppStoreBackfill {
+  store: string;
+  /**
+   * What the App calls the store: the alias of its newest binding; null
+   * for its default store when no version it runs or reviews binds it.
+   */
+  alias: string | null;
+  backfill: StoreBackfill;
+}
+
+/**
  * An admin's abandonment of a store's failed backfill: the target, as
  * of the run they saw fail (`StoreBackfill.attempt`).
  */
@@ -600,6 +614,12 @@ export interface AbandonedBackfill {
 export interface StoresApi {
   /** The store's pending schema change and its backfill; null for none. */
   backfill: (store: string) => Promise<StoreBackfill | null>;
+  /**
+   * The pending schema changes of the stores an App runs on: those its
+   * current and pending versions are bound to, newest first, then its
+   * default store. Stores without one aren't listed.
+   */
+  appBackfills: (app: string) => Promise<AppStoreBackfill[]>;
   /** Abandons the store's failed backfill (see `AbandonedBackfill`). */
   abandonBackfill: (input: AbandonBackfill) => Promise<AbandonedBackfill>;
 }

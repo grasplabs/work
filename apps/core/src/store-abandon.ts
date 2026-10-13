@@ -1,12 +1,19 @@
 import { actorOf, auditEventSchema } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import type { StoreId } from "@grasp-os/shared/ids";
+import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
+import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { abandonBackfillSchema, dataErrors } from "@grasp-os/shared/stores";
-import type { AbandonedBackfill, StoreBackfill } from "@grasp-os/shared/stores";
-import { and, eq, isNull, not } from "drizzle-orm";
+import type {
+  AbandonedBackfill,
+  AppStoreBackfill,
+  StoreBackfill,
+} from "@grasp-os/shared/stores";
+import { and, asc, desc, eq, inArray, isNull, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import {
   auditedBatch,
@@ -15,7 +22,12 @@ import {
   uuidFromHash,
 } from "./audit-outbox.ts";
 import type { Member } from "./auth/identity.ts";
-import { businessStores } from "./db/core/schema.ts";
+import {
+  appDefaultStores,
+  apps,
+  businessStores,
+  sdkResourceBindings,
+} from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { requireNotStaff } from "./sharing.ts";
 import type { BackfillAbandonment } from "./store-host.ts";
@@ -37,7 +49,8 @@ import type { BackfillAbandonment } from "./store-host.ts";
 //   builders: on a shared store, one App's target holds other Apps'
 //   releases too, so abandoning it decides for all of them, which is the
 //   organization's call. No App or workflow reaches it (it isn't in the
-//   SDK, and core's agents don't get it).
+//   SDK, and core's agents don't get it). Reading a store's failed change,
+//   or which stores an App uses and theirs, is theirs alone too.
 // - A backfill still running is abandoned under its run: refused
 //   (`migration.not_failed`); it either finishes or fails first.
 // - An abandonment races a retry: the admin names the run they saw fail
@@ -175,6 +188,143 @@ export const storeBackfill = async (
   }
   const { target, state, attempt, scanned, filled, failure } = status;
   return { target, state, attempt, scanned, filled, failure };
+};
+
+/**
+ * The most stores `appStoreBackfills` asks: the current and pending
+ * versions bind at most 16 stores each, and the default store makes one
+ * more, so the cap only ever drops what an App can't have.
+ */
+const appStoresAsked = 32;
+
+/**
+ * The stores the App `app` runs on now or is about to: those its current
+ * and pending versions are bound to, newest version first, then its
+ * default store; each once, with the alias its newest binding gives it.
+ * Releases kept from older versions aren't asked: no change of theirs
+ * holds back what the App would make current.
+ */
+const storesInUse = async (
+  env: Env,
+  app: AppId
+): Promise<{ store: string; alias: string | null }[]> => {
+  const db = drizzle(env.DB);
+  const [found, defaults] = await Promise.all([
+    db
+      .select({
+        current: apps.currentVersion,
+        pending: apps.pendingVersion,
+      })
+      .from(apps)
+      .where(eq(apps.id, app))
+      .get(),
+    db
+      .select({ store: appDefaultStores.storeId })
+      .from(appDefaultStores)
+      .where(eq(appDefaultStores.appId, app)),
+  ]);
+  const versions = [found?.pending, found?.current].filter(
+    (version): version is number => typeof version === "number"
+  );
+  const bound =
+    versions.length === 0
+      ? []
+      : await db
+          .select({
+            store: sdkResourceBindings.targetId,
+            alias: sdkResourceBindings.alias,
+          })
+          .from(sdkResourceBindings)
+          .where(
+            and(
+              eq(sdkResourceBindings.resourceId, app),
+              eq(sdkResourceBindings.kind, "store"),
+              inArray(sdkResourceBindings.resourceVersion, versions)
+            )
+          )
+          .orderBy(
+            desc(sdkResourceBindings.resourceVersion),
+            asc(sdkResourceBindings.alias)
+          );
+  const named = new Map<string, string | null>();
+  for (const { store, alias } of [
+    ...bound,
+    ...defaults.map((row) => ({ store: row.store, alias: null })),
+  ]) {
+    if (!named.has(store)) {
+      named.set(store, alias);
+    }
+  }
+  return [...named]
+    .slice(0, appStoresAsked)
+    .map(([store, alias]) => ({ store, alias }));
+};
+
+/**
+ * The pending schema changes of the stores the App `app` runs on (see
+ * `storesInUse`), for an admin (`StoresApi.appBackfills`), in that order.
+ * On a shared store the change may be another App's, which blocks this
+ * App's releases all the same. A store with none isn't listed; neither is
+ * one that is gone, nor one whose object didn't answer (logged), so one
+ * store out of reach leaves the others; nor an App nobody knows.
+ */
+export const appStoreBackfills = async (
+  env: Env,
+  by: Member,
+  app: string
+): Promise<AppStoreBackfill[]> => {
+  requireAdmin(by);
+  requireNotStaff(by);
+  const { app: id } = dataErrors.parse(
+    "data.invalid",
+    z.strictObject({ app: appIdSchema }),
+    { app }
+  );
+  const named = await storesInUse(env, id);
+  if (named.length === 0) {
+    return [];
+  }
+  const liveRows = await drizzle(env.DB)
+    .select({ id: businessStores.id })
+    .from(businessStores)
+    .where(
+      and(
+        inArray(
+          businessStores.id,
+          named.map(({ store }) => store)
+        ),
+        isNull(businessStores.deletedAt)
+      )
+    );
+  const live = new Set(liveRows.map((row) => row.id));
+  const asked = named.filter(({ store }) => live.has(store));
+  const answers = await Promise.allSettled(
+    asked.map(async ({ store }) => {
+      const storeId = storeIdSchema.parse(store);
+      return await storeObject(env, storeId).backfillStatus(storeId);
+    })
+  );
+  return answers.flatMap((answer, index): AppStoreBackfill[] => {
+    const { store, alias } = asked[index] ?? { store: "", alias: null };
+    if (answer.status === "rejected") {
+      log.warn("store.backfill_status_failed", {
+        store,
+        ...errorFields(answer.reason),
+      });
+      return [];
+    }
+    if (answer.value === null) {
+      return [];
+    }
+    const { target, state, attempt, scanned, filled, failure } = answer.value;
+    return [
+      {
+        store,
+        alias,
+        backfill: { target, state, attempt, scanned, filled, failure },
+      },
+    ];
+  });
 };
 
 /**

@@ -15,11 +15,14 @@ import {
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { Link } from "@tanstack/react-router";
 import { HammerIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
+import { makeCurrentFailure } from "../engines/store-change-errors.ts";
+import { storeChangesAnchor } from "../engines/store-changes.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
@@ -480,6 +483,27 @@ const ReviewDetails = ({
   );
 };
 
+/** Why a version wasn't made current, as `makeCurrentFailure` says. */
+type MadeCurrent = { made: true } | ReturnType<typeof makeCurrentFailure>;
+
+/**
+ * Makes `version` of `app` current, or says why core refused: a store's
+ * failed change it waits on points to the engine's page (`link`).
+ * Outside the component, as the React Compiler can't compile `try`.
+ */
+const setCurrentOf = async (
+  session: Session,
+  app: string,
+  version: number
+): Promise<MadeCurrent> => {
+  try {
+    await session.apps.versions.setCurrent(app, version);
+    return { made: true };
+  } catch (error) {
+    return makeCurrentFailure(error);
+  }
+};
+
 /**
  * An App's version up for review: what it changes, and making it current;
  * nothing for an App the person doesn't build.
@@ -545,13 +569,23 @@ const PendingVersion = ({
     };
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `codeReads` says when to read again
   }, [core, app.id, version, loaded, codeReads]);
+  const [refused, setRefused] = useState<{
+    text: string;
+    link: string | undefined;
+  }>();
   const makeCurrent = async (): Promise<void> => {
+    setRefused(undefined);
     const made = await run(
-      async (session) => await session.apps.versions.setCurrent(app.id, version)
+      async (session) => await setCurrentOf(session, app.id, version)
     );
-    if (made !== undefined) {
-      onDone(versionKey(app.id, version));
+    if (made === undefined) {
+      return;
     }
+    if ("made" in made) {
+      onDone(versionKey(app.id, version));
+      return;
+    }
+    setRefused(made);
   };
   if (review === undefined) {
     return null;
@@ -595,7 +629,19 @@ const PendingVersion = ({
             serverCode={serverCode}
           />
         )}
-        <ErrorText>{failure}</ErrorText>
+        <ErrorText>{failure ?? refused?.text}</ErrorText>
+        {refused?.link === undefined ? null : (
+          <p className="text-muted-foreground">
+            <Link
+              className="underline underline-offset-3"
+              hash={storeChangesAnchor}
+              params={{ engine: app.id }}
+              to="/engines/$engine"
+            >
+              {refused.link}
+            </Link>
+          </p>
+        )}
       </CardContent>
       {loaded === undefined ? null : (
         <CardFooter>

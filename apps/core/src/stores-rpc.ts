@@ -1,6 +1,7 @@
 import type {
   AbandonBackfill,
   AbandonedBackfill,
+  AppStoreBackfill,
   StoreBackfill,
   StoresApi,
 } from "@grasp-os/shared/stores";
@@ -8,7 +9,11 @@ import type {
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
-import { abandonStoreBackfill, storeBackfill } from "./store-abandon.ts";
+import {
+  abandonStoreBackfill,
+  appStoreBackfills,
+  storeBackfill,
+} from "./store-abandon.ts";
 
 // Business stores over `/rpc`, for admins: a store's failed schema change,
 // and abandoning it (store-abandon.ts, where who may is decided).
@@ -28,6 +33,13 @@ export class StoresRpc extends CoreRpcTarget implements StoresApi {
     return await withPerson(
       this.#check,
       async (person) => await storeBackfill(this.#env, person, store)
+    );
+  }
+
+  async appBackfills(app: string): Promise<AppStoreBackfill[]> {
+    return await withPerson(
+      this.#check,
+      async (person) => await appStoreBackfills(this.#env, person, app)
     );
   }
 

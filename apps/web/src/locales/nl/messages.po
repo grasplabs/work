@@ -177,6 +177,10 @@ msgstr "{engine} mag vanaf nu precies deze pakketten gebruiken."
 msgid "{engine}: run of {workflowId}"
 msgstr "{engine}: run van {workflowId}"
 
+#: src/engines/store-changes.tsx
+msgid "{engineName}, version {version}"
+msgstr "{engineName}, versie {version}"
+
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# mislukt in de afgelopen {days} dagen} other {# mislukt in de afgelopen {days} dagen}}"
@@ -497,6 +501,14 @@ msgstr "Een .txt-, .vtt-, .srt- of .docx-bestand, of geplakte tekst."
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Een wijziging geldt voor runs die daarna starten: runs die al bezig zijn houden de waarden waarmee ze begonnen. Elke wijziging wordt vastgelegd, zonder de waarde."
 
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} can't be applied"
+msgstr "Een wijziging in de opslag {name} kan niet worden toegepast"
+
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} is being applied"
+msgstr "Een wijziging in de opslag {name} wordt toegepast"
+
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
 msgstr "Een verbinding moet opnieuw worden aangemeld"
@@ -545,6 +557,10 @@ msgstr "Een nieuwe sjabloon"
 msgid "A new version of this engine is available."
 msgstr "Er is een nieuwe versie van deze engine."
 
+#: src/engines/store-change-errors.ts
+msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
+msgstr "Er is al een nieuwe poging voor deze wijziging gestart, dus die is niet opgegeven. De pagina toont nu hoe het ervoor staat."
+
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
 msgstr "Een run van een workflow vroeg om dit antwoord."
@@ -556,6 +572,18 @@ msgstr "Een run van een workflow wacht op dit antwoord."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Een zoekopdracht in {where} vond {searches, plural, one {één keer} other {# keer}} niets, bij {askers, plural, one {# vragensteller} other {# vragenstellers}}."
+
+#: src/engines/store-changes.tsx
+msgid "Abandon the change"
+msgstr "Wijziging opgeven"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change"
+msgstr "Deze wijziging opgeven"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change?"
+msgstr "Deze wijziging opgeven?"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "About {ending}"
@@ -743,6 +771,14 @@ msgstr "Al besloten: {model}"
 #: src/connections/connection-list.tsx
 msgid "An admin"
 msgstr "Een beheerder"
+
+#: src/engines/store-change-errors.ts
+msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
+msgstr "Een beheerder heeft de gegevenswijziging opgegeven die deze versie nodig heeft, dus die kan nooit actueel worden gemaakt. Laat de engine opnieuw bouwen."
+
+#: src/engines/store-change-errors.ts
+msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
+msgstr "Een beheerder ziet op de pagina van de engine het record dat het tegenhoudt, en kan de wijziging opgeven."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
@@ -1190,6 +1226,10 @@ msgstr "wijzigt de gegevens van de engine"
 msgid "Changes the engine's data"
 msgstr "Wijzigt de gegevens van de engine"
 
+#: src/engines/store-changes.tsx
+msgid "Changes to the engine's stores"
+msgstr "Wijzigingen in de opslag van de engine"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
 msgstr "In rekening brengen"
@@ -1238,6 +1278,7 @@ msgstr "Wissen"
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
 #: src/engines/resource-bindings.tsx
+#: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -1721,6 +1762,10 @@ msgstr "E-mail"
 msgid "Engine"
 msgstr "Engine"
 
+#: src/engines/store-changes.tsx
+msgid "engine {app}, version {version}"
+msgstr "engine {app}, versie {version}"
+
 #: src/connections/connection-list.tsx
 msgid "Engine {engine}"
 msgstr "Engine {engine}"
@@ -1904,6 +1949,14 @@ msgstr "Bestand"
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Files"
 msgstr "Bestanden"
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
+msgstr "Het invullen van het nieuwe veld {field} van de tabel {table} zou het record {record} groter maken dan een record mag zijn."
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new fields stopped making progress, and trying again didn't help."
+msgstr "Het invullen van de nieuwe velden kwam niet meer verder, en opnieuw proberen hielp niet."
 
 #: src/activity/audit-log.tsx
 msgid "Filter"
@@ -2294,6 +2347,10 @@ msgstr "De inhoud kon niet worden gelezen."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "De berichten worden definitief verwijderd en elke wijziging die de agent voor je vasthoudt, wordt afgewezen. Wat de agent deed, blijft in het auditlog."
+
+#: src/engines/store-changes.tsx
+msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
+msgstr "De standaardwaarden van de nieuwe velden worden ingevuld. Releases die dit nodig hebben, kunnen actueel worden gemaakt zodra het klaar is."
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -2721,6 +2778,10 @@ msgstr "Voor deze engine zijn nog niet eerder pakketten goedgekeurd."
 msgid "No permissions."
 msgstr "Geen toestemmingen."
 
+#: src/engines/store-change-errors.ts
+msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
+msgstr "Geen enkel record is de oorzaak, dus een beheerder kan de wijziging alleen opgeven, op de pagina van de engine."
+
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
 msgstr "Geen enkele run vroeg iemand om een beslissing."
@@ -3068,6 +3129,10 @@ msgstr "Alleen jij"
 #: src/connections/connect-dialog.tsx
 msgid "Only you can use it."
 msgstr "Alleen jij kunt het gebruiken."
+
+#: src/engines/store-change-errors.ts
+msgid "Only your organization's admins can abandon a change to a store."
+msgstr "Alleen de beheerders van je organisatie kunnen een wijziging in een opslag opgeven."
 
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
@@ -3464,6 +3529,10 @@ msgstr "Klaar"
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"
 msgstr "Recente chats"
+
+#: src/engines/store-changes.tsx
+msgid "Records checked: {scanned}. Filled in: {filled}."
+msgstr "Gecontroleerde records: {scanned}. Ingevuld: {filled}."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Registry and hash"
@@ -4137,6 +4206,10 @@ msgstr "Gestopt met volgen wat er bij een verbinding verandert"
 msgid "Stopped."
 msgstr "Gestopt."
 
+#: src/engines/store-changes.tsx
+msgid "Store ID: {store}"
+msgstr "Opslag-ID: {store}"
+
 #: src/engines/resource-bindings.tsx
 msgid "Structured, at most {tokens} tokens"
 msgstr "Gestructureerd, hoogstens {tokens} tokens"
@@ -4321,6 +4394,10 @@ msgstr "De catalogus vermeldt {app} niet, dus de tools kunnen niet worden getoon
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "De catalogus van integraties kon niet worden gelezen, dus deze pagina toont alleen wat je accounts erover zeggen."
 
+#: src/engines/store-changes.tsx
+msgid "The change to the store {name} was abandoned"
+msgstr "De wijziging in de opslag {name} is opgegeven"
+
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
 msgstr "De code van versie {version}"
@@ -4471,6 +4548,10 @@ msgstr "De modelaanroep is mislukt."
 msgid "The most pressing first."
 msgstr "Het dringendste eerst."
 
+#: src/engines/store-changes.tsx
+msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
+msgstr "Het nieuwe veld {field} van de tabel {table} kan niet worden ingevuld: het record {record} heeft onder die naam al een waarde die het veld niet accepteert."
+
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
 msgstr "De volgende"
@@ -4512,6 +4593,10 @@ msgstr "Het antwoord van de sponsor"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "De stappen kunnen niet uit de code van deze workflow worden gelezen: {message}"
+
+#: src/engines/store-changes.tsx
+msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+msgstr "De opslag houdt zijn tabellen zoals ze zijn en neemt weer wijzigingen aan. De release die deze wijziging nodig had, kan nooit actueel worden gemaakt, in deze engine noch in een andere engine die de opslag gebruikt: die moet opnieuw worden gebouwd. De nieuwe velden blijven gereserveerd met de betekenis die deze wijziging ze gaf: een latere versie kan ze alleen precies zo opnieuw toevoegen. De al ingevulde waarden blijven onzichtbaar in de records staan. Dit kan niet ongedaan worden gemaakt."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."
@@ -4564,6 +4649,14 @@ msgstr "Er zijn nog geen engines die je kunt openen. Engines maak je in de chat:
 msgid "There is no data rule: any allowed model may take sensitive data."
 msgstr "Er is geen gegevensregel: elk toegestaan model mag gevoelige gegevens krijgen."
 
+#: src/engines/store-changes.tsx
+msgid "These fields stay reserved with their current meaning: {reserved}."
+msgstr "Deze velden blijven gereserveerd met hun huidige betekenis: {reserved}."
+
+#: src/engines/store-changes.tsx
+msgid "These releases can never be made current: {releases}."
+msgstr "Deze releases kunnen nooit actueel worden gemaakt: {releases}."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "Ze worden overal uitgelogd, hun persoonlijke koppelingen worden ontkoppeld en ze kunnen niet meer inloggen."
@@ -4587,6 +4680,14 @@ msgstr "Deze app heeft zijn frame verlaten en is gestopt."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "Deze app is de verbinding met de pagina kwijtgeraakt en is gestopt."
+
+#: src/engines/store-change-errors.ts
+msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
+msgstr "Deze wijziging wordt opnieuw toegepast, dus die kan nu niet worden opgegeven. De pagina toont nu hoe het ervoor staat."
+
+#: src/engines/store-change-errors.ts
+msgid "This change was already abandoned."
+msgstr "Deze wijziging is al opgegeven."
 
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
@@ -4680,6 +4781,26 @@ msgstr "Deze kan alleen worden vrijgegeven: een budgetrecord waartegen hij telt 
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Deze pagina is niet geladen"
+
+#: src/engines/store-change-errors.ts
+msgid "This store no longer exists, so there is nothing to abandon."
+msgstr "Deze opslag bestaat niet meer, dus er valt niets op te geven."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
+msgstr "Deze versie wijzigt de gegevens van de engine, en de wijziging kan niet worden toegepast: een record heeft al een waarde die een van de nieuwe velden niet accepteert."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgstr "Deze versie wijzigt de gegevens van de engine, en de wijziging kan niet worden toegepast: het invullen van de nieuwe velden kwam niet meer verder."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgstr "Deze versie wijzigt de gegevens van de engine, en de wijziging kan niet worden toegepast: het invullen van een van de nieuwe velden zou een record groter maken dan een record mag zijn."
+
+#: src/engines/store-change-errors.ts
+msgid "This version's data change is still being applied. Try again in a moment."
+msgstr "De gegevenswijziging van deze versie wordt nog toegepast. Probeer het zo opnieuw."
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -4782,6 +4903,14 @@ msgstr "Onbekend"
 #: src/dashboard/activity.tsx
 msgid "Unreadable event"
 msgstr "Onleesbare gebeurtenis"
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
+msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wijzigt actueel worden gemaakt, in deze engine noch in een andere engine die de opslag gebruikt. Herstel het record via de engine, dan wordt de wijziging opnieuw geprobeerd, of geef haar op."
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgstr "Tot dit is opgelost, kan geen release die de tabellen van deze opslag wijzigt actueel worden gemaakt, in deze engine noch in een andere engine die de opslag gebruikt. Geen enkel record is de oorzaak, dus er valt niets te herstellen: geef de wijziging op, zodat de opslag weer wijzigingen aanneemt."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
