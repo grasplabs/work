@@ -501,6 +501,10 @@ msgstr "Un fichier .txt, .vtt, .srt ou .docx, ou du texte collé."
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Une modification s’applique aux exécutions qui démarrent ensuite : celles déjà en cours gardent les valeurs de leur démarrage. Chaque modification est enregistrée, sans sa valeur."
 
+#: src/workflows/history-view.tsx
+msgid "A change by {label} waits for approval by the person the run acts for"
+msgstr "Une modification par {label} attend l'accord de la personne pour qui l'exécution agit"
+
 #: src/engines/store-changes.tsx
 msgid "A change to the store {name} can't be applied"
 msgstr "Une modification du magasin {name} ne peut pas être appliquée"
@@ -508,6 +512,10 @@ msgstr "Une modification du magasin {name} ne peut pas être appliquée"
 #: src/engines/store-changes.tsx
 msgid "A change to the store {name} is being applied"
 msgstr "Une modification du magasin {name} est en cours d’application"
+
+#: src/workflows/history-view.tsx
+msgid "A change waits for approval by the person the run acts for"
+msgstr "Une modification attend l'accord de la personne pour qui l'exécution agit"
 
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
@@ -572,6 +580,10 @@ msgstr "Une exécution d’un workflow attend cette réponse."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Une recherche dans {where} n’a rien trouvé {searches, plural, one {une fois} other {# fois}}, pour {askers, plural, one {# personne} other {# personnes}}."
+
+#: src/workflows/history-view.tsx
+msgid "A step"
+msgstr "Une étape"
 
 #: src/engines/store-changes.tsx
 msgid "Abandon the change"
@@ -1003,6 +1015,10 @@ msgstr "À {step} : {error}"
 msgid "At work"
 msgstr "À l’œuvre"
 
+#: src/workflows/history-view.tsx
+msgid "Attempt {n}"
+msgstr "Tentative {n}"
+
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Audit trail"
@@ -1107,6 +1123,11 @@ msgid "Cancel"
 msgstr "Annuler"
 
 #: src/workflows/runs.tsx
+msgid "Cancelled"
+msgstr "Annulée"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
 msgid "Cancelled"
 msgstr "Annulée"
 
@@ -1348,6 +1369,16 @@ msgstr "Comparée à la version {current}, qui s’exécute actuellement."
 
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx
+msgid "Completed"
+msgstr "Terminée"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Completed"
+msgstr "Terminée"
+
+#: src/workflows/history-view.tsx
+msgctxt "an attempt of a step"
 msgid "Completed"
 msgstr "Terminée"
 
@@ -1824,6 +1855,10 @@ msgstr "Saisissez un montant, par exemple 12.50."
 msgid "Entries"
 msgstr "Entrées"
 
+#: src/workflows/history-view.tsx
+msgid "Entry {sequence} can't be read."
+msgstr "L'entrée {sequence} ne peut pas être lue."
+
 #: src/chat/thread.tsx
 msgid "Error"
 msgstr "Erreur"
@@ -1933,9 +1968,23 @@ msgstr "Extraction"
 msgid "Failed"
 msgstr "En échec"
 
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Failed"
+msgstr "Échouée"
+
+#: src/workflows/history-view.tsx
+msgctxt "an attempt of a step"
+msgid "Failed"
+msgstr "Échouée"
+
 #: src/dashboard/failed-workflows.tsx
 msgid "Failed while acting for you"
 msgstr "A échoué en agissant pour vous"
+
+#: src/workflows/history-view.tsx
+msgid "Failed, tried again"
+msgstr "Échouée, nouvelle tentative"
 
 #: src/dashboard/report.ts
 msgid "Failed: {failed}"
@@ -2497,6 +2546,10 @@ msgstr "Liens envoyés : {count} sur {of}"
 msgid "Links to"
 msgstr "Renvoie à"
 
+#: src/workflows/history-view.tsx
+msgid "Load more"
+msgstr "Charger plus"
+
 #: src/activity/audit-log.tsx
 msgid "Load older"
 msgstr "Charger les plus anciens"
@@ -2513,6 +2566,7 @@ msgstr "Recharger le code serveur"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
+#: src/workflows/history-view.tsx
 msgid "Loading…"
 msgstr "Chargement…"
 
@@ -2694,6 +2748,10 @@ msgstr "Nouveau depuis la dernière approbation : {added}"
 msgid "New: failed while acting for you"
 msgstr "Nouveau : a échoué en agissant pour vous"
 
+#: src/workflows/triggers.tsx
+msgid "Next run: {next}"
+msgstr "Prochaine exécution : {next}"
+
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.engines.index.tsx
 msgid "No apps yet"
@@ -2769,6 +2827,10 @@ msgstr "Aucun fichier de mémoire n’a encore été écrit."
 #: src/chat/composer.tsx
 msgid "No model is set up for this deployment yet."
 msgstr "Aucun modèle n’est encore configuré pour ce déploiement."
+
+#: src/workflows/triggers.tsx
+msgid "No next run"
+msgstr "Aucune prochaine exécution"
 
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this engine before."
@@ -3003,6 +3065,10 @@ msgstr "Rien n'est retenu pour examen pour l'instant."
 msgid "Nothing is published for {contract} yet. Publish it first."
 msgstr "Rien n'est encore publié pour {contract}. Publiez d'abord une version."
 
+#: src/workflows/history-view.tsx
+msgid "Nothing is recorded for this run."
+msgstr "Rien n'est enregistré pour cette exécution."
+
 #: src/dashboard/pile-cards.tsx
 msgid "Nothing is sent or changed on {connection}."
 msgstr "Rien n’est envoyé ni modifié dans {connection}."
@@ -3026,6 +3092,10 @@ msgstr "Rien ne s’exécute encore : ce serait la première version actuelle du
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
 msgstr "Rien de dépensé pour l’instant."
+
+#: src/workflows/triggers.tsx
+msgid "Nothing starts it on its own: it runs when someone starts it."
+msgstr "Rien ne le lance tout seul : il s'exécute quand quelqu'un le lance."
 
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
@@ -3089,6 +3159,10 @@ msgstr "à la réception d’un e-mail à {address}@"
 msgid "on the event {event}, filtered"
 msgstr "à l’événement {event}, filtré"
 
+#: src/workflows/triggers.tsx
+msgid "On the schedule set by {param} ({timeZone})"
+msgstr "Selon la planification définie par {param} ({timeZone})"
+
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "En route"
@@ -3133,6 +3207,11 @@ msgstr "Vous seul pouvez l’utiliser."
 #: src/engines/store-change-errors.ts
 msgid "Only your organization's admins can abandon a change to a store."
 msgstr "Seuls les admins de votre organisation peuvent abandonner une modification d’un magasin."
+
+#: src/workflows/history-view.tsx
+msgctxt "a wait of a run"
+msgid "Open"
+msgstr "Ouverte"
 
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
@@ -3296,6 +3375,11 @@ msgstr "Mettre les entretiens en pause"
 msgid "Paused"
 msgstr "En pause"
 
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Paused"
+msgstr "En pause"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "En pause : aucun lien ne s’ouvre ni ne part. Les liens prévus partent dès que les entretiens reprennent."
@@ -3427,6 +3511,11 @@ msgstr "Publier une version de {contract}"
 #: src/engines/resource-bindings.tsx
 msgid "Publish as"
 msgstr "Publier comme"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Queued"
+msgstr "En file d'attente"
 
 #: src/dashboard/widget-board.tsx
 msgid "Ran"
@@ -3763,6 +3852,10 @@ msgstr "Rôle de {who}"
 msgid "Rules"
 msgstr "Règles"
 
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "Run"
+msgstr "Exécution"
+
 #: src/routes/decisions.$decision.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
@@ -3776,11 +3869,37 @@ msgstr "Exécution {runId}"
 msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
 msgstr "Exécution {shortId} de {workflowId} dans {engine}, lancée le {started}"
 
+#: src/workflows/history-view.tsx
+msgid "Run history"
+msgstr "Historique de l'exécution"
+
+#: src/workflows/runs.tsx
+msgid "Run history, {time}"
+msgstr "Historique de l'exécution, {time}"
+
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "Run not found"
+msgstr "Exécution introuvable"
+
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "Run of {workflow}"
+msgstr "Exécution de {workflow}"
+
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 msgid "Running"
 msgstr "En production"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Running"
+msgstr "En cours"
+
+#: src/workflows/history-view.tsx
+msgctxt "an attempt of a step"
+msgid "Running"
+msgstr "En cours"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Running or cancelled"
@@ -4158,6 +4277,10 @@ msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Statut"
 
+#: src/workflows/history-view.tsx
+msgid "Step {ordinal}"
+msgstr "Étape {ordinal}"
+
 #: src/dashboard/signals.tsx
 msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "L’étape {step} de {about} a échoué {failures} fois sur {runs, plural, one {# exécution} other {# exécutions}} {days, plural, one {ces dernières 24 heures} other {ces # derniers jours}}."
@@ -4192,6 +4315,11 @@ msgstr "Arrêter"
 #: src/chat/thread.tsx
 msgid "Stopped"
 msgstr "Arrêté"
+
+#: src/workflows/triggers.tsx
+msgctxt "a schedule that stopped"
+msgid "Stopped"
+msgstr "Arrêtée"
 
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
@@ -4782,6 +4910,14 @@ msgstr "Celui-ci ne peut qu'être libéré : un enregistrement de budget sur leq
 msgid "This page didn't load"
 msgstr "Cette page ne s’est pas chargée"
 
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "This run's details were removed once its retention was over, and its history with them."
+msgstr "Les détails de cette exécution ont été supprimés à la fin de sa durée de conservation, et son historique avec eux."
+
+#: src/workflows/history-view.tsx
+msgid "This step failed."
+msgstr "Cette étape a échoué."
+
 #: src/engines/store-change-errors.ts
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "Ce magasin n’existe plus : il n’y a donc rien à abandonner."
@@ -4868,6 +5004,15 @@ msgstr "Outils à autoriser"
 msgid "Tools, products and the company's own words, so he hears them right."
 msgstr "Outils, produits et mots propres à l’entreprise, pour qu’il les comprenne bien."
 
+#: src/workflows/triggers.tsx
+msgid "Triggers"
+msgstr "Déclencheurs"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgctxt "tab of a workflow"
+msgid "Triggers"
+msgstr "Déclencheurs"
+
 #: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
@@ -4895,6 +5040,18 @@ msgctxt "programme stage"
 msgid "Under way"
 msgstr "En cours"
 
+#: src/workflows/history-view.tsx
+msgid "Undoing {label}"
+msgstr "Annulation de {label}"
+
+#: src/workflows/history-view.tsx
+msgid "Undoing its changes after a failure"
+msgstr "Annule ses modifications après un échec"
+
+#: src/workflows/history-view.tsx
+msgid "Undoing its changes after it was cancelled"
+msgstr "Annule ses modifications après son annulation"
+
 #: src/activity/pending.tsx
 msgid "Unknown"
 msgstr "Inconnue"
@@ -4903,6 +5060,10 @@ msgstr "Inconnue"
 #: src/dashboard/activity.tsx
 msgid "Unreadable event"
 msgstr "Événement illisible"
+
+#: src/workflows/history-view.tsx
+msgid "Until {until}"
+msgstr "Jusqu'au {until}"
 
 #: src/engines/store-changes.tsx
 msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
@@ -4991,12 +5152,18 @@ msgstr "Via Composio"
 msgid "View app"
 msgstr "Voir l’app"
 
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Waiting"
+msgstr "En attente"
+
 #: src/dashboard/to-do.tsx
 msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "En attente ailleurs"
 
 #: src/routes/_shell.workflows.index.tsx
+#: src/workflows/history-view.tsx
 #: src/workflows/runs.tsx
 msgid "Waiting for a decision"
 msgstr "En attente d’une décision"
@@ -5008,6 +5175,18 @@ msgstr "En attente d’une décision : {waiting}"
 #: src/dashboard/signals.tsx
 msgid "Waiting for a person"
 msgstr "Attend une personne"
+
+#: src/workflows/history-view.tsx
+msgid "Waiting for a set time"
+msgstr "Attend un délai fixé"
+
+#: src/workflows/history-view.tsx
+msgid "Waiting for an event"
+msgstr "Attend un événement"
+
+#: src/workflows/history-view.tsx
+msgid "Waiting for the decision {label}"
+msgstr "Attend la décision {label}"
 
 #: src/dashboard/report.ts
 msgctxt "programme stage"
@@ -5186,9 +5365,17 @@ msgctxt "column: when a run happened"
 msgid "When"
 msgstr "Quand"
 
+#: src/workflows/triggers.tsx
+msgid "When an email arrives at {address}"
+msgstr "Quand un e-mail arrive à {address}"
+
 #: src/chat/builds-state.ts
 msgid "when someone starts it"
 msgstr "quand quelqu’un le lance"
+
+#: src/workflows/triggers.tsx
+msgid "When the event {event} happens"
+msgstr "Quand l'événement {event} se produit"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Where it comes from"
@@ -5292,6 +5479,7 @@ msgstr "Des tests de workflow échouent :"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx
