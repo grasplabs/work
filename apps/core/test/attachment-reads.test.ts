@@ -64,6 +64,9 @@ const hooks: HostHooks = {
   callFunction: () => {
     throw new Error("A read calls no App function");
   },
+  modelBinding: () => {
+    throw new Error("No model step here");
+  },
 };
 
 /**

@@ -7,7 +7,11 @@ import type { z } from "zod";
 export interface ModelRequest {
   /** The step the call is made for, for the audit log and cost reporting. */
   step: string;
-  model: string;
+  /**
+   * The alias of the App's model resource the call goes through: an
+   * approved binding of it names the model and caps what it may spend.
+   */
+  binding: string;
   /** What the model is asked to do. */
   instructions: string;
   /** What it works on. */

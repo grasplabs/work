@@ -1,6 +1,7 @@
 // What the runtime and the describer agree on about steps. Internal to the
 // SDK: neither workflow code nor the runtime imports this module.
 
+import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 import { maxAttemptTimeoutMs } from "@grasp-os/shared/workflows";
 import type { StepKind } from "@grasp-os/shared/workflows";
 import { z } from "zod";
@@ -171,7 +172,9 @@ export const stepOptionSchemas = {
     ),
   llm: z.strictObject({
     ...common,
-    model: option(paramValueSchemas.model, "param"),
+    // Written as a literal, so the review reads which binding each AI
+    // step goes through.
+    binding: option(z.string().regex(resourceAliasPattern), "literal"),
     instructions: option(text, "literal"),
     input: option(z.json(), "code"),
     schema: option(zodSchema, "code"),

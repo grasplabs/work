@@ -28,9 +28,11 @@ import {
 import { refusal, signedInApi } from "./sign-in.ts";
 import {
   appWith,
+  bindModel,
   grantMail,
   invoiceMail,
   mailer,
+  modelRegistration,
   runEvents,
   server,
   workflowFiles,
@@ -64,7 +66,7 @@ const extractionModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
  * and books the invoice, through its App's server code, typed by the
  * App's own class (`appServer`).
  */
-const invoiceWorkflow = `import { appServer, model, money, person, workflow, z } from "@grasp-os/sdk/workflow";
+const invoiceWorkflow = `import { appServer, money, person, workflow, z } from "@grasp-os/sdk/workflow";
 
 import type { App } from "../app/server.ts";
 
@@ -75,7 +77,6 @@ export default workflow(
     params: {
       threshold: money({ label: "Review invoices above", currency: "EUR", default: 500_000, sensitive: true }),
       reviewer: person({ label: "Reviewer", default: "role:admin" }),
-      extractionModel: model({ label: "Extraction model", default: "${extractionModel}", sensitive: true }),
     },
   },
   async (step, { input, params, env }) => {
@@ -89,7 +90,7 @@ export default workflow(
     }
     const extracted = await step.llm("extract", {
       description: "Read the total and currency from the invoice",
-      model: params.extractionModel,
+      binding: "extractor",
       instructions: "Read the invoice's total in cents and its ISO 4217 currency.",
       input: input.text,
       schema: z.object({ total: z.int(), currency: z.string() }),
@@ -210,9 +211,12 @@ describe("workflow runs", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const reviewer = await personApi("admin");
     const app = await appWith(builder, {
+      ...modelRegistration({ extractor: 12_000 }),
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
     });
+    // An admin binds the model its AI step goes through.
+    await bindModel(app, "extractor", extractionModel);
     // The model reads the invoice's total.
     const gateway = fakeGateway({
       text: JSON.stringify({ total: 800_000, currency: "EUR" }),
@@ -485,21 +489,22 @@ ${mailStep("after")}`,
 
   it("check a model's answer against the step's schema, formats included", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
-      builder,
-      workflowFiles(
+    const app = await appWith(builder, {
+      ...modelRegistration({ extractor: 12_000 }),
+      ...workflowFiles(
         "reader",
         `  return await step.llm("extract", {
     description: "Read the total",
-    model: "${extractionModel}",
+    binding: "extractor",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int(), from: z.email(), on: z.iso.date() }),
     retries: { limit: 0 },
   });`,
         { extract: { total: 1234, from: "anna@example.com", on: "2026-09-26" } }
-      )
-    );
+      ),
+    });
+    await bindModel(app, "extractor", extractionModel);
     const runWithAnswers = async (...texts: string[]) => {
       const gateway = fakeGateway(
         ...texts.map((text) => ({ text, inputTokens: 10, outputTokens: 5 }))

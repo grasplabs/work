@@ -1,4 +1,4 @@
-import { appServer, model, workflow, z } from "@grasp-os/sdk/workflow";
+import { appServer, workflow, z } from "@grasp-os/sdk/workflow";
 
 import type { App } from "../app/server.ts";
 
@@ -32,7 +32,8 @@ const sourceSchema = z.object({
 });
 
 // What the model may answer must fit what it may write in one answer.
-// The default model, Llama 3.3, has a window of 24,000 tokens, of which
+// The model an admin binds `extractor` to, the deployment's first one,
+// Llama 3.3, say, has a window of 24,000 tokens, of which
 // the gateway gives the answer a quarter: 6,000 tokens (core's models.ts).
 // The draft takes 100 statements with quotes of 1,000 characters, far
 // more than that: an answer cut off halfway, which isn't JSON, and a run
@@ -83,16 +84,9 @@ export default workflow(
   {
     // Notes, or a stakeholder's chat by its ID.
     input: z.union([notesSchema, z.object({ chat: z.string().min(1) })]),
-    params: {
-      model: model({
-        label: "Model that reads the notes",
-        // The first model a new deployment allows (`defaultGatewayModels`
-        // in @grasp-os/shared), so a run works before anyone picks one.
-        default: "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-      }),
-    },
+    params: {},
   },
-  async (step, { input, params, env }) => {
+  async (step, { input, env }) => {
     const guest = "chat" in input;
     // A chat is read in an `if`, not one side of a `?:`, so the run's
     // outline can show the step.
@@ -119,7 +113,9 @@ export default workflow(
     // wrote can pass for a question.
     const { statements } = await step.llm("extract", {
       description: "Take each claim out of the notes, tagged, with a quote",
-      model: params.model,
+      // The App's model resource (app.ts): the model an admin bound it to,
+      // under the binding's caps.
+      binding: "extractor",
       // Written here, not in a constant, so the run's outline shows it.
       instructions: `You take statements out of notes about how a company works: from an interview, a chat or a document. Notes come as text (\`notes\`), or as a chat's lines (\`lines\`), each the guest's (\`guest\`) or a question put to them (\`question\`): take claims from the guest's lines only, reading the questions as context.
 

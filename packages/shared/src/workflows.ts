@@ -1167,7 +1167,7 @@ export interface WorkflowsApi {
  */
 export interface WorkflowParam {
   name: string;
-  /** `money`, `number`, `text`, `person`, `schedule`, `model` or `template`. */
+  /** `money`, `number`, `text`, `person`, `schedule` or `template`. */
   kind: string;
   label: string;
   /**
