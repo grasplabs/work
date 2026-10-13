@@ -25,6 +25,17 @@ import {
   runLineages,
   workflowRuns,
 } from "../db/core/schema.ts";
+import {
+  dequeued,
+  queuedRefusal,
+  queuePlaceOf,
+  queuePruned,
+  roomFor,
+  sharesOf,
+  sharesRead,
+  standingOf,
+} from "./admission.ts";
+import type { AdmissionScope } from "./admission.ts";
 
 // A run lineage's quotas: how deep its runs nest, how many runs it starts,
 // how long its steps' attempts run in all and how old it may grow, each
@@ -444,6 +455,12 @@ export const admitChild = async (
 export interface QuotaAttempt {
   /** Its step's idempotency key in the engine. */
   key: string;
+  /**
+   * Its step's name, as the run's code named it: its place in the
+   * client's queue (admission.ts) is by it, the same for every attempt and
+   * every round the step waits.
+   */
+  step: string;
   /** Its number, from 1, as the engine counts the step's attempts. */
   number: number;
   /**
@@ -454,6 +471,14 @@ export interface QuotaAttempt {
   ordinal?: number;
   /** The generation of the activation that claimed it. */
   generation: number;
+  /**
+   * The rounds its step has waited for load before it (host.ts): how
+   * long it waits this round, should it be refused (admission.ts,
+   * `askAgainSeconds`).
+   */
+  waited?: number;
+  /** When its step first waited for load, if it has (host.ts). */
+  waitingSince?: number;
   /** When the engine gives up on it (ms since the epoch). */
   deadline: number;
 }
@@ -483,7 +508,7 @@ const minRetryAfterSeconds = 1;
  * (an admission settles it then): at least {@link minRetryAfterSeconds}.
  * What it holds is no sooner given back, since a hold goes only as it
  * settles; one may settle earlier, which the host finds by asking again
- * every few seconds at most (host.ts, `maxBusyWaitSeconds`).
+ * every minute at most (admission.ts, `askAgainSeconds`).
  */
 const busyFor = async (
   db: DrizzleD1Database,
@@ -736,11 +761,16 @@ const hostCallsOf = (
     },
   };
 };
+/** Whose run an attempt is: its lineage, who it acts for and its App. */
+export interface AttemptOwner extends AdmissionScope {
+  run: string;
+  root: string;
+}
 
 /** `admitAttempt` under `policy`; `retried` once read again (`policyStill`). */
 const admitAttemptOnce = async (
   env: Pick<Env, "DB" | "QUOTA_LIMITS">,
-  { run, root }: { run: string; root: string },
+  owner: AttemptOwner,
   attempt: QuotaAttempt,
   policy: QuotaPolicy,
   retried: boolean
@@ -767,7 +797,11 @@ const admitAttemptOnce = async (
   if (attempt.deadline <= now) {
     throw executionErrors.create("execution.stale_attempt");
   }
+  const { run, root } = owner;
   const db = drizzle(env.DB);
+  const shares = sharesOf(policy);
+  const place = await queuePlaceOf(run, attempt.step);
+  const standing = await standingOf(db, owner, place, now);
   const reserved = Math.min(
     attempt.deadline - now,
     platformLimits.workflowAttemptWallMs
@@ -780,12 +814,20 @@ const admitAttemptOnce = async (
     eq(held.attempt, attempt.number),
     eq(held.generation, attempt.generation)
   );
+  const receiptHeld = sql`EXISTS (SELECT 1 FROM ${held} WHERE ${and(identity, isNull(held.settledAt))})`;
   // The lineage's attempts past their deadline, unsettled: they used all
   // they could.
   const lapsed = sql`${held.rootRunId} = ${root} AND ${held.settledAt} IS NULL AND ${held.deadline} <= ${now}`;
   const lapsedSum = (of: SQL) =>
     sql`(SELECT coalesce(sum(${of}), 0) FROM ${held} WHERE ${lapsed})`;
-  await db.batch([
+  // The step's attempts the engine claimed for an activation that is over
+  // (a lower generation, under the same key), unsettled: the engine has
+  // fenced them, so they hold nothing more, and used what they ran.
+  const fenced = sql`${held.runId} = ${run} AND ${held.stepKey} = ${attempt.key} AND ${held.settledAt} IS NULL AND ${held.generation} < ${attempt.generation}`;
+  const fencedUsed = sql`min(${held.deadline}, ${now}) - ${held.admittedAt}`;
+  const fencedSum = (of: SQL) =>
+    sql`(SELECT coalesce(sum(${of}), 0) FROM ${held} WHERE ${fenced})`;
+  const written = await db.batch([
     lineageCreated(db, root),
     db
       .update(runLineages)
@@ -801,13 +843,27 @@ const admitAttemptOnce = async (
         settledAt: new Date(now),
       })
       .where(lapsed),
-    // The receipt, only while the lineage has time left and is young
-    // enough: one statement, so no other admission comes between the
-    // check and the hold.
+    db
+      .update(runLineages)
+      .set({
+        activeUsedMs: sql`${runLineages.activeUsedMs} + ${fencedSum(fencedUsed)}`,
+        activeHeldMs: sql`${runLineages.activeHeldMs} - ${fencedSum(sql`${held.reservedMs}`)}`,
+      })
+      .where(eq(runLineages.rootRunId, root)),
+    db
+      .update(held)
+      .set({ usedMs: fencedUsed, settledAt: new Date(now) })
+      .where(fenced),
+    ...queuePruned(db, now),
+    // The receipt, which is also the attempt's lease on its shares of the
+    // attempts running at once (admission.ts), only while the lineage has
+    // time left and is young enough, and every share has room: one
+    // statement, so no other admission comes between the check and the
+    // hold.
     db
       .insert(held)
       .select(
-        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0 FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.hostCalls} < ${policy.limits.lineageHostCalls} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)}`
+        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.hostCalls} < ${policy.limits.lineageHostCalls} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(owner, place, standing, now, shares)}`
       )
       .onConflictDoNothing(),
     // Held on the lineage only if that statement took the receipt.
@@ -818,7 +874,13 @@ const admitAttemptOnce = async (
         policyGeneration: policy.generation,
       })
       .where(and(eq(runLineages.rootRunId, root), sql`changes() > 0`)),
+    // Admitted, it waits in the queue no more.
+    ...dequeued(db, place, receiptHeld),
+    // Refused, why: the shares as that statement found them, in the same
+    // transaction; nothing counted once it is admitted.
+    sharesRead(db, owner, place, standing, now, shares, receiptHeld),
   ]);
+  const sharesFound = written.at(-1);
   // Read once the batch is in: a receipt still holding was admitted, by
   // this call or by an earlier one of the attempt. One that has settled
   // (the attempt returned, or its allowance passed and an admission
@@ -833,6 +895,7 @@ const admitAttemptOnce = async (
         createdAt: runLineages.createdAt,
         used: runLineages.activeUsedMs,
         hostCalls: runLineages.hostCalls,
+        held: runLineages.activeHeldMs,
       })
       .from(runLineages)
       .where(eq(runLineages.rootRunId, root)),
@@ -860,7 +923,7 @@ const admitAttemptOnce = async (
   if (!retried && !(await policyStill(db, policy))) {
     return await admitAttemptOnce(
       env,
-      { run, root },
+      owner,
       attempt,
       await quotaPolicy(env),
       true
@@ -881,15 +944,28 @@ const admitAttemptOnce = async (
   if (found.used >= policy.limits.workflowActiveMs) {
     throw limitReached("activeTime", policy);
   }
-  throw workflowErrors.create("workflow.lineage_busy", {
-    retryAfterSeconds: await busyFor(db, root, now),
+  if (found.used + found.held >= policy.limits.workflowActiveMs) {
+    throw workflowErrors.create("workflow.lineage_busy", {
+      retryAfterSeconds: await busyFor(db, root, now),
+      maxWaitMs: policy.limits.workflowQueuedStepMs,
+    });
+  }
+  // The lineage had room: the client's shares hadn't, as the batch that
+  // refused it read them.
+  throw await queuedRefusal(db, owner, place, now, shares, sharesFound, {
+    waited: attempt.waited ?? 0,
+    since: attempt.waitingSince ?? now,
+    maxWaitMs: policy.limits.workflowQueuedStepMs,
   });
 };
 
 /**
  * Admits `attempt` of a step of `run`, of the lineage of `root`: within
  * the attempts a step may have, while the lineage is young enough and its
- * attempts haven't used, or don't hold, all of its active time. Admitted,
+ * attempts haven't used, or don't hold, all of its active time, and while
+ * the client's attempts running at once leave it a share, in all, for the
+ * person the run acts for and of its App, after those queued before it
+ * (admission.ts). Admitted,
  * it holds its allowance (its deadline less now, at most a minute) until
  * it settles;
  * the same attempt admitted again holds once, until it settles. Throws,
@@ -897,11 +973,13 @@ const admitAttemptOnce = async (
  * deadline or already settled, `workflow.too_many_attempts`,
  * `workflow.lineage_limit` (active time or age), or
  * `workflow.lineage_busy` with the seconds after which an attempt under
- * way will have given back its hold.
+ * way will have given back its hold, or `workflow.queued`, having queued
+ * it, with the share it waits for and the seconds after which it asks
+ * again at the latest.
  */
 export const admitAttempt = async (
   env: Pick<Env, "DB" | "QUOTA_LIMITS">,
-  lineage: { run: string; root: string },
+  owner: AttemptOwner,
   attempt: QuotaAttempt
 ): Promise<AttemptAdmission> =>
-  await admitAttemptOnce(env, lineage, attempt, await quotaPolicy(env), false);
+  await admitAttemptOnce(env, owner, attempt, await quotaPolicy(env), false);

@@ -70,6 +70,28 @@ import type { RunRow, Stopped } from "./runs.ts";
 // values it started with.
 
 /**
+ * Whose person share of the attempts running at once a run's attempts
+ * take (admission.ts): the person who started it; for a run nobody
+ * started, its lineage root's (a run started under another, by mail or a
+ * connector event its parent's step caused, keeps its parent's), or, for a
+ * root nobody started (a trigger, mail, a connector event), its App's
+ * triggers', `trigger:<app>`, a person share of their own. It is not who
+ * the run acts for: those runs act for the App's owner, but outsiders who
+ * can send mail or events never take the owner's own share.
+ */
+const admissionSubjectOf = async (env: Env, row: RunRow): Promise<string> => {
+  if (row.startedBy !== null) {
+    return row.startedBy;
+  }
+  const root =
+    row.rootRunId === null
+      ? undefined
+      : await findRun(env, runIdSchema.parse(row.rootRunId));
+  const origin = root ?? row;
+  return origin.startedBy ?? `trigger:${origin.appId}`;
+};
+
+/**
  * Who a run acts for now: its person, or its App's owner; and the App
  * version whose code it runs, for the audit log.
  */
@@ -364,11 +386,17 @@ const runWorkflow = async (
         await callRunFunction(env, caller, reference, input, idempotencyKey),
       modelBinding: async (alias) =>
         await stepModelBinding(env, run.app, run.version, alias),
-      // Its lineage from its row, never from its input.
+      // Its lineage, its person and its App from its row and its root's,
+      // never from its input: whose shares its attempts take.
       admitAttempt: async (attempt) =>
         await admitAttempt(
           env,
-          { run: runId, root: row.rootRunId ?? runId },
+          {
+            run: runId,
+            root: row.rootRunId ?? runId,
+            subject: await admissionSubjectOf(env, row),
+            resource: run.app,
+          },
           attempt
         ),
     });

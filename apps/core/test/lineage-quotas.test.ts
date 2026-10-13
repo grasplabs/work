@@ -148,9 +148,18 @@ const hanging = (name: string, retries: "most" | "undeclared" = "most") =>
 /** A first attempt at the step `key`, holding `ms` from now: a minute unless said. */
 const attemptOf = (key: string, ms = 60_000) => ({
   key,
+  step: key,
   number: 1,
   generation: 1,
   deadline: Date.now() + ms,
+});
+
+/** The owner of an attempt of root run `run`, of `app`, acting for `userId`. */
+const ownerOf = (run: string, app: string, userId: string) => ({
+  run,
+  root: run,
+  subject: userId,
+  resource: app,
 });
 
 /** How a refusal that says when to try again, `promise`'s, is coded. */
@@ -711,7 +720,7 @@ ${working("c", 10)}
     const app = await noopApp(builder);
     const root = await builder.api.workflows.start(app, "noop");
     await finished(root.id);
-    const lineage = { run: root.id, root: root.id };
+    const lineage = ownerOf(root.id, app, builder.userId);
     // Each holds a minute: two fit within 150 seconds, a third is admitted
     // on the 30 seconds left, and the rest find it held.
 
@@ -814,7 +823,7 @@ ${working("c", 10)}
     const app = await noopApp(builder);
     const root = await builder.api.workflows.start(app, "noop");
     await finished(root.id);
-    const lineage = { run: root.id, root: root.id };
+    const lineage = ownerOf(root.id, app, builder.userId);
 
     const wait = await withQuotas({ workflowActiveMs: 50_000 }, async () => {
       // Its deadline two minutes on: it holds a minute (an attempt's
@@ -844,7 +853,7 @@ ${working("c", 10)}
     const app = await noopApp(builder);
     const root = await builder.api.workflows.start(app, "noop");
     await finished(root.id);
-    const lineage = { run: root.id, root: root.id };
+    const lineage = ownerOf(root.id, app, builder.userId);
 
     const late = await outcome(
       admitAttempt(env, lineage, { ...attemptOf("late"), deadline: Date.now() })
@@ -1022,7 +1031,7 @@ ${working("c", 10)}
       attempt: await outcome(
         admitAttempt(
           racing({ workflowAttemptsPerStep: 1 }),
-          { run: root.id, root: root.id },
+          ownerOf(root.id, app, builder.userId),
           { ...attemptOf("raced"), number: 2 }
         )
       ),

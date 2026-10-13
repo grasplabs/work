@@ -1170,6 +1170,13 @@ export const runLineageAttempts = sqliteTable(
      * once it settled, those it made; all it reserved if it never did.
      */
     hostCalls: integer("host_calls").notNull().default(0),
+    /**
+     * Who the attempt's run acts for (a user ID) and its App: whose shares
+     * of the attempts running at once it takes while it holds
+     * (src/workflows/admission.ts).
+     */
+    subject: text().notNull().default(""),
+    resource: text().notNull().default(""),
   },
   (table) => [
     primaryKey({
@@ -1181,6 +1188,68 @@ export const runLineageAttempts = sqliteTable(
     index("run_lineage_attempts_held_idx")
       .on(table.rootRunId, table.admittedAt)
       .where(sql`settled_at IS NULL`),
+    // The attempts running at once, in all, for a person and of an App:
+    // what fair admission counts (src/workflows/admission.ts), each until
+    // its hold ends, an attempt's wall time at most after its admission.
+    index("run_lineage_attempts_running_idx")
+      .on(table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+    index("run_lineage_attempts_subject_idx")
+      .on(table.subject, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+    index("run_lineage_attempts_resource_idx")
+      .on(table.resource, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+  ]
+);
+
+/**
+ * The client's queue of workflow attempts waiting for a share of the
+ * attempts running at once (src/workflows/admission.ts): one entry per
+ * step of a run refused for want of one, by the SHA-256 of the step's
+ * name (a keyed step's name holds the run's data), with who the run acts
+ * for, its App, its turn (one past the latest turn of the places of the
+ * same person and App waiting as it joined), when it joined and when it last asked. Places
+ * are served by turn, then by when they joined: round-robin between the
+ * people waiting in an App, first come, first served within each. An
+ * entry that hasn't asked for a while is no longer waiting, and goes; the
+ * step's next attempt joins at the back.
+ */
+export const workflowAdmissionQueue = sqliteTable(
+  "workflow_admission_queue",
+  {
+    runId: text("run_id").notNull(),
+    stepHash: text("step_hash").notNull(),
+    subject: text().notNull(),
+    resource: text().notNull(),
+    enqueuedAt: timestamp("enqueued_at").notNull(),
+    seenAt: timestamp("seen_at").notNull(),
+    /** Which share it waits for: `client`, `person` or `app`. */
+    waitingFor: text("waiting_for", {
+      enum: ["client", "person", "app"],
+    }).notNull(),
+    /** When it asks again at the latest: the run's summary shows it. */
+    retryAt: timestamp("retry_at").notNull(),
+    turn: integer().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.stepHash] }),
+    // The places still asking, in the order they are served.
+    index("workflow_admission_queue_order_idx").on(
+      table.seenAt,
+      table.turn,
+      table.enqueuedAt
+    ),
+    // The places of a person, and of an App: their caps, and their turns.
+    index("workflow_admission_queue_subject_idx").on(
+      table.subject,
+      table.resource,
+      table.seenAt
+    ),
+    index("workflow_admission_queue_resource_idx").on(
+      table.resource,
+      table.seenAt
+    ),
   ]
 );
 
