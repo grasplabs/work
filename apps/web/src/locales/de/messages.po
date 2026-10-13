@@ -796,6 +796,10 @@ msgstr "Ein Admin hat die Datenänderung verworfen, die diese Version braucht, d
 msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 msgstr "Ein Admin sieht auf der Seite der Engine den Datensatz, der sie aufhält, und kann die Änderung verwerfen."
 
+#: src/engines/store-change-errors.ts
+msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
+msgstr "Ein Admin kann auf der Seite der Engine sehen, was schiefging, und die Änderung verwerfen."
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "Ein Admin ändert sie, unter Mitglieder und Rollen."
@@ -4683,6 +4687,14 @@ msgstr "Der Link funktioniert bis {until}."
 msgid "The list is full: remove a line to add another."
 msgstr "Die Liste ist voll: Entfernen Sie eine Zeile, um eine weitere hinzuzufügen."
 
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
+msgstr "Die Migration {migration} der Tabelle {table} ist als Ganzes fehlgeschlagen: Ihr Code ist fehlgeschlagen, nicht ein Datensatz."
+
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed on the record {record}."
+msgstr "Die Migration {migration} der Tabelle {table} ist beim Datensatz {record} fehlgeschlagen."
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
@@ -4937,6 +4949,10 @@ msgstr "Dieser Schritt ist fehlgeschlagen."
 #: src/engines/store-change-errors.ts
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "Diesen Speicher gibt es nicht mehr, daher gibt es nichts zu verwerfen."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+msgstr "Diese Version ändert die Daten der Engine mit einer Migration, und diese kann nicht abgeschlossen werden: Ihre Umwandlung ist fehlgeschlagen oder hat etwas geliefert, das die Tabelle nicht annimmt."
 
 #: src/engines/store-change-errors.ts
 msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."

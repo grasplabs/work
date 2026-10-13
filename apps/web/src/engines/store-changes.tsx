@@ -4,6 +4,7 @@ import type {
   AbandonBackfill,
   AbandonedBackfill,
   AppStoreBackfill,
+  MigrationFailure,
   StoreBackfillFailure,
 } from "@grasp-os/shared/stores";
 import {
@@ -45,8 +46,46 @@ import { abandonFailureText } from "./store-change-errors.ts";
 /** Where the engine page shows its stores' changes, for links to them. */
 export const storeChangesAnchor = "store-changes";
 
+/**
+ * What an explicit migration's failure means: its migration, table and
+ * record, and what its transform threw or why its output was refused,
+ * which only admins and the migration's own engine are shown.
+ */
+const MigrationFailureText = ({ failure }: { failure: MigrationFailure }) => {
+  const { migration, table, id, issues } = failure;
+  const record = <span className="font-mono">{id}</span>;
+  return (
+    <>
+      {id === null ? (
+        <Trans>
+          The migration {migration} of the table {table} failed as a whole: its
+          code failed, not a record.
+        </Trans>
+      ) : (
+        <Trans>
+          The migration {migration} of the table {table} failed on the record{" "}
+          {record}.
+        </Trans>
+      )}
+      {issues.length === 0 ? null : (
+        <code className="block font-mono whitespace-pre-wrap">
+          {issues.join("\n")}
+        </code>
+      )}
+    </>
+  );
+};
+
+/** Whether no record is to blame for `failure`: abandoning is all that's left. */
+const nothingToMend = (failure: StoreBackfillFailure): boolean =>
+  failure.reason === "stalled" ||
+  ("migration" in failure && failure.id === null);
+
 /** What a failure means, in a sentence naming the record and field. */
 const FailureText = ({ failure }: { failure: StoreBackfillFailure }) => {
+  if ("migration" in failure) {
+    return <MigrationFailureText failure={failure} />;
+  }
   if (failure.reason === "stalled") {
     return (
       <Trans>
@@ -201,7 +240,7 @@ export const StoreChange = ({
           <FailureText failure={backfill.failure} />
         </p>
         <p>
-          {backfill.failure.reason === "stalled" ? (
+          {nothingToMend(backfill.failure) ? (
             <Trans>
               Until this is resolved, no release that changes this store&apos;s
               tables can be made current, in this engine or any other engine

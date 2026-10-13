@@ -796,6 +796,10 @@ msgstr "An admin abandoned the data change this version needs, so it can never b
 msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 msgstr "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 
+#: src/engines/store-change-errors.ts
+msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
+msgstr "An admin can see what went wrong, and abandon the change, on the engine's page."
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "An admin changes it, in Members and roles."
@@ -4683,6 +4687,14 @@ msgstr "The link works until {until}."
 msgid "The list is full: remove a line to add another."
 msgstr "The list is full: remove a line to add another."
 
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
+msgstr "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
+
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed on the record {record}."
+msgstr "The migration {migration} of the table {table} failed on the record {record}."
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
@@ -4937,6 +4949,10 @@ msgstr "This step failed."
 #: src/engines/store-change-errors.ts
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "This store no longer exists, so there is nothing to abandon."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+msgstr "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
 
 #: src/engines/store-change-errors.ts
 msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."

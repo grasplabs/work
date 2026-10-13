@@ -796,6 +796,10 @@ msgstr "Un admin a abandonné la modification des données dont cette version a 
 msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 msgstr "Un admin peut voir, sur la page du moteur, l’enregistrement qui la bloque, et abandonner la modification."
 
+#: src/engines/store-change-errors.ts
+msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
+msgstr "Un admin peut voir ce qui n'a pas fonctionné et abandonner la modification sur la page du moteur."
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "Un admin le modifie, dans Membres et rôles."
@@ -4683,6 +4687,14 @@ msgstr "Le lien fonctionne jusqu’au {until}."
 msgid "The list is full: remove a line to add another."
 msgstr "La liste est pleine : retirez une ligne pour en ajouter une autre."
 
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
+msgstr "La migration {migration} de la table {table} a échoué dans son ensemble : c'est son code qui a échoué, pas un enregistrement."
+
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed on the record {record}."
+msgstr "La migration {migration} de la table {table} a échoué sur l'enregistrement {record}."
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
@@ -4937,6 +4949,10 @@ msgstr "Cette étape a échoué."
 #: src/engines/store-change-errors.ts
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "Ce magasin n’existe plus : il n’y a donc rien à abandonner."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+msgstr "Cette version modifie les données du moteur avec une migration, qui ne peut pas aboutir : sa transformation a échoué, ou a renvoyé ce que la table n'accepte pas."
 
 #: src/engines/store-change-errors.ts
 msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."

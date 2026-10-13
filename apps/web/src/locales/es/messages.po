@@ -796,6 +796,10 @@ msgstr "Un administrador abandonó el cambio de datos que necesita esta versión
 msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
 msgstr "Un administrador puede ver en la página del motor el registro que lo impide y abandonar el cambio."
 
+#: src/engines/store-change-errors.ts
+msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
+msgstr "Un admin puede ver qué falló y abandonar el cambio en la página del motor."
+
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
 msgstr "Lo cambia un administrador, en Miembros y roles."
@@ -4683,6 +4687,14 @@ msgstr "El enlace funciona hasta el {until}."
 msgid "The list is full: remove a line to add another."
 msgstr "La lista está llena: quita una línea para añadir otra."
 
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
+msgstr "La migración {migration} de la tabla {table} falló por completo: falló su código, no un registro."
+
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed on the record {record}."
+msgstr "La migración {migration} de la tabla {table} falló en el registro {record}."
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
@@ -4937,6 +4949,10 @@ msgstr "Este paso falló."
 #: src/engines/store-change-errors.ts
 msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "Este almacén ya no existe, así que no hay nada que abandonar."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+msgstr "Esta versión cambia los datos del motor con una migración, y no puede terminar: su transformación falló o devolvió algo que la tabla no acepta."
 
 #: src/engines/store-change-errors.ts
 msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."

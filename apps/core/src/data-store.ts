@@ -86,7 +86,12 @@ export class DataStore extends DurableObject<Env> {
     consumer?: SchemaConsumer,
     declared?: StoreMigration[]
   ): Promise<DefinedTables> {
-    return await this.#live().defineTables(storeId, manifest, consumer, declared);
+    return await this.#live().defineTables(
+      storeId,
+      manifest,
+      consumer,
+      declared
+    );
   }
 
   /**
@@ -136,7 +141,7 @@ export class DataStore extends DurableObject<Env> {
     schemaHash: string,
     consumer: SchemaConsumer
   ): SchemaStatus {
-    return this.#host.activateReady(storeId, schemaHash, consumer);
+    return this.#live().activateReady(storeId, schemaHash, consumer);
   }
 
   /** `StoreHost.schemaStatus`. */
