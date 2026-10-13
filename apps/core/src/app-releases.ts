@@ -59,6 +59,7 @@ import {
   sdkStoreOwners,
 } from "./db/core/schema.ts";
 import { inList, isUniqueViolation, notNullFailed } from "./db/d1.ts";
+import { requireMigrationsTarget } from "./migration-transform.ts";
 import { finishDeletion, markArtifact } from "./release-retention.ts";
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
@@ -905,6 +906,7 @@ export const sealRelease = async (
   }
 
   const schema = await schemaHash(manifest.schema);
+  requireMigrationsTarget(manifest.migrations, schema);
   const bound = await boundStore(env, request, manifest, schema);
   const store = bound?.binding ?? null;
 

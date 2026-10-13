@@ -21,12 +21,14 @@ export const releaseFormatVersion = 1;
  * The version of the protocol between the host and an App's isolate. The
  * host's half (its run module, app-functions.ts) imports from a release's
  * sealed SDK only what this version pins: version 1 pins the runner's
- * `runFunction` (and `manifestOfApp`, for inspection). Anything else the
- * host's half needs in the isolate is a host module it loads itself. A new
- * import from the sealed SDK requires a new version, since releases sealed
- * before it don't have it.
+ * `runFunction` (and `manifestOfApp`, for inspection); version 2 adds
+ * `runMigration`, which runs an App's explicit migrations
+ * (apps/core/src/migration-transform.ts), and the App manifest's
+ * `migrations`. Anything else the host's half needs in the isolate is a
+ * host module it loads itself. A new import from the sealed SDK requires
+ * a new version, since releases sealed before it don't have it.
  */
-export const sdkProtocolVersion = 1;
+export const sdkProtocolVersion = 2;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
@@ -127,4 +129,6 @@ export const versionErrors = defineErrorFamily({
     "This version's App tests fail, so it can't be made current.",
   "version.tests_unavailable":
     "This version has App tests, which run only where a sandbox bounds them: on this deployment they need the sandbox host, which doesn't run them yet. Until it does, a version with App tests can't be made current here.",
+  "version.invalid_migration":
+    "One of this version's migrations doesn't transform records to this version's schema: set its toSchema to the schema hash these details name.",
 });

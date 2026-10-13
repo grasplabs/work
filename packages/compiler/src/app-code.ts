@@ -10,6 +10,11 @@
  *   schema and values, the SDK's root module and the generated `#grasp`
  *   modules: no platform module, no Workers runtime, nothing with
  *   authority of its own;
+ * - its migrations (`migrations/*.ts`, spec 17.2): the schema, values and
+ *   the SDK's root module, never server code or the generated modules, so
+ *   a transform is built from nothing that reaches a store or a function.
+ *   The registration imports them to register them; the host runs them
+ *   in an isolate with no env and no network whatever they import;
  * - what the host generated for it (`.grasp/**`), which no App's version
  *   holds: the server constructors import `@grasp-os/sdk/server` and the
  *   schema; the references import nothing at run time;
@@ -40,7 +45,12 @@ export const serverSdkImports = [
 ] as const;
 
 /** The kinds of an App's server code, and its tests. */
-export type AppCodeKind = "schema" | "server" | "generated" | "test";
+export type AppCodeKind =
+  | "schema"
+  | "server"
+  | "migration"
+  | "generated"
+  | "test";
 
 /** Where the host's generated modules are. */
 export const generatedFolder = ".grasp/";
@@ -54,6 +64,7 @@ export const generatedModules = {
 
 const schemaFiles: ReadonlySet<string> = new Set(["schema.ts", "values.ts"]);
 const operationFile = /^operations\/(?:[\w-]+\/)*[\w.-]+\.ts$/u;
+const migrationFile = /^migrations\/[\w.-]+\.ts$/u;
 const generatedFile = /^\.grasp\/[\w.-]+\.ts$/u;
 
 /** Where an App's tests are: suites, their helpers and their fixtures. */
@@ -124,6 +135,9 @@ export const appCodeKind = (path: string): AppCodeKind | undefined => {
   if (path === "app.ts" || operationFile.test(path)) {
     return "server";
   }
+  if (migrationFile.test(path)) {
+    return "migration";
+  }
   if (generatedFile.test(path)) {
     return "generated";
   }
@@ -166,7 +180,8 @@ export const appTestFiles = (
 /** The kinds of file each kind's relative imports may reach. */
 const reachable: Readonly<Record<AppCodeKind, ReadonlySet<AppCodeKind>>> = {
   schema: new Set(["schema"]),
-  server: new Set(["server", "schema"]),
+  server: new Set(["server", "schema", "migration"]),
+  migration: new Set(["schema"]),
   generated: new Set(["schema"]),
   test: new Set(["test", "schema"]),
 };
@@ -182,6 +197,7 @@ const platformImports: Readonly<
       ([alias, path]) => [alias, appModuleName(path)] as const
     ),
   ]),
+  migration: new Map([["@grasp-os/sdk", kitModuleName("@grasp-os/sdk")]]),
   generated: new Map([
     ["@grasp-os/sdk/server", kitModuleName("@grasp-os/sdk/server")],
   ]),
@@ -197,7 +213,9 @@ const described: Readonly<Record<AppCodeKind, string>> = {
   schema:
     "The schema (schema.ts, values.ts) imports only @grasp-os/sdk and each other",
   server:
-    "Server code (app.ts, operations/) imports its own files, schema.ts, values.ts, @grasp-os/sdk, #grasp, #grasp/server and #grasp/server-references",
+    "Server code (app.ts, operations/) imports its own files, schema.ts, values.ts, migrations/, @grasp-os/sdk, #grasp, #grasp/server and #grasp/server-references",
+  migration:
+    "A migration (migrations/) imports only schema.ts, values.ts and @grasp-os/sdk",
   generated: "Generated code imports only @grasp-os/sdk/server and schema.ts",
   test: "Tests (tests/) import each other, schema.ts, values.ts, @grasp-os/sdk, @grasp-os/sdk/testing and #grasp: they reach the App through its references, as its callers do",
 };
@@ -290,6 +308,7 @@ const serverPath = (
   const path = parts.join("/").replace(/\.tsx?$/u, "");
   return ["schema", "values", "app"].includes(path) ||
     path.startsWith("operations/") ||
+    path.startsWith("migrations/") ||
     path.startsWith(".grasp/")
     ? path
     : undefined;
@@ -317,5 +336,5 @@ export const screenImportError = (
   }
   return reached === undefined
     ? undefined
-    : `"${specifier}" is the App's server code, which screens never import: what a screen calls comes from the App's references, never its handlers, schema or server modules.`;
+    : `"${specifier}" is the App's server code, which screens never import: what a screen calls comes from the App's references, never its handlers, schema, migrations or server modules.`;
 };

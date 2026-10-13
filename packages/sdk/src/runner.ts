@@ -3,6 +3,8 @@ import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 import { AppError } from "./app-error.ts";
 import { inspectApp } from "./app.ts";
 import { databaseReader, databaseWriter } from "./database.ts";
+import { migrationHandler } from "./migration.ts";
+import type { MigrationContext } from "./migration.ts";
 import { referenceData } from "./references.ts";
 import { isResource } from "./resources.ts";
 import type { AnyResource } from "./resources.ts";
@@ -208,3 +210,173 @@ export const runFunction = async (
  */
 export const manifestOfApp = (registered: unknown): string =>
   JSON.stringify(inspectApp(registered).manifest);
+
+/** One row a migration transforms: its record's ID and fields. */
+export interface MigrationRow {
+  readonly id: string;
+  readonly fields: unknown;
+}
+
+/** What the host asks of a migration: its name and a batch of rows. */
+export interface MigrationRequest {
+  readonly name: string;
+  readonly rows: readonly MigrationRow[];
+}
+
+/**
+ * What a batch answered: each row's output, in order, or the row whose
+ * handler threw, and what it said.
+ */
+export type MigrationAnswer =
+  | { readonly ok: true; readonly rows: readonly unknown[] }
+  | { readonly ok: false; readonly index: number; readonly message: string };
+
+/** The longest message of a handler's failure a batch answers. */
+const failureMaxLength = 500;
+
+/** A function that refuses, for what a migration can't use. */
+const unavailable = (what: string) => (): never => {
+  throw new Error(
+    `A migration is pure: ${what} isn't available while it transforms rows.`
+  );
+};
+
+/** What a global held before a transform: its own property, if it had one. */
+interface Saved {
+  readonly target: object;
+  readonly key: string;
+  readonly own: PropertyDescriptor | undefined;
+}
+
+/** Shadows `key` of `target` with `value` where it can; what it held before. */
+const shadow = (target: object, key: string, value: unknown): Saved => {
+  const own = Object.getOwnPropertyDescriptor(target, key);
+  try {
+    Object.defineProperty(target, key, {
+      configurable: true,
+      writable: true,
+      value,
+    });
+  } catch {
+    // Not configurable here: left as it is (see `deterministically`).
+  }
+  return { target, key, own };
+};
+
+/** Puts back what `saved` held before it was shadowed. */
+const restore = ({ target, key, own }: Saved): void => {
+  try {
+    if (own === undefined) {
+      Reflect.deleteProperty(target, key);
+    } else {
+      Object.defineProperty(target, key, own);
+    }
+  } catch {
+    // As `shadow` left it.
+  }
+};
+
+/** `Date`, except that it never tells the time. */
+const clocklessDate = (): DateConstructor =>
+  new Proxy(Date, {
+    apply: unavailable("the clock"),
+    construct: (target, args: unknown[]) => {
+      if (args.length === 0) {
+        return unavailable("the clock")();
+      }
+      // SAFETY: constructing `Date` with arguments makes a `Date`.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      return Reflect.construct(target, args) as Date;
+    },
+    get: (target, key, receiver): unknown => {
+      if (key === "now") {
+        return unavailable("the clock");
+      }
+      const value: unknown = Reflect.get(target, key, receiver);
+      return value;
+    },
+  });
+
+/**
+ * Runs `work` with randomness and the clocks taken away (`Math.random`,
+ * `crypto`'s random values, `Date.now`, `new Date()`, `performance.now`),
+ * restoring them after, so a transform answers the same for the same row
+ * however often a batch is retried. Not a boundary: App code that kept a
+ * reference to one from before still has it, and the isolate has no
+ * capability for it to misuse either way. The host's receipt, not this,
+ * keeps a retried batch from writing twice.
+ */
+const deterministically = <Result>(work: () => Result): Result => {
+  const saved = [
+    shadow(Math, "random", unavailable("randomness")),
+    shadow(crypto, "getRandomValues", unavailable("randomness")),
+    shadow(crypto, "randomUUID", unavailable("randomness")),
+    shadow(performance, "now", unavailable("the clock")),
+    shadow(globalThis, "Date", clocklessDate()),
+  ];
+  try {
+    return work();
+  } finally {
+    for (const one of saved.toReversed()) {
+      restore(one);
+    }
+  }
+};
+
+/** Whether `value` looks like a promise: anything with a `then` function. */
+const isThenable = (value: unknown): boolean =>
+  (typeof value === "object" || typeof value === "function") &&
+  value !== null &&
+  typeof Reflect.get(value, "then") === "function";
+
+/**
+ * Runs migration `request.name` of `registered` (an App `app` made) on
+ * `request.rows`, one at a time, in order, deterministically: each row's
+ * output, or the first row whose handler threw or answered a promise. The
+ * host validated each row before and validates each output after, so the
+ * runner validates neither.
+ */
+export const runMigration = (
+  registered: unknown,
+  request: MigrationRequest
+): MigrationAnswer => {
+  const declared = inspectApp(registered).migrations.get(request.name);
+  if (declared === undefined) {
+    throw Object.assign(new Error("There is no such migration."), {
+      code: "migration.not_found",
+    });
+  }
+  const handler = migrationHandler(declared);
+  const { name, table, fromSchema, toSchema } = declared["~migration"];
+  return deterministically((): MigrationAnswer => {
+    const rows: unknown[] = [];
+    for (const [index, row] of request.rows.entries()) {
+      const ctx: MigrationContext = Object.freeze({
+        migration: name,
+        table,
+        fromSchema,
+        toSchema,
+        id: row.id,
+      });
+      try {
+        const output = handler(ctx, row.fields);
+        if (isThenable(output)) {
+          throw new Error(
+            "A migration's handler answers its row, not a promise: it has nothing to wait for."
+          );
+        }
+        rows.push(output);
+      } catch (error) {
+        return {
+          ok: false,
+          index,
+          message: (error instanceof Error
+            ? error.message
+            : "The handler threw"
+          ).slice(0, failureMaxLength),
+        };
+      }
+    }
+    return { ok: true, rows };
+  });
+};
