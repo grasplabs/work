@@ -1139,6 +1139,13 @@ export const setCurrentVersion = async (
   const sealedLayout = isAppLayout(files);
   if (sealedLayout) {
     await requireRunnableRelease(env, appId, number);
+    // Its migrations passed on their fixtures as it was sealed, even where
+    // the store had nothing to transform; asked before its store, whose
+    // backfill such a migration fails, so the refusal names the fixture.
+    // Imported here for the same reason as the tests' runner below.
+    const { requireMigrationEvidence } =
+      await import("./migration-evidence.ts");
+    await requireMigrationEvidence(env, appId, number);
     // Its store's contract holds its schema, or it waits; a ready explicit
     // migration passes here and takes over below, once every gate passed.
     await requireStoreSchemaActive(env, appId, number);

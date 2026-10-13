@@ -7,7 +7,9 @@ import { z } from "zod";
 
 import { loadRelease } from "./app-releases.ts";
 import { inJurisdiction } from "./durable-objects.ts";
+import { failedEvidence } from "./migration-evidence.ts";
 import { transformBatch } from "./migration-transform.ts";
+import type { TransformOutcome } from "./migration-transform.ts";
 import { SandboxUnavailableError } from "./sandboxed.ts";
 import { backfillRunId, batchesPerRun } from "./store-backfill.ts";
 import { backfillBatchSchema } from "./store-host.ts";
@@ -98,14 +100,39 @@ const runBatch = async (
     return answered;
   }
   const { consumer, migration, table, rows, phase, through } = answered;
-  let transformed: Awaited<ReturnType<typeof transformBatch>>;
+  let transformed:
+    | TransformOutcome
+    | {
+        ok: false;
+        failure: { id: null; reason: "fixtures_failed"; issues: string[] };
+      };
   try {
     const release = await loadRelease(
       env,
       appIdSchema.parse(consumer.resourceId),
       consumer.resourceVersion
     );
-    transformed = await transformBatch(env, release, migration, rows);
+    const failed = failedEvidence(release, migration);
+    // A migration that failed on its fixtures never sees a record: the
+    // batch fails as a whole, naming none.
+    transformed =
+      failed === undefined
+        ? await transformBatch(env, release, migration, rows)
+        : {
+            ok: false,
+            failure: {
+              id: null,
+              reason: "fixtures_failed",
+              issues: [
+                `It failed on its fixture ${
+                  failed.failure?.fixture === null ||
+                  failed.failure?.fixture === undefined
+                    ? ""
+                    : String(failed.failure.fixture + 1)
+                } as its release was sealed (${failed.failure?.reason ?? ""})`,
+              ],
+            },
+          };
   } catch (error) {
     if (error instanceof SandboxUnavailableError) {
       // The sandbox host out of reach for a moment: the step's retry.

@@ -667,6 +667,7 @@ const migrationFailureSchema = z.strictObject({
     "invalid_answer",
     "outside_contract",
     "reference_changed",
+    "fixtures_failed",
   ]),
   issues: z.array(z.string().max(500)).max(20),
 });

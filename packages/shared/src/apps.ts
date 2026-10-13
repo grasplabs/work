@@ -201,10 +201,19 @@ export interface VersionReview {
    * wherever they are declared: each reads and rewrites every record of
    * its table, whoever owns it, once a release sealed on it runs on the
    * App's store. Null when its manifest can't be read (its code doesn't
-   * build or inspect): it may then rewrite any table.
+   * build or inspect): it may then rewrite any table. Each says how many
+   * fixtures it is run on as the version is sealed, and whether they all
+   * passed (`fixturesPassed`), null until the version is sealed: one that
+   * failed runs on no records, and the version can't be made current.
    */
   migrations:
-    | { name: string; table: string; change: "added" | "modified" }[]
+    | {
+        name: string;
+        table: string;
+        change: "added" | "modified";
+        fixtures: number;
+        fixturesPassed: boolean | null;
+      }[]
     | null;
   /**
    * Its workflows that differ from the current version's: their own files,

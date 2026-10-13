@@ -1,3 +1,4 @@
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import { failureText } from "@grasp-os/shared/errors";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { dataErrors, migrationErrors } from "@grasp-os/shared/stores";
@@ -103,6 +104,49 @@ const compatibleOf = (error: unknown): number[] => {
     : [];
 };
 
+/** Why a migration's fixture failed, by core's reason, as the page says it. */
+const fixtureReasons: Readonly<Record<string, MessageDescriptor>> = {
+  invalid_input: msg`the fixture's row doesn't fit what the migration takes`,
+  threw: msg`the migration threw an error`,
+  invalid_output: msg`its output doesn't fit the table`,
+  too_large: msg`its output is larger than a record may be`,
+  invalid_answer: msg`it answered something that isn't its records`,
+  unexpected_output: msg`its output isn't what the fixture expects`,
+};
+
+/** A string of `details` under `key`, when it is one. */
+const detailOf = (error: unknown, key: string): unknown => {
+  if (typeof error !== "object" || error === null || !("details" in error)) {
+    return undefined;
+  }
+  const { details } = error;
+  return typeof details === "object" && details !== null && key in details
+    ? Reflect.get(details, key)
+    : undefined;
+};
+
+/** What the page says of a migration that failed on its fixtures. */
+const fixturesFailedText = (error: unknown): string => {
+  const named = detailOf(error, "migration");
+  const migration = typeof named === "string" ? named : "";
+  const fixture = detailOf(error, "fixture");
+  const reasonCode = detailOf(error, "reason");
+  const known =
+    typeof reasonCode === "string" && Object.hasOwn(fixtureReasons, reasonCode)
+      ? fixtureReasons[reasonCode]
+      : undefined;
+  const reason =
+    known === undefined ? i18n._(msg`it didn't pass`) : i18n._(known);
+  if (typeof fixture === "number") {
+    return i18n._(
+      msg`The migration ${migration} failed on its fixture ${fixture} when this version was sealed: ${reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again.`
+    );
+  }
+  return i18n._(
+    msg`The migration ${migration} failed on its fixtures when this version was sealed: ${reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again.`
+  );
+};
+
 /** What the page says of a rollback a data migration rules out. */
 const rollbackIncompatibleText = (error: unknown): string => {
   const compatible = compatibleOf(error);
@@ -124,7 +168,28 @@ const rollbackIncompatibleText = (error: unknown): string => {
  */
 export const makeCurrentFailure = (
   error: unknown
-): { text: string; link: string | undefined } => {
+): {
+  text: string;
+  link: string | undefined;
+  /**
+   * What core said went wrong, in its own words, when that helps mend it:
+   * a fixture's thrown message, or what it answered against what was
+   * expected. Fixtures are the App's own data, never real records.
+   */
+  issues?: readonly string[];
+} => {
+  if (versionErrors.codeOf(error) === "version.migration_fixtures_failed") {
+    const issues = detailOf(error, "issues");
+    return {
+      text: fixturesFailedText(error),
+      link: undefined,
+      issues: Array.isArray(issues)
+        ? issues
+            .filter((issue): issue is string => typeof issue === "string")
+            .slice(0, 20)
+        : [],
+    };
+  }
   const code = migrationErrors.codeOf(error);
   if (code === "migration.backfill_failed") {
     const reason = failedReasonOf(error);
