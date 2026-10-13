@@ -248,6 +248,21 @@ interface Saved {
   readonly own: PropertyDescriptor | undefined;
 }
 
+/** Shadows the accessor `key` of `target` with `get` where it can, as `shadow`. */
+const shadowGetter = (
+  target: object,
+  key: string,
+  get: () => unknown
+): Saved => {
+  const own = Object.getOwnPropertyDescriptor(target, key);
+  try {
+    Object.defineProperty(target, key, { configurable: true, get });
+  } catch {
+    // Not configurable here: left as it is (see `deterministically`).
+  }
+  return { target, key, own };
+};
+
 /** Shadows `key` of `target` with `value` where it can; what it held before. */
 const shadow = (target: object, key: string, value: unknown): Saved => {
   const own = Object.getOwnPropertyDescriptor(target, key);
@@ -316,18 +331,26 @@ const formatToParts: unknown = Reflect.getOwnPropertyDescriptor(
 )?.value;
 
 /**
- * `Intl.DateTimeFormat`'s `format`, refusing to format the current time:
- * formatting a date it is given is pure.
+ * `Intl.DateTimeFormat`'s `format` getter, as the platform's is: it
+ * answers a function bound to its formatter, so a detached
+ * `const format = formatter.format` still works. The function refuses to
+ * format the current time (no date given); formatting a date it is given
+ * is pure.
  */
-const datelessFormat = function datelessFormat(
-  this: unknown,
-  ...args: unknown[]
+const datelessFormatGetter = function datelessFormatGetter(
+  this: unknown
 ): unknown {
-  if (args[0] === undefined || typeof formatGetter !== "function") {
-    return unavailable("the clock")();
-  }
-  const bound: unknown = Reflect.apply(formatGetter, this, []);
-  return typeof bound === "function" ? Reflect.apply(bound, this, args) : "";
+  const bound: unknown =
+    typeof formatGetter === "function"
+      ? Reflect.apply(formatGetter, this, [])
+      : undefined;
+  return (...args: unknown[]): unknown => {
+    if (args[0] === undefined || typeof bound !== "function") {
+      return unavailable("the clock")();
+    }
+    const formatted: unknown = Reflect.apply(bound, undefined, args);
+    return formatted;
+  };
 };
 
 /** `Intl.DateTimeFormat`'s `formatToParts`, as `datelessFormat`. */
@@ -370,7 +393,7 @@ const deterministically = <Result>(work: () => Result): Result => {
     shadow(performance, "now", unavailable("the clock")),
     shadow(globalThis, "Date", clockless),
     shadow(datePrototype, "constructor", clockless),
-    shadow(dateFormatPrototype, "format", datelessFormat),
+    shadowGetter(dateFormatPrototype, "format", datelessFormatGetter),
     shadow(dateFormatPrototype, "formatToParts", datelessFormatToParts),
   ];
   try {

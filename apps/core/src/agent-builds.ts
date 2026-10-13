@@ -1318,8 +1318,8 @@ build: {
       /** How the server code (app/**.ts) changed: it acts for whoever uses the App. */
       server: "added" | "modified" | "removed" | null;
       serverFiles: { path: string; change: "added" | "modified" | "removed" }[];
-      /** Its migrations (migrations/*.ts): each reads and rewrites every record of its table, whoever owns it. */
-      migrations: { path: string; change: "added" | "modified" | "removed" }[];
+      /** Its migrations new or changed: each reads and rewrites every record of its table, whoever owns it; null when they can't be read. */
+      migrations: { name: string; table: string; change: "added" | "modified" }[] | null;
       workflows: {
         id: string;
         change: "added" | "modified" | "removed";

@@ -730,6 +730,45 @@ const operationManifestHash = async (app: AppManifest): Promise<string> =>
   await sha256Hex(canonicalText(app.operations));
 
 /**
+ * The App manifest of `version` of `app`, as the host reads it: its
+ * sealed release's when it has one, otherwise its code built and
+ * inspected in the sandbox as a seal's first inspection does (symbolic
+ * references, nothing stored). Undefined for a version not of spec 8's
+ * layout. Throws as a seal would for code that doesn't build or inspect.
+ */
+export const versionManifest = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  files: Readonly<Record<string, string>>
+): Promise<AppManifest | undefined> => {
+  if (!isAppLayout(files)) {
+    return undefined;
+  }
+  const sealed = await drizzle(env.DB)
+    .select({ version: sdkReleaseManifests.version })
+    .from(sdkReleaseManifests)
+    .where(
+      and(
+        eq(sdkReleaseManifests.appId, app),
+        eq(sdkReleaseManifests.version, version)
+      )
+    )
+    .get();
+  if (sealed !== undefined) {
+    const release = await loadRelease(env, app, version);
+    return release.app;
+  }
+  const sdk = await serverSdkModules(env.ASSETS);
+  const symbolic = await builtCode(env, {
+    ...files,
+    ...symbolicModules(),
+    [generatedPaths.server]: serverModuleSource,
+  });
+  return readManifest(await inspected(env, symbolic, sdk.modules));
+};
+
+/**
  * The store release `request` binds, with the App's schema (`schema`, its
  * hash) applied to it for this version, and what that did to the store's
  * contract; or null for an App without tables; `version.store_unbound`

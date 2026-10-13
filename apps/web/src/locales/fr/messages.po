@@ -670,8 +670,8 @@ msgid "Added: it acts for whoever uses the engine, with everything the engine ho
 msgstr "Ajouté : il agit pour quiconque utilise le moteur, avec tout ce que détient le moteur"
 
 #: src/chat/builds.tsx
-msgid "Added: it reads and rewrites every record of its table, whoever owns it"
-msgstr "Ajoutée : lit et réécrit chaque enregistrement de sa table, quel qu'en soit le propriétaire"
+msgid "Added: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Ajoutée : lit et réécrit chaque enregistrement de {table}, quel qu'en soit le propriétaire"
 
 #: src/labels.ts
 msgid "Admin"
@@ -1215,8 +1215,8 @@ msgid "Changed: it acts for whoever uses the engine, with everything the engine 
 msgstr "Modifié : il agit pour quiconque utilise le moteur, avec tout ce que détient le moteur"
 
 #: src/chat/builds.tsx
-msgid "Changed: it reads and rewrites every record of its table, whoever owns it"
-msgstr "Modifiée : lit et réécrit chaque enregistrement de sa table, quel qu'en soit le propriétaire"
+msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Modifiée : lit et réécrit chaque enregistrement de {table}, quel qu'en soit le propriétaire"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
@@ -2355,6 +2355,10 @@ msgstr "Son contenu n’a pas pu être lu."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Ses messages sont supprimés définitivement, et chaque modification que son agent retient pour vous est rejetée. Ce que l’agent a fait reste dans le journal d’audit."
+
+#: src/chat/builds.tsx
+msgid "Its migrations can't be read: it may rewrite the records of any table"
+msgstr "Ses migrations sont illisibles : elle peut réécrire les enregistrements de n'importe quelle table"
 
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
@@ -3645,10 +3649,6 @@ msgstr "Workflow supprimé :"
 #: src/chat/builds.tsx
 msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Supprimé : il agissait pour quiconque utilise le moteur, avec tout ce que détient le moteur"
-
-#: src/chat/builds.tsx
-msgid "Removed: it no longer rewrites records"
-msgstr "Supprimée : ne réécrit plus d'enregistrements"
 
 #: src/chat/chat-list.tsx
 msgid "Rename"

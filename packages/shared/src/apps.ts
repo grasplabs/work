@@ -195,11 +195,17 @@ export interface VersionReview {
   server: ReviewChange | null;
   serverFiles: { path: string; change: ReviewChange }[];
   /**
-   * Its explicit migrations (`migrations/*.ts`, spec 17.2) that differ: each
-   * reads and rewrites every record of its table, whoever owns it, once a
-   * release sealed on it runs on the App's store.
+   * Its explicit migrations (spec 17.2) that the current version doesn't
+   * have, or has otherwise (declared differently, or with server code
+   * changed, which its transform may run), read from the App's manifest
+   * wherever they are declared: each reads and rewrites every record of
+   * its table, whoever owns it, once a release sealed on it runs on the
+   * App's store. Null when its manifest can't be read (its code doesn't
+   * build or inspect): it may then rewrite any table.
    */
-  migrations: { path: string; change: ReviewChange }[];
+  migrations:
+    | { name: string; table: string; change: "added" | "modified" }[]
+    | null;
   /**
    * Its workflows that differ from the current version's: their own files,
    * or code outside `screens/` they may import (`shared`), such as the

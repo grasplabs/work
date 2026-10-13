@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { activateVersion } from "../src/app-activation.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles } from "../src/apps.ts";
 import {
@@ -154,6 +155,14 @@ const moreHandlers = {
   "intl-parts": `(ctx, row) => ({ ...row, category: new Intl.DateTimeFormat("en").formatToParts()[0].value })`,
   "late-json": `(ctx, row) => ({ ...row, category: { toJSON: () => String(Math.random()) } })`,
   "formats-given-date": `(ctx, row) => ({ ...row, title: new Intl.DateTimeFormat("en", { timeZone: "UTC" }).format(new Date(0)), category: "general" })`,
+  "formats-detached": `(ctx, row) => {
+    const { format } = new Intl.DateTimeFormat("en", { timeZone: "UTC" });
+    return { ...row, title: format(0), category: "general" };
+  }`,
+  "formats-detached-now": `(ctx, row) => {
+    const { format } = new Intl.DateTimeFormat("en", { timeZone: "UTC" });
+    return { ...row, title: format(), category: "general" };
+  }`,
 } as const;
 
 type Name = keyof typeof handlers | keyof typeof moreHandlers;
@@ -283,15 +292,82 @@ describe("an explicit migration", { timeout: 120_000 }, () => {
     });
   });
 
-  it("is listed in its version's review, which says it rewrites every record of its table", async () => {
+  it("is listed in its version's review with its table, every one when no version is current", async () => {
     const { fixture } = await sealed();
     const review = await reviewVersion(env, fixture.owner, fixture.app, 2);
 
     expect(review.migrations).toContainEqual({
-      path: "migrations/derive-category.ts",
+      name: "derive-category",
+      table: "notes",
       change: "added",
     });
     expect(review.migrations).toHaveLength(Object.keys(handlers).length);
+  });
+
+  it("is listed in the review when declared inline in app.ts", async () => {
+    const inline = notesFiles({});
+    inline["app.ts"] = `import { app, migration, v } from "@grasp-os/sdk";
+import schema, { noteFields } from "./schema.ts";
+
+export default app({
+  name: "Notes",
+  schema,
+  access: { tables: { notes: { read: "owner", write: "owner" } } },
+  operations: {},
+  screens: [],
+  uses: [],
+  migrations: [
+    migration({
+      name: "inline-category",
+      fromSchema: ${JSON.stringify("f".repeat(64))},
+      toSchema: ${JSON.stringify(placeholder)},
+      table: "notes",
+      output: v.object(noteFields),
+      handler: (ctx, row) => ({ ...row, category: "general" }),
+    }),
+  ],
+});
+`;
+    const fixture = await appWith(inline);
+    const review = await reviewVersion(env, fixture.owner, fixture.app, 1);
+
+    expect(review.migrations).toStrictEqual([
+      { name: "inline-category", table: "notes", change: "added" },
+    ]);
+  });
+
+  it("is listed in the review when a version only registers a migration file the current one had", async () => {
+    const source = migrationSource(
+      "derive-category",
+      handlers["derive-category"],
+      {
+        input: inputs["derive-category"],
+      }
+    );
+    const unregistered = {
+      ...notesFiles({}),
+      "migrations/derive-category.ts": source,
+    };
+    const fixture = await appWith(unregistered);
+    await activateVersion(env, fixture.owner, fixture.app, 1);
+    const { version } = await commitFiles(
+      env,
+      fixture.owner,
+      fixture.app,
+      notesFiles({ "derive-category": source }),
+      "Register"
+    );
+    const review = await reviewVersion(
+      env,
+      fixture.owner,
+      fixture.app,
+      version
+    );
+
+    expect(review.files.map(({ path }) => path)).toStrictEqual(["app.ts"]);
+    expect(review.migrations).toStrictEqual([
+      { name: "derive-category", table: "notes", change: "added" },
+    ]);
   });
 
   it.each([
@@ -466,6 +542,7 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
     ["crypto-prototype", "randomness"],
     ["date-prototype", "the clock"],
     ["intl-format", "the clock"],
+    ["formats-detached-now", "the clock"],
     ["intl-parts", "the clock"],
     ["late-json", "randomness"],
   ] as const)(
@@ -482,14 +559,17 @@ describe("transforming a batch", { timeout: 120_000 }, () => {
     }
   );
 
-  it("still formats a date it is given", async () => {
-    await expect(
-      run("formats-given-date", [note("n1", { title: "Plan" })])
-    ).resolves.toMatchObject({
-      ok: true,
-      rows: [{ fields: { title: "1/1/1970" } }],
-    });
-  });
+  it.each(["formats-given-date", "formats-detached"] as const)(
+    "still formats a date it is given: %s",
+    async (name) => {
+      await expect(
+        run(name, [note("n1", { title: "Plan" })])
+      ).resolves.toMatchObject({
+        ok: true,
+        rows: [{ fields: { title: "1/1/1970" } }],
+      });
+    }
+  );
 
   it("refuses an answer past its bound", async () => {
     const many = Array.from({ length: 45 }, (_, index) =>

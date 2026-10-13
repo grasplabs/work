@@ -670,8 +670,8 @@ msgid "Added: it acts for whoever uses the engine, with everything the engine ho
 msgstr "Toegevoegd: deze code handelt namens iedereen die de engine gebruikt, met alles wat de engine heeft"
 
 #: src/chat/builds.tsx
-msgid "Added: it reads and rewrites every record of its table, whoever owns it"
-msgstr "Toegevoegd: leest en herschrijft elk record van zijn tabel, van wie het ook is"
+msgid "Added: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Toegevoegd: leest en herschrijft elk record van {table}, van wie het ook is"
 
 #: src/labels.ts
 msgid "Admin"
@@ -1215,8 +1215,8 @@ msgid "Changed: it acts for whoever uses the engine, with everything the engine 
 msgstr "Gewijzigd: deze code handelt namens iedereen die de engine gebruikt, met alles wat de engine heeft"
 
 #: src/chat/builds.tsx
-msgid "Changed: it reads and rewrites every record of its table, whoever owns it"
-msgstr "Gewijzigd: leest en herschrijft elk record van zijn tabel, van wie het ook is"
+msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Gewijzigd: leest en herschrijft elk record van {table}, van wie het ook is"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
@@ -2355,6 +2355,10 @@ msgstr "De inhoud kon niet worden gelezen."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "De berichten worden definitief verwijderd en elke wijziging die de agent voor je vasthoudt, wordt afgewezen. Wat de agent deed, blijft in het auditlog."
+
+#: src/chat/builds.tsx
+msgid "Its migrations can't be read: it may rewrite the records of any table"
+msgstr "De migraties zijn niet te lezen: het kan de records van elke tabel herschrijven"
 
 #: src/engines/store-changes.tsx
 msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
@@ -3645,10 +3649,6 @@ msgstr "Workflow verwijderd:"
 #: src/chat/builds.tsx
 msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Verwijderd: deze code handelde namens iedereen die de engine gebruikt, met alles wat de engine heeft"
-
-#: src/chat/builds.tsx
-msgid "Removed: it no longer rewrites records"
-msgstr "Verwijderd: herschrijft geen records meer"
 
 #: src/chat/chat-list.tsx
 msgid "Rename"
