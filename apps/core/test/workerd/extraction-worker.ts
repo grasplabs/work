@@ -1,8 +1,11 @@
 import { kickoffErrors } from "@grasp-os/shared/kickoff";
-import { uploadErrors } from "@grasp-os/shared/uploads";
+import { uploadErrors, uploadTypes } from "@grasp-os/shared/uploads";
 import { unzipSync, zipSync } from "fflate";
 
-import { localExtractor } from "../../src/knowledge/extract.ts";
+import {
+  ExtractorUnavailableError,
+  localExtractor,
+} from "../../src/knowledge/extract.ts";
 import type { LocalExtractorEnv } from "../../src/knowledge/extract.ts";
 import { extractorAsset } from "../../src/knowledge/extractor/asset.ts";
 import { transcriptOf } from "../../src/onboarding/kickoff.ts";
@@ -22,11 +25,40 @@ interface StandInEnv {
   EXTRACTOR: string;
 }
 
-/** What a file that took the extractor over could run: it never returns. */
-const busyExtractor = `import { WorkerEntrypoint } from "cloudflare:workers";
+/** An extractor's module of `body`: what a file that took it over runs. */
+const takenOver = (body: string): string =>
+  `import { WorkerEntrypoint } from "cloudflare:workers";
 export default class extends WorkerEntrypoint {
-  async extractRead() { for (;;) {} }
+  async extractRead(mediaType, size, read) { ${body} }
 }`;
+
+/** What a file that took the extractor over could run, by name. */
+const hostile: Readonly<Record<string, string>> = {
+  // Never returns.
+  busy: takenOver("for (;;) {}"),
+  // Allocates without end while a read of the file is in flight.
+  memory: takenOver(`const first = await read(0);
+    read(first.byteLength);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const held = [];
+    for (;;) {
+      held.push(new Uint8Array(16 * 1024 * 1024).fill(1));
+      const until = Date.now() + 20;
+      while (Date.now() < until) {}
+    }`),
+  // Answers more than a session's message takes.
+  oversized: takenOver(
+    'return { ok: true, markdown: "x".repeat(15_000_000) };'
+  ),
+  // Reads the file's start again.
+  reread: takenOver(`await read(0);
+    try {
+      await read(0);
+      return { ok: true, markdown: "# Read twice" };
+    } catch {
+      return { ok: true, markdown: "# Refused" };
+    }`),
+};
 
 /** Core's static assets as far as extracting reads them: the extractor. */
 const assetsServing = (source: string): Fetcher => ({
@@ -89,6 +121,7 @@ const outcomeOf = async (
     return {
       status: "unavailable",
       error: error instanceof Error ? error.name : String(error),
+      busy: error instanceof ExtractorUnavailableError && error.busy,
       cause,
       ms: Date.now() - started,
     };
@@ -106,7 +139,7 @@ export default {
     const bytes = pad > 0 ? padded(posted, pad) : posted;
     const extractorEnv = {
       ASSETS: assetsServing(
-        searchParams.get("extractor") === "busy" ? busyExtractor : env.EXTRACTOR
+        hostile[searchParams.get("extractor") ?? ""] ?? env.EXTRACTOR
       ),
       RUNTIME_PROFILE: env.RUNTIME_PROFILE,
       SANDBOX_DEADLINE_MS: env.SANDBOX_DEADLINE_MS,
@@ -128,9 +161,9 @@ export default {
     }
     const mediaType = searchParams.get("type");
     if (
-      mediaType !== "application/pdf" &&
-      mediaType !==
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      mediaType !== uploadTypes.pdf &&
+      mediaType !== uploadTypes.docx &&
+      mediaType !== uploadTypes.xlsx
     ) {
       return new Response("Which type?", { status: 400 });
     }

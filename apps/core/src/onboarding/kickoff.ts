@@ -19,7 +19,10 @@ import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import { uploadTypes } from "@grasp-os/shared/uploads";
 import { z } from "zod";
 
-import { localExtractor } from "../knowledge/extract.ts";
+import {
+  ExtractorUnavailableError,
+  localExtractor,
+} from "../knowledge/extract.ts";
 import type { LocalExtractorEnv } from "../knowledge/extract.ts";
 import { gatewaySettings, models } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
@@ -248,8 +251,14 @@ export const transcriptOf = async (
         }).decode(bytes);
         text = kind === "txt" ? decoded : subtitleText(decoded);
       }
-    } catch {
-      throw kickoffErrors.create("kickoff.unreadable");
+    } catch (error) {
+      // An extractor out of reach or busy says nothing of the file: try
+      // again, as a shared document does (documents.ts).
+      throw kickoffErrors.create(
+        error instanceof ExtractorUnavailableError
+          ? "kickoff.not_read"
+          : "kickoff.unreadable"
+      );
     }
   }
   const trimmed = text.trim();

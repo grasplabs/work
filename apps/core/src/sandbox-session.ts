@@ -454,12 +454,13 @@ const failureOf = async (
   {
     host,
     id,
-    closed,
+    isClosed,
     signal,
   }: {
     host: Fetcher;
     id: string;
-    closed: boolean;
+    /** Whether the session's socket has closed, read when it's needed. */
+    isClosed: () => boolean;
     signal: AbortSignal | undefined;
   }
 ): Promise<unknown> => {
@@ -468,11 +469,22 @@ const failureOf = async (
     // it the call's process.
     return signal.reason;
   }
-  if (sandboxVerdictOf(error) !== undefined || !closed) {
-    // The App's: what its isolate's entrypoint threw, or what it sent.
+  if (
+    sandboxVerdictOf(error) !== undefined ||
+    error instanceof SandboxUnavailableError
+  ) {
+    // Core's own word on the call: what the App sent that a session
+    // doesn't take, or the sandbox overdue.
     return error;
   }
+  // Asked before trusting an open socket: the supervisor keeps its verdict
+  // before it closes core's end, but a broken session (a process killed
+  // mid-call) can reject the call before the socket's close is seen.
   const verdict = await verdictOf(host, id);
+  if (verdict === undefined && !isClosed()) {
+    // The App's: what its isolate's entrypoint threw.
+    return error;
+  }
   return verdict === undefined
     ? new SandboxUnavailableError("The sandbox session ended.", {
         cause: error,
@@ -627,7 +639,12 @@ export const runInSession = async (
           message: "The call this function was called in was stopped.",
         });
       }
-      throw await failureOf(error, { host, id, closed, signal: nestedSignal });
+      throw await failureOf(error, {
+        host,
+        id,
+        isClosed: () => closed,
+        signal: nestedSignal,
+      });
     } finally {
       nestedLive = false;
     }
@@ -655,7 +672,12 @@ export const runInSession = async (
       told = true;
       await endSession(host, id, "cancel");
     }
-    throw await failureOf(error, { host, id, closed, signal });
+    throw await failureOf(error, {
+      host,
+      id,
+      isClosed: () => closed,
+      signal,
+    });
   } finally {
     giveUp();
     signal?.removeEventListener("abort", giveUp);

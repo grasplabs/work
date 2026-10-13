@@ -36,13 +36,18 @@ const DEADLINE_MS = 6000;
 const types = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 } as const;
+
+/** Just under an upload's limit of 10 MiB. */
+const NEARLY_LIMIT_BYTES = Math.floor(9.9 * 1024 * 1024);
 
 const outcomeSchema = z.object({
   status: z.enum(["ok", "failed", "unavailable"]),
   text: z.string().optional(),
   code: z.string().optional(),
   error: z.string().optional(),
+  busy: z.boolean().optional(),
   cause: z.string().nullable().optional(),
   ms: z.number(),
 });
@@ -99,22 +104,26 @@ describe("extracting an upload on the on-prem sandbox", () => {
     return Date.now() - started;
   };
 
-  it("reads a PDF and a Word file on the sandbox host, not in core", async () => {
-    const [pdf, docx] = await Promise.all([
-      extract("expense-policy.pdf", `type=${types.pdf}`),
-      extract("travel-policy.docx", `type=${types.docx}`),
-    ]);
+  it("reads a PDF, a Word and an Excel file on the sandbox host, not in core", async () => {
+    // One at a time: the extractor's owner holds one of the two processes.
+    const pdf = await extract("expense-policy.pdf", `type=${types.pdf}`);
+    const docx = await extract("travel-policy.docx", `type=${types.docx}`);
+    const xlsx = await extract("offices.xlsx", `type=${types.xlsx}`);
 
     expect({
       pdf: pdf.status,
       pdfPages: pdf.text?.includes("## Page 2"),
       docx: docx.status,
       docxHeading: docx.text?.includes("# Travel policy"),
+      xlsx: xlsx.status,
+      xlsxSheet: xlsx.text?.includes("Contacts"),
     }).toStrictEqual({
       pdf: "ok",
       pdfPages: true,
       docx: "ok",
       docxHeading: true,
+      xlsx: "ok",
+      xlsxSheet: true,
     });
   }, 60_000);
 
@@ -129,6 +138,68 @@ describe("extracting an upload on the on-prem sandbox", () => {
       status: outcome.status,
       heading: outcome.text?.includes("# Travel policy"),
     }).toStrictEqual({ status: "ok", heading: true });
+  }, 60_000);
+
+  it("reads an honest file just under the upload limit", async () => {
+    const docx = readFileSync(path.join(uploads, "travel-policy.docx"));
+    const outcome = await extract(
+      "travel-policy.docx",
+      `type=${types.docx}&pad=${NEARLY_LIMIT_BYTES - docx.byteLength - 4096}`
+    );
+
+    expect({
+      status: outcome.status,
+      heading: outcome.text?.includes("# Travel policy"),
+    }).toStrictEqual({ status: "ok", heading: true });
+  }, 60_000);
+
+  it("refuses a second read of the file's start, so an extractor reads each chunk once", async () => {
+    const outcome = await extract(
+      "travel-policy.docx",
+      `type=${types.docx}&extractor=reread`
+    );
+
+    expect({ status: outcome.status, text: outcome.text }).toStrictEqual({
+      status: "ok",
+      text: "# Refused",
+    });
+  }, 60_000);
+
+  it("fails as too complex an extractor a file runs out of memory with a read in flight, every time", async () => {
+    // Several in a row: the kill can reach core before the socket's close.
+    const before = supervisor.stats();
+    const outcomes = [];
+    for (let run = 0; run < 3; run += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one process at a time
+      const outcome = await extract(
+        "travel-policy.docx",
+        `type=${types.docx}&extractor=memory&pad=${3 * 1024 * 1024}`
+      );
+      outcomes.push(outcome.code ?? outcome.error);
+    }
+    const after = supervisor.stats();
+
+    expect(outcomes).toStrictEqual([
+      "upload.too_complex",
+      "upload.too_complex",
+      "upload.too_complex",
+    ]);
+    // Ended for its memory (or by V8 at its heap limit, as a crash).
+    expect(
+      after.memory - before.memory + (after.crashed - before.crashed)
+    ).toBe(3);
+  }, 120_000);
+
+  it("fails as too complex an extractor that answers more than a session takes", async () => {
+    const outcome = await extract(
+      "expense-policy.pdf",
+      `type=${types.pdf}&extractor=oversized`
+    );
+
+    expect({ status: outcome.status, code: outcome.code }).toStrictEqual({
+      status: "failed",
+      code: "upload.too_complex",
+    });
   }, 60_000);
 
   it("ends an extractor a file keeps busy for good, fails the upload as too complex, and core answers meanwhile", async () => {
@@ -170,9 +241,23 @@ describe("extracting an upload on the on-prem sandbox", () => {
     });
   }, 60_000);
 
-  it("holds extractions to one owner's share of the pool: past it, one is retried later, never failed", async () => {
+  it("asks for a kickoff's transcript again, not for another file, when no extractor could try", async () => {
+    const outcome = await extract(
+      "travel-policy.docx",
+      "unbound",
+      "/transcript"
+    );
+
+    expect({ status: outcome.status, code: outcome.code }).toStrictEqual({
+      status: "failed",
+      code: "kickoff.not_read",
+    });
+  });
+
+  it("holds extractions to one owner's share of the pool: past it, the extractor is busy, not failed", async () => {
     // Two processes, so one owner holds one: the second extraction waits
-    // for the first's place, gives up while it's held, and couldn't try.
+    // for the first's place, gives up while it's held, and is busy, which
+    // the extraction workflow waits out (apps/core/test/uploads.test.ts).
     const first = extract(
       "expense-policy.pdf",
       `type=${types.pdf}&extractor=busy`
@@ -186,11 +271,13 @@ describe("extracting an upload on the on-prem sandbox", () => {
     expect({
       status: second.status,
       error: second.error,
-      busy: second.cause?.includes("as many calls in the sandbox as it may"),
+      busy: second.busy,
+      cause: second.cause?.includes("as many calls in the sandbox as it may"),
     }).toStrictEqual({
       status: "unavailable",
       error: "ExtractorUnavailableError",
       busy: true,
+      cause: true,
     });
     const ended = await first;
 

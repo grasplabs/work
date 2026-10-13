@@ -12,7 +12,7 @@ import {
   runInSession,
   sandboxVerdictOf,
 } from "../sandbox-session.ts";
-import { sessionHost } from "../sandboxed.ts";
+import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 import { extractorAsset } from "./extractor/asset.ts";
 import type ExtractorWorker from "./extractor/worker.ts";
 
@@ -56,7 +56,14 @@ import type ExtractorWorker from "./extractor/worker.ts";
 // - Extractions take every sandbox process, starving Apps (or Apps starve
 //   uploads). They run as one owner of their own, `platform:extractor`,
 //   which the supervisor holds to its per-owner share of the pool like any
-//   App; past it the extraction is busy and retried, never failed.
+//   App. Past it, or with the pool full, the extractor is `busy`: the
+//   extraction workflow waits and tries again for up to an hour without
+//   spending the retries a failing file gets (extraction.ts), so crafted
+//   files or busy Apps delay uploads but fail none a free place would
+//   read.
+// - A crafted file's extractor asks for the file without end. Reads are
+//   strictly in order, each from where the last ended, so an extraction
+//   reads at most `size / readChunkBytes` chunks, rounded up.
 // - A deployment off Cloudflare forgets `SANDBOX_HOST`, and parsers run in
 //   core unbounded again. Refused, as `sessionHost` refuses App code (the
 //   extractor unavailable, retried and then failed), unless the
@@ -81,12 +88,23 @@ export type Extractor = (file: ExtractInput) => Promise<string>;
 
 /**
  * The extractor couldn't be reached, or failed for a moment, before it
- * read the file: trying again may work.
+ * read the file: trying again may work. `busy` when the sandbox host had
+ * no place for it (its owner's share taken, the pool full): nothing about
+ * the file, so the extraction waits for a place rather than spend a retry
+ * (extraction.ts).
  */
 export class ExtractorUnavailableError extends Error {
-  constructor(options?: ErrorOptions) {
-    super("The extractor couldn't be reached", options);
+  readonly busy: boolean;
+
+  constructor(options?: ErrorOptions & { busy?: boolean }) {
+    super(
+      options?.busy === true
+        ? "The extractor has no place free in the sandbox"
+        : "The extractor couldn't be reached",
+      options
+    );
     this.name = "ExtractorUnavailableError";
+    this.busy = options?.busy === true;
   }
 }
 
@@ -198,6 +216,16 @@ const fileVerdicts = new Set([
   "refused",
 ]);
 
+/**
+ * Whether the supervisor refused the session for a full pool: it answers
+ * 503 to an upgrade it has no room for, which `runInSession` reports as
+ * the sandbox unavailable, the same as an outage. For an extraction it is
+ * a wait, as a taken share is.
+ */
+const isPoolFull = (error: unknown): boolean =>
+  error instanceof SandboxUnavailableError &&
+  error.message === "The sandbox host answered 503.";
+
 /** What the extractor answers in a Dynamic Worker of core's own. */
 const extractedInCore = async (
   loader: WorkerLoader,
@@ -228,17 +256,16 @@ const extractedOnHost = async (
   source: string,
   { mediaType, bytes }: Pick<ExtractInput, "mediaType" | "bytes">
 ): Promise<unknown> => {
-  // The isolate asks for the file a chunk at a time, from where it is.
+  // The isolate asks for the file a chunk at a time, each from where the
+  // last one ended and never again: at most as many reads as chunks.
+  let next = 0;
   const read = (offset: unknown): Uint8Array => {
-    if (
-      typeof offset !== "number" ||
-      !Number.isSafeInteger(offset) ||
-      offset < 0 ||
-      offset >= bytes.byteLength
-    ) {
-      throw new RangeError("There is nothing of the file to read there.");
+    if (offset !== next || next >= bytes.byteLength) {
+      throw new RangeError("The file is read once, in order.");
     }
-    return bytes.slice(offset, offset + readChunkBytes);
+    const chunk = bytes.slice(next, next + readChunkBytes);
+    next += chunk.byteLength;
+    return chunk;
   };
   try {
     return await runInSession(host, {
@@ -259,6 +286,9 @@ const extractedOnHost = async (
     const verdict = sandboxVerdictOf(error);
     if (verdict !== undefined && fileVerdicts.has(verdict)) {
       throw uploadErrors.create("upload.too_complex");
+    }
+    if (verdict === "busy" || isPoolFull(error)) {
+      throw new ExtractorUnavailableError({ cause: error, busy: true });
     }
     throw new ExtractorUnavailableError({ cause: error });
   }

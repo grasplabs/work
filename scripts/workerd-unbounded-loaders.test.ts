@@ -67,7 +67,7 @@ describe("App code no sandbox bounds, on plain workerd", () => {
     expect(refused).toContain("No sandbox bounds a draft's preview here yet");
   });
 
-  it("refuses to compile an App's screens it hasn't built before", async () => {
+  it("refuses to compile an App's screens", async () => {
     const refused = await refusal("screens");
     expect(refused).toContain("SandboxUnavailableError");
     expect(refused).toContain("No sandbox bounds the screen compiler here yet");
