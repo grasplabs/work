@@ -24,6 +24,8 @@ let sent = 0;
 let forwardError: Record<string, unknown> | undefined;
 /** An error `mail.forward` answers with as a text block, in its place. */
 let forwardText: string | undefined;
+/** Whether that error carries an image after its text block. */
+let forwardImage = false;
 /** Holds `mail.archive` until the test lets it finish. */
 let archiveDone: Promise<unknown> = Promise.resolve();
 
@@ -41,7 +43,18 @@ const server = fakeMcpServer(serverUrl, [
       if (forwardText !== undefined) {
         return {
           output: {},
-          content: [{ type: "text", text: forwardText }],
+          content: [
+            { type: "text", text: forwardText },
+            ...(forwardImage
+              ? [
+                  {
+                    type: "image" as const,
+                    data: "aGVsbG8=",
+                    mimeType: "image/png",
+                  },
+                ]
+              : []),
+          ],
           isError: true,
         };
       }
@@ -538,6 +551,40 @@ describe("a side effect", () => {
       }).toStrictEqual({ logged: "string", leaked: false, redacted: true });
     }
   );
+
+  it("whose Composio tool answered with text and an image logs the text, redacted, and notes the image", async () => {
+    const connectionId = await addConnection();
+    const warn = vi.spyOn(console, "warn");
+    forwardText = "Upload refused: password=hunter2 for ann";
+    forwardImage = true;
+    try {
+      await expect(
+        outcome(
+          callAs(anna, {
+            connectionId,
+            action: "mail.forward",
+            input: {},
+            idempotencyKey: "run-1:forward",
+          })
+        )
+      ).resolves.toBe("connect.outcome_unknown");
+    } finally {
+      forwardText = undefined;
+      forwardImage = false;
+    }
+    const logged = warn.mock.calls
+      .map(([entry]: unknown[]) => entry)
+      .find(
+        (entry): entry is Record<string, unknown> =>
+          typeof entry === "object" &&
+          entry !== null &&
+          "event" in entry &&
+          entry.event === "connect.composio_error_unknown"
+      );
+    expect(logged?.error).toBe(
+      "Upload refused: password=[redacted] for ann\n(content other than text)"
+    );
+  });
 
   it("running at the same time as a repeat runs once", async () => {
     const connectionId = await addConnection();

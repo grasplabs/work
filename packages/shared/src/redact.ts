@@ -67,7 +67,7 @@ const credentials: readonly (readonly [
   // linear. A name's prefix (`access_`) is word characters only, so a
   // match starts once per word, not at every "-" of a flood.
   [
-    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'\\&,;]+)/giu,
+    /\b(?<name>\w*?(?:api[_-]?key|apikey|token|secret|passwd|password|authorization))(?<between>\\?["']?\s*[:=]\s*)(?:(?<escapedQuote>\\["'])(?:(?!\k<escapedQuote>)[^\n])*(?<escapedClose>\k<escapedQuote>)?|(?<quote>["'])(?:\\.|(?!\k<quote>)[^\\\n])*(?<close>\k<quote>)?|(?:(?:bearer|basic)\s+)?[^\s"'&,;]+)/giu,
     redactedAssignment,
   ],
 ];

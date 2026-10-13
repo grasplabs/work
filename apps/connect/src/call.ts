@@ -68,32 +68,48 @@ const notPerformed = ({ output }: McpToolResult): Error => {
 const maxLoggedErrorChars = 500;
 
 /**
- * What a tool's error said, as text to redact: its text blocks' own text,
- * as the server sent it, or its structured content as JSON. Never the
- * output as connect stores it, where text is JSON-quoted once more and a
- * credential's name and quotes come escaped (`\"password\"`). Content
- * other than text (an image, a resource) is left out.
+ * What a tool's error said, as the server sent it: each text block's own
+ * text, or its structured content as JSON. Never the output as connect
+ * stores it, where text is JSON-quoted once more and a credential's name
+ * and quotes come escaped (`\"password\"`). Content other than text (an
+ * image, a resource) is left out, and only noted.
  */
-const errorText = (output: string): string => {
+const errorParts = (output: string): string[] => {
   let said: unknown;
   try {
     said = JSON.parse(output);
   } catch {
-    return output;
+    return [output];
   }
   if (typeof said === "string") {
-    return said;
+    return [said];
   }
-  return Array.isArray(said) ? "(content other than text)" : output;
+  if (!Array.isArray(said)) {
+    return [output];
+  }
+  // Blocks as `resultOf` keeps them when not every one is text.
+  const texts = said.flatMap((block: unknown) =>
+    typeof block === "object" &&
+    block !== null &&
+    "type" in block &&
+    block.type === "text" &&
+    "text" in block &&
+    typeof block.text === "string"
+      ? [block.text]
+      : []
+  );
+  return texts.length < said.length
+    ? [...texts, "(content other than text)"]
+    : texts;
 };
 
 /**
- * A tool's error as connect logs it: credentials redacted in what it said
- * ({@link errorText}), then cut to {@link maxLoggedErrorChars}, so neither
- * a secret it echoed nor its size reaches the log.
+ * A tool's error as connect logs it: what it said ({@link errorParts}),
+ * credentials redacted, then cut to {@link maxLoggedErrorChars}, so
+ * neither a secret it echoed nor its size reaches the log.
  */
 const loggedError = (output: string): string => {
-  const redacted = redact(errorText(output));
+  const redacted = redact(errorParts(output).join("\n"));
   return redacted.length > maxLoggedErrorChars
     ? `${redacted.slice(0, maxLoggedErrorChars)}…`
     : redacted;
