@@ -288,13 +288,15 @@ describe("a call that fails while its session looks open", () => {
 
   it("is the App's own error when its process ends with no verdict kept", async () => {
     const { host, asked } = hostFailing({ state: "ending" });
+    const started = Date.now();
 
     await expect(failedOn(host)).resolves.toStrictEqual({
       message: "internal error; the isolate's process is exiting",
       verdict: null,
     });
-    // Asked for the moment it waits, then no longer.
-    expect(asked()).toBe(11);
+    // Asked again while it waits, and for about its 1 s, no longer.
+    expect(asked()).toBeGreaterThanOrEqual(2);
+    expect(Date.now() - started).toBeLessThan(2000);
   });
 
   it("is the App's own error at once when the supervisor says its session still runs", async () => {
