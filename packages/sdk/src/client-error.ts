@@ -89,6 +89,11 @@ const clientErrors = {
     message: "The App's server couldn't be reached. Try again.",
     category: "operational",
   },
+  "auth.principal_changed": {
+    message:
+      "Someone else signed in, so what was shown for the person before was cleared.",
+    category: "authorization",
+  },
 } as const satisfies Record<
   string,
   { message: string; category: ErrorCategory }
@@ -108,6 +113,15 @@ export const clientError = (
     retryable: code === "operation.unreachable",
     requestId: null,
     ...(details === undefined ? {} : { details }),
+  });
+
+/**
+ * A transport's refusal of a call it didn't send, because whose token
+ * the host gives changed since the call began (client-core.ts).
+ */
+export const principalChanged = (): Error =>
+  Object.assign(new Error(clientErrors["auth.principal_changed"].message), {
+    code: "auth.principal_changed",
   });
 
 /**

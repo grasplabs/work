@@ -6,12 +6,15 @@ import {
   clientError,
   fencingCodes,
   GraspError,
+  principalChanged,
   nothingRanCodes,
   readAnswer,
   refusedBeforeCallCodes,
   readRejection,
 } from "./client-error.ts";
 import type { Settled } from "./client-error.ts";
+import { PortableTransport } from "./client-portable.ts";
+import type { PortableClientOptions } from "./client-portable.ts";
 import type {
   ArgsOf,
   OperationReference,
@@ -71,12 +74,23 @@ import { readDescriptor } from "./value-read.ts";
 //   before anything is sent; the host checks all of it again.
 
 /**
- * How the client reaches the host: one call, its request as JSON text,
- * answered with core's `{ result }` (spec 32.6), or rejected with a coded
- * refusal; a rejection without a code is a lost response.
+ * How the client reaches the host: one call of the App `app`, its
+ * request as JSON text, answered with core's `{ result }` (spec 32.6), or
+ * rejected with a coded refusal; a rejection without a code is a lost
+ * response.
  */
 export interface ClientTransport {
-  call: (request: string) => Promise<unknown>;
+  call: (request: string, app: string) => Promise<unknown>;
+}
+
+/**
+ * What a call through a portable host's transport is bound to: the read's
+ * fence generation, and the person its first attempt was sent for. A
+ * call that finds either changed is refused before it is sent.
+ */
+interface Bound {
+  readonly generation?: number;
+  principal?: string;
 }
 
 /** Options of a query call. */
@@ -535,7 +549,10 @@ const withKey = (error: GraspError, key: string): GraspError =>
   });
 
 export class GraspClient {
-  readonly #transport: ClientTransport;
+  readonly #transport: ClientTransport | undefined;
+  readonly #portable: PortableTransport | undefined;
+  /** Whose token a portable host's latest call was sent with. */
+  #principal: string | undefined;
   readonly #queries = new Map<string, QueryEntry>();
   readonly #submissions = new Map<string, Submission>();
   /** Moves on at every fence: answers to older requests are dropped. */
@@ -550,12 +567,24 @@ export class GraspClient {
   #fencedBy: GraspError | undefined;
 
   /**
-   * For the platform only (screen-runtime.ts). By design, not isolation:
-   * screen code shares the frame and could make one (`constructor`), but
-   * gets nothing from it that `bridge()` doesn't already give it.
+   * A portable host's client (`{ url, getToken }`, spec 10.7.1): its
+   * bootstrap makes one per App session and mounts it with
+   * `GraspProvider`; generated App code never makes one.
+   *
+   * Over a `ClientTransport`, for the platform only (screen-runtime.ts).
+   * By design, not isolation: screen code shares the frame and could make
+   * one, but gets nothing from it that `bridge()` doesn't already give it.
    */
-  constructor(transport: ClientTransport) {
-    this.#transport = transport;
+  constructor(connection: PortableClientOptions | ClientTransport) {
+    if ("call" in connection && typeof connection.call === "function") {
+      this.#transport = connection;
+      this.#portable = undefined;
+    } else if ("url" in connection) {
+      this.#transport = undefined;
+      this.#portable = new PortableTransport(connection);
+    } else {
+      throw new TypeError("A client takes { url, getToken }.");
+    }
   }
 
   static {
@@ -775,6 +804,7 @@ export class GraspClient {
       }
       return stop.signal.aborted ? clientError("query.cancelled") : undefined;
     };
+    const bound: Bound = { generation };
     const attempt = async (): Promise<unknown> => {
       const started = Date.now();
       for (let tries = 1; ; tries += 1) {
@@ -787,7 +817,11 @@ export class GraspClient {
             throw early;
           }
           // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-          settled = await this.#call(request);
+          settled = await this.#call(
+            request,
+            entry.reference.resourceId,
+            bound
+          );
         } finally {
           release();
         }
@@ -840,10 +874,10 @@ export class GraspClient {
    * One call through the transport, settled. A refusal of the person or
    * the build fences every cache before its caller hears of it.
    */
-  async #call(request: string): Promise<Settled> {
+  async #call(request: string, app: string, bound: Bound): Promise<Settled> {
     let settled: Settled;
     try {
-      settled = readAnswer(await this.#transport.call(request));
+      settled = readAnswer(await this.#through(request, app, bound));
     } catch (error) {
       settled = readRejection(error);
     }
@@ -851,6 +885,55 @@ export class GraspClient {
       this.#fence(settled.error);
     }
     return settled;
+  }
+
+  /**
+   * Sends `request` through the transport. A portable host's token is
+   * asked for first: when it is someone else's than the last call's, all
+   * the client holds is cleared before anything is sent with it
+   * (`#switchPrincipal`), and a call bound to before is refused unsent.
+   */
+  async #through(request: string, app: string, bound: Bound): Promise<unknown> {
+    const portable = this.#portable;
+    if (portable === undefined) {
+      return await this.#transport?.call(request, app);
+    }
+    const token = await portable.token();
+    if (this.#principal !== undefined && token.principal !== this.#principal) {
+      this.#switchPrincipal();
+    }
+    this.#principal = token.principal;
+    const before =
+      (bound.generation !== undefined &&
+        bound.generation !== this.#generation) ||
+      (bound.principal !== undefined && bound.principal !== token.principal);
+    if (before) {
+      throw principalChanged();
+    }
+    bound.principal = token.principal;
+    return await portable.send(request, app, token.text);
+  }
+
+  /**
+   * Someone else signed in on a portable host: drops every result held
+   * and every answer still to come for the person before, and reads
+   * again what is read now, for the person now. Submissions in flight
+   * are no longer joined; theirs stay theirs (`#send`).
+   */
+  #switchPrincipal(): void {
+    this.#generation += 1;
+    this.#fencedBy = clientError("auth.principal_changed");
+    this.#submissions.clear();
+    for (const entry of this.#queries.values()) {
+      entry.reading?.stop.abort();
+      entry.reading = undefined;
+      entry.shown = entry.sent;
+      entry.stale = true;
+      show(entry, loading);
+      if (entry.listeners.size > 0) {
+        this.#refresh(entry);
+      }
+    }
   }
 
   /**
@@ -862,6 +945,9 @@ export class GraspClient {
   #fence(refusal: GraspError): void {
     this.#generation += 1;
     this.#fencedBy = refusal;
+    // Nothing of anyone's is held now: whoever's token comes next starts
+    // afresh, without a switch to refuse calls over.
+    this.#principal = undefined;
     for (const entry of this.#queries.values()) {
       entry.reading?.stop.abort();
       entry.reading = undefined;
@@ -1000,9 +1086,23 @@ export class GraspClient {
     const run = async (): Promise<unknown> => {
       const started = Date.now();
       let lostSince: number | undefined;
+      const bound: Bound = {};
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-        const settled = await this.#call(request);
+        const settled = await this.#call(request, reference.resourceId, bound);
+        if (
+          lostSince !== undefined &&
+          settled.kind === "failed" &&
+          settled.error.category === "authorization"
+        ) {
+          // An earlier attempt's answer was lost, and access is gone or
+          // someone else signed in: whether it committed is the person's
+          // to recover with its key, not a failure, and it is never sent
+          // again for someone else.
+          throw clientError("submission.outcome_unknown", {
+            idempotencyKey: key,
+          });
+        }
         if (settled.kind === "value") {
           this.#changed(reference.resourceId);
           return settled.value;
