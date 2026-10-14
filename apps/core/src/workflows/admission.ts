@@ -101,9 +101,12 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 //   a step waits longer each round, five seconds doubling to a minute
 //   (`askAgainSeconds`), and fails once its rounds have waited a day in
 //   all since it was last admitted (`workflowQueuedStepMs`,
-//   `workflow.queue_timeout`), spending none of its retries: at most some
-//   1,450 rounds a wait. Only those rounds count: a pause, or a wait for
-//   its person after an admission, is not a wait for load (host.ts).
+//   `workflow.queue_timeout`), spending none of its retries. A round never
+//   waits past when the share's first lease ends (`retryAfterSeconds`),
+//   though, which can be a second away again and again: the backoff alone
+//   doesn't bound the rounds of a day's wait. Only those rounds count: a
+//   pause, or a wait for its person after an admission, is not a wait for
+//   load (host.ts).
 // - A fake identity for an extra share: who a run acts for and its App
 //   come from its row (dispatcher.ts), never from its input or code, and
 //   people are the organization's members, from its identity provider.

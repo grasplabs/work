@@ -514,12 +514,15 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       const hotWhenQuickDone = await Promise.all(
         hotRuns.map(async ({ id }) => await liveStatus(id))
       );
+      // The last of the hot App's runs may wait three rounds, five, ten
+      // and twenty seconds long (admission.ts, `askAgainSeconds`), before
+      // a share is its: some 35 seconds, and more on a loaded machine.
       await eventually(async () => {
         const statuses = await Promise.all(
           hotRuns.map(async ({ id }) => await liveStatus(id))
         );
         expect(statuses).toStrictEqual(["complete", "complete", "complete"]);
-      });
+      }, 60_000);
       return {
         queued,
         retryAt: z
@@ -1345,18 +1348,30 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
         // The person takes longer than a step may wait for a share: none
         // of it is a wait for one.
         await scheduler.wait(12_000);
+        // The share is taken again before they confirm: the send waits for
+        // it once more, its ten seconds starting over.
+        await admit(holder, "second holder");
         if (pending !== undefined) {
           await admin.api.pendingActions.confirm(pending.id, pending.inputHash);
         }
+        // Once its next check saw the confirmation, it queues again.
+        await eventually(async () => {
+          await expect(placesOf(run.id)).resolves.toBe(1);
+        });
+        const queuedAgainAt = Date.now();
         await finished(run.id);
         return {
-          failed: (await failedWith(run.id)) ?? null,
-          status: await liveStatus(run.id),
+          failed: await failedWith(run.id),
+          // Its whole ten seconds, not the five its first wait left.
+          waitedAfresh: Date.now() - queuedAgainAt >= 8000,
         };
       }
     );
 
-    expect(result).toStrictEqual({ failed: null, status: "complete" });
+    expect(result).toStrictEqual({
+      failed: "workflow.queue_timeout",
+      waitedAfresh: true,
+    });
   });
 
   it("count none of a pause as a step's wait for a share, and run the step once resumed, however long the pause", async () => {

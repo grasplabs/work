@@ -600,6 +600,66 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     }
   });
 
+  it("runs the step again once connect may recover its call, with nobody resolving it, and completes it as connect recovered it", async () => {
+    const admin = await personApi("admin");
+    // A draft, which connect recovers by looking it up.
+    const { mailbox, connectionId, run } = await waitingRun(
+      admin,
+      "mail.createDraft"
+    );
+    // Its call's claim is past the claim timeout: connect may recover it.
+    await connectDb()
+      .prepare(
+        "UPDATE idempotent_calls SET claimed_at = claimed_at - ?1, created_at = created_at - ?1 WHERE connection_id = ?2"
+      )
+      .bind(6 * 60 * 1000, connectionId)
+      .run();
+    await finished(run.id);
+    expect({
+      run: await statusOf(admin, run.id),
+      // Connect looked the draft up, and Graph here finds none: so it
+      // made it once more, under the same key, as a call that didn't
+      // happen.
+      drafts: await draftsIn(mailbox),
+      listed: await listedFor(admin),
+    }).toStrictEqual({ run: "completed", drafts: 2, listed: 0 });
+  });
+
+  it("ends a hold by its deadline once connect can no longer recover the call, a day after its first claim", async () => {
+    const admin = await personApi("admin");
+    const deadline = env.WORKFLOW_UNKNOWN_HOLD_MS;
+    env.WORKFLOW_UNKNOWN_HOLD_MS = "4000";
+    try {
+      const { mailbox, connectionId, run } = await waitingRun(
+        admin,
+        "mail.createDraft"
+      );
+      // First claimed more than a day ago: past connect's recovery
+      // horizon, so nothing clears the hold but its person.
+      await connectDb()
+        .prepare(
+          "UPDATE idempotent_calls SET claimed_at = claimed_at - ?1, created_at = created_at - ?1 WHERE connection_id = ?2"
+        )
+        .bind(day + 6 * 60 * 1000, connectionId)
+        .run();
+      await finished(run.id);
+      expect({
+        run: await admin.api.workflows.status(run.id),
+        drafts: await draftsIn(mailbox),
+        listed: await listedFor(admin),
+      }).toMatchObject({
+        run: {
+          status: "failed",
+          failure: { error: { code: "connect.outcome_unknown_unresolved" } },
+        },
+        drafts: 1,
+        listed: 1,
+      });
+    } finally {
+      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
+    }
+  });
+
   it("never runs the step again at once, even when connect says it may be recovered and the call says otherwise", async () => {
     const admin = await personApi("admin");
     const { CONNECT: connect } = env;

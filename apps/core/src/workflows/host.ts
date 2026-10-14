@@ -272,9 +272,6 @@ const busyField = `${coreStepPrefix}busy`;
 /** The field of a busy step's result that says it was queued, for which share. */
 const queuedField = `${coreStepPrefix}queued`;
 
-/** The field of a busy step's result that says when it was refused. */
-const busyAtField = `${coreStepPrefix}busyAt`;
-
 /** The field of a busy step's result that says how long a step may wait. */
 const busyMaxField = `${coreStepPrefix}busyMaxMs`;
 
@@ -290,13 +287,12 @@ const joinedField = `${coreStepPrefix}joined`;
  * runs the step again under a step of its own, as a held step does. The
  * refusal spends none of the step's attempts, and its wait none of the
  * run's steps (`uncountedWaitStep`): the load is others' as much as the
- * run's. Its rounds wait a day in all at most (`workflowQueuedStepMs`, `LoadWait`), then fail
- * (`workflow.queue_timeout`). Workflow code can't
+ * run's. Its rounds wait a day in all at most (`workflowQueuedStepMs`,
+ * `LoadWait`), then fail (`workflow.queue_timeout`). Workflow code can't
  * return it (`do` refuses it).
  */
-const busyMarker = ({ busyFor, queuedFor, at, maxWaitMs, joined }: Busy) => ({
+const busyMarker = ({ busyFor, queuedFor, maxWaitMs, joined }: Busy) => ({
   [busyField]: busyFor,
-  [busyAtField]: at,
   [busyMaxField]: maxWaitMs,
   ...(queuedFor === undefined ? {} : { [queuedField]: queuedFor }),
   ...(joined === true ? { [joinedField]: true } : {}),
@@ -304,14 +300,12 @@ const busyMarker = ({ busyFor, queuedFor, at, maxWaitMs, joined }: Busy) => ({
 
 /**
  * An attempt refused for now: the seconds to wait, the share it was
- * queued for, when it was (`workflow.queued`), not its lineage busy, when
- * it was refused, and how long a step may wait in all, as the quota
- * policy said then.
+ * queued for, when it was (`workflow.queued`), not its lineage busy, and
+ * how long a step may wait in all, as the quota policy said then.
  */
 interface Busy {
   busyFor: number;
   queuedFor?: Share;
-  at: number;
   maxWaitMs: number;
   /** Whether the refusal took it a place in the queue (admission.ts). */
   joined?: boolean;
@@ -328,7 +322,6 @@ const isCoreMarker = (value: unknown): boolean =>
 
 const busyRecordSchema = z.object({
   busyFor: z.number(),
-  at: z.number(),
   maxWaitMs: z.number(),
   queuedFor: shareSchema.optional(),
   joined: z.boolean(),
@@ -368,7 +361,6 @@ const markerOf = (value: unknown): CoreMarker | undefined => {
     kind: "busy",
     ...busyRecordSchema.parse({
       busyFor: field(busyField),
-      at: field(busyAtField),
       maxWaitMs: field(busyMaxField),
       queuedFor: field(queuedField),
       joined: field(joinedField) === true,
@@ -401,17 +393,14 @@ const busyOf = (error: unknown): Busy | undefined => {
   const seconds = error.details?.retryAfterSeconds;
   const busyFor = typeof seconds === "number" && seconds >= 1 ? seconds : 1;
   const most = error.details?.maxWaitMs;
-  const timing = {
-    at: Date.now(),
-    maxWaitMs:
-      typeof most === "number" ? most : platformLimits.workflowQueuedStepMs,
-  };
+  const maxWaitMs =
+    typeof most === "number" ? most : platformLimits.workflowQueuedStepMs;
   if (error.code === "workflow.lineage_busy") {
-    return { busyFor, ...timing };
+    return { busyFor, maxWaitMs };
   }
   return {
     busyFor,
-    ...timing,
+    maxWaitMs,
     queuedFor:
       shareSchema.safeParse(error.details?.waitingFor).data ?? "client",
     joined: error.details?.joined === true,
@@ -433,11 +422,17 @@ interface WaitedSoFar {
 
 /**
  * A step's wait for load since its last admission: the rounds it was
- * refused for load in a row, what they waited in all (their sleeps, never
- * the time between them), how long a step may wait in all as the last
- * refusal said, and how long this round sleeps. A pause, a restart or a
- * wait for its person between rounds counts for none of it. A held marker
- * means an attempt was admitted: the wait starts over (`loadWaitAfter`).
+ * refused for load in a row, what they wait in all (their sleeps, this
+ * round's included, never the time between them), how long a step may
+ * wait in all as the last refusal said, and how long this round sleeps.
+ * A pause, a restart or a wait for its person between rounds counts for
+ * none of it. A held marker means an attempt was admitted: the wait
+ * starts over (`loadWaitAfter`).
+ *
+ * Only an admission that ended in a hold is journaled as one. An attempt
+ * admitted that then fails, whose retry by the engine in the same round is
+ * refused for load, keeps counting from before its admission. That errs
+ * safe: such a step times out sooner, never later.
  */
 interface LoadWait {
   rounds: number;
@@ -457,26 +452,25 @@ const loadWaitStart: LoadWait = {
 /**
  * The step's wait for load once its attempt answered `marker`: after a
  * hold, none (an attempt was admitted); after a refusal for load, one
- * round more, sleeping as long as `askAgainMs` says, what it slept added
- * once it has. A round left nothing to sleep (`sleepMs` 0) has waited as
- * long as a step may.
+ * round more, sleeping as long as `askAgainMs` says, added to what its
+ * rounds wait in all. A round left nothing to sleep (`sleepMs` 0) has
+ * waited as long as a step may.
  */
 const loadWaitAfter = (wait: LoadWait, marker: CoreMarker): LoadWait => {
   if (marker.kind === "held") {
     return loadWaitStart;
   }
-  // What the previous round slept, now that the step asked again.
-  const waitedMs = wait.waitedMs + wait.sleepMs;
+  const sleepMs = askAgainMs({
+    waited: wait.rounds,
+    retryAfterSeconds: marker.busyFor,
+    waitedMs: wait.waitedMs,
+    maxWaitMs: marker.maxWaitMs,
+  });
   return {
     rounds: wait.rounds + 1,
-    waitedMs,
+    waitedMs: wait.waitedMs + sleepMs,
     maxWaitMs: marker.maxWaitMs,
-    sleepMs: askAgainMs({
-      waited: wait.rounds,
-      retryAfterSeconds: marker.busyFor,
-      waitedMs,
-      maxWaitMs: marker.maxWaitMs,
-    }),
+    sleepMs,
   };
 };
 
@@ -1447,8 +1441,7 @@ export class RunHost extends RpcTarget {
         throw connectErrors.create("connect.outcome_unknown_unresolved");
       }
       if (held !== true) {
-        // Whether it was held at a check before it cleared: something
-        // was its person's to decide, and they did.
+        // Whether a check found it held before it cleared (`#waitBefore`).
         return checks > 0;
       }
       if (checks === 0) {
@@ -1615,10 +1608,17 @@ export class RunHost extends RpcTarget {
         marker.keys,
         marker.unknown ? unknown.since : undefined
       );
-      // Its person decided what held it: an unknown outcome the step
-      // comes back with after is another, with 7 days of its own. One
-      // that cleared before any check held it (connect and the step's
-      // call disagree) is the same outcome, still under its deadline.
+      // A check found it held, and it cleared since: its person
+      // resolved it, or connect may now recover the call (its claim past
+      // the claim timeout). An unknown outcome the step comes back with
+      // after starts 7 days of its own. One that cleared before any check
+      // ran (connect and the step's call disagree) keeps its deadline.
+      // So a call connect keeps failing to recover restarts the window at
+      // most until connect's recovery horizon (a day from its first
+      // claim, apps/connect/src/idempotency.ts), past which it is never
+      // recoverable: a hold ends a day and 7 days after its first claim
+      // at the latest. A person who resolves before the first check
+      // leaves the next outcome on the old deadline, a minute shorter.
       if (decided) {
         unknown.since = undefined;
       }
@@ -1725,9 +1725,7 @@ export class RunHost extends RpcTarget {
           async () =>
             await this.#admit(attempt, {
               waited: load.rounds,
-              // What its rounds waited, the last one's sleep included.
-              waitedMs:
-                load.rounds === 0 ? undefined : load.waitedMs + load.sleepMs,
+              waitedMs: load.rounds === 0 ? undefined : load.waitedMs,
               maxWaitMs: load.maxWaitMs,
             })
         );
