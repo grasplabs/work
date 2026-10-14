@@ -8,6 +8,7 @@
   "exports": {
     "./catalog": "./src/catalog.ts",
     "./diagnostics": "./src/diagnostics.ts",
+    "./limits": "./src/limits.ts",
     "./provenance": "./src/provenance.ts",
     "./validate": "./src/validate.ts"
   },

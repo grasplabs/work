@@ -26,6 +26,7 @@ import type { ScreensApi } from "./screens.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { StoresApi } from "./stores.ts";
 import type { UploadsApi } from "./uploads.ts";
+import type { WorkflowResourcesApi } from "./workflow-resources.ts";
 import type { WorkflowsApi } from "./workflows.ts";
 
 /** A way to sign in to this deployment, for the sign-in screen. */
@@ -109,6 +110,11 @@ export interface SessionApi {
   readonly connections: ConnectionsApi;
   /** Runs of Apps' workflows, for those with a role in the App. */
   readonly workflows: WorkflowsApi;
+  /**
+   * Independent workflows: their versions and whom they are shared with,
+   * for those with a role in them.
+   */
+  readonly workflowResources: WorkflowResourcesApi;
   /**
    * What core tells the person: the workflows that failed while acting for
    * them.

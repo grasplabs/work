@@ -105,28 +105,123 @@ export default app({
 });
 `;
 
-const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/ui/components/button";
-import { Input } from "@grasp-os/ui/components/input";
-import { Label } from "@grasp-os/ui/components/label";
-import { useState } from "react";
-import type { MouseEvent } from "react";
+const createNote = `import { useForm } from "@grasp-os/sdk/react";
+import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { api } from "#grasp";
+
+/** A new note: the operation's input is the form, its contract the check. */
+export function CreateNote() {
+  const form = useForm(api.notes.create, {
+    defaultValues: { title: "", body: "" },
+    resetOnSuccess: true,
+  });
+  return (
+    <Form aria-label="New note" form={form}>
+      <TextField form={form} label="Title" name="title" />
+      <TextareaField form={form} label="Body" name="body" />
+      <FormError form={form} />
+      <SubmitButton form={form}>Create note</SubmitButton>
+    </Form>
+  );
+}
+`;
+
+const noteEditor = `import type { ReturnOf } from "@grasp-os/sdk";
+import { useForm } from "@grasp-os/sdk/react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
+import { useState } from "react";
+import { api } from "#grasp";
+
+export type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
+
+/**
+ * One note, edited with explicit Save: the draft keeps the revision it
+ * started from, and a save someone else's overtook keeps the draft until
+ * the person chooses to load the latest version.
+ */
+export function NoteEditor({ note }: { note: Note }) {
+  const form = useForm(api.notes.update, {
+    record: note,
+    fields: ["title", "body"],
+    args: (baseline) => ({ id: baseline._id, expectedRevision: baseline._rev }),
+  });
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <Form aria-label="Edit note" form={form}>
+      <TextField form={form} label="Title" name="title" />
+      <TextareaField form={form} label="Body" name="body" />
+      <FormError form={form} />
+      <div className="flex gap-2">
+        <SubmitButton form={form}>Save changes</SubmitButton>
+        <AlertDialog onOpenChange={setConfirming} open={confirming}>
+          <AlertDialogTrigger render={<Button variant="outline" />}>
+            Load the latest version
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Discard your changes?</AlertDialogTitle>
+              <AlertDialogDescription>
+                What you changed in this note and haven't saved is lost, and its latest version shows instead.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep editing</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  form.reload();
+                  setConfirming(false);
+                }}
+                variant="destructive"
+              >
+                Discard and load
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </Form>
+  );
+}
+`;
+
+const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+import type { Id } from "@grasp-os/sdk";
+import { Button } from "@grasp-os/ui/components/button";
+import { useState } from "react";
+import { api } from "#grasp";
+import { CreateNote } from "../components/create-note.tsx";
 import { ImportNote } from "../components/import-note.tsx";
+import { NoteEditor } from "../components/note-editor.tsx";
+
+/** The note chosen, loaded live; null is a note that is gone. */
+function SelectedNote({ id }: { id: Id<"notes"> }) {
+  const note = useQuery(api.notes.get, { id });
+  if (note === undefined) {
+    return <p role="status">Loading the note…</p>;
+  }
+  if (note === null) {
+    return <p>This note is gone.</p>;
+  }
+  // A note chosen anew is a new editor: its draft never carries over.
+  return <NoteEditor key={note._id} note={note} />;
+}
 
 export default function Notes() {
   const notes = useQuery(api.notes.list, { pagination: { pageSize: 50 } });
-  const create = useMutation(api.notes.create);
   const remove = useMutation(api.notes.remove);
-  const [title, setTitle] = useState("");
-
-  // The frame's sandbox submits no form, so the button (which Enter in the
-  // field clicks too) creates the note itself.
-  const submit = async (event: MouseEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    await create({ title });
-    setTitle("");
-  };
+  const [selected, setSelected] = useState<Id<"notes"> | null>(null);
 
   if (notes === undefined) {
     return <p role="status">Loading notes…</p>;
@@ -134,15 +229,7 @@ export default function Notes() {
   return (
     <main className="flex flex-col gap-6 p-6">
       <h1 className="text-2xl font-semibold">Notes</h1>
-      <form className="flex items-end gap-2">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="title">Title</Label>
-          <Input id="title" onChange={(event) => setTitle(event.target.value)} value={title} />
-        </div>
-        <Button onClick={(event) => void submit(event)} type="submit">
-          Create note
-        </Button>
-      </form>
+      <CreateNote />
       <ImportNote />
       {notes.items.length === 0 ? (
         <p>No notes yet.</p>
@@ -151,6 +238,9 @@ export default function Notes() {
           {notes.items.map((note) => (
             <li className="flex items-center gap-3" key={note._id}>
               <span>{note.title}</span>
+              <Button onClick={() => setSelected(note._id)} variant="outline">
+                Edit {note.title}
+              </Button>
               <Button
                 onClick={() => void remove({ id: note._id, expectedRevision: note._rev })}
                 variant="outline"
@@ -161,6 +251,7 @@ export default function Notes() {
           ))}
         </ul>
       )}
+      {selected === null ? null : <SelectedNote id={selected} />}
     </main>
   );
 }
@@ -200,5 +291,7 @@ export const notesAppFiles = (): Record<string, string> => ({
   "operations/notes.ts": operations,
   "app.ts": registration,
   "components/import-note.tsx": importNote,
+  "components/create-note.tsx": createNote,
+  "components/note-editor.tsx": noteEditor,
   "screens/notes.tsx": screen,
 });

@@ -61,6 +61,11 @@ const clientErrors = {
     message: "The arguments are larger than an operation accepts.",
     category: "contract",
   },
+  "contract.invalid_result": {
+    message:
+      "The save went through, but answered something other than the record it saved, so the form can't show the record as it is now.",
+    category: "contract",
+  },
   "contract.invalid_request": {
     message:
       "That isn't a public reference of this kind: use one from the App's generated api.",
