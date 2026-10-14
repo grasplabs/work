@@ -12,7 +12,12 @@ import type {
 import { NonRetryableError, namedError } from "../src/errors.ts";
 import type { RunNotification } from "../src/notifications.ts";
 import { WorkflowRun } from "../src/run.ts";
-import type { DeleteOutcome, StartCommand, StartOutcome } from "../src/run.ts";
+import type {
+  AttemptLease,
+  DeleteOutcome,
+  StartCommand,
+  StartOutcome,
+} from "../src/run.ts";
 import {
   busyFor,
   checkpoint,
@@ -24,6 +29,7 @@ import {
   hostNotifications,
   notifyFailures,
   notifyHangs,
+  readLease,
   undone,
   witness,
 } from "./outside.ts";
@@ -1067,6 +1073,44 @@ export const unstartablePrefix = "unstartable-";
 /** A run with an ID that starts with this fails to be deleted. */
 export const undeletablePrefix = "undeletable-";
 
+/**
+ * One step that reads its attempt's lease (`attemptLease`) as it starts,
+ * after the checkpoint "lease" the test may hold it at, and once the step
+ * has returned; it times out after the params' `duration`, with no retry.
+ */
+const leased = (
+  leaseOf: (key: string, attempt: number) => AttemptLease | undefined
+): WorkflowDefinition => ({
+  run: async (event, step) => {
+    const id = event.instanceId;
+    let attempt: WorkflowStepContext | undefined;
+    const read = (at: string, context: WorkflowStepContext): void => {
+      readLease(id, {
+        at,
+        lease: leaseOf(context.idempotencyKey, context.attempt),
+      });
+    };
+    await step.do(
+      "lease",
+      {
+        timeout: durationIn(event.payload, "10 minutes"),
+        retries: { limit: 0, delay: 0 },
+      },
+      async (context) => {
+        attempt = context;
+        read("started", context);
+        await checkpoint(id, "lease");
+        read("after the checkpoint", context);
+        return "done";
+      }
+    );
+    if (attempt !== undefined) {
+      read("returned", attempt);
+    }
+    return "done";
+  },
+});
+
 export class TestRuns extends WorkflowRun {
   protected override readonly maxStreamOutputBytes = testMaxStreamBytes;
   protected override readonly maxRunStreamBytes = testMaxRunStreamBytes;
@@ -1075,10 +1119,12 @@ export class TestRuns extends WorkflowRun {
   /** Few, so replays that never get the rollbacks back end soon. */
   protected override readonly rollbackReplays = testRollbackReplays;
 
-  // oxlint-disable-next-line class-methods-use-this -- the host's hook; this host needs nothing of its own
   protected definition({
     definition,
   }: DefinitionIdentity): WorkflowDefinition | undefined {
+    if (definition === "leased") {
+      return leased((key, attempt) => this.attemptLease(key, attempt));
+    }
     return definitions[definition] ?? resultDefinitions[definition];
   }
 

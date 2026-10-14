@@ -8,7 +8,6 @@ import type { stepOptionSchemas } from "../src/steps.ts";
 import {
   appExports,
   appServer,
-  model,
   money,
   person,
   schedule,
@@ -21,7 +20,6 @@ import type {
   DecisionOptions,
   DoOptions,
   LlmOptions,
-  Model,
   Person,
   SideEffectContext,
   SleepOptions,
@@ -37,7 +35,6 @@ import {
 const params = {
   threshold: money({ label: "Above", currency: "EUR", default: 500_000 }),
   reviewer: person({ label: "Reviewer", default: "team:finance" }),
-  extractionModel: model({ label: "Model", default: "mistral-large" }),
   reminder: template({ label: "Reminder", default: "invoice-reminder" }),
 };
 declare const step: StepRunner;
@@ -45,7 +42,7 @@ declare const context: WorkflowContext<typeof params, undefined>;
 const { params: p } = context;
 const llm = {
   description: "Extract",
-  model: p.extractionModel,
+  binding: "extractor",
   instructions: "Read the total.",
   input: "",
   schema: extractionSchema,
@@ -54,14 +51,13 @@ const llm = {
 // Parameters are typed by their kind.
 expectTypeOf(p.threshold).toExtend<number>();
 expectTypeOf(p.reviewer).toEqualTypeOf<Person>();
-expectTypeOf(p.extractionModel).toEqualTypeOf<Model>();
 expectTypeOf(context.runId).toEqualTypeOf<RunId>();
 expectTypeOf<string>().not.toExtend<Person>();
 
 // A parameter of the wrong kind doesn't compile.
-// @ts-expect-error -- a person isn't a model
-await step.llm("extract", { ...llm, model: p.reviewer });
-// @ts-expect-error -- models come from a model parameter, not a literal
+// @ts-expect-error -- a binding is named by its alias, a string
+await step.llm("extract", { ...llm, binding: 1 });
+// @ts-expect-error -- a model isn't named: its binding is
 await step.llm("extract", { ...llm, model: "mistral-large" });
 await step.decision("review", {
   description: "Review",

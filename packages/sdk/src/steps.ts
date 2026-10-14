@@ -1,6 +1,8 @@
 // What the runtime and the describer agree on about steps. Internal to the
 // SDK: neither workflow code nor the runtime imports this module.
 
+import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
+import { maxAttemptTimeoutMs } from "@grasp-os/shared/workflows";
 import type { StepKind } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
@@ -136,7 +138,14 @@ const retries = option(
     .optional(),
   "value"
 );
-const attemptTimeout = option(durationSchema.optional(), "value");
+/** How long one attempt of a step may run: up to 14 minutes. */
+const attemptTimeoutSchema = durationSchema.refine(
+  (milliseconds) => milliseconds <= maxAttemptTimeoutMs,
+  {
+    message: `A step attempt's timeout is at most ${maxAttemptTimeoutMs / 60_000} minutes, e.g. "10 minutes": a longer step is split into steps, or waits with step.sleep or a decision`,
+  }
+);
+const attemptTimeout = option(attemptTimeoutSchema.optional(), "value");
 const zodSchema = z.custom<z.ZodType>((value) => value instanceof z.ZodType);
 
 /**
@@ -163,7 +172,9 @@ export const stepOptionSchemas = {
     ),
   llm: z.strictObject({
     ...common,
-    model: option(paramValueSchemas.model, "param"),
+    // Written as a literal, so the review reads which binding each AI
+    // step goes through.
+    binding: option(z.string().regex(resourceAliasPattern), "literal"),
     instructions: option(text, "literal"),
     input: option(z.json(), "code"),
     schema: option(zodSchema, "code"),

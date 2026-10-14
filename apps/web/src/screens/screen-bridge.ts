@@ -1,5 +1,6 @@
 import type { ScreenBridge, Theme } from "@grasp-os/sdk/screen-runtime";
 import { requestErrors } from "@grasp-os/shared/errors";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   accountedTransport,
   rpcCopyNodeBounds,
@@ -42,11 +43,14 @@ import { RpcSession, RpcStub } from "capnweb";
  */
 export interface FrameTarget {
   call: (method: string, args: unknown[]) => Promise<unknown>;
+  callFunction: (request: string) => Promise<unknown>;
   report: (problem: ScreenProblem) => Promise<void>;
   startRun: (workflow: string, input: unknown) => Promise<unknown>;
   runs: (workflow: string) => Promise<unknown>;
   run: (run: string) => Promise<unknown>;
   decide: (run: string, decision: string, answer: unknown) => Promise<unknown>;
+  control: (run: string, kind: string) => Promise<unknown>;
+  summary: (run: string) => Promise<unknown>;
   watchRuns: (workflow: string, onChange: unknown) => Promise<unknown>;
 }
 
@@ -127,6 +131,22 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
     return await this.#target.call(method, args);
   }
 
+  /**
+   * Passes a function call's request on as the frame sent it: text, no
+   * longer than core reads of one (`functionRequestMaxBytes`, counted here
+   * in UTF-16 code units, which core then bounds again in bytes).
+   */
+  async callFunction(request: unknown): Promise<unknown> {
+    this.#request();
+    if (
+      typeof request !== "string" ||
+      request.length > functionRequestMaxBytes
+    ) {
+      throw screenErrors.create("screen.invalid");
+    }
+    return await this.#target.callFunction(request);
+  }
+
   async startRun(workflow: unknown, input: unknown): Promise<unknown> {
     this.#request();
     return await this.#target.startRun(text(workflow), input);
@@ -149,6 +169,16 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
   ): Promise<unknown> {
     this.#request();
     return await this.#target.decide(text(run), text(decision), answer);
+  }
+
+  async summary(run: unknown): Promise<unknown> {
+    this.#request();
+    return await this.#target.summary(text(run));
+  }
+
+  async control(run: unknown, kind: unknown): Promise<unknown> {
+    this.#request();
+    return await this.#target.control(text(run), text(kind));
   }
 
   /**

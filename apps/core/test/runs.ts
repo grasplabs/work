@@ -1,30 +1,45 @@
 /**
- * Workflow runs as tests drive them from outside: through Cloudflare
- * Workflows' own instance API, as a crash, a deploy or time passing would.
+ * Workflow runs as tests drive them from outside: through the engine's own
+ * run objects (Workerflow), as a crash, a deploy or time passing would.
  */
-import { introspectWorkflowInstance } from "cloudflare:test";
+import { runObjectName } from "@grasp-os/workerflow/identity";
+import { WorkflowInstance } from "@grasp-os/workerflow/instance";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
+import { runDefinition } from "../src/workflows/engine.ts";
 import { allEvents } from "./audit-events.ts";
+
+/** The ID of the run's object, as the engine names it (engine.ts). */
+export const runObjectId = (run: string): DurableObjectId =>
+  env.WORKFLOW_RUNS.idFromName(runObjectName(runDefinition, run));
+
+/** The run's object: by name, so `aroundEngine` leaves the test's calls be. */
+export const runObject = (run: string) =>
+  env.WORKFLOW_RUNS.getByName(runObjectName(runDefinition, run));
+
+/** The run, as the engine's instance API holds it. */
+export const runInstance = (run: string): WorkflowInstance =>
+  new WorkflowInstance(run, runObject(run));
 
 /** Where the engine has a run now. */
 export const liveStatus = async (run: string): Promise<string> => {
-  const instance = await env.WORKFLOWS.get(run);
-  const { status } = await instance.status();
+  const { status } = await runInstance(run).status();
   return status;
 };
 
 /**
- * Stops a run's execution, as a crash or a deploy does; resuming it runs
+ * Stops a run's activation, as a crash or a deploy does; resuming it runs
  * the workflow again from its start, loaded anew, finished steps replayed.
- * Workflows lets a run stop between steps, here while it waits.
+ * The engine lets a run stop at a safe boundary: between steps, or while
+ * it waits.
  */
 export const stopped = async (run: string): Promise<void> => {
-  const instance = await env.WORKFLOWS.get(run);
+  const instance = runInstance(run);
+  await instance.pause();
   await vi.waitFor(
     async () => {
-      await instance.pause();
       await expect(instance.status()).resolves.toMatchObject({
         status: "paused",
       });
@@ -35,17 +50,16 @@ export const stopped = async (run: string): Promise<void> => {
 
 /** Resumes a run `stopped` stopped. */
 export const resumed = async (run: string): Promise<void> => {
-  const instance = await env.WORKFLOWS.get(run);
-  await instance.resume();
+  await runInstance(run).resume();
 };
+
+const endedStatuses = new Set(["complete", "errored", "terminated"]);
 
 /** Once the run has ended, however it ended. */
 export const finished = async (run: string): Promise<void> => {
-  const instance = await env.WORKFLOWS.get(run);
   await vi.waitFor(
     async () => {
-      const { status } = await instance.status();
-      expect(["complete", "errored", "terminated"]).toContain(status);
+      expect(endedStatuses).toContain(await liveStatus(run));
     },
     { timeout: 20_000, interval: 200 }
   );
@@ -53,13 +67,12 @@ export const finished = async (run: string): Promise<void> => {
 
 /**
  * Once the engine reports that the run began its sleep `step`, from the
- * run's own event stream (Workflows' `subscribe`), which the engine
- * writes as the sleep begins. The local engine's status says `running`
- * while a run sleeps, so the status can't tell.
+ * run's own event stream, which the engine writes as the sleep begins.
  */
 export const sleeping = async (run: string, step: string): Promise<void> => {
-  const instance = await env.WORKFLOWS.get(run);
-  using events = await instance.subscribe({ filter: ["sleep_started"] });
+  using events = await runInstance(run).subscribe({
+    filter: ["sleep_started"],
+  });
   await vi.waitFor(
     async () => {
       const { done, value } = await events.next();
@@ -77,16 +90,15 @@ export const sleeping = async (run: string, step: string): Promise<void> => {
 
 /**
  * Once the run, `stopped` and `resumed`, began a sleep in a step whose
- * name starts with `step` in the resumed execution: as `sleeping`, but
+ * name starts with `step` in the resumed activation: as `sleeping`, but
  * only a sleep the engine reports after it resumed the run counts. The
- * resumed execution has then replayed every step before that sleep.
+ * resumed activation has then replayed every step before that sleep.
  */
 export const sleepingOnceResumed = async (
   run: string,
   step: string
 ): Promise<void> => {
-  const instance = await env.WORKFLOWS.get(run);
-  using events = await instance.subscribe({
+  using events = await runInstance(run).subscribe({
     filter: ["workflow_paused", "workflow_running", "sleep_started"],
   });
   let paused = false;
@@ -113,26 +125,136 @@ export const sleepingOnceResumed = async (
   );
 };
 
+/** Where a run stands with its sleep `step`, as its journal has it. */
+type SleepState = "ended" | "passed" | "asleep" | "not_yet";
+
 /**
  * Ends the run's sleep `step` now, as its time passing would: a workflow
  * under test sleeps a day where the test acts on it while it is live, and
- * this lets it go on. The local engine skips a sleep only when an
- * execution comes to it, so the run is stopped once it sleeps there (as
- * it is, when a test stopped it already), told to skip the sleep, and
- * resumed: the new execution replays the steps before it, and passes it.
+ * this lets it go on. The sleep's deadline, as the engine journaled it, is
+ * moved to now, and the run's alarm with it: the next activation replays
+ * the steps before it, and passes it. A run a test stopped is resumed,
+ * its sleep due as it resumes; one that never gets to the sleep (it fails
+ * as it loads, say) is left to end.
  */
 export const woken = async (run: string, step = "go"): Promise<void> => {
-  if ((await liveStatus(run)) !== "paused") {
-    await sleeping(run, step);
-    await stopped(run);
+  const object = runObject(run);
+  if ((await liveStatus(run)) === "paused") {
+    // Resuming moves each deadline on by the time the run was paused: one
+    // set to when it paused comes due as it resumes.
+    await runInDurableObject(object, (_object, state) => {
+      state.storage.sql.exec(
+        "UPDATE steps SET deadline = (SELECT paused_at FROM run) WHERE type = 'sleep' AND state = 'waiting' AND name = ?",
+        step
+      );
+    });
+    await resumed(run);
   }
-  // Not disposed: disposing deletes the run's instance.
-  const instance = await introspectWorkflowInstance(env.WORKFLOWS, run);
-  await instance.modify(async (modifier) => {
-    await modifier.disableSleeps([{ name: step }]);
-  });
-  await resumed(run);
+  await vi.waitFor(
+    async () => {
+      const found = await runInDurableObject(
+        object,
+        async (_object, state): Promise<SleepState> => {
+          const { sql } = state.storage;
+          const [current] = sql
+            .exec<{ status: string }>("SELECT status FROM run")
+            .toArray();
+          if (current === undefined || endedStatuses.has(current.status)) {
+            return "ended";
+          }
+          const [sleep] = sql
+            .exec<{ state: string; deadline: number | null }>(
+              "SELECT state, deadline FROM steps WHERE type = 'sleep' AND name = ?",
+              step
+            )
+            .toArray();
+          if (sleep?.state === "succeeded") {
+            return "passed";
+          }
+          if (sleep?.state !== "waiting" || current.status !== "waiting") {
+            return "not_yet";
+          }
+          const now = Date.now();
+          sql.exec(
+            "UPDATE steps SET deadline = ? WHERE type = 'sleep' AND state = 'waiting' AND name = ?",
+            now,
+            step
+          );
+          sql.exec("UPDATE run SET wake_at = ?", now);
+          await state.storage.setAlarm(now);
+          return "asleep";
+        }
+      );
+      expect(found).not.toBe("not_yet");
+    },
+    { timeout: 10_000, interval: 100 }
+  );
 };
+
+/**
+ * Runs `run` with every call core makes on a run object going through
+ * `around`, which makes it (`call`) or doesn't: the engine as a slow or
+ * failing outside system would be. Calls through the test's own
+ * `runObject` go straight to the run.
+ */
+export const aroundEngine = async <T>(
+  around: (
+    method: string,
+    call: () => Promise<unknown>,
+    object: DurableObjectId
+  ) => Promise<unknown>,
+  run: () => Promise<T>
+): Promise<T> => {
+  const namespace = env.WORKFLOW_RUNS;
+  const get = namespace.get.bind(namespace);
+  const intercepted = vi
+    .spyOn(namespace, "get")
+    .mockImplementation((id, options) => {
+      const stub = get(id, options);
+      return new Proxy(stub, {
+        get: (target, property) => {
+          const value: unknown = Reflect.get(target, property);
+          if (typeof value !== "function" || typeof property !== "string") {
+            return value;
+          }
+          return async (...args: unknown[]): Promise<unknown> =>
+            await around(
+              property,
+              async (): Promise<unknown> => {
+                const result: unknown = await Reflect.apply(
+                  value,
+                  target,
+                  args
+                );
+                return result;
+              },
+              id
+            );
+        },
+      });
+    });
+  try {
+    return await run();
+  } finally {
+    intercepted.mockRestore();
+  }
+};
+
+/**
+ * Runs `run` while the engine fails each call `refused` names on a run
+ * object, as when its storage is down: the call rejects, and nothing of
+ * it reaches the run.
+ */
+export const whileEngineRefuses = async <T>(
+  refused: (method: string) => boolean,
+  run: () => Promise<T>
+): Promise<T> =>
+  await aroundEngine(async (method, call) => {
+    if (refused(method)) {
+      throw new Error("The engine is unavailable");
+    }
+    return await call();
+  }, run);
 
 /** Once the run's step `step` has completed, as the audit log has it. */
 export const stepDone = async (run: string, step: string): Promise<void> => {
@@ -152,8 +274,6 @@ export const stepDone = async (run: string, step: string): Promise<void> => {
   );
 };
 
-const endedStatuses = new Set(["complete", "errored", "terminated"]);
-
 /** Runs `endLiveRuns` has ended or found ended; it skips them after. */
 const seenEnded = new Set<string>();
 
@@ -166,38 +286,22 @@ const seenEnded = new Set<string>();
  * CI (see apps/core/vite.config.ts), so each test ends its runs.
  */
 export const endLiveRuns = async (): Promise<void> => {
-  const { results } = await env.DB.prepare("SELECT id FROM workflow_runs").all<{
-    id: string;
-  }>();
+  // Only rows that may still have a live run: one that ended otherwise
+  // (completed or failed) ended in the engine first. A cancelled one may
+  // have a live run left, whose termination failed.
+  const { results } = await env.DB.prepare(
+    "SELECT id FROM workflow_runs WHERE status IN ('starting', 'running', 'paused', 'cancelled')"
+  ).all<{ id: string }>();
   await Promise.all(
     results
       .filter(({ id }) => !seenEnded.has(id))
       .map(async ({ id }) => {
-        // A row whose run never started has no instance; any other
-        // failure is the test's to see.
-        const instance = await env.WORKFLOWS.get(id).catch((error: unknown) => {
-          if (
-            error instanceof Error &&
-            error.message === "instance.not_found"
-          ) {
-            return null;
-          }
-          throw error;
-        });
-        if (instance) {
-          const { status } = await instance.status();
-          if (!endedStatuses.has(status)) {
-            await instance.terminate().catch(async (error: unknown) => {
-              // It ended on its own between the two calls (a run that just
-              // failed, say, whose row the test already saw): the engine
-              // refuses to terminate an ended instance. Anything else, or
-              // an instance still live, is the test's to see.
-              const now = await instance.status();
-              if (!endedStatuses.has(now.status)) {
-                throw error;
-              }
-            });
-          }
+        // A row whose run never started has no run object: its status is
+        // none, and terminating it does nothing. Terminating a run that
+        // ended meanwhile does nothing either.
+        const status = await runObject(id).status();
+        if (status !== undefined && !endedStatuses.has(status.status)) {
+          await runObject(id).terminate({ rollback: false });
         }
         seenEnded.add(id);
       })

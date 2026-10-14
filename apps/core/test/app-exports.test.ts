@@ -83,7 +83,7 @@ describe("another App's exports", () => {
     ).resolves.toStrictEqual([true, true, false]);
   });
 
-  it("are never asked for the App itself, for an agent, or with an action that isn't one", async () => {
+  it("are never asked for the App itself, for an agent by an export's name, or with an action that isn't one", async () => {
     const admin = await personApi("admin");
     const [app, other] = await Promise.all([
       newApp(admin),
@@ -92,8 +92,10 @@ describe("another App's exports", () => {
     const refused = await Promise.all(
       [
         exportsOf(app, app),
+        // An agent calls an App's functions with read or write
+        // (agent-apps.ts), never by an export's name.
         {
-          ...exportsOf(app, other),
+          ...exportsOf(app, other, ["findCustomers"]),
           subject: { type: "agent" as const, agentId: `agent-${unique()}` },
         },
         exportsOf(app, other, ["FindCustomers"]),
@@ -113,6 +115,19 @@ describe("another App's exports", () => {
       // As for any App the person has no role in.
       "app.not_found",
     ]);
+    // What an agent may be given: read and write on the App's functions.
+    const agentId = `agent-${unique()}`;
+    await expect(
+      admin.api.permissions.request({
+        ...exportsOf(app, other, ["read", "write"]),
+        subject: { type: "agent", agentId },
+      })
+    ).resolves.toMatchObject({
+      subject: { type: "agent", agentId },
+      object: { type: "app", appId: other },
+      actions: ["read", "write"],
+      status: "requested",
+    });
   });
 
   it("are asked for again when a builder makes a new version current, but for reading", async () => {

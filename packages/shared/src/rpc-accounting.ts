@@ -815,17 +815,33 @@ export interface TextRpcTransport {
 export const accountedTransport = (
   inner: TextRpcTransport,
   limits: RpcAccountingLimits,
-  onRefused: (refusal: AccountingRefusal) => Error,
+  /**
+   * Makes the error that ends the session, for the bound passed, and
+   * which way: a message the peer sent, or one of ours.
+   */
+  onRefused: (
+    refusal: AccountingRefusal,
+    direction: "received" | "sent"
+  ) => Error,
   pool?: HeldPool
 ): {
   encodingLevel: "jsonCompatible";
   send: (message: unknown) => void;
   receive: () => Promise<unknown>;
   abort: (reason: unknown) => void;
+  /** Tests only: how many receives a refusal of ours would end now (0 or 1). */
+  endable: () => number;
 } => {
   const { account, recordSent, dispose } = messageAccountant(limits, pool);
+  // Once one of our own messages was refused the session is over, so the
+  // receive waiting on the peer ends too, and with it every call still
+  // waiting for an answer, rather than waiting on a socket we closed. Only
+  // the receive waiting now holds a way to be ended, cleared as it settles:
+  // nothing is left behind by the receives before it.
+  let refusedWith: Error | undefined;
+  let endReceive: ((error: Error) => void) | undefined;
   const refuse = (refusal: AccountingRefusal): never => {
-    const error = onRefused(refusal);
+    const error = onRefused(refusal, "received");
     dispose();
     inner.abort?.(error);
     throw error;
@@ -837,9 +853,11 @@ export const accountedTransport = (
       if (refusal !== undefined) {
         // Our answer would hold more than this session or the isolate may:
         // end the session instead of sending it.
-        const error = onRefused(refusal);
+        const error = onRefused(refusal, "sent");
         dispose();
         inner.abort?.(error);
+        refusedWith ??= error;
+        endReceive?.(error);
         return;
       }
       // Cap'n Web's custom-encoding transport sends synchronously; our inner
@@ -848,12 +866,20 @@ export const accountedTransport = (
     },
     receive: async (): Promise<unknown> => {
       let raw: unknown;
+      const ending = Promise.withResolvers<never>();
+      endReceive = ending.reject;
       try {
-        raw = await inner.receive();
+        if (refusedWith !== undefined) {
+          throw refusedWith;
+        }
+        raw = await Promise.race([inner.receive(), ending.promise]);
       } catch (error) {
-        // The other side closed, or the transport failed: the session ends.
+        // The other side closed, the transport failed, or one of our own
+        // messages was refused: the session ends.
         dispose();
         throw error;
+      } finally {
+        endReceive = undefined;
       }
       if (typeof raw !== "string") {
         return refuse("non-text");
@@ -881,6 +907,7 @@ export const accountedTransport = (
       }
       return parsed;
     },
+    endable: (): number => (endReceive === undefined ? 0 : 1),
     abort: (reason) => {
       dispose();
       inner.abort?.(reason);

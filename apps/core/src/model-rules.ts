@@ -173,6 +173,7 @@ export interface Refusal {
     | "model.run_limit"
     | "model.budget_busy"
     | "model.unpriced"
+    | "model.answer_too_long"
     | "model.ledger_unavailable"
     | "permission.context_invalid";
   because?: string;

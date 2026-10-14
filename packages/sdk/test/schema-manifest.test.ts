@@ -679,6 +679,36 @@ describe("reading a manifest", () => {
 });
 
 describe("references", () => {
+  test("a record ID's delete policy is part of the manifest, restrict left out as the default", async () => {
+    const withPolicy = (onDelete?: "restrict" | "cascade") =>
+      manifestOf(
+        defineSchema({
+          people: defineTable({ name: v.string() }),
+          notes: defineTable({
+            author: v.id("people", onDelete && { onDelete }).optional(),
+          }),
+        }),
+        {}
+      );
+    const unsaid = await schemaHash(withPolicy());
+    await expect(schemaHash(withPolicy("restrict"))).resolves.toBe(unsaid);
+    const cascade = withPolicy("cascade");
+    await expect(schemaHash(cascade)).resolves.not.toBe(unsaid);
+    const read = readSchemaManifest(manifestText(cascade));
+    expect(read.manifest.tables.notes?.fields.author).toMatchObject({
+      kind: "id",
+      tableName: "people",
+      onDelete: "cascade",
+      presence: "optional",
+    });
+    expect(
+      Reflect.has(
+        withPolicy("restrict").tables.notes?.fields.author ?? {},
+        "onDelete"
+      )
+    ).toBeFalsy();
+  });
+
   test("every record ID a table declares, with where it is and what it names", () => {
     const schema = defineSchema({
       people: defineTable({

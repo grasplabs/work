@@ -58,6 +58,10 @@ msgstr "{about} cost {cost} a run in model calls, over {runs, plural, one {# run
 msgid "{about} has {open, plural, one {# decision open} other {# decisions open}}; the oldest has waited {waited}."
 msgstr "{about} has {open, plural, one {# decision open} other {# decisions open}}; the oldest has waited {waited}."
 
+#: src/engines/resource-bindings.tsx
+msgid "{account} on {provider}"
+msgstr "{account} on {provider}"
+
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as Grasp sees it} builtIn {AI built in, as Grasp sees it} other {No AI, as Grasp sees it}}"
 msgstr "{ai, select, tool {An AI tool, as Grasp sees it} builtIn {AI built in, as Grasp sees it} other {No AI, as Grasp sees it}}"
@@ -65,6 +69,10 @@ msgstr "{ai, select, tool {An AI tool, as Grasp sees it} builtIn {AI built in, a
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
+
+#: src/engines/resource-bindings.tsx
+msgid "{alertAt} of a cap"
+msgstr "{alertAt} of a cap"
 
 #: src/brain/brain-atlas.ts
 msgid "{answered} answered"
@@ -86,9 +94,21 @@ msgstr "{app} needs someone to sign in again"
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Version {version}"
 
+#: src/engines/package-approvals.tsx
+msgid "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
+msgstr "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
+
 #: src/routes/_shell.engines.index.tsx
 msgid "{apps, plural, one {# app} other {# apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
+msgstr "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
+msgstr "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{asked, plural, one {# question is still open, each with who can answer it.} other {# questions are still open, each with who can answer it.}}"
@@ -117,6 +137,10 @@ msgstr "{category} by {vendor}"
 #: src/brain/brain.ts
 msgid "{category} by {vendor}, with AI built in"
 msgstr "{category} by {vendor}, with AI built in"
+
+#: src/engines/resource-bindings.tsx
+msgid "{collection}: {name}"
+msgstr "{collection}: {name}"
 
 #: src/chat/held-writes.tsx
 msgid "{connection} ({tool})"
@@ -242,6 +266,10 @@ msgstr "{count, plural, one {The board set # goal for the sprint.} other {The bo
 msgid "{count} or more files"
 msgstr "{count} or more files"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{daily} a day"
+msgstr "{daily} a day"
+
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# day} other {# days}}"
@@ -290,6 +318,10 @@ msgstr "{engine} may use exactly these packages from now on."
 msgid "{engine}: run of {workflowId}"
 msgstr "{engine}: run of {workflowId}"
 
+#: src/engines/store-changes.tsx
+msgid "{engineName}, version {version}"
+msgstr "{engineName}, version {version}"
+
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -301,6 +333,14 @@ msgstr "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "{fileName}, brought in on {when}. Bring it in again to read it again."
 msgstr "{fileName}, brought in on {when}. Bring it in again to read it again."
+
+#: src/chat/builds-state.ts
+msgid "{fixtures, plural, one {It passed its # fixture when the version was sealed} other {It passed all # of its fixtures when the version was sealed}}"
+msgstr "{fixtures, plural, one {It passed its # fixture when the version was sealed} other {It passed all # of its fixtures when the version was sealed}}"
+
+#: src/chat/builds-state.ts
+msgid "{fixtures, plural, one {It runs on its # fixture when the version is sealed, before any record} other {It runs on its # fixtures when the version is sealed, before any record}}"
+msgstr "{fixtures, plural, one {It runs on its # fixture when the version is sealed, before any record} other {It runs on its # fixtures when the version is sealed, before any record}}"
 
 #: src/knowledge/timeline.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
@@ -388,7 +428,12 @@ msgstr "{link} in {appName} failed {failures, plural, one {once} other {# times}
 msgid "{minutes}m {rest}s"
 msgstr "{minutes}m {rest}s"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{monthly} a month"
+msgstr "{monthly} a month"
+
 #: src/dashboard/dependency-requests.tsx
+#: src/engines/package-approvals.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 msgstr "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 
@@ -544,6 +589,10 @@ msgstr "{place} of {count}"
 msgid "{points} of {weight}"
 msgstr "{points} of {weight}"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{request} a request"
+msgstr "{request} a request"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -616,6 +665,10 @@ msgstr "{sources, plural, one {Time-consuming work that could be automated, rais
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source, by no team yet.} other {Time-consuming work that could be automated, raised in # sources, by no team yet.}}"
 msgstr "{sources, plural, one {Time-consuming work that could be automated, raised in # source, by no team yet.} other {Time-consuming work that could be automated, raised in # sources, by no team yet.}}"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{spent} of {limit}"
+msgstr "{spent} of {limit}"
 
 #: src/brain/brain.ts
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
@@ -788,6 +841,26 @@ msgstr "A .txt, .vtt, .srt or .docx file, or pasted text."
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 
+#: src/workflows/history-view.tsx
+msgid "A change by {label} waits for approval by the person the run acts for"
+msgstr "A change by {label} waits for approval by the person the run acts for"
+
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} can't be applied"
+msgstr "A change to the store {name} can't be applied"
+
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} is being applied"
+msgstr "A change to the store {name} is being applied"
+
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} is ready"
+msgstr "A change to the store {name} is ready"
+
+#: src/workflows/history-view.tsx
+msgid "A change waits for approval by the person the run acts for"
+msgstr "A change waits for approval by the person the run acts for"
+
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
 msgstr "A connection needs signing in again"
@@ -795,6 +868,14 @@ msgstr "A connection needs signing in again"
 #: src/activity/audit-words.ts
 msgid "A connection refused to say what changed"
 msgstr "A connection refused to say what changed"
+
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
+msgstr "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
+
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
+msgstr "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
 
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
@@ -828,9 +909,17 @@ msgstr "A model budget reached its alert or ran out"
 msgid "A model call was refused"
 msgstr "A model call was refused"
 
+#: src/engines/resource-bindings.tsx
+msgid "A new template"
+msgstr "A new template"
+
 #: src/screens/screen-frame.tsx
 msgid "A new version of this engine is available."
 msgstr "A new version of this engine is available."
+
+#: src/engines/store-change-errors.ts
+msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
+msgstr "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
 
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
@@ -843,6 +932,22 @@ msgstr "A run of a workflow waits for this answer."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
+
+#: src/workflows/history-view.tsx
+msgid "A step"
+msgstr "A step"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon the change"
+msgstr "Abandon the change"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change"
+msgstr "Abandon this change"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change?"
+msgstr "Abandon this change?"
 
 #: src/brain/brain.ts
 msgctxt "note property: what a note is about"
@@ -870,6 +975,11 @@ msgstr "Account"
 #: src/activity/audit-log.tsx
 msgid "Action"
 msgstr "Action"
+
+#: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
+msgid "Actions"
+msgstr "Actions"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Actions for {who}"
@@ -947,6 +1057,10 @@ msgstr "Added workflow"
 msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Added: it acts for whoever uses the engine, with everything the engine holds"
 
+#: src/chat/builds.tsx
+msgid "Added: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Added: it reads and rewrites every record of {table}, whoever owns it"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Adjusted in"
@@ -963,6 +1077,10 @@ msgstr "Admin"
 #: src/knowledge/collection-markers.tsx
 msgid "Admins"
 msgstr "Admins"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Admins alerted at {alertAt}"
+msgstr "Admins alerted at {alertAt}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
@@ -1004,6 +1122,18 @@ msgstr "AI"
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "AI spend"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Alert"
+msgstr "Alert"
+
+#: src/engines/resource-bindings.tsx
+msgid "Alert admins at, in percent of a day's or month's cap"
+msgstr "Alert admins at, in percent of a day's or month's cap"
+
+#: src/engines/resource-bindings.tsx
+msgid "Alert at"
+msgstr "Alert at"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
@@ -1050,6 +1180,18 @@ msgstr "Already decided: {model}"
 #: src/connections/connection-list.tsx
 msgid "An admin"
 msgstr "An admin"
+
+#: src/engines/store-change-errors.ts
+msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
+msgstr "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
+
+#: src/engines/store-change-errors.ts
+msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
+msgstr "An admin can see the record that holds it back, and abandon the change, on the engine's page."
+
+#: src/engines/store-change-errors.ts
+msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
+msgstr "An admin can see what went wrong, and abandon the change, on the engine's page."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
@@ -1184,6 +1326,7 @@ msgid "Approve the packages for {engine}"
 msgstr "Approve the packages for {engine}"
 
 #: src/dashboard/runs-widget.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 msgid "Approved"
 msgstr "Approved"
@@ -1192,11 +1335,16 @@ msgstr "Approved"
 msgid "Approved an app's code"
 msgstr "Approved an app's code"
 
+#: src/engines/package-approvals.tsx
+msgid "Approved by {decidedBy}, {decidedAt}"
+msgstr "Approved by {decidedBy}, {decidedAt}"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Approved by {name} on {date}."
 
 #: src/activity/audit-words.ts
+#: src/engines/package-approvals.tsx
 msgid "Approved packages"
 msgstr "Approved packages"
 
@@ -1315,6 +1463,10 @@ msgstr "At {step}: {error}"
 msgid "At work"
 msgstr "At work"
 
+#: src/workflows/history-view.tsx
+msgid "Attempt {n}"
+msgstr "Attempt {n}"
+
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Audit trail"
@@ -1361,6 +1513,10 @@ msgstr "Before"
 msgid "Being built"
 msgstr "Being built"
 
+#: src/engines/resource-bindings.tsx
+msgid "Bind {alias}"
+msgstr "Bind {alias}"
+
 #: src/brain/brain.ts
 msgid "Blocker"
 msgstr "Blocker"
@@ -1368,6 +1524,14 @@ msgstr "Blocker"
 #: src/brain/brain.ts
 msgid "Blockers"
 msgstr "Blockers"
+
+#: src/engines/resource-bindings.tsx
+msgid "Bound"
+msgstr "Bound"
+
+#: src/engines/resource-bindings.tsx
+msgid "Bound to"
+msgstr "Bound to"
 
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
@@ -1381,6 +1545,10 @@ msgstr "Browse"
 msgctxt "where a package runs"
 msgid "Browser"
 msgstr "Browser"
+
+#: src/engines/resource-bindings.tsx
+msgid "Budget (optional)"
+msgstr "Budget (optional)"
 
 #: src/brain/brain.ts
 msgid "Budget for AI set"
@@ -1439,6 +1607,7 @@ msgstr "Came in"
 msgid "Came up in {source}"
 msgstr "Came up in {source}"
 
+#: src/engines/package-approvals.tsx
 #: src/knowledge/document.tsx
 msgid "Cancel"
 msgstr "Cancel"
@@ -1446,6 +1615,23 @@ msgstr "Cancel"
 #: src/workflows/runs.tsx
 msgid "Cancelled"
 msgstr "Cancelled"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Cancelled"
+msgstr "Cancelled"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Cap reached"
+msgstr "Cap reached"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps"
+msgstr "Caps"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
+msgstr "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -1539,6 +1725,10 @@ msgstr "Changed workflow"
 msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Changed: it acts for whoever uses the engine, with everything the engine holds"
 
+#: src/chat/builds.tsx
+msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Changed: it reads and rewrites every record of {table}, whoever owns it"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
 msgstr "Changes"
@@ -1554,6 +1744,10 @@ msgstr "changes the engine's data"
 #: src/chat/builds.tsx
 msgid "Changes the engine's data"
 msgstr "Changes the engine's data"
+
+#: src/engines/store-changes.tsx
+msgid "Changes to the engine's stores"
+msgstr "Changes to the engine's stores"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
@@ -1591,6 +1785,10 @@ msgstr "Chats with Grasp"
 msgid "Checked the audit trail's chain"
 msgstr "Checked the audit trail's chain"
 
+#: src/engines/resource-bindings.tsx
+msgid "Choose a collection"
+msgstr "Choose a collection"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Choose a file"
@@ -1603,6 +1801,9 @@ msgstr "Clear"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
+#: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -1637,10 +1838,15 @@ msgstr "Collection"
 msgid "Collection {collectionId}"
 msgstr "Collection {collectionId}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Collection for {collection}"
+msgstr "Collection for {collection}"
+
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection not found"
 msgstr "Collection not found"
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
 msgstr "Collections"
@@ -1671,6 +1877,16 @@ msgstr "Compared with version {current}, which runs now."
 
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx
+msgid "Completed"
+msgstr "Completed"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Completed"
+msgstr "Completed"
+
+#: src/workflows/history-view.tsx
+msgctxt "an attempt of a step"
 msgid "Completed"
 msgstr "Completed"
 
@@ -1769,12 +1985,17 @@ msgstr "Connected."
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "Connecting didn't work. Try again, or ask an admin."
 
+#: src/engines/resource-bindings.tsx
+msgid "Connection"
+msgstr "Connection"
+
 #: src/dashboard/to-do.tsx
 msgctxt "kind of thing that waits"
 msgid "Connection"
 msgstr "Connection"
 
 #: src/activity/pending.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Connection {connectionId}"
 msgstr "Connection {connectionId}"
 
@@ -1805,6 +2026,14 @@ msgstr "Consent and connect"
 #: src/connections/connect-dialog.tsx
 msgid "Consent and sign in"
 msgstr "Consent and sign in"
+
+#: src/engines/resource-bindings.tsx
+msgid "Content, as JSON"
+msgstr "Content, as JSON"
+
+#: src/engines/resource-bindings.tsx
+msgid "Contract"
+msgstr "Contract"
 
 #. Folder of the sources that are conversations: the vision talk and the interviews by voice or chat
 #: src/brain/brain.ts
@@ -2130,10 +2359,15 @@ msgstr "Employee interviews"
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Engine"
 msgstr "Engine"
+
+#: src/engines/store-changes.tsx
+msgid "engine {app}, version {version}"
+msgstr "engine {app}, version {version}"
 
 #: src/connections/connection-list.tsx
 msgid "Engine {engine}"
@@ -2142,6 +2376,10 @@ msgstr "Engine {engine}"
 #: src/screens/screen-frame.tsx
 msgid "Engine app"
 msgstr "Engine app"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Engine budgets"
+msgstr "Engine budgets"
 
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
@@ -2173,6 +2411,14 @@ msgstr "Enough is known: it is past {threshold}%. The company comes in the momen
 msgid "Enter a number."
 msgstr "Enter a number."
 
+#: src/engines/resource-bindings.tsx
+msgid "Enter a whole percent from 1 to 99."
+msgstr "Enter a whole percent from 1 to 99."
+
+#: src/engines/resource-bindings.tsx
+msgid "Enter an amount in US dollars from {least} to {most}, such as 2.50."
+msgstr "Enter an amount in US dollars from {least} to {most}, such as 2.50."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter an amount, such as 12.50."
 msgstr "Enter an amount, such as 12.50."
@@ -2180,6 +2426,10 @@ msgstr "Enter an amount, such as 12.50."
 #: src/activity/audit-log.tsx
 msgid "Entries"
 msgstr "Entries"
+
+#: src/workflows/history-view.tsx
+msgid "Entry {sequence} can't be read."
+msgstr "Entry {sequence} can't be read."
 
 #: src/chat/thread.tsx
 msgid "Error"
@@ -2302,9 +2552,23 @@ msgstr "Extracting"
 msgid "Failed"
 msgstr "Failed"
 
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Failed"
+msgstr "Failed"
+
+#: src/workflows/history-view.tsx
+msgctxt "an attempt of a step"
+msgid "Failed"
+msgstr "Failed"
+
 #: src/dashboard/failed-workflows.tsx
 msgid "Failed while acting for you"
 msgstr "Failed while acting for you"
+
+#: src/workflows/history-view.tsx
+msgid "Failed, tried again"
+msgstr "Failed, tried again"
 
 #: src/dashboard/report.ts
 msgid "Failed: {failed}"
@@ -2318,6 +2582,14 @@ msgstr "File"
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Files"
 msgstr "Files"
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
+msgstr "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new fields stopped making progress, and trying again didn't help."
+msgstr "Filling in the new fields stopped making progress, and trying again didn't help."
 
 #: src/activity/audit-log.tsx
 msgid "Filter"
@@ -2643,6 +2915,7 @@ msgctxt "note property: the drawn version of this workflow on the Workflows page
 msgid "In Workflows"
 msgstr "In Workflows"
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration"
 msgstr "Integration"
@@ -2694,9 +2967,21 @@ msgstr "Invited a guest"
 msgid "Invited for step 2"
 msgstr "Invited for step 2"
 
+#: src/engines/store-change-errors.ts
+msgid "it answered something that isn't its records"
+msgstr "it answered something that isn't its records"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
 msgstr "It counts against the budgets as spent: the most it could have cost. This can't be undone."
+
+#: src/engines/store-change-errors.ts
+msgid "it didn't pass"
+msgstr "it didn't pass"
+
+#: src/chat/builds-state.ts
+msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
+msgstr "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
@@ -2770,6 +3055,14 @@ msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the orga
 msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
 msgstr "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
 
+#: src/engines/resource-bindings.tsx
+msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
+msgstr "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Its budget can't be read, so it serves nothing."
+msgstr "Its budget can't be read, so it serves nothing."
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "Its contents couldn't be read."
@@ -2777,6 +3070,30 @@ msgstr "Its contents couldn't be read."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
+
+#: src/engines/store-changes.tsx
+msgid "Its migration has transformed every record. It takes over when a release that needs it is made current; until then the current release goes on using the store as before."
+msgstr "Its migration has transformed every record. It takes over when a release that needs it is made current; until then the current release goes on using the store as before."
+
+#: src/chat/builds.tsx
+msgid "Its migrations can't be read: it may rewrite the records of any table"
+msgstr "Its migrations can't be read: it may rewrite the records of any table"
+
+#: src/engines/store-changes.tsx
+msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
+msgstr "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
+
+#: src/engines/store-change-errors.ts
+msgid "its output doesn't fit the table"
+msgstr "its output doesn't fit the table"
+
+#: src/engines/store-change-errors.ts
+msgid "its output is larger than a record may be"
+msgstr "its output is larger than a record may be"
+
+#: src/engines/store-change-errors.ts
+msgid "its output isn't what the fixture expects"
+msgstr "its output isn't what the fixture expects"
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -2824,6 +3141,11 @@ msgctxt "onboarding stage"
 msgid "Kickoff"
 msgstr "Kickoff"
 
+#: src/engines/resource-bindings.tsx
+msgid "Kind"
+msgstr "Kind"
+
+#: src/engines/resource-bindings.tsx
 #: src/frame/app-sidebar.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
@@ -2926,6 +3248,10 @@ msgstr "Links to"
 msgid "Live, being measured"
 msgstr "Live, being measured"
 
+#: src/workflows/history-view.tsx
+msgid "Load more"
+msgstr "Load more"
+
 #: src/activity/audit-log.tsx
 msgid "Load older"
 msgstr "Load older"
@@ -2942,6 +3268,7 @@ msgstr "Load the server code again"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
+#: src/workflows/history-view.tsx
 msgid "Loading…"
 msgstr "Loading…"
 
@@ -3027,6 +3354,11 @@ msgstr "Messages"
 msgid "Microsoft sign-in"
 msgstr "Microsoft sign-in"
 
+#: src/chat/builds.tsx
+msgid "Migrations"
+msgstr "Migrations"
+
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
 msgstr "Model"
@@ -3155,6 +3487,10 @@ msgstr "New since the last approval: {added}"
 msgid "New: failed while acting for you"
 msgstr "New: failed while acting for you"
 
+#: src/workflows/triggers.tsx
+msgid "Next run: {next}"
+msgstr "Next run: {next}"
+
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.engines.index.tsx
 msgid "No apps yet"
@@ -3168,9 +3504,17 @@ msgstr "No budget is set: model calls aren't limited by cost."
 msgid "No call has to stay in the EU."
 msgstr "No call has to stay in the EU."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "No caps of its own"
+msgstr "No caps of its own"
+
 #: src/brain/brain.ts
 msgid "No connector yet"
 msgstr "No connector yet"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "No engine has a model bound to it."
+msgstr "No engine has a model bound to it."
 
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.engines.index.tsx
@@ -3202,6 +3546,10 @@ msgstr "No files yet."
 msgid "No integrations match your search."
 msgstr "No integrations match your search."
 
+#: src/engines/resource-bindings.tsx
+msgid "No longer declared"
+msgstr "No longer declared"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "No longer held: {model}"
 msgstr "No longer held: {model}"
@@ -3223,6 +3571,14 @@ msgstr "No memory files are written yet."
 msgid "No model is set up for this deployment yet."
 msgstr "No model is set up for this deployment yet."
 
+#: src/workflows/triggers.tsx
+msgid "No next run"
+msgstr "No next run"
+
+#: src/engines/package-approvals.tsx
+msgid "No packages are approved for this engine."
+msgstr "No packages are approved for this engine."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this engine before."
 msgstr "No packages were approved for this engine before."
@@ -3230,6 +3586,10 @@ msgstr "No packages were approved for this engine before."
 #: src/chat/builds.tsx
 msgid "No permissions."
 msgstr "No permissions."
+
+#: src/engines/store-change-errors.ts
+msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
+msgstr "No record is to blame, so an admin can only abandon the change, on the engine's page."
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -3333,6 +3693,10 @@ msgstr "None current"
 msgid "none now"
 msgstr "none now"
 
+#: src/engines/resource-bindings.tsx
+msgid "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
+msgstr "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "None stated"
 msgstr "None stated"
@@ -3362,6 +3726,14 @@ msgstr "Not answered yet"
 msgid "Not approved"
 msgstr "Not approved"
 
+#: src/engines/resource-bindings.tsx
+msgid "Not bound"
+msgstr "Not bound"
+
+#: src/engines/resource-bindings.tsx
+msgid "Not checked"
+msgstr "Not checked"
+
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Not confirmed by the board yet"
@@ -3377,6 +3749,14 @@ msgstr "Not drawn yet"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
 msgstr "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
+
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice could be checked, and none of those checked can serve it. Reload the page to check again."
+msgstr "Not every choice could be checked, and none of those checked can serve it. Reload the page to check again."
+
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice could be checked: some may be missing from the list."
+msgstr "Not every choice could be checked: some may be missing from the list."
 
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -3406,6 +3786,10 @@ msgstr "Not released"
 #: src/dashboard/widget-board.tsx
 msgid "Not run yet"
 msgstr "Not run yet"
+
+#: src/engines/resource-bindings.tsx
+msgid "Not served"
+msgstr "Not served"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Not signed off yet"
@@ -3457,6 +3841,14 @@ msgstr "Nothing here yet."
 msgid "Nothing is held for review now."
 msgstr "Nothing is held for review now."
 
+#: src/engines/resource-bindings.tsx
+msgid "Nothing is published for {contract} yet. Publish it first."
+msgstr "Nothing is published for {contract} yet. Publish it first."
+
+#: src/workflows/history-view.tsx
+msgid "Nothing is recorded for this run."
+msgstr "Nothing is recorded for this run."
+
 #: src/dashboard/pile-cards.tsx
 msgid "Nothing is sent or changed on {connection}."
 msgstr "Nothing is sent or changed on {connection}."
@@ -3480,6 +3872,10 @@ msgstr "Nothing runs yet: this would be the engine's first current version."
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
 msgstr "Nothing spent yet."
+
+#: src/workflows/triggers.tsx
+msgid "Nothing starts it on its own: it runs when someone starts it."
+msgstr "Nothing starts it on its own: it runs when someone starts it."
 
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
@@ -3556,6 +3952,10 @@ msgstr "on mail to {address}@"
 msgid "on the event {event}, filtered"
 msgstr "on the event {event}, filtered"
 
+#: src/workflows/triggers.tsx
+msgid "On the schedule set by {param} ({timeZone})"
+msgstr "On the schedule set by {param} ({timeZone})"
+
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "On the way"
@@ -3601,6 +4001,15 @@ msgstr "Only you"
 #: src/connections/connect-dialog.tsx
 msgid "Only you can use it."
 msgstr "Only you can use it."
+
+#: src/engines/store-change-errors.ts
+msgid "Only your organization's admins can abandon a change to a store."
+msgstr "Only your organization's admins can abandon a change to a store."
+
+#: src/workflows/history-view.tsx
+msgctxt "a wait of a run"
+msgid "Open"
+msgstr "Open"
 
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
@@ -3690,6 +4099,10 @@ msgstr "Opening the chat…"
 msgid "Opens at {threshold}%"
 msgstr "Opens at {threshold}%"
 
+#: src/engines/resource-bindings.tsx
+msgid "Operations"
+msgstr "Operations"
+
 #: src/knowledge/uploads.tsx
 msgid "or choose them from your computer"
 msgstr "or choose them from your computer"
@@ -3711,6 +4124,7 @@ msgid "Otherwise:"
 msgstr "Otherwise:"
 
 #: src/chat/thread.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Output"
 msgstr "Output"
 
@@ -3740,6 +4154,11 @@ msgstr "Owner"
 msgid "Package"
 msgstr "Package"
 
+#: src/engines/package-approvals.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "Packages"
+msgstr "Packages"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Packages for {engine}"
 msgstr "Packages for {engine}"
@@ -3752,6 +4171,10 @@ msgstr "Parameters"
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Past the alert"
+msgstr "Past the alert"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Paste the transcript of the first conversation with the sponsor"
@@ -3770,6 +4193,11 @@ msgid "Pause the interviews"
 msgstr "Pause the interviews"
 
 #: src/workflows/runs.tsx
+msgid "Paused"
+msgstr "Paused"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
 msgid "Paused"
 msgstr "Paused"
 
@@ -3798,13 +4226,38 @@ msgstr "People heard"
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Per day"
 msgstr "Per day"
 
+#: src/engines/resource-bindings.tsx
+msgid "Per day (UTC), in US dollars"
+msgstr "Per day (UTC), in US dollars"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per month"
+msgstr "Per month"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per month (UTC), in US dollars"
+msgstr "Per month (UTC), in US dollars"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per request"
+msgstr "Per request"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per request, in US dollars"
+msgstr "Per request, in US dollars"
+
 #: src/activity/audit-log.tsx
 msgid "Permission"
 msgstr "Permission"
+
+#: src/engines/resource-bindings.tsx
+msgid "Permission {permission}"
+msgstr "Permission {permission}"
 
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
@@ -3876,6 +4329,14 @@ msgstr "Proposed packages"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Provided by Grasp, not installed again: {provided}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Publish a version of {contract}"
+msgstr "Publish a version of {contract}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Publish as"
+msgstr "Publish as"
+
 #. Product name: keep it as it is
 #. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
@@ -3890,6 +4351,11 @@ msgstr "Pulse on company devices. Adds which applications, MCP servers and skill
 #: src/brain/brain-atlas.ts
 msgid "Pulse shows what runs on the laptops, AI tools included."
 msgstr "Pulse shows what runs on the laptops, AI tools included."
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Queued"
+msgstr "Queued"
 
 #: src/dashboard/widget-board.tsx
 msgid "Ran"
@@ -3914,6 +4380,10 @@ msgstr "Read"
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "Read a knowledge document"
+
+#: src/engines/package-approvals.tsx
+msgid "Read again"
+msgstr "Read again"
 
 #: src/activity/audit-words.ts
 msgid "Read an email attachment"
@@ -3992,6 +4462,10 @@ msgstr "Ready"
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"
 msgstr "Recent chats"
+
+#: src/engines/store-changes.tsx
+msgid "Records checked: {scanned}. Filled in: {filled}."
+msgstr "Records checked: {scanned}. Filled in: {filled}."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Registry and hash"
@@ -4105,6 +4579,10 @@ msgstr "Repeats, {items}:"
 msgid "Repeats, once per item:"
 msgstr "Repeats, once per item:"
 
+#: src/engines/resource-bindings.tsx
+msgid "Replace the binding of {alias}"
+msgstr "Replace the binding of {alias}"
+
 #: src/knowledge/document.tsx
 msgid "Replace version {newerVersion} with mine"
 msgstr "Replace version {newerVersion} with mine"
@@ -4116,6 +4594,15 @@ msgstr "Replaced a request for packages"
 #: src/dashboard/report-dialog.tsx
 msgid "Report"
 msgstr "Report"
+
+#: src/engines/resource-bindings.tsx
+msgid "Resource"
+msgstr "Resource"
+
+#: src/engines/resource-bindings.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "Resources"
+msgstr "Resources"
 
 #: src/knowledge/timeline.tsx
 msgid "Restore"
@@ -4151,6 +4638,26 @@ msgstr "Result: not measured yet"
 msgid "Results"
 msgstr "Results"
 
+#: src/engines/package-approvals.tsx
+msgid "Retire"
+msgstr "Retire"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}"
+msgstr "Retire the packages for {engine}"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}?"
+msgstr "Retire the packages for {engine}?"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired"
+msgstr "Retired"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
+msgstr "Retired by {endedBy}, {endedAt}: {endedReason}"
+
 #: src/dashboard/to-do.tsx
 msgid "Review"
 msgstr "Review"
@@ -4168,12 +4675,30 @@ msgid "Review the apps of {name}"
 msgstr "Review the apps of {name}"
 
 #: src/connections/connection-list.tsx
+#: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Revoke"
 msgstr "Revoke"
 
 #: src/connections/connection-list.tsx
 msgid "Revoke {holder}'s permission"
 msgstr "Revoke {holder}'s permission"
+
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}"
+msgstr "Revoke the binding of {alias}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}?"
+msgstr "Revoke the binding of {alias}?"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}"
+msgstr "Revoke the packages for {engine}"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}?"
+msgstr "Revoke the packages for {engine}?"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
@@ -4221,6 +4746,10 @@ msgstr "Rules published"
 msgid "Rules waiting for a decision"
 msgstr "Rules waiting for a decision"
 
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "Run"
+msgstr "Run"
+
 #: src/routes/decisions.$decision.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
@@ -4234,13 +4763,39 @@ msgstr "Run {runId}"
 msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
 msgstr "Run {shortId} of {workflowId} in {engine}, started {started}"
 
+#: src/workflows/history-view.tsx
+msgid "Run history"
+msgstr "Run history"
+
+#: src/workflows/runs.tsx
+msgid "Run history, {time}"
+msgstr "Run history, {time}"
+
 #: src/brain/brain.ts
 msgid "Run logs"
 msgstr "Run logs"
 
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "Run not found"
+msgstr "Run not found"
+
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "Run of {workflow}"
+msgstr "Run of {workflow}"
+
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
+msgid "Running"
+msgstr "Running"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Running"
+msgstr "Running"
+
+#: src/workflows/history-view.tsx
+msgctxt "an attempt of a step"
 msgid "Running"
 msgstr "Running"
 
@@ -4274,6 +4829,10 @@ msgstr "Runs {how} {count, plural, one {# more time} other {# more times}} ({now
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
 msgstr "Runs by the day they started"
+
+#: src/engines/package-approvals.tsx
+msgid "Runs in"
+msgstr "Runs in"
 
 #: src/chat/builds-state.ts
 msgid "Runs now"
@@ -4681,6 +5240,7 @@ msgid "Statements"
 msgstr "Statements"
 
 #: src/connections/connection-list.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -4691,6 +5251,10 @@ msgstr "Status"
 msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
+
+#: src/workflows/history-view.tsx
+msgid "Step {ordinal}"
+msgstr "Step {ordinal}"
 
 #: src/dashboard/signals.tsx
 msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
@@ -4740,6 +5304,11 @@ msgstr "Stop"
 msgid "Stopped"
 msgstr "Stopped"
 
+#: src/workflows/triggers.tsx
+msgctxt "a schedule that stopped"
+msgid "Stopped"
+msgstr "Stopped"
+
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "Stopped a schedule that kept failing"
@@ -4752,6 +5321,14 @@ msgstr "Stopped following what changes at a connection"
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Stopped."
+
+#: src/engines/store-changes.tsx
+msgid "Store ID: {store}"
+msgstr "Store ID: {store}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Structured, at most {tokens} tokens"
+msgstr "Structured, at most {tokens} tokens"
 
 #: src/frame/person-menu.tsx
 msgid "System"
@@ -4820,6 +5397,18 @@ msgstr "Teams"
 msgid "Teams named"
 msgstr "Teams named"
 
+#: src/engines/resource-bindings.tsx
+msgid "Template"
+msgstr "Template"
+
+#: src/engines/resource-bindings.tsx
+msgid "Template {templateId}, version {version}"
+msgstr "Template {templateId}, version {version}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Template version"
+msgstr "Template version"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Test"
 msgstr "Test"
@@ -4844,6 +5433,10 @@ msgstr "Tests"
 #: src/knowledge/document.tsx
 msgid "Text"
 msgstr "Text"
+
+#: src/engines/resource-bindings.tsx
+msgid "Text, at most {tokens} tokens"
+msgstr "Text, at most {tokens} tokens"
 
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
@@ -4880,6 +5473,10 @@ msgstr "That is too short to be a conversation."
 #: src/onboarding/kickoff-errors.ts
 msgid "That isn't something the kickoff takes."
 msgstr "That isn't something the kickoff takes."
+
+#: src/engines/resource-bindings.tsx
+msgid "That isn't valid JSON."
+msgstr "That isn't valid JSON."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
@@ -4959,6 +5556,10 @@ msgstr "The catalog doesn't list {app}, so its tools can't be shown."
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 
+#: src/engines/store-changes.tsx
+msgid "The change to the store {name} was abandoned"
+msgstr "The change to the store {name} was abandoned"
+
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
 msgstr "The code of version {version}"
@@ -4980,6 +5581,14 @@ msgstr "The company's platform stays closed until Grasp gives its go. Closing it
 msgid "The conversation couldn't be read just now. Try again in a moment."
 msgstr "The conversation couldn't be read just now. Try again in a moment."
 
+#: src/engines/resource-bindings.tsx
+msgid "The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now."
+msgstr "The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now."
+
+#: src/engines/resource-bindings.tsx
+msgid "The current version doesn't declare these, so they serve nothing until a version declares them again."
+msgstr "The current version doesn't declare these, so they serve nothing until a version declares them again."
+
 #: src/dashboard/widget-board.tsx
 msgid "The dashboard is back to how it began."
 msgstr "The dashboard is back to how it began."
@@ -5000,6 +5609,34 @@ msgstr "The directory and sign-in through Microsoft or Google. Adds teams and ro
 msgid "The directory brought in the teams and their roles."
 msgstr "The directory brought in the teams and their roles."
 
+#: src/engines/resource-bindings.tsx
+msgid "The engine has no permission to read a collection. Grant one first."
+msgstr "The engine has no permission to read a collection. Grant one first."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+msgstr "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's actions can't use it until an admin binds it."
+msgstr "The engine's actions can't use it until an admin binds it."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
+msgstr "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's current version declares no resource for its actions."
+msgstr "The engine's current version declares no resource for its actions."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+msgstr "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+
 #: src/chat/builds.tsx
 msgid "The engines this chat builds didn't load."
 msgstr "The engines this chat builds didn't load."
@@ -5008,6 +5645,14 @@ msgstr "The engines this chat builds didn't load."
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "The export didn't work. Try again."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "The first {shown} by engine; more engines have models bound."
+msgstr "The first {shown} by engine; more engines have models bound."
+
+#: src/engines/store-change-errors.ts
+msgid "the fixture's row doesn't fit what the migration takes"
+msgstr "the fixture's row doesn't fit what the migration takes"
 
 #: src/dashboard/activity.tsx
 msgid "The full audit trail"
@@ -5068,6 +5713,26 @@ msgstr "The link works until {until}."
 msgid "The list is full: remove a line to add another."
 msgstr "The list is full: remove a line to add another."
 
+#: src/engines/store-change-errors.ts
+msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
+msgstr "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
+
+#: src/engines/store-change-errors.ts
+msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
+msgstr "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
+
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
+msgstr "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
+
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed on the record {record}."
+msgstr "The migration {migration} of the table {table} failed on the record {record}."
+
+#: src/engines/store-change-errors.ts
+msgid "the migration threw an error"
+msgstr "the migration threw an error"
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
@@ -5085,9 +5750,17 @@ msgstr "The most pressing first."
 msgid "The most used AI tool nobody mentioned is {name}, used by {people} people."
 msgstr "The most used AI tool nobody mentioned is {name}, used by {people} people."
 
+#: src/engines/store-changes.tsx
+msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
+msgstr "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
+
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
 msgstr "The next one"
+
+#: src/engines/resource-bindings.tsx
+msgid "The next version of template {id}"
+msgstr "The next version of template {id}"
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter: what"
@@ -5097,6 +5770,18 @@ msgstr "The onboarding"
 #: src/dashboard/todo-pile.tsx
 msgid "The one before"
 msgstr "The one before"
+
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
+msgstr "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
+
+#: src/engines/package-approvals.tsx
+msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
+msgstr "The packages couldn't be read again, so this list may be out of date: {unread}"
+
+#: src/workflows/triggers.tsx
+msgid "The part of the address before the @, on the mail domain set up for Grasp."
+msgstr "The part of the address before the @, on the mail domain set up for Grasp."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
@@ -5122,6 +5807,10 @@ msgstr "The sponsor's answer"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "The steps can't be read from this workflow's code: {message}"
+
+#: src/engines/store-changes.tsx
+msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+msgstr "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."
@@ -5178,6 +5867,14 @@ msgstr "There are no engines you can open yet. Engines are made in chat: describ
 msgid "There is no data rule: any allowed model may take sensitive data."
 msgstr "There is no data rule: any allowed model may take sensitive data."
 
+#: src/engines/store-changes.tsx
+msgid "These fields stay reserved with their current meaning: {reserved}."
+msgstr "These fields stay reserved with their current meaning: {reserved}."
+
+#: src/engines/store-changes.tsx
+msgid "These releases can never be made current: {releases}."
+msgstr "These releases can never be made current: {releases}."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
@@ -5209,6 +5906,14 @@ msgstr "This app left its frame and was stopped."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "This app lost its connection to the page and was stopped."
+
+#: src/engines/store-change-errors.ts
+msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
+msgstr "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
+
+#: src/engines/store-change-errors.ts
+msgid "This change was already abandoned."
+msgstr "This change was already abandoned."
 
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
@@ -5250,6 +5955,10 @@ msgstr "This decision has closed."
 msgid "This decision is for someone else to answer."
 msgstr "This decision is for someone else to answer."
 
+#: src/engines/resource-bindings.tsx
+msgid "This deployment allows no model."
+msgstr "This deployment allows no model."
+
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
@@ -5283,6 +5992,10 @@ msgstr "This link doesn't work. Ask whoever sent it for a new one."
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "This link has expired. Ask whoever sent it for a new one."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "This month"
+msgstr "This month"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "This month so far"
 msgstr "This month so far"
@@ -5294,6 +6007,38 @@ msgstr "This one can only be released: a budget record it counts against is dama
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "This page didn't load"
+
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "This run's details were removed once its retention was over, and its history with them."
+msgstr "This run's details were removed once its retention was over, and its history with them."
+
+#: src/workflows/history-view.tsx
+msgid "This step failed."
+msgstr "This step failed."
+
+#: src/engines/store-change-errors.ts
+msgid "This store no longer exists, so there is nothing to abandon."
+msgstr "This store no longer exists, so there is nothing to abandon."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+msgstr "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
+msgstr "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgstr "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgstr "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+
+#: src/engines/store-change-errors.ts
+msgid "This version's data change is still being applied. Try again in a moment."
+msgstr "This version's data change is still being applied. Try again in a moment."
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -5336,10 +6081,18 @@ msgstr "To do"
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 
+#: src/engines/package-approvals.tsx
+msgid "To use them again, someone who approves packages reviews them again."
+msgstr "To use them again, someone who approves packages reviews them again."
+
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Today"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Today ({day}, UTC)"
+msgstr "Today ({day}, UTC)"
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"
@@ -5381,6 +6134,15 @@ msgstr "Tools, products and the company's own words, so he hears them right."
 msgid "Transcript"
 msgstr "Transcript"
 
+#: src/workflows/triggers.tsx
+msgid "Triggers"
+msgstr "Triggers"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgctxt "tab of a workflow"
+msgid "Triggers"
+msgstr "Triggers"
+
 #: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
@@ -5408,6 +6170,18 @@ msgctxt "programme stage"
 msgid "Under way"
 msgstr "Under way"
 
+#: src/workflows/history-view.tsx
+msgid "Undoing {label}"
+msgstr "Undoing {label}"
+
+#: src/workflows/history-view.tsx
+msgid "Undoing its changes after a failure"
+msgstr "Undoing its changes after a failure"
+
+#: src/workflows/history-view.tsx
+msgid "Undoing its changes after it was cancelled"
+msgstr "Undoing its changes after it was cancelled"
+
 #: src/activity/pending.tsx
 msgid "Unknown"
 msgstr "Unknown"
@@ -5425,6 +6199,18 @@ msgstr "Unknown source"
 #: src/dashboard/activity.tsx
 msgid "Unreadable event"
 msgstr "Unreadable event"
+
+#: src/workflows/history-view.tsx
+msgid "Until {until}"
+msgstr "Until {until}"
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
+msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
@@ -5458,6 +6244,7 @@ msgstr "Use your organization’s account to go on."
 msgid "Used a connected tool"
 msgstr "Used a connected tool"
 
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/document.tsx
 msgid "Used by"
 msgstr "Used by"
@@ -5533,12 +6320,18 @@ msgstr "Vision page"
 msgid "Vision page confirmed"
 msgstr "Vision page confirmed"
 
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Waiting"
+msgstr "Waiting"
+
 #: src/dashboard/to-do.tsx
 msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "Waiting elsewhere"
 
 #: src/routes/_shell.workflows.index.tsx
+#: src/workflows/history-view.tsx
 #: src/workflows/runs.tsx
 msgid "Waiting for a decision"
 msgstr "Waiting for a decision"
@@ -5550,6 +6343,18 @@ msgstr "Waiting for a decision: {waiting}"
 #: src/dashboard/signals.tsx
 msgid "Waiting for a person"
 msgstr "Waiting for a person"
+
+#: src/workflows/history-view.tsx
+msgid "Waiting for a set time"
+msgstr "Waiting for a set time"
+
+#: src/workflows/history-view.tsx
+msgid "Waiting for an event"
+msgstr "Waiting for an event"
+
+#: src/workflows/history-view.tsx
+msgid "Waiting for the decision {label}"
+msgstr "Waiting for the decision {label}"
 
 #: src/dashboard/report.ts
 msgctxt "programme stage"
@@ -5687,6 +6492,18 @@ msgstr "What it brought"
 msgid "What it is"
 msgstr "What it is"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "What it is bound to can't be read, so it serves nothing."
+msgstr "What it is bound to can't be read, so it serves nothing."
+
+#: src/engines/resource-bindings.tsx
+msgid "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."
+msgstr "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."
+
+#: src/engines/resource-bindings.tsx
+msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
+msgstr "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
 msgstr "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
@@ -5736,6 +6553,10 @@ msgstr "What the client shares, and our own desk research. Adds policies, proced
 msgid "What the engine holds"
 msgstr "What the engine holds"
 
+#: src/engines/resource-bindings.tsx
+msgid "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
+msgstr "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 msgstr "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
@@ -5761,9 +6582,17 @@ msgctxt "column: when a run happened"
 msgid "When"
 msgstr "When"
 
+#: src/workflows/triggers.tsx
+msgid "When an email arrives for {localPart}"
+msgstr "When an email arrives for {localPart}"
+
 #: src/chat/builds-state.ts
 msgid "when someone starts it"
 msgstr "when someone starts it"
+
+#: src/workflows/triggers.tsx
+msgid "When the event {event} happens"
+msgstr "When the event {event} happens"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Where it comes from"
@@ -5825,6 +6654,10 @@ msgstr "Who works where"
 #: src/onboarding/staff-words.ts
 msgid "Who works where is in"
 msgstr "Who works where is in"
+
+#: src/engines/package-approvals.tsx
+msgid "Why"
+msgstr "Why"
 
 #: src/brain/brain.ts
 msgid "Why now"
@@ -5909,6 +6742,7 @@ msgstr "Workflow tests fail:"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx

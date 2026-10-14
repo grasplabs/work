@@ -14,10 +14,20 @@ export type {
   TableVerbs,
 } from "./app.ts";
 export { AppError } from "./app-error.ts";
+export { migration } from "./migration.ts";
+export type {
+  Migration,
+  MigrationContext,
+  MigrationDefinition,
+} from "./migration.ts";
 export { resource } from "./resources.ts";
 export type {
   AnyResource,
   BrowserResource,
+  ComposioCall,
+  ComposioContract,
+  ConnectorAction,
+  ConnectorContract,
   ConnectorResource,
   FilesResource,
   LinksResource,

@@ -58,6 +58,10 @@ msgstr "{about} a coûté {cost} par exécution en appels au modèle, sur {runs,
 msgid "{about} has {open, plural, one {# decision open} other {# decisions open}}; the oldest has waited {waited}."
 msgstr "{about} a {open, plural, one {# décision en attente} other {# décisions en attente}} ; la plus ancienne attend depuis {waited}."
 
+#: src/engines/resource-bindings.tsx
+msgid "{account} on {provider}"
+msgstr "{account} sur {provider}"
+
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as Grasp sees it} builtIn {AI built in, as Grasp sees it} other {No AI, as Grasp sees it}}"
 msgstr "{ai, select, tool {Un outil d’IA, selon Grasp} builtIn {IA intégrée, selon Grasp} other {Pas d’IA, selon Grasp}}"
@@ -65,6 +69,10 @@ msgstr "{ai, select, tool {Un outil d’IA, selon Grasp} builtIn {IA intégrée,
 #: src/brain/brain.ts
 msgid "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in, as the team said it} other {No AI, as the team said it}}"
 msgstr "{ai, select, tool {Un outil d’IA, selon l’équipe} builtIn {IA intégrée, selon l’équipe} other {Pas d’IA, selon l’équipe}}"
+
+#: src/engines/resource-bindings.tsx
+msgid "{alertAt} of a cap"
+msgstr "{alertAt} d'un plafond"
 
 #: src/brain/brain-atlas.ts
 msgid "{answered} answered"
@@ -86,9 +94,21 @@ msgstr "{app} a besoin que quelqu’un se reconnecte"
 msgid "{appName} · Version {version}"
 msgstr "{appName} · Version {version}"
 
+#: src/engines/package-approvals.tsx
+msgid "{approvals, plural, one {This ends # approval of these packages.} other {This ends # approvals of these packages.}}"
+msgstr "{approvals, plural, one {Cela met fin à # approbation de ces paquets.} other {Cela met fin à # approbations de ces paquets.}}"
+
 #: src/routes/_shell.engines.index.tsx
 msgid "{apps, plural, one {# app} other {# apps}}"
 msgstr "{apps, plural, one {# application} other {# applications}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build already made ({targets}) keeps working. Nothing new is built with these packages.} other {# builds already made ({targets}) keep working. Nothing new is built with these packages.} =0 {Nothing was built with these packages yet, and nothing new will be.}}"
+msgstr "{artifacts, plural, one {# build déjà fait ({targets}) continue de fonctionner. Rien de nouveau n’est construit avec ces paquets.} other {# builds déjà faits ({targets}) continuent de fonctionner. Rien de nouveau n’est construit avec ces paquets.} =0 {Rien n’a encore été construit avec ces paquets, et rien de nouveau ne le sera.}}"
+
+#: src/engines/package-approvals.tsx
+msgid "{artifacts, plural, one {# build made with them ({targets}) stops at once, and nothing of these packages runs any more.} other {# builds made with them ({targets}) stop at once, and nothing of these packages runs any more.} =0 {Nothing of these packages runs any more.}}"
+msgstr "{artifacts, plural, one {# build fait avec eux ({targets}) s’arrête aussitôt, et plus rien de ces paquets ne s’exécute.} other {# builds faits avec eux ({targets}) s’arrêtent aussitôt, et plus rien de ces paquets ne s’exécute.} =0 {Plus rien de ces paquets ne s’exécute.}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{asked, plural, one {# question is still open, each with who can answer it.} other {# questions are still open, each with who can answer it.}}"
@@ -117,6 +137,10 @@ msgstr "{category} ({vendor})"
 #: src/brain/brain.ts
 msgid "{category} by {vendor}, with AI built in"
 msgstr "{category} ({vendor}), avec IA intégrée"
+
+#: src/engines/resource-bindings.tsx
+msgid "{collection}: {name}"
+msgstr "{collection} : {name}"
 
 #: src/chat/held-writes.tsx
 msgid "{connection} ({tool})"
@@ -242,6 +266,10 @@ msgstr "{count, plural, one {La direction a fixé # objectif pour le sprint.} ot
 msgid "{count} or more files"
 msgstr "{count} fichiers ou plus"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{daily} a day"
+msgstr "{daily} par jour"
+
 #: src/dashboard/signals.tsx
 msgid "{days, plural, one {# day} other {# days}}"
 msgstr "{days, plural, one {# jour} other {# jours}}"
@@ -290,6 +318,10 @@ msgstr "{engine} peut désormais utiliser exactement ces paquets."
 msgid "{engine}: run of {workflowId}"
 msgstr "{engine} : exécution de {workflowId}"
 
+#: src/engines/store-changes.tsx
+msgid "{engineName}, version {version}"
+msgstr "{engineName}, version {version}"
+
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
 msgstr "{failed, plural, one {# en échec au cours des {days} derniers jours} other {# en échec au cours des {days} derniers jours}}"
@@ -301,6 +333,14 @@ msgstr "{failed, plural, one {# exécution en échec} other {# exécutions en é
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "{fileName}, brought in on {when}. Bring it in again to read it again."
 msgstr "{fileName}, apporté le {when}. Apportez-le de nouveau pour le relire."
+
+#: src/chat/builds-state.ts
+msgid "{fixtures, plural, one {It passed its # fixture when the version was sealed} other {It passed all # of its fixtures when the version was sealed}}"
+msgstr "{fixtures, plural, one {Elle a réussi son # enregistrement de test quand la version a été scellée} other {Elle a réussi ses # enregistrements de test quand la version a été scellée}}"
+
+#: src/chat/builds-state.ts
+msgid "{fixtures, plural, one {It runs on its # fixture when the version is sealed, before any record} other {It runs on its # fixtures when the version is sealed, before any record}}"
+msgstr "{fixtures, plural, one {Elle s'exécute sur son # enregistrement de test quand la version est scellée, avant tout enregistrement} other {Elle s'exécute sur ses # enregistrements de test quand la version est scellée, avant tout enregistrement}}"
 
 #: src/knowledge/timeline.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
@@ -388,7 +428,12 @@ msgstr "{link} dans {appName} a échoué {failures, plural, one {une fois} other
 msgid "{minutes}m {rest}s"
 msgstr "{minutes} min {rest} s"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{monthly} a month"
+msgstr "{monthly} par mois"
+
 #: src/dashboard/dependency-requests.tsx
+#: src/engines/package-approvals.tsx
 msgid "{more, plural, one {{shown} and # more} other {{shown} and # more}}"
 msgstr "{more, plural, one {{shown} et # autre} other {{shown} et # autres}}"
 
@@ -544,6 +589,10 @@ msgstr "{place} sur {count}"
 msgid "{points} of {weight}"
 msgstr "{points} sur {weight}"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "{request} a request"
+msgstr "{request} par requête"
+
 #. A length of time, said short: 21 seconds.
 #: src/chat/thread.tsx
 msgid "{rest}s"
@@ -616,6 +665,10 @@ msgstr "{sources, plural, one {Un travail chronophage qui pourrait être automat
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source, by no team yet.} other {Time-consuming work that could be automated, raised in # sources, by no team yet.}}"
 msgstr "{sources, plural, one {Un travail chronophage qui pourrait être automatisé, soulevé dans # source, encore par aucune équipe.} other {Un travail chronophage qui pourrait être automatisé, soulevé dans # sources, encore par aucune équipe.}}"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "{spent} of {limit}"
+msgstr "{spent} sur {limit}"
 
 #: src/brain/brain.ts
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
@@ -788,6 +841,26 @@ msgstr "Un fichier .txt, .vtt, .srt ou .docx, ou du texte collé."
 msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
 msgstr "Une modification s’applique aux exécutions qui démarrent ensuite : celles déjà en cours gardent les valeurs de leur démarrage. Chaque modification est enregistrée, sans sa valeur."
 
+#: src/workflows/history-view.tsx
+msgid "A change by {label} waits for approval by the person the run acts for"
+msgstr "Une modification par {label} attend l'accord de la personne pour qui l'exécution agit"
+
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} can't be applied"
+msgstr "Une modification du magasin {name} ne peut pas être appliquée"
+
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} is being applied"
+msgstr "Une modification du magasin {name} est en cours d’application"
+
+#: src/engines/store-changes.tsx
+msgid "A change to the store {name} is ready"
+msgstr "Une modification du stockage {name} est prête"
+
+#: src/workflows/history-view.tsx
+msgid "A change waits for approval by the person the run acts for"
+msgstr "Une modification attend l'accord de la personne pour qui l'exécution agit"
+
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
 msgstr "Une connexion doit être reconnectée"
@@ -795,6 +868,14 @@ msgstr "Une connexion doit être reconnectée"
 #: src/activity/audit-words.ts
 msgid "A connection refused to say what changed"
 msgstr "Une connexion a refusé de dire ce qui a changé"
+
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
+msgstr "Une migration des données a transformé les enregistrements de ce moteur après cette version : elle ne peut plus être rendue actuelle, et aucune version conservée ne leur correspond désormais. Créez plutôt une nouvelle version."
+
+#: src/engines/store-change-errors.ts
+msgid "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
+msgstr "Une migration des données a transformé les enregistrements de ce moteur après cette version : elle ne peut plus être rendue actuelle. Versions conservées qui leur correspondent encore : {versions}."
 
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
@@ -828,9 +909,17 @@ msgstr "Un budget de modèles a atteint son seuil d’alerte ou est épuisé"
 msgid "A model call was refused"
 msgstr "Un appel de modèle a été refusé"
 
+#: src/engines/resource-bindings.tsx
+msgid "A new template"
+msgstr "Un nouveau modèle"
+
 #: src/screens/screen-frame.tsx
 msgid "A new version of this engine is available."
 msgstr "Une nouvelle version de ce moteur est disponible."
+
+#: src/engines/store-change-errors.ts
+msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
+msgstr "Une nouvelle tentative de cette modification a déjà commencé : elle n’a donc pas été abandonnée. La page montre maintenant où elle en est."
 
 #: src/routes/decisions.$decision.tsx
 msgid "A run of a workflow asked for this answer."
@@ -843,6 +932,22 @@ msgstr "Une exécution d’un workflow attend cette réponse."
 #: src/dashboard/signals.tsx
 msgid "A search in {where} found nothing {searches, plural, one {once} other {# times}}, by {askers, plural, one {# asker} other {# askers}}."
 msgstr "Une recherche dans {where} n’a rien trouvé {searches, plural, one {une fois} other {# fois}}, pour {askers, plural, one {# personne} other {# personnes}}."
+
+#: src/workflows/history-view.tsx
+msgid "A step"
+msgstr "Une étape"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon the change"
+msgstr "Abandonner la modification"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change"
+msgstr "Abandonner cette modification"
+
+#: src/engines/store-changes.tsx
+msgid "Abandon this change?"
+msgstr "Abandonner cette modification ?"
 
 #: src/brain/brain.ts
 msgctxt "note property: what a note is about"
@@ -870,6 +975,11 @@ msgstr "Compte"
 #: src/activity/audit-log.tsx
 msgid "Action"
 msgstr "Action"
+
+#: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
+msgid "Actions"
+msgstr "Actions"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Actions for {who}"
@@ -947,6 +1057,10 @@ msgstr "Workflow ajouté :"
 msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Ajouté : il agit pour quiconque utilise le moteur, avec tout ce que détient le moteur"
 
+#: src/chat/builds.tsx
+msgid "Added: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Ajoutée : lit et réécrit chaque enregistrement de {table}, quel qu'en soit le propriétaire"
+
 #: src/brain/brain.ts
 msgctxt "note property"
 msgid "Adjusted in"
@@ -963,6 +1077,10 @@ msgstr "Admin"
 #: src/knowledge/collection-markers.tsx
 msgid "Admins"
 msgstr "Administrateurs"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Admins alerted at {alertAt}"
+msgstr "Admins alertés à {alertAt}"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Admins can change anyone's role, end their sessions and remove them, other admins included."
@@ -1004,6 +1122,18 @@ msgstr "IA"
 #: src/routes/_shell.settings.tsx
 msgid "AI spend"
 msgstr "Dépenses d’IA"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Alert"
+msgstr "Alerte"
+
+#: src/engines/resource-bindings.tsx
+msgid "Alert admins at, in percent of a day's or month's cap"
+msgstr "Alerter les admins à, en pourcentage du plafond journalier ou mensuel"
+
+#: src/engines/resource-bindings.tsx
+msgid "Alert at"
+msgstr "Alerter à"
 
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
@@ -1050,6 +1180,18 @@ msgstr "Déjà décidé : {model}"
 #: src/connections/connection-list.tsx
 msgid "An admin"
 msgstr "Un admin"
+
+#: src/engines/store-change-errors.ts
+msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
+msgstr "Un admin a abandonné la modification des données dont cette version a besoin : elle ne pourra jamais être rendue actuelle. Demandez à reconstruire le moteur."
+
+#: src/engines/store-change-errors.ts
+msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
+msgstr "Un admin peut voir, sur la page du moteur, l’enregistrement qui la bloque, et abandonner la modification."
+
+#: src/engines/store-change-errors.ts
+msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
+msgstr "Un admin peut voir ce qui n'a pas fonctionné et abandonner la modification sur la page du moteur."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
@@ -1184,6 +1326,7 @@ msgid "Approve the packages for {engine}"
 msgstr "Approuver les paquets pour {engine}"
 
 #: src/dashboard/runs-widget.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 msgid "Approved"
 msgstr "Approuvé"
@@ -1192,11 +1335,16 @@ msgstr "Approuvé"
 msgid "Approved an app's code"
 msgstr "A approuvé le code d’une application"
 
+#: src/engines/package-approvals.tsx
+msgid "Approved by {decidedBy}, {decidedAt}"
+msgstr "Approuvé par {decidedBy}, {decidedAt}"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Approuvé par {name} le {date}."
 
 #: src/activity/audit-words.ts
+#: src/engines/package-approvals.tsx
 msgid "Approved packages"
 msgstr "A approuvé des paquets"
 
@@ -1315,6 +1463,10 @@ msgstr "À {step} : {error}"
 msgid "At work"
 msgstr "À l’œuvre"
 
+#: src/workflows/history-view.tsx
+msgid "Attempt {n}"
+msgstr "Tentative {n}"
+
 #: src/routes/_shell.settings.audit.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Audit trail"
@@ -1361,6 +1513,10 @@ msgstr "Avant"
 msgid "Being built"
 msgstr "En construction"
 
+#: src/engines/resource-bindings.tsx
+msgid "Bind {alias}"
+msgstr "Lier {alias}"
+
 #: src/brain/brain.ts
 msgid "Blocker"
 msgstr "Blocage"
@@ -1368,6 +1524,14 @@ msgstr "Blocage"
 #: src/brain/brain.ts
 msgid "Blockers"
 msgstr "Blocages"
+
+#: src/engines/resource-bindings.tsx
+msgid "Bound"
+msgstr "Lié"
+
+#: src/engines/resource-bindings.tsx
+msgid "Bound to"
+msgstr "Lié à"
 
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
@@ -1381,6 +1545,10 @@ msgstr "Parcourir"
 msgctxt "where a package runs"
 msgid "Browser"
 msgstr "Navigateur"
+
+#: src/engines/resource-bindings.tsx
+msgid "Budget (optional)"
+msgstr "Budget (facultatif)"
 
 #: src/brain/brain.ts
 msgid "Budget for AI set"
@@ -1439,6 +1607,7 @@ msgstr "Reçue"
 msgid "Came up in {source}"
 msgstr "Évoqué dans {source}"
 
+#: src/engines/package-approvals.tsx
 #: src/knowledge/document.tsx
 msgid "Cancel"
 msgstr "Annuler"
@@ -1446,6 +1615,23 @@ msgstr "Annuler"
 #: src/workflows/runs.tsx
 msgid "Cancelled"
 msgstr "Annulée"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Cancelled"
+msgstr "Annulée"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Cap reached"
+msgstr "Plafond atteint"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps"
+msgstr "Plafonds"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
+msgstr "Les plafonds qu'un admin a fixés pour le modèle d'un moteur, dans l'onglet Ressources du moteur, en plus des budgets du déploiement, et ce que les actions du moteur ont dépensé par son biais. Les étapes d'IA propres à un workflow ne comptent pas ici."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -1539,6 +1725,10 @@ msgstr "Workflow modifié :"
 msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
 msgstr "Modifié : il agit pour quiconque utilise le moteur, avec tout ce que détient le moteur"
 
+#: src/chat/builds.tsx
+msgid "Changed: it reads and rewrites every record of {table}, whoever owns it"
+msgstr "Modifiée : lit et réécrit chaque enregistrement de {table}, quel qu'en soit le propriétaire"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
 msgstr "Modifie"
@@ -1554,6 +1744,10 @@ msgstr "modifie les données du moteur"
 #: src/chat/builds.tsx
 msgid "Changes the engine's data"
 msgstr "Modifie les données du moteur"
+
+#: src/engines/store-changes.tsx
+msgid "Changes to the engine's stores"
+msgstr "Modifications des magasins du moteur"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
@@ -1591,6 +1785,10 @@ msgstr "Échanges avec Grasp"
 msgid "Checked the audit trail's chain"
 msgstr "A vérifié la chaîne du journal d’audit"
 
+#: src/engines/resource-bindings.tsx
+msgid "Choose a collection"
+msgstr "Choisir une collection"
+
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Choose a file"
 msgstr "Choisir un fichier"
@@ -1603,6 +1801,9 @@ msgstr "Effacer"
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
 #: src/dashboard/widget-block.tsx
+#: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
+#: src/engines/store-changes.tsx
 #: src/knowledge/frame.tsx
 #: src/routes/_shell.index.tsx
 msgid "Close"
@@ -1637,10 +1838,15 @@ msgstr "Collection"
 msgid "Collection {collectionId}"
 msgstr "Collection {collectionId}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Collection for {collection}"
+msgstr "Collection pour {collection}"
+
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Collection not found"
 msgstr "Collection introuvable"
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Collections"
 msgstr "Collections"
@@ -1671,6 +1877,16 @@ msgstr "Comparée à la version {current}, qui s’exécute actuellement."
 
 #: src/dashboard/runs-widget.tsx
 #: src/workflows/runs.tsx
+msgid "Completed"
+msgstr "Terminée"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Completed"
+msgstr "Terminée"
+
+#: src/workflows/history-view.tsx
+msgctxt "an attempt of a step"
 msgid "Completed"
 msgstr "Terminée"
 
@@ -1769,12 +1985,17 @@ msgstr "Connectée."
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "La connexion n’a pas abouti. Réessayez ou demandez à un admin."
 
+#: src/engines/resource-bindings.tsx
+msgid "Connection"
+msgstr "Connexion"
+
 #: src/dashboard/to-do.tsx
 msgctxt "kind of thing that waits"
 msgid "Connection"
 msgstr "Connexion"
 
 #: src/activity/pending.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Connection {connectionId}"
 msgstr "Connexion {connectionId}"
 
@@ -1805,6 +2026,14 @@ msgstr "Consentir et connecter"
 #: src/connections/connect-dialog.tsx
 msgid "Consent and sign in"
 msgstr "Consentir et se connecter"
+
+#: src/engines/resource-bindings.tsx
+msgid "Content, as JSON"
+msgstr "Contenu, en JSON"
+
+#: src/engines/resource-bindings.tsx
+msgid "Contract"
+msgstr "Contrat"
 
 #. Folder of the sources that are conversations: the vision talk and the interviews by voice or chat
 #: src/brain/brain.ts
@@ -2130,10 +2359,15 @@ msgstr "Entretiens avec les employés"
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Engine"
 msgstr "Moteur"
+
+#: src/engines/store-changes.tsx
+msgid "engine {app}, version {version}"
+msgstr "moteur {app}, version {version}"
 
 #: src/connections/connection-list.tsx
 msgid "Engine {engine}"
@@ -2142,6 +2376,10 @@ msgstr "Moteur {engine}"
 #: src/screens/screen-frame.tsx
 msgid "Engine app"
 msgstr "Application du moteur"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Engine budgets"
+msgstr "Budgets des moteurs"
 
 #: src/routes/_shell.engines.$engine.apps.$screen.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
@@ -2173,6 +2411,14 @@ msgstr "On en sait assez : on a dépassé {threshold} %. L’entreprise entre d�
 msgid "Enter a number."
 msgstr "Saisissez un nombre."
 
+#: src/engines/resource-bindings.tsx
+msgid "Enter a whole percent from 1 to 99."
+msgstr "Saisissez un pourcentage entier de 1 à 99."
+
+#: src/engines/resource-bindings.tsx
+msgid "Enter an amount in US dollars from {least} to {most}, such as 2.50."
+msgstr "Saisissez un montant en dollars américains de {least} à {most}, par exemple 2.50."
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Enter an amount, such as 12.50."
 msgstr "Saisissez un montant, par exemple 12.50."
@@ -2180,6 +2426,10 @@ msgstr "Saisissez un montant, par exemple 12.50."
 #: src/activity/audit-log.tsx
 msgid "Entries"
 msgstr "Entrées"
+
+#: src/workflows/history-view.tsx
+msgid "Entry {sequence} can't be read."
+msgstr "L'entrée {sequence} ne peut pas être lue."
 
 #: src/chat/thread.tsx
 msgid "Error"
@@ -2302,9 +2552,23 @@ msgstr "Extraction"
 msgid "Failed"
 msgstr "En échec"
 
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Failed"
+msgstr "Échouée"
+
+#: src/workflows/history-view.tsx
+msgctxt "an attempt of a step"
+msgid "Failed"
+msgstr "Échouée"
+
 #: src/dashboard/failed-workflows.tsx
 msgid "Failed while acting for you"
 msgstr "A échoué en agissant pour vous"
+
+#: src/workflows/history-view.tsx
+msgid "Failed, tried again"
+msgstr "Échouée, nouvelle tentative"
 
 #: src/dashboard/report.ts
 msgid "Failed: {failed}"
@@ -2318,6 +2582,14 @@ msgstr "Fichier"
 #: src/routes/_shell.knowledge.$collection.tsx
 msgid "Files"
 msgstr "Fichiers"
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new field {field} of the table {table} would make the record {record} larger than a record may be."
+msgstr "Remplir le nouveau champ {field} de la table {table} rendrait l’enregistrement {record} plus grand qu’un enregistrement ne peut l’être."
+
+#: src/engines/store-changes.tsx
+msgid "Filling in the new fields stopped making progress, and trying again didn't help."
+msgstr "Le remplissage des nouveaux champs n’avançait plus, et les nouvelles tentatives n’y ont rien changé."
 
 #: src/activity/audit-log.tsx
 msgid "Filter"
@@ -2643,6 +2915,7 @@ msgctxt "note property: the drawn version of this workflow on the Workflows page
 msgid "In Workflows"
 msgstr "Dans Workflows"
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration"
 msgstr "Intégration"
@@ -2694,9 +2967,21 @@ msgstr "A invité un invité"
 msgid "Invited for step 2"
 msgstr "Équipes invitées à l’étape 2"
 
+#: src/engines/store-change-errors.ts
+msgid "it answered something that isn't its records"
+msgstr "elle a répondu autre chose que ses enregistrements"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
 msgstr "Il compte comme dépensé dans les budgets : le maximum qu’il aurait pu coûter. Cette action est irréversible."
+
+#: src/engines/store-change-errors.ts
+msgid "it didn't pass"
+msgstr "elle n'a pas réussi"
+
+#: src/chat/builds-state.ts
+msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
+msgstr "Elle a échoué sur ses enregistrements de test quand la version a été scellée : elle ne s'exécute sur aucun enregistrement, et la version ne peut pas être rendue actuelle"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
@@ -2770,6 +3055,14 @@ msgstr "Son accès a expiré. L’équipe Grasp ne peut pas la reconnecter : un 
 msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
 msgstr "Son accès a expiré. Reconnectez-vous avec le même compte : les moteurs et les agents gardent leurs autorisations."
 
+#: src/engines/resource-bindings.tsx
+msgid "Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh."
+msgstr "Son budget ne peut pas être lu : elle ne sert rien plutôt que de fonctionner sans budget. Liez-la à nouveau pour redéfinir son budget."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Its budget can't be read, so it serves nothing."
+msgstr "Son budget est illisible, elle ne sert donc rien."
+
 #: src/routes/_shell.engines.index.tsx
 msgid "Its contents couldn't be read."
 msgstr "Son contenu n’a pas pu être lu."
@@ -2777,6 +3070,30 @@ msgstr "Son contenu n’a pas pu être lu."
 #: src/chat/chat-list.tsx
 msgid "Its messages are deleted for good, and every change its agent holds for you is rejected. What the agent did stays in the audit log."
 msgstr "Ses messages sont supprimés définitivement, et chaque modification que son agent retient pour vous est rejetée. Ce que l’agent a fait reste dans le journal d’audit."
+
+#: src/engines/store-changes.tsx
+msgid "Its migration has transformed every record. It takes over when a release that needs it is made current; until then the current release goes on using the store as before."
+msgstr "Sa migration a transformé chaque enregistrement. Elle prend effet quand une version qui en a besoin est rendue actuelle ; d'ici là, la version actuelle continue d'utiliser le stockage comme avant."
+
+#: src/chat/builds.tsx
+msgid "Its migrations can't be read: it may rewrite the records of any table"
+msgstr "Ses migrations sont illisibles : elle peut réécrire les enregistrements de n'importe quelle table"
+
+#: src/engines/store-changes.tsx
+msgid "Its new fields' defaults are being filled in. Releases that need it can be made current once it has finished."
+msgstr "Les valeurs par défaut de ses nouveaux champs sont en cours de remplissage. Les versions qui en ont besoin pourront être rendues actuelles une fois terminé."
+
+#: src/engines/store-change-errors.ts
+msgid "its output doesn't fit the table"
+msgstr "sa sortie ne correspond pas à la table"
+
+#: src/engines/store-change-errors.ts
+msgid "its output is larger than a record may be"
+msgstr "sa sortie est plus grande qu'un enregistrement ne peut l'être"
+
+#: src/engines/store-change-errors.ts
+msgid "its output isn't what the fixture expects"
+msgstr "sa sortie n'est pas ce qu'attend l'enregistrement de test"
 
 #: src/chat/builds.tsx
 msgid "Its parameters can't be read from its code."
@@ -2824,6 +3141,11 @@ msgctxt "onboarding stage"
 msgid "Kickoff"
 msgstr "Lancement"
 
+#: src/engines/resource-bindings.tsx
+msgid "Kind"
+msgstr "Type"
+
+#: src/engines/resource-bindings.tsx
 #: src/frame/app-sidebar.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
@@ -2926,6 +3248,10 @@ msgstr "Renvoie à"
 msgid "Live, being measured"
 msgstr "En production, en cours de mesure"
 
+#: src/workflows/history-view.tsx
+msgid "Load more"
+msgstr "Charger plus"
+
 #: src/activity/audit-log.tsx
 msgid "Load older"
 msgstr "Charger les plus anciens"
@@ -2942,6 +3268,7 @@ msgstr "Recharger le code serveur"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
+#: src/workflows/history-view.tsx
 msgid "Loading…"
 msgstr "Chargement…"
 
@@ -3027,6 +3354,11 @@ msgstr "Messages"
 msgid "Microsoft sign-in"
 msgstr "Connexion Microsoft"
 
+#: src/chat/builds.tsx
+msgid "Migrations"
+msgstr "Migrations"
+
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.settings.models.tsx
 msgid "Model"
 msgstr "Modèle"
@@ -3155,6 +3487,10 @@ msgstr "Nouveau depuis la dernière approbation : {added}"
 msgid "New: failed while acting for you"
 msgstr "Nouveau : a échoué en agissant pour vous"
 
+#: src/workflows/triggers.tsx
+msgid "Next run: {next}"
+msgstr "Prochaine exécution : {next}"
+
 #: src/routes/_shell.engines.$engine.index.tsx
 #: src/routes/_shell.engines.index.tsx
 msgid "No apps yet"
@@ -3168,9 +3504,17 @@ msgstr "Aucun budget défini : les appels de modèles ne sont pas limités en co
 msgid "No call has to stay in the EU."
 msgstr "Aucun appel n’est tenu de rester dans l’UE."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "No caps of its own"
+msgstr "Aucun plafond propre"
+
 #: src/brain/brain.ts
 msgid "No connector yet"
 msgstr "Pas encore de connecteur"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "No engine has a model bound to it."
+msgstr "Aucun moteur n'a de modèle lié."
 
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.engines.index.tsx
@@ -3202,6 +3546,10 @@ msgstr "Pas encore de fichiers."
 msgid "No integrations match your search."
 msgstr "Aucune intégration ne correspond à votre recherche."
 
+#: src/engines/resource-bindings.tsx
+msgid "No longer declared"
+msgstr "Plus déclarées"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "No longer held: {model}"
 msgstr "Plus retenu : {model}"
@@ -3223,6 +3571,14 @@ msgstr "Aucun fichier de mémoire n’a encore été écrit."
 msgid "No model is set up for this deployment yet."
 msgstr "Aucun modèle n’est encore configuré pour ce déploiement."
 
+#: src/workflows/triggers.tsx
+msgid "No next run"
+msgstr "Aucune prochaine exécution"
+
+#: src/engines/package-approvals.tsx
+msgid "No packages are approved for this engine."
+msgstr "Aucun paquet n’est approuvé pour ce moteur."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this engine before."
 msgstr "Aucun paquet n’avait encore été approuvé pour ce moteur."
@@ -3230,6 +3586,10 @@ msgstr "Aucun paquet n’avait encore été approuvé pour ce moteur."
 #: src/chat/builds.tsx
 msgid "No permissions."
 msgstr "Aucune autorisation."
+
+#: src/engines/store-change-errors.ts
+msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
+msgstr "Aucun enregistrement n’est en cause : un admin peut seulement abandonner la modification, sur la page du moteur."
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -3333,6 +3693,10 @@ msgstr "Aucune actuelle"
 msgid "none now"
 msgstr "aucune pour l’instant"
 
+#: src/engines/resource-bindings.tsx
+msgid "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
+msgstr "Aucune des autorisations d'intégration du moteur ne sert {contract} avec toutes les actions qu'il déclare. Accordez-en une d'abord."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "None stated"
 msgstr "Non indiquée"
@@ -3362,6 +3726,14 @@ msgstr "Pas encore de réponse"
 msgid "Not approved"
 msgstr "Non approuvé"
 
+#: src/engines/resource-bindings.tsx
+msgid "Not bound"
+msgstr "Non lié"
+
+#: src/engines/resource-bindings.tsx
+msgid "Not checked"
+msgstr "Non vérifié"
+
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Pas encore confirmée par la direction"
@@ -3377,6 +3749,14 @@ msgstr "Pas encore cartographié"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Not enough is known yet. It can open once it is past {threshold}%, or once the interviews are over."
 msgstr "On n’en sait pas encore assez. Il peut ouvrir une fois {threshold} % dépassés, ou une fois les entretiens terminés."
+
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice could be checked, and none of those checked can serve it. Reload the page to check again."
+msgstr "Tous les choix n'ont pas pu être vérifiés, et aucun de ceux vérifiés ne peut la servir. Rechargez la page pour vérifier à nouveau."
+
+#: src/engines/resource-bindings.tsx
+msgid "Not every choice could be checked: some may be missing from the list."
+msgstr "Tous les choix n'ont pas pu être vérifiés : certains manquent peut-être dans la liste."
 
 #: src/frame/page-states.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -3406,6 +3786,10 @@ msgstr "Non publiée"
 #: src/dashboard/widget-board.tsx
 msgid "Not run yet"
 msgstr "Pas encore lancé"
+
+#: src/engines/resource-bindings.tsx
+msgid "Not served"
+msgstr "Non servi"
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Not signed off yet"
@@ -3457,6 +3841,14 @@ msgstr "Rien ici pour l’instant."
 msgid "Nothing is held for review now."
 msgstr "Rien n'est retenu pour examen pour l'instant."
 
+#: src/engines/resource-bindings.tsx
+msgid "Nothing is published for {contract} yet. Publish it first."
+msgstr "Rien n'est encore publié pour {contract}. Publiez d'abord une version."
+
+#: src/workflows/history-view.tsx
+msgid "Nothing is recorded for this run."
+msgstr "Rien n'est enregistré pour cette exécution."
+
 #: src/dashboard/pile-cards.tsx
 msgid "Nothing is sent or changed on {connection}."
 msgstr "Rien n’est envoyé ni modifié dans {connection}."
@@ -3480,6 +3872,10 @@ msgstr "Rien ne s’exécute encore : ce serait la première version actuelle du
 #: src/routes/_shell.settings.spend.tsx
 msgid "Nothing spent yet."
 msgstr "Rien de dépensé pour l’instant."
+
+#: src/workflows/triggers.tsx
+msgid "Nothing starts it on its own: it runs when someone starts it."
+msgstr "Rien ne le lance tout seul : il s'exécute quand quelqu'un le lance."
 
 #: src/dashboard/report.ts
 #: src/dashboard/signals.tsx
@@ -3556,6 +3952,10 @@ msgstr "à la réception d’un e-mail à {address}@"
 msgid "on the event {event}, filtered"
 msgstr "à l’événement {event}, filtré"
 
+#: src/workflows/triggers.tsx
+msgid "On the schedule set by {param} ({timeZone})"
+msgstr "Selon la planification définie par {param} ({timeZone})"
+
 #: src/workflows/workflows-table.tsx
 msgid "On the way"
 msgstr "En route"
@@ -3601,6 +4001,15 @@ msgstr "Vous seul"
 #: src/connections/connect-dialog.tsx
 msgid "Only you can use it."
 msgstr "Vous seul pouvez l’utiliser."
+
+#: src/engines/store-change-errors.ts
+msgid "Only your organization's admins can abandon a change to a store."
+msgstr "Seuls les admins de votre organisation peuvent abandonner une modification d’un magasin."
+
+#: src/workflows/history-view.tsx
+msgctxt "a wait of a run"
+msgid "Open"
+msgstr "Ouverte"
 
 #: src/workflows/workflows-table.tsx
 msgctxt "column: a link that opens the workflow"
@@ -3690,6 +4099,10 @@ msgstr "Ouverture du chat…"
 msgid "Opens at {threshold}%"
 msgstr "Ouvre à {threshold} %"
 
+#: src/engines/resource-bindings.tsx
+msgid "Operations"
+msgstr "Opérations"
+
 #: src/knowledge/uploads.tsx
 msgid "or choose them from your computer"
 msgstr "ou choisissez-les sur votre ordinateur"
@@ -3711,6 +4124,7 @@ msgid "Otherwise:"
 msgstr "Sinon :"
 
 #: src/chat/thread.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Output"
 msgstr "Sortie"
 
@@ -3740,6 +4154,11 @@ msgstr "Responsable"
 msgid "Package"
 msgstr "Paquet"
 
+#: src/engines/package-approvals.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "Packages"
+msgstr "Paquets"
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Packages for {engine}"
 msgstr "Paquets pour {engine}"
@@ -3752,6 +4171,10 @@ msgstr "Paramètres"
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Une partie de ce qui sera envoyé est tronquée ci-dessus. Affichez tout, ou exactement ce qui sera envoyé, pour confirmer."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Past the alert"
+msgstr "Seuil d'alerte dépassé"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Paste the transcript of the first conversation with the sponsor"
@@ -3770,6 +4193,11 @@ msgid "Pause the interviews"
 msgstr "Mettre les entretiens en pause"
 
 #: src/workflows/runs.tsx
+msgid "Paused"
+msgstr "En pause"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
 msgid "Paused"
 msgstr "En pause"
 
@@ -3798,13 +4226,38 @@ msgstr "Personnes entendues"
 msgid "People rejected {rejected} of {answered, plural, one {# answer} other {# answers}} at step {step} of {about} in {days, plural, one {the last day} other {the last # days}}."
 msgstr "À l’étape {step} de {about} : {rejected} refus sur {answered, plural, one {# réponse} other {# réponses}} {days, plural, one {ces dernières 24 heures} other {ces # derniers jours}}."
 
+#: src/engines/resource-bindings.tsx
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Per day"
 msgstr "Par jour"
 
+#: src/engines/resource-bindings.tsx
+msgid "Per day (UTC), in US dollars"
+msgstr "Par jour (UTC), en dollars américains"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per month"
+msgstr "Par mois"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per month (UTC), in US dollars"
+msgstr "Par mois (UTC), en dollars américains"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per request"
+msgstr "Par requête"
+
+#: src/engines/resource-bindings.tsx
+msgid "Per request, in US dollars"
+msgstr "Par requête, en dollars américains"
+
 #: src/activity/audit-log.tsx
 msgid "Permission"
 msgstr "Autorisation"
+
+#: src/engines/resource-bindings.tsx
+msgid "Permission {permission}"
+msgstr "Autorisation {permission}"
 
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
@@ -3876,6 +4329,14 @@ msgstr "A proposé des paquets"
 msgid "Provided by Grasp, not installed again: {provided}"
 msgstr "Fourni par Grasp, non réinstallé : {provided}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Publish a version of {contract}"
+msgstr "Publier une version de {contract}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Publish as"
+msgstr "Publier comme"
+
 #. Product name: keep it as it is
 #. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
@@ -3890,6 +4351,11 @@ msgstr "Pulse sur les appareils de l’entreprise. Ajoute les applications, serv
 #: src/brain/brain-atlas.ts
 msgid "Pulse shows what runs on the laptops, AI tools included."
 msgstr "Pulse montre ce qui tourne sur les ordinateurs, outils d’IA compris."
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Queued"
+msgstr "En file d'attente"
 
 #: src/dashboard/widget-board.tsx
 msgid "Ran"
@@ -3914,6 +4380,10 @@ msgstr "Lecture"
 #: src/activity/audit-words.ts
 msgid "Read a knowledge document"
 msgstr "A lu un document de connaissances"
+
+#: src/engines/package-approvals.tsx
+msgid "Read again"
+msgstr "Relire"
 
 #: src/activity/audit-words.ts
 msgid "Read an email attachment"
@@ -3992,6 +4462,10 @@ msgstr "Prêt"
 #: src/routes/_shell.index.tsx
 msgid "Recent chats"
 msgstr "Discussions récentes"
+
+#: src/engines/store-changes.tsx
+msgid "Records checked: {scanned}. Filled in: {filled}."
+msgstr "Enregistrements vérifiés : {scanned}. Remplis : {filled}."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Registry and hash"
@@ -4105,6 +4579,10 @@ msgstr "Se répète, {items} :"
 msgid "Repeats, once per item:"
 msgstr "Se répète, une fois par élément :"
 
+#: src/engines/resource-bindings.tsx
+msgid "Replace the binding of {alias}"
+msgstr "Remplacer la liaison de {alias}"
+
 #: src/knowledge/document.tsx
 msgid "Replace version {newerVersion} with mine"
 msgstr "Remplacer la version {newerVersion} par la mienne"
@@ -4116,6 +4594,15 @@ msgstr "A remplacé une demande de paquets"
 #: src/dashboard/report-dialog.tsx
 msgid "Report"
 msgstr "Rapport"
+
+#: src/engines/resource-bindings.tsx
+msgid "Resource"
+msgstr "Ressource"
+
+#: src/engines/resource-bindings.tsx
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "Resources"
+msgstr "Ressources"
 
 #: src/knowledge/timeline.tsx
 msgid "Restore"
@@ -4151,6 +4638,26 @@ msgstr "Résultat : pas encore mesuré"
 msgid "Results"
 msgstr "Résultats"
 
+#: src/engines/package-approvals.tsx
+msgid "Retire"
+msgstr "Mettre hors service"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}"
+msgstr "Mettre hors service les paquets de {engine}"
+
+#: src/engines/package-approvals.tsx
+msgid "Retire the packages for {engine}?"
+msgstr "Mettre hors service les paquets de {engine} ?"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired"
+msgstr "Hors service"
+
+#: src/engines/package-approvals.tsx
+msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
+msgstr "Mis hors service par {endedBy}, {endedAt} : {endedReason}"
+
 #: src/dashboard/to-do.tsx
 msgid "Review"
 msgstr "Examiner"
@@ -4168,12 +4675,30 @@ msgid "Review the apps of {name}"
 msgstr "Examiner les applications de {name}"
 
 #: src/connections/connection-list.tsx
+#: src/engines/package-approvals.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Revoke"
 msgstr "Révoquer"
 
 #: src/connections/connection-list.tsx
 msgid "Revoke {holder}'s permission"
 msgstr "Révoquer l’autorisation de {holder}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}"
+msgstr "Révoquer la liaison de {alias}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Revoke the binding of {alias}?"
+msgstr "Révoquer la liaison de {alias} ?"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}"
+msgstr "Révoquer les paquets de {engine}"
+
+#: src/engines/package-approvals.tsx
+msgid "Revoke the packages for {engine}?"
+msgstr "Révoquer les paquets de {engine} ?"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
@@ -4221,6 +4746,10 @@ msgstr "Règles publiées"
 msgid "Rules waiting for a decision"
 msgstr "Règles en attente de décision"
 
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "Run"
+msgstr "Exécution"
+
 #: src/routes/decisions.$decision.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
@@ -4234,15 +4763,41 @@ msgstr "Exécution {runId}"
 msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
 msgstr "Exécution {shortId} de {workflowId} dans {engine}, lancée le {started}"
 
+#: src/workflows/history-view.tsx
+msgid "Run history"
+msgstr "Historique de l'exécution"
+
+#: src/workflows/runs.tsx
+msgid "Run history, {time}"
+msgstr "Historique de l'exécution, {time}"
+
 #: src/brain/brain.ts
 msgid "Run logs"
 msgstr "Journaux d’exécution"
+
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "Run not found"
+msgstr "Exécution introuvable"
+
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "Run of {workflow}"
+msgstr "Exécution de {workflow}"
 
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 msgid "Running"
 msgstr "En production"
+
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Running"
+msgstr "En cours"
+
+#: src/workflows/history-view.tsx
+msgctxt "an attempt of a step"
+msgid "Running"
+msgstr "En cours"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -4274,6 +4829,10 @@ msgstr "S’exécute {how} {count, plural, one {# fois de plus} other {# fois de
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
 msgstr "Exécutions par jour de démarrage"
+
+#: src/engines/package-approvals.tsx
+msgid "Runs in"
+msgstr "S’exécute dans"
 
 #: src/chat/builds-state.ts
 msgid "Runs now"
@@ -4681,6 +5240,7 @@ msgid "Statements"
 msgstr "Affirmations"
 
 #: src/connections/connection-list.tsx
+#: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -4691,6 +5251,10 @@ msgstr "Statut"
 msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Statut"
+
+#: src/workflows/history-view.tsx
+msgid "Step {ordinal}"
+msgstr "Étape {ordinal}"
 
 #: src/dashboard/signals.tsx
 msgid "Step {step} of {about} failed in {failures} of {runs, plural, one {# run} other {# runs}} in {days, plural, one {the last day} other {the last # days}}."
@@ -4740,6 +5304,11 @@ msgstr "Arrêter"
 msgid "Stopped"
 msgstr "Arrêté"
 
+#: src/workflows/triggers.tsx
+msgctxt "a schedule that stopped"
+msgid "Stopped"
+msgstr "Arrêtée"
+
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "A arrêté une planification qui échouait sans cesse"
@@ -4752,6 +5321,14 @@ msgstr "A arrêté de suivre ce qui change sur une connexion"
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Arrêté."
+
+#: src/engines/store-changes.tsx
+msgid "Store ID: {store}"
+msgstr "ID du magasin : {store}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Structured, at most {tokens} tokens"
+msgstr "Structurée, au plus {tokens} jetons"
 
 #: src/frame/person-menu.tsx
 msgid "System"
@@ -4820,6 +5397,18 @@ msgstr "Équipes"
 msgid "Teams named"
 msgstr "Équipes nommées"
 
+#: src/engines/resource-bindings.tsx
+msgid "Template"
+msgstr "Modèle"
+
+#: src/engines/resource-bindings.tsx
+msgid "Template {templateId}, version {version}"
+msgstr "Modèle {templateId}, version {version}"
+
+#: src/engines/resource-bindings.tsx
+msgid "Template version"
+msgstr "Version du modèle"
+
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Test"
 msgstr "Tester"
@@ -4844,6 +5433,10 @@ msgstr "Tests"
 #: src/knowledge/document.tsx
 msgid "Text"
 msgstr "Texte"
+
+#: src/engines/resource-bindings.tsx
+msgid "Text, at most {tokens} tokens"
+msgstr "Texte, au plus {tokens} jetons"
 
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
@@ -4880,6 +5473,10 @@ msgstr "C’est trop court pour être une conversation."
 #: src/onboarding/kickoff-errors.ts
 msgid "That isn't something the kickoff takes."
 msgstr "Ce n’est pas quelque chose que le lancement accepte."
+
+#: src/engines/resource-bindings.tsx
+msgid "That isn't valid JSON."
+msgstr "Ce n'est pas du JSON valide."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
@@ -4959,6 +5556,10 @@ msgstr "Le catalogue ne contient pas {app} : ses outils ne peuvent pas être aff
 msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
 msgstr "Le catalogue des intégrations n’a pas pu être lu : cette page ne montre donc que ce que vos comptes en disent."
 
+#: src/engines/store-changes.tsx
+msgid "The change to the store {name} was abandoned"
+msgstr "La modification du magasin {name} a été abandonnée"
+
 #: src/engines/screen-approval.tsx
 msgid "The code of version {version}"
 msgstr "Le code de la version {version}"
@@ -4980,6 +5581,14 @@ msgstr "La plateforme de l’entreprise reste fermée jusqu’au feu vert de Gra
 msgid "The conversation couldn't be read just now. Try again in a moment."
 msgstr "La conversation n’a pas pu être lue pour l’instant. Réessayez dans un instant."
 
+#: src/engines/resource-bindings.tsx
+msgid "The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now."
+msgstr "La version actuelle la déclare autrement que la version pour laquelle sa liaison a été approuvée. Liez-la à nouveau pour approuver ce qu'elle déclare maintenant."
+
+#: src/engines/resource-bindings.tsx
+msgid "The current version doesn't declare these, so they serve nothing until a version declares them again."
+msgstr "La version actuelle ne les déclare pas : elles ne servent rien tant qu'une version ne les déclare pas à nouveau."
+
 #: src/dashboard/widget-board.tsx
 msgid "The dashboard is back to how it began."
 msgstr "Le tableau de bord est revenu comme au début."
@@ -5000,6 +5609,34 @@ msgstr "L’annuaire et la connexion via Microsoft ou Google. Ajoute les équipe
 msgid "The directory brought in the teams and their roles."
 msgstr "L’annuaire a apporté les équipes et leurs rôles."
 
+#: src/engines/resource-bindings.tsx
+msgid "The engine has no permission to read a collection. Grant one first."
+msgstr "Le moteur n'a aucune autorisation de lire une collection. Accordez-en une d'abord."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+msgstr "Le moteur a trop d'intégrations pour toutes les vérifier sur cette page : cette liaison n'a donc pas été vérifiée. Sa prochaine requête est vérifiée comme toujours."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's actions can't use it until an admin binds it."
+msgstr "Les actions du moteur ne peuvent pas l'utiliser tant qu'un admin ne l'a pas liée."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr "Les actions du moteur n'atteignent un modèle, une intégration, des connaissances ou un modèle de contenu que par une liaison qu'un admin approuve ici. Déclarer une ressource n'accorde rien, et révoquer une liaison arrête la requête suivante qui passe par elle."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
+msgstr "Les actions du moteur n'atteignent un modèle, une intégration, des connaissances ou un modèle de contenu que par une liaison qu'approuve un admin de votre organisation."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's current version declares no resource for its actions."
+msgstr "La version actuelle du moteur ne déclare aucune ressource pour ses actions."
+
+#: src/engines/resource-bindings.tsx
+msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+msgstr "La prochaine requête du moteur qui passe par elle est refusée, et les actions qui l'attendent sont abandonnées. Liez-la à nouveau pour l'utiliser de nouveau."
+
 #: src/chat/builds.tsx
 msgid "The engines this chat builds didn't load."
 msgstr "Les moteurs que ce chat crée n’ont pas été chargés."
@@ -5008,6 +5645,14 @@ msgstr "Les moteurs que ce chat crée n’ont pas été chargés."
 #: src/export/export-menu.tsx
 msgid "The export didn't work. Try again."
 msgstr "L’export n’a pas fonctionné. Réessayez."
+
+#: src/routes/_shell.settings.models.tsx
+msgid "The first {shown} by engine; more engines have models bound."
+msgstr "Les {shown} premiers par moteur ; d'autres moteurs ont des modèles liés."
+
+#: src/engines/store-change-errors.ts
+msgid "the fixture's row doesn't fit what the migration takes"
+msgstr "la ligne de l'enregistrement de test ne correspond pas à ce que prend la migration"
 
 #: src/dashboard/activity.tsx
 msgid "The full audit trail"
@@ -5068,6 +5713,26 @@ msgstr "Le lien fonctionne jusqu’au {until}."
 msgid "The list is full: remove a line to add another."
 msgstr "La liste est pleine : retirez une ligne pour en ajouter une autre."
 
+#: src/engines/store-change-errors.ts
+msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
+msgstr "La migration {migration} a échoué sur son enregistrement de test {fixture} quand cette version a été scellée : {reason}. Elle ne s'exécute sur aucun enregistrement, donc la version ne peut pas être rendue actuelle : corrigez la migration ou son enregistrement de test et reconstruisez le moteur."
+
+#: src/engines/store-change-errors.ts
+msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
+msgstr "La migration {migration} a échoué sur ses enregistrements de test quand cette version a été scellée : {reason}. Elle ne s'exécute sur aucun enregistrement, donc la version ne peut pas être rendue actuelle : corrigez la migration ou ses enregistrements de test et reconstruisez le moteur."
+
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
+msgstr "La migration {migration} de la table {table} a échoué dans son ensemble : c'est son code qui a échoué, pas un enregistrement."
+
+#: src/engines/store-changes.tsx
+msgid "The migration {migration} of the table {table} failed on the record {record}."
+msgstr "La migration {migration} de la table {table} a échoué sur l'enregistrement {record}."
+
+#: src/engines/store-change-errors.ts
+msgid "the migration threw an error"
+msgstr "la migration a levé une erreur"
+
 #: src/chat/chat-markdown.ts
 #: src/chat/thread.tsx
 msgid "The model call failed."
@@ -5085,9 +5750,17 @@ msgstr "Le plus urgent d’abord."
 msgid "The most used AI tool nobody mentioned is {name}, used by {people} people."
 msgstr "L’outil d’IA le plus utilisé que personne n’a cité est {name}, utilisé par {people} personnes."
 
+#: src/engines/store-changes.tsx
+msgid "The new field {field} of the table {table} can't be filled in: the record {record} already holds a value under that name that the field doesn't accept."
+msgstr "Le nouveau champ {field} de la table {table} ne peut pas être rempli : l’enregistrement {record} contient déjà sous ce nom une valeur que le champ n’accepte pas."
+
 #: src/dashboard/todo-pile.tsx
 msgid "The next one"
 msgstr "La suivante"
+
+#: src/engines/resource-bindings.tsx
+msgid "The next version of template {id}"
+msgstr "La version suivante du modèle {id}"
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter: what"
@@ -5097,6 +5770,18 @@ msgstr "L’onboarding"
 #: src/dashboard/todo-pile.tsx
 msgid "The one before"
 msgstr "La précédente"
+
+#: src/routes/_shell.engines.$engine.index.tsx
+msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
+msgstr "Les paquets approuvés pour ce moteur. Vous les voyez parce que vous pouvez approuver des paquets ; le reste du moteur est réservé à ses membres."
+
+#: src/engines/package-approvals.tsx
+msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
+msgstr "Les paquets n’ont pas pu être relus, cette liste n’est donc peut-être plus à jour : {unread}"
+
+#: src/workflows/triggers.tsx
+msgid "The part of the address before the @, on the mail domain set up for Grasp."
+msgstr "La partie de l'adresse avant le @, sur le domaine de messagerie configuré pour Grasp."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
@@ -5122,6 +5807,10 @@ msgstr "La réponse du sponsor"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "Les étapes ne peuvent pas être lues dans le code de ce workflow : {message}"
+
+#: src/engines/store-changes.tsx
+msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+msgstr "Le magasin garde ses tables telles quelles et accepte à nouveau des modifications. La version qui avait besoin de cette modification ne pourra jamais être rendue actuelle, ni dans ce moteur ni dans un autre qui utilise le magasin : elle doit être reconstruite. Les nouveaux champs restent réservés avec le sens que cette modification leur a donné : une version ultérieure ne peut les ajouter à nouveau qu’exactement tels quels. Les valeurs déjà remplies restent dans les enregistrements, invisibles. Cette action est irréversible."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."
@@ -5178,6 +5867,14 @@ msgstr "Il n’y a pas encore de moteur que vous puissiez ouvrir. Les moteurs se
 msgid "There is no data rule: any allowed model may take sensitive data."
 msgstr "Il n’y a pas de règle de données : tout modèle autorisé peut recevoir des données sensibles."
 
+#: src/engines/store-changes.tsx
+msgid "These fields stay reserved with their current meaning: {reserved}."
+msgstr "Ces champs restent réservés avec leur sens actuel : {reserved}."
+
+#: src/engines/store-changes.tsx
+msgid "These releases can never be made current: {releases}."
+msgstr "Ces versions ne pourront jamais être rendues actuelles : {releases}."
+
 #: src/routes/_shell.settings.members.tsx
 msgid "They are signed out everywhere, their personal connections are disconnected, and they cannot sign in again."
 msgstr "La personne est déconnectée partout, ses connexions personnelles sont coupées et elle ne peut plus se connecter."
@@ -5209,6 +5906,14 @@ msgstr "Cette application a quitté son cadre et a été arrêtée."
 #: src/screens/screen-frame.tsx
 msgid "This app lost its connection to the page and was stopped."
 msgstr "Cette application a perdu sa connexion avec la page et a été arrêtée."
+
+#: src/engines/store-change-errors.ts
+msgid "This change is being applied again, so it can't be abandoned now. The page shows where it stands now."
+msgstr "Cette modification est de nouveau en cours d’application : elle ne peut donc pas être abandonnée maintenant. La page montre maintenant où elle en est."
+
+#: src/engines/store-change-errors.ts
+msgid "This change was already abandoned."
+msgstr "Cette modification a déjà été abandonnée."
 
 #: src/routes/guest.tsx
 msgid "This chat asks how your work is done. Everything you write is kept and read by the people who invited you, who may copy it into their own records and keep it there. Please don't share passwords, bank details or anything you wouldn't put in an email."
@@ -5250,6 +5955,10 @@ msgstr "Cette décision est close."
 msgid "This decision is for someone else to answer."
 msgstr "Cette décision revient à quelqu’un d’autre."
 
+#: src/engines/resource-bindings.tsx
+msgid "This deployment allows no model."
+msgstr "Ce déploiement n'autorise aucun modèle."
+
 #: src/knowledge/document.tsx
 msgid "This document changed since you opened it. Version {newerVersion} is below; your text is kept. Start again from it, or replace it with your text."
 msgstr "Ce document a changé depuis que vous l’avez ouvert. La version {newerVersion} figure ci-dessous ; votre texte est conservé. Repartez de celle-ci ou remplacez-la par votre texte."
@@ -5283,6 +5992,10 @@ msgstr "Ce lien ne fonctionne pas. Demandez-en un nouveau à la personne qui l�
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Ce lien a expiré. Demandez-en un nouveau à la personne qui l’a envoyé."
 
+#: src/routes/_shell.settings.models.tsx
+msgid "This month"
+msgstr "Ce mois-ci"
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "This month so far"
 msgstr "Ce mois-ci jusqu’à présent"
@@ -5294,6 +6007,38 @@ msgstr "Celui-ci ne peut qu'être libéré : un enregistrement de budget sur leq
 #: src/frame/page-states.tsx
 msgid "This page didn't load"
 msgstr "Cette page ne s’est pas chargée"
+
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
+msgid "This run's details were removed once its retention was over, and its history with them."
+msgstr "Les détails de cette exécution ont été supprimés à la fin de sa durée de conservation, et son historique avec eux."
+
+#: src/workflows/history-view.tsx
+msgid "This step failed."
+msgstr "Cette étape a échoué."
+
+#: src/engines/store-change-errors.ts
+msgid "This store no longer exists, so there is nothing to abandon."
+msgstr "Ce magasin n’existe plus : il n’y a donc rien à abandonner."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+msgstr "Cette version modifie les données du moteur avec une migration, qui ne peut pas aboutir : sa transformation a échoué, ou a renvoyé ce que la table n'accepte pas."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
+msgstr "Cette version modifie les données du moteur, et la modification ne peut pas être appliquée : un enregistrement contient déjà une valeur que l’un de ses nouveaux champs n’accepte pas."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgstr "Cette version modifie les données du moteur, et la modification ne peut pas être appliquée : le remplissage de ses nouveaux champs n’avançait plus."
+
+#: src/engines/store-change-errors.ts
+msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgstr "Cette version modifie les données du moteur, et la modification ne peut pas être appliquée : remplir l’un de ses nouveaux champs rendrait un enregistrement plus grand qu’un enregistrement ne peut l’être."
+
+#: src/engines/store-change-errors.ts
+msgid "This version's data change is still being applied. Try again in a moment."
+msgstr "La modification des données de cette version est encore en cours d’application. Réessayez dans un instant."
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -5336,10 +6081,18 @@ msgstr "À faire"
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "Pour que l’on ne sache pas qui a parlé, une équipe n’apparaît pas tant que cinq de ses membres n’ont pas été sollicités, ni son chiffre tant que trois n’ont pas été entendus. Ni l’un ni l’autre ne veut dire que personne n’a participé."
 
+#: src/engines/package-approvals.tsx
+msgid "To use them again, someone who approves packages reviews them again."
+msgstr "Pour les utiliser à nouveau, une personne qui approuve les paquets les examine de nouveau."
+
 #: src/chat/chat-list.tsx
 msgctxt "chats from today"
 msgid "Today"
 msgstr "Aujourd’hui"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Today ({day}, UTC)"
+msgstr "Aujourd'hui ({day}, UTC)"
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"
@@ -5381,6 +6134,15 @@ msgstr "Outils, produits et mots propres à l’entreprise, pour qu’il les com
 msgid "Transcript"
 msgstr "Transcription"
 
+#: src/workflows/triggers.tsx
+msgid "Triggers"
+msgstr "Déclencheurs"
+
+#: src/routes/_shell.workflows.$app.$workflow.tsx
+msgctxt "tab of a workflow"
+msgid "Triggers"
+msgstr "Déclencheurs"
+
 #: src/chat/builds.tsx
 #: src/chat/chat-dock.tsx
 #: src/chat/thread.tsx
@@ -5408,6 +6170,18 @@ msgctxt "programme stage"
 msgid "Under way"
 msgstr "En cours"
 
+#: src/workflows/history-view.tsx
+msgid "Undoing {label}"
+msgstr "Annulation de {label}"
+
+#: src/workflows/history-view.tsx
+msgid "Undoing its changes after a failure"
+msgstr "Annule ses modifications après un échec"
+
+#: src/workflows/history-view.tsx
+msgid "Undoing its changes after it was cancelled"
+msgstr "Annule ses modifications après son annulation"
+
 #: src/activity/pending.tsx
 msgid "Unknown"
 msgstr "Inconnue"
@@ -5425,6 +6199,18 @@ msgstr "Source inconnue"
 #: src/dashboard/activity.tsx
 msgid "Unreadable event"
 msgstr "Événement illisible"
+
+#: src/workflows/history-view.tsx
+msgid "Until {until}"
+msgstr "Jusqu'au {until}"
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
+msgstr "Tant que ce n’est pas résolu, aucune version qui modifie les tables de ce magasin ne peut être rendue actuelle, ni dans ce moteur ni dans un autre qui utilise le magasin. Corrigez l’enregistrement via le moteur et la modification sera retentée, ou abandonnez-la."
+
+#: src/engines/store-changes.tsx
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgstr "Tant que ce n’est pas résolu, aucune version qui modifie les tables de ce magasin ne peut être rendue actuelle, ni dans ce moteur ni dans un autre qui utilise le magasin. Aucun enregistrement n’est en cause, il n’y a donc rien à corriger : abandonnez la modification pour que le magasin accepte à nouveau des modifications."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
@@ -5458,6 +6244,7 @@ msgstr "Utilisez le compte de votre organisation pour continuer."
 msgid "Used a connected tool"
 msgstr "A utilisé un outil connecté"
 
+#: src/engines/resource-bindings.tsx
 #: src/knowledge/document.tsx
 msgid "Used by"
 msgstr "Utilisé par"
@@ -5533,12 +6320,18 @@ msgstr "Page Vision"
 msgid "Vision page confirmed"
 msgstr "Page Vision confirmée"
 
+#: src/workflows/history-view.tsx
+msgctxt "a run's lifecycle"
+msgid "Waiting"
+msgstr "En attente"
+
 #: src/dashboard/to-do.tsx
 msgctxt "dashboard: what waits on you, settled on its own page"
 msgid "Waiting elsewhere"
 msgstr "En attente ailleurs"
 
 #: src/routes/_shell.workflows.index.tsx
+#: src/workflows/history-view.tsx
 #: src/workflows/runs.tsx
 msgid "Waiting for a decision"
 msgstr "En attente d’une décision"
@@ -5550,6 +6343,18 @@ msgstr "En attente d’une décision : {waiting}"
 #: src/dashboard/signals.tsx
 msgid "Waiting for a person"
 msgstr "Attend une personne"
+
+#: src/workflows/history-view.tsx
+msgid "Waiting for a set time"
+msgstr "Attend un délai fixé"
+
+#: src/workflows/history-view.tsx
+msgid "Waiting for an event"
+msgstr "Attend un événement"
+
+#: src/workflows/history-view.tsx
+msgid "Waiting for the decision {label}"
+msgstr "Attend la décision {label}"
 
 #: src/dashboard/report.ts
 msgctxt "programme stage"
@@ -5687,6 +6492,18 @@ msgstr "Ce qu’il a apporté"
 msgid "What it is"
 msgstr "Ce que c’est"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "What it is bound to can't be read, so it serves nothing."
+msgstr "Ce à quoi elle est liée est illisible, elle ne sert donc rien."
+
+#: src/engines/resource-bindings.tsx
+msgid "What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read."
+msgstr "Ce à quoi elle est liée ne peut plus la servir : son autorisation a été révoquée, le modèle n'est plus autorisé ou le modèle de contenu ne peut pas être lu."
+
+#: src/engines/resource-bindings.tsx
+msgid "What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits."
+msgstr "Ce à quoi elle est liée a changé depuis l'approbation de la liaison. Liez-la à nouveau une fois que vous avez vérifié que cela convient toujours."
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
 msgstr "Ce que font ses outils, tels que son fournisseur les déclare. Les moteurs et les agents n’utilisent que ce qui leur est accordé, et un outil qui modifie quelque chose attend que sa personne le confirme."
@@ -5736,6 +6553,10 @@ msgstr "Ce que le client partage, et notre propre recherche documentaire. Ajoute
 msgid "What the engine holds"
 msgstr "Ce que détient le moteur"
 
+#: src/engines/resource-bindings.tsx
+msgid "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
+msgstr "Ce que les actions du moteur peuvent dépenser via cette liaison, en plus des budgets du déploiement. Laissez un plafond vide pour n'en fixer aucun. Les étapes d'IA propres à un workflow ne passent pas par elle."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 msgstr "Ce que coûtent ce mois-ci ({month}, UTC) les modèles qui travaillent pour vous dans Grasp, en dollars américains, à leur prix."
@@ -5761,9 +6582,17 @@ msgctxt "column: when a run happened"
 msgid "When"
 msgstr "Quand"
 
+#: src/workflows/triggers.tsx
+msgid "When an email arrives for {localPart}"
+msgstr "Quand un e-mail arrive pour {localPart}"
+
 #: src/chat/builds-state.ts
 msgid "when someone starts it"
 msgstr "quand quelqu’un le lance"
+
+#: src/workflows/triggers.tsx
+msgid "When the event {event} happens"
+msgstr "Quand l'événement {event} se produit"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Where it comes from"
@@ -5825,6 +6654,10 @@ msgstr "Qui travaille où"
 #: src/onboarding/staff-words.ts
 msgid "Who works where is in"
 msgstr "Qui travaille où est connu"
+
+#: src/engines/package-approvals.tsx
+msgid "Why"
+msgstr "Pourquoi"
 
 #: src/brain/brain.ts
 msgid "Why now"
@@ -5909,6 +6742,7 @@ msgstr "Des tests de workflow échouent :"
 #: src/dashboard/widget-board.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.engines.$engine.index.tsx
+#: src/routes/_shell.workflows.$app.$workflow_.runs.$run.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/decisions.$decision.tsx

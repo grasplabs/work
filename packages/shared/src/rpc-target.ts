@@ -82,29 +82,45 @@ const wrapMethods = (
   base: object,
   bounds: ValueBounds
 ): void => {
+  // Every prototype of the chain not wrapped yet: a wrapped one has every
+  // prototype above it wrapped too, as all of them are marked together.
+  const chain: object[] = [];
   for (
     let current: object | null = prototype;
     current !== null && current !== base && !wrapped.has(current);
     current = Reflect.getPrototypeOf(current)
   ) {
-    wrapped.add(current);
+    chain.push(current);
+  }
+  for (const current of chain) {
     for (const name of Reflect.ownKeys(current)) {
       const property = Reflect.getOwnPropertyDescriptor(current, name);
       const method: unknown = property?.value;
       // Cap'n Web names a method by a string; symbols (`Symbol.dispose`)
       // it calls itself, with nothing a side sent.
+      // A method that can't be wrapped would take any argument unchecked:
+      // never silently.
       if (
         typeof name === "string" &&
         name !== "constructor" &&
         property !== undefined &&
-        isMethod(method)
-      ) {
-        Reflect.defineProperty(current, name, {
+        isMethod(method) &&
+        !Reflect.defineProperty(current, name, {
           ...property,
           value: bounded(name, method, bounds),
-        });
+        })
+      ) {
+        throw new TypeError(
+          `The method ${name} can't be bounded: it isn't writable and configurable.`
+        );
       }
     }
+  }
+  // Only once the whole chain is bounded: one that threw, a subclass's
+  // own prototype below it too, is tried again, and throws again, at the
+  // next construction.
+  for (const current of chain) {
+    wrapped.add(current);
   }
 };
 

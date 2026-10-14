@@ -34,11 +34,11 @@ import {
 //   conditional on the lock as it was read, with a guard that fails the
 //   whole batch when the lock isn't the one written (`lockGuardFailed`):
 //   the proposal then starts over.
-// - Locks piling up. One that no pending or approved request names is
-//   deleted in the batch that supersedes or denies a request
+// - Locks piling up. One that no pending, approved or retired request
+//   names is deleted in the batch that supersedes, denies or revokes one
 //   (`unusedLockStatements`). An App holds at most `packageLimits.appLocks`:
 //   a new lock takes the room of the oldest approval no longer in use (not
-//   pending, nor the latest for its targets, nor read through an artifact
+//   pending, nor retired, nor the latest for its targets, nor read through an artifact
 //   address that still holds: `stale`), in the batch that stores it, so
 //   changing graphs again and again never locks an App out for longer
 //   than an address holds (about 12 hours). Only locks in use count
@@ -118,24 +118,55 @@ export const lockGuardFailed = (error: unknown): boolean =>
   error instanceof Error &&
   (error.message.includes(guardFailure) || lockGuardFailed(error.cause));
 
-/** That no pending or approved request of its App names the lock `lock`. */
+/**
+ * A statement that fails the batch it is in, as a lock's guard does
+ * (`lockGuardFailed`), unless `condition` holds as it runs: it inserts a
+ * lock row of `app`'s graph `graphHash` with no lock, which the column
+ * refuses.
+ */
+export const failUnless = (
+  db: DrizzleD1Database,
+  app: string,
+  graphHash: string,
+  condition: SQL
+) =>
+  db
+    .insert(dependencyLocks)
+    .select(
+      sql`SELECT ${app}, ${graphHash}, NULL, 0, NULL WHERE NOT (${condition})`
+    );
+
+/**
+ * That `app`'s graph `graphHash` is retired and approved by nothing else,
+ * as SQL: its lock is frozen (`lockStatements`).
+ */
+const frozenSql = (app: string, graphHash: string): SQL =>
+  sql`(EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${app} AND ${dependencyRequests.graphHash} = ${graphHash} AND ${dependencyRequests.status} = 'retired') AND NOT EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${app} AND ${dependencyRequests.graphHash} = ${graphHash} AND ${dependencyRequests.status} = 'approved'))`;
+
+/**
+ * That no pending, approved or retired request of its App names the lock
+ * `lock`. A retired graph's lock stays: the artifacts it pins are what
+ * the graph keeps working with. A revoked one's goes.
+ */
 const unused = (lock: string): SQL =>
-  sql`NOT EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${sql.raw(lock)}.app_id AND ${dependencyRequests.graphHash} = ${sql.raw(lock)}.graph_hash AND ${dependencyRequests.status} IN ('pending', 'approved'))`;
+  sql`NOT EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.appId} = ${sql.raw(lock)}.app_id AND ${dependencyRequests.graphHash} = ${sql.raw(lock)}.graph_hash AND ${dependencyRequests.status} IN ('pending', 'approved', 'retired'))`;
 
 /**
  * That the lock `lock` is no longer in use: neither the App's pending
  * request names it, nor its latest approval for any set of targets, and
  * no address of one of its artifacts handed out still holds
- * (`holdLockFor`). An approval never ends (until GRA-359), so an App that
- * changes its graph again and again keeps older approvals; their locks
- * are what a new one may take the room of, once nothing handed out reads
- * them any more. A resolve back to such a graph finds its approval
- * standing, and writes its lock again. With `waiting` `replaced`, the
+ * (`holdLockFor`), and its graph isn't retired. An App that changes its
+ * graph again and again keeps older approvals; their locks are what a new
+ * one may take the room of, once nothing handed out reads them any more.
+ * A resolve back to such a graph finds its approval standing, and writes
+ * its lock again. A retired graph's lock is never stale: its pins are the
+ * artifacts the graph keeps working with, and nothing could pin them
+ * again, so it holds its room until the graph is revoked. With `waiting` `replaced`, the
  * App's pending request counts as gone: what a resolve that writes a new
  * lock counts its room by, since its batch drops that request first.
  */
 const stale = (lock: string, waiting: "in use" | "replaced" = "in use"): SQL =>
-  sql`(COALESCE(${sql.raw(lock)}.served_until, 0) <= ${Date.now()} AND NOT EXISTS (SELECT 1 FROM dependency_requests r WHERE r.app_id = ${sql.raw(lock)}.app_id AND r.graph_hash = ${sql.raw(lock)}.graph_hash AND (${sql.raw(waiting === "in use" ? "r.status = 'pending'" : "0")} OR (r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM dependency_requests n WHERE n.app_id = r.app_id AND n.status = 'approved' AND n.targets = r.targets AND n.decided_at > r.decided_at)))))`;
+  sql`(COALESCE(${sql.raw(lock)}.served_until, 0) <= ${Date.now()} AND NOT EXISTS (SELECT 1 FROM dependency_requests r WHERE r.app_id = ${sql.raw(lock)}.app_id AND r.graph_hash = ${sql.raw(lock)}.graph_hash AND (${sql.raw(waiting === "in use" ? "r.status = 'pending'" : "0")} OR r.status = 'retired' OR (r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM dependency_requests n WHERE n.app_id = r.app_id AND n.status = 'approved' AND n.targets = r.targets AND n.decided_at > r.decided_at)))))`;
 
 /**
  * That the lock `lock` is one a new lock of `app` takes the room of, as
@@ -225,9 +256,30 @@ export const lockStatements = async (
     .where(where)
     .get();
   const before = row ? graspLockSchema.parse(JSON.parse(row.lock)) : undefined;
-  const merged = before
-    ? mergedLock(before, fresh)
-    : { lock: fresh, changed: [] };
+  // A retired graph's lock is frozen: its pins are what the graph keeps,
+  // each built for the target config the lock names. A resolve may add a
+  // target it has no config for, never change one it has (a new config
+  // waits for the graph to be approved again).
+  const retiredOnly = frozenSql(app, graphHash);
+  const read = await db.get<{ frozen: number }>(
+    sql`SELECT ${retiredOnly} AS frozen`
+  );
+  const frozen = before !== undefined && read.frozen !== 0;
+  let merged: { lock: GraspLock; changed: DependencyTarget[] } = {
+    lock: fresh,
+    changed: [],
+  };
+  if (before !== undefined) {
+    merged = frozen
+      ? {
+          lock: {
+            ...before,
+            targets: { ...fresh.targets, ...before.targets },
+          },
+          changed: [],
+        }
+      : mergedLock(before, fresh);
+  }
   const stored = canonicalJson(graspLockSchema.parse(merged.lock));
   if (new TextEncoder().encode(stored).byteLength > limits.lockBytes) {
     throw packageErrors.create("package.quota", {
@@ -237,11 +289,12 @@ export const lockStatements = async (
   }
   // Inserts a row with no lock, which the column refuses, unless the lock
   // is the one written: a batch with it lands only with that lock.
-  const guard = db
-    .insert(dependencyLocks)
-    .select(
-      sql`SELECT ${app}, ${graphHash}, NULL, 0, NULL WHERE NOT EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${where} AND ${dependencyLocks.lock} = ${stored})`
-    );
+  const guard = failUnless(
+    db,
+    app,
+    graphHash,
+    sql`EXISTS (SELECT 1 FROM ${dependencyLocks} WHERE ${where} AND ${dependencyLocks.lock} = ${stored})`
+  );
   if (row === undefined) {
     // A new lock is never the waiting request's (that one has its lock),
     // and the batch that writes it drops that request before this runs
@@ -285,8 +338,13 @@ export const lockStatements = async (
     .update(dependencyLocks)
     .set({ lock: stored })
     .where(and(where, eq(dependencyLocks.lock, row.lock)));
+  // Merged as a lock in use: the batch fails whole if the graph was
+  // retired since, and the next attempt reads it frozen.
+  const stillThawed = frozen
+    ? []
+    : [failUnless(db, app, graphHash, sql`NOT ${retiredOnly}`)];
   if (merged.changed.length === 0) {
-    return { lock: merged.lock, statements: [update, guard] };
+    return { lock: merged.lock, statements: [update, guard, ...stillThawed] };
   }
   const [from, to] = await Promise.all([
     configsOf(before, merged.changed, "from"),
@@ -297,6 +355,7 @@ export const lockStatements = async (
     statements: [
       update,
       guard,
+      ...stillThawed,
       // Only if the guard passed: the batch lands whole or not at all.
       outboxed(db, {
         actor: by.actor ?? actorOf(by),

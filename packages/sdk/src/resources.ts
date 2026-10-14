@@ -1,5 +1,7 @@
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 
+import type { ConnectorCatalog } from "./connector-catalog.gen.ts";
 import type { FilesOperation } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type {
@@ -34,10 +36,67 @@ export interface ModelConfig<Output extends AnySchema | undefined> {
   readonly maxOutputTokens: number;
 }
 
+/**
+ * A Composio connection's generated contract, `composio.<toolkit>@1`: the
+ * tools its admin allowed, each an action named by its tool, such as
+ * `HUBSPOT_LIST_CONTACTS`. Composio changes its toolkits without a release
+ * of Grasp, so they aren't in the release's catalog and their calls aren't
+ * typed (`ComposioCall`): the host checks each one, both ways, against the
+ * contract the binding pinned when an admin approved it.
+ */
+export type ComposioContract = `composio.${string}@1`;
+
+/**
+ * A generated connector contract (spec 12): a native connector's tools of
+ * one family, such as `microsoft-365.mail@1`, from this release's catalog;
+ * or a Composio toolkit's (`ComposioContract`).
+ */
+export type ConnectorContract =
+  | Extract<keyof ConnectorCatalog, string>
+  | ComposioContract;
+
+/**
+ * The actions of connector contract `Contract`, by name: any name for a
+ * Composio contract, whose tools only its binding knows.
+ */
+export type ConnectorAction<Contract extends ConnectorContract> =
+  Contract extends keyof ConnectorCatalog
+    ? Extract<keyof ConnectorCatalog[Contract], string>
+    : string;
+
+/**
+ * A Composio action's arguments and answer: any JSON object in, any JSON
+ * value back, both checked by the host against the pinned contract. A tool
+ * that declares no output schema answers its text, as a string.
+ */
+export interface ComposioCall {
+  readonly input: Readonly<Record<string, JsonValue>>;
+  readonly output: JsonValue;
+}
+
+/**
+ * Action `Action` of contract `Contract`: its `input`, the arguments a
+ * call passes, and its `output`, the answer it gets back.
+ */
+type ContractAction<Contract, Action> = Contract extends keyof ConnectorCatalog
+  ? Action extends keyof ConnectorCatalog[Contract]
+    ? ConnectorCatalog[Contract][Action]
+    : never
+  : Contract extends ComposioContract
+    ? ComposioCall
+    : never;
+
 /** What a declaration's config may say about a connector. */
-export interface ConnectorConfig<Actions extends readonly string[]> {
-  /** The adapter contract and its major version, e.g. `grasp.mail@1`. */
-  readonly contract: string;
+export interface ConnectorConfig<
+  Contract extends ConnectorContract,
+  Actions extends readonly ConnectorAction<Contract>[],
+> {
+  /**
+   * The generated contract and its major version: one the release's
+   * connectors serve, e.g. `microsoft-365.mail@1`, or a Composio toolkit's,
+   * e.g. `composio.hubspot@1`.
+   */
+  readonly contract: Contract;
   /** The contract's actions the App needs, each once. */
   readonly actions: Actions;
 }
@@ -83,9 +142,10 @@ export interface ModelResource<
 /** A connector requirement. */
 export interface ConnectorResource<
   Alias extends string = string,
+  Contract extends string = string,
   Actions extends readonly string[] = readonly string[],
 > extends DeclarationBase<"connector", Alias> {
-  readonly contract: string;
+  readonly contract: Contract;
   readonly actions: Actions;
 }
 
@@ -170,20 +230,47 @@ export interface ModelClient<Output> {
   }) => Promise<Output>;
 }
 
-/** What `ctx.resources.<alias>` is for a connector. */
-export interface ConnectorClient<Actions extends readonly string[]> {
-  /** One of the declared actions, with its arguments, through connect. */
-  readonly call: (
-    action: Actions[number],
-    args: Readonly<Record<string, JsonValue>>
-  ) => Promise<JsonValue>;
+/** A catalog action's arguments. */
+type InputOf<Entry> = Entry extends { readonly input: infer Input }
+  ? Input
+  : never;
+
+/**
+ * A call's arguments: each action of `Action` paired with its own
+ * arguments, so an action that may be either of two needs arguments that
+ * fit whichever it is, never just one of them.
+ */
+type CallArgs<Contract, Action> = Action extends string
+  ? [action: Action, args: InputOf<ContractAction<Contract, Action>>]
+  : never;
+
+/**
+ * What `ctx.resources.<alias>` is for a connector: its calls typed by the
+ * contract's catalog entry (`ConnectorCatalog`).
+ */
+export interface ConnectorClient<
+  Contract extends string,
+  Actions extends readonly string[],
+> {
+  /**
+   * One of the declared actions, with its arguments, through connect: its
+   * answer, or any of theirs when the action may be several. Both are
+   * checked against the contract the binding serves.
+   */
+  readonly call: <Action extends Actions[number]>(
+    ...call: CallArgs<Contract, Action>
+  ) => Promise<ContractAction<Contract, Action>["output"]>;
 }
 
 /** What `ctx.resources.<alias>` is for knowledge, by its operations. */
 export type KnowledgeClient<Operations extends readonly KnowledgeOperation[]> =
   ("search" extends Operations[number]
     ? {
-        /** The best matches for `text` in the declared collections. */
+        /**
+         * The best matches for `text` in the declared collections: 1 to
+         * `knowledgeSearchMaxLength` (500) code units, Knowledge's own
+         * limit; a longer text is refused as `contract.invalid_args`.
+         */
         readonly search: (request: {
           readonly text: string;
           readonly limit?: number;
@@ -209,8 +296,8 @@ export interface TemplateClient {
 export type ResourceClient<Resource> =
   Resource extends ModelResource<string, infer Output>
     ? ModelClient<Output>
-    : Resource extends ConnectorResource<string, infer Actions>
-      ? ConnectorClient<Actions>
+    : Resource extends ConnectorResource<string, infer Contract, infer Actions>
+      ? ConnectorClient<Contract, Actions>
       : Resource extends KnowledgeResource<string, infer Operations>
         ? KnowledgeClient<Operations>
         : Resource extends TemplateResource
@@ -328,11 +415,15 @@ const checkedConfig = (
   return config;
 };
 
+// No longer than an identifier, so the audit events that name a binding's
+// contract can carry it.
 const checkedContract = (contract: unknown): string =>
-  typeof contract === "string" && contractPattern.test(contract)
+  typeof contract === "string" &&
+  contract.length <= identifierMaxLength &&
+  contractPattern.test(contract)
     ? contract
     : refuse(
-        "A contract is a dotted name and its major version, e.g. `grasp.mail@1`."
+        `A contract is a dotted name and its major version, e.g. \`grasp.mail@1\`, of at most ${identifierMaxLength} characters.`
       );
 
 const checkedList = (
@@ -461,11 +552,15 @@ export const resource = Object.freeze({
   /** Some of a connector contract's actions. */
   connector: <
     const Alias extends string,
-    const Actions extends readonly [string, ...string[]],
+    const Contract extends ConnectorContract,
+    const Actions extends readonly [
+      ConnectorAction<Contract>,
+      ...ConnectorAction<Contract>[],
+    ],
   >(
     alias: Alias,
-    config: ConnectorConfig<Actions>
-  ): ConnectorResource<Alias, Actions> => {
+    config: ConnectorConfig<Contract, Actions>
+  ): ConnectorResource<Alias, Contract, Actions> => {
     const checked = checkedConfig(config, ["contract", "actions"]);
     // SAFETY: built from what was checked of the arguments the type is
     // inferred from: the alias given, and lists holding exactly the names
@@ -476,7 +571,7 @@ export const resource = Object.freeze({
       alias: checkedAlias(alias),
       contract: checkedContract(checked.contract),
       actions: checkedList(checked.actions, "actions"),
-    }) as ConnectorResource<Alias, Actions>;
+    }) as ConnectorResource<Alias, Contract, Actions>;
   },
   /** Search and reading of some knowledge collections. */
   knowledge: <
