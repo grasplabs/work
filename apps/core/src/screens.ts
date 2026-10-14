@@ -9,6 +9,7 @@ import {
   kitModules,
   screenRuntime,
   limitErrors,
+  screenCompilerCode,
   serverFiles,
   startScreenCompiler,
   workflowFiles,
@@ -29,7 +30,12 @@ import {
   screenPath,
 } from "@grasp-os/shared/screens";
 
-import { requireBoundedHere } from "./sandboxed.ts";
+import {
+  PlatformBoundError,
+  platformWallMs,
+  runPlatformCode,
+} from "./platform-sandbox.ts";
+import { sessionHost } from "./sandboxed.ts";
 import type { FrameCode } from "./screen-frame.ts";
 
 /**
@@ -93,18 +99,115 @@ interface FailedBuild {
   diagnostics: Diagnostic[];
 }
 
+/** What building reads from core's env. */
+export type BuildEnv = Pick<
+  Env,
+  | "ASSETS"
+  | "LOADER"
+  | "RUNTIME_PROFILE"
+  | "SANDBOX_DEADLINE_MS"
+  | "SANDBOX_HOST"
+  | "SANDBOX_IN_PROCESS"
+> & {
+  /** Where builds are cached: core's R2 bucket, in the EU. */
+  FILES: Pick<R2Bucket, "get" | "put">;
+};
+
+/** The compiler's methods, by what they build. */
+const compilerMethods = {
+  screen: "build",
+  server: "buildServer",
+  workflow: "buildWorkflows",
+  app: "buildAppCode",
+  "app-tests": "buildAppTests",
+} as const;
+
+/**
+ * The wall-clock time a build may take on the on-prem sandbox host,
+ * loading the compiler included: past its CPU time, which bounds the work,
+ * and past the build wait, so a late build still lands in the cache.
+ */
+const compilerWallMs = 30_000;
+
+/**
+ * Whether the compiler's answer is shaped as a build: its code is core's
+ * own, which reads the App's source and never runs it, so its answer is
+ * trusted as the Loader's is; only a broken one is refused.
+ */
+const isBuildShaped = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  "ok" in value &&
+  (value.ok === true ||
+    (value.ok === false &&
+      "diagnostics" in value &&
+      Array.isArray(value.diagnostics)));
+
+/**
+ * A build on the on-prem sandbox host (platform-sandbox.ts): the
+ * compiler's answer, or a failed build when the sandbox ended it at a
+ * bound (a type built to recurse, say). A stop the files reach whatever
+ * the load (CPU time, memory, a crash, an answer too large) is cached as
+ * the failed build it is, so an App whose screen holds the checker can't
+ * hold the builders' share of the sandbox on every view. A stop at the
+ * wall-clock deadline isn't: the load can be what made it reach it.
+ */
+const builtOnHost = async (
+  env: BuildEnv,
+  host: Fetcher,
+  method: string,
+  files: AppFiles
+): Promise<{ built: unknown; cache: boolean }> => {
+  try {
+    const built = await runPlatformCode(
+      host,
+      await screenCompilerCode(env.ASSETS),
+      {
+        method,
+        args: [{ value: files }],
+        wallMs: platformWallMs(env, compilerWallMs),
+      }
+    );
+    return { built, cache: true };
+  } catch (error) {
+    if (!(error instanceof PlatformBoundError)) {
+      throw error;
+    }
+    const failed: FailedBuild = {
+      ok: false,
+      diagnostics: [
+        {
+          rule: "compile",
+          severity: "error",
+          message: `The compiler was stopped before it finished: ${error.message} Simplify the App's types (a type that recurses without end holds the type checker).`,
+        },
+      ],
+    };
+    return { built: failed, cache: error.verdict !== "deadline" };
+  }
+};
+
+/**
+ * The builds running now in this isolate, by their cache key: a build
+ * asked for while the same one runs waits for it rather than start the
+ * compiler again, so views of one App's screen take one place in the
+ * sandbox, not one each.
+ */
+const buildsRunning = new Map<string, Promise<unknown>>();
+
 /**
  * A build of the files `select` picks, the only ones it reads: limited
  * first, so the limits bound the hashing and sending too. From R2 (in the
  * EU), or built in the compiler's isolate and stored there. A failed build
  * is cached too: the same files fail the same way with the same compiler,
  * so an App that doesn't build can't start the compiler on every request.
- * A build that throws isn't cached. Two requests for a build that isn't
- * cached yet may both build it; they build the same thing.
+ * A build that throws isn't cached. Two requests in one isolate for a
+ * build that isn't cached yet share one (`buildsRunning`); in two
+ * isolates they may both build it, and build the same thing.
  */
 const cachedBuild = async <Build>(
-  env: Env,
-  kind: "screen" | "server" | "workflow" | "app" | "app-tests",
+  env: BuildEnv,
+  kind: keyof typeof compilerMethods,
   appFiles: AppFiles,
   select: (files: AppFiles) => AppFiles,
   build: (
@@ -120,26 +223,61 @@ const cachedBuild = async <Build>(
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
-  // The compiler parses, transforms and type-checks App source in a
-  // Dynamic Worker of core's own, which plain workerd (on-prem) doesn't
-  // bound: TypeScript's checker alone can be held for good by a type built
-  // to recurse, whatever the source's size. It doesn't go to the sandbox
-  // host yet, which takes only JavaScript modules and no `nodejs_compat`
-  // (the compiler needs `nodejs_compat`, and a JSON module for its kit),
-  // and would load the whole compiler for every build; until it does, it
-  // runs only where
-  // `requireBoundedHere` allows. Refused before the cache is read: a
-  // deployment where nothing compiles has nothing cached to serve.
-  requireBoundedHere(env, "the screen compiler");
+  // The compiler parses, transforms and type-checks App source, and
+  // TypeScript's checker alone can be held for good by a type built to
+  // recurse, whatever the source's size. On Cloudflare it runs in a
+  // Dynamic Worker of core's own, whose CPU the runtime bounds; on-prem,
+  // on the sandbox host (`sessionHost`, platform-sandbox.ts). Where
+  // neither bounds it, refused before the cache is read: a deployment
+  // where nothing compiles has nothing cached to serve.
+  const host = sessionHost(env);
   const cacheKey = `${kind}-builds/${await buildKey(files)}.json`;
+  const isBuild = (value: unknown): value is Build | FailedBuild =>
+    isBuildShaped(value);
   const cached = await env.FILES.get(cacheKey);
   if (cached) {
     return await cached.json<Build>();
   }
-  const compiler = startScreenCompiler(env.LOADER, env.ASSETS);
-  const built = await build(compiler, files);
-  await env.FILES.put(cacheKey, JSON.stringify(built));
-  return built;
+  // Taken in the same turn as the check: of the views that missed the
+  // cache together, the first starts the build and the others wait on it.
+  const running = buildsRunning.get(cacheKey);
+  if (running !== undefined) {
+    const shared = await running;
+    if (isBuild(shared)) {
+      return shared;
+    }
+  }
+  const building = (async (): Promise<Build | FailedBuild> => {
+    if (host !== undefined) {
+      const { built, cache } = await builtOnHost(
+        env,
+        host,
+        compilerMethods[kind],
+        files
+      );
+      if (!isBuild(built)) {
+        throw new TypeError(
+          "The compiler answered something else than a build."
+        );
+      }
+      if (cache) {
+        await env.FILES.put(cacheKey, JSON.stringify(built));
+      }
+      return built;
+    }
+    const compiler = startScreenCompiler(env.LOADER, env.ASSETS);
+    const built = await build(compiler, files);
+    await env.FILES.put(cacheKey, JSON.stringify(built));
+    return built;
+  })();
+  buildsRunning.set(cacheKey, building);
+  try {
+    return await building;
+  } finally {
+    if (buildsRunning.get(cacheKey) === building) {
+      buildsRunning.delete(cacheKey);
+    }
+  }
 };
 
 /**
@@ -149,7 +287,7 @@ const cachedBuild = async <Build>(
  * cached in R2.
  */
 export const buildScreens = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<ScreenBuild> =>
   await cachedBuild(
@@ -165,7 +303,7 @@ export const buildScreens = async (
  * compiler's isolate. A build is cached in R2, like the screens'.
  */
 export const buildServer = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<ServerBuild> =>
   await cachedBuild(
@@ -184,7 +322,7 @@ export const buildServer = async (
  * generated modules are among the files the key hashes.
  */
 export const buildAppCode = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<AppCodeBuild> =>
   await cachedBuild(
@@ -202,7 +340,7 @@ export const buildAppCode = async (
  * release (app-tests.ts). Cached in R2 like the others.
  */
 export const buildAppTests = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<AppCodeBuild> =>
   await cachedBuild(
@@ -218,7 +356,7 @@ export const buildAppTests = async (
  * compiler's isolate. A build is cached in R2, like the server's.
  */
 export const buildWorkflows = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<WorkflowBuild> =>
   await cachedBuild(
