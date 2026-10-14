@@ -89,6 +89,11 @@ const clientErrors = {
     message: "The App's server couldn't be reached. Try again.",
     category: "operational",
   },
+  "auth.principal_changed": {
+    message:
+      "Someone else signed in, so what was shown for the person before was cleared.",
+    category: "authorization",
+  },
 } as const satisfies Record<
   string,
   { message: string; category: ErrorCategory }

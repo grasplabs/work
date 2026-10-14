@@ -141,11 +141,11 @@ const refusalLogMs = 60_000;
 
 /**
  * How often, at most, the same refusal of the App's data to a screen (who,
- * which build, why, what and where) is audited (`auditRefusal`).
+ * which build, why, what and where) is audited (`auditOnce`).
  */
 const refusalAuditMs = 10 * 60_000;
 
-/** How many refusals `auditRefusal` remembers at most. */
+/** How many refusals `auditOnce` remembers at most. */
 const refusalsKept = 1000;
 
 /** The one bucket all of an App's reports share, and its server lines. */
@@ -827,10 +827,10 @@ export class App extends DurableObject<Env> {
   /** Requests refused since the last line logged of them, and when that was. */
   #refused = { requests: 0, loggedAt: 0 };
 
-  /** When each refusal of a screen was last audited, oldest first (`auditRefusal`). */
+  /** When each refusal of a screen was last audited, oldest first (`auditOnce`). */
   readonly #refusalsAudited = new Map<string, number>();
 
-  /** The refusals whose rows are being written now (`auditRefusal`). */
+  /** The refusals whose rows are being written now (`auditOnce`). */
   readonly #refusalsWriting = new Map<string, Promise<void>>();
 
   get #app(): AppId {
@@ -1182,8 +1182,9 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Audits a screen's refusal of the App's data, named by `refusal`
-   * (who, which build, why, what and where), with `entry`: unless it was
+   * Audits what `refusal` names, with `entry`: a screen's refusal of the
+   * App's data (who, which build, why, what and where), or a person's use
+   * of the App from a portable host (app-function-route.ts); unless it was
    * audited within `refusalAuditMs`, so a screen opened over and over, or
    * a page retrying, adds a row a window, not one a try. The check and the
    * write are one operation per refusal here: the same refusal arriving
@@ -1194,7 +1195,7 @@ export class App extends DurableObject<Env> {
    * once more; past `refusalsKept`, the oldest are forgotten first, which
    * only audits them again.
    */
-  async auditRefusal(refusal: string, entry: AuditEntry): Promise<void> {
+  async auditOnce(refusal: string, entry: AuditEntry): Promise<void> {
     const audited = this.#refusalsAudited.get(refusal);
     if (audited !== undefined && Date.now() - audited < refusalAuditMs) {
       return;
