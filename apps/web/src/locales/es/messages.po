@@ -2220,6 +2220,10 @@ msgstr "Falló, se volvió a intentar"
 msgid "Failed: {failed}"
 msgstr "Fallidas: {failed}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Fewer than {least} of {of}"
+msgstr "Menos de {least} de {of}"
+
 #: src/labels.ts
 msgid "File"
 msgstr "Archivo"
@@ -3830,6 +3834,7 @@ msgctxt "a run's lifecycle"
 msgid "Paused"
 msgstr "En pausa"
 
+#: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "En pausa: ningún enlace se abre y ninguno sale. Los enlaces pendientes salen en cuanto se reanuden."
@@ -5555,6 +5560,10 @@ msgstr "Este enlace no funciona. Pide uno nuevo a quien te lo envió."
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Este enlace ha caducado. Pide uno nuevo a quien te lo envió."
+
+#: src/onboarding/setup-steps.tsx
+msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."
+msgstr "Esta lista es demasiado grande. Puedo aceptar hasta {peopleMost} personas en hasta {teamsMost} equipos."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "This month"

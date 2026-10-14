@@ -2220,6 +2220,10 @@ msgstr "Mislukt, opnieuw geprobeerd"
 msgid "Failed: {failed}"
 msgstr "Mislukt: {failed}"
 
+#: src/onboarding/setup-steps.tsx
+msgid "Fewer than {least} of {of}"
+msgstr "Minder dan {least} van {of}"
+
 #: src/labels.ts
 msgid "File"
 msgstr "Bestand"
@@ -3830,6 +3834,7 @@ msgctxt "a run's lifecycle"
 msgid "Paused"
 msgstr "Gepauzeerd"
 
+#: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Paused: no link opens and none goes out. The links that are due go out once they run again."
 msgstr "Gepauzeerd: geen link gaat open en er gaat er geen uit. De links die aan de beurt zijn, gaan uit zodra de interviews weer lopen."
@@ -5555,6 +5560,10 @@ msgstr "Deze link werkt niet. Vraag wie hem stuurde om een nieuwe."
 #: src/routes/guest.tsx
 msgid "This link has expired. Ask whoever sent it for a new one."
 msgstr "Deze link is verlopen. Vraag wie hem stuurde om een nieuwe."
+
+#: src/onboarding/setup-steps.tsx
+msgid "This list is too large. I can take up to {peopleMost} people in up to {teamsMost} teams."
+msgstr "Deze lijst is te groot. Ik kan tot {peopleMost} mensen in maximaal {teamsMost} teams aan."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "This month"

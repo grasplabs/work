@@ -6,12 +6,15 @@ import {
   closesOn,
   documentSources,
   dotsOf,
+  keptAt,
   listeningOf,
   reachedOf,
   stepIndex,
   steps,
+  teamNumbersOf,
   teamsOf,
 } from "./setup.ts";
+import type { Kept } from "./setup.ts";
 
 // From the prototype's `lib/onboarding.test.ts`, on what core keeps.
 
@@ -169,5 +172,43 @@ describe("how far the admin went", () => {
       stepIndex("listening")
     );
     expect(reachedOf(99, { plan: null })).toBe(steps.length - 1);
+  });
+});
+
+describe("what this browser keeps of how far the admin went", () => {
+  it("moves on with them, and stays at the furthest step when they go back", () => {
+    let kept: Kept = { reached: 0, message: null };
+    for (const step of [
+      "company",
+      "documents",
+      "leads",
+      "about",
+      "company",
+    ] as const) {
+      kept = keptAt(kept, stepIndex(step));
+    }
+    expect(kept).toStrictEqual({ reached: stepIndex("leads"), message: null });
+    const same = { reached: 4, message: "Hi" };
+    expect(keptAt(same, 2)).toBe(same);
+  });
+});
+
+describe("a team's numbers", () => {
+  it("show how many talked of how many were asked, once enough were asked and enough talked", () => {
+    expect(teamNumbersOf({ asked: 8, talked: 4 })).toStrictEqual({
+      shown: "both",
+      talked: 4,
+      asked: 8,
+    });
+  });
+
+  it("show only how many were asked while too few talked, and nothing while too few were asked", () => {
+    expect(teamNumbersOf({ asked: 8, talked: null })).toStrictEqual({
+      shown: "asked",
+      asked: 8,
+    });
+    expect(teamNumbersOf({ asked: null, talked: null })).toStrictEqual({
+      shown: "none",
+    });
   });
 });

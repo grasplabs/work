@@ -3,13 +3,35 @@
 // hand and inflated with the browser's own DecompressionStream, so no
 // library is needed. From the prototype's `lib/docx.ts` (`xlsxRows`).
 
-/** Why a file is not a workbook this can read. */
+import { onboardingPeopleMax } from "@grasp-os/shared/onboarding";
+
+/** Why a workbook can't be read: not one this reads, or larger than a staff list can be. */
 export class XlsxError extends Error {
-  constructor() {
-    super("This is not an Excel workbook Grasp can read.");
+  readonly reason: "unreadable" | "large";
+
+  constructor(reason: "unreadable" | "large" = "unreadable") {
+    super(
+      reason === "large"
+        ? "This workbook is larger than a staff list Grasp reads."
+        : "This is not an Excel workbook Grasp can read."
+    );
     this.name = "XlsxError";
+    this.reason = reason;
   }
 }
+
+/**
+ * How large a staff list's workbook may be: as a file, any one part of it
+ * once unpacked, and in rows with something in them. The rows are the most
+ * people an onboarding takes, with room for a title and headings: a list
+ * longer than that could not be kept anyway, and reading it would hold the
+ * browser up.
+ */
+export const xlsxMost = {
+  bytes: 10 * 1024 * 1024,
+  unpacked: 40 * 1024 * 1024,
+  rows: onboardingPeopleMax + 50,
+} as const;
 
 const endOfDirectory = 0x06_05_4b_50;
 const directoryEntry = 0x02_01_4b_50;
@@ -73,11 +95,35 @@ const findEntry = (
   return null;
 };
 
+/** Unpacks a part, giving up once it comes to more than `xlsxMost.unpacked`: a small file can unpack to a very large one. */
 const inflate = async (data: Uint8Array): Promise<Uint8Array> => {
-  const stream = new Blob([new Uint8Array(data)])
+  const reader = new Blob([new Uint8Array(data)])
     .stream()
-    .pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+    .pipeThrough(new DecompressionStream("deflate-raw"))
+    .getReader();
+  const chunks: Uint8Array[] = [];
+  let length = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a stream is read a chunk at a time
+    const { done, value } = await reader.read();
+    if (done || length + value.byteLength > xlsxMost.unpacked) {
+      length += value?.byteLength ?? 0;
+      break;
+    }
+    length += value.byteLength;
+    chunks.push(value);
+  }
+  if (length > xlsxMost.unpacked) {
+    await reader.cancel();
+    throw new XlsxError("large");
+  }
+  const all = new Uint8Array(length);
+  let at = 0;
+  for (const chunk of chunks) {
+    all.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return all;
 };
 
 /** One file in a zip as text; none when it is not there, or compressed in a way that cannot be read. */
@@ -121,9 +167,47 @@ const columnOf = (letters: string): number => {
   return number - 1;
 };
 
+const sheetElement = /<sheet\b[^>]*>/u;
+const relationId = /\br:id="(?<id>[^"]+)"/u;
+const relationship = /<Relationship\b[^>]*>/gu;
+const relationshipId = /\bId="(?<value>[^"]*)"/u;
+const relationshipTarget = /\bTarget="(?<value>[^"]*)"/u;
+const leadingSlash = /^\//u;
+
+/**
+ * Where the workbook's first sheet is: the first one `xl/workbook.xml`
+ * lists, found through its relationships, since a sheet keeps its file
+ * when the sheets are reordered or one is deleted. `sheet1.xml` when the
+ * workbook says nothing of it.
+ */
+const firstSheetPath = async (zip: DataView): Promise<string> => {
+  const fallback = "xl/worksheets/sheet1.xml";
+  const book = await entryText(zip, "xl/workbook.xml");
+  const sheet = book === null ? undefined : sheetElement.exec(book)?.[0];
+  const id =
+    sheet === undefined ? undefined : relationId.exec(sheet)?.groups?.id;
+  const relations = await entryText(zip, "xl/_rels/workbook.xml.rels");
+  if (id === undefined || relations === null) {
+    return fallback;
+  }
+  for (const [element] of relations.matchAll(relationship)) {
+    const target = relationshipTarget.exec(element)?.groups?.value;
+    if (
+      relationshipId.exec(element)?.groups?.value === id &&
+      target !== undefined
+    ) {
+      // A target is relative to xl/, or from the package's root when it starts with a slash.
+      return target.startsWith("/")
+        ? target.replace(leadingSlash, "")
+        : `xl/${target}`;
+    }
+  }
+  return fallback;
+};
+
 const textRun = /<t(?:\s[^>]*)?>(?<text>[^<]*)<\/t>/gu;
 const sharedWord = /<si>(?<word>[\s\S]*?)<\/si>/gu;
-const rowElement = /<row\b[^>]*>(?<cells>[\s\S]*?)<\/row>/gu;
+const rowElement = /<row\b[^>]*?(?:\/>|>(?<cells>[\s\S]*?)<\/row>)/gu;
 const cellElement =
   /<c\b(?<attributes>[^>]*?)(?:\/>|>(?<inner>[\s\S]*?)<\/c>)/gu;
 const cellPlace = /\br="(?<column>[A-Z]+)\d+"/u;
@@ -153,11 +237,15 @@ const cellText = (
 /**
  * The first sheet of an Excel workbook as rows of cells, as text: a staff
  * list, say. Words come from the workbook's shared words, numbers as
- * written; an empty cell is an empty string.
+ * written; an empty cell is an empty string. A workbook larger than
+ * `xlsxMost` is refused.
  */
 export const xlsxRows = async (bytes: ArrayBuffer): Promise<string[][]> => {
+  if (bytes.byteLength > xlsxMost.bytes) {
+    throw new XlsxError("large");
+  }
   const zip = new DataView(bytes);
-  const sheet = await entryText(zip, "xl/worksheets/sheet1.xml");
+  const sheet = await entryText(zip, await firstSheetPath(zip));
   if (sheet === null) {
     throw new XlsxError();
   }
@@ -167,6 +255,7 @@ export const xlsxRows = async (bytes: ArrayBuffer): Promise<string[][]> => {
     ),
   ].map((found) => runs(found.groups?.word ?? ""));
   const rows: string[][] = [];
+  let filled = 0;
   for (const row of sheet.matchAll(rowElement)) {
     const cells: string[] = [];
     for (const cell of (row.groups?.cells ?? "").matchAll(cellElement)) {
@@ -180,6 +269,12 @@ export const xlsxRows = async (bytes: ArrayBuffer): Promise<string[][]> => {
       cells[index] = text.trim();
     }
     rows.push(cells);
+    if (cells.some((each) => each !== "")) {
+      filled += 1;
+      if (filled > xlsxMost.rows) {
+        throw new XlsxError("large");
+      }
+    }
   }
   return rows;
 };

@@ -145,3 +145,47 @@ export const choiceOfPlan = (plan: {
     heldTime: later === null ? sendTime : clockOf(later),
   };
 };
+
+/**
+ * The plan a choice makes over a plan saved before: what the admin did
+ * not change stays as it was. How many days the interviews run is not on
+ * the screen, so it stays; the first moment stays while its day and hour
+ * do; and while the later day and hour are as the screen showed them, each
+ * team held before keeps its own moment, as only the first is shown.
+ */
+export const replanOf = (
+  choice: SendChoice,
+  saved: {
+    start: string;
+    days: number;
+    at?: string;
+    later?: Record<string, string | null>;
+  } | null,
+  usualDays: number
+): PlanInput => {
+  if (saved === null) {
+    return planOf(choice, usualDays);
+  }
+  const plan = planOf(choice, saved.days);
+  const shown = choiceOfPlan(saved);
+  const sameFirst = choice.day === shown.day && choice.time === shown.time;
+  const sameLater =
+    choice.heldDay === shown.heldDay && choice.heldTime === shown.heldTime;
+  const savedLater = saved.later ?? {};
+  return {
+    ...plan,
+    ...(sameFirst && saved.at !== undefined ? { at: saved.at } : {}),
+    ...(plan.later !== undefined && sameLater
+      ? {
+          later: Object.fromEntries(
+            Object.entries(plan.later).map(([team, moment]) => [
+              team,
+              Object.hasOwn(savedLater, team)
+                ? (savedLater[team] ?? null)
+                : moment,
+            ])
+          ),
+        }
+      : {}),
+  };
+};

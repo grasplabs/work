@@ -14,12 +14,13 @@ import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
   brainScene,
   isStep,
+  keptAt,
   listeningOf,
   reachedOf,
   stepIndex,
   steps,
 } from "../onboarding/setup.ts";
-import type { SetupStep } from "../onboarding/setup.ts";
+import type { Kept, SetupStep } from "../onboarding/setup.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 
 // The client onboarding (prototype `routes/onboarding.tsx`): what a
@@ -99,11 +100,6 @@ const onResize = (listener: () => void): (() => void) => {
 /** Where this browser keeps how far its admin went, and the message they wrote: a convenience of this browser alone. */
 const keptKey = (userId: string): string => `grasp.setup.${userId}`;
 
-interface Kept {
-  reached: number;
-  message: string | null;
-}
-
 const readKept = (userId: string): Kept => {
   try {
     const raw: unknown = JSON.parse(
@@ -139,15 +135,20 @@ const today = (): string => new Date().toISOString().slice(0, 10);
  */
 const useKept = (userId: string, index: number) => {
   const [kept, setKept] = useState(() => readKept(userId));
-  const reached = Math.max(kept.reached, index);
+  // The furthest step is kept as they go, so going back never lowers it.
+  const now = keptAt(kept, index);
+  if (now !== kept) {
+    setKept(now);
+  }
+  const { reached, message } = now;
   useEffect(() => {
-    writeKept(userId, { reached, message: kept.message });
-  }, [userId, reached, kept.message]);
+    writeKept(userId, { reached, message });
+  }, [userId, reached, message]);
   return {
     reached,
-    message: kept.message,
-    onMessage: (message: string) => {
-      setKept({ reached, message });
+    message,
+    onMessage: (next: string) => {
+      setKept({ reached, message: next });
     },
   };
 };

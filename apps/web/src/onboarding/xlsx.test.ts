@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { XlsxError, xlsxRows } from "./xlsx.ts";
+import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
 // From the prototype's `lib/docx.test.ts` ("an Excel sheet as rows").
 
@@ -64,6 +64,18 @@ const zipOf = async (files: Record<string, string>): Promise<ArrayBuffer> => {
   return zip.buffer;
 };
 
+/** A sheet with one cell, of `name`. */
+const sheetOf = (name: string) =>
+  `<worksheet><sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>${name}</t></is></c></row></sheetData></worksheet>`;
+
+/** A sheet of `count` rows with a number in them, each with an empty row after it. */
+const rowsOf = (count: number) =>
+  `<worksheet><sheetData>${Array.from(
+    { length: count },
+    (_, at) =>
+      `<row r="${at + 1}"><c r="A${at + 1}"><v>${at}</v></c></row><row r="${at + 1}"/>`
+  ).join("")}</sheetData></worksheet>`;
+
 describe("an Excel sheet as rows", () => {
   it("reads cells by their column, shared words and numbers alike, with gaps kept", async () => {
     const book = await zipOf({
@@ -79,6 +91,52 @@ describe("an Excel sheet as rows", () => {
       ["Daan Bakker", "42", "Service & claims"],
       ["Lisa"],
     ]);
+  });
+
+  it("reads the first sheet the workbook lists, wherever its file is", async () => {
+    const book = await zipOf({
+      "xl/workbook.xml":
+        '<workbook><sheets><sheet name="Staff" sheetId="2" r:id="rId7"/><sheet name="Old" sheetId="1" r:id="rId1"/></sheets></workbook>',
+      "xl/_rels/workbook.xml.rels":
+        '<Relationships><Relationship Id="rId1" Type="worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId7" Type="worksheet" Target="worksheets/sheet2.xml"/></Relationships>',
+      "xl/worksheets/sheet1.xml": sheetOf("Old"),
+      "xl/worksheets/sheet2.xml": sheetOf("Staff"),
+    });
+    await expect(xlsxRows(book)).resolves.toStrictEqual([["Staff"]]);
+    // A target from the package's root reads the same.
+    const rooted = await zipOf({
+      "xl/workbook.xml":
+        '<workbook><sheets><sheet name="Staff" sheetId="1" r:id="rId2"/></sheets></workbook>',
+      "xl/_rels/workbook.xml.rels":
+        '<Relationships><Relationship Id="rId2" Type="worksheet" Target="/xl/worksheets/staff.xml"/></Relationships>',
+      "xl/worksheets/staff.xml": sheetOf("Rooted"),
+    });
+    await expect(xlsxRows(rooted)).resolves.toStrictEqual([["Rooted"]]);
+  });
+
+  it("is refused when larger than a staff list: as a file, unpacked, or in rows", async () => {
+    await expect(xlsxRows(new ArrayBuffer(xlsxMost.bytes + 1))).rejects.toThrow(
+      expect.objectContaining({ reason: "large" })
+    );
+    // A small file that unpacks to a very large one.
+    const padded = await zipOf({
+      "xl/worksheets/sheet1.xml": `<worksheet>${" ".repeat(xlsxMost.unpacked + 1)}</worksheet>`,
+    });
+    expect(padded.byteLength).toBeLessThan(xlsxMost.bytes);
+    await expect(xlsxRows(padded)).rejects.toThrow(
+      expect.objectContaining({ reason: "large" })
+    );
+    await expect(
+      xlsxRows(
+        await zipOf({ "xl/worksheets/sheet1.xml": rowsOf(xlsxMost.rows + 1) })
+      )
+    ).rejects.toThrow(expect.objectContaining({ reason: "large" }));
+    // Rows with nothing in them don't count.
+    await expect(
+      xlsxRows(
+        await zipOf({ "xl/worksheets/sheet1.xml": rowsOf(xlsxMost.rows) })
+      )
+    ).resolves.toHaveLength(xlsxMost.rows * 2);
   });
 
   it("says so when a file is not a workbook", async () => {

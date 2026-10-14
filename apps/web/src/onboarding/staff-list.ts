@@ -1,4 +1,9 @@
+import {
+  onboardingPeopleMax,
+  onboardingTeamsMax,
+} from "@grasp-os/shared/onboarding";
 import type {
+  Roster,
   RosterInput,
   RosterPerson,
   RosterTeam,
@@ -66,14 +71,34 @@ const trailingDashes = /-+$/u;
 const textMost = 80;
 const emailSchema = z.email().max(120);
 
-/** The rows in a CSV file: the separator is whichever of comma, semicolon or tab the first line uses most; quotes as CSV writes them. */
+const quotedText = /"(?:[^"]|"")*"/gu;
+/** How many of its first lines a CSV file's separator is told from: a title line above the headings is outweighed by the rows below it. */
+const separatorLines = 10;
+
+/** Whichever of comma, semicolon or tab the first lines with words in them use most, outside quotes. */
+const separatorOf = (text: string): string => {
+  const lines = text
+    .split(lineBreak, 200)
+    .filter((line) => line.trim() !== "")
+    .slice(0, separatorLines)
+    .map((line) => line.replaceAll(quotedText, ""));
+  return (
+    [",", ";", "\t"]
+      .map((each) => ({
+        each,
+        count: lines.reduce(
+          (sum, line) => sum + line.split(each).length - 1,
+          0
+        ),
+      }))
+      .toSorted((a, b) => b.count - a.count)[0]?.each ?? ","
+  );
+};
+
+/** The rows in a CSV file: the separator is whichever of comma, semicolon or tab its first lines use most; quotes as CSV writes them. */
 export const csvRows = (text: string): string[][] => {
   const lines = text.replace(byteOrderMark, "");
-  const [head = ""] = lines.split(lineBreak, 1);
-  const separator =
-    [",", ";", "\t"]
-      .map((each) => ({ each, count: head.split(each).length }))
-      .toSorted((a, b) => b.count - a.count)[0]?.each ?? ",";
+  const separator = separatorOf(lines);
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = "";
@@ -163,7 +188,7 @@ const hashOf = (words: string): string => {
   return (hash >>> 0).toString(36);
 };
 
-/** A person's id, from their email, or their name and team where there is no email: the same person keeps it when the list comes in again. */
+/** A person's id, from their email, or their name and team where there is no email address (or none that is one): the same person keeps it when the list comes in again. */
 const personIdOf = (person: {
   email: string;
   name: string;
@@ -173,8 +198,35 @@ const personIdOf = (person: {
   return `p-${hashOf(email === "" ? `${person.name.trim().toLowerCase()}|${person.team}` : email)}`;
 };
 
-/** A team's id, from its name. */
+/** A team's id, from its name: the same name gets the same id when the list comes in again. */
 const teamIdOf = (name: string): string => `t-${slugOf(name)}`;
+
+/**
+ * The ids of the teams in one list, by name. Names that only differ in
+ * case are one team. Names that come to the same id ("Sales / North" and
+ * "Sales - North", or two that share their first 36 letters) are two
+ * teams: the one that comes first in the list keeps the id, the next gets
+ * `-2`, and so on, so a list read again gives every team the id it had.
+ */
+const teamIds = () => {
+  const byName = new Map<string, string>();
+  const taken = new Set<string>();
+  return (name: string): { id: string; fresh: boolean } => {
+    const key = name.toLowerCase();
+    const known = byName.get(key);
+    if (known !== undefined) {
+      return { id: known, fresh: false };
+    }
+    const base = teamIdOf(name);
+    let id = base;
+    for (let count = 2; taken.has(id); count += 1) {
+      id = `${base}-${count}`;
+    }
+    byName.set(key, id);
+    taken.add(id);
+    return { id, fresh: true };
+  };
+};
 
 /** What a staff list came to: the teams and their people, how many rows were left out, and whether its leads were said or guessed. */
 export interface StaffList {
@@ -185,11 +237,11 @@ export interface StaffList {
   leadsFrom: "column" | "manager" | "title" | "none";
 }
 
-/** Why a staff list could not be read: no headings Grasp knows, or nobody in it. */
+/** Why a staff list could not be read: no headings Grasp knows, nobody in it, or more people or teams than an onboarding takes. */
 export class StaffListError extends Error {
-  readonly reason: "headings" | "empty";
+  readonly reason: "headings" | "empty" | "large";
 
-  constructor(reason: "headings" | "empty") {
+  constructor(reason: "headings" | "empty" | "large") {
     super(reason);
     this.name = "StaffListError";
     this.reason = reason;
@@ -257,6 +309,7 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
       : (row[index] ?? "").replaceAll(spaces, " ").trim();
   };
   const teams = new Map<string, RosterTeam>();
+  const teamIdIn = teamIds();
   const people: RosterPerson[] = [];
   const said: Said[] = [];
   let skipped = 0;
@@ -270,8 +323,11 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
       continue;
     }
     const teamName = (cell(row, "team") || noTeam).slice(0, textMost);
-    const team = teamIdOf(teamName);
-    if (!teams.has(team)) {
+    const { id: team, fresh } = teamIdIn(teamName);
+    if (fresh) {
+      if (teams.size >= onboardingTeamsMax) {
+        throw new StaffListError("large");
+      }
       teams.set(team, {
         id: team,
         name: teamName,
@@ -280,17 +336,22 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
         off: false,
       });
     }
-    const email = cell(row, "email").toLowerCase();
+    // Only an email address is one: "n/a" or "-" in many rows would make them all one person.
+    const written = cell(row, "email").toLowerCase();
+    const email = emailSchema.safeParse(written).success ? written : "";
     const person: RosterPerson = {
       id: personIdOf({ email, name, team }),
       name,
-      email: emailSchema.safeParse(email).success ? email : "",
+      email,
       team,
       title: cell(row, "title").slice(0, textMost),
       away: false,
     };
     if (people.some((each) => each.id === person.id)) {
       continue;
+    }
+    if (people.length >= onboardingPeopleMax) {
+      throw new StaffListError("large");
     }
     people.push(person);
     // A "leidinggevende" column holds a name in one company and a yes in the next: a yes means they lead.
@@ -314,6 +375,50 @@ export const staffListOf = (rows: string[][], noTeam: string): StaffList => {
     }
   }
   return { roster: { teams: [...teams.values()], people }, skipped, leadsFrom };
+};
+
+/**
+ * A staff list read again, with what the admin set on the one before kept
+ * for the teams and people in both, by id: a team they switched off stays
+ * off, someone marked away stays away, a lead they picked stays the lead
+ * while still in that team, and what a team does stays said.
+ */
+export const withSaved = (
+  roster: StaffList["roster"],
+  saved: Roster | null
+): StaffList["roster"] => {
+  if (saved === null) {
+    return roster;
+  }
+  const savedTeams = new Map(saved.teams.map((team) => [team.id, team]));
+  const savedPeople = new Map(
+    saved.people.map((person) => [person.id, person])
+  );
+  const teamOf = new Map(
+    roster.people.map((person) => [person.id, person.team])
+  );
+  return {
+    teams: roster.teams.map((team) => {
+      const before = savedTeams.get(team.id);
+      if (before === undefined) {
+        return team;
+      }
+      const lead =
+        before.lead !== null && teamOf.get(before.lead) === team.id
+          ? before.lead
+          : team.lead;
+      return {
+        ...team,
+        lead,
+        off: before.off,
+        does: team.does === "" ? before.does : team.does,
+      };
+    }),
+    people: roster.people.map((person) => {
+      const before = savedPeople.get(person.id);
+      return before === undefined ? person : { ...person, away: before.away };
+    }),
+  };
 };
 
 /** An example staff list to fill in, as CSV: the headings Grasp reads, and two rows. */

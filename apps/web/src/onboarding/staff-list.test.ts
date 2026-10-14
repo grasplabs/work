@@ -1,4 +1,9 @@
-import { rosterSchema } from "@grasp-os/shared/onboarding";
+import {
+  onboardingPeopleMax,
+  onboardingTeamsMax,
+  rosterSchema,
+} from "@grasp-os/shared/onboarding";
+import type { Roster } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -6,6 +11,7 @@ import {
   exampleList,
   StaffListError,
   staffListOf,
+  withSaved,
 } from "./staff-list.ts";
 
 // From the prototype's `lib/staff-list.test.ts`, and that what it reads is
@@ -34,6 +40,19 @@ describe("a staff list as rows", () => {
     ).toStrictEqual([
       ["Name", "Note"],
       ["Tim", 'said "hi"\nthen left'],
+    ]);
+  });
+
+  it("tells the separator from the rows, not a title line above the headings", () => {
+    expect(
+      csvRows(
+        'Staff list, October 2026\nNaam;E-mail;Afdeling\n"Bakker, Daan";daan@x.nl;Verkoop\nLisa Jansen;lisa@x.nl;Service\n'
+      )
+    ).toStrictEqual([
+      ["Staff list, October 2026"],
+      ["Naam", "E-mail", "Afdeling"],
+      ["Bakker, Daan", "daan@x.nl", "Verkoop"],
+      ["Lisa Jansen", "lisa@x.nl", "Service"],
     ]);
   });
 });
@@ -142,6 +161,82 @@ describe("the teams and people in a staff list", () => {
     expect(list.leadsFrom).toBe("none");
   });
 
+  it("keeps teams whose names come to the same id apart, with ids that stay put", () => {
+    const long = "Customer service and claims handling for the north";
+    const rows = [
+      ["Name", "Team"],
+      ["Ada", "Sales / North"],
+      ["Bo", "Sales - North"],
+      ["Cas", "sales / north"],
+      ["Dee", `${long} region`],
+      ["Eli", `${long} and east`],
+      ["Fay", "Ops"],
+    ];
+    const list = staffListOf(rows, "Other");
+    expect(list.roster.teams.map((team) => [team.id, team.name])).toStrictEqual(
+      [
+        ["t-sales-north", "Sales / North"],
+        ["t-sales-north-2", "Sales - North"],
+        ["t-customer-service-and-claims-handling", `${long} region`],
+        ["t-customer-service-and-claims-handling-2", `${long} and east`],
+        ["t-ops", "Ops"],
+      ]
+    );
+    // Names that only differ in case are one team.
+    expect(
+      list.roster.people.find((person) => person.name === "Cas")?.team
+    ).toBe("t-sales-north");
+    expect(rosterSchema.safeParse(list.roster).success).toBeTruthy();
+    // Read again, every team and person has the id it had.
+    expect(staffListOf(rows, "Other").roster).toStrictEqual(list.roster);
+  });
+
+  it("tells people apart by name and team where their email address is no email address", () => {
+    const list = staffListOf(
+      [
+        ["Name", "Email", "Team"],
+        ["Lisa Jansen", "N/A", "Service"],
+        ["Tim de Groot", "N/A", "Service"],
+        ["Anne Visser", "-", "Service"],
+        ["Anne Visser", "", "Sales"],
+      ],
+      "Other"
+    );
+    expect(
+      list.roster.people.map((person) => [person.name, person.email])
+    ).toStrictEqual([
+      ["Lisa Jansen", ""],
+      ["Tim de Groot", ""],
+      ["Anne Visser", ""],
+      ["Anne Visser", ""],
+    ]);
+    expect(rosterSchema.safeParse(list.roster).success).toBeTruthy();
+  });
+
+  it("is refused with more people or teams than an onboarding takes", () => {
+    const people = Array.from({ length: onboardingPeopleMax + 1 }, (_, at) => [
+      `Person ${at}`,
+      `p${at}@x.com`,
+      "Service",
+    ]);
+    const teams = Array.from({ length: onboardingTeamsMax + 1 }, (_, at) => [
+      `Person ${at}`,
+      `p${at}@x.com`,
+      `Team ${at}`,
+    ]);
+    for (const rows of [people, teams]) {
+      expect(() =>
+        staffListOf([["Name", "Email", "Team"], ...rows], "Other")
+      ).toThrow(expect.objectContaining({ reason: "large" }));
+    }
+    expect(
+      staffListOf(
+        [["Name", "Email", "Team"], ...people.slice(0, onboardingPeopleMax)],
+        "Other"
+      ).roster.people
+    ).toHaveLength(onboardingPeopleMax);
+  });
+
   it("is refused without headings it knows, or without anyone in it", () => {
     expect(() =>
       staffListOf(
@@ -162,5 +257,73 @@ describe("the teams and people in a staff list", () => {
     expect(list.roster.people).toHaveLength(2);
     expect(list.leadsFrom).toBe("column");
     expect(rosterSchema.safeParse(list.roster).success).toBeTruthy();
+  });
+});
+
+describe("a staff list shared again", () => {
+  const rows = [
+    ["Name", "Email", "Team", "Team lead"],
+    ["Lea Bakker", "lea@x.com", "Sales", "yes"],
+    ["Sam Visser", "sam@x.com", "Sales", ""],
+    ["Ona Smit", "ona@x.com", "Ops", ""],
+    ["Kim Bos", "kim@x.com", "Board", ""],
+  ];
+  const first = staffListOf(rows, "Other").roster;
+  const idOf = (name: string): string =>
+    first.people.find((person) => person.name === name)?.id ?? "";
+  const teamOf = (name: string): string =>
+    first.teams.find((team) => team.name === name)?.id ?? "";
+  // As the admin left it: Board switched off, Sam away, and Sam leading Sales.
+  const saved: Roster = rosterSchema.parse({
+    teams: first.teams.map((team) => ({
+      ...team,
+      off: team.name === "Board",
+      lead: team.name === "Sales" ? idOf("Sam Visser") : team.lead,
+      does: team.name === "Ops" ? "Plans the routes" : "",
+    })),
+    people: first.people.map((person) => ({
+      ...person,
+      away: person.name === "Sam Visser",
+    })),
+  });
+
+  it("keeps who takes part, who is away, the leads picked and what a team does", () => {
+    const again = withSaved(
+      staffListOf([...rows, ["Noor Jansen", "noor@x.com", "Ops", ""]], "Other")
+        .roster,
+      saved
+    );
+    expect(
+      again.teams.map((team) => [team.name, team.off, team.lead, team.does])
+    ).toStrictEqual([
+      ["Sales", false, idOf("Sam Visser"), ""],
+      ["Ops", false, null, "Plans the routes"],
+      ["Board", true, null, ""],
+    ]);
+    expect(
+      again.people.map((person) => [person.name, person.away])
+    ).toStrictEqual([
+      ["Lea Bakker", false],
+      ["Sam Visser", true],
+      ["Ona Smit", false],
+      ["Kim Bos", false],
+      ["Noor Jansen", false],
+    ]);
+    expect(rosterSchema.safeParse(again).success).toBeTruthy();
+  });
+
+  it("takes the list's own lead where the one picked moved to another team", () => {
+    const moved = rows.map((row) =>
+      row[0] === "Sam Visser" ? ["Sam Visser", "sam@x.com", "Ops", ""] : row
+    );
+    const again = withSaved(staffListOf(moved, "Other").roster, saved);
+    expect(again.teams.find((team) => team.id === teamOf("Sales"))?.lead).toBe(
+      idOf("Lea Bakker")
+    );
+    expect(rosterSchema.safeParse(again).success).toBeTruthy();
+  });
+
+  it("is the list itself when nothing was saved before", () => {
+    expect(withSaved(first, null)).toStrictEqual(first);
   });
 });

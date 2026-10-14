@@ -1,9 +1,15 @@
-import { planDays } from "@grasp-os/shared/onboarding";
+import {
+  minTalkedShown,
+  onboardingPeopleMax,
+  onboardingTeamsMax,
+  planDays,
+} from "@grasp-os/shared/onboarding";
 import type {
   InterviewLocale,
   OnboardingView,
   Roster,
   RosterInput,
+  TeamProgress,
 } from "@grasp-os/shared/onboarding";
 import { documentErrors } from "@grasp-os/shared/onboarding-documents";
 import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
@@ -66,7 +72,12 @@ import { DocumentDrop } from "./document-drop.tsx";
 import type { DocumentRow } from "./document-drop.tsx";
 import { LanguageChoice } from "./language-choice.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
-import { choiceHolds, choiceOfPlan, firstChoice, planOf } from "./send-plan.ts";
+import {
+  choiceHolds,
+  choiceOfPlan,
+  firstChoice,
+  replanOf,
+} from "./send-plan.ts";
 import {
   Asides,
   Callout,
@@ -81,15 +92,16 @@ import {
   Primary,
   SupportLink,
 } from "./setup-parts.tsx";
-import { closesOn, documentSources } from "./setup.ts";
+import { closesOn, documentSources, teamNumbersOf } from "./setup.ts";
 import type { Listening, SetupStep } from "./setup.ts";
 import {
   csvRows,
   exampleList,
   StaffListError,
   staffListOf,
+  withSaved,
 } from "./staff-list.ts";
-import { xlsxRows } from "./xlsx.ts";
+import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
 // One screen of the client onboarding, by step (prototype
 // `components/onboarding/onboarding-steps.tsx`, the steps of a real
@@ -284,18 +296,29 @@ const Welcome = (props: StepProps) => {
 
 const xlsxName = /\.xlsx$/iu;
 
-/** Who works where, from a staff list file; or why it could not be read. */
+/**
+ * Who works where, from a staff list file, with what the admin set on the
+ * one saved before kept; or why it could not be read. A file larger than
+ * a workbook may be is refused before it is read, a CSV file too.
+ */
 const readStaffList = async (
   file: File,
-  noTeam: string
-): Promise<RosterInput | "headings" | "empty" | "unreadable"> => {
+  noTeam: string,
+  saved: Roster | null
+): Promise<RosterInput | "headings" | "empty" | "large" | "unreadable"> => {
+  if (file.size > xlsxMost.bytes) {
+    return "large";
+  }
   try {
     const rows = xlsxName.test(file.name)
       ? await xlsxRows(await file.arrayBuffer())
       : csvRows(await file.text());
-    return staffListOf(rows, noTeam).roster;
+    return withSaved(staffListOf(rows, noTeam).roster, saved);
   } catch (error) {
-    return error instanceof StaffListError ? error.reason : "unreadable";
+    if (error instanceof StaffListError || error instanceof XlsxError) {
+      return error.reason;
+    }
+    return "unreadable";
   }
 };
 
@@ -344,15 +367,21 @@ const Company = (props: StepProps) => {
   const read = async (file: File) => {
     setReading(true);
     setProblem(null);
-    const found = await readStaffList(file, noTeam);
+    const found = await readStaffList(file, noTeam, roster);
     if (typeof found === "string") {
       const why = found;
+      const peopleMost = onboardingPeopleMax;
+      const teamsMost = onboardingTeamsMax;
       if (why === "headings") {
         setProblem(
           t`I could not find the columns. The first row should name them: name, email, team and job.`
         );
       } else if (why === "empty") {
         setProblem(t`There is nobody in this list.`);
+      } else if (why === "large") {
+        setProblem(
+          t`This list is too large. I can take up to ${peopleMost} people in up to ${teamsMost} teams.`
+        );
       } else {
         setProblem(
           t`I could not read this file. A CSV or an Excel file works.`
@@ -539,28 +568,23 @@ const Documents = (props: StepProps) => {
   const lines = useHeadlines(props).documents;
   const core = useCore();
   const refresh = useRefresh();
-  const { run } = useCoreAction();
+  const { run, busy, failure } = useCoreAction();
   const problemOf = useProblemOf();
   const [pending, setPending] = useState<Pending[]>([]);
   const [fresh, setFresh] = useState(false);
   const kept = props.data.documents;
   const locale: InterviewLocale = isLocale(i18n.locale) ? i18n.locale : "en";
+  // Core keeps two documents of the same name as two: each row is its own upload, by an id of its own.
   const take = (files: File[]) => {
-    const added = files
-      .filter(
-        (file) =>
-          !kept.some((each) => each.name === file.name) &&
-          !pending.some((busy) => busy.name === file.name)
-      )
-      .map((file, at): Pending => ({
-        key: `${file.name}-${file.size}-${Date.now()}`,
-        name: file.name,
-        size: file.size,
-        state: "reading",
-        startedAt: Date.now(),
-        ms: readMs + at * readStaggerMs + Math.min(6000, file.size / 400),
-        file,
-      }));
+    const added = files.map((file, at): Pending => ({
+      key: crypto.randomUUID(),
+      name: file.name,
+      size: file.size,
+      state: "reading",
+      startedAt: Date.now(),
+      ms: readMs + at * readStaggerMs + Math.min(6000, file.size / 400),
+      file,
+    }));
     if (added.length === 0) {
       return;
     }
@@ -572,13 +596,13 @@ const Documents = (props: StepProps) => {
         const result = await shareDocument(core, each.file, locale);
         if (result.shared) {
           await refresh();
-          setPending((now) => now.filter((busy) => busy.key !== each.key));
+          setPending((now) => now.filter((row) => row.key !== each.key));
           return;
         }
         const problem = problemOf(result.error);
         setPending((now) =>
-          now.map((busy) =>
-            busy.key === each.key ? { ...busy, state: "failed", problem } : busy
+          now.map((row) =>
+            row.key === each.key ? { ...row, state: "failed", problem } : row
           )
         );
       })();
@@ -646,6 +670,7 @@ const Documents = (props: StepProps) => {
             <div className="flex flex-wrap justify-center gap-2">
               {ask.options.map((option) => (
                 <Button
+                  disabled={busy}
                   key={option}
                   onClick={() => {
                     void answer(option);
@@ -657,6 +682,7 @@ const Documents = (props: StepProps) => {
                 </Button>
               ))}
             </div>
+            <ErrorText>{failure}</ErrorText>
           </div>
         )}
         <p className="text-muted-foreground text-xs">{t`Leave out personnel files and anything about one person.`}</p>
@@ -1013,7 +1039,7 @@ const Team = (props: StepProps) => {
             const saved = await run(
               async (session) =>
                 await session.onboarding.savePlan(
-                  planOf(choice, planDays.usual)
+                  replanOf(choice, view.plan, planDays.usual)
                 )
             );
             if (saved !== undefined) {
@@ -1040,6 +1066,70 @@ const QuietTeam = ({ team, lead }: { team: string; lead: string }) => {
 };
 
 /**
+ * What keeps the links from going out, before anything else on the step:
+ * Grasp's staff paused the interviews (in the words of their own switch),
+ * or the agreements are not in place yet.
+ */
+const Waiting = ({ paused, agreed }: { paused: boolean; agreed: boolean }) => {
+  const { t } = useLingui();
+  return (
+    <>
+      {paused ? (
+        <Callout
+          text={t`Paused: no link opens and none goes out. The links that are due go out once they run again.`}
+        />
+      ) : null}
+      {agreed ? null : (
+        <Callout
+          text={t`Grasp is still putting the agreements in place. Your people’s links go out once that is done.`}
+        />
+      )}
+    </>
+  );
+};
+
+/**
+ * One team's row of how far it is: how many talked of how many were
+ * asked; while too few talked, how many were asked and whether the lead
+ * talked; while too few were asked, only whether the lead talked.
+ */
+const TeamRow = ({ team }: { team: TeamProgress }) => {
+  const { t } = useLingui();
+  const numbers = teamNumbersOf(team);
+  const least = minTalkedShown;
+  let count = t`Under 5`;
+  if (numbers.shown === "both") {
+    const { talked, asked: of } = numbers;
+    count = t`${talked} of ${of}`;
+  } else if (numbers.shown === "asked") {
+    const { asked: of } = numbers;
+    count = t`Fewer than ${least} of ${of}`;
+  }
+  return (
+    <div className="setup-team-row grid items-center gap-3 py-1.5">
+      <span className="truncate">{team.name}</span>
+      {numbers.shown === "both" ? (
+        <Progress
+          aria-label={team.name}
+          value={
+            numbers.asked === 0
+              ? 0
+              : Math.round((numbers.talked / numbers.asked) * 100)
+          }
+        />
+      ) : (
+        <span className="text-muted-foreground text-xs">
+          {team.leadTalked ? t`Lead talked` : t`Lead not yet`}
+        </span>
+      )}
+      <span className="text-muted-foreground text-right tabular-nums">
+        {count}
+      </span>
+    </div>
+  );
+};
+
+/**
  * The weeks Stephen talks to the team: how far the days are, three
  * numbers, and the team that needs a word from its lead. Numbers per team
  * only for teams of five or more, and never who talked or what anyone said.
@@ -1048,7 +1138,7 @@ const ListeningStep = (props: StepProps) => {
   const { t } = useLingui();
   const { listening, percent, today, data } = props;
   const lines = useHeadlines(props).listening;
-  const { plan, progress, roster, agreed } = data.view;
+  const { plan, progress, roster, agreed, paused } = data.view;
   const closes = plan === null ? "" : formatDay(closesOn(plan));
   const { days } = listening;
   const day = Math.max(
@@ -1086,11 +1176,7 @@ const ListeningStep = (props: StepProps) => {
     <>
       <Heading sentence={lines.sentence} title={lines.title} />
       <div className="flex w-full flex-col gap-4 text-left">
-        {agreed ? null : (
-          <Callout
-            text={t`Grasp is still putting the agreements in place. Your people’s links go out once that is done.`}
-          />
-        )}
+        <Waiting agreed={agreed} paused={paused} />
         <div className="flex flex-col gap-2">
           <div className="flex gap-1">
             {Array.from({ length: days }, (_, index) => (
@@ -1143,36 +1229,9 @@ const ListeningStep = (props: StepProps) => {
             <PopoverContent align="end" className="w-96">
               {/* One list, close together: the content's own room is between its parts. */}
               <div className="flex flex-col">
-                {teams.map((team) => {
-                  const share =
-                    team.asked === null || team.asked === 0
-                      ? 0
-                      : (team.talked ?? 0) / team.asked;
-                  const shown = team.talked !== null;
-                  const of = team.asked ?? 0;
-                  const talked = team.talked ?? 0;
-                  return (
-                    <div
-                      className="setup-team-row grid items-center gap-3 py-1.5"
-                      key={team.id}
-                    >
-                      <span className="truncate">{team.name}</span>
-                      {shown ? (
-                        <Progress
-                          aria-label={team.name}
-                          value={Math.round(share * 100)}
-                        />
-                      ) : (
-                        <span className="text-muted-foreground text-xs">
-                          {team.leadTalked ? t`Lead talked` : t`Lead not yet`}
-                        </span>
-                      )}
-                      <span className="text-muted-foreground text-right tabular-nums">
-                        {shown ? t`${talked} of ${of}` : t`Under 5`}
-                      </span>
-                    </div>
-                  );
-                })}
+                {teams.map((team) => (
+                  <TeamRow key={team.id} team={team} />
+                ))}
                 <p className="text-muted-foreground pt-2 text-xs">{t`Teams under five people show only whether their lead talked, so nobody can be singled out.`}</p>
               </div>
             </PopoverContent>

@@ -15,6 +15,8 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { DragEvent, KeyboardEvent } from "react";
 
+import { extensionOf, filesToRead, readable } from "./document-files.ts";
+
 // Where documents are dropped in the onboarding (prototype
 // `components/onboarding/document-drop.tsx`), modelled on uiarc's file
 // dropzone. Its dashed edge is drawn, so a file over it closes the dashes
@@ -41,19 +43,6 @@ export interface DocumentRow {
   startedAt?: number;
 }
 
-/** What Grasp reads, by extension; anything else is refused with a shake. */
-export const readable = [
-  "pdf",
-  "doc",
-  "docx",
-  "xls",
-  "xlsx",
-  "ppt",
-  "pptx",
-  "txt",
-  "md",
-  "csv",
-] as const;
 /** From this many documents the prompt folds to a slim bar, so the list has room; a file dragged over opens it again. */
 const compactAt = 3;
 
@@ -64,9 +53,6 @@ const cornerOf = (box: Element): number => {
   );
   return Number.isNaN(corner) ? 0 : corner;
 };
-
-const extensionOf = (name: string): string =>
-  name.toLowerCase().split(".").pop() ?? "";
 
 /** Whether a drag carries files, rather than text or a link. */
 const carries = (event: DragEvent): boolean =>
@@ -380,22 +366,25 @@ export const DocumentDrop = ({
     };
   }, []);
 
+  // Each refusal shakes the target again: its animation starts over in place, so the target, and the edge fitted to it, stay.
+  useEffect(() => {
+    if (shaking === 0) {
+      return;
+    }
+    for (const animation of zone.current?.getAnimations() ?? []) {
+      if (
+        animation instanceof CSSAnimation &&
+        animation.animationName === "drop-shake"
+      ) {
+        animation.currentTime = 0;
+        animation.play();
+      }
+    }
+  }, [shaking]);
+
   const add = (incoming: FileList | File[]) => {
     const files = [...incoming];
-    const known = files.filter((file) =>
-      readable.some((extension) => extension === extensionOf(file.name))
-    );
-    const fresh = known.filter(
-      (file, at, all) =>
-        all.findIndex(
-          (other) => other.name === file.name && other.size === file.size
-        ) === at &&
-        !rows.some(
-          (row) =>
-            row.name === file.name && (row.size ?? file.size) === file.size
-        )
-    );
-    const refused = files.length - known.length;
+    const { fresh, refused } = filesToRead(files);
     const only = files[0]?.name ?? "";
     if (refused === 0) {
       setError("");
@@ -496,7 +485,6 @@ export const DocumentDrop = ({
           dragging && "drop-breathe bg-muted/30",
           shaking > 0 && "drop-shake"
         )}
-        key={shaking}
         onDragEnter={(event) => {
           if (!carries(event)) {
             return;

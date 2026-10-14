@@ -251,3 +251,36 @@ export const reachedOf = (
     Math.max(stored, plan === null ? 0 : stepIndex("listening")),
     steps.length - 1
   );
+
+/** What this browser keeps of an admin's onboarding: the furthest step they reached, and the message they wrote. */
+export interface Kept {
+  reached: number;
+  message: string | null;
+}
+
+/**
+ * What is kept once the admin is on step `index`: the furthest step stays
+ * the furthest when they go back. The same object when nothing changed.
+ */
+export const keptAt = (kept: Kept, index: number): Kept =>
+  index > kept.reached ? { ...kept, reached: index } : kept;
+
+/**
+ * What a team's row says of how many talked, from what core shows of it:
+ * the numbers; how many were asked but not yet how many talked, while too
+ * few have; or nothing, while too few were asked.
+ */
+export const teamNumbersOf = (team: {
+  talked: number | null;
+  asked: number | null;
+}):
+  | { shown: "both"; talked: number; asked: number }
+  | { shown: "asked"; asked: number }
+  | { shown: "none" } => {
+  if (team.asked === null) {
+    return { shown: "none" };
+  }
+  return team.talked === null
+    ? { shown: "asked", asked: team.asked }
+    : { shown: "both", talked: team.talked, asked: team.asked };
+};
