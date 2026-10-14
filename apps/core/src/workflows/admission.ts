@@ -49,7 +49,8 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 //   when none is), so within an App people take turns, round-robin, and
 //   another person's newcomer waits behind one of the backlog's places at
 //   most. A person's turns only grow while they have places waiting, so
-//   their newer work never passes their older work as places come and go.
+//   their newer work never passes their older work as places come and go,
+//   unless the older gave its place up (below).
 // - Starvation and queue jumping: within a turn the waiting are served
 //   first come, first served. An attempt is admitted only if serving the
 //   queue in order now would admit it (`servedInOrder`): each place ahead
@@ -64,6 +65,18 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 //   minute at least (`askAgainSeconds`); a run that stopped
 //   asking (its activation gone) loses it, and joins at the back when it
 //   asks again.
+// - A waiter that couldn't run if its share came free holding one back:
+//   a step holds a place only while its last answer was `workflow.queued`,
+//   a wait for a share. Refused for anything else (its lineage's time held
+//   by a sibling, a lineage limit, a timeout), it gives its place up
+//   (quotas.ts, `admitAttempt`) and joins at the back when it next waits
+//   for a share; past an admission it holds none (`dequeued`). So the
+//   queue holds back shares only for steps waiting on shares alone, and
+//   `servedInOrder` never models a lineage, a hold or anything else a
+//   step may wait for: such a wait is the run's own, and it keeps no one
+//   else waiting. A step whose lineage filled while it slept holds its
+//   place until it asks again, a minute at most, as a run paused before
+//   its notification lands does.
 // - A queue so long admission overloads core's database: a person, and an
 //   App, may have so many places at once (`workflowQueuedPerPerson`,
 //   `workflowQueuedPerApp`); past them a step's attempt is refused

@@ -971,6 +971,30 @@ const admitAttemptOnce = async (
 };
 
 /**
+ * Gives up the place of step `step` of `owner`'s run, if it holds one: it
+ * waits for something other than a share now. What it was refused for is
+ * thrown whether or not this lands: a place left behind lapses
+ * (`queueLiveMs`).
+ */
+const placeGivenUp = async (
+  env: Pick<Env, "DB">,
+  owner: AttemptOwner,
+  step: string
+): Promise<void> => {
+  try {
+    const db = drizzle(env.DB);
+    await db.batch(
+      dequeued(db, await queuePlaceOf(owner.run, step), sql`1 = 1`)
+    );
+  } catch (error) {
+    log.warn("workflow.queue.give_up_failed", {
+      runId: owner.run,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
  * Admits `attempt` of a step of `run`, of the lineage of `root`: within
  * the attempts a step may have, while the lineage is young enough and its
  * attempts haven't used, or don't hold, all of its active time, and while
@@ -986,11 +1010,26 @@ const admitAttemptOnce = async (
  * `workflow.lineage_busy` with the seconds after which an attempt under
  * way will have given back its hold, or `workflow.queued`, having queued
  * it, with the share it waits for and the seconds after which it asks
- * again at the latest.
+ * again at the latest. Any refusal but `workflow.queued` gives up the
+ * step's place in the queue (`placeGivenUp`).
  */
 export const admitAttempt = async (
   env: Pick<Env, "DB" | "QUOTA_LIMITS">,
   owner: AttemptOwner,
   attempt: QuotaAttempt
-): Promise<AttemptAdmission> =>
-  await admitAttemptOnce(env, owner, attempt, await quotaPolicy(env), false);
+): Promise<AttemptAdmission> => {
+  try {
+    return await admitAttemptOnce(
+      env,
+      owner,
+      attempt,
+      await quotaPolicy(env),
+      false
+    );
+  } catch (error) {
+    if (workflowErrors.codeOf(error) !== "workflow.queued") {
+      await placeGivenUp(env, owner, attempt.step);
+    }
+    throw error;
+  }
+};

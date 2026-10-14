@@ -721,6 +721,46 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
     });
   });
 
+  it("hold back no share for a step refused for its lineage once its App came free, and queue it again at the back", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const [hot, other, newcomer] = await Promise.all([
+      ownerOf(builder),
+      ownerOf(builder),
+      ownerOf(builder),
+    ]);
+    const holder = asPerson(await anotherRun(builder, hot), "p1");
+    // A child in the hot App, and its sibling in another App, of one
+    // lineage: the sibling's attempt holds all of the lineage's time.
+    const child = asPerson(hot, "p2");
+    const sibling = {
+      ...asPerson(other, "p3"),
+      root: child.root,
+    };
+
+    const result = await withShares(
+      { workflowClientAttempts: 2, workflowActiveMs: 30_000 },
+      async () => {
+        const held = await admit(holder, "h1");
+        const waiting = shown(await admit(child, "c1"));
+        const siblingAnswer = shown(await admit(sibling, "s1"));
+        await settled(held);
+        // The hot App came free, but the child's lineage has no time.
+        const lineage = shown(await admit(child, "c1"));
+        const places = await placesOf(child.run);
+        const late = shown(await admit(asPerson(newcomer, "p4"), "n1"));
+        return { waiting, siblingAnswer, lineage, places, late };
+      }
+    );
+
+    expect(result).toStrictEqual({
+      waiting: "workflow.queued:app",
+      siblingAnswer: "ok",
+      lineage: "workflow.lineage_busy",
+      places: 0,
+      late: "ok",
+    });
+  });
+
   it("put a place that stopped asking at the back when it asks again", async () => {
     const builder = await signedInApi(idp, "builder");
     const owner = await ownerOf(builder);
