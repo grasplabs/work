@@ -55,6 +55,12 @@ const network = (
         atOnce -= 1;
       }
     },
+    // Live queries are core's own test (screen-client.test.ts): these
+    // cases only make calls.
+    watch: async () => {
+      await Promise.resolve();
+      throw new Error("Nothing here follows a query.");
+    },
   };
   return {
     client: new GraspClient(transport),
