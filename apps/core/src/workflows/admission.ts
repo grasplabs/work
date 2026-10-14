@@ -71,16 +71,24 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 //   by a sibling, a lineage limit, a timeout), it gives its place up
 //   (quotas.ts, `admitAttempt`) and joins at the back when it next waits
 //   for a share; past an admission it holds none (`dequeued`). It gives
-//   up only the place as its call found it (`writeToken`, new with each
-//   write): a call that outlasted its attempt's deadline, failing after
-//   the engine's retry of the step queued, never erases the retry's
-//   place, and a stale attempt gives up nothing. So the
+//   up only a place no newer attempt of the step wrote (below). So the
 //   queue holds back shares only for steps waiting on shares alone, and
 //   `servedInOrder` never models a lineage, a hold or anything else a
 //   step may wait for: such a wait is the run's own, and it keeps no one
 //   else waiting. A step whose lineage filled while it slept holds its
 //   place until it asks again, a minute at most, as a run paused before
 //   its notification lands does.
+// - A late call of an attempt the step has moved past writing or erasing
+//   the place: an admission call can outlast its attempt's deadline, and
+//   the engine retry the step meanwhile. Each place carries the attempt
+//   that wrote it, by its deadline (`attemptDeadline`): the engine claims
+//   a step's attempts one after another, so a later deadline is a newer
+//   attempt, however late its calls arrive. An attempt refreshes or gives
+//   up the place only while no newer one wrote it (`ownedBy`), and writes
+//   none once one as new or newer took a lease (`noNewerLease`): each a
+//   condition of the one statement that writes, so no late call slips in
+//   between. Its refusal is then `execution.stale_attempt`: the step has
+//   gone on without it.
 // - A queue so long admission overloads core's database: a person, and an
 //   App, may have so many places at once (`workflowQueuedPerPerson`,
 //   `workflowQueuedPerApp`); past them a step's attempt is refused
@@ -127,10 +135,17 @@ export interface AdmissionScope {
   resource: string;
 }
 
-/** A step's place in the queue: its run, and the SHA-256 of its name. */
+/**
+ * A step's place in the queue: its run, and the SHA-256 of its name, as
+ * one attempt of the step asks for it, by its deadline (`deadline`, ms
+ * since the epoch). The engine claims a step's attempts one after another,
+ * each past the last one's deadline or for a later activation or round,
+ * so a later deadline is a newer attempt (`ownedBy`, `noNewerLease`).
+ */
 export interface QueuePlace {
   runId: string;
   stepHash: string;
+  deadline: number;
 }
 
 /** The share an attempt waits for. */
@@ -229,11 +244,16 @@ export const sharesOf = (policy: QuotaPolicy): Shares => {
   };
 };
 
-/** The place in the queue of step `step` of run `runId`. */
+/** The place in the queue of step `step` of run `runId`, as its attempt with `deadline` asks. */
 export const queuePlaceOf = async (
   runId: string,
-  step: string
-): Promise<QueuePlace> => ({ runId, stepHash: await sha256Hex(step) });
+  step: string,
+  deadline: number
+): Promise<QueuePlace> => ({
+  runId,
+  stepHash: await sha256Hex(step),
+  deadline,
+});
 
 /**
  * A whole number of core's own (a time, a share), as a literal: the
@@ -241,6 +261,31 @@ export const queuePlaceOf = async (
  * most 100 parameters to one.
  */
 const literal = (value: number): SQL => sql.raw(String(Math.trunc(value)));
+
+/** The step's place, whichever attempt wrote it. */
+const placeIs = (place: QueuePlace): SQL | undefined =>
+  and(
+    eq(workflowAdmissionQueue.runId, place.runId),
+    eq(workflowAdmissionQueue.stepHash, place.stepHash)
+  );
+
+/**
+ * The step's place, if no attempt newer than `place`'s wrote it: the only
+ * one `place`'s attempt may refresh or give up.
+ */
+const ownedBy = (place: QueuePlace): SQL | undefined =>
+  and(
+    placeIs(place),
+    lte(workflowAdmissionQueue.attemptDeadline, new Date(place.deadline))
+  );
+
+/**
+ * That no attempt of the step as new as `place`'s, or newer, ever took a
+ * lease: once one did, the step waits in the queue no more, and an older
+ * attempt's late refusal puts no place back.
+ */
+const noNewerLease = (place: QueuePlace): SQL =>
+  sql`NOT EXISTS (SELECT 1 FROM run_lineage_attempts AS r WHERE r.run_id = ${place.runId} AND r.step_hash = ${place.stepHash} AND r.deadline >= ${literal(place.deadline)})`;
 
 /**
  * The leases held at `now` (`h`) that `where` takes: unsettled, until
@@ -460,17 +505,17 @@ export const runDequeued = (db: DrizzleD1Database, run: string, took: SQL) =>
 
 /**
  * The statements that give up `place` once its attempt holds its lease
- * (`admitted`, as SQL), its run's summary taking its next revision.
+ * (`admitted`, as SQL), or, with `admitted` true, once it waits for
+ * something other than a share, its run's summary taking its next
+ * revision: unless a newer attempt of the step wrote the place since
+ * (`ownedBy`), whose it is then.
  */
 export const dequeued = (
   db: DrizzleD1Database,
   place: QueuePlace,
   admitted: SQL
 ) => {
-  const mine = and(
-    eq(workflowAdmissionQueue.runId, place.runId),
-    eq(workflowAdmissionQueue.stepHash, place.stepHash)
-  );
+  const mine = ownedBy(place);
   return [
     db
       .update(workflowRuns)
@@ -483,57 +528,6 @@ export const dequeued = (
         )
       ),
     db.delete(workflowAdmissionQueue).where(and(mine, admitted)),
-  ] as const;
-};
-
-/**
- * Which write of `place` is there now (its `writeToken`), if it is held:
- * read as an admission starts, so it can give up that place and no other
- * (`givenUp`).
- */
-export const placeWritten = async (
-  db: DrizzleD1Database,
-  place: QueuePlace
-): Promise<string | undefined> => {
-  const [held] = await db
-    .select({ writeToken: workflowAdmissionQueue.writeToken })
-    .from(workflowAdmissionQueue)
-    .where(
-      and(
-        eq(workflowAdmissionQueue.runId, place.runId),
-        eq(workflowAdmissionQueue.stepHash, place.stepHash)
-      )
-    );
-  return held?.writeToken;
-};
-
-/**
- * The statements that give up `place` as its write `writeToken` left it,
- * its run's summary taking its next revision: a place written since, by a
- * later attempt of the step, is not the one given up, and stays.
- */
-export const givenUp = (
-  db: DrizzleD1Database,
-  place: QueuePlace,
-  writeToken: string
-) => {
-  const queue = workflowAdmissionQueue;
-  const seen = and(
-    eq(queue.runId, place.runId),
-    eq(queue.stepHash, place.stepHash),
-    eq(queue.writeToken, writeToken)
-  );
-  return [
-    db
-      .update(workflowRuns)
-      .set({ summaryRevision: sql`${workflowRuns.summaryRevision} + 1` })
-      .where(
-        and(
-          eq(workflowRuns.id, place.runId),
-          sql`EXISTS (SELECT 1 FROM ${queue} WHERE ${seen})`
-        )
-      ),
-    db.delete(queue).where(seen),
   ] as const;
 };
 
@@ -656,19 +650,29 @@ export const queuedRefusal = async (
   const rows = z.array(sharesRowSchema).safeParse(read).data;
   const { waitingFor, retryAfterSeconds } = waitOf(rows?.[0], shares, now);
   const at = new Date(now);
-  // This write of the place: what a later give-up of it must match.
-  const writeToken = crypto.randomUUID();
   // When it asks again at the latest, as the host waits (`askAgainMs`):
   // never after it would time out.
   const retryAt = new Date(
     now + askAgainMs({ waited, retryAfterSeconds, since, maxWaitMs, now })
   );
   const queue = workflowAdmissionQueue;
-  const mine = and(
-    eq(queue.runId, place.runId),
-    eq(queue.stepHash, place.stepHash)
-  );
-  const kept = db.select({ runId: queue.runId }).from(queue).where(mine);
+  const mine = placeIs(place);
+  // Its place as this attempt left it: written or kept by it.
+  const kept = db
+    .select({ runId: queue.runId })
+    .from(queue)
+    .where(and(mine, eq(queue.attemptDeadline, new Date(place.deadline))));
+  // A newer attempt of the step took the place, or a lease: this one's
+  // refusal is late, and the step has gone on without it.
+  const superseded = db
+    .select({ id: workflowRuns.id })
+    .from(workflowRuns)
+    .where(
+      and(
+        eq(workflowRuns.id, place.runId),
+        sql`(EXISTS (SELECT 1 FROM ${queue} WHERE ${mine} AND ${queue.attemptDeadline} > ${place.deadline}) OR NOT ${noNewerLease(place)})`
+      )
+    );
   // Still going as its place is written, in the same statement: a run
   // paused, cancelled or ended meanwhile has given up its places
   // (runs.ts, `projectStatus`), and takes none again.
@@ -684,13 +688,18 @@ export const queuedRefusal = async (
       .where(and(mine, lte(queue.seenAt, new Date(now - queueLiveMs)))),
     db
       .update(queue)
-      .set({ seenAt: at, waitingFor, retryAt, writeToken })
-      .where(mine),
+      .set({
+        seenAt: at,
+        waitingFor,
+        retryAt,
+        attemptDeadline: new Date(place.deadline),
+      })
+      .where(and(ownedBy(place), noNewerLease(place))),
     // A new place, within its person's and its App's.
     db
       .insert(queue)
       .select(
-        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(scope, now)}, ${writeToken} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${place.runId} AND ${runActive} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
+        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(scope, now)}, ${place.deadline} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${place.runId} AND ${runActive} AND ${noNewerLease(place)} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
       )
       .onConflictDoNothing()
       .returning({ runId: queue.runId }),
@@ -706,12 +715,15 @@ export const queuedRefusal = async (
       ),
     kept,
     active,
+    superseded,
   ]);
   // It joined the queue only if this refusal took it a place: the run
   // records that it waits then (host.ts), once each time it joins.
   const joined = written[2].length > 0;
   // Paused, cancelled or ended: its attempt is over, not queued.
-  if (written[5].length === 0) {
+  // Superseded by a newer attempt of its step: over too, and it neither
+  // wrote the place nor put one back.
+  if (written[5].length === 0 || written[6].length > 0) {
     return executionErrors.create("execution.stale_attempt");
   }
   if (written[4].length === 0) {

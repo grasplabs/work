@@ -1177,6 +1177,12 @@ export const runLineageAttempts = sqliteTable(
      */
     subject: text().notNull().default(""),
     resource: text().notNull().default(""),
+    /**
+     * The SHA-256 of the attempt's step name: whose place in the queue its
+     * lease ends, and an older attempt of the step's late refusal may not
+     * put back (src/workflows/admission.ts).
+     */
+    stepHash: text("step_hash").notNull().default(""),
   },
   (table) => [
     primaryKey({
@@ -1232,11 +1238,11 @@ export const workflowAdmissionQueue = sqliteTable(
     retryAt: timestamp("retry_at").notNull(),
     turn: integer().notNull(),
     /**
-     * New with each write of the place (a refusal that queued it, or kept
-     * it): a step that gives its place up gives up only the one it saw,
-     * never one a later attempt of the step wrote since.
+     * The deadline of the step's attempt that last wrote the place: which
+     * attempt owns it. An older attempt of the step (an earlier deadline)
+     * neither writes nor gives up a place a newer one wrote.
      */
-    writeToken: text("write_token").notNull(),
+    attemptDeadline: timestamp("attempt_deadline").notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.runId, table.stepHash] }),

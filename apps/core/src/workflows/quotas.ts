@@ -27,8 +27,6 @@ import {
 } from "../db/core/schema.ts";
 import {
   dequeued,
-  givenUp,
-  placeWritten,
   queuedRefusal,
   queuePlaceOf,
   queuePruned,
@@ -813,7 +811,7 @@ const admitAttemptOnce = async (
   const { run, root } = owner;
   const db = drizzle(env.DB);
   const shares = sharesOf(policy);
-  const place = await queuePlaceOf(run, attempt.step);
+  const place = await queuePlaceOf(run, attempt.step, attempt.deadline);
   const standing = await standingOf(db, owner, place, now);
   const reserved = Math.min(
     attempt.deadline - now,
@@ -876,7 +874,7 @@ const admitAttemptOnce = async (
     db
       .insert(held)
       .select(
-        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.hostCalls} < ${policy.limits.lineageHostCalls} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(owner, place, standing, now, shares)}`
+        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource}, ${place.stepHash} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.hostCalls} < ${policy.limits.lineageHostCalls} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(owner, place, standing, now, shares)}`
       )
       .onConflictDoNothing(),
     // Held on the lineage only if that statement took the receipt.
@@ -973,24 +971,18 @@ const admitAttemptOnce = async (
 };
 
 /**
- * Gives up the place of step `step` of `owner`'s run as the refused call
- * found it (`seen`, its write as the call started), if it held one: the
- * step waits for something other than a share now. A place a later
- * attempt of the step wrote since is another write, and stays. What the
- * call was refused for is thrown whether or not this lands: a place left
- * behind lapses (`queueLiveMs`).
+ * Gives up `place`, unless a newer attempt of its step wrote it since
+ * (admission.ts, `dequeued`): the step waits for something other than a
+ * share now. What the call was refused for is thrown whether or not this
+ * lands: a place left behind lapses (`queueLiveMs`).
  */
 const placeGivenUp = async (
   db: DrizzleD1Database,
   owner: AttemptOwner,
-  place: QueuePlace,
-  seen: string | undefined
+  place: QueuePlace
 ): Promise<void> => {
-  if (seen === undefined) {
-    return;
-  }
   try {
-    await db.batch(givenUp(db, place, seen));
+    await db.batch(dequeued(db, place, sql`1 = 1`));
   } catch (error) {
     log.warn("workflow.queue.give_up_failed", {
       runId: owner.run,
@@ -1015,19 +1007,14 @@ const placeGivenUp = async (
  * `workflow.lineage_busy` with the seconds after which an attempt under
  * way will have given back its hold, or `workflow.queued`, having queued
  * it, with the share it waits for and the seconds after which it asks
- * again at the latest. Any other refusal of an attempt not yet stale
- * gives up the step's place in the queue as this call found it
- * (`placeGivenUp`).
+ * again at the latest. Any other refusal gives up the step's place in
+ * the queue, unless a newer attempt of the step wrote it (`placeGivenUp`).
  */
 export const admitAttempt = async (
   env: Pick<Env, "DB" | "QUOTA_LIMITS">,
   owner: AttemptOwner,
   attempt: QuotaAttempt
 ): Promise<AttemptAdmission> => {
-  const db = drizzle(env.DB);
-  const place = await queuePlaceOf(owner.run, attempt.step);
-  // The step's place as this call found it: the only one it may give up.
-  const seen = await placeWritten(db, place);
   try {
     return await admitAttemptOnce(
       env,
@@ -1037,13 +1024,14 @@ export const admitAttempt = async (
       false
     );
   } catch (error) {
-    // Queued, it keeps its place. A stale attempt is over, and its step
-    // may have gone on under a later attempt that owns the place now.
-    const keeps =
-      workflowErrors.codeOf(error) === "workflow.queued" ||
-      executionErrors.codeOf(error) === "execution.stale_attempt";
-    if (!keeps) {
-      await placeGivenUp(db, owner, place, seen);
+    // Queued, it keeps its place.
+    if (workflowErrors.codeOf(error) !== "workflow.queued") {
+      const db = drizzle(env.DB);
+      await placeGivenUp(
+        db,
+        owner,
+        await queuePlaceOf(owner.run, attempt.step, attempt.deadline)
+      );
     }
     throw error;
   }

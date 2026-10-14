@@ -773,7 +773,10 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       const waiting = await admitExactly(waiter, first);
       // The engine gave up on the first attempt and retries the step: the
       // retry keeps its place.
-      const retried = await admitExactly(waiter, { ...first, number: 2 });
+      const retried = await admitExactly(waiter, {
+        ...attemptOf("w1", 61_000),
+        number: 2,
+      });
       // The first attempt's call, past its deadline, fails only now.
       const late = await admitExactly(waiter, {
         ...first,
@@ -789,6 +792,37 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       retried: "workflow.queued:app",
       late: "execution.stale_attempt",
       places: 1,
+    });
+  });
+
+  it("put back no place for a step whose later attempt took a lease, when an earlier attempt's refusal lands late", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const hot = await ownerOf(builder);
+    const holder = asPerson(await anotherRun(builder, hot), "p1");
+    const waiter = asPerson(hot, "p2");
+    const first = attemptOf("w1");
+
+    const result = await withShares({ workflowClientAttempts: 2 }, async () => {
+      const held = await admit(holder, "h1");
+      const waiting = await admitExactly(waiter, first);
+      await settled(held);
+      // The engine retries the step, and the retry runs: its lease holds
+      // the App's share.
+      const retried = await admitExactly(waiter, {
+        ...attemptOf("w1", 61_000),
+        number: 2,
+      });
+      // The first attempt's call, still within its deadline, is refused
+      // for the App's share only now.
+      const late = await admitExactly(waiter, first);
+      return { waiting, retried, late, places: await placesOf(waiter.run) };
+    });
+
+    expect(result).toStrictEqual({
+      waiting: "workflow.queued:app",
+      retried: "ok",
+      late: "execution.stale_attempt",
+      places: 0,
     });
   });
 
