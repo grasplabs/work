@@ -19,6 +19,11 @@ import type {
   ChatSummary,
 } from "@grasp-os/shared/chat";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
+import { standardWidgetIdSchema } from "@grasp-os/shared/dashboard";
+import type {
+  DashboardLayout,
+  StandardWidgetId,
+} from "@grasp-os/shared/dashboard";
 import {
   internalErrors,
   isExpectedError,
@@ -38,6 +43,7 @@ import {
   permissionActionSchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
+import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 import { DurableObject } from "cloudflare:workers";
@@ -82,7 +88,6 @@ import {
   codeTimeoutMs,
   cutMarker,
   cutToBytes,
-  redact,
   utf8Bytes,
 } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
@@ -98,6 +103,8 @@ import {
   chatMessages,
   chatSources,
   chats,
+  dashboardWidgets,
+  dashboards,
 } from "./db/workspace/schema.ts";
 import { readAsDelegate } from "./knowledge/binding.ts";
 import { forContext } from "./knowledge/memory.ts";
@@ -107,6 +114,7 @@ import { PreviewReports, serverProblem } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { Previews } from "./preview.ts";
 import type { WorkContext } from "./restricted.ts";
+import { sessionHost } from "./sandboxed.ts";
 import { runEngine } from "./workflows/engine.ts";
 
 export type Chat = typeof chats.$inferSelect;
@@ -383,7 +391,7 @@ const interruptedMessage = (): AssistantMessage => ({
 });
 
 /** How a write a chat's agent had held for its person ended. */
-export type HeldOutcome = "confirmed" | "declined" | "failed";
+export type HeldOutcome = "confirmed" | "declined" | "unknown" | "failed";
 
 /** A held write, as its chat's agent knows it: the ID its call answered with. */
 const heldSchema = z.strictObject({
@@ -403,6 +411,8 @@ const heldOutcomes: Record<HeldOutcome, string> = {
     "The person confirmed it and it was carried out. Don't ask for it again.",
   declined:
     "The person declined it: it was not carried out and won't be. Don't ask for it again unless they say so.",
+  unknown:
+    "The person confirmed it and it was sent, but whether it took effect is unknown: it may have been carried out. It won't be sent again; check the outside system before asking for it again.",
   failed:
     "The person confirmed it, but carrying it out failed, so it may not have been done. It no longer waits for them; don't ask for it again unless they say so.",
 };
@@ -989,6 +999,7 @@ export class Workspace extends DurableObject<Env> {
           },
         },
         loader: this.env.LOADER,
+        sandbox: () => sessionHost(this.env),
         codeTimeoutMs: codeTimeoutMs(this.env),
         signal: cancel.signal,
         events: () => live.events.splice(0),
@@ -1797,6 +1808,66 @@ export class Workspace extends DurableObject<Env> {
         createdAt: createdAt.toISOString(),
         running: this.#turns.has(id),
       }));
+  }
+
+  /**
+   * `personId`'s dashboard as they last saved it, in order; `null` when
+   * they never did. A widget this release no longer has is left out.
+   */
+  dashboardLayout(personId: string): DashboardLayout | null {
+    const saved = this.#db
+      .select({ personId: dashboards.personId })
+      .from(dashboards)
+      .where(eq(dashboards.personId, personId))
+      .get();
+    if (saved === undefined) {
+      return null;
+    }
+    const widgets = this.#db
+      .select({ widgetId: dashboardWidgets.widgetId })
+      .from(dashboardWidgets)
+      .where(eq(dashboardWidgets.personId, personId))
+      .orderBy(asc(dashboardWidgets.position))
+      .all()
+      .map(({ widgetId }) => standardWidgetIdSchema.safeParse(widgetId))
+      .filter((widget) => widget.success)
+      .map(({ data }) => data);
+    return { widgets };
+  }
+
+  /**
+   * Saves `personId`'s whole dashboard, `widgets` in order (checked by
+   * the caller, `dashboardLayoutSchema`), in place of what they saved
+   * before: in one transaction, so a reader sees one or the other.
+   */
+  saveDashboardLayout(
+    personId: string,
+    widgets: readonly StandardWidgetId[]
+  ): void {
+    const updatedAt = new Date();
+    this.ctx.storage.transactionSync(() => {
+      this.#db
+        .insert(dashboards)
+        .values({ personId, updatedAt })
+        .onConflictDoUpdate({ target: dashboards.personId, set: { updatedAt } })
+        .run();
+      this.#db
+        .delete(dashboardWidgets)
+        .where(eq(dashboardWidgets.personId, personId))
+        .run();
+      if (widgets.length > 0) {
+        this.#db
+          .insert(dashboardWidgets)
+          .values(
+            widgets.map((widgetId, position) => ({
+              personId,
+              position,
+              widgetId,
+            }))
+          )
+          .run();
+      }
+    });
   }
 
   /** Renames `personId`'s own chat, audited as `by`'s. */

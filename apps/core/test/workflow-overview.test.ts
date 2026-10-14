@@ -41,7 +41,7 @@ type Person = Awaited<ReturnType<typeof personApi>>;
  * above a limit, and books the invoice; its test approves the review.
  */
 const approveFiles = {
-  "workflows/approve.ts": `import { model, money, person, workflow, z } from "@grasp-os/sdk/workflow";
+  "workflows/approve.ts": `import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "approve",
@@ -50,13 +50,12 @@ export default workflow(
     params: {
       limit: money({ label: "Review invoices above", currency: "EUR", default: 500_000, sensitive: true }),
       reviewer: person({ label: "Reviewer", default: "role:admin" }),
-      reader: model({ label: "Reading model", default: "mistral-large" }),
     },
   },
   async (step, { input, params }) => {
     const extracted = await step.llm("extract", {
       description: "Read the invoice's total",
-      model: params.reader,
+      binding: "reader",
       instructions: "Read the total in cents.",
       input: input.text,
       schema: z.object({ total: z.int() }),
@@ -755,7 +754,6 @@ describe("the Workflows page", buildTime, () => {
     ).toStrictEqual([
       ["limit", true],
       ["reviewer", false],
-      ["reader", false],
     ]);
 
     const [asUser, asStaff, hiddenSteps, missing] = await Promise.all([
@@ -779,14 +777,14 @@ describe("the Workflows page", buildTime, () => {
       userSets: false,
       userCode: [],
       ownerCode: [
-        "param reader",
+        "option binding",
         "option instructions",
         "extracted.total > params.limit",
         "param limit",
         "param reviewer",
         "option timeout",
       ],
-      staffSees: 3,
+      staffSees: 2,
       staffSets: false,
       hidden: hiddenReason,
       missing: "workflow.not_found",

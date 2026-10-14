@@ -7,7 +7,12 @@ import { expectTypeOf } from "vite-plus/test";
 
 import { AppError, resource } from "../src/index.ts";
 import { serverModule } from "../src/server.ts";
-import type { ActionCtx, MutationCtx, QueryCtx } from "../src/server.ts";
+import type {
+  ActionCtx,
+  ArgsOf,
+  MutationCtx,
+  QueryCtx,
+} from "../src/server.ts";
 import {
   defineSchema,
   defineTable,
@@ -103,7 +108,7 @@ const remove = mutation({
 void [list, update, remove];
 
 // A caller may leave out a defaulted argument; the handler always has it.
-expectTypeOf<NonNullable<(typeof create)["~argsIn"]>>().toEqualTypeOf<{
+expectTypeOf<ArgsOf<typeof create>>().toEqualTypeOf<{
   title: string;
   body?: string | undefined;
 }>();
@@ -230,7 +235,7 @@ mutation({
 
 // An action has no database, and calls only what it lists.
 const mail = resource.connector("mail", {
-  contract: "grasp.mail@1",
+  contract: "microsoft-365.mail@1",
   actions: ["send"],
 });
 const help = resource.knowledge("help", {
@@ -267,7 +272,12 @@ action({
     ).resolves.toEqualTypeOf<Id<"notes">>();
     // Internal functions of the App are its own server code's to call.
     expectTypeOf(ctx.runQuery(secret, {})).resolves.toEqualTypeOf<string>();
-    await ctx.resources.mail.call("send", { to: args.to });
+    await ctx.resources.mail.call("send", {
+      mailbox: "team@acme.test",
+      subject: "Hello",
+      body: "Hi.",
+      to: [args.to],
+    });
     // @ts-expect-error -- an action the declaration doesn't list
     await ctx.resources.mail.call("delete", {});
     expectTypeOf(

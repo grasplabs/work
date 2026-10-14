@@ -7,7 +7,11 @@ import type { z } from "zod";
 export interface ModelRequest {
   /** The step the call is made for, for the audit log and cost reporting. */
   step: string;
-  model: string;
+  /**
+   * The alias of the App's model resource the call goes through: an
+   * approved binding of it names the model and caps what it may spend.
+   */
+  binding: string;
   /** What the model is asked to do. */
   instructions: string;
   /** What it works on. */
@@ -59,6 +63,29 @@ export type BindingMethod = (...args: Json[]) => Promise<unknown>;
  * method a step calls, its own App's or another's export, gets the same
  * key on its caller (`caller.idempotencyKey`), the only one its own
  * connection calls take.
+ *
+ * A public function of the App's own release (spec 8: a query, mutation
+ * or action) is `env.APP.callFunction(reference, input)`: `reference` is
+ * the function's generated reference, or just `{ contractId, kind }`. It
+ * runs in the release of the version the run is pinned to, as the run,
+ * and answers what the function answered or why it failed, as data:
+ * `{ ok: true, value }` or `{ ok: false, error }`, where `error` has the
+ * failure's `code`, `message` and `retryable`. To fail the step with it,
+ * throw it as it is: `if (!answered.ok) throw answered.error;`. It keeps
+ * its code, so a failure trying again may fix (`resource.budget_busy`,
+ * `internal.unexpected`) is retried as the step's retries allow, and any
+ * other fails the step at once; a thrown code alone (a string) is never
+ * retried. Each call's key is the step's and
+ * its place among the step's calls of `callFunction`: two calls in one
+ * step each do what they do, and the step run again, calling in the same
+ * order, makes the same calls: their mutations answer from their receipts
+ * and their connector requests from connect's stored answers, never doing
+ * it again. A model request has no such key: it is sent again, and charged
+ * again, each time the step runs again. Make the calls one after another
+ * (calls made at once count in the order they reach core). An action's `ctx.resources` resolve
+ * through the App's approved bindings, as the run: a model request counts
+ * against the binding's caps and the run's budgets, and a side effect held
+ * for the person holds the step, as the run's own do.
  *
  * Write each call out where it happens, in the function of the step that
  * makes it: `env.NAME.method(…)`, `appServer(env).method(…)` or

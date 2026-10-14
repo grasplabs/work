@@ -1,12 +1,16 @@
+import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
 
+import type { ConnectorCatalog } from "./connector-catalog.gen.ts";
+import type { FilesOperation } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type {
   JsonValue,
   ValueDescriptor,
   ValueSchema,
 } from "./value-descriptor.ts";
-import { descriptorOf } from "./value-schema.ts";
+import { readDescriptor } from "./value-read.ts";
+import { descriptorOf, schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type { Infer } from "./values.ts";
 
@@ -32,10 +36,67 @@ export interface ModelConfig<Output extends AnySchema | undefined> {
   readonly maxOutputTokens: number;
 }
 
+/**
+ * A Composio connection's generated contract, `composio.<toolkit>@1`: the
+ * tools its admin allowed, each an action named by its tool, such as
+ * `HUBSPOT_LIST_CONTACTS`. Composio changes its toolkits without a release
+ * of Grasp, so they aren't in the release's catalog and their calls aren't
+ * typed (`ComposioCall`): the host checks each one, both ways, against the
+ * contract the binding pinned when an admin approved it.
+ */
+export type ComposioContract = `composio.${string}@1`;
+
+/**
+ * A generated connector contract (spec 12): a native connector's tools of
+ * one family, such as `microsoft-365.mail@1`, from this release's catalog;
+ * or a Composio toolkit's (`ComposioContract`).
+ */
+export type ConnectorContract =
+  | Extract<keyof ConnectorCatalog, string>
+  | ComposioContract;
+
+/**
+ * The actions of connector contract `Contract`, by name: any name for a
+ * Composio contract, whose tools only its binding knows.
+ */
+export type ConnectorAction<Contract extends ConnectorContract> =
+  Contract extends keyof ConnectorCatalog
+    ? Extract<keyof ConnectorCatalog[Contract], string>
+    : string;
+
+/**
+ * A Composio action's arguments and answer: any JSON object in, any JSON
+ * value back, both checked by the host against the pinned contract. A tool
+ * that declares no output schema answers its text, as a string.
+ */
+export interface ComposioCall {
+  readonly input: Readonly<Record<string, JsonValue>>;
+  readonly output: JsonValue;
+}
+
+/**
+ * Action `Action` of contract `Contract`: its `input`, the arguments a
+ * call passes, and its `output`, the answer it gets back.
+ */
+type ContractAction<Contract, Action> = Contract extends keyof ConnectorCatalog
+  ? Action extends keyof ConnectorCatalog[Contract]
+    ? ConnectorCatalog[Contract][Action]
+    : never
+  : Contract extends ComposioContract
+    ? ComposioCall
+    : never;
+
 /** What a declaration's config may say about a connector. */
-export interface ConnectorConfig<Actions extends readonly string[]> {
-  /** The adapter contract and its major version, e.g. `grasp.mail@1`. */
-  readonly contract: string;
+export interface ConnectorConfig<
+  Contract extends ConnectorContract,
+  Actions extends readonly ConnectorAction<Contract>[],
+> {
+  /**
+   * The generated contract and its major version: one the release's
+   * connectors serve, e.g. `microsoft-365.mail@1`, or a Composio toolkit's,
+   * e.g. `composio.hubspot@1`.
+   */
+  readonly contract: Contract;
   /** The contract's actions the App needs, each once. */
   readonly actions: Actions;
 }
@@ -81,9 +142,10 @@ export interface ModelResource<
 /** A connector requirement. */
 export interface ConnectorResource<
   Alias extends string = string,
+  Contract extends string = string,
   Actions extends readonly string[] = readonly string[],
 > extends DeclarationBase<"connector", Alias> {
-  readonly contract: string;
+  readonly contract: Contract;
   readonly actions: Actions;
 }
 
@@ -103,6 +165,35 @@ export interface TemplateResource<
 > extends DeclarationBase<"template", Alias> {
   readonly contract: string;
 }
+
+/**
+ * A files requirement (spec 10.7.5, 32.3): what the App's screens may do
+ * with files, through the host. Browser-facing: no function lists it.
+ */
+export interface FilesResource<
+  Alias extends string = string,
+  Operations extends readonly FilesOperation[] = readonly FilesOperation[],
+> {
+  readonly "~resource": "files";
+  readonly alias: Alias;
+  readonly operations: Operations;
+}
+
+/**
+ * A links requirement (spec 10.7.7, 32.3): the exact HTTPS origins the
+ * App's screens may link to. It grants no network access at all.
+ */
+export interface LinksResource<
+  Alias extends string = string,
+  Origins extends readonly string[] = readonly string[],
+> {
+  readonly "~resource": "links";
+  readonly alias: Alias;
+  readonly origins: Origins;
+}
+
+/** A requirement the App's screens use, never its functions. */
+export type BrowserResource = FilesResource | LinksResource;
 
 /** Any resource requirement. */
 export type AnyResource =
@@ -139,20 +230,47 @@ export interface ModelClient<Output> {
   }) => Promise<Output>;
 }
 
-/** What `ctx.resources.<alias>` is for a connector. */
-export interface ConnectorClient<Actions extends readonly string[]> {
-  /** One of the declared actions, with its arguments, through connect. */
-  readonly call: (
-    action: Actions[number],
-    args: Readonly<Record<string, JsonValue>>
-  ) => Promise<JsonValue>;
+/** A catalog action's arguments. */
+type InputOf<Entry> = Entry extends { readonly input: infer Input }
+  ? Input
+  : never;
+
+/**
+ * A call's arguments: each action of `Action` paired with its own
+ * arguments, so an action that may be either of two needs arguments that
+ * fit whichever it is, never just one of them.
+ */
+type CallArgs<Contract, Action> = Action extends string
+  ? [action: Action, args: InputOf<ContractAction<Contract, Action>>]
+  : never;
+
+/**
+ * What `ctx.resources.<alias>` is for a connector: its calls typed by the
+ * contract's catalog entry (`ConnectorCatalog`).
+ */
+export interface ConnectorClient<
+  Contract extends string,
+  Actions extends readonly string[],
+> {
+  /**
+   * One of the declared actions, with its arguments, through connect: its
+   * answer, or any of theirs when the action may be several. Both are
+   * checked against the contract the binding serves.
+   */
+  readonly call: <Action extends Actions[number]>(
+    ...call: CallArgs<Contract, Action>
+  ) => Promise<ContractAction<Contract, Action>["output"]>;
 }
 
 /** What `ctx.resources.<alias>` is for knowledge, by its operations. */
 export type KnowledgeClient<Operations extends readonly KnowledgeOperation[]> =
   ("search" extends Operations[number]
     ? {
-        /** The best matches for `text` in the declared collections. */
+        /**
+         * The best matches for `text` in the declared collections: 1 to
+         * `knowledgeSearchMaxLength` (500) code units, Knowledge's own
+         * limit; a longer text is refused as `contract.invalid_args`.
+         */
         readonly search: (request: {
           readonly text: string;
           readonly limit?: number;
@@ -178,8 +296,8 @@ export interface TemplateClient {
 export type ResourceClient<Resource> =
   Resource extends ModelResource<string, infer Output>
     ? ModelClient<Output>
-    : Resource extends ConnectorResource<string, infer Actions>
-      ? ConnectorClient<Actions>
+    : Resource extends ConnectorResource<string, infer Contract, infer Actions>
+      ? ConnectorClient<Contract, Actions>
       : Resource extends KnowledgeResource<string, infer Operations>
         ? KnowledgeClient<Operations>
         : Resource extends TemplateResource
@@ -213,9 +331,67 @@ const listMax = 32;
 /** Every declaration `resource` made; nothing else counts as one. */
 const declarations = new WeakSet<object>();
 
-/** Whether `value` is a declaration `resource` made. */
+/** Every browser-facing declaration `resource` made. */
+const browserDeclarations = new WeakSet<object>();
+
+/** Whether `value` is a declaration `resource` made for actions. */
 export const isResource = (value: unknown): value is AnyResource =>
   typeof value === "object" && value !== null && declarations.has(value);
+
+/** Whether `value` is a files or links declaration `resource` made. */
+export const isBrowserResource = (value: unknown): value is BrowserResource =>
+  typeof value === "object" && value !== null && browserDeclarations.has(value);
+
+/** The operations a files resource may declare. */
+const filesOperations: readonly FilesOperation[] = [
+  "upload",
+  "read",
+  "attach",
+  "delete",
+];
+
+/**
+ * An HTTPS origin's form: lower-case host labels, an IPv4 address or a
+ * bracketed IPv6 one as the URL standard serializes it, and an optional
+ * port. What a URL parser lets through beyond it (a `*`, say) is
+ * no origin a browser navigates to exactly.
+ */
+const originPattern =
+  /^https:\/\/(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?$/u;
+
+/** The most bytes of one link origin. */
+const originMaxLength = 253 + "https://".length + ":65535".length;
+
+/**
+ * An exact HTTPS origin as the URL standard serializes it: scheme, host
+ * and an optional port, nothing else (no path, query, credentials or
+ * wildcard), lower case.
+ */
+const checkedOrigin = (origin: unknown): string => {
+  if (typeof origin !== "string" || origin.length > originMaxLength) {
+    return refuse(
+      "A link origin is an HTTPS origin, e.g. `https://example.com`."
+    );
+  }
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return refuse(
+      "A link origin is an HTTPS origin, e.g. `https://example.com`."
+    );
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.origin !== origin ||
+    !originPattern.test(origin)
+  ) {
+    return refuse(
+      `\`${origin}\` isn't an exact HTTPS origin: \`https://\`, a host and an optional port, in lower case, with nothing after it.`
+    );
+  }
+  return origin;
+};
 
 const checkedAlias = (alias: unknown): string =>
   typeof alias === "string" && resourceAliasPattern.test(alias)
@@ -239,11 +415,15 @@ const checkedConfig = (
   return config;
 };
 
+// No longer than an identifier, so the audit events that name a binding's
+// contract can carry it.
 const checkedContract = (contract: unknown): string =>
-  typeof contract === "string" && contractPattern.test(contract)
+  typeof contract === "string" &&
+  contract.length <= identifierMaxLength &&
+  contractPattern.test(contract)
     ? contract
     : refuse(
-        "A contract is a dotted name and its major version, e.g. `grasp.mail@1`."
+        `A contract is a dotted name and its major version, e.g. \`grasp.mail@1\`, of at most ${identifierMaxLength} characters.`
       );
 
 const checkedList = (
@@ -292,6 +472,34 @@ const declared = (declaration: AnyResource): AnyResource => {
   const frozen = deepFreeze(declaration);
   declarations.add(frozen);
   return frozen;
+};
+
+/** A browser-facing declaration, frozen and registered as genuine. */
+const declaredForBrowser = (declaration: BrowserResource): BrowserResource => {
+  const frozen = deepFreeze(declaration);
+  browserDeclarations.add(frozen);
+  return frozen;
+};
+
+/** The origins a links declaration lists: 1 to 32 exact HTTPS origins. */
+const checkedOrigins = (origins: unknown): readonly string[] => {
+  if (
+    !Array.isArray(origins) ||
+    origins.length === 0 ||
+    origins.length > listMax
+  ) {
+    return refuse(`A links resource lists between 1 and ${listMax} origins.`);
+  }
+  const listed: readonly unknown[] = origins;
+  const checked: string[] = [];
+  for (const origin of listed) {
+    const exact = checkedOrigin(origin);
+    if (checked.includes(exact)) {
+      refuse(`A links resource lists \`${exact}\` twice.`);
+    }
+    checked.push(exact);
+  }
+  return Object.freeze(checked);
 };
 
 /**
@@ -344,11 +552,15 @@ export const resource = Object.freeze({
   /** Some of a connector contract's actions. */
   connector: <
     const Alias extends string,
-    const Actions extends readonly [string, ...string[]],
+    const Contract extends ConnectorContract,
+    const Actions extends readonly [
+      ConnectorAction<Contract>,
+      ...ConnectorAction<Contract>[],
+    ],
   >(
     alias: Alias,
-    config: ConnectorConfig<Actions>
-  ): ConnectorResource<Alias, Actions> => {
+    config: ConnectorConfig<Contract, Actions>
+  ): ConnectorResource<Alias, Contract, Actions> => {
     const checked = checkedConfig(config, ["contract", "actions"]);
     // SAFETY: built from what was checked of the arguments the type is
     // inferred from: the alias given, and lists holding exactly the names
@@ -359,7 +571,7 @@ export const resource = Object.freeze({
       alias: checkedAlias(alias),
       contract: checkedContract(checked.contract),
       actions: checkedList(checked.actions, "actions"),
-    }) as ConnectorResource<Alias, Actions>;
+    }) as ConnectorResource<Alias, Contract, Actions>;
   },
   /** Search and reading of some knowledge collections. */
   knowledge: <
@@ -407,4 +619,108 @@ export const resource = Object.freeze({
       contract: checkedContract(checked.contract),
     }) as TemplateResource<Alias>;
   },
+  /**
+   * What the App's screens may do with files through the host: upload,
+   * read, attach, delete. Listed in the App's `uses`, never a function's.
+   */
+  files: <
+    const Alias extends string,
+    const Operations extends readonly [FilesOperation, ...FilesOperation[]],
+  >(
+    alias: Alias,
+    config: { readonly operations: Operations }
+  ): FilesResource<Alias, Operations> => {
+    const checked = checkedConfig(config, ["operations"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the operations given, in order.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declaredForBrowser({
+      "~resource": "files",
+      alias: checkedAlias(alias),
+      operations: checkedList(
+        checked.operations,
+        "operations",
+        filesOperations
+      ).filter((operation): operation is FilesOperation =>
+        filesOperations.some((known) => known === operation)
+      ),
+    }) as FilesResource<Alias, Operations>;
+  },
+  /**
+   * The exact HTTPS origins the App's screens may link to. It grants no
+   * network access: a screen still has none.
+   */
+  links: <
+    const Alias extends string,
+    const Origins extends readonly [string, ...string[]],
+  >(
+    alias: Alias,
+    config: { readonly origins: Origins }
+  ): LinksResource<Alias, Origins> => {
+    const checked = checkedConfig(config, ["origins"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the origins given, in order.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declaredForBrowser({
+      "~resource": "links",
+      alias: checkedAlias(alias),
+      origins: checkedOrigins(checked.origins),
+    }) as LinksResource<Alias, Origins>;
+  },
 });
+
+/**
+ * The declaration `data` describes, as a manifest holds it, declared
+ * again through `resource`: it passes exactly the checks a declaration in
+ * code does, and anything else (an unknown kind or key, a value out of
+ * bounds) throws `ResourceDefinitionError` or `ValueDefinitionError`.
+ * Only the host reads declarations back (host.ts).
+ */
+export const readResourceDeclaration = (
+  data: unknown
+): AnyResource | BrowserResource => {
+  if (!isPlainObject(data)) {
+    return refuse("A resource declaration is an object.");
+  }
+  const { "~resource": kind, alias, ...config } = data;
+  if (typeof alias !== "string") {
+    return refuse("A resource declaration has an alias.");
+  }
+  // Each constructor refuses keys its kind hasn't; `~resource` and the
+  // alias are read here, the rest is its config.
+  // SAFETY: each constructor checks its config at run time.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const loose = config as never;
+  if (kind === "model") {
+    const { structuredOutput, ...rest } = config;
+    // SAFETY: as above.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const modelConfig = {
+      ...rest,
+      ...(structuredOutput === null
+        ? {}
+        : {
+            structuredOutput: schemaOf(
+              readDescriptor(structuredOutput, 1, { nodes: 0 })
+            ),
+          }),
+    } as never;
+    return resource.model(alias, modelConfig);
+  }
+  if (kind === "connector") {
+    return resource.connector(alias, loose);
+  }
+  if (kind === "knowledge") {
+    return resource.knowledge(alias, loose);
+  }
+  if (kind === "template") {
+    return resource.template(alias, loose);
+  }
+  if (kind === "files") {
+    return resource.files(alias, loose);
+  }
+  if (kind === "links") {
+    return resource.links(alias, loose);
+  }
+  return refuse("A resource declaration's kind isn't one this SDK knows.");
+};

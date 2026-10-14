@@ -14,6 +14,7 @@ import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
+import { appFunctionResponse, functionCallApp } from "./app-function-route.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -201,6 +202,10 @@ const route = async (
   }
   if (pathname === platformUpdatePath) {
     return await platformUpdateResponse(request, env, requestId);
+  }
+  const functionApp = functionCallApp(pathname);
+  if (functionApp !== undefined) {
+    return await appFunctionResponse(request, env, functionApp, requestId);
   }
   const original = originalPath.exec(pathname)?.groups?.id;
   if (original !== undefined) {

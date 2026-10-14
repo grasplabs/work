@@ -1,12 +1,23 @@
+import { platformLimits } from "./platform-limits.ts";
 import { valueDepth } from "./value-depth.ts";
 
 // The limits and the frame's start, as the page, core and the frame's own
 // runtime all name them. Apart from the rest of what screens share
-// (screens.ts), importing only the depth a value may nest (a constant):
-// the runtime is loaded into every frame, and carries only what it uses.
+// (screens.ts), importing only constants (the depth a value may nest, the
+// platform's limits): the runtime is loaded into every frame, and carries
+// only what it uses.
 
 /** Where the frontend frames screens from: a document core serves. */
 export const screenFramePath = "/screen-frame";
+
+/**
+ * Where a running App's screen calls one of its App's functions (core's
+ * app-function-route.ts): `POST <path>/<app ID>`, the request as the body.
+ */
+export const appFunctionPath = "/api/app-functions";
+
+/** The header that carries the frame's lease on a function call. */
+export const screenLeaseHeader = "x-grasp-screen-lease";
 
 /** Where core serves a screen's modules to its frame, each by its hash. */
 export const screenModulePath = "/screen-modules";
@@ -43,6 +54,20 @@ const rpcWrapperLevels = 2;
 export const rpcArgumentDepth = valueDepth + rpcWrapperLevels - 1;
 
 /**
+ * Room in one of Cap'n Web's messages for what wraps a value: the message
+ * kind, its IDs and the call's path, a few hundred code units at most.
+ */
+const rpcEnvelopeSize = 4 * 1024;
+
+/**
+ * The longest message a frame may send over its port, in UTF-16 code
+ * units: a public operation's output (the larger of its input and output)
+ * and the envelope around it. The largest input fits even as Cap'n Web
+ * writes it, each array bracketed twice, which at most doubles its text.
+ */
+const rpcMessageMaxSize = platformLimits.operationOutputBytes + rpcEnvelopeSize;
+
+/**
  * The limits of a screen's start and traffic, in one place. They are the
  * product's defaults: nothing an App declares or a frame sends raises
  * them. Each is in the unit it names; a count of characters is never
@@ -50,7 +75,7 @@ export const rpcArgumentDepth = valueDepth + rpcWrapperLevels - 1;
  */
 export const screenLimits = {
   /** How long each stage of a screen's start may take: ready, then mounted. */
-  stageMs: 10_000,
+  stageMs: platformLimits.screenStageMs,
   /**
    * How long the page waits for core to hand over a screen's build before
    * the frame starts: past core's own wait for a build (15 s), so core
@@ -79,15 +104,18 @@ export const screenLimits = {
    */
   rpc: {
     maxDepth: valueDepth + rpcWrapperLevels,
-    maxMessageSize: 262_144,
+    maxMessageSize: rpcMessageMaxSize,
     maxBigIntDigits: 32,
   },
   /** A server call's arguments, as UTF-8 JSON, in bytes. */
-  inputBytes: 128 * 1024,
+  inputBytes: platformLimits.operationInputBytes,
   /** A server call's answer, as UTF-8 JSON, in bytes: more is paged. */
-  answerBytes: 256 * 1024,
+  answerBytes: platformLimits.operationOutputBytes,
   /** A person's requests of one App's screens (subscriptions apart). */
-  requests: { burst: 20, perMinute: 120 },
+  requests: {
+    burst: platformLimits.browserRequestBurst,
+    perMinute: platformLimits.browserRequestsPerMinute,
+  },
   /** The problems kept of what one person's screens of an App report. */
   callerReports: { burst: 20, perMinute: 20 },
   /** The problems kept of what all of an App's screens report. */
@@ -101,7 +129,7 @@ export const screenLimits = {
    * characters together (four of the longest): they are read as they
    * come, so more than this is a side sending faster than it is heard.
    */
-  portQueue: { messages: 256, characters: 4 * 262_144 },
+  portQueue: { messages: 256, characters: 4 * rpcMessageMaxSize },
   /**
    * What a frame's unreleased pushes and unanswered calls may hold at once,
    * in bytes of heap as the page's accountant estimates them

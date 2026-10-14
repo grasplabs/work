@@ -28,8 +28,8 @@ const connectMigrations = await readD1Migrations(
 );
 
 /**
- * The engine's step limit in tests: well above what any test workflow
- * takes, but low enough to reach.
+ * Core's step limit in tests: well above what any test workflow takes,
+ * but low enough to reach.
  */
 const testStepLimit = 60;
 
@@ -45,7 +45,20 @@ const capabilitySigningKey = "test-capability-signing-key-of-32-chars-or-more";
 export const screenTests = [
   "test/screen*.test.ts",
   "test/app-sandbox.test.ts",
+  "test/app-releases.test.ts",
+  "test/migration-transform.test.ts",
+  "test/custom-migration-runs.test.ts",
+  "test/app-functions.test.ts",
+  "test/app-invocation-isolation.test.ts",
+  "test/release-retention.test.ts",
+  "test/app-activation.test.ts",
+  "test/app-tests.test.ts",
+  "test/app-function-route.test.ts",
+  "test/resource-bindings.test.ts",
+  "test/resource-connectors.test.ts",
+  "test/run-functions.test.ts",
   "test/agent-apps.test.ts",
+  "test/agent-app-functions.test.ts",
   "test/agent-builds.test.ts",
   "test/build-jobs.test.ts",
   "test/app-preview.test.ts",
@@ -65,16 +78,34 @@ export const screenTests = [
   "test/event-sources.test.ts",
   "test/orphaned-runs.test.ts",
   "test/run-retention.test.ts",
+  "test/run-controls.test.ts",
+  "test/run-summary.test.ts",
+  "test/run-history.test.ts",
   "test/rpc-targets.test.ts",
 ];
 
-/** Core's Worker test setup, shared by both of core's test projects. */
-export const coreProject = (test: UserWorkspaceConfig["test"]) =>
+/** Core's Worker test setup, shared by each of core's test projects. */
+export const coreProject = (
+  test: UserWorkspaceConfig["test"],
+  {
+    sandboxSocket,
+  }: {
+    /**
+     * For the on-prem project: the sandbox supervisor's socket, read when
+     * its pool starts, which core's `SANDBOX_HOST` is bound to, as on-prem
+     * binds it, instead of running App code unbounded.
+     */
+    sandboxSocket?: () => string;
+  } = {}
+) =>
   defineProject({
     test: {
       // Writes the assets the tests serve and bundles connect, once per run,
       // so each project also runs on its own.
-      globalSetup: ["./test/global-setup.ts"],
+      globalSetup: [
+        "./test/global-setup.ts",
+        ...(sandboxSocket === undefined ? [] : ["./test/sandbox-setup.ts"]),
+      ],
       // A worker's test files share one runtime, which loads core once:
       // starting workerd and loading core took longer than most files'
       // tests. Each file still starts with empty storage and the env as
@@ -150,31 +181,43 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
             DURABLE_OBJECT_JURISDICTION: "none",
             // Plain workerd: no CPU limit on Code Mode's isolates.
             RUNTIME_PROFILE: "workerd",
+            // No sandbox supervisor in tests but the on-prem project's: App
+            // code is inspected in the test's own workerd, where a busy loop
+            // would hold it (src/sandboxed.ts). scripts/workerd-sandbox.test.ts
+            // tests the supervisor on plain workerd. The on-prem project
+            // accepts it too, for what no sandbox runs yet (the screen
+            // compiler, App tests, an App's server object): wherever one
+            // does, a bound SANDBOX_HOST comes first, so App code still runs
+            // in its sessions there.
+            SANDBOX_IN_PROCESS: "unbounded",
             // So the test of a call that never ends doesn't wait a minute.
             APP_CALL_TIMEOUT_MS: "10000",
-            // The engine's step limit, lowered below (`workflows`) so a test
-            // reaches it; core must know it too.
-            WORKFLOW_STEP_LIMIT: String(testStepLimit),
+            // The quota policy, its step limit lowered so a test reaches it
+            // (src/workflows/quotas.ts); tests of the others set their own.
+            QUOTA_LIMITS: {
+              generation: 1,
+              limits: { workflowSteps: testStepLimit },
+            },
             // So a run waiting on a held side effect checks again at once.
             WORKFLOW_OFF_WAIT_MS: "250",
             CORE_MIGRATIONS: coreMigrations,
             KNOWLEDGE_MIGRATIONS: knowledgeMigrations,
             CONNECT_MIGRATIONS: connectMigrations,
           },
-          // The dispatcher as wrangler.jsonc has it, with a step limit a
-          // test can reach.
-          workflows: {
-            WORKFLOWS: {
-              name: "grasp-os-workflows",
-              className: "WorkflowDispatcher",
-              stepLimit: testStepLimit,
-            },
-          },
           // Connect's database, as CONNECT_DB, so the setup can migrate it.
           d1Databases: { CONNECT_DB: "grasp-os-connect" },
           // The outside systems connect reaches, so tests can plan how
           // they answer and read what they did (test/mail-server.ts).
-          serviceBindings: { CONNECT_PROVIDERS: "connect-providers" },
+          serviceBindings: {
+            CONNECT_PROVIDERS: "connect-providers",
+            ...(sandboxSocket === undefined
+              ? {}
+              : {
+                  SANDBOX_HOST: {
+                    external: { address: `unix:${sandboxSocket()}`, http: {} },
+                  },
+                }),
+          },
           // A stand-in frontend and the screen compiler, written by the
           // global setup.
           assets: { directory: "./dist/test-assets" },
@@ -199,6 +242,9 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
                 COMPOSIO_API_KEY: testComposioKey,
               },
               d1Databases: { DB: "grasp-os-connect" },
+              // Its native connectors, each loaded into an isolate of its
+              // own per call (connect's src/connectors.ts), as deployed.
+              workerLoaders: { LOADER: {} },
               // Entra and Composio, as connect reaches them
               // (test/connect-providers.ts).
               outboundService: "connect-providers",
@@ -216,7 +262,14 @@ export const coreProject = (test: UserWorkspaceConfig["test"]) =>
   });
 
 export default coreProject({
-  // The build step's own test runs in Node, in the root config's "scripts"
-  // project.
-  exclude: [...defaultExclude, ...screenTests, "build-blueprints.test.ts"],
+  // The build step's own test, and the test that bundles core's host module
+  // with Wrangler, run in Node, in the root config's "scripts" project.
+  exclude: [
+    ...defaultExclude,
+    ...screenTests,
+    // With the sandbox supervisor bound: vite.on-prem.config.ts.
+    "test/on-prem/**",
+    "build-blueprints.test.ts",
+    "host-json.bundle.test.ts",
+  ],
 });

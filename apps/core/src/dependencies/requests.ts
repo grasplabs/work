@@ -1,12 +1,16 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import {
   canonicalGraph,
+  dependencyApprovalsDigest,
   dependencyDecisionSchema,
+  dependencyApprovalsListed,
+  dependencyEndingSchema,
   dependencyErrors,
   dependencyGraphHash,
   dependencyGraphSchema,
+  dependencyImpactListed,
   dependencyMaxBytes,
   dependencyProposalSchema,
   dependencySummaryDirect,
@@ -16,8 +20,11 @@ import {
 } from "@grasp-os/shared/dependencies";
 import type {
   DependenciesWaiting,
+  DependencyApprovals,
   DependencyFinding,
   DependencyGraph,
+  DependencyImpact,
+  DependencyImpactArtifact,
   DependencyPackage,
   DependencyRefusal,
   DependencyRequest,
@@ -28,7 +35,8 @@ import type {
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
+import { graspLockSchema } from "@grasp-os/shared/packages";
 import type { GraspLock, PackageLimits } from "@grasp-os/shared/packages";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -41,31 +49,44 @@ import {
   inArray,
   sql,
 } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { appFor } from "../apps.ts";
-import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedEventWhere,
+  outboxedIfChanged,
+  storedEvent,
+} from "../audit-outbox.ts";
 import type { Acting } from "../auth/identity.ts";
 import {
   apps,
   auditOutbox,
   dependencyAdmissionRefusals,
+  dependencyLocks,
   dependencyPolicy,
   dependencyRequests,
   users,
 } from "../db/core/schema.ts";
 import { isUniqueViolation } from "../db/d1.ts";
 import {
+  failUnless,
   lockGuardFailed,
   lockStatements,
   unusedLockStatements,
 } from "../packages/locks.ts";
 import { holdsApprove, holdsApproveSql } from "./approvers.ts";
 import { peerIssues } from "./peers.ts";
-import { policyGeneration, policyGenerationSql } from "./policy.ts";
+import {
+  advancePolicy,
+  policyGeneration,
+  policyGenerationSql,
+} from "./policy.ts";
 
 // npm packages proposed for an App, a person's decision on them, and the
 // one check that says whether a graph may be used. Nothing here fetches,
@@ -119,6 +140,24 @@ import { policyGeneration, policyGenerationSql } from "./policy.ts";
 //   sensitive data, and every use still runs under the App's own
 //   permissions.
 //
+// - An approval that should end, and doesn't. A person who holds
+//   `dependencies.approve` retires or revokes an App's graph (spec
+//   19.3.1), every approval of it at once, so no approval of the same
+//   graph for other targets keeps it in use. Retired is a lifecycle
+//   decision: nothing new is admitted (`admitDependencies` with `new`, the
+//   default), and only what was built before is (`retained`: the
+//   artifacts the lock pinned, which no pin adds to once the graph is
+//   retired, packages/build.ts). Revoked is a security decision: nothing
+//   at all is admitted. Neither row is ever approved again: approving the
+//   graph again is a new request, and both stay as history.
+// - Ending an approval on what the person didn't see. The one batch that
+//   ends it lands only while the approvals still in force are exactly the
+//   ones they read, the policy generation is the one they read, and they
+//   hold the permission; it moves the generation on with its audit event,
+//   so a build that read the generation before is refused, and its pin
+//   (whose write checks both) either landed before, and is what a retired
+//   graph keeps, or never lands.
+//
 // Not stopped here: a licence is what the package states of itself, and
 // a request reports no findings yet (no advisory source is read). What a
 // person approves is the graph by its hash, so what is later fetched must
@@ -164,6 +203,8 @@ type DependencyAction =
   | "superseded"
   | "approved"
   | "denied"
+  | "retired"
+  | "revoked"
   | "admission_refused";
 
 /** The audit entry of something that happened to a request: identifiers only. */
@@ -199,7 +240,8 @@ const requestEntry = (
 /** `rows` as the API returns them, with the App's and the people's names. */
 const toRequests = async (
   env: Env,
-  rows: readonly Listed[]
+  rows: readonly Listed[],
+  names: "read" | "if they can be read" = "read"
 ): Promise<DependencyRequest[]> => {
   if (rows.length === 0) {
     return [];
@@ -207,21 +249,34 @@ const toRequests = async (
   const db = drizzle(env.DB);
   const people = [
     ...new Set(
-      rows.flatMap(({ requestedBy, decidedBy }) =>
-        decidedBy === null ? [requestedBy] : [requestedBy, decidedBy]
+      rows.flatMap(({ requestedBy, decidedBy, endedBy }) =>
+        [requestedBy, decidedBy, endedBy].filter((id) => id !== null)
       )
     ),
   ];
-  const [appNames, personNames] = await Promise.all([
-    db
-      .select({ id: apps.id, name: apps.name })
-      .from(apps)
-      .where(inArray(apps.id, [...new Set(rows.map(({ appId }) => appId))])),
-    db
-      .select({ id: users.id, name: users.name })
-      .from(users)
-      .where(inArray(users.id, people)),
-  ]);
+  const read = async () =>
+    await Promise.all([
+      db
+        .select({ id: apps.id, name: apps.name })
+        .from(apps)
+        .where(inArray(apps.id, [...new Set(rows.map(({ appId }) => appId))])),
+      db
+        .select({ id: users.id, name: users.name })
+        .from(users)
+        .where(inArray(users.id, people)),
+    ]);
+  let appNames: { id: string; name: string }[] = [];
+  let personNames: { id: string; name: string }[] = [];
+  try {
+    [appNames, personNames] = await read();
+  } catch (error) {
+    // After a change landed, its answer goes without the names rather
+    // than fail as if it hadn't.
+    if (names === "read") {
+      throw error;
+    }
+    log.warn("dependencies.names_unread", errorFields(error));
+  }
   const appName = new Map(appNames.map(({ id, name }) => [id, name]));
   const personName = new Map(personNames.map(({ id, name }) => [id, name]));
   const person = (userId: string) => ({
@@ -259,6 +314,19 @@ const toRequests = async (
             at: row.decidedAt.toISOString(),
             reason: row.reason,
             policyGeneration: row.decidedGeneration,
+          },
+        }
+      : {}),
+    ...(row.endedBy !== null &&
+    row.endedAt !== null &&
+    row.endedGeneration !== null &&
+    row.endedReason !== null
+      ? {
+          ended: {
+            by: person(row.endedBy),
+            at: row.endedAt.toISOString(),
+            reason: row.endedReason,
+            policyGeneration: row.endedGeneration,
           },
         }
       : {}),
@@ -450,6 +518,10 @@ const newRequest = (
   decidedAt: null,
   decidedGeneration: null,
   reason: null,
+  endedBy: null,
+  endedAt: null,
+  endedGeneration: null,
+  endedReason: null,
 });
 
 /** One attempt's outcome: the request it answers with, and its batch. */
@@ -496,10 +568,20 @@ const attempt = async (
     // proposal may have taken that one's place since. Dropped before the
     // lock is written, so the lock of what waited gives up its room to it
     // (`lockStatements`).
+    //
+    // The approval may be retired or revoked as this runs: the batch then
+    // fails whole (`failUnless`), and the next attempt finds it no longer
+    // standing, and asks for a new one.
     return {
       request: standing,
       lock,
       statements: [
+        failUnless(
+          db,
+          proposal.app,
+          graphHash,
+          sql`EXISTS (SELECT 1 FROM ${dependencyRequests} WHERE ${dependencyRequests.id} = ${standing.id} AND ${dependencyRequests.status} = 'approved')`
+        ),
         ...dropPending(db, actor, proposal.app, standing.id),
         ...lockFirst,
         ...unusedLockStatements(db, proposal.app),
@@ -918,12 +1000,31 @@ const admissionSchema = z.strictObject({
 /** What a build asks to use: one graph, for one App and targets. */
 export type DependencyAdmission = z.input<typeof admissionSchema>;
 
+/**
+ * What an admission allows. `approved`: anything the approval covers, a
+ * new build included. `retained`: the graph is retired, so only what was
+ * built with it before (an artifact its lock pins) may still be used.
+ */
+export type AdmissionScope = "approved" | "retained";
+
+/** Why an admission was refused. */
+export type AdmissionRefusal =
+  | "policy_changed"
+  | "not_approved"
+  | "retired"
+  | "revoked";
+
 /** What `admissionOf` decided. */
 export type Admission =
-  | { admitted: true; approval: string; policyGeneration: number }
+  | {
+      admitted: true;
+      approval: string;
+      policyGeneration: number;
+      scope: AdmissionScope;
+    }
   | {
       admitted: false;
-      reason: "policy_changed" | "not_approved";
+      reason: Exclude<AdmissionRefusal, "retired">;
       /** A request waiting for a decision on the App, if any. */
       waiting: string | undefined;
       /** Whether any request of the App's names the graph, decided or not. */
@@ -935,7 +1036,9 @@ export type Admission =
 /**
  * The one check `admitDependencies` makes, without its audit: whether a
  * person's approval covers exactly this App, graph and targets under the
- * policy generation the caller read. For a caller that records a refusal
+ * policy generation the caller read, and how far (`AdmissionScope`): an
+ * approval in force covers anything; one retired covers only what was
+ * built before; one revoked, nothing. For a caller that records a refusal
  * its own way (serving an artifact, packages/serve.ts, which would
  * otherwise write an audit row for every refused file a browser asks for).
  */
@@ -959,75 +1062,122 @@ export const admissionOf = async (
       .where(
         and(
           eq(dependencyRequests.appId, asked.app),
-          eq(dependencyRequests.graphHash, asked.graphHash),
-          inArray(dependencyRequests.status, ["approved", "pending", "denied"])
+          eq(dependencyRequests.graphHash, asked.graphHash)
         )
       ),
   ]);
   const generation = policy?.generation ?? 0;
   const policyChanged = generation !== asked.policyGeneration;
-  const approval = policyChanged
-    ? undefined
-    : candidates.find(
-        (row) => row.status === "approved" && covers(row, asked.targets)
-      );
-  if (approval) {
-    return {
-      admitted: true,
-      approval: approval.id,
-      policyGeneration: generation,
-    };
+  const covering = (status: Row["status"]) =>
+    candidates.find(
+      (row) => row.status === status && covers(row, asked.targets)
+    );
+  if (!policyChanged) {
+    // An approval in force first: a graph approved again after it was
+    // retired or revoked is approved, whatever its older rows say.
+    for (const [status, scope] of [
+      ["approved", "approved"],
+      ["retired", "retained"],
+    ] as const) {
+      const approval = covering(status);
+      if (approval) {
+        return {
+          admitted: true,
+          approval: approval.id,
+          policyGeneration: generation,
+          scope,
+        };
+      }
+    }
+  }
+  let reason: Exclude<AdmissionRefusal, "retired"> = "not_approved";
+  if (policyChanged) {
+    reason = "policy_changed";
+  } else if (covering("revoked")) {
+    reason = "revoked";
   }
   return {
     admitted: false,
-    reason: policyChanged ? "policy_changed" : "not_approved",
+    reason,
     waiting: candidates.find((row) => row.status === "pending")?.id,
     requested: candidates.length > 0,
     generation,
   };
 };
 
+/** What `admitDependencies` admitted, to record with what used it. */
+export interface Admitted {
+  approval: string;
+  policyGeneration: number;
+  scope: AdmissionScope;
+}
+
 /**
- * Whether exactly this graph is approved: for this App, for every one of
+ * Whether exactly this graph may be used: for this App, for every one of
  * these targets, under the policy generation the caller read. The one
  * check for anything that would build with, run or publish an App's
  * packages; it answers with the approval it relied on, to record with
  * what was built. One read of the database answers it, so a decision or a
  * policy change lands wholly before or after.
  *
+ * `use` says what for. `new` (the default): anything not built with the
+ * graph before, a new build or a new pin, which only an approval in force
+ * admits. `retained`: reusing what was built with it before, which a
+ * retired approval admits too (scope `retained`); the caller must then
+ * use nothing but that.
+ *
  * Which revision of the source the graph comes from is not asked: an
  * approved graph holds for every revision that resolves to it, and a
  * source that asks for anything else resolves to another hash.
  *
  * Refused with `dependency.policy_changed` when the generation moved on
- * since the caller read it (read the status again), and with
- * `dependency.approval_required` for anything not approved as asked: its
- * details name the request waiting for that graph, if one is. A refusal
- * is audited as `actor`'s the first time it is made for this App, graph,
- * set of targets, policy generation in force and reason, and only for a
- * graph some request of the App's names: the same refusal again records
- * nothing more, and one of a hash nobody proposed is logged instead, so a
- * caller can't fill the audit trail by asking. Each part of that key is
- * one core decides or a handful of values (never the generation the
- * caller says it read), so the rows it keeps are bounded too. An
- * admission that succeeds records nothing here: what uses it records the
- * approval it relied on.
+ * since the caller read it (read the status again); `dependency.revoked`
+ * for a graph revoked for the App; `dependency.retired` for a new use of
+ * one retired; and `dependency.approval_required` for anything else not
+ * approved as asked: its details name the request waiting for that
+ * graph, if one is. A refusal is audited as `actor`'s the first time it
+ * is made for this App, graph, set of targets, policy generation in force
+ * and reason, and only for a graph some request of the App's names: the
+ * same refusal again records nothing more, and one of a hash nobody
+ * proposed is logged instead, so a caller can't fill the audit trail by
+ * asking. Each part of that key is one core decides or a handful of
+ * values (never the generation the caller says it read), so the rows it
+ * keeps are bounded too. An admission that succeeds records nothing here:
+ * what uses it records the approval it relied on.
  */
 export const admitDependencies = async (
   env: Env,
   actor: AuditActor,
-  input: DependencyAdmission
-): Promise<{ approval: string; policyGeneration: number }> => {
+  input: DependencyAdmission,
+  use: "new" | "retained" = "new"
+): Promise<Admitted> => {
   const asked = admissionSchema.parse(input);
   const db = drizzle(env.DB);
   const decided = await admissionOf(db, asked);
-  if (decided.admitted) {
+  if (
+    decided.admitted &&
+    (decided.scope === "approved" || use === "retained")
+  ) {
     return {
       approval: decided.approval,
       policyGeneration: decided.policyGeneration,
+      scope: decided.scope,
     };
   }
-  const { reason, waiting, requested, generation } = decided;
+  const refusal: {
+    reason: AdmissionRefusal;
+    waiting: string | undefined;
+    requested: boolean;
+    generation: number;
+  } = decided.admitted
+    ? {
+        reason: "retired",
+        waiting: undefined,
+        requested: true,
+        generation: decided.policyGeneration,
+      }
+    : decided;
+  const { reason, waiting, requested, generation } = refusal;
   const targets = [...new Set(asked.targets)].toSorted().join(" ");
   if (requested) {
     await auditedBatch(env, db, [
@@ -1064,10 +1214,391 @@ export const admitDependencies = async (
       reason,
     });
   }
-  throw reason === "policy_changed"
-    ? dependencyErrors.create("dependency.policy_changed")
-    : dependencyErrors.create(
-        "dependency.approval_required",
-        waiting === undefined ? undefined : { request: waiting }
-      );
+  if (reason === "not_approved") {
+    throw dependencyErrors.create(
+      "dependency.approval_required",
+      waiting === undefined ? undefined : { request: waiting }
+    );
+  }
+  throw dependencyErrors.create(`dependency.${reason}`);
+};
+
+/** What ending an approval leaves it, and the approvals it ends. */
+const endings = {
+  retired: ["approved"],
+  revoked: ["approved", "retired"],
+} as const satisfies Record<"retired" | "revoked", readonly Row["status"][]>;
+
+type Ending = keyof typeof endings;
+
+/** That a row of `app`'s graph `graphHash` is one `ending` ends, as SQL. */
+const endable = (app: string, graphHash: string, ending: Ending): SQL =>
+  and(
+    eq(dependencyRequests.appId, app),
+    eq(dependencyRequests.graphHash, graphHash),
+    inArray(dependencyRequests.status, [...endings[ending]])
+  ) ?? sql`0`;
+
+/**
+ * Every approval of `app`'s graph `graphHash` that `ending` would end:
+ * its ID and status only, however many there are.
+ */
+const endableIds = async (
+  db: DrizzleD1Database,
+  app: string,
+  graphHash: string,
+  ending: Ending
+): Promise<{ id: string; status: Row["status"] }[]> =>
+  await db
+    .select({ id: dependencyRequests.id, status: dependencyRequests.status })
+    .from(dependencyRequests)
+    .where(endable(app, graphHash, ending));
+
+/**
+ * App `input`'s approvals in force (approved or retired), the newest
+ * decision first, at most {@link dependencyApprovalsListed}: for one of
+ * its builders, or someone who holds `dependencies.approve` now, who may
+ * end them. `app.not_found` for anyone else, as for an App that isn't
+ * there. Never their graphs: a list selects what it shows.
+ */
+export const dependencyApprovals = async (
+  env: Env,
+  by: Identity,
+  input: unknown
+): Promise<DependencyApprovals> => {
+  const db = drizzle(env.DB);
+  const decides = await holdsApprove(env, by);
+  const parsed = appIdSchema.safeParse(input);
+  // Who may approve packages reads any App's, with its name, and nothing
+  // else of it: not its versions, screens, data or members.
+  const known =
+    decides && parsed.success
+      ? await db
+          .select({ id: apps.id, name: apps.name })
+          .from(apps)
+          .where(eq(apps.id, parsed.data))
+          .get()
+      : undefined;
+  const { id: app, name } = known ?? (await appFor(env, by, input, "builder"));
+  const [generation, rows] = await Promise.all([
+    policyGeneration(db),
+    db
+      .select(listed)
+      .from(dependencyRequests)
+      .where(
+        and(
+          eq(dependencyRequests.appId, app),
+          inArray(dependencyRequests.status, ["approved", "retired"])
+        )
+      )
+      .orderBy(desc(dependencyRequests.decidedAt), dependencyRequests.id)
+      .limit(dependencyApprovalsListed),
+  ]);
+  return {
+    policyGeneration: generation,
+    decides,
+    app: { id: appIdSchema.parse(app), name },
+    approvals: await toRequests(env, rows),
+  };
+};
+
+/** Only a person on their own session who holds `dependencies.approve` now. */
+const requireDecider = async (env: Env, by: Identity): Promise<void> => {
+  const { actor, via }: Acting = by;
+  if (by.staff || actor !== undefined || via !== undefined) {
+    throw dependencyErrors.create("dependency.forbidden");
+  }
+  if (!(await holdsApprove(env, by))) {
+    throw dependencyErrors.create("dependency.forbidden");
+  }
+};
+
+/** The approval `input` names, while it is in force (approved or retired). */
+const approvalRow = async (
+  db: DrizzleD1Database,
+  input: unknown
+): Promise<Listed> => {
+  const id = identifierSchema.safeParse(input);
+  const row = id.success
+    ? await db
+        .select(listed)
+        .from(dependencyRequests)
+        .where(
+          and(
+            eq(dependencyRequests.id, id.data),
+            inArray(dependencyRequests.status, ["approved", "retired"])
+          )
+        )
+        .get()
+    : undefined;
+  if (!row) {
+    throw notFound();
+  }
+  return row;
+};
+
+/** The artifacts `app`'s lock of `graphHash` pins, newest first. */
+const pinnedArtifacts = async (
+  db: DrizzleD1Database,
+  app: string,
+  graphHash: string
+): Promise<DependencyImpactArtifact[]> => {
+  const row = await db
+    .select({ lock: dependencyLocks.lock })
+    .from(dependencyLocks)
+    .where(
+      and(
+        eq(dependencyLocks.appId, app),
+        eq(dependencyLocks.graphHash, graphHash)
+      )
+    )
+    .get();
+  if (!row) {
+    return [];
+  }
+  const lock = graspLockSchema.parse(JSON.parse(row.lock));
+  return Object.entries(lock.artifacts ?? {})
+    .flatMap(([compiler, pins]) =>
+      Object.values(pins).map(({ target, hash, pinnedAt }) => ({
+        target,
+        compiler,
+        hash,
+        pinnedAt,
+      }))
+    )
+    .toSorted((a, b) => b.pinnedAt.localeCompare(a.pinnedAt));
+};
+
+/**
+ * What retiring or revoking the graph of approval `input` would touch,
+ * for someone who holds `dependencies.approve` now: its approvals in
+ * force, and the artifacts its lock pins. `dependency.not_found` for
+ * anyone else, as for an approval that isn't there or no longer in force.
+ */
+export const dependencyImpact = async (
+  env: Env,
+  by: Identity,
+  input: unknown
+): Promise<DependencyImpact> => {
+  if (!(await holdsApprove(env, by))) {
+    throw notFound();
+  }
+  const db = drizzle(env.DB);
+  const row = await approvalRow(db, input);
+  const [generation, inForce, listedRows, artifacts] = await Promise.all([
+    policyGeneration(db),
+    endableIds(db, row.appId, row.graphHash, "revoked"),
+    db
+      .select(listed)
+      .from(dependencyRequests)
+      .where(endable(row.appId, row.graphHash, "revoked"))
+      .orderBy(desc(dependencyRequests.decidedAt), dependencyRequests.id)
+      .limit(dependencyImpactListed),
+    pinnedArtifacts(db, row.appId, row.graphHash),
+  ]);
+  const approved = inForce
+    .filter(({ status }) => status === "approved")
+    .map(({ id }) => id);
+  const all = inForce.map(({ id }) => id);
+  const requests = await toRequests(env, listedRows);
+  return {
+    policyGeneration: generation,
+    app: requests[0]?.app ?? { id: appIdSchema.parse(row.appId), name: "" },
+    graphHash: row.graphHash,
+    approvals: requests,
+    endings: {
+      retire: {
+        approvals: approved.length,
+        digest: await dependencyApprovalsDigest(approved),
+      },
+      revoke: {
+        approvals: all.length,
+        digest: await dependencyApprovalsDigest(all),
+      },
+    },
+    artifacts,
+  };
+};
+
+/**
+ * The statements, for a batch that revokes `named`'s graph and stores
+ * event `revocation`, that deny the request waiting for that same App and
+ * graph, if one does, as `by`'s decision under `generation`: its audit
+ * event first (`dependency.denied`, naming the revocation), written from
+ * the very row the update then changes, and both only if the revocation
+ * landed.
+ */
+const denyWaiting = (
+  db: DrizzleD1Database,
+  by: Identity,
+  named: Listed,
+  revocation: string,
+  generation: number,
+  reason: string
+) => {
+  const waits = and(
+    eq(dependencyRequests.appId, named.appId),
+    eq(dependencyRequests.graphHash, named.graphHash),
+    eq(dependencyRequests.status, "pending"),
+    storedEvent(revocation)
+  );
+  const eventId = crypto.randomUUID();
+  const now = new Date();
+  const event = sql`json_object(
+    'id', ${eventId},
+    'at', ${now.toISOString()},
+    'source', 'core',
+    'actor', json(${JSON.stringify(actorOf(by))}),
+    'action', 'dependency.denied',
+    'target', json_object('type', 'dependency_request', 'id', ${dependencyRequests.id}),
+    'provenance', json('[]'),
+    'detail', json_object(
+      'app', ${dependencyRequests.appId},
+      'sourceRevision', ${dependencyRequests.sourceRevision},
+      'graphHash', ${dependencyRequests.graphHash},
+      'targets', (SELECT group_concat(value, ' ') FROM json_each(${dependencyRequests.targets})),
+      'direct', ${dependencyRequests.direct},
+      'packages', ${dependencyRequests.packages},
+      'requestedBy', ${dependencyRequests.requestedBy},
+      'policyGeneration', ${generation},
+      'reason', ${reason},
+      'revocation', ${revocation}
+    )
+  )`;
+  return [
+    db
+      .insert(auditOutbox)
+      .select(
+        sql`SELECT ${eventId}, ${event}, ${now.getTime()} FROM ${dependencyRequests} WHERE ${waits}`
+      ),
+    db
+      .update(dependencyRequests)
+      .set({
+        status: "denied",
+        decidedBy: by.userId,
+        decidedAt: now,
+        decidedGeneration: generation,
+        reason,
+      })
+      .where(waits),
+  ] as const;
+};
+
+/**
+ * Retires or revokes the graph of approval `input` for its App, for `by`:
+ * the approvals of the graph the person reviewed, in one batch that
+ * lands only while those are exactly the ones `ending` would end now
+ * (`endings`), the
+ * policy generation is the one reviewed, and `by` holds
+ * `dependencies.approve`, all read as it runs. The batch records it once
+ * (`dependency.retired` or `dependency.revoked`, naming every approval it
+ * ended) and moves the policy generation on, so every admission read
+ * before is refused from then on. Revoking also denies the request
+ * waiting for the same graph, if one does, and the graph's lock goes, its
+ * files queued for cleanup (packages/locks.ts). A retired graph keeps its lock,
+ * and the artifacts it pins keep working.
+ *
+ * As for a decision: only a person, from their own session, never an
+ * agent acting for one nor Grasp staff. Refused with `dependency.stale`
+ * when the approvals in force or the policy changed since they were read.
+ */
+export const endDependency = async (
+  env: Env,
+  by: Identity,
+  input: unknown,
+  ending: Ending,
+  decision: unknown
+): Promise<DependencyRequest[]> => {
+  await requireDecider(env, by);
+  const { reviewed, reason } = dependencyErrors.parse(
+    "dependency.invalid",
+    dependencyEndingSchema,
+    decision
+  );
+  const db = drizzle(env.DB);
+  const named = await approvalRow(db, input);
+  if (named.graphHash !== reviewed.graphHash) {
+    throw dependencyErrors.create("dependency.stale");
+  }
+  // What the person reviewed, not merely what this call reads: the
+  // approvals in force now must be the very set the impact showed them
+  // (by digest, however many), and the batch then lands only while they
+  // still are.
+  const inForceNow = await endableIds(db, named.appId, named.graphHash, ending);
+  const ids = inForceNow.map(({ id }) => id);
+  if (
+    !ids.includes(named.id) ||
+    (await dependencyApprovalsDigest(ids)) !== reviewed.approvalsDigest
+  ) {
+    throw dependencyErrors.create("dependency.stale");
+  }
+  const generation = reviewed.policyGeneration + 1;
+  const event = createAuditEvent(
+    {
+      actor: actorOf(by),
+      action: `dependency.${ending}`,
+      target: { type: "dependency_request", id: named.id },
+      detail: {
+        app: named.appId,
+        graphHash: named.graphHash,
+        // How many, and which by digest: the rows themselves record that
+        // they ended, with this generation (`ended_generation`).
+        approvals: ids.length,
+        approvalsDigest: reviewed.approvalsDigest,
+        reason,
+        policyGeneration: generation,
+      },
+    },
+    "core"
+  );
+  // The approvals in force as the batch runs are exactly the ones
+  // reviewed: as many, and each of them, whatever order rows come in.
+  const inForce = endable(named.appId, named.graphHash, ending);
+  // The IDs as one JSON parameter, however many there are.
+  const reviewedIds = sql`(SELECT value FROM json_each(${JSON.stringify(ids)}))`;
+  const lands = sql`(SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce}) = ${ids.length} AND (SELECT COUNT(*) FROM ${dependencyRequests} WHERE ${inForce} AND ${dependencyRequests.id} IN ${reviewedIds}) = ${ids.length} AND ${policyGenerationSql} = ${reviewed.policyGeneration} AND ${holdsApproveSql(by.userId)}`;
+  const status: Row["status"] = ending;
+  const [, ended] = await auditedBatch(env, db, [
+    outboxedEventWhere(db, event, lands),
+    db
+      .update(dependencyRequests)
+      .set({
+        status,
+        endedBy: by.userId,
+        endedAt: new Date(),
+        endedGeneration: generation,
+        endedReason: reason,
+      })
+      .where(
+        and(
+          sql`${dependencyRequests.id} IN ${reviewedIds}`,
+          storedEvent(event.id)
+        )
+      )
+      .returning(listed),
+    advancePolicy(db, storedEvent(event.id)),
+    // A request waiting for the revoked graph is denied with it: approving
+    // it later would bring back the lock, and what it pinned, unbuilt.
+    ...(ending === "revoked"
+      ? denyWaiting(db, by, named, event.id, generation, reason)
+      : []),
+    // A revoked graph's lock goes, now that nothing waiting names it; a
+    // retired one is in use (packages/locks.ts).
+    ...unusedLockStatements(db, named.appId),
+  ]);
+  if (ended.length !== ids.length) {
+    // Who holds the permission can have changed since it was checked.
+    throw dependencyErrors.create(
+      (await holdsApprove(env, by))
+        ? "dependency.stale"
+        : "dependency.forbidden"
+    );
+  }
+  // Landed: the answer is what the batch returned, and reading names
+  // can't turn it into a failure.
+  return await toRequests(
+    env,
+    ended.toSorted((a, b) => a.id.localeCompare(b.id)),
+    "if they can be read"
+  );
 };

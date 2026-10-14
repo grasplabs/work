@@ -29,6 +29,11 @@ const generated = [
   "scripts/release/testdata/**",
   // Third-party files vendored byte for byte, pinned by their hashes.
   "packages/*/vendor/**",
+  // What the host generates for an App, byte for byte (spec 8).
+  "**/.grasp/**",
+  // The SDK's connector catalog, from the release's connectors
+  // (apps/core/build-connector-catalog.ts).
+  "packages/sdk/src/connector-catalog.gen.ts",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
@@ -153,9 +158,13 @@ export default defineConfig({
         },
       },
       {
-        // A run's host is served over workerd's own RPC to the run's
-        // isolate, never over Cap'n Web, and extends workerd's RpcTarget.
-        files: ["apps/core/src/workflows/host.ts"],
+        // A run's host, and the host of each of its steps' attempts, are
+        // served over workerd's own RPC to the run's isolate, never over
+        // Cap'n Web, and extend workerd's RpcTarget.
+        files: [
+          "apps/core/src/workflows/host.ts",
+          "apps/core/src/workflows/attempt-host.ts",
+        ],
         rules: {
           "no-restricted-imports": [
             "error",
@@ -212,6 +221,7 @@ export default defineConfig({
       "!apps/console",
       "apps/console/vite.test.config.ts",
       "apps/core/vite.screens.config.ts",
+      "apps/core/vite.on-prem.config.ts",
       "packages/*",
       "packages/workerflow/vite.process.config.ts",
       "packages/connectors/*",
@@ -222,6 +232,7 @@ export default defineConfig({
           include: [
             "scripts/**/*.test.ts",
             "apps/core/build-blueprints.test.ts",
+            "apps/core/host-json.bundle.test.ts",
           ],
           environment: "node",
         },

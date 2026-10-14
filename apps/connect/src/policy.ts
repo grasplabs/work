@@ -88,6 +88,37 @@ export const didNothing = (kind: ServerKind, result: McpToolResult): boolean =>
   kind === "native" && result.notPerformed;
 
 /**
+ * Whether a side effect's error result leaves open whether it acted, so it
+ * is `connect.outcome_unknown` with its key spent, not a failure kept as
+ * the answer to every repeat. A tool that says so (`outcomeUnknownMetaKey`)
+ * is believed from any server: it can only stop a repeat. A native
+ * connector's other errors are refusals its reviewed code made before
+ * acting (the kit marks the rest unknown).
+ *
+ * Every error of a Composio tool that may act is unknown (GRA-539).
+ * Composio runs the tool remotely and may answer a provider's 5xx, a
+ * timeout or a dropped connection after the provider acted, in a result
+ * that looks like any other error. Its documented answer (`successful`,
+ * `error`, `data`) carries no provider status, and toolkits put one, if at
+ * all, in their own `data` or message text, so nothing in it proves the
+ * provider refused before acting. When in doubt, unknown: a stored failure
+ * tells every repeat the action failed, and code that read that as
+ * "nothing was sent" would send it again under a fresh key. The cost is
+ * that an input the provider rejected outright is unknown too. Recorded
+ * Composio answers, per toolkit, can narrow this later to a shape that
+ * does prove a refusal (a 4xx it passes on, or its own validation error
+ * before running the tool). A tool the admin marked read-only can't have
+ * acted, so its error stays a failure, as on a read.
+ */
+export const uncertainFailure = (
+  kind: ServerKind,
+  tool: McpTool,
+  result: McpToolResult
+): boolean =>
+  result.outcomeUnknown ||
+  (kind === "composio" && result.isError && !tool.readOnly);
+
+/**
  * The result as connect passes it on, with the resources it read. A
  * Composio server's tools name none (`provenanceMetaKey` is ours), so
  * a call there that names none is known by its toolkit and tool, such as

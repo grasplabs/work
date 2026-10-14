@@ -258,8 +258,7 @@ describe("a workflow's owner", slow, () => {
       id: answers.userId,
     });
     const unseen = await triggered(app, "careless");
-    const instance = await env.WORKFLOWS.get(booked);
-    const { output } = await instance.status();
+    const { output } = await owner.api.workflows.status(booked);
     const events = await allEvents();
     const notified = events
       .filter(

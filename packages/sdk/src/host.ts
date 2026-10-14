@@ -28,6 +28,8 @@ export type {
   UseManifest,
 } from "./app.ts";
 export { appErrorDetailsOf } from "./app-error.ts";
+export { appMaxMigrations } from "./app.ts";
+export type { MigrationManifest } from "./migration.ts";
 
 // A schema as a store's host reads, hashes and compares it.
 export { diffSchemaManifests, schemaReferences } from "./schema-diff.ts";
@@ -41,6 +43,18 @@ export type {
   SchemaReference,
   TableChange,
 } from "./schema-diff.ts";
+export { holdsId, planSchemaChange } from "./schema-plan.ts";
+export type {
+  AcceptedPlan,
+  PlannedChanges,
+  PlannedField,
+  PlannedIndex,
+  PlanRefusal,
+  PlanRefusalReason,
+  RefusedPlan,
+  ReservedFields,
+  SchemaPlan,
+} from "./schema-plan.ts";
 export {
   manifestMaxBytes,
   manifestText,
@@ -98,3 +112,25 @@ export const schemaFromDescriptor = (
   }
   return schemaOf(readDescriptor(data, 1, { nodes: 0 }));
 };
+
+// An App's manifest as the host reads it back from what inspection or a
+// release answered, and the modules and references it generates from it.
+export { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
+export { readAppManifest } from "./app-manifest.ts";
+export {
+  connectorCatalogSource,
+  contractFingerprint,
+  contractFingerprints,
+  contractsFormatVersion,
+  generatedPaths,
+  generateModules,
+  serverModuleSource,
+  symbolicModules,
+} from "./generate.ts";
+export type { CatalogAction, ReleaseIdentity } from "./generate.ts";
+export type { ScreenManifest } from "./app.ts";
+
+// A descriptor as JSON Schema, for what reads only JSON Schema (a model
+// told its answer's shape); values are still checked by the descriptor.
+export { jsonSchemaOf } from "./json-schema.ts";
+export type { JsonSchema, JsonSchemaOptions } from "./json-schema.ts";

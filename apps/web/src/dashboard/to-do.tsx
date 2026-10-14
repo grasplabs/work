@@ -1,6 +1,6 @@
 import type { PendingAction } from "@grasp-os/shared/connect";
 import type { DependenciesWaiting } from "@grasp-os/shared/dependencies";
-import { isAdmin } from "@grasp-os/shared/roles";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import { buttonVariants } from "@grasp-os/ui/components/button";
@@ -76,8 +76,8 @@ export const toReconnect = (
   );
 
 /** Whether permission requests wait on this person: admins decide them; staff can't, and don't get them. */
-export const decidesRequests = ({ role, staff }: Viewer): boolean =>
-  isAdmin(role) && !staff;
+export const decidesRequests = (viewer: Viewer): boolean =>
+  isMemberAdmin(viewer);
 
 /** An account to sign in to again: its next step opens its account on its integration's page. */
 const ReconnectRow = ({ ranOut }: { ranOut: RanOut }) => {

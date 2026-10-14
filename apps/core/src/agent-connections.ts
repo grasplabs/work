@@ -66,12 +66,13 @@ export interface AgentCallResult {
 export interface AgentCallOutcome {
   /**
    * `waiting` for the person still (or being carried out now), `declined`
-   * by them (or dropped), `done`, or `failed`.
+   * by them (or dropped), `done`, `unknown` (sent, and it may or may not
+   * have taken effect), or `failed`.
    */
   status: HeldOutcome["state"];
   /** What the action returned, once done; what it said, if it failed. */
   output: unknown;
-  /** Why it failed. */
+  /** Why it failed, or why its outcome is unknown. */
   error: string | null;
 }
 
@@ -90,6 +91,9 @@ const callOutcome = (outcome: HeldOutcome): AgentCallOutcome => {
       output: outcome.output === null ? null : JSON.parse(outcome.output),
       error: outcome.reason,
     };
+  }
+  if (outcome.state === "unknown") {
+    return { status: "unknown", output: null, error: outcome.reason };
   }
   return { status: outcome.state, output: null, error: null };
 };
@@ -430,11 +434,13 @@ connections: {
   /**
    * How a call that waited for the person ended, by its \`pending.id\`:
    * still \`waiting\`, \`declined\` by them, \`done\` (with what the action
-   * returned) or \`failed\` (with why, and what the action said). Only for
-   * calls of this chat.
+   * returned), \`unknown\` (it was sent, and may or may not have been
+   * carried out: check the outside system before asking for it again) or
+   * \`failed\` (with why, and what the action said). Only for calls of this
+   * chat.
    */
   outcome(pendingId: string): Promise<{
-    status: "waiting" | "declined" | "done" | "failed";
+    status: "waiting" | "declined" | "done" | "unknown" | "failed";
     output: unknown;
     error: string | null;
   }>;

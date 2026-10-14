@@ -101,7 +101,8 @@ const releaseFiles = [
   compilerAssets.source,
   compilerAssets.kit,
   compilerAssets.kitModules,
-  compilerAssets.sdkModules,
+  compilerAssets.workflowSdkModules,
+  compilerAssets.serverSdkModules,
   compilerAssets.packageBuilder,
   compilerAssets.esbuildWasm,
 ].toSorted();
@@ -155,7 +156,8 @@ describe("the compiler's build", { timeout: 120_000 }, () => {
         compilerAssets.source,
         compilerAssets.kit,
         compilerAssets.kitModules,
-        compilerAssets.sdkModules,
+        compilerAssets.workflowSdkModules,
+        compilerAssets.serverSdkModules,
         compilerAssets.packageBuilder,
         compilerAssets.esbuildWasm,
       ].toSorted()

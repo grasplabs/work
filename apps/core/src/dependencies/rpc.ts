@@ -1,9 +1,12 @@
 import type {
   DependenciesApi,
   DependenciesWaiting,
+  DependencyApprovals,
   DependencyApprover,
   DependencyApproverSubject,
   DependencyDecision,
+  DependencyEnding,
+  DependencyImpact,
   DependencyRequest,
   DependencyReview,
   DependencyStatus,
@@ -23,8 +26,11 @@ import type { SessionCheck } from "../session-check.ts";
 import { grantApprover, listApprovers, revokeApprover } from "./approvers.ts";
 import {
   decideDependency,
+  dependencyApprovals,
+  dependencyImpact,
   dependencyReview,
   dependencyStatus,
+  endDependency,
   waitingDependencies,
   waitingDependencyCount,
 } from "./requests.ts";
@@ -94,6 +100,42 @@ export class DependenciesRpc extends CoreRpcTarget implements DependenciesApi {
     return await withPerson(
       this.#check,
       async (by) => await decideDependency(this.#env, by, request, decision)
+    );
+  }
+
+  async approvals(app: string): Promise<DependencyApprovals> {
+    return await withPerson(
+      this.#check,
+      async (by) => await dependencyApprovals(this.#env, by, app)
+    );
+  }
+
+  async impact(request: string): Promise<DependencyImpact> {
+    return await withPerson(
+      this.#check,
+      async (by) => await dependencyImpact(this.#env, by, request)
+    );
+  }
+
+  async retire(
+    request: string,
+    ending: DependencyEnding
+  ): Promise<DependencyRequest[]> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await endDependency(this.#env, by, request, "retired", ending)
+    );
+  }
+
+  async revoke(
+    request: string,
+    ending: DependencyEnding
+  ): Promise<DependencyRequest[]> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await endDependency(this.#env, by, request, "revoked", ending)
     );
   }
 

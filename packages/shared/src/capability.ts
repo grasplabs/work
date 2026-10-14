@@ -46,10 +46,25 @@ export const capabilityKeyMinLength = 32;
 /** Keeps a MAC made here from ever passing as one made for anything else. */
 const macContext = "grasp-os capability v1\n";
 
+/** An approved resource binding, as a held call pins it. */
+export const heldBindingSchema = z.strictObject({
+  id: identifierSchema,
+  declarationHash: z.string().regex(/^[0-9a-f]{64}$/u),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+});
+export type HeldBinding = z.infer<typeof heldBindingSchema>;
+
 /** Where a call a person is there for comes from (`origin`). */
 const originSchema = z.strictObject({
   permissionId: permissionIdSchema,
   context: workContextSchema,
+  /**
+   * For an App action's connector resource: the approved binding the call
+   * came through, with the declaration and contract it served then. Core
+   * resolves the binding again, as a live request would, before it signs
+   * the confirmation of a held call, and refuses on any difference.
+   */
+  binding: heldBindingSchema.optional(),
 });
 
 /** What a capability says. Unknown fields make it invalid. */
