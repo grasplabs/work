@@ -20,6 +20,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 
 import { signedCall } from "./bindings.ts";
 import { personOf } from "./connections.ts";
+import { requireHeldBinding } from "./resource-bindings.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -54,6 +55,16 @@ const resolutionCapability = async (
   ) {
     throw permissionErrors.create("permission.denied", { action: key.action });
   }
+  // A call an App made through a resource binding is resolved only while
+  // that binding would still serve it, as a held call is confirmed.
+  if (key.subject.type === "app" && origin.binding !== undefined) {
+    await requireHeldBinding(
+      env,
+      key.subject.appId,
+      origin.binding,
+      key.action
+    );
+  }
   const authority = authoritySchema.parse({
     subject: key.subject,
     onBehalfOf: identity.userId,
@@ -71,6 +82,7 @@ const resolutionCapability = async (
         resource: resource ?? undefined,
       },
       permissionId: permissionIdSchema.parse(origin.permissionId),
+      ...(origin.binding === undefined ? {} : { binding: origin.binding }),
     },
     { action: key.action, idempotencyKey: key.idempotencyKey },
     undefined,

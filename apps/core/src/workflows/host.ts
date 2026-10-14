@@ -1,5 +1,6 @@
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
+import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema, isExpectedError } from "@grasp-os/shared/errors";
@@ -186,6 +187,12 @@ interface StepAttempt {
   step: string;
   held: boolean;
   /**
+   * Whether it was held because a call of it under the step's key came
+   * back of unknown outcome, for its person to resolve (`heldNoted`): its
+   * wait sleeps before its first check and ends by a deadline.
+   */
+  unknown: boolean;
+  /**
    * The keys of the side effects its App's functions asked for through
    * their resource bindings that connect held (`BindingCaller.held`): the
    * step waits while any of them, or one under its own key, does. At most
@@ -223,6 +230,9 @@ const unknownCode = "connect.outcome_unknown";
 /** The field of a held marker (`heldMarkerOf`). */
 const heldField = `${coreStepPrefix}held`;
 
+/** The field of a held marker that says it waits on an unknown outcome. */
+const unknownField = `${coreStepPrefix}unknown`;
+
 /**
  * What an attempt of a step answers when a side effect of it was held:
  * recorded as the step's result, so every execution replays it and waits
@@ -230,9 +240,16 @@ const heldField = `${coreStepPrefix}held`;
  * for (`StepAttempt.heldKeys`), which a wait after a restart still checks.
  * Workflow code can't return it (`do` refuses it).
  */
-const heldMarkerOf = (keys: readonly string[]) => ({
+const heldMarkerOf = (keys: readonly string[], unknown: boolean) => ({
   [heldField]: [...keys].toSorted(),
+  ...(unknown ? { [unknownField]: true } : {}),
 });
+
+/** Whether a held marker says its step waits on an unknown outcome. */
+const isUnknownMarker = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  Reflect.get(value, unknownField) === true;
 
 const isHeldMarker = (value: unknown): boolean =>
   typeof value === "object" &&
@@ -582,6 +599,20 @@ const waitMsOf = (env: Env): number => {
 };
 
 /**
+ * How long a step waits, from when it was first held on an unknown outcome,
+ * for its person to resolve it: 7 days, then it fails with
+ * `connect.outcome_unknown_unresolved`. Tests shorten it.
+ */
+const unknownHoldMs = 7 * 24 * 60 * 60 * 1000;
+
+const unknownHoldMsOf = (env: Env): number => {
+  const set = Number(env.WORKFLOW_UNKNOWN_HOLD_MS);
+  return Number.isInteger(set) && set > 0 && set < unknownHoldMs
+    ? set
+    : unknownHoldMs;
+};
+
+/**
  * The least an AI step waits after the model budget turned it away while
  * other calls under way hold it (`model.budget_busy`), before its attempt
  * fails and the engine retries it at the step's own delay: so a step with
@@ -877,29 +908,48 @@ const requireUnrefused = (attempt: StepAttempt): void => {
 };
 
 /**
+ * Whether connect said an unknown outcome waits for its person's word
+ * (`awaitsResolution`): a native connector's lost answer. A Composio
+ * tool's error, which its person can't yet see, fails the step instead.
+ */
+const awaitsResolution = (error: object): boolean => {
+  const details: unknown = Reflect.get(error, "details");
+  return (
+    typeof details === "object" &&
+    details !== null &&
+    Reflect.get(details, "awaitsResolution") === true
+  );
+};
+
+/**
  * Runs `call` for the step attempt `attempt`, noting when it answered that
  * a side effect was held, whatever the workflow code does with the error.
  * With `unknownHolds`, for a call under the step's own key, an outcome
- * nobody can tell (`connect.outcome_unknown`) holds the step too: it waits
- * until connect can recover the call or its person resolved it (connect's
+ * nobody can tell (`connect.outcome_unknown`) that connect says waits for
+ * its person (`awaitsResolution`) holds the step too: it waits until
+ * connect can recover the call or its person resolved it (connect's
  * `anyPending` says so), then runs again under the same key, rather than
  * spend its retries on the same answer or fail the run.
  */
 const heldNoted = async <T>(
-  attempt: { held: boolean },
+  attempt: { held: boolean; unknown?: boolean },
   call: () => Promise<T>,
   unknownHolds = false
 ): Promise<T> => {
   try {
     return await call();
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error.code === heldCode || (unknownHolds && error.code === unknownCode))
-    ) {
-      attempt.held = true;
+    if (typeof error === "object" && error !== null && "code" in error) {
+      if (error.code === heldCode) {
+        attempt.held = true;
+      } else if (
+        unknownHolds &&
+        error.code === unknownCode &&
+        awaitsResolution(error)
+      ) {
+        attempt.held = true;
+        attempt.unknown = true;
+      }
     }
     throw error;
   }
@@ -1145,9 +1195,20 @@ export class RunHost extends RpcTarget {
   async #waitWhileHeld(
     step: string,
     prefix: string,
-    keys: readonly string[]
+    keys: readonly string[],
+    unknownSince?: number
   ): Promise<void> {
     const first = waitMsOf(this.#env);
+    if (unknownSince !== undefined) {
+      // Never run again at once on an unknown outcome: should connect
+      // and the step's call disagree on whether it may be recovered now,
+      // the step would come back held at once, again and again.
+      await this.#step.sleep(`${prefix}:first`, first);
+    }
+    const deadline =
+      unknownSince === undefined
+        ? undefined
+        : unknownSince + unknownHoldMsOf(this.#env);
     for (let checks = 0; ; checks += 1) {
       // Its answer is recorded, so a replay asks connect nothing, and a
       // failing connect is tried again rather than failing the step.
@@ -1161,8 +1222,18 @@ export class RunHost extends RpcTarget {
             backoff: "exponential",
           },
         },
-        async () => await this.#stillHeld(step, keys)
+        async (): Promise<boolean | "expired"> => {
+          const still = await this.#stillHeld(step, keys);
+          return still && deadline !== undefined && Date.now() >= deadline
+            ? "expired"
+            : still;
+        }
       );
+      if (held === "expired") {
+        // Nobody resolved it in time: the step fails, saying so, rather
+        // than wait out the run's steps.
+        throw connectErrors.create("connect.outcome_unknown_unresolved");
+      }
       if (held !== true) {
         return;
       }
@@ -1275,13 +1346,32 @@ export class RunHost extends RpcTarget {
   async #waitBefore(
     step: string,
     value: unknown,
-    round: number
+    round: number,
+    unknown: { since?: number }
   ): Promise<string> {
     const key = await waitKeyOf(step);
     const busyFor = busyWaitOf(value);
     if (busyFor === undefined) {
       const prefix = `${waitStepPrefix}${key}:held:${round}`;
-      await this.#waitWhileHeld(step, prefix, heldKeysOf(value));
+      if (isUnknownMarker(value)) {
+        // When the step was first held on an unknown outcome, recorded
+        // once, so its deadline holds across rounds and replays.
+        unknown.since ??= z
+          .number()
+          .parse(
+            await this.#step.do(
+              `${prefix}:since`,
+              {},
+              async () => await Promise.resolve(Date.now())
+            )
+          );
+      }
+      await this.#waitWhileHeld(
+        step,
+        prefix,
+        heldKeysOf(value),
+        isUnknownMarker(value) ? unknown.since : undefined
+      );
       return prefix;
     }
     const prefix = `${waitStepPrefix}${key}:busy:${round}`;
@@ -1365,6 +1455,7 @@ export class RunHost extends RpcTarget {
           over: false,
           step,
           held: false,
+          unknown: false,
           heldKeys: [],
           functionCalls: 0,
           calledApp: false,
@@ -1424,7 +1515,7 @@ export class RunHost extends RpcTarget {
           throw toStepError(failed);
         }
         if (held) {
-          return heldMarkerOf(attempt.heldKeys);
+          return heldMarkerOf(attempt.heldKeys, attempt.unknown);
         }
         if (!result.ok) {
           failed = result.error;
@@ -1478,9 +1569,10 @@ export class RunHost extends RpcTarget {
       // seconds the lineage said, then run the step again under the same
       // key, in a step of its own each time, so every execution replays the
       // same steps.
+      const unknown: { since?: number } = {};
       for (let round = 1; isCoreMarker(value); round += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        const prefix = await this.#waitBefore(step, value, round);
+        const prefix = await this.#waitBefore(step, value, round, unknown);
         tries = 0;
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         value = await this.#step.do(

@@ -1,4 +1,5 @@
 import { signCapability } from "@grasp-os/shared/capability";
+import type { CapabilityScope } from "@grasp-os/shared/capability";
 import { unknownOutcomeKeySchema } from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
@@ -8,9 +9,11 @@ import type {
 import type { Authority } from "@grasp-os/shared/permissions";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   agentFor,
+  appFor,
   auditEvents,
   callAs,
   connectAccount,
@@ -90,7 +93,8 @@ const keyOf = (
 const resolutionCapability = async (
   key: UnknownOutcomeKey,
   choice: ResolutionChoice | undefined,
-  authority: Authority
+  authority: Authority,
+  extra: Pick<CapabilityScope, "confirms"> = {}
 ): Promise<string> =>
   await signCapability(env.CAPABILITY_SIGNING_KEY, authority, {
     origin: originOf(authority),
@@ -99,6 +103,7 @@ const resolutionCapability = async (
     action: key.action,
     idempotencyKey: key.idempotencyKey,
     ...(choice === undefined ? {} : { resolves: choice }),
+    ...extra,
   });
 
 /** Resolves `key` as core does for `person`, with its capability. */
@@ -487,6 +492,188 @@ describe("a call of unknown outcome", () => {
       before: { email: true, draft: true, otherPerson: false },
       recoverable: false,
       resolved: false,
+    });
+  });
+});
+
+/** The details of the error `promise` failed with. */
+const detailsOf = async (
+  promise: Promise<unknown>
+): Promise<Record<string, unknown>> => {
+  try {
+    await promise;
+  } catch (error) {
+    return (
+      z
+        .object({ details: z.record(z.string(), z.unknown()).optional() })
+        .parse(error).details ?? {}
+    );
+  }
+  throw new Error("The call didn't fail");
+};
+
+/** The binding an App's call came through, as core signs it. */
+const binding = {
+  id: "binding-mail",
+  declarationHash: "a".repeat(64),
+  fingerprint: "b".repeat(64),
+};
+
+describe("a native connector's call of unknown outcome", () => {
+  it("says a run waits on it for its person to resolve, whenever it is asked", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    expect({
+      first: await detailsOf(send(connection, "run-8:send")),
+      repeat: await detailsOf(send(connection, "run-8:send")),
+    }).toStrictEqual({
+      first: { awaitsResolution: true },
+      repeat: { awaitsResolution: true },
+    });
+  });
+
+  it("refused recovery for the confirmation it needs now, keeps a run waiting rather than tell it to run again", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await outcome(draft(connection, "run-9:draft"));
+    await claimedAgo(connection);
+    const pending = async () =>
+      await exports.default.anyPending({
+        onBehalfOf: connection.person.userId,
+        idempotencyKey: "run-9:draft",
+      });
+    const recoverable = await pending();
+    // Its context has read restricted data since: its person must confirm.
+    const restricted = await outcome(
+      callAs(
+        agentFor(connection.person.userId),
+        {
+          connectionId: connection.id,
+          resource: invoices,
+          action: "mail.createDraft",
+          input: email,
+          idempotencyKey: "run-9:draft",
+        },
+        { restricted: true }
+      )
+    );
+    expect({
+      recoverable,
+      restricted,
+      after: await pending(),
+      writes: writes().length,
+    }).toStrictEqual({
+      recoverable: false,
+      restricted: "connect.outcome_unknown",
+      after: true,
+      writes: 1,
+    });
+  });
+
+  it("keeps no input past the retention of answers, whoever made it, and stays listed", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await outcome(send(connection, "chat-1:send"));
+    await env.DB.prepare(
+      "UPDATE idempotent_calls SET created_at = created_at - ?1, claimed_at = claimed_at - ?1 WHERE connection_id = ?2"
+    )
+      .bind(31 * 24 * 60 * 60 * 1000, connection.id)
+      .run();
+    const before = await exports.default.listUnknownOutcomes(connection.person);
+    // Any later claim sweeps it, as it sweeps expired answers.
+    await outcome(send(connection, "chat-2:send"));
+    const after = await exports.default.listUnknownOutcomes(connection.person);
+    expect({
+      before: before.map(({ input }) => input),
+      after: after.map(({ input }) => input),
+    }).toStrictEqual({ before: [JSON.stringify(email)], after: [null] });
+  });
+
+  it("keeps the resource binding its call came through, for core to check before it signs a resolution", async () => {
+    const connection = await connected();
+    const app = appFor(connection.person.userId);
+    graph.loseWriteAnswer();
+    await outcome(
+      callAs(
+        app,
+        {
+          connectionId: connection.id,
+          resource: invoices,
+          action: "mail.send",
+          input: email,
+          idempotencyKey: "run-10:send",
+        },
+        { origin: { ...originOf(app), binding } }
+      )
+    );
+    const [listed] = await exports.default.listUnknownOutcomes(
+      connection.person
+    );
+    expect(listed?.origin).toStrictEqual({
+      mode: "workflow",
+      appVersion: 1,
+      permissionId: "permission-mail",
+      context: { type: "app", appId: "app-crm" },
+      binding,
+    });
+  });
+
+  it("refuses, without recording anything, a resolution of a call never made, and refuses one that also confirms, or names another person", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await outcome(send(connection, "run-11:send"));
+    const key = keyOf(connection, "mail.send", "run-11:send");
+    const owner = agentFor(connection.person.userId);
+    const never = await outcome(
+      resolve(
+        connection.person,
+        keyOf(connection, "mail.send", "run-11:never"),
+        "happened"
+      )
+    );
+    const recordedForNever = await recorded();
+    const refused = {
+      confirmsToo: await outcome(
+        resolve(
+          connection.person,
+          key,
+          "happened",
+          await resolutionCapability(key, "happened", owner, {
+            confirms: crypto.randomUUID(),
+          })
+        )
+      ),
+      otherPerson: await outcome(
+        resolve(
+          connection.person,
+          key,
+          "happened",
+          await resolutionCapability(
+            key,
+            "happened",
+            agentFor(someone().userId)
+          )
+        )
+      ),
+    };
+    expect({
+      never,
+      recordedForNever,
+      refused,
+      recorded: await recorded(),
+      stillListed: await listedFor(connection.person),
+    }).toStrictEqual({
+      never: "connect.outcome_not_found",
+      recordedForNever: [],
+      refused: {
+        confirmsToo: "capability.invalid",
+        otherPerson: "capability.invalid",
+      },
+      recorded: [
+        ["connection.call.resolve_refused", "capability.invalid"],
+        ["connection.call.resolve_refused", "capability.invalid"],
+      ],
+      stillListed: 1,
     });
   });
 });

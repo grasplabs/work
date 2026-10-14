@@ -173,6 +173,11 @@ export interface CallProgress extends Repeat {
   claimed?: boolean;
   /** Set once a call of unknown outcome was taken up again to recover it. */
   recovery?: RecoveryMode;
+  /**
+   * Set once its connection is found: a native connector's, whose call of
+   * unknown outcome a run waits on for its person to resolve.
+   */
+  native?: boolean;
 }
 
 type Input = Record<string, Json>;
@@ -763,6 +768,7 @@ export const carryOut = async (
 ): Promise<CallDone> => {
   const { authority, resource, idempotencyKey } = claims;
   const connection = await connectionFor(env, claims, call.connectionId, held);
+  progress.native = connection.serverKind === "native";
   const { input } = call;
   // MCP tools take an object of arguments.
   if (!isInput(input)) {
@@ -810,10 +816,17 @@ export const carryOut = async (
     // has passed again (the capability core signed for this caller now,
     // the connection, the scope), never by a call a person must confirm,
     // which would be held anew instead.
+    const mustConfirm = mustHold(claims, held);
+    if (mustConfirm && store !== undefined) {
+      // Refused for that: kept on the row, so a run waiting on it isn't
+      // told it may be recovered now (`recoverableNow`), and run again,
+      // only to be refused again.
+      await store.requireConfirmation();
+    }
     requireRecoverable(recovering, {
       recovery: sideEffect ? recovery : "none",
       release,
-      mustConfirm: mustHold(claims, held),
+      mustConfirm,
     });
   }
   if (sideEffect && mustHold(claims, held)) {

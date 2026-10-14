@@ -719,6 +719,8 @@ export interface UnknownOutcomeOrigin {
   appVersion: number | null;
   permissionId: string;
   context: WorkContext;
+  /** The App's resource binding it came through, as `PendingAction.binding`. */
+  binding?: HeldBinding;
 }
 
 /** A call of unknown outcome, as the person it acted for sees it. */
@@ -1144,6 +1146,8 @@ export const connectErrors = defineErrorFamily({
     "A call with this idempotency key is still running. Try again shortly.",
   "connect.outcome_unknown":
     "A call with this idempotency key was interrupted after it was sent, so it may or may not have taken effect. It won't be sent again blindly: where its connector can find what it did, or can't do it twice, trying again later (after `retryAfterSeconds`, when given) recovers it; otherwise check the outside system to see whether it did.",
+  "connect.outcome_unknown_unresolved":
+    "A call of this step was interrupted after it was sent, so it may or may not have taken effect, and the person it acted for didn't say what became of it in time: the step stopped waiting. It's still theirs to resolve.",
   "connect.resolved_done":
     "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it took effect: it won't be sent again, and what it returned isn't known.",
   "connect.resolved_not_done":

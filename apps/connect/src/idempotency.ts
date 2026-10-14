@@ -1,3 +1,4 @@
+import { heldBindingSchema } from "@grasp-os/shared/capability";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type {
@@ -245,6 +246,12 @@ const storedOriginSchema = z.strictObject({
   context: workContextSchema,
   /** Its context had read restricted data: every side effect of it waits. */
   restricted: z.boolean(),
+  /**
+   * The App's approved resource binding the call came through, if it
+   * did: core checks it would still serve the call before it signs a
+   * resolution, as for confirming a held call.
+   */
+  binding: heldBindingSchema.optional(),
 });
 
 /** What a call whose capability says `claims` keeps under its key. */
@@ -256,6 +263,9 @@ export const keptOf = (claims: CapabilityClaims, input: Json): Kept => ({
     permissionId: claims.origin.permissionId,
     context: claims.origin.context,
     restricted: claims.restricted,
+    ...(claims.origin.binding === undefined
+      ? {}
+      : { binding: claims.origin.binding }),
   } satisfies z.input<typeof storedOriginSchema>),
 });
 
@@ -472,19 +482,7 @@ export const idempotencyStore = (
       kept: Kept | null = null
     ): Promise<StoredAnswer | undefined> => {
       const now = Date.now();
-      const [, claimed] = await db.batch([
-        // Expired answers are dropped; the index on created_at keeps it
-        // cheap. Their keys stay used: their effect happened.
-        db
-          .update(idempotentCalls)
-          .set({ output: null, provenance: null })
-          .where(
-            and(
-              lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
-              inArray(idempotentCalls.state, ["done", "failed"]),
-              isNotNull(idempotentCalls.output)
-            )
-          ),
+      const [claimed] = await db.batch([
         db
           .insert(idempotentCalls)
           .values({
@@ -504,6 +502,29 @@ export const idempotencyStore = (
           })
           .onConflictDoNothing()
           .returning({ state: idempotentCalls.state }),
+        // Expired answers are dropped; the index on created_at keeps it
+        // cheap. Their keys stay used: their effect happened.
+        db
+          .update(idempotentCalls)
+          .set({ output: null, provenance: null })
+          .where(
+            and(
+              lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
+              inArray(idempotentCalls.state, ["done", "failed"]),
+              isNotNull(idempotentCalls.output)
+            )
+          ),
+        // So is the input a call of unknown outcome kept for its person,
+        // whoever made it: its obligation stays, listed without it.
+        db
+          .update(idempotentCalls)
+          .set({ input: null })
+          .where(
+            and(
+              lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
+              isNotNull(idempotentCalls.input)
+            )
+          ),
       ]);
       if (claimed.length > 0) {
         mine = new Date(now);
@@ -573,6 +594,20 @@ export const idempotencyStore = (
         throw connectErrors.create("connect.call_in_progress");
       }
       mine = at;
+    },
+
+    /**
+     * Records on the row that recovering its call needs its person to
+     * confirm it now (a call of a restricted context): `recoverableNow`
+     * then reads it as never recoverable.
+     */
+    requireConfirmation: async (): Promise<void> => {
+      await db
+        .update(idempotentCalls)
+        .set({
+          origin: sql`json_set(${idempotentCalls.origin}, '$.restricted', json('true'))`,
+        })
+        .where(and(key, isNotNull(idempotentCalls.origin)));
     },
 
     /**

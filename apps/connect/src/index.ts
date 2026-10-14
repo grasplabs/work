@@ -34,6 +34,7 @@ import type {
   UnknownOutcome,
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { NpmMetadata } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -166,6 +167,10 @@ const statedOf = ({
   input: _input,
   ...stated
 }: Omit<ConnectCall, "capability">): StatedCall => stated;
+
+/** An expected error's details, such as a `retryAfterSeconds`, if any. */
+const detailsOf = (error: unknown): ErrorPayload["details"] =>
+  isExpectedError(error) ? error.details : undefined;
 
 const codeOf = (error: unknown): string | undefined =>
   connectErrors.codeOf(error) ?? capabilityErrors.codeOf(error);
@@ -606,6 +611,15 @@ export default class Connect
         recovery: progress.recovery,
         pendingActionId: held?.id,
       });
+      if (reason === "connect.outcome_unknown" && progress.native === true) {
+        // A native connector's lost answer: a run waits for its person to
+        // resolve it. A Composio tool's error, whose text nobody is shown
+        // yet, fails the run's step instead.
+        throw connectErrors.create("connect.outcome_unknown", {
+          ...detailsOf(error),
+          awaitsResolution: true,
+        });
+      }
       throw lost ? connectErrors.create("connect.outcome_unknown") : error;
     }
     // Nothing is returned, or stored for a repeat, that the audit log

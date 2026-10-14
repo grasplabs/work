@@ -98,26 +98,41 @@ const summaryOf = ({
             appVersion: origin.appVersion,
             permissionId: origin.permissionId,
             context: origin.context,
+            ...(origin.binding === undefined
+              ? {}
+              : { binding: origin.binding }),
           },
   };
 };
 
 /** The rows of `person`'s, under `key` when given. */
-const theirs = (person: ConnectionPerson, key?: UnknownOutcomeKey) => {
-  const subjectId =
-    key?.subject.type === "app" ? key.subject.appId : key?.subject.agentId;
-  return and(
-    eq(idempotentCalls.onBehalfOf, person.userId),
-    key === undefined
-      ? undefined
-      : and(
-          eq(idempotentCalls.subjectType, key.subject.type),
-          eq(idempotentCalls.subjectId, subjectId ?? ""),
-          eq(idempotentCalls.connectionId, key.connectionId),
-          eq(idempotentCalls.action, key.action),
-          eq(idempotentCalls.idempotencyKey, key.idempotencyKey)
-        )
+/** The rows under `key`, whoever they acted for. */
+const underKey = (key: UnknownOutcomeKey) =>
+  and(
+    eq(idempotentCalls.subjectType, key.subject.type),
+    eq(
+      idempotentCalls.subjectId,
+      key.subject.type === "app" ? key.subject.appId : key.subject.agentId
+    ),
+    eq(idempotentCalls.connectionId, key.connectionId),
+    eq(idempotentCalls.action, key.action),
+    eq(idempotentCalls.idempotencyKey, key.idempotencyKey)
   );
+
+const theirs = (person: ConnectionPerson, key?: UnknownOutcomeKey) =>
+  and(
+    eq(idempotentCalls.onBehalfOf, person.userId),
+    key === undefined ? undefined : underKey(key)
+  );
+
+/** Whether any call was made under `key`, for anyone. */
+const anyUnder = async (env: Env, key: UnknownOutcomeKey): Promise<boolean> => {
+  const row = await drizzle(env.DB)
+    .select({ state: idempotentCalls.state })
+    .from(idempotentCalls)
+    .where(underKey(key))
+    .get();
+  return row !== undefined;
 };
 
 /**
@@ -305,6 +320,10 @@ export const resolveOutcome = async (
   }
   const { capability, person, key, choice } = parsed.data;
   const row = await unknownRowOf(env, person, key);
+  if (row === undefined && !(await anyUnder(env, key))) {
+    // No call was ever made under it: nothing to record a refusal of.
+    throw connectErrors.create("connect.outcome_not_found");
+  }
   try {
     if (row === undefined) {
       throw connectErrors.create("connect.outcome_not_found");
@@ -366,7 +385,9 @@ export const resolveOutcome = async (
  * Whether a call under idempotency key `idempotencyKey`, acting for
  * `onBehalfOf`, is of unknown outcome, unresolved, and wouldn't be
  * recovered by the same call made again now (`recoverableNow`): a run's
- * step that got its unknown outcome waits while one is.
+ * step that got its unknown outcome waits while one is. Only a native
+ * connector's: a Composio tool's error, whose text nobody is shown yet,
+ * fails the step (GRA-560), though it stays listed for its person.
  */
 export const unresolvedUnder = async (
   env: Env,
@@ -377,18 +398,20 @@ export const unresolvedUnder = async (
     throw connectErrors.create("connect.invalid");
   }
   const rows = await drizzle(env.DB)
-    .select()
+    .select({ row: idempotentCalls })
     .from(idempotentCalls)
+    .innerJoin(connections, eq(connections.id, idempotentCalls.connectionId))
     .where(
       and(
         eq(idempotentCalls.onBehalfOf, parsed.data.onBehalfOf),
         eq(idempotentCalls.idempotencyKey, parsed.data.idempotencyKey),
+        eq(connections.serverKind, "native"),
         unknownNow(Date.now())
       )
     )
     .limit(10);
   const recoverable = await Promise.all(
-    rows.map(async (row) => await recoverableNow(env, row))
+    rows.map(async ({ row }) => await recoverableNow(env, row))
   );
   return recoverable.includes(false);
 };
