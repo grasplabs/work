@@ -119,6 +119,18 @@ export const useChecks = (): void => {
     fields: ["summary"],
     args: (baseline) => ({ id: baseline._id, expectedRevision: baseline._rev }),
   });
+  // @ts-expect-error -- a record form binds a mutation returning the record, not its ID
+  void useForm(api.notes.create, {
+    record: note,
+    fields: ["title", "body"],
+    args: () => ({}),
+  });
+  // @ts-expect-error -- nor one returning only null, which says nothing of the record
+  void useForm(api.notes.remove, {
+    record: note,
+    fields: [],
+    args: (baseline) => ({ id: baseline._id, expectedRevision: baseline._rev }),
+  });
   // @ts-expect-error -- a record form binds a mutation, not an action
   void useForm(api.notes.tally, {
     record: note,

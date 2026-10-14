@@ -38,6 +38,7 @@ import type {
 } from "./client-core.ts";
 import { useGraspForm } from "./form.ts";
 import type {
+  AnswersRecord,
   EditableKey,
   FormOptionsInput,
   GraspForm,
@@ -159,7 +160,8 @@ interface UseForm {
     Field extends EditableKey<Reference, Doc>,
   >(
     reference: Reference,
-    options: RecordFormOptions<Reference, Doc, Field>
+    options: RecordFormOptions<Reference, Doc, Field> &
+      AnswersRecord<Reference, Doc>
   ): RecordForm<Pick<Doc, Field>, ReturnOf<Reference>>;
   <Reference extends MutationReference | ActionReference>(
     reference: Reference,
@@ -180,7 +182,9 @@ interface UseForm {
  *   public mutation or action, its input the fields, its argument
  *   contract the validator.
  * - `useForm(ref, { record, fields, args, onSuccess? })`: a live document
- *   edited with explicit Save. `fields` are editable; `args` maps the
+ *   edited with explicit Save, through a mutation that returns the record
+ *   it saved (or `null`, delete-style); a save answering anything else
+ *   fails as `contract.invalid_result`. `fields` are editable; `args` maps the
  *   captured baseline to the rest of the arguments (its ID and revision).
  * - `useForm(schema, { defaultValues, onSubmit })`: a local form, checked
  *   by a native schema, `onSubmit` given its normalized output.

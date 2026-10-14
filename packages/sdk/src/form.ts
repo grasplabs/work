@@ -188,6 +188,24 @@ type RemainingArgs<Reference, Field extends PropertyKey> = Omit<
 > &
   Readonly<Partial<Record<Field, never>>>;
 
+/** What a record form's options say of a mutation that doesn't answer the record. */
+interface AnswersOtherThanRecord {
+  readonly "A record form binds a mutation that returns the record": never;
+}
+
+/**
+ * Nothing, when `Reference` answers the record `Doc`: its document type,
+ * or it or `null` for a delete-style save. A save answering anything else
+ * says nothing of what the record is now, so it doesn't bind a record form.
+ */
+export type AnswersRecord<Reference, Doc> = [ReturnOf<Reference>] extends [
+  Doc | null,
+]
+  ? [Doc] extends [ReturnOf<Reference>]
+    ? unknown
+    : AnswersOtherThanRecord
+  : AnswersOtherThanRecord;
+
 /** A record form's options (spec 10.3). */
 export interface RecordFormOptions<
   Reference,
@@ -380,11 +398,6 @@ export class FormBinding {
   /** The record the draft started from, and the latest supplied. */
   #baseline: unknown;
   #latest: unknown;
-  /**
-   * The values a save committed that answered no record: until a newer
-   * record is adopted, what the form compares edits with.
-   */
-  #saved: Record<string, unknown> | undefined;
   #mounted = true;
   /** The values TanStack starts from: never changed after. */
   readonly initialValues: Record<string, unknown>;
@@ -512,11 +525,7 @@ export class FormBinding {
     return this.#form;
   }
 
-  /**
-   * Whether the editable values hold edits: they differ from what was last
-   * saved without the record coming back (`#saved`), or else from the
-   * record's baseline.
-   */
+  /** Whether the editable values differ from the record's baseline. */
   #dirty(): boolean {
     const target = this.#target;
     if (target.kind !== "record") {
@@ -524,7 +533,7 @@ export class FormBinding {
     }
     return !same(
       this.#formOf().state.values,
-      this.#saved ?? pick(this.#baseline, target.fields)
+      pick(this.#baseline, target.fields)
     );
   }
 
@@ -535,7 +544,6 @@ export class FormBinding {
       return;
     }
     this.#baseline = record;
-    this.#saved = undefined;
     const latest = identityOf(this.#latest);
     const adopted = identityOf(record);
     if (
@@ -605,10 +613,9 @@ export class FormBinding {
       return;
     }
     const target = this.#target;
-    // A record form's last save that answered no record is what it holds.
     const values =
       target.kind === "record"
-        ? (this.#saved ?? pick(this.#baseline, target.fields))
+        ? pick(this.#baseline, target.fields)
         : this.initialValues;
     this.#formOf().reset(values, { keepDefaultValues: true });
     this.#set({
@@ -704,7 +711,10 @@ export class FormBinding {
       throw failure;
     }
     this.#uncertain = undefined;
-    this.#succeeded(result, submission);
+    const refused = this.#succeeded(result);
+    if (refused !== undefined) {
+      throw refused;
+    }
     return result;
   }
 
@@ -772,17 +782,28 @@ export class FormBinding {
   }
 
   /** A submission committed: the new baseline, the reset and the callback. */
-  #succeeded(result: unknown, submission: Submission): void {
+  #succeeded(result: unknown): GraspError | undefined {
     const target = this.#target;
     if (target.kind === "record") {
       const committed = identityOf(result);
       const baseline = identityOf(this.#baseline);
       const latest = identityOf(this.#latest);
-      if (
-        committed !== undefined &&
-        baseline !== undefined &&
-        committed.id === baseline.id
+      if (result === null) {
+        // A delete-style save (`Doc | null`): the record is gone, so
+        // there is nothing to adopt, and no later revision of it.
+        this.#set({ phase: "idle" });
+      } else if (
+        committed === undefined ||
+        baseline === undefined ||
+        committed.id !== baseline.id
       ) {
+        // A record form binds a mutation that answers the record it saved
+        // (`useForm`'s types say so); anything else says nothing of what
+        // the record is now, so nothing is adopted and the values stay.
+        const refused = clientError("contract.invalid_result");
+        this.#set({ phase: "idle", failure: failureOf(refused) });
+        return refused;
+      } else {
         this.#set({ phase: "idle" });
         // A newer record supplied while the save was in flight wins: the
         // form is pristine now, and never goes back a revision.
@@ -791,22 +812,6 @@ export class FormBinding {
             ? this.#latest
             : result
         );
-      } else {
-        // Another shape of result: nothing says what the record is now
-        // (fields set through `args`, or by the handler, may have
-        // changed), so the fields unlock with what was saved, and a record
-        // newer than the baseline is adopted once one comes, unless edited
-        // since.
-        this.#saved = pick(submission.input, target.fields);
-        this.#formOf().reset(this.#saved, { keepDefaultValues: true });
-        this.#set({ phase: "idle", attempted: false });
-        if (
-          latest !== undefined &&
-          baseline !== undefined &&
-          latest.rev > baseline.rev
-        ) {
-          this.#adopt(this.#latest);
-        }
       }
     } else {
       this.#set({ phase: "idle", attempted: false });
@@ -815,6 +820,7 @@ export class FormBinding {
       }
     }
     void this.#notify(result);
+    return undefined;
   }
 
   /** Runs `onSuccess` once, for a mounted form; its failure is its own. */

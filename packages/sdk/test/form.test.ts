@@ -139,7 +139,7 @@ describe("a form whose values don't pass", () => {
   });
 });
 
-describe("a record form whose save answers no record", () => {
+describe("a record form's save and the records that follow it", () => {
   const record = {
     _id: "01890000-0000-7000-8000-000000000001",
     _rev: 3,
@@ -147,14 +147,14 @@ describe("a record form whose save answers no record", () => {
     body: "",
   };
 
-  /** A record form over `record`, its title edited and saved, the save answering no record. */
-  const saved = async () => {
+  /** A record form over `record`, its title edited and saved, the save answering `answer`. */
+  const saved = async (answer: (input: unknown) => unknown) => {
     const binding = new FormBinding(
       {
         kind: "record",
         args: api.notes.update.args,
         fields: ["title", "body"],
-        send: async () => await Promise.resolve(null),
+        send: async (input) => await Promise.resolve(answer(input)),
       },
       { title: record.title, body: record.body },
       {
@@ -164,37 +164,54 @@ describe("a record form whose save answers no record", () => {
     );
     const form = mounted(binding);
     form.setFieldValue("title", "Edited");
-    await binding.submit();
-    return { binding, form };
+    const outcome = await settle(binding.submit());
+    return { binding, form, outcome };
   };
 
-  it("unlocks its fields at once, holding what was saved", async () => {
-    const { binding, form } = await saved();
-    expect(binding.status().phase).toBe("idle");
+  /** The committed record, as `notes.update` answers it. */
+  const committed = () => ({ ...record, _rev: 4, title: "Edited" });
+
+  it("refuses an answer that isn't the record, keeping the values and adopting nothing", async () => {
+    const { binding, form, outcome } = await saved(() => record._id);
+    expect(outcome).toMatchObject({
+      rejected: { code: "contract.invalid_result" },
+    });
+    expect(binding.status()).toMatchObject({
+      phase: "idle",
+      failure: { code: "contract.invalid_result" },
+    });
     expect(form.state.values).toMatchObject({ title: "Edited" });
   });
 
-  it("adopts a newer revision supplied afterwards, with no edits since", async () => {
-    const { binding, form } = await saved();
-    // Idle first, not waiting for it: the form adopts it as it would any.
-    expect(binding.status().phase).toBe("idle");
-    binding.supply({ ...record, _rev: 4, title: "Edited", body: "Set too" });
+  it("adopts nothing, without failing, when a delete-style save answers null", async () => {
+    const { binding, form, outcome } = await saved(() => null);
+    expect(outcome).toStrictEqual({ resolved: null });
+    expect(binding.status()).toMatchObject({
+      phase: "idle",
+      failure: undefined,
+    });
+    expect(form.state.values).toMatchObject({ title: "Edited" });
+  });
+
+  it("adopts the committed record, then a newer revision with no edits since", async () => {
+    const { binding, form } = await saved(committed);
+    binding.supply({ ...committed(), _rev: 5, body: "Set too" });
     expect(binding.status()).toMatchObject({ phase: "idle", newer: false });
     expect(form.state.values).toMatchObject({ body: "Set too" });
   });
 
   it("keeps edits made since over a newer revision, saying one came", async () => {
-    const { binding, form } = await saved();
+    const { binding, form } = await saved(committed);
     form.setFieldValue("title", "Edited again");
-    binding.supply({ ...record, _rev: 4, title: "Edited" });
-    expect(binding.status()).toMatchObject({ phase: "idle", newer: true });
+    binding.supply({ ...committed(), _rev: 5 });
+    expect(binding.status()).toMatchObject({ newer: true });
     expect(form.state.values).toMatchObject({ title: "Edited again" });
   });
 
   it("ignores a read sent before the save that answers after it", async () => {
-    const { binding, form } = await saved();
-    binding.supply({ ...record, title: "Stale" });
-    expect(binding.status()).toMatchObject({ phase: "idle", newer: false });
+    const { binding, form } = await saved(committed);
+    binding.supply({ ...record });
+    expect(binding.status()).toMatchObject({ newer: false });
     expect(form.state.values).toMatchObject({ title: "Edited" });
   });
 });
