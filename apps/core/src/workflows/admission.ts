@@ -51,14 +51,14 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 //   most. A person's turns only grow while they have places waiting, so
 //   their newer work never passes their older work as places come and go.
 // - Starvation and queue jumping: within a turn the waiting are served
-//   first come, first served. An attempt is admitted only while the shares
-//   it takes leave room for every attempt ahead of it that could run now:
-//   one whose App and person are still under their shares. One queued
-//   behind a saturated App doesn't wait for that App (no head-of-line
-//   blocking, no priority inversion), and a newcomer never takes a share
-//   an attempt ahead of it could. What those ahead hold back is never
-//   more than what they could take: per person and per App, no more than
-//   what is left of its share.
+//   first come, first served. An attempt is admitted only if serving the
+//   queue in order now would admit it (`servedInOrder`): each place ahead
+//   of it takes a lease if its person, its App and the client have room
+//   after those before it, and is passed over if not. One queued behind a
+//   saturated App doesn't wait for that App (no head-of-line blocking, no
+//   priority inversion), and a newcomer never takes a share an attempt
+//   ahead of it would. What those ahead hold back is exactly what they
+//   would take, under every share at once.
 // - A dead waiter holding its place for ever: a place lasts only while
 //   the step asks again (`queueLiveMs`), which a waiting run does every
 //   minute at least (`askAgainSeconds`); a run that stopped
@@ -248,45 +248,93 @@ export interface Standing {
 }
 
 /**
- * The counts an admission of `scope`'s attempt at `place` (standing at
- * `standing`) is checked against at `now`: the leases held, in all, for
- * its person and of its App, and the attempts queued ahead of it that
- * could run now, as each share must leave room for them.
+ * The queue served in order, up to and including `scope`'s attempt at
+ * `place` (standing at `standing`), at `now`, as SQL: `served`, a row for
+ * each place still asking ahead of it and a last row for the attempt
+ * itself (`me`), each with the leases it would find held, in all
+ * (`client`), for its person (`person`) and of its App (`app`), and
+ * whether it would take one (`fits`): every share under its own.
+ *
+ * One rule, so what those ahead hold back is never more, nor less, than
+ * what they would take: each in turn takes a lease if its person, its App
+ * and the client have room once those before it took theirs, and is passed
+ * over if not. A share left over by those ahead is the attempt's, and one
+ * they would take never is. Counting each share of those ahead apart
+ * holds back too much: two places of one person in two Apps, under a
+ * person's share of one, take one lease, not two.
+ *
+ * The leases each would take are kept as JSON, per person and per App,
+ * under the hex of its name: any name is a safe path.
  */
-const admissionCounts = (
+const servedInOrder = (
   scope: AdmissionScope,
   place: QueuePlace,
   { turn, joined }: Standing,
   now: number,
   shares: Shares
-) => {
-  const liveAfter = now - queueLiveMs;
-  // Ahead: still asking, not this step, served before it (by turn, then
-  // when it joined, then by place), and could run now, its person and App
-  // each under their share.
-  const ahead = sql`q.seen_at > ${literal(liveAfter)}
+): SQL => {
+  // Ahead: still asking, not this step, and served before it: by turn,
+  // then when it joined, then by place, as `served` orders them.
+  const ahead = sql`q.seen_at > ${literal(now - queueLiveMs)}
     AND NOT (q.run_id = ${place.runId} AND q.step_hash = ${place.stepHash})
-    AND (q.turn < ${literal(turn)} OR (q.turn = ${literal(turn)} AND (q.enqueued_at < ${literal(joined)} OR (q.enqueued_at = ${literal(joined)} AND (q.run_id, q.step_hash) < (${place.runId}, ${place.stepHash})))))
-    AND ${running(now, sql`h.subject = q.subject`)} < ${literal(shares.person)}
-    AND ${running(now, sql`h.resource = q.resource`)} < ${literal(shares.app)}`;
-  // What they could take of the client's share: per person, and per App,
-  // no more than what is left of its own.
-  const takeBy = (column: "subject" | "resource", share: number): SQL =>
-    sql`(SELECT coalesce(sum(n), 0) FROM (SELECT min(count(*), ${literal(share)} - ${running(now, sql`h.${sql.raw(column)} = q.${sql.raw(column)}`)}) AS n FROM workflow_admission_queue AS q WHERE ${ahead} GROUP BY q.${sql.raw(column)}))`;
-  const aheadOf = (where: SQL): SQL =>
-    sql`(SELECT count(*) FROM workflow_admission_queue AS q WHERE ${ahead} AND ${where})`;
-  return {
+    AND (q.turn < ${literal(turn)} OR (q.turn = ${literal(turn)} AND (q.enqueued_at < ${literal(joined)} OR (q.enqueued_at = ${literal(joined)} AND (q.run_id, q.step_hash) < (${place.runId}, ${place.stepHash})))))`;
+  // What a place would find, after those before it: its person's and its
+  // App's leases as taken so far, or as held, if none took one yet.
+  const person = sql`coalesce(json_extract(s.persons, w.person_key), w.person_held)`;
+  const app = sql`coalesce(json_extract(s.apps, w.app_key), w.app_held)`;
+  const fits = sql`(s.client < ${literal(shares.client)} AND ${person} < ${literal(shares.person)} AND ${app} < ${literal(shares.app)})`;
+  return sql`WITH RECURSIVE
+    waiting AS (
+      SELECT row_number() OVER (ORDER BY u.turn, u.joined, u.run_id, u.step_hash) AS i,
+        u.me AS me,
+        '$.x' || hex(u.subject) AS person_key,
+        '$.x' || hex(u.resource) AS app_key,
+        ${running(now, sql`h.subject = u.subject`)} AS person_held,
+        ${running(now, sql`h.resource = u.resource`)} AS app_held
+      FROM (
+        SELECT q.turn AS turn, q.enqueued_at AS joined, q.run_id AS run_id, q.step_hash AS step_hash, 0 AS me, q.subject AS subject, q.resource AS resource
+        FROM workflow_admission_queue AS q WHERE ${ahead}
+        UNION ALL
+        SELECT ${literal(turn)}, ${literal(joined)}, ${place.runId}, ${place.stepHash}, 1, ${scope.subject}, ${scope.resource}
+      ) AS u
+    ),
+    served (i, me, client, persons, apps, person, app, fits) AS (
+      SELECT 0, 0, ${running(now, sql`1`)}, '{}', '{}', 0, 0, 0
+      UNION ALL
+      SELECT w.i, w.me,
+        s.client + ${fits},
+        CASE WHEN ${fits} THEN json_set(s.persons, w.person_key, ${person} + 1) ELSE s.persons END,
+        CASE WHEN ${fits} THEN json_set(s.apps, w.app_key, ${app} + 1) ELSE s.apps END,
+        ${person}, ${app}, ${fits}
+      FROM served AS s JOIN waiting AS w ON w.i = s.i + 1
+    )`;
+};
+
+/** The client's leases a row of `served` found: before its own. */
+const servedClient = sql`s.client - s.fits`;
+
+/**
+ * The counts an admission of `scope`'s attempt at `place` (standing at
+ * `standing`) is checked against at `now`: the leases held, in all, for
+ * its person and of its App, and what it would find of each once those
+ * ahead of it took theirs (`servedInOrder`), as JSON.
+ */
+const admissionCounts = (
+  scope: AdmissionScope,
+  place: QueuePlace,
+  standing: Standing,
+  now: number,
+  shares: Shares
+) =>
+  ({
     client: running(now, sql`1`),
-    clientAhead: sql`min(${takeBy("subject", shares.person)}, ${takeBy("resource", shares.app)})`,
     person: running(now, sql`h.subject = ${scope.subject}`),
-    personAhead: aheadOf(sql`q.subject = ${scope.subject}`),
     app: running(now, sql`h.resource = ${scope.resource}`),
-    appAhead: aheadOf(sql`q.resource = ${scope.resource}`),
+    served: sql`(${servedInOrder(scope, place, standing, now, shares)} SELECT json_object('client', ${servedClient}, 'person', s.person, 'app', s.app) FROM served AS s WHERE s.me = 1)`,
     appEnds: firstEnds(now, sql`h.resource = ${scope.resource}`),
     personEnds: firstEnds(now, sql`h.subject = ${scope.subject}`),
     clientEnds: firstEnds(now, sql`1`),
-  } satisfies Record<string, SQL>;
-};
+  }) satisfies Record<string, SQL>;
 
 /** The live places of `scope`'s person and App as SQL counting them. */
 const placesOf = (where: SQL, now: number): SQL =>
@@ -355,8 +403,8 @@ export const roomFor = (
   now: number,
   shares: Shares
 ): SQL => {
-  const counts = admissionCounts(scope, place, standing, now, shares);
-  return sql`(${counts.client} + ${counts.clientAhead} < ${literal(shares.client)} AND ${counts.person} + ${counts.personAhead} < ${literal(shares.person)} AND ${counts.app} + ${counts.appAhead} < ${literal(shares.app)})`;
+  const served = servedInOrder(scope, place, standing, now, shares);
+  return sql`EXISTS (${served} SELECT 1 FROM served AS s WHERE s.me = 1 AND s.fits)`;
 };
 
 /**
@@ -444,13 +492,21 @@ export const sharesRead = (
     .where(and(eq(workflowRuns.id, place.runId), sql`NOT (${admitted})`));
 
 /** What `sharesRead` reads. */
+const foundSchema = z.object({
+  client: z.number(),
+  person: z.number(),
+  app: z.number(),
+});
 const sharesRowSchema = z.object({
   client: z.number(),
-  clientAhead: z.number(),
   person: z.number(),
-  personAhead: z.number(),
   app: z.number(),
-  appAhead: z.number(),
+  // What the attempt would find once those ahead took theirs: JSON, as
+  // SQLite answers it.
+  served: z
+    .string()
+    .transform((text): unknown => JSON.parse(text))
+    .pipe(foundSchema),
   appEnds: z.number().nullable(),
   personEnds: z.number().nullable(),
   clientEnds: z.number().nullable(),
@@ -469,32 +525,30 @@ const waitOf = (
   shares: Shares,
   now: number
 ): { waitingFor: Share; retryAfterSeconds: number } => {
-  const checked: { share: Share; held: number; ahead: number; ends: number }[] =
+  const checked: { share: Share; held: number; found: number; ends: number }[] =
     row === undefined
       ? []
       : [
           {
             share: "app",
             held: row.app,
-            ahead: row.appAhead,
+            found: row.served.app,
             ends: row.appEnds ?? now,
           },
           {
             share: "person",
             held: row.person,
-            ahead: row.personAhead,
+            found: row.served.person,
             ends: row.personEnds ?? now,
           },
           {
             share: "client",
             held: row.client,
-            ahead: row.clientAhead,
+            found: row.served.client,
             ends: row.clientEnds ?? now,
           },
         ];
-  const binding = checked.find(
-    ({ share, held, ahead }) => held + ahead >= shares[share]
-  );
+  const binding = checked.find(({ share, found }) => found >= shares[share]);
   if (binding === undefined) {
     return { waitingFor: "client", retryAfterSeconds: maxAskAgainSeconds };
   }

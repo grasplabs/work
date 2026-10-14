@@ -1470,18 +1470,22 @@ export class RunHost extends RpcTarget {
    * Admits `attempt` against its run lineage's quotas (`admitAttempt`),
    * throwing the refusal; nothing to settle for a host of its own. A step
    * that has waited for load as long as a step may is refused
-   * (`workflow.queue_timeout`) before it asks.
+   * (`workflow.queue_timeout`): by the admission, against the policy as
+   * it is now, or, with none, before it asks.
    */
   async #admit(
     attempt: StepAttempt,
     { waited, since, maxWaitMs }: WaitedSoFar
   ): Promise<AttemptAdmission | Busy> {
-    // Waited as long as a step may: it fails, though a share came free as
-    // it slept, and none of its code runs.
-    if (since !== undefined && Date.now() - since >= maxWaitMs) {
-      throw workflowErrors.create("workflow.queue_timeout", { maxWaitMs });
-    }
     if (this.#hooks.admitAttempt === undefined) {
+      // Waited as long as a step may: it fails, though a share came free
+      // as it slept, and none of its code runs. With an admission, the
+      // admission decides (quotas.ts), by the cap as it is now, not the
+      // one the step's last refusal named: an operator may have raised it
+      // as the step slept.
+      if (since !== undefined && Date.now() - since >= maxWaitMs) {
+        throw workflowErrors.create("workflow.queue_timeout", { maxWaitMs });
+      }
       return unadmitted;
     }
     try {

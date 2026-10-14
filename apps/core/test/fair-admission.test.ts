@@ -659,6 +659,68 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
     });
   });
 
+  it("hold back for those waiting only the shares they can take together, under a person's and an App's share at once", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const [kept, first, second, third, fourth] = await Promise.all([
+      ownerOf(builder),
+      ownerOf(builder),
+      ownerOf(builder),
+      ownerOf(builder),
+      ownerOf(builder),
+    ]);
+
+    const result = await withShares(
+      {
+        workflowClientAttempts: 4,
+        workflowPersonAttempts: 1,
+        workflowAppAttempts: 1,
+      },
+      async () => {
+        // The client's share full, and the Apps of the next four each
+        // hold its own, so they wait their turn.
+        const held = await admit(asPerson(kept, "p0"), "h0");
+        const freed = [
+          await admit(asPerson(first, "q1"), "h1"),
+          await admit(asPerson(second, "q2"), "h2"),
+          await admit(asPerson(third, "q3"), "h3"),
+        ];
+        const older = [
+          [asPerson(second, "p1"), "w1"],
+          [asPerson(third, "p1"), "w2"],
+          [asPerson(first, "p2"), "w3"],
+          [asPerson(first, "p3"), "w4"],
+        ] as const;
+        const inOrder = async (): Promise<string[]> => {
+          const answers: string[] = [];
+          for (const [owner, step] of older) {
+            // oxlint-disable-next-line no-await-in-loop -- in queue order
+            answers.push(shown(await admit(owner, step)));
+          }
+          return answers;
+        };
+        const waiting = await inOrder();
+        await Promise.all(freed.map(settled));
+        // One lease runs: of those waiting, one person's two places take
+        // one lease, and one App's two take one, so a third is free.
+        const newcomer = shown(await admit(asPerson(fourth, "p4"), "n1"));
+        const after = await inOrder();
+        return { held: shown(held), waiting, newcomer, after };
+      }
+    );
+
+    expect(result).toStrictEqual({
+      held: "ok",
+      waiting: [
+        "workflow.queued:app",
+        "workflow.queued:app",
+        "workflow.queued:app",
+        "workflow.queued:app",
+      ],
+      newcomer: "ok",
+      after: ["ok", "workflow.queued:person", "ok", "workflow.queued:app"],
+    });
+  });
+
   it("put a place that stopped asking at the back when it asks again", async () => {
     const builder = await signedInApi(idp, "builder");
     const owner = await ownerOf(builder);
@@ -1341,5 +1403,57 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
     });
 
     expect(result).toStrictEqual({ failed: "workflow.queue_timeout", hits: 0 });
+  });
+
+  it("keep a step waiting past the cap its last refusal named, once the operator raised it as the step slept", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, {
+      ...workflowFiles("noop", "  return 1;"),
+      ...idle,
+      ...workflowFiles(
+        "counted",
+        `  await step.do("work", { description: "Work" }, async () => {
+    await env.APP.call("hit", "work");
+    return 1;
+  });
+  return 1;`,
+        { work: 1 }
+      ),
+    });
+    const holderRun = await idleRun(builder, app);
+    const holder = {
+      run: holderRun,
+      root: holderRun,
+      subject: builder.userId,
+      resource: app,
+    };
+
+    const result = await withShares(
+      { workflowClientAttempts: 2, workflowQueuedStepMs: 8000 },
+      async () => {
+        const held = await admit(holder, "holder");
+        const run = await builder.api.workflows.start(app, "counted");
+        // Its second round sleeps until its eight seconds are up, as its
+        // refusal said; the operator raises the cap as it sleeps, and its
+        // share comes free.
+        await eventually(async () => {
+          await expect(loadWaitsOf(run.id)).resolves.toHaveLength(2);
+        });
+        policyWith({ workflowClientAttempts: 2 });
+        await settled(held);
+        await finished(run.id);
+        return {
+          failed: (await failedWith(run.id)) ?? null,
+          status: await liveStatus(run.id),
+          hits: await hitsOf(app, builder.userId, "work"),
+        };
+      }
+    );
+
+    expect(result).toStrictEqual({
+      failed: null,
+      status: "complete",
+      hits: 1,
+    });
   });
 });
