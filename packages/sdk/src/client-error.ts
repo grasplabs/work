@@ -91,6 +91,30 @@ const clientErrors = {
       "Whether this finished is unknown, so it wasn't sent again. Sending it again with the same idempotency key gets a change's outcome; an action runs again, though steps it already completed aren't repeated.",
     category: "uncertain",
   },
+  "stream.cancelled": {
+    message:
+      "You stopped following this action. The platform cancels it once no one follows it; what it already did stays done.",
+    category: "operational",
+  },
+  "stream.outcome_unknown": {
+    message:
+      "The connection to this action was lost and couldn't be restored, so its outcome is unknown. It wasn't run again: run it again with the same idempotency key to get its outcome.",
+    category: "uncertain",
+  },
+  "contract.mode_mismatch": {
+    message:
+      "That action streams its progress: run it with useStream or client.stream. Any other action runs with useAction or client.action.",
+    category: "contract",
+  },
+  "stream.active": {
+    message:
+      "This stream is still running: wait for it to finish, or cancel it, before you run it again.",
+    category: "contract",
+  },
+  "stream.unavailable": {
+    message: "Streaming actions can't run here.",
+    category: "operational",
+  },
   "operation.unreachable": {
     message: "The App's server couldn't be reached. Try again.",
     category: "operational",

@@ -168,6 +168,8 @@ export const permissionMaxActions = 16;
  * as, a platform binding. Tests check this list against both Workers' env.
  */
 const platformBindingNames: ReadonlySet<string> = new Set([
+  // One foreground action's invocation (core's src/action-invocation.ts).
+  "ACTION_INVOCATIONS",
   "AI",
   // A workflow run's own App (its server methods), next to its permissions.
   "APP",

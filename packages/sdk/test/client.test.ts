@@ -69,6 +69,12 @@ const network = (
   };
 };
 
+/** A transport's `watch` where nothing follows a query. */
+const unwatched: ClientTransport["watch"] = async () => {
+  await Promise.resolve();
+  throw new Error("Nothing here follows a query.");
+};
+
 /** The structured error `promise` rejected with. */
 const failureOf = async (promise: Promise<unknown>): Promise<GraspError> => {
   try {
@@ -89,6 +95,67 @@ const idOf = (suffix: number): Id<"notes"> =>
   `01890000-0000-7000-8000-${String(suffix).padStart(12, "0")}` as Id<"notes">;
 
 const noteId = idOf(1);
+
+/** What a test doesn't listen to. */
+const unheard = (): void => {
+  // Nothing to hear.
+};
+
+/**
+ * A client following a stream that never ends, whose page answers a
+ * cancel with `answer`: the `cancel` a hook is handed, and how to stop.
+ */
+const following = async (answer: () => Promise<unknown>) => {
+  const transport: ClientTransport = {
+    call: async () => await Promise.reject(new Error("Not this.")),
+    watch: unwatched,
+    stream: async () => await Promise.resolve({ release: () => null }),
+    cancelStream: answer,
+  };
+  const client = new GraspClient(transport);
+  const started = Promise.withResolvers<() => Promise<void>>();
+  const controller = new AbortController();
+  const running = (async () => {
+    try {
+      await clientInternals(client).stream(
+        api.notes.exportAll,
+        { format: "csv" },
+        { signal: controller.signal },
+        {
+          onStarted: (cancel) => {
+            started.resolve(cancel);
+          },
+          onRecovering: unheard,
+          onAttached: unheard,
+          onProgress: unheard,
+        }
+      );
+    } catch {
+      // Stopped following below.
+    }
+  })();
+  const cancel = await started.promise;
+  return {
+    cancel,
+    stop: async () => {
+      controller.abort();
+      await running;
+    },
+  };
+};
+
+/** "acknowledged", or the code a cancel answered by `answer` was refused with. */
+const cancelled = async (answer: () => Promise<unknown>): Promise<string> => {
+  const { cancel, stop } = await following(answer);
+  try {
+    await cancel();
+    return "acknowledged";
+  } catch (error) {
+    return error instanceof GraspError ? error.code : "thrown";
+  } finally {
+    await stop();
+  }
+};
 
 describe("the session client and the request budget", () => {
   it("sends a save again past its budget's refusals, waiting as each says, until it is taken", async () => {
@@ -519,5 +586,84 @@ describe("the session client following a query", () => {
     } finally {
       stop();
     }
+  });
+});
+
+describe("the session client and a streaming action's cancel", () => {
+  it("resolves a cancel only once the host acknowledged it, and never takes a lost or refused one for one", async () => {
+    expect({
+      acknowledged: await cancelled(
+        async () => await Promise.resolve({ requested: true })
+      ),
+      notRunning: await cancelled(
+        async () => await Promise.resolve({ requested: false })
+      ),
+      unreadable: await cancelled(
+        async () => await Promise.resolve({ result: { ok: true, value: null } })
+      ),
+      lost: await cancelled(
+        async () => await Promise.reject(new Error("The connection was reset."))
+      ),
+      refused: await cancelled(async () => await Promise.reject(rateLimited())),
+    }).toStrictEqual({
+      acknowledged: "acknowledged",
+      notRunning: "acknowledged",
+      unreadable: "operation.unreachable",
+      lost: "operation.unreachable",
+      refused: "screen.rate_limited",
+    });
+  });
+});
+
+describe("the session client and a cancel asked for while a stream opens", () => {
+  it("sends the cancel only once the invocation has answered", async () => {
+    const seen: string[] = [];
+    const opening = Promise.withResolvers<null>();
+    const transport: ClientTransport = {
+      call: async () => await Promise.reject(new Error("Not this.")),
+      watch: unwatched,
+      stream: async () => {
+        seen.push("open asked");
+        await opening.promise;
+        seen.push("opened");
+        return { release: () => null };
+      },
+      cancelStream: async () => {
+        seen.push("cancel sent");
+        return await Promise.resolve({ requested: true });
+      },
+    };
+    const client = new GraspClient(transport);
+    const started = Promise.withResolvers<() => Promise<void>>();
+    const controller = new AbortController();
+    const running = (async () => {
+      try {
+        await clientInternals(client).stream(
+          api.notes.exportAll,
+          { format: "csv" },
+          { signal: controller.signal },
+          {
+            onStarted: (cancel) => {
+              started.resolve(cancel);
+            },
+            onRecovering: unheard,
+            onAttached: unheard,
+            onProgress: unheard,
+          }
+        );
+      } catch {
+        // Stopped following below.
+      }
+    })();
+    const cancel = await started.promise;
+    const cancelling = cancel();
+    await vi.waitFor(() => {
+      expect(seen).toContain("open asked");
+    });
+    opening.resolve(null);
+    await cancelling;
+    controller.abort();
+    await running;
+    expect(seen).toStrictEqual(["open asked", "opened", "cancel sent"]);
   });
 });

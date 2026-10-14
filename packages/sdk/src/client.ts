@@ -33,5 +33,8 @@ export type {
   MutationReference,
   QueryOptions,
   QueryReference,
+  StreamArguments,
+  StreamOptions,
+  StreamReference,
   SubmitOptions,
 } from "./client-core.ts";

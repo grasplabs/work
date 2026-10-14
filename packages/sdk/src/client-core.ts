@@ -1,6 +1,9 @@
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import {
+  functionRequestMaxBytes,
+  streamIdleCancelMs,
+} from "@grasp-os/shared/operation-limits";
 
 import {
   clientError,
@@ -19,6 +22,7 @@ import type { PortableClientOptions } from "./client-portable.ts";
 import type {
   ArgsOf,
   OperationReference,
+  ProgressOf,
   ReferenceKind,
   ReturnOf,
 } from "./references.ts";
@@ -95,6 +99,28 @@ import { readDescriptor } from "./value-read.ts";
 // - A malformed reference or argument reaches the host: references are
 //   read as data, their descriptors checked, and arguments validated
 //   before anything is sent; the host checks all of it again.
+//
+// A streaming action (spec 10.7.6, `stream`) is followed rather than
+// answered: its progress snapshots, then its result, over the transport's
+// `stream`. More ways it can fail:
+// - A reference of the wrong mode runs anyway: `action` takes only a
+//   single-answer reference and `stream` only a streaming one, refused
+//   before anything is sent (`contract.mode_mismatch`); the host refuses
+//   them too.
+// - A lost connection runs it again: the client attaches to the same
+//   invocation under the same key (`attach`), which never starts one, and
+//   gets its latest progress and its result; while it does, the caller is
+//   told it is recovering. If it can't, it rejects
+//   `stream.outcome_unknown` with the key, never a made-up outcome.
+// - Progress is applied unchecked, or out of order: each snapshot is
+//   validated against the reference's own `stream` descriptor and handed
+//   on only if newer than the last (a gap is snapshots the host replaced
+//   with a newer one), frozen, so no caller changes another's.
+// - A callback's failure turns into the action's: a throwing `onProgress`
+//   is only no longer called; the result is still the action's.
+// - Stopping following cancels another follower's run: aborting lets go
+//   of this caller's connection only; the host cancels the run once no
+//   one follows it. Cancelling it for everyone is a command of its own.
 
 /**
  * How the client reaches the host: one call of the App `app`, its
@@ -116,6 +142,21 @@ export interface ClientTransport {
     onSnapshot: (push: unknown) => void,
     onLost: () => void
   ) => Promise<{ release: () => void }>;
+  /**
+   * Follows one of a streaming action's invocations: `start` starts it
+   * (or joins it under the same key and input), `attach` only reads it
+   * again. `onFrame` gets each frame core sent, as data, then
+   * `{ type: "closed" }` once the connection ends; the promise resolves
+   * once it is open, with how to let go of it, or rejects as `call` does.
+   * A transport without it runs no streaming action.
+   */
+  stream?: (
+    what: "stream" | "attach",
+    request: string,
+    onFrame: (frame: unknown) => void
+  ) => Promise<StreamLink>;
+  /** Cancels the invocation `request` names, for everyone following it. */
+  cancelStream?: (request: string) => Promise<unknown>;
 }
 
 /**
@@ -142,6 +183,12 @@ const unsent = (refusal: GraspError): Error => {
 interface Bound {
   readonly generation?: number;
   principal?: string;
+}
+
+/** A connection to a streaming action's invocation, as the transport opened it. */
+export interface StreamLink {
+  /** Lets go of it: the invocation goes on for anyone else following it. */
+  readonly release: () => unknown;
 }
 
 /** Options of a query call. */
@@ -177,6 +224,34 @@ export type MutationReference = OperationReference<
 >;
 /** A public action reference that answers once (not a stream). */
 export type ActionReference = OperationReference<unknown, unknown, "action">;
+/** A public reference to an action that streams its progress. */
+export type StreamReference = OperationReference<
+  unknown,
+  unknown,
+  "action",
+  "public",
+  unknown
+> & {
+  // Spelled out: compared through its type parameters alone, a reference
+  // that answers once (its progress `never`) would pass for one that
+  // streams.
+  readonly mode: "stream";
+};
+
+/** Options of a streaming action's call through `client.stream`. */
+export interface StreamOptions<Progress> extends SubmitOptions {
+  /**
+   * Gets each progress snapshot, newer than the last, frozen. If it
+   * throws, it is no longer called; the call goes on.
+   */
+  readonly onProgress: (progress: Progress) => void;
+}
+
+/** The arguments of `client.stream`: its input, then its options. */
+export type StreamArguments<Reference> = [
+  args: ArgsOf<Reference>,
+  options: StreamOptions<ProgressOf<Reference>>,
+];
 
 /**
  * The arguments of a call of `Reference`, then its options. The input may
@@ -191,6 +266,8 @@ export type CallArguments<Reference, Options> =
 /** A reference as the client read it: what it sends, and its input's descriptor. */
 export interface ReadReference {
   readonly kind: ReferenceKind;
+  /** The descriptor of its progress, for a streaming action only. */
+  readonly stream: ValueDescriptor | undefined;
   readonly resourceId: string;
   readonly resourceVersion: number;
   readonly contractId: string;
@@ -203,7 +280,7 @@ const fingerprintPattern = /^[0-9a-f]{64}$/u;
 /** References read already, by the object App code passes. */
 const readReferences = new WeakMap<object, ReadReference>();
 
-/** Whether `value` names a public, single-answer function of `kind`. */
+/** Whether `value` names a public function of `kind`, of either mode. */
 const isReferenceOf = (
   value: unknown,
   kind: ReferenceKind
@@ -212,11 +289,12 @@ const isReferenceOf = (
   resourceVersion: number;
   contractId: string;
   fingerprint: string;
+  mode: "single" | "stream";
 } =>
   isPlainObject(value) &&
   value.kind === kind &&
   value.visibility === "public" &&
-  value.mode === "single" &&
+  (value.mode === "single" || (kind === "action" && value.mode === "stream")) &&
   typeof value.resourceId === "string" &&
   Number.isInteger(value.resourceVersion) &&
   typeof value.contractId === "string" &&
@@ -224,28 +302,46 @@ const isReferenceOf = (
   fingerprintPattern.test(value.fingerprint);
 
 /**
- * `value` as a public, single-answer reference of `kind`, read as data,
- * its descriptor checked; or `contract.invalid_request`.
+ * `value` as a public reference of `kind` and `mode`, read as data, its
+ * descriptors checked; `contract.mode_mismatch` for an action of the
+ * other mode, `contract.invalid_request` for anything else.
  */
-const readReference = (value: unknown, kind: ReferenceKind): ReadReference => {
+const readReference = (
+  value: unknown,
+  kind: ReferenceKind,
+  mode: "single" | "stream" = "single"
+): ReadReference => {
   const known =
     typeof value === "object" && value !== null
       ? readReferences.get(value)
       : undefined;
-  if (known !== undefined && known.kind === kind) {
+  if (
+    known !== undefined &&
+    known.kind === kind &&
+    (known.stream !== undefined) === (mode === "stream")
+  ) {
     return known;
   }
   if (!isReferenceOf(value, kind)) {
     throw clientError("contract.invalid_request");
   }
+  if (value.mode !== mode) {
+    throw clientError("contract.mode_mismatch");
+  }
   let args: ValueDescriptor;
+  let stream: ValueDescriptor | undefined;
   try {
     args = readDescriptor(value.args, 1, { nodes: 0 });
+    stream =
+      mode === "stream"
+        ? readDescriptor(value.stream, 1, { nodes: 0 })
+        : undefined;
   } catch {
     throw clientError("contract.invalid_request");
   }
   const read: ReadReference = {
     kind,
+    stream,
     resourceId: value.resourceId,
     resourceVersion: value.resourceVersion,
     contractId: value.contractId,
@@ -287,6 +383,10 @@ const submitOptionKeys: ReadonlySet<string> = new Set([
   "signal",
   "idempotencyKey",
 ]);
+const streamOptionKeys: ReadonlySet<string> = new Set([
+  ...submitOptionKeys,
+  "onProgress",
+]);
 
 const keyPattern = /^[ -~]{1,128}$/u;
 
@@ -297,7 +397,11 @@ const keyPattern = /^[ -~]{1,128}$/u;
 const readOptions = (
   options: unknown,
   allowed: ReadonlySet<string>
-): { signal?: AbortSignal; idempotencyKey?: string } => {
+): {
+  signal?: AbortSignal;
+  idempotencyKey?: string;
+  onProgress?: (progress: unknown) => void;
+} => {
   if (options === undefined) {
     return {};
   }
@@ -309,9 +413,12 @@ const readOptions = (
       throw new TypeError(`"${key}" isn't an option of this call.`);
     }
   }
-  const { signal, idempotencyKey } = options;
+  const { signal, idempotencyKey, onProgress } = options;
   if (signal !== undefined && !(signal instanceof AbortSignal)) {
     throw new TypeError("signal is an AbortSignal.");
+  }
+  if (onProgress !== undefined && typeof onProgress !== "function") {
+    throw new TypeError("onProgress is a function.");
   }
   if (
     idempotencyKey !== undefined &&
@@ -322,6 +429,13 @@ const readOptions = (
   return {
     ...(signal === undefined ? {} : { signal }),
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(typeof onProgress === "function"
+      ? {
+          // SAFETY: a function App code passed; it gets what it asked for.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          onProgress: onProgress as (progress: unknown) => void,
+        }
+      : {}),
   };
 };
 
@@ -637,7 +751,110 @@ export interface ClientInternals {
    * its descriptor checked; or `contract.invalid_request`.
    */
   readReference: (value: unknown, kind: ReferenceKind) => ReadReference;
+  /**
+   * Runs the streaming action `reference` names, as `client.stream` does,
+   * telling `events` how it goes: what `useStream` shows.
+   */
+  stream: (
+    reference: unknown,
+    args: unknown,
+    options: unknown,
+    events: StreamEvents
+  ) => Promise<unknown>;
 }
+
+/** How a streaming action's call goes, beyond its progress and result. */
+export interface StreamEvents {
+  /** It was admitted: `cancel` cancels it for everyone following it. */
+  readonly onStarted: (cancel: () => Promise<void>) => void;
+  /** Its connection was lost, and the client is attaching again. */
+  readonly onRecovering: () => void;
+  /** It is followed again after a lost connection. */
+  readonly onAttached: () => void;
+  /** A newer progress snapshot, frozen. */
+  readonly onProgress: (progress: unknown) => void;
+}
+
+/** How a streaming action's connection ended. */
+type Followed =
+  | {
+      readonly kind: "settled";
+      readonly settled: Settled;
+      /** Whether the invocation answered, rather than its connection being refused. */
+      readonly answered: boolean;
+    }
+  | { readonly kind: "lost" }
+  | { readonly kind: "aborted" };
+
+/** How often a client starts a stream refused before it reached the invocation. */
+const streamStartAttempts = 3;
+
+/**
+ * Whether a start refused as `followed` (the `refused`th refusal) is
+ * worth sending again: only one refused before it reached the invocation
+ * (`refusedBeforeCallCodes`). One the invocation answered settled its
+ * receipt, which the same key only answers again.
+ */
+const startAgain = (
+  followed: Followed,
+  what: "stream" | "attach",
+  refused: number
+): boolean =>
+  what === "stream" &&
+  followed.kind === "settled" &&
+  !followed.answered &&
+  followed.settled.kind === "failed" &&
+  refusedBeforeCallCodes.has(followed.settled.error.code) &&
+  refused < streamStartAttempts;
+
+/** How often a client attaches again to a stream whose connection was lost. */
+const streamAttachAttempts = 8;
+
+/** Whether `signal` was aborted, read afresh. */
+const isAborted = (signal: AbortSignal | undefined): boolean =>
+  signal?.aborted === true;
+
+/** `value`, and everything in it, frozen: a snapshot no caller can change. */
+const frozen = (value: unknown): unknown => {
+  if (typeof value === "object" && value !== null) {
+    for (const item of Object.values(value)) {
+      frozen(item);
+    }
+    Object.freeze(value);
+  }
+  return value;
+};
+
+/** A stream's frame, as the client reads it; anything else is undefined. */
+const readFrame = (
+  frame: unknown
+):
+  | { readonly type: "progress"; readonly seq: number; readonly value: unknown }
+  | { readonly type: "result"; readonly settled: Settled }
+  | { readonly type: "closed" }
+  | undefined => {
+  if (!isPlainObject(frame)) {
+    return undefined;
+  }
+  if (
+    frame.type === "progress" &&
+    typeof frame.seq === "number" &&
+    Number.isSafeInteger(frame.seq) &&
+    "value" in frame
+  ) {
+    return { type: "progress", seq: frame.seq, value: frame.value };
+  }
+  if (frame.type === "result") {
+    return { type: "result", settled: readAnswer({ result: frame.result }) };
+  }
+  if (frame.type === "refused") {
+    const settled = readAnswer({
+      result: { ok: false, error: frame.error },
+    });
+    return { type: "result", settled };
+  }
+  return frame.type === "closed" ? { type: "closed" } : undefined;
+};
 
 /** A submission in flight, by its scoped key. */
 interface Submission {
@@ -824,6 +1041,8 @@ export class GraspClient {
         client.#retryFailed();
       },
       readReference,
+      stream: async (reference, args, options, events) =>
+        await client.#stream(reference, args, options, events),
     });
   }
 
@@ -892,6 +1111,271 @@ export class GraspClient {
     // SAFETY: as in `query`.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return value as ReturnOf<Reference>;
+  }
+
+  /**
+   * Runs the streaming action `reference` names with `args` (spec
+   * 10.7.6): `options.onProgress` gets each newer progress snapshot, and
+   * the promise resolves with the action's declared result, or rejects
+   * with a structured error, `operation.cancelled` when it was cancelled.
+   * A lost connection attaches to the same invocation again, never runs
+   * it twice (see the header). Aborting `signal` stops only this caller
+   * following it: the host cancels it once no one does.
+   */
+  async stream<Reference extends StreamReference>(
+    reference: Reference,
+    ...[args, options]: StreamArguments<Reference>
+  ): Promise<ReturnOf<Reference>> {
+    const value = await this.#stream(reference, args, options);
+    // SAFETY: as in `query`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return value as ReturnOf<Reference>;
+  }
+
+  /** See `stream`; `events` are a hook's (`ClientInternals.stream`). */
+  async #stream(
+    reference: unknown,
+    args: unknown,
+    options: unknown,
+    events?: StreamEvents
+  ): Promise<unknown> {
+    const read = readReference(reference, "action", "stream");
+    const { signal, idempotencyKey, onProgress } = readOptions(
+      options,
+      streamOptionKeys
+    );
+    const input = normalized(read, args);
+    const key = idempotencyKey ?? freshKey();
+    const request = JSON.stringify({
+      reference: wireReference(read),
+      input,
+      idempotencyKey: key,
+    });
+    if (
+      new TextEncoder().encode(request).byteLength > functionRequestMaxBytes
+    ) {
+      throw clientError("contract.input_too_large", {
+        maxBytes: functionRequestMaxBytes,
+      });
+    }
+    const transport = this.#transport;
+    if (
+      transport === undefined ||
+      transport.stream === undefined ||
+      transport.cancelStream === undefined
+    ) {
+      throw clientError("stream.unavailable");
+    }
+    const open = transport.stream.bind(transport);
+    const cancel = transport.cancelStream.bind(transport);
+    if (signal?.aborted === true) {
+      throw clientError("submission.cancelled", { sent: false });
+    }
+    let seen = 0;
+    let listening = onProgress !== undefined;
+    const progressed = (value: unknown): void => {
+      events?.onProgress(value);
+      if (!listening) {
+        return;
+      }
+      try {
+        onProgress?.(value);
+      } catch {
+        // Its failure is its own: it isn't called again, and the action
+        // goes on (spec 10.7.6).
+        listening = false;
+      }
+    };
+    /** A snapshot, if newer than the last and as its descriptor allows. */
+    const onProgressFrame = (frameSeq: number, value: unknown): void => {
+      if (frameSeq <= seen || read.stream === undefined) {
+        return;
+      }
+      const checked = validateValue(read.stream, value);
+      if (checked.issues === undefined) {
+        seen = frameSeq;
+        progressed(frozen(checked.value));
+      }
+    };
+    /** Resolves once the invocation first answered (true), or never will. */
+    const opened = Promise.withResolvers<boolean>();
+    /** Follows the invocation over one connection, until it ends. */
+    const follow = async (what: "stream" | "attach"): Promise<Followed> => {
+      const ended = Promise.withResolvers<Followed>();
+      const onFrame = (raw: unknown): void => {
+        const frame = readFrame(raw);
+        if (frame?.type === "closed") {
+          ended.resolve({ kind: "lost" });
+        } else if (frame?.type === "result") {
+          ended.resolve({
+            kind: "settled",
+            settled: frame.settled,
+            answered: true,
+          });
+        } else if (frame?.type === "progress") {
+          onProgressFrame(frame.seq, frame.value);
+        }
+      };
+      let link: StreamLink;
+      try {
+        link = await open(what, request, onFrame);
+        opened.resolve(true);
+      } catch (error) {
+        return {
+          kind: "settled",
+          settled: readRejection(error),
+          answered: false,
+        };
+      }
+      if (what === "attach") {
+        events?.onAttached();
+      }
+      const onAbort = (): void => {
+        ended.resolve({ kind: "aborted" });
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted === true) {
+        onAbort();
+      }
+      try {
+        return await ended.promise;
+      } finally {
+        signal?.removeEventListener("abort", onAbort);
+        try {
+          await link.release();
+        } catch {
+          // Gone already.
+        }
+      }
+    };
+    // A cancel asked for before the invocation answered waits for it: sent
+    // before, it could reach the host ahead of the start and find nothing
+    // to cancel, while the run then went ahead. One that never opened has
+    // nothing to cancel.
+    events?.onStarted(async () => {
+      if (await opened.promise) {
+        await this.#cancelStream(request, cancel);
+      }
+    });
+    try {
+      return await this.#settleStream(follow, {
+        resourceId: read.resourceId,
+        key,
+        events,
+        signal,
+      });
+    } finally {
+      opened.resolve(false);
+    }
+  }
+
+  /**
+   * Follows a streaming action's invocation until it settles (see the
+   * header): its value, or its failure thrown. Starts it once, then, once
+   * a start may have reached the host, only ever attaches; a reconnect
+   * refused before it reached the invocation goes on recovering; after
+   * `streamAttachAttempts` it rejects `stream.outcome_unknown` with the key.
+   */
+  async #settleStream(
+    follow: (what: "stream" | "attach") => Promise<Followed>,
+    {
+      resourceId,
+      key,
+      events,
+      signal,
+    }: {
+      readonly resourceId: string;
+      readonly key: string;
+      readonly events: StreamEvents | undefined;
+      readonly signal: AbortSignal | undefined;
+    }
+  ): Promise<unknown> {
+    let refused = 0;
+    // Once a start may have reached the host, only ever attach.
+    let what: "stream" | "attach" = "stream";
+    for (let tries = 1; ; tries += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      const followed = await follow(what);
+      if (followed.kind === "aborted") {
+        throw clientError("stream.cancelled", { idempotencyKey: key });
+      }
+      const settled: Settled =
+        followed.kind === "settled" ? followed.settled : { kind: "lost" };
+      if (settled.kind === "value") {
+        this.#changed(resourceId);
+        return settled.value;
+      }
+      // A refusal of a reconnect before it reached the invocation (the
+      // request budget) says nothing of the run: recovery goes on.
+      const attachRefused =
+        what === "attach" &&
+        settled.kind === "failed" &&
+        followed.kind === "settled" &&
+        !followed.answered &&
+        refusedBeforeCallCodes.has(settled.error.code);
+      if (settled.kind === "failed" && !attachRefused) {
+        const { error } = settled;
+        if (fences(error.code)) {
+          this.#fence(error);
+        }
+        refused += 1;
+        if (!startAgain(followed, what, refused)) {
+          this.#changed(resourceId);
+          // An outcome the host can't tell carries the key, so a caller that
+          // let the client pick it can still recover the receipt by it.
+          throw error.category === "uncertain" ? withKey(error, key) : error;
+        }
+      } else {
+        what = "attach";
+        if (tries > streamAttachAttempts) {
+          // What it ran may have committed: the App's queries are read again.
+          this.#changed(resourceId);
+          throw clientError("stream.outcome_unknown", { idempotencyKey: key });
+        }
+        events?.onRecovering();
+      }
+      // A refused start waits as long as the refusal said; an attach comes
+      // back before the host cancels a run no one follows.
+      const wait =
+        what === "stream" || attachRefused
+          ? waitAfter(settled, tries)
+          : Math.min(retryDelay(tries), streamIdleCancelMs / 2);
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      await sleep(wait, signal);
+      if (isAborted(signal)) {
+        throw clientError("stream.cancelled", { idempotencyKey: key });
+      }
+    }
+  }
+
+  /**
+   * Asks the host to cancel the invocation `request` names: resolves once
+   * it acknowledged the request (`{ requested }`), whether or not the run
+   * was still going; rejects a refusal with its error, and an answer that
+   * isn't an acknowledgement, a lost one included, with
+   * `operation.unreachable`, so a caller never takes an unconfirmed cancel
+   * for one.
+   */
+  async #cancelStream(
+    request: string,
+    send: (text: string) => Promise<unknown>
+  ): Promise<void> {
+    let answer: unknown;
+    try {
+      answer = await send(request);
+    } catch (error) {
+      const settled = readRejection(error);
+      if (settled.kind === "failed") {
+        if (fences(settled.error.code)) {
+          this.#fence(settled.error);
+        }
+        throw settled.error;
+      }
+      throw clientError("operation.unreachable");
+    }
+    if (!isPlainObject(answer) || typeof answer.requested !== "boolean") {
+      throw clientError("operation.unreachable");
+    }
   }
 
   /** See `ClientInternals.entry`. */

@@ -12,6 +12,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { operationErrors } from "@grasp-os/shared/operations";
 import { portableFunctionPath } from "@grasp-os/shared/portable";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -21,17 +22,29 @@ import {
   screenLeaseHeader,
   screenLimits,
   screenPersonHeader,
+  streamCallActions,
 } from "@grasp-os/shared/screens";
+import type { StreamCallAction } from "@grasp-os/shared/screens";
+import { idempotencyKeySchema } from "@grasp-os/shared/submissions";
 
-import { callAppFunction } from "./app-functions.ts";
-import type { FunctionAnswer } from "./app-functions.ts";
+import {
+  accessOf,
+  actionInvocation,
+  invocationName,
+} from "./action-invocation.ts";
+import {
+  callAppFunction,
+  readFunctionRequest,
+  refusalOf,
+} from "./app-functions.ts";
+import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
 import type { TokenCheck } from "./auth/app-tokens.ts";
 import { identify } from "./auth/identity.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedArtifact } from "./screen-trust.ts";
+import { delivering, leasedArtifact, requireDelivery } from "./screen-trust.ts";
 import { admitted } from "./screens-rpc.ts";
 
 // A running App's screen calling one of its App's functions (spec 32.6):
@@ -92,6 +105,23 @@ import { admitted } from "./screens-rpc.ts";
 //   before its answer, and a refusal recorded (screen-trust.ts).
 // - The budget: the same as the person's screens of that App, so a token
 //   adds no requests to it.
+//
+// A streaming action (spec 10.7.6) goes through the same admission, at
+// `<path>/<app>/<stream | attach | cancel>`, and runs in an object of its
+// own (action-invocation.ts), which keeps its latest progress and its
+// receipt. Its frames outlive the request that started them, so:
+// - Progress reaches someone who lost access, or code that lost its
+//   approval: the relay checks again, at most every `streamRecheckMs`
+//   before progress and always before the result, that the session is
+//   still the person's, their role in the App and the build's delivery;
+//   checked on a timer, frames or not, so a silent action is checked too;
+//   a refusal ends the relay with it and cancels the invocation at once.
+// - Access narrowed since the stream started reaches what it computed:
+//   the relay refuses once the person's role or teams differ from those
+//   it started under (`operation.access_changed`), and so does the
+//   invocation on an attach or a join.
+// - Another person reaches the stream: the invocation is named by the
+//   person signed in, never by anything in the request.
 
 /** How long a screen waits for a function's answer. */
 const screenCallMs = 30_000;
@@ -116,6 +146,32 @@ export const functionCallApp = (pathname: string): string | undefined =>
 /** The App ID in `pathname`, if it is a portable host's call's path. */
 export const portableCallApp = (pathname: string): string | undefined =>
   appAfter(pathname, portableFunctionPath);
+
+const streamActions: ReadonlySet<string> = new Set(streamCallActions);
+
+const isStreamAction = (value: string): value is StreamCallAction =>
+  streamActions.has(value);
+
+/** The App ID and what to do, if `pathname` is a streaming action's call. */
+const functionStreamCall = (
+  pathname: string
+): { app: string; action: StreamCallAction } | undefined => {
+  const prefix = `${appFunctionPath}/`;
+  if (!pathname.startsWith(prefix)) {
+    return undefined;
+  }
+  const [app, action, ...rest] = pathname.slice(prefix.length).split("/");
+  if (
+    app === undefined ||
+    app.length === 0 ||
+    action === undefined ||
+    rest.length > 0 ||
+    !isStreamAction(action)
+  ) {
+    return undefined;
+  }
+  return { app, action };
+};
 
 /** The status a refusal before the call answers with. */
 export const statusOf = (code: string): number => {
@@ -291,6 +347,35 @@ const boundedCall = async (
 };
 
 /**
+ * The refusal of a screen's call whose frame names someone other than
+ * the person signed in (`screenPersonHeader`, see the header), or none:
+ * a streaming action's calls as much as a plain call.
+ */
+const personRefusal = (
+  request: Request,
+  person: Identity,
+  app: string,
+  requestId: string
+): Response | undefined => {
+  const named = request.headers.get(screenPersonHeader);
+  if (named === person.userId) {
+    return undefined;
+  }
+  const refusal =
+    named === null
+      ? screenErrors.create("screen.reload_required")
+      : authErrors.create("auth.principal_changed");
+  // Who was named and who is signed in stay out of the log: only why,
+  // and for which App.
+  log.info("app_function.person_refused", {
+    requestId,
+    app: app.slice(0, loggedAppMaxLength),
+    reason: refusal.code,
+  });
+  return errorResponse(statusOf(refusal.code), refusal, requestId);
+};
+
+/**
  * `POST /api/app-functions/<app>`: calls a function of the App for the
  * person signed in, as their screen running the build its lease names
  * (see the header). Answers the call's `FunctionAnswer`, whatever its
@@ -324,20 +409,9 @@ export const appFunctionResponse = async (
       requestId
     );
   }
-  const named = request.headers.get(screenPersonHeader);
-  if (named !== person.userId) {
-    const refusal =
-      named === null
-        ? screenErrors.create("screen.reload_required")
-        : authErrors.create("auth.principal_changed");
-    // Who was named and who is signed in stay out of the log: only why,
-    // and for which App.
-    log.info("app_function.person_refused", {
-      requestId,
-      app: app.slice(0, loggedAppMaxLength),
-      reason: refusal.code,
-    });
-    return errorResponse(statusOf(refusal.code), refusal, requestId);
+  const misnamed = personRefusal(request, person, app, requestId);
+  if (misnamed !== undefined) {
+    return misnamed;
   }
   return await boundedCall(
     request,
@@ -464,4 +538,389 @@ export const portableFunctionResponse = async (
       requestId
     )
   );
+};
+
+/** A call core admitted: who makes it, for which App, its body, its build. */
+interface AdmittedCall {
+  readonly person: Identity;
+  readonly id: AppId;
+  readonly body: string;
+  readonly artifact: string | undefined;
+}
+
+/**
+ * What every call of a screen's passes before anything reads its body
+ * (see the header): the method, the origin, JSON, a session, the
+ * person's rate, the body bounded and the lease read. A refusal as the
+ * response to answer.
+ */
+const admitCall = async (
+  request: Request,
+  env: Env,
+  app: string,
+  requestId: string
+): Promise<AdmittedCall | Response> => {
+  if (request.method !== "POST") {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  if (!(isOwnOrigin(request, env) && isJson(request))) {
+    return errorResponse(
+      403,
+      requestErrors.create("request.forbidden"),
+      requestId
+    );
+  }
+  const person = await identify(env, request.headers);
+  if (person === undefined) {
+    return errorResponse(
+      401,
+      authErrors.create("auth.unauthenticated"),
+      requestId
+    );
+  }
+  const misnamed = personRefusal(request, person, app, requestId);
+  if (misnamed !== undefined) {
+    return misnamed;
+  }
+  const id = await admitted(env, person, app);
+  // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
+  // chunks; its type says `any` only for streams in general.
+  const stream = request.body as ReadableStream<Uint8Array> | null;
+  const length = Number(request.headers.get("content-length") ?? 0);
+  const body =
+    stream === null || length > functionRequestMaxBytes
+      ? undefined
+      : await readAtMost(stream, functionRequestMaxBytes);
+  if (body === undefined) {
+    return errorResponse(
+      413,
+      requestErrors.create("request.too_large"),
+      requestId
+    );
+  }
+  const artifact = await leasedArtifact(
+    env,
+    person.userId,
+    id,
+    request.headers.get(screenLeaseHeader)
+  );
+  return { person, id, body: new TextDecoder().decode(body), artifact };
+};
+
+/**
+ * How often a stream's relay checks again that its person is signed in,
+ * with the role and teams the stream started under, and that the
+ * screen's build still gets the App's data: on a timer, whether frames
+ * come or not, and before the result whatever the time.
+ */
+const streamRecheckMs = 5000;
+
+/**
+ * Whether the person whose session `headers` carry is still `call`'s,
+ * with the access `access` fingerprints (organization role, teams and
+ * role in the App, `accessOf`), and its build still gets the App's data:
+ * throws the refusal otherwise.
+ */
+const stillDelivering = async (
+  env: Env,
+  headers: Headers,
+  { call, access }: { readonly call: AdmittedCall; readonly access: string },
+  stage: "push" | "delivery"
+): Promise<void> => {
+  const now = await identify(env, headers);
+  if (now?.userId !== call.person.userId) {
+    throw authErrors.create("auth.unauthenticated");
+  }
+  // Refuses, too, someone with no role in the App any more.
+  if ((await accessOf(env, now, call.id)) !== access) {
+    throw operationErrors.create("operation.access_changed");
+  }
+  await requireDelivery(env, now, call.id, call.artifact, {
+    operation: "stream",
+    stage,
+  });
+};
+
+/** One frame's line as the relay reads it: its type, if it is JSON at all. */
+const frameOf = (line: string): { type?: unknown; result?: unknown } => {
+  try {
+    const frame: unknown = JSON.parse(line);
+    return typeof frame === "object" && frame !== null ? frame : {};
+  } catch {
+    return {};
+  }
+};
+
+/** What the relay of one stream needs besides its frames. */
+interface RelayOf {
+  readonly env: Env;
+  readonly headers: Headers;
+  readonly call: AdmittedCall;
+  /** The access the request was admitted under (`accessOf`). */
+  readonly access: string;
+  readonly requestId: string;
+  /** Cancels the invocation: the person or the build lost access. */
+  readonly cancel: () => Promise<unknown>;
+}
+
+/**
+ * The invocation's frames as the screen gets them (see the header): each
+ * line passed on as it is read, the result only after a check of its own
+ * and within what a screen takes in one answer, and the person and the
+ * build checked again every `streamRecheckMs` meanwhile, frames or not.
+ * A refusal ends the relay with a `refused` line carrying it, and cancels
+ * the invocation at once.
+ */
+const relay = (
+  frames: ReadableStream<Uint8Array>,
+  { env, headers, call, access, requestId, cancel }: RelayOf
+): ReadableStream<Uint8Array> => {
+  const reader = frames.pipeThrough(new TextDecoderStream()).getReader();
+  const encoder = new TextEncoder();
+  let buffered = "";
+  let done = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const finish = async (): Promise<void> => {
+    done = true;
+    clearTimeout(timer);
+    try {
+      await reader.cancel();
+    } catch {
+      // Closed already.
+    }
+  };
+  const nextLine = async (): Promise<string | undefined> => {
+    for (;;) {
+      const end = buffered.indexOf("\n");
+      if (end !== -1) {
+        const line = buffered.slice(0, end);
+        buffered = buffered.slice(end + 1);
+        return line;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one chunk after another
+      const { done: ended, value } = await reader.read();
+      if (ended) {
+        return undefined;
+      }
+      buffered += value;
+    }
+  };
+  let refuse: ((error: unknown) => Promise<void>) | undefined;
+  return new ReadableStream(
+    {
+      start: (controller) => {
+        refuse = async (error) => {
+          if (done) {
+            return;
+          }
+          const refusal = refusalOf(error, requestId);
+          try {
+            controller.enqueue(
+              encoder.encode(
+                `${JSON.stringify({ type: "refused", error: refusal })}\n`
+              )
+            );
+            controller.close();
+          } catch {
+            // The screen dropped the stream already: nobody reads the
+            // refusal, but the invocation is cancelled all the same.
+          }
+          await finish();
+          try {
+            await cancel();
+          } catch (cancelError) {
+            log.warn("app_function.stream_cancel_failed", {
+              requestId,
+              ...errorFields(cancelError),
+            });
+          }
+        };
+        // Runs on a timer nobody awaits: it never throws.
+        const check = async (): Promise<void> => {
+          try {
+            await stillDelivering(env, headers, { call, access }, "push");
+          } catch (error) {
+            try {
+              await refuse?.(error);
+            } catch (refuseError) {
+              log.warn("app_function.stream_refuse_failed", {
+                requestId,
+                ...errorFields(refuseError),
+              });
+            }
+            return;
+          }
+          if (!done) {
+            timer = setTimeout(() => {
+              void check();
+            }, streamRecheckMs);
+          }
+        };
+        timer = setTimeout(() => {
+          void check();
+        }, streamRecheckMs);
+      },
+      pull: async (controller) => {
+        const line = await nextLine();
+        if (done) {
+          return;
+        }
+        if (line === undefined) {
+          controller.close();
+          await finish();
+          return;
+        }
+        const frame = frameOf(line);
+        if (frame.type !== "result") {
+          controller.enqueue(encoder.encode(`${line}\n`));
+          return;
+        }
+        try {
+          await stillDelivering(env, headers, { call, access }, "delivery");
+        } catch (error) {
+          await refuse?.(error);
+          return;
+        }
+        // As a plain call's answer: no more than a screen takes in one.
+        const fits =
+          jsonBytes(frame.result, screenLimits.answerBytes) <=
+          screenLimits.answerBytes;
+        const out = fits
+          ? line
+          : JSON.stringify({
+              type: "result",
+              seq: 1,
+              result: {
+                ok: false,
+                error: refusalOf(
+                  screenErrors.create("screen.answer_too_large"),
+                  requestId
+                ),
+              },
+            });
+        controller.enqueue(encoder.encode(`${out}\n`));
+        controller.close();
+        await finish();
+      },
+      cancel: async () => {
+        await finish();
+      },
+    },
+    { highWaterMark: 0 }
+  );
+};
+
+/** The call a stream request carries, with the key it must have. */
+const streamRequestOf = (
+  body: string
+): { call: FunctionRequest; key: string } => {
+  const call = readFunctionRequest(body);
+  const key = idempotencyKeySchema.safeParse(call.idempotencyKey);
+  if (!key.success || call.reference.kind !== "action") {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  return { call, key: key.data };
+};
+
+/**
+ * `POST /api/app-functions/<app>/<stream | attach | cancel>`: one of the
+ * App's streaming actions (spec 10.7.6), for the person signed in, as
+ * their screen running the build its lease names, each admitted as a
+ * start is, against the person's role now. `stream` starts the
+ * invocation its key names (or joins it, with the same input) and
+ * `attach` reads it again without ever starting it, each answering its
+ * frames as JSON lines (action-invocation.ts), relayed only while the
+ * person and the build still get the App's data; `cancel` asks it to
+ * stop, answering `{ requested }`: whether it was still running, never
+ * what stopping did, which its result says.
+ */
+const appStreamResponse = async (
+  request: Request,
+  env: Env,
+  app: string,
+  action: StreamCallAction,
+  requestId: string
+): Promise<Response> => {
+  try {
+    const admittedCall = await admitCall(request, env, app, requestId);
+    if (admittedCall instanceof Response) {
+      return admittedCall;
+    }
+    const { person, id, body, artifact } = admittedCall;
+    await requireDelivery(env, person, id, artifact, {
+      operation: "stream",
+      stage: "admission",
+    });
+    const { call, key } = streamRequestOf(body);
+    const name = await invocationName(person.userId, id, call, key, true);
+    const invocation = actionInvocation(env, name);
+    if (action === "cancel") {
+      return Response.json({
+        requested: await invocation.cancel(person.userId),
+      });
+    }
+    // Admitted as a start is, against the person's access now, which the
+    // invocation compares with the access it started under.
+    const access = await accessOf(env, person, id);
+    const frames = await invocation.open({
+      by: { userId: person.userId, role: person.role, teams: person.teams },
+      access,
+      app: id,
+      name,
+      call,
+      streaming: true,
+      attach: action === "attach",
+    });
+    return new Response(
+      relay(frames, {
+        env,
+        headers: request.headers,
+        call: admittedCall,
+        access,
+        requestId,
+        cancel: async () => await invocation.cancel(person.userId),
+      }),
+      {
+        headers: {
+          "content-type": "application/x-ndjson; charset=utf-8",
+          "cache-control": "no-store",
+        },
+      }
+    );
+  } catch (error) {
+    return refusalResponse(error, requestId, "app_function.stream_failed");
+  }
+};
+
+/**
+ * The response to `request` when `pathname` is a screen's call of one of
+ * its App's functions: a call (`<path>/<app>`) or one of a streaming
+ * action's (`<path>/<app>/<stream | attach | cancel>`); undefined for any
+ * other path.
+ */
+export const appFunctionRoute = async (
+  request: Request,
+  env: Env,
+  pathname: string,
+  requestId: string
+): Promise<Response | undefined> => {
+  const app = functionCallApp(pathname);
+  if (app !== undefined) {
+    return await appFunctionResponse(request, env, app, requestId);
+  }
+  const stream = functionStreamCall(pathname);
+  if (stream !== undefined) {
+    return await appStreamResponse(
+      request,
+      env,
+      stream.app,
+      stream.action,
+      requestId
+    );
+  }
+  return undefined;
 };

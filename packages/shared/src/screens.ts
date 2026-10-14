@@ -29,7 +29,9 @@ export {
   screenLimits,
   screenModulePath,
   screenPersonHeader,
+  streamCallActions,
 } from "./screen-limits.ts";
+export type { StreamCallAction } from "./screen-limits.ts";
 
 /** A value the page or core made up: never longer than a hash in hex. */
 const stageValue = z.string().min(1).max(128);

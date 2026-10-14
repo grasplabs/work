@@ -164,6 +164,7 @@ const cast = {
   notesAppTwoTabs: { first: "builder", next: "user" },
   notesAppSignedOut: { first: "builder" },
   notesLive: { builder: "builder" },
+  writerApp: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },

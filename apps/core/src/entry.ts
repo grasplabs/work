@@ -15,8 +15,7 @@ import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
 import {
-  appFunctionResponse,
-  functionCallApp,
+  appFunctionRoute,
   portableCallApp,
   portableFunctionResponse,
 } from "./app-function-route.ts";
@@ -167,9 +166,11 @@ const appCallResponse = async (
   env: Env,
   requestId: string
 ): Promise<Response | undefined> => {
-  const functionApp = functionCallApp(pathname);
-  if (functionApp !== undefined) {
-    return await appFunctionResponse(request, env, functionApp, requestId);
+  // A screen's call of one of its App's functions, or of a streaming
+  // action's (`<path>/<app>/<stream | attach | cancel>`).
+  const screenCall = await appFunctionRoute(request, env, pathname, requestId);
+  if (screenCall !== undefined) {
+    return screenCall;
   }
   const portableApp = portableCallApp(pathname);
   if (portableApp !== undefined) {
