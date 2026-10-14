@@ -265,10 +265,15 @@ const ruleOf = async (
   id: string,
   version: number
 ): Promise<InvokerRule> => {
-  const object = {
-    type: "workflow",
-    workflowId: workflowResourceIdSchema.parse(id),
-  } as const;
+  // An ID no workflow could have: unavailable to a person, as for one that
+  // doesn't exist; to code, `start_denied`, as for anything it may not start.
+  const workflowId = workflowResourceIdSchema.safeParse(id);
+  if (!workflowId.success) {
+    throw invoker.type === "person"
+      ? workflowResourceErrors.create("workflow.resource_unavailable")
+      : denied();
+  }
+  const object = { type: "workflow", workflowId: workflowId.data } as const;
   switch (invoker.type) {
     case "person": {
       // A role now, as `get` decides it, before anything says more.

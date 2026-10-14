@@ -594,14 +594,19 @@ const refuseRequest = (issue: string): never => {
 
 /**
  * Moves workflow `id`'s policy generation on, for the batch of a grant or
- * revocation on it: who may start or follow it changed, so a start
- * decided before is refused (workflow-starts.ts).
+ * revocation on it, only when `landed` says the batch changed it: who may
+ * start or follow it changed, so a start decided before is refused
+ * (workflow-starts.ts). One that changed nothing refuses nothing.
  */
-const workflowGenerationMoved = (db: ReturnType<typeof drizzle>, id: string) =>
+const workflowGenerationMoved = (
+  db: ReturnType<typeof drizzle>,
+  id: string,
+  landed: SQL
+) =>
   db
     .update(workflowResources)
     .set({ policyGeneration: sql`${workflowResources.policyGeneration} + 1` })
-    .where(eq(workflowResources.id, id));
+    .where(and(eq(workflowResources.id, id), landed));
 
 /**
  * Refuses an object `subject` has no use for: what the platform offers is
@@ -994,7 +999,7 @@ export const grantPermission = async (
     // Who may start or follow a workflow changed: starts decided before
     // are refused (workflow-starts.ts).
     ...(found.objectType === "workflow"
-      ? [workflowGenerationMoved(db, found.objectId)]
+      ? [workflowGenerationMoved(db, found.objectId, storedEvent(event.id))]
       : []),
     // More access for an App is more for every App that reaches it
     // through exports or workflows: their data, if an admin had said it
@@ -1322,10 +1327,11 @@ export const revokePermission = async (
     throw permissionErrors.create("permission.not_found");
   }
   const db = drizzle(env.DB);
+  const revokedAt = new Date();
   const [[revoked]] = await auditedBatch(env, db, [
     db
       .update(permissions)
-      .set({ status: "revoked", revokedBy: by.userId, revokedAt: new Date() })
+      .set({ status: "revoked", revokedBy: by.userId, revokedAt })
       .where(
         and(
           eq(permissions.id, found.id),
@@ -1339,7 +1345,16 @@ export const revokePermission = async (
       changeEntry(by, "permission.revoked", toPermission(found))
     ),
     ...(found.objectType === "workflow"
-      ? [workflowGenerationMoved(db, found.objectId)]
+      ? [
+          workflowGenerationMoved(
+            db,
+            found.objectId,
+            sql`EXISTS (SELECT 1 FROM ${permissions}
+              WHERE ${eq(permissions.id, found.id)}
+                AND ${eq(permissions.status, "revoked")}
+                AND ${eq(permissions.revokedAt, revokedAt)})`
+          ),
+        ]
       : []),
   ]);
   if (!revoked) {

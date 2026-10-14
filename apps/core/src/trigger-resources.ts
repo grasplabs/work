@@ -213,7 +213,9 @@ export const createTriggerResource = async (
  * staff: to `manage` it (see it, disable or delete it), its owner, an
  * admin, or a builder of the workflow it starts, so no trigger keeps a
  * workflow's builders from stopping it; to `own` it (move it to another
- * version, enable it again), its owner alone, whose person it acts for.
+ * version, enable it again), its owner alone, whose person it acts for,
+ * and only while they still build the workflow, read now, as creating one
+ * needs: an owner demoted or unshared can't undo a builder's disable.
  * Anyone else gets `workflow.trigger_unavailable`, as for one that
  * doesn't exist.
  */
@@ -256,11 +258,16 @@ export const requireTriggerManager = async (
   if (row === undefined) {
     throw unavailable();
   }
-  if (row.owner === by.userId) {
+  if (as === "own") {
+    if (row.owner !== by.userId) {
+      throw unavailable();
+    }
+    requireBuilder(by);
+    await requireWorkflowRole(env, by, row.workflowId, "builder");
     return { id: parsed.data, ...row };
   }
-  if (as === "own") {
-    throw unavailable();
+  if (row.owner === by.userId) {
+    return { id: parsed.data, ...row };
   }
   if (isAdmin(by.role)) {
     return { id: parsed.data, ...row };
@@ -278,7 +285,7 @@ export const requireTriggerManager = async (
 
 /**
  * Moves trigger `id` to version `version` of its own workflow, for `by`,
- * its owner, who must still have a role in the workflow: a new trigger
+ * its owner, who must still build the workflow: a new trigger
  * version, audited, used by future starts only. Its principal stays.
  */
 export const updateTriggerVersion = async (
@@ -293,7 +300,6 @@ export const updateTriggerVersion = async (
     z.number().int().positive(),
     version
   );
-  await requireWorkflowRole(env, by, trigger.workflowId, "user");
   await requirePublished(env, trigger.workflowId, target);
   const next = trigger.version + 1;
   const db = drizzle(env.DB);

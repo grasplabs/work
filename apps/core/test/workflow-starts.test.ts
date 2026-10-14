@@ -695,7 +695,7 @@ describe("a trigger starting a workflow", () => {
     });
   });
 
-  it("is moved or enabled by its owner alone, and stopped by the workflow's builders or admins", async () => {
+  it("is moved or enabled by its owner alone while they build the workflow, and stopped by its builders or admins", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     const bob = await person("builder");
@@ -725,11 +725,44 @@ describe("a trigger starting a workflow", () => {
         setTriggerEnabled(env, ada, trigger.id, true)
       ),
     };
-    expect(tries).toStrictEqual({
-      adminMoves: "workflow.trigger_unavailable",
-      ownerOfWorkflowMoves: "workflow.trigger_unavailable",
-      adminDisables: "ok",
-      ownerOfWorkflowEnables: "workflow.trigger_unavailable",
+    // Bob, demoted to a user of the workflow, can't undo the disable or
+    // steer his trigger; unshared, neither.
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const demoted = {
+      enables: await outcome(setTriggerEnabled(env, bob, trigger.id, true)),
+      moves: await outcome(updateTriggerVersion(env, bob, trigger.id, 2)),
+    };
+    await unshareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+    });
+    const unshared = await outcome(
+      setTriggerEnabled(env, bob, trigger.id, true)
+    );
+    const enabled = await env.DB.prepare(
+      "SELECT enabled FROM trigger_resources WHERE id = ?"
+    )
+      .bind(trigger.id)
+      .first<{ enabled: number }>();
+    expect({
+      tries,
+      demoted,
+      unshared,
+      enabled: enabled?.enabled,
+    }).toStrictEqual({
+      tries: {
+        adminMoves: "workflow.trigger_unavailable",
+        ownerOfWorkflowMoves: "workflow.trigger_unavailable",
+        adminDisables: "ok",
+        ownerOfWorkflowEnables: "workflow.trigger_unavailable",
+      },
+      demoted: { enables: "role.forbidden", moves: "role.forbidden" },
+      unshared: "workflow.resource_unavailable",
+      enabled: 0,
     });
   });
 
@@ -936,6 +969,7 @@ describe("what code and triggers may learn and name", () => {
     const before = await Promise.all([
       outcome(startWorkflow(env, invoker, crypto.randomUUID(), request())),
       outcome(startWorkflow(env, invoker, workflow.id, request(9))),
+      outcome(startWorkflow(env, invoker, "not a workflow ID", request())),
     ]);
     await granted(
       ada,
@@ -951,7 +985,11 @@ describe("what code and triggers may learn and name", () => {
         startWorkflow(env, invoker, workflow.id, request(9))
       ),
     }).toStrictEqual({
-      before: ["workflow.start_denied", "workflow.start_denied"],
+      before: [
+        "workflow.start_denied",
+        "workflow.start_denied",
+        "workflow.start_denied",
+      ],
       grantedButMissing: "workflow.start_denied",
     });
   });
@@ -972,9 +1010,14 @@ describe("what code and triggers may learn and name", () => {
     const afterGrant = await generationOf(workflow.id);
     await revokePermission(env, admin, id);
     const afterRevoke = await generationOf(workflow.id);
-    expect([afterGrant - start, afterRevoke - afterGrant]).toStrictEqual([
-      1, 1,
-    ]);
+    // Revoking it again changes nothing, so refuses no start decided since.
+    await revokePermission(env, admin, id);
+    const afterNothing = await generationOf(workflow.id);
+    expect([
+      afterGrant - start,
+      afterRevoke - afterGrant,
+      afterNothing - afterRevoke,
+    ]).toStrictEqual([1, 1, 0]);
   });
 
   it("lets nobody name a workflow subject they don't build, a store reach a workflow, or a trigger start another workflow", async () => {
