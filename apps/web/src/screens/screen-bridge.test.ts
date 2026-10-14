@@ -1,5 +1,6 @@
 import type { ScreenBridge } from "@grasp-os/sdk/screen-runtime";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { screenLimits } from "@grasp-os/shared/screen-limits";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 import { RpcSession, RpcTarget } from "capnweb";
@@ -34,8 +35,11 @@ class Subscription extends RpcTarget {
   }
 }
 
-/** What reached core, and what it handed out. */
-const coreStandIn = () => {
+/** What core answers a function call unless a test says otherwise. */
+const nullAnswer = { result: { ok: true, value: null } };
+
+/** What reached core, and what it handed out: `answer` to a function call. */
+const coreStandIn = (answer: unknown = nullAnswer) => {
   const calls: { method: string; args: unknown[] }[] = [];
   const functionCalls: string[] = [];
   const reports: string[] = [];
@@ -47,7 +51,7 @@ const coreStandIn = () => {
     },
     callFunction: async (request) => {
       functionCalls.push(request);
-      return await Promise.resolve({ result: { ok: true, value: null } });
+      return await Promise.resolve(answer);
     },
     report: async (problem) => {
       reports.push(problem.message);
@@ -69,8 +73,8 @@ const coreStandIn = () => {
 };
 
 /** A frame on its port, talking to the page's bridge as the runtime does. */
-const framed = () => {
-  const core = coreStandIn();
+const framed = (answer?: unknown) => {
+  const core = coreStandIn(answer);
   const { port1, port2 } = new MessageChannel();
   const broken = { times: 0 };
   const close = openBridge(port1, core.target, () => {
@@ -142,6 +146,23 @@ const rawFramed = () => {
     return await settled.promise;
   };
   return { ...core, broken, close, push, pull };
+};
+
+/** A call of `notes` with one string, as Cap'n Web writes it. */
+const notesCall = (text: string): unknown => [
+  "pipeline",
+  0,
+  ["call"],
+  ["notes", [[text]]],
+];
+
+/**
+ * `notesCall` padded so the message that pushes it (`["push", ...]` as
+ * `rawFramed` sends it) is exactly `length` code units.
+ */
+const paddedCall = (length: number): unknown => {
+  const bare = JSON.stringify(["push", notesCall("")]).length;
+  return notesCall("x".repeat(length - bare));
 };
 
 /** How a call of the frame's ended: its answer, or why not. */
@@ -293,7 +314,45 @@ describe("the page's bridge to a screen", () => {
     );
   });
 
-  it("ends the session over a message longer than 262,144 code units", async () => {
+  it("takes a message exactly as long as a message may be, and ends the session over one code unit more", async () => {
+    const atLimit = rawFramed();
+    const exact = atLimit.pull(
+      atLimit.push(paddedCall(screenLimits.rpc.maxMessageSize))
+    );
+    await expect(exact).resolves.toStrictEqual({ answered: "answered" });
+    atLimit.close();
+
+    const pastLimit = rawFramed();
+    pastLimit.push(paddedCall(screenLimits.rpc.maxMessageSize + 1));
+    await vi.waitFor(() => {
+      expect(pastLimit.broken.times).toBe(1);
+    });
+    pastLimit.close();
+    expect({
+      exactReached: atLimit.calls.length,
+      pastReached: pastLimit.calls.length,
+    }).toStrictEqual({ exactReached: 1, pastReached: 0 });
+  });
+
+  it("hands the frame an answer as large as a public operation's output", async () => {
+    const value = "x".repeat(screenLimits.answerBytes - 2);
+    const frame = framed({ result: { ok: true, value } });
+    const answered = await outcome(frame.page.callFunction("{}"));
+    frame.close();
+    expect({
+      bytes: new TextEncoder().encode(JSON.stringify(value)).byteLength,
+      whole:
+        JSON.stringify(answered) ===
+        JSON.stringify({ result: { ok: true, value } }),
+      broken: frame.broken.times,
+    }).toStrictEqual({
+      bytes: screenLimits.answerBytes,
+      whole: true,
+      broken: 0,
+    });
+  });
+
+  it("counts a message's length in code units, not signs", async () => {
     const frame = framed();
     const fits = await outcome(frame.page.call("notes", ["x".repeat(200_000)]));
     // Half as many signs, each two code units: counted as units, not signs.

@@ -436,13 +436,30 @@ export const callExport = async (
     throw error;
   }
   await carryRestricted();
-  // The host ran exactly `version` (or refused), so its schema holds.
-  return checkedJson(
-    answer,
-    appCallLimits.answerBytes,
-    compiledSchema(`${grant.app}:${version}:${name}:output`, output),
-    () => appErrors.create("app.answer_invalid", { version, method: name })
-  );
+  try {
+    // The host ran exactly `version` (or refused), so its schema holds.
+    return checkedJson(
+      answer,
+      appCallLimits.answerBytes,
+      compiledSchema(`${grant.app}:${version}:${name}:output`, output),
+      () => appErrors.create("app.answer_invalid", { version, method: name })
+    );
+  } catch (error) {
+    // The method ran, and may have written, but its answer never reached
+    // the caller: the log says so beside the record that it was called,
+    // which an append-only log can't take back.
+    await keepAuditEvent(
+      env,
+      db,
+      callEntry(record, {
+        access,
+        calledVersion: version,
+        outcome: "answer_refused",
+        reason: isExpectedError(error) ? error.code : "internal.unexpected",
+      })
+    );
+    throw error;
+  }
 };
 
 /**
