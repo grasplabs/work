@@ -38,7 +38,7 @@ export interface WidgetFrame {
 export const WidgetControls = createContext<WidgetFrame | null>(null);
 
 /** Whether a widget is shown in full, so a part shows everything it has. */
-const WidgetFull = createContext(false);
+export const WidgetFull = createContext(false);
 
 /** Whether the widget is shown in full, so a part shows everything it has. */
 export const useFull = (): boolean => use(WidgetFull);
