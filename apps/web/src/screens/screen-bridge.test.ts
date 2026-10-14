@@ -26,8 +26,9 @@ import type { FrameTarget } from "./screen-bridge.ts";
 class Subscription extends RpcTarget {
   released = false;
 
-  release(): void {
+  async release(): Promise<void> {
     this.released = true;
+    await Promise.resolve();
   }
 
   [Symbol.dispose](): void {
@@ -64,6 +65,11 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
     control: async () => await Promise.resolve("controlled"),
     summary: async () => await Promise.resolve("summarised"),
     watchRuns: async () => {
+      const subscription = new Subscription();
+      subscriptions.push(subscription);
+      return await Promise.resolve(subscription);
+    },
+    watchQuery: async () => {
       const subscription = new Subscription();
       subscriptions.push(subscription);
       return await Promise.resolve(subscription);

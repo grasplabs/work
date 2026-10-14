@@ -187,6 +187,37 @@ export interface RunChange {
 }
 
 /**
+ * The bounds of live queries (spec 11.3, 11.4): what core holds one
+ * page's connection (one browser tab) and one person to, and how it
+ * delivers.
+ */
+export const querySubscriptionLimits = {
+  /** Live queries one connection follows at once. */
+  perConnection: 100,
+  /** Live queries one person follows of one App at once, across tabs. */
+  perPerson: 500,
+  /** How long core gathers a query's changes before it reads it again. */
+  coalesceMs: 50,
+  /**
+   * Snapshot bytes core holds for one connection that the page hasn't
+   * taken yet: past it, the snapshots in between are dropped, and each
+   * query sends its latest once the page catches up.
+   */
+  unsentBytes: 512 * 1024,
+} as const;
+
+/**
+ * What core pushes to a screen following a query (`watchQuery`): the
+ * query's result (spec 32.6's `OperationResult`, as a function call
+ * answers it), numbered. Each push of one subscription has a greater
+ * `revision` than the one before; a screen drops any that doesn't.
+ */
+export interface QuerySnapshotPush {
+  revision: number;
+  result: unknown;
+}
+
+/**
  * A screen's hold on its App's runs of one workflow (`watchRuns`), until
  * it releases it: then core calls its callback no more, and the slot it
  * took of the 20 a screen may hold is free again.
@@ -301,6 +332,26 @@ export interface ScreensApi {
     workflow: string,
     onChange: (change: RunChange) => void
   ) => Promise<RunSubscriptionApi>;
+  /**
+   * Follows one of the App's public queries (spec 11): `request` is the
+   * call as a function call sends it (its reference and input, as JSON
+   * text), for the build this connection presented. Core reads it as the
+   * person, pushes its result to `onSnapshot` (`QuerySnapshotPush`), and
+   * pushes it again, read afresh, after every commit that changed what
+   * it read, for as long as the person may use the App and the build
+   * gets its data, until the screen releases the subscription. A refusal
+   * that ends the subscription (the person or the build lost access, the
+   * App moved to another version) is pushed as the last result; core
+   * then lets go of `onSnapshot`, as it does when it can no longer keep
+   * the query fresh, which tells the screen to follow again. One
+   * connection follows at most 100 queries at once, and a person 500 of
+   * one App (`screen.too_many_queries`).
+   */
+  watchQuery: (
+    app: string,
+    request: string,
+    onSnapshot: (snapshot: QuerySnapshotPush) => void
+  ) => Promise<RunSubscriptionApi>;
 }
 
 /** Why a call to an App's screens was refused. */
@@ -312,6 +363,8 @@ export const screenErrors = defineErrorFamily({
   "screen.invalid": "That isn't a valid request for a screen.",
   "screen.too_many_subscriptions":
     "A screen follows at most 20 workflows' runs at a time.",
+  "screen.too_many_queries":
+    "This page follows too many live queries at once. Close a screen, then try again.",
   "screen.rate_limited":
     "This screen asks for too much at once. Try again in a moment.",
   "screen.input_too_large":

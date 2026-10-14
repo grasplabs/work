@@ -42,7 +42,7 @@ import {
   compatibleVersionsMax,
   schemaConsumerSchema,
   stagedWritesSchema,
-  storeIntentSchema,
+  storeOutboxEntrySchema,
   storeMigrationSchema,
   storedFieldsSchema,
   tableNameSchema,
@@ -67,6 +67,7 @@ import {
   submissionRetentionDays,
   submissionTombstoneDays,
 } from "@grasp-os/shared/submissions";
+import type { StoreChanged } from "@grasp-os/shared/submissions";
 import {
   and,
   asc,
@@ -219,6 +220,10 @@ import { recordReferences } from "./store-references.ts";
 //   out, so it doesn't keep its receipt forever. Every commit gives its
 //   entries IDs of their own (its number in the store's order), so a key
 //   that commits again after its tombstone went never reuses one.
+// - A live query misses a commit: a commit that changes records stages,
+//   in its own transaction, one `store.changed` entry naming the tables
+//   it changed at their new generations (when something follows the
+//   store's changes, data-store.ts), handed over like any other entry.
 // - The alarm spins, or stops: it is set only for what it can act on (an
 //   owed entry, a receipt the sweep may expire, a tombstone), never
 //   sooner than a second away, again after work that failed (a while
@@ -369,7 +374,7 @@ const intentOf = (stored: string) => {
   } catch {
     // Not JSON: unreadable, as below.
   }
-  return storeIntentSchema.safeParse(json).data;
+  return storeOutboxEntrySchema.safeParse(json).data;
 };
 
 /** A deleted store's mark, as its row holds it. */
@@ -2623,7 +2628,12 @@ export class StoreHost {
           }
         }
       );
-      this.#flush(staged, principal.userId, schemaHash, stagedAt);
+      const changedIds = this.#flush(
+        staged,
+        principal.userId,
+        schemaHash,
+        stagedAt
+      );
       this.#indexReferences(pinned, staged, principal.userId, roles);
       const counted = this.#db
         .update(store)
@@ -2674,10 +2684,54 @@ export class StoreHost {
           })
           .run();
       }
+      const changes = this.#storeChanged(pinned, changedIds, consumers);
+      if (changes !== undefined) {
+        this.#db
+          .insert(outbox)
+          .values({
+            id: `${held.receiptId}:${counted.commits}:${intents.length}`,
+            receiptId: held.receiptId,
+            position: intents.length,
+            kind: changes.kind,
+            intent: JSON.stringify(changes),
+            createdAt: now,
+            nextAttemptAt: now,
+          })
+          .run();
+      }
       return outcome;
     });
     await this.schedule();
     return committed;
+  }
+
+  /**
+   * The `store.changed` entry of a commit that changed the records of
+   * the tables `changedIds` (call it inside the commit's transaction,
+   * after its writes): each table by name, at the generation the commit
+   * moved it to. Staged in the commit's own transaction, so a commit
+   * whose object dies before its live queries hear of it still tells
+   * them, from its outbox, once the object wakes. None when nothing
+   * changed, or nothing in `consumers` follows the store's changes.
+   */
+  #storeChanged(
+    pinned: PinnedSchema,
+    changedIds: ReadonlySet<string>,
+    consumers: OutboxConsumers
+  ): StoreChanged | undefined {
+    if (
+      changedIds.size === 0 ||
+      consumerFor(consumers, "store.changed") === undefined
+    ) {
+      return undefined;
+    }
+    const names = Object.entries(pinned.tableIds).flatMap(([name, id]) =>
+      changedIds.has(id) ? [name] : []
+    );
+    return {
+      kind: "store.changed",
+      tables: this.#generationsOf(pinned, names),
+    };
   }
 
   /**
@@ -3175,14 +3229,15 @@ export class StoreHost {
 
   /**
    * Writes what a commit (or a preview) staged, changing only the records
-   * it changed, stamped with `now`, the time core staged them.
+   * it changed, stamped with `now`, the time core staged them. Answers
+   * the IDs of the tables whose records it changed.
    */
   #flush(
     staged: readonly Staged[],
     ownerId: string,
     schemaHash: string,
     now: number
-  ): void {
+  ): ReadonlySet<string> {
     // The tables whose records this commit changes: each one's generation
     // moves on once, so a read of it (even one that matched nothing) is
     // known to be stale.
@@ -3277,6 +3332,7 @@ export class StoreHost {
         .where(inArray(tables.tableId, [...changed]))
         .run();
     }
+    return changed;
   }
 
   /**

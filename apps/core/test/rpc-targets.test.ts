@@ -217,6 +217,17 @@ const calls = {
   },
   "authenticate.screens.watchRuns": async (screens, { app, held }) =>
     holding(held, await screens.watchRuns(app, "approval", pageStub().stub)),
+  "authenticate.screens.watchQuery": async (screens, { app, held }) => {
+    const page = pageStub();
+    // A request that names no query: its refusal, pushed at once, ends
+    // the subscription, which is let go of after that, as a page does.
+    const subscription = holding(
+      held,
+      await screens.watchQuery(app, "{}", page.stub)
+    );
+    await page.pushed;
+    return subscription;
+  },
 } satisfies {
   [Path in CallableAnswers<CoreRpc>]: (
     owner: Owner<CoreRpc, Path>,

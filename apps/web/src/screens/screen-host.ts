@@ -334,6 +334,11 @@ const appTarget = (
         async (screens) =>
           await screens.watchRuns(app, workflow, forCore(onChange))
       ),
+    watchQuery: async (request, onSnapshot) =>
+      await framed(
+        async (screens) =>
+          await screens.watchQuery(app, request, forCore(onSnapshot))
+      ),
   };
 };
 
@@ -386,6 +391,8 @@ const previewTarget = (
           await Promise.resolve();
         },
       }),
+    // As `callFunction`: a draft's functions aren't sealed.
+    watchQuery: refusedInPreview,
   };
 };
 

@@ -54,7 +54,9 @@ export const submissionErrors = defineErrorFamily({
 /**
  * What a committed submission can still have to tell others, through its
  * outbox (committed in its batch): that a record changed, which whoever
- * follows the record's collection learns; a notification for a workflow
+ * follows the record's collection learns; that a business store's
+ * tables changed, which its live queries learn (`store.changed`, staged
+ * by the store itself, never by a caller); a notification for a workflow
  * run; a workflow run to start. Each is handed over after the commit,
  * never as part of it: no change spans the store and a run. A kind is
  * staged only once something takes it (its consumer): invalidations with
@@ -62,6 +64,7 @@ export const submissionErrors = defineErrorFamily({
  */
 export const submissionIntentKinds = [
   "record.changed",
+  "store.changed",
   "workflow.notify",
   "workflow.start",
 ] as const;
@@ -76,6 +79,16 @@ export interface RecordChanged {
 }
 
 /**
+ * The tables of a business store one commit changed, each at the
+ * generation the commit moved it to: what a live query that read any of
+ * them is told, so it reads again (core's query-subscriptions.ts).
+ */
+export interface StoreChanged {
+  kind: "store.changed";
+  tables: Record<string, number>;
+}
+
+/**
  * A workflow notification or start a submission staged: its content is
  * defined where it is delivered.
  */
@@ -84,4 +97,4 @@ export interface WorkflowIntent {
   data: Json;
 }
 
-export type SubmissionIntent = RecordChanged | WorkflowIntent;
+export type SubmissionIntent = RecordChanged | StoreChanged | WorkflowIntent;

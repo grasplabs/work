@@ -37,11 +37,14 @@ import { readDescriptor } from "./value-read.ts";
 // It owns what every screen would otherwise write again: reading the
 // generated reference, normalizing the arguments with the same native
 // interpreter the host uses, one logical submission per explicit call,
-// receipt recovery after a lost response, sharing one query among the
-// components that read it, ordering its snapshots and reading them again
-// after a change this client confirmed. Live updates from other clients
-// are GRA-252's, through this same entry. Failure modes, and how each is
-// closed:
+// receipt recovery after a lost response, and live queries (spec 11):
+// over the platform's frame, one subscription per query, shared by the
+// components that read it, whose snapshots core pushes after every write
+// that changed what the query read, whoever made it, ordered and
+// authorized, followed again after a lost connection; a screen there
+// never reads a query again on its own. A portable host has no such
+// connection yet: its queries are read again after a change this client
+// confirmed. Failure modes, and how each is closed:
 //
 // - A lost response turns a saved change into a second one: every
 //   mutation carries an idempotency key, the caller's or a fresh random
@@ -56,22 +59,36 @@ import { readDescriptor } from "./value-read.ts";
 //   receipt of a whole action: a deliberate call with that key runs it
 //   again, its completed steps reconciled by the keys operations.ts
 //   derives from it, not repeated.
-// - Retries spend the person's request budget: re-reads after changes are
-//   gathered and at most `maxReadsInFlight` run at once, a refusal for
-//   the budget waits as long as it says, and a save is sent again for
-//   `submissionBudgetMs` rather than a few quick tries.
+// - Retries spend the person's request budget: reads run at most
+//   `maxReadsInFlight` at once (re-reads after changes, on a portable
+//   host, gathered first), a refusal for the budget waits as long as it
+//   says, a save is sent again for `submissionBudgetMs` rather than a few
+//   quick tries, and a followed query waits as a refusal of it says.
 // - Cancelling unlocks a duplicate: aborting stops the caller waiting,
 //   never the submission, which keeps reconciling under its key; a call
 //   with the same key and input joins it rather than send it again.
-// - A delayed answer overwrites a newer one: each read of a query is
-//   numbered, and an answer older than the one shown is dropped.
+// - A delayed answer overwrites a newer one: a followed query shows only
+//   its subscription's pushes, each numbered by core, an older or repeated
+//   one dropped, and a push of an earlier subscription dropped too; an
+//   imperative read's answer answers its caller and is shown only while
+//   nobody follows the query. Reads are numbered too, an answer older
+//   than the one shown dropped.
+// - A lost connection leaves a screen silently stale, or hammers core:
+//   once core lets go of a subscription, the query keeps its last
+//   authorized snapshot and follows again after a delay from 250 ms up
+//   to 30 seconds, fully jittered; a fresh subscription starts with a
+//   fresh read. A refusal of the person or the build stops it for good.
 // - Data outlives the access it was read under: a refusal of the person
-//   or the build (`fences`) clears every cached result, and every answer
+//   or the build (`fences`), from a call or as a pushed result, clears
+//   every cached result and stops every subscription, and every answer
 //   to a request sent before it is dropped.
 // - One person's submission is sent as another's: a key whose outcome was
 //   left unknown is sent again only within the generation it was sent
 //   under; after someone else signed in, or access was lost, it is
 //   refused unsent as `auth.principal_changed`.
+// - Subscriptions pile up: a query is followed only while a component
+//   reads it, released as soon as the last one stops (a skipped query
+//   follows nothing); core bounds what a page follows.
 // - Invocation options travel as arguments: options are read on their
 //   own, strictly, and only the normalized input is sent.
 // - A malformed reference or argument reaches the host: references are
@@ -86,6 +103,18 @@ import { readDescriptor } from "./value-read.ts";
  */
 export interface ClientTransport {
   call: (request: string, app: string) => Promise<unknown>;
+  /**
+   * Follows the query `request` names (spec 11): `onSnapshot` gets each
+   * push of core's (`{ revision, result }`), and `onLost` is called once
+   * core, or the connection to it, let go of the subscription. Resolves
+   * with what releases it, or rejects as `call` does. The platform's
+   * frame has it; without it, queries are read again after changes.
+   */
+  watch?: (
+    request: string,
+    onSnapshot: (push: unknown) => void,
+    onLost: () => void
+  ) => Promise<{ release: () => void }>;
 }
 
 /**
@@ -402,16 +431,41 @@ export const loading: QuerySnapshot = Object.freeze({
   error: undefined,
 });
 
+/** A query's subscription, while components read it. */
+interface Live {
+  /** Its place among the client's subscriptions: a later one is newer. */
+  readonly attempt: number;
+  /** What releases it, once core answered. */
+  release: (() => void) | undefined;
+  /** The revision of the latest push shown. */
+  revision: number;
+  /**
+   * How many times in a row it was lost before one lasted `steadyMs`: a
+   * push alone doesn't reset it, so a subscription lost right after each
+   * push still backs off.
+   */
+  failures: number;
+  /** When it was made. */
+  readonly since: number;
+  retry: ReturnType<typeof setTimeout> | undefined;
+  /** Released, ended, or fenced: nothing of it is shown any more. */
+  stopped: boolean;
+}
+
 /** One query, by reference and normalized arguments, shared by its readers. */
 export interface QueryEntry {
   readonly key: string;
   readonly reference: ReadReference;
   readonly input: Json;
+  /** Its request as the host reads it. */
+  readonly request: string;
   snapshot: QuerySnapshot;
   /** Components reading it now. */
   readonly listeners: Set<() => void>;
   /** Imperative reads waiting on it now. */
   interest: number;
+  /** Its subscription, while components read it (over the frame). */
+  live: Live | undefined;
   /** The number of the latest read sent, and of the one shown. */
   sent: number;
   shown: number;
@@ -446,9 +500,54 @@ const worthRetrying = (settled: Settled): boolean =>
   (settled.kind === "failed" && nothingRanCodes.has(settled.error.code));
 
 /**
+ * Refusals after which following a query again would only be refused
+ * again: the App moved to another version, or the page follows too many.
+ * (A refusal of the person or the build fences the whole client.)
+ */
+const endsFollowing = (code: string): boolean =>
+  code.startsWith("version.") ||
+  code === "app.not_running" ||
+  code === "screen.too_many_queries" ||
+  code === "screen.invalid" ||
+  code.startsWith("contract.");
+
+/** The least wait before following a query again. */
+const minFollowMs = 250;
+
+/**
+ * How long to wait before following a query again after it was lost
+ * `failures` times in a row: from 1 up to 30 seconds, fully jittered,
+ * but never under `minFollowMs`.
+ */
+const followDelay = (failures: number): number =>
+  Math.max(minFollowMs, Math.random() * Math.min(30_000, 1000 * 2 ** failures));
+
+/** How long a subscription must last for its losses to count afresh. */
+const steadyMs = 30_000;
+
+/** A push of core's, read: its revision and result, or none if malformed. */
+const readPush = (
+  push: unknown
+): { revision: number; settled: Settled } | undefined => {
+  if (
+    !isPlainObject(push) ||
+    typeof push.revision !== "number" ||
+    !Number.isSafeInteger(push.revision) ||
+    push.revision < 1
+  ) {
+    return undefined;
+  }
+  const settled = readAnswer({ result: push.result });
+  return settled.kind === "lost"
+    ? undefined
+    : { revision: push.revision, settled };
+};
+
+/**
  * Shows what read `number` of `entry` settled as, unless a newer read is
- * shown already, and answers it: its value, or its failure thrown. A
- * query that shows data keeps it while its server is unreachable.
+ * shown already or the query is followed (its pushes are what it shows),
+ * and answers it: its value, or its failure thrown. A query that shows
+ * data keeps it while its server is unreachable.
  */
 const settleRead = (
   entry: QueryEntry,
@@ -456,7 +555,7 @@ const settleRead = (
   settled: Settled
 ): unknown => {
   const { number } = read;
-  const newest = number > entry.shown;
+  const newest = number > entry.shown && entry.live === undefined;
   // A change confirmed after the read was sent may be missing from it.
   const current = read.changes === entry.changes;
   if (settled.kind === "lost") {
@@ -524,8 +623,10 @@ export interface ClientInternals {
   entry: (reference: unknown, args: unknown) => QueryEntry;
   /**
    * Adds a reader of `entry`, which `onChange` tells of every new
-   * snapshot, and reads the query when it has nothing current. Answers
-   * the function that removes the reader.
+   * snapshot: over the frame it follows the query while it has one,
+   * elsewhere it reads the query when it has nothing current. Answers the
+   * function that removes the reader; the last one out releases the
+   * subscription.
    */
   subscribe: (entry: QueryEntry, onChange: () => void) => () => void;
   /** Reads again every query that failed and is still read. */
@@ -690,6 +791,8 @@ export class GraspClient {
    * person. Another operation under the same key never clears it.
    */
   readonly #uncertainKeys = new Map<string, number>();
+  /** How many subscriptions the client made: each is numbered by it. */
+  #attempts = 0;
 
   /**
    * A portable host's client (`{ url, getToken }`, spec 10.7.1): its
@@ -818,9 +921,11 @@ export class GraspClient {
       key,
       reference: read,
       input,
+      request,
       snapshot: loading,
       listeners: new Set(),
       interest: 0,
+      live: undefined,
       sent: 0,
       shown: 0,
       stale: false,
@@ -844,16 +949,30 @@ export class GraspClient {
     if (!this.#queries.has(entry.key)) {
       this.#queries.set(entry.key, entry);
     }
-    const current = entry.snapshot.value !== undefined && !entry.stale;
-    if (
-      entry.reading === undefined &&
-      !current &&
-      entry.snapshot.error === undefined
-    ) {
-      this.#refresh(entry);
+    if (this.#transport?.watch === undefined) {
+      const current = entry.snapshot.value !== undefined && !entry.stale;
+      if (
+        entry.reading === undefined &&
+        !current &&
+        entry.snapshot.error === undefined
+      ) {
+        this.#refresh(entry);
+      }
+    } else {
+      if (entry.live === undefined && entry.snapshot.error === undefined) {
+        this.#follow(entry, 0);
+      }
     }
     return () => {
       entry.listeners.delete(onChange);
+      // Released once the task that let go of it ends without another
+      // reader: React resubscribes a component within one commit, and
+      // that keeps the subscription rather than follow the query anew.
+      queueMicrotask(() => {
+        if (entry.listeners.size === 0) {
+          GraspClient.#unfollow(entry);
+        }
+      });
       this.#release(entry);
     };
   }
@@ -863,8 +982,13 @@ export class GraspClient {
     for (const entry of this.#queries.values()) {
       if (entry.snapshot.error !== undefined) {
         show(entry, loading);
-        if (entry.listeners.size > 0) {
+        if (entry.listeners.size === 0) {
+          continue;
+        }
+        if (this.#transport?.watch === undefined) {
           this.#refresh(entry);
+        } else if (entry.live === undefined) {
+          this.#follow(entry, 0);
         }
       }
     }
@@ -883,6 +1007,145 @@ export class GraspClient {
         this.#queries.delete(entry.key);
       }
     }, keepMs);
+  }
+
+  /**
+   * Follows `entry`'s query: subscribes, and shows each push of core's
+   * in order (see the header). `failures` is how often in a row it was
+   * lost before.
+   */
+  #follow(entry: QueryEntry, failures: number): void {
+    this.#attempts += 1;
+    const live: Live = {
+      attempt: this.#attempts,
+      release: undefined,
+      revision: 0,
+      failures,
+      since: Date.now(),
+      retry: undefined,
+      stopped: false,
+    };
+    entry.live = live;
+    void this.#connect(entry, live);
+  }
+
+  /** Whether `live` is still what `entry` shows. */
+  static #current(entry: QueryEntry, live: Live): boolean {
+    return entry.live === live && !live.stopped;
+  }
+
+  async #connect(entry: QueryEntry, live: Live): Promise<void> {
+    const watch = this.#transport?.watch;
+    if (watch === undefined) {
+      return;
+    }
+    let handle: { release: () => void };
+    try {
+      handle = await watch(
+        entry.request,
+        (push) => {
+          if (GraspClient.#current(entry, live)) {
+            this.#pushed(entry, live, push);
+          }
+        },
+        () => {
+          if (GraspClient.#current(entry, live)) {
+            this.#lost(entry, live);
+          }
+        }
+      );
+    } catch (error) {
+      if (!GraspClient.#current(entry, live)) {
+        return;
+      }
+      const settled = readRejection(error);
+      if (settled.kind === "failed") {
+        if (fences(settled.error.code)) {
+          this.#fence(settled.error);
+          return;
+        }
+        if (!nothingRanCodes.has(settled.error.code)) {
+          live.stopped = true;
+          entry.live = undefined;
+          show(entry, { value: undefined, error: settled.error });
+          return;
+        }
+      }
+      // A refusal for the request budget says how long to wait: never
+      // less than that, whatever the backoff would allow.
+      this.#lost(
+        entry,
+        live,
+        settled.kind === "failed" ? waitAfter(settled, 1) : 0
+      );
+      return;
+    }
+    if (GraspClient.#current(entry, live)) {
+      live.release = handle.release;
+    } else {
+      handle.release();
+    }
+  }
+
+  /** Shows a push of `live`'s, unless it is older than one shown. */
+  #pushed(entry: QueryEntry, live: Live, push: unknown): void {
+    const read = readPush(push);
+    if (read === undefined || read.revision <= live.revision) {
+      return;
+    }
+    live.revision = read.revision;
+    const { settled } = read;
+    if (settled.kind === "value") {
+      show(entry, { value: settled.value, error: undefined });
+      return;
+    }
+    if (settled.kind === "failed") {
+      const { error } = settled;
+      if (fences(error.code)) {
+        this.#fence(error);
+        return;
+      }
+      if (endsFollowing(error.code)) {
+        GraspClient.#stop(live);
+        entry.live = undefined;
+      }
+      show(entry, { value: undefined, error });
+    }
+  }
+
+  /**
+   * Core, or the connection to it, let go of `live`: keeps the last
+   * snapshot and follows again after a jittered delay.
+   */
+  #lost(entry: QueryEntry, live: Live, atLeastMs = 0): void {
+    live.release = undefined;
+    const failures =
+      Date.now() - live.since >= steadyMs ? 0 : live.failures + 1;
+    live.retry = setTimeout(
+      () => {
+        if (GraspClient.#current(entry, live) && entry.listeners.size > 0) {
+          this.#follow(entry, failures);
+        }
+      },
+      Math.max(atLeastMs, followDelay(Math.max(0, failures - 1)))
+    );
+  }
+
+  /** Stops `live`: released, its retry cancelled, nothing of it shown. */
+  static #stop(live: Live): void {
+    live.stopped = true;
+    clearTimeout(live.retry);
+    live.release?.();
+    live.release = undefined;
+  }
+
+  /** Stops following `entry`'s query: no component reads it any more. */
+  static #unfollow(entry: QueryEntry): void {
+    const { live } = entry;
+    entry.live = undefined;
+    if (live !== undefined) {
+      GraspClient.#stop(live);
+    }
   }
 
   /**
@@ -988,6 +1251,8 @@ export class GraspClient {
         if (
           entry.stale &&
           entry.listeners.size > 0 &&
+          entry.live === undefined &&
+          this.#transport?.watch === undefined &&
           generation === this.#generation
         ) {
           this.#refresh(entry);
@@ -1099,6 +1364,7 @@ export class GraspClient {
     this.#principal = undefined;
     this.#submissions.clear();
     for (const entry of this.#queries.values()) {
+      GraspClient.#unfollow(entry);
       entry.reading?.stop.abort();
       entry.reading = undefined;
       entry.shown = entry.sent;
@@ -1120,7 +1386,13 @@ export class GraspClient {
         entry.changes += 1;
       }
     }
-    // Changes in quick succession share one round of re-reads.
+    // Over the frame, core pushes what the change made out of date: the
+    // marks above only keep a later imperative read from joining an
+    // older one (`#readCurrent`). Elsewhere, changes in quick succession
+    // share one round of re-reads.
+    if (this.#transport?.watch !== undefined) {
+      return;
+    }
     this.#changedApps.add(resourceId);
     if (this.#gathering !== undefined) {
       return;
@@ -1305,6 +1577,19 @@ export class GraspClient {
   }
 }
 
-/** The internals of `client`, for the hooks and the platform. */
-export const clientInternals = (client: GraspClient): ClientInternals =>
-  internalsOf(client);
+/** Each client's internals, made once. */
+const madeInternals = new WeakMap<GraspClient, ClientInternals>();
+
+/**
+ * The internals of `client`, for the hooks and the platform: the same
+ * object every time, so a hook's subscribe function built on them keeps
+ * its identity across renders, and React doesn't resubscribe each one.
+ */
+export const clientInternals = (client: GraspClient): ClientInternals => {
+  let internals = madeInternals.get(client);
+  if (internals === undefined) {
+    internals = internalsOf(client);
+    madeInternals.set(client, internals);
+  }
+  return internals;
+};

@@ -167,6 +167,12 @@ export interface Invocation {
   readonly authorize: () => Promise<WriterRoles>;
   /** How core binds the App's resources for this call; none bound without it. */
   readonly resources?: ResourceBindings;
+  /**
+   * Told what a query the caller named read, once its reads stand as one
+   * state of the store (`readConsistently`): the generation of each table
+   * it read, which a live query watches (query-subscriptions.ts).
+   */
+  readonly observeReads?: (readSet: Record<string, number>) => void;
 }
 
 /**
@@ -1876,15 +1882,20 @@ const runQuery = async (
   );
   return await trusted(
     async () =>
-      await readConsistently(invocation.store, scope, async (reader) => {
-        const budget = runReads(run);
-        return await runHandler(run, operation, args, {
-          read: async (request) => {
-            spendRead(budget, 0);
-            return await readFor(operation, reader, request);
-          },
-        });
-      })
+      await readConsistently(
+        invocation.store,
+        scope,
+        async (reader) => {
+          const budget = runReads(run);
+          return await runHandler(run, operation, args, {
+            read: async (request) => {
+              spendRead(budget, 0);
+              return await readFor(operation, reader, request);
+            },
+          });
+        },
+        run.depth === 0 ? invocation.observeReads : undefined
+      )
   );
 };
 

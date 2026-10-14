@@ -287,6 +287,27 @@ export const storeIntentSchema = z.strictObject({
 });
 
 /**
+ * What a store's outbox holds: the intents its commits staged, and the
+ * one entry the store stages itself for a commit that changed records
+ * while its live queries are followed (`store.changed`: the tables it
+ * changed, and the generation it moved each to). A caller never stages
+ * that one: `storeIntentSchema` refuses it.
+ */
+export const storeOutboxKinds = [...storeIntentKinds, "store.changed"] as const;
+
+/** A `store.changed` entry, as the store reads it back. */
+export const storeChangedSchema = z.strictObject({
+  kind: z.literal("store.changed"),
+  tables: z.record(tableNameSchema, z.number().int().min(0)),
+});
+
+/** An outbox entry, as the store reads it back before handing it over. */
+export const storeOutboxEntrySchema = z.union([
+  storeIntentSchema,
+  storeChangedSchema,
+]);
+
+/**
  * Whether the person a commit or a read is for is a member or a builder
  * of the App it comes through, as core resolved it for the invocation:
  * what `appMembers` and `appBuilders` tables require.

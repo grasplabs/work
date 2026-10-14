@@ -138,5 +138,7 @@ export type { JsonSchema, JsonSchemaOptions } from "./json-schema.ts";
 // The session client as a host makes it (spec 10.7.1): over the host's own
 // transport, one per App session, mounted for the screens it serves. App
 // code never makes one; it gets the platform's from `useClient()`.
-export { GraspClient } from "./client-core.ts";
+// `clientInternals` is what the screen runtime and the React hooks reach
+// of it: a component's reading of a query, as `useQuery` subscribes.
+export { clientInternals, GraspClient } from "./client-core.ts";
 export type { ClientTransport } from "./client-core.ts";
