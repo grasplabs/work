@@ -23,6 +23,8 @@ import type { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
+import { stampedMail } from "./workflows/mail-stamps.ts";
+import type { StampingRun } from "./workflows/mail-stamps.ts";
 
 // What Apps and agents get in their env: one stub per granted permission,
 // and nothing else. Each stub is a loopback entrypoint of core whose props
@@ -192,6 +194,13 @@ export interface StubCaller {
    * it comes from may still act.
    */
   stillAllowed?: () => Promise<void>;
+  /**
+   * The workflow run the call is a step of, and the step's key, as core
+   * knows them, never as the call names them: mail it sends to the
+   * deployment's own domain is stamped with the run
+   * (workflows/mail-stamps.ts).
+   */
+  stamping?: StampingRun;
 }
 
 /**
@@ -214,7 +223,11 @@ const signedStub = async (
   authority: StubAuthority,
   { context, permissionId, connection }: ConnectionGrant,
   call: unknown[]
-): Promise<{ request: ConnectCall; stillAllowed?: () => Promise<void> }> => {
+): Promise<{
+  request: ConnectCall;
+  stillAllowed?: () => Promise<void>;
+  stamping?: StampingRun;
+}> => {
   const parsed = stubCallSchema.safeParse(call);
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
@@ -242,6 +255,7 @@ const signedStub = async (
       ...(caller.stillAllowed === undefined
         ? {}
         : { stillAllowed: caller.stillAllowed }),
+      ...(caller.stamping === undefined ? {} : { stamping: caller.stamping }),
     };
   } catch (error) {
     throw forSandbox(error);
@@ -271,15 +285,25 @@ export const runStubCall = async (
   grant: ConnectionGrant,
   call: unknown[]
 ): Promise<ConnectResult> => {
-  const { request, stillAllowed } = await signedStub(
+  const { request, stillAllowed, stamping } = await signedStub(
     env,
     authority,
     grant,
     call
   );
   try {
+    // A run's mail to the deployment's domain carries the run's token,
+    // recorded before the call leaves, so the runs it starts join its
+    // lineage. A record that fails fails the call, which sent nothing.
+    const sent =
+      stamping === undefined
+        ? request
+        : {
+            ...request,
+            input: await stampedMail(env, stamping, request),
+          };
     await stillAllowed?.();
-    return await env.CONNECT.call(request);
+    return await env.CONNECT.call(sent);
   } catch (error) {
     throw forSandbox(error);
   }
