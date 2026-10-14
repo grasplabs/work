@@ -636,6 +636,11 @@ export type RefuseConfirmation = z.input<typeof refuseConfirmationSchema>;
 export const pendingKeySchema = z.strictObject({
   onBehalfOf: identifierSchema,
   idempotencyKey: identifierSchema,
+  /**
+   * Count a call of unknown outcome connect could recover now as waiting
+   * too: past a hold's deadline, nothing is recovered on its own.
+   */
+  orRecoverable: z.literal(true).optional(),
 });
 export type PendingKey = z.input<typeof pendingKeySchema>;
 

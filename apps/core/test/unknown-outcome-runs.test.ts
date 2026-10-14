@@ -1,3 +1,4 @@
+import type { PendingKey } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
@@ -430,6 +431,53 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     }
   });
 
+  it("runs the step again as its person said, when they resolve it during the last wait before its deadline", async () => {
+    const admin = await personApi("admin");
+    const { WORKFLOW_UNKNOWN_HOLD_MS: deadline, WORKFLOW_OFF_WAIT_MS: wait } =
+      env;
+    // Its deadline passes during its first wait, two seconds long: the
+    // person resolves it then, and the check after it is past the deadline.
+    env.WORKFLOW_UNKNOWN_HOLD_MS = "1";
+    env.WORKFLOW_OFF_WAIT_MS = "2000";
+    try {
+      const outcomes = [];
+      for (const choice of ["happened", "not_happened"] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time
+        const { mailbox, run } = await lostRun(admin);
+        // oxlint-disable-next-line no-await-in-loop -- once it is listed
+        const unknown = await vi.waitFor(
+          async () => {
+            const [listed] = await admin.api.unknownOutcomes.list();
+            if (listed === undefined) {
+              throw new Error("Not listed yet");
+            }
+            return listed;
+          },
+          { timeout: 10_000, interval: 50 }
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time
+        await admin.api.unknownOutcomes.resolve(
+          unknown.key,
+          choice,
+          unknown.claim
+        );
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time
+        await finished(run.id);
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time
+        const { status, output } = await admin.api.workflows.status(run.id);
+        // oxlint-disable-next-line no-await-in-loop -- one run at a time
+        outcomes.push({ status, output, sent: await sentFrom(mailbox) });
+      }
+      expect(outcomes).toMatchObject([
+        { status: "completed", output: { resolved: true }, sent: 1 },
+        { status: "completed", output: { sent: true }, sent: 2 },
+      ]);
+    } finally {
+      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
+      env.WORKFLOW_OFF_WAIT_MS = wait;
+    }
+  });
+
   it("ends by its deadline, not the run's step allowance, however many rounds the hold takes", async () => {
     const admin = await personApi("admin");
     const { CONNECT: connect } = env;
@@ -440,8 +488,12 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     env.WORKFLOW_UNKNOWN_HOLD_MS = "8000";
     env.CONNECT = new Proxy(connect, {
       get: (target, name) => {
+        // Asked past the deadline, connect answers as it is.
         if (name === "anyPending") {
-          return async () => await Promise.resolve(false);
+          return async (request: PendingKey) =>
+            request.orRecoverable === true
+              ? await target.anyPending(request)
+              : false;
         }
         const real: unknown = Reflect.get(target, name);
         return real;

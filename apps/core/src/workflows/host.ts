@@ -1238,11 +1238,15 @@ export class RunHost extends RpcTarget {
           },
         },
         async (): Promise<boolean | "expired"> => {
-          // Past its deadline the hold ends, whatever connect says now:
-          // a call still of unknown outcome then is its person's to
-          // resolve, with no run waiting on it.
+          // Past its deadline the hold ends, unless its person resolved
+          // it meanwhile (the step then runs again, as they said): a call
+          // still of unknown outcome is theirs to resolve, with no run
+          // waiting on it, and never recovered on its own after it, so
+          // one connect could recover counts as unresolved here.
           if (deadline !== undefined && Date.now() >= deadline) {
-            return "expired";
+            return (await this.#stillHeld(step, keys, true))
+              ? "expired"
+              : false;
           }
           return await this.#stillHeld(step, keys);
         }
@@ -1297,13 +1301,18 @@ export class RunHost extends RpcTarget {
    */
   async #stillHeld(
     step: string,
-    keys: readonly string[] = []
+    keys: readonly string[] = [],
+    orRecoverable = false
   ): Promise<boolean> {
     const { onBehalfOf } = this.#run.authority;
     const waiting = await Promise.all(
       [stepIdempotencyKey(this.#run.runId, step), ...keys].map(
         async (idempotencyKey) =>
-          await this.#env.CONNECT.anyPending({ onBehalfOf, idempotencyKey })
+          await this.#env.CONNECT.anyPending({
+            onBehalfOf,
+            idempotencyKey,
+            ...(orRecoverable ? { orRecoverable } : {}),
+          })
       )
     );
     return waiting.includes(true);

@@ -414,6 +414,9 @@ export const unresolvedUnder = async (
         unknownNow(Date.now())
       )
     );
+  if (parsed.data.orRecoverable === true) {
+    return rows.length > 0;
+  }
   // Every one under the step's key: a step makes few calls, each its own
   // row, and the first that waits for its person settles it.
   for (const { row } of rows) {
