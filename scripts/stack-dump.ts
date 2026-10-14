@@ -77,34 +77,61 @@ export const truncated = (text: string, maxBytes: number): string => {
   return `${bytes.subarray(0, maxBytes).toString("utf-8")}\n[cut at ${maxBytes} of ${bytes.byteLength} bytes]\n`;
 };
 
-/** What a bounded command may take. */
+/** What a bounded command may take, and what ends it early. */
 export interface Bounds {
   timeoutMs: number;
   maxBytes: number;
+  /** Kills the command once aborted. */
+  signal?: AbortSignal;
+}
+
+/** What a bounded command answered. */
+export interface Ran {
+  /** stdout and stderr together, with a line saying why it ended early. */
+  output: string;
+  /** Whether it started at all. */
+  started: boolean;
+  /** Its exit code; null when it was killed or never started. */
+  code: number | null;
 }
 
 /**
- * Runs a command and answers its output (stdout and stderr together), never
- * rejecting: a command that can't start, outlives `timeoutMs` or writes
- * more than `maxBytes` answers what it wrote with a line saying why it
- * ended.
+ * Runs a command and answers its output, never rejecting: a command that
+ * can't start, outlives `timeoutMs`, writes more than `maxBytes` or is
+ * aborted answers what it wrote with a line saying why it ended, and is
+ * killed.
  */
 export type RunCommand = (
   command: string,
   args: readonly string[],
   bounds: Bounds
-) => Promise<string>;
+) => Promise<Ran>;
 
 export const runBounded: RunCommand = async (command, args, bounds) => {
-  const { promise, resolve } = Promise.withResolvers<string>();
+  const { promise, resolve } = Promise.withResolvers<Ran>();
   const chunks: Buffer[] = [];
   let bytes = 0;
   let note = "";
   const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-  const timer = setTimeout(() => {
-    note ||= `[ended after ${bounds.timeoutMs} ms]\n`;
+  const kill = (why: string): void => {
+    note ||= why;
     child.kill("SIGKILL");
+  };
+  const timer = setTimeout(() => {
+    kill(`[ended after ${bounds.timeoutMs} ms]\n`);
   }, bounds.timeoutMs);
+  const onAbort = (): void => {
+    kill("[ended at the dump's deadline]\n");
+  };
+  if (bounds.signal?.aborted === true) {
+    onAbort();
+  }
+  bounds.signal?.addEventListener("abort", onAbort, { once: true });
+  const settle = (ran: Ran): void => {
+    clearTimeout(timer);
+    bounds.signal?.removeEventListener("abort", onAbort);
+    resolve(ran);
+  };
   const take = (chunk: Buffer): void => {
     if (bytes >= bounds.maxBytes) {
       return;
@@ -113,19 +140,24 @@ export const runBounded: RunCommand = async (command, args, bounds) => {
     chunks.push(kept);
     bytes += kept.byteLength;
     if (bytes >= bounds.maxBytes) {
-      note ||= `[cut at ${bounds.maxBytes} bytes]\n`;
-      child.kill("SIGKILL");
+      kill(`[cut at ${bounds.maxBytes} bytes]\n`);
     }
   };
   child.stdout.on("data", take);
   child.stderr.on("data", take);
   child.on("error", (error) => {
-    clearTimeout(timer);
-    resolve(`[${command} didn't run: ${error.message}]\n`);
+    settle({
+      output: `[${command} didn't run: ${error.message}]\n`,
+      started: false,
+      code: null,
+    });
   });
-  child.on("close", () => {
-    clearTimeout(timer);
-    resolve(`${Buffer.concat(chunks).toString("utf-8")}${note}`);
+  child.on("close", (code) => {
+    settle({
+      output: `${Buffer.concat(chunks).toString("utf-8")}${note}`,
+      started: true,
+      code,
+    });
   });
   return await promise;
 };
@@ -133,12 +165,14 @@ export const runBounded: RunCommand = async (command, args, bounds) => {
 /** How long the whole dump may take, and how much it may print. */
 export const dumpBounds: Bounds = { timeoutMs: 20_000, maxBytes: 300 * 1024 };
 
-/** How long listing processes may take. */
+/** How long listing processes may take, at most. */
 const psTimeoutMs = 5000;
 
 /**
  * The thread stacks of every workerd below process `root`, by gdb, as one
- * text of at most `bounds.maxBytes`, within `bounds.timeoutMs`.
+ * text of at most `bounds.maxBytes`, within `bounds.timeoutMs`: each gdb
+ * has only the time left of that, a dump that didn't end by then is cut
+ * where it was and its gdb killed, and the dumps that ended are kept.
  */
 export const dumpWorkerdStacks = async ({
   root,
@@ -149,12 +183,40 @@ export const dumpWorkerdStacks = async ({
   run?: RunCommand;
   bounds?: Bounds;
 }): Promise<string> => {
-  const dump = async (): Promise<string> => {
-    const listed = await run("ps", ["-A", "-o", "pid=,ppid=,comm="], {
-      timeoutMs: Math.min(psTimeoutMs, bounds.timeoutMs),
-      maxBytes: bounds.maxBytes,
-    });
-    const pids = workerdBelow(parsePs(listed), root);
+  const deadline = Date.now() + bounds.timeoutMs;
+  const left = (): number => Math.max(0, deadline - Date.now());
+  // Aborted once the dump is done: a command still running then (one that
+  // missed its own deadline) is killed before this returns.
+  const stop = new AbortController();
+  /** `answer` at the deadline, or once the dump is done. */
+  const late = async <T>(answer: T): Promise<T> => {
+    try {
+      await wait(left(), undefined, { ref: false, signal: stop.signal });
+    } catch {
+      // Aborted: the dump is done, and the answer goes unread.
+    }
+    return answer;
+  };
+  try {
+    const listed = await Promise.race([
+      run("ps", ["-A", "-o", "pid=,ppid=,comm="], {
+        timeoutMs: Math.min(psTimeoutMs, left()),
+        maxBytes: bounds.maxBytes,
+        signal: stop.signal,
+      }),
+      late<Ran>({
+        output: "[no answer by the dump's deadline]\n",
+        started: true,
+        code: null,
+      }),
+    ]);
+    if (!listed.started || listed.code !== 0) {
+      return truncated(
+        `Couldn't list the processes to find workerd (ps ${listed.started ? `ended with ${listed.code ?? "no exit code"}` : "didn't start"}):\n${listed.output}`,
+        bounds.maxBytes
+      );
+    }
+    const pids = workerdBelow(parsePs(listed.output), root);
     if (pids.length === 0) {
       return `No workerd runs below the Vitest process (${root}).\n`;
     }
@@ -162,23 +224,24 @@ export const dumpWorkerdStacks = async ({
     // the others.
     const share = Math.floor(bounds.maxBytes / pids.length);
     const stacks = await Promise.all(
-      pids.map(
-        async (pid) =>
-          `--- workerd ${pid} ---\n${truncated(
-            await run(
-              "gdb",
-              ["-batch", "-p", String(pid), "-ex", "thread apply all bt"],
-              { timeoutMs: bounds.timeoutMs, maxBytes: share }
-            ),
-            share
-          )}`
-      )
+      pids.map(async (pid) => {
+        const ran = await Promise.race([
+          run(
+            "gdb",
+            ["-batch", "-p", String(pid), "-ex", "thread apply all bt"],
+            { timeoutMs: left(), maxBytes: share, signal: stop.signal }
+          ),
+          late<Ran>({
+            output: `[no answer by the dump's deadline, ${bounds.timeoutMs} ms]\n`,
+            started: true,
+            code: null,
+          }),
+        ]);
+        return `--- workerd ${pid} ---\n${truncated(ran.output, share)}`;
+      })
     );
-    return stacks.join("\n");
-  };
-  const deadline = async (): Promise<string> => {
-    await wait(bounds.timeoutMs, undefined, { ref: false });
-    return `[the stack dump didn't end within ${bounds.timeoutMs} ms]\n`;
-  };
-  return truncated(await Promise.race([dump(), deadline()]), bounds.maxBytes);
+    return truncated(stacks.join("\n"), bounds.maxBytes);
+  } finally {
+    stop.abort();
+  }
 };

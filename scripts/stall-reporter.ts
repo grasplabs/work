@@ -135,6 +135,21 @@ const defaultOverdueCheckMs = 5000;
  */
 const flushMs = 5000;
 
+/** How long ending a run waits for the stacks to leave stdout. */
+const outputFlushMs = 3000;
+
+/**
+ * Resolves once stdout has handled an empty write: after every write before
+ * it, as a stream handles writes in order.
+ */
+const stdoutFlushed = async (): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<boolean>();
+  process.stdout.write("", () => {
+    resolve(true);
+  });
+  await promise;
+};
+
 /** How many failed files or unhandled errors a summary names. */
 const summaryLimit = 20;
 
@@ -179,6 +194,14 @@ export interface StallReporterOptions {
   dumpStacks?: () => Promise<string>;
   /** How long to wait for `dumpStacks` before ending the run regardless. */
   stackDumpTimeoutMs?: number;
+  /**
+   * Resolves once what was written has left the process: the stacks are
+   * large, and exiting drops what stdout still holds. By default, once
+   * stdout has taken an empty write after them.
+   */
+  outputFlushed?: () => Promise<void>;
+  /** How long to wait for `outputFlushed` before ending the run regardless. */
+  outputFlushTimeoutMs?: number;
   /**
    * Ends the run, failed, once a test is overdue; by default, the process
    * exits 1. Exiting stops workerd too: miniflare disposes of it on exit.
@@ -267,6 +290,8 @@ export default class StallReporter implements Reporter {
   readonly #end: () => void;
   readonly #dumpStacks: (() => Promise<string>) | undefined;
   readonly #stackDumpTimeoutMs: number;
+  readonly #outputFlushed: () => Promise<void>;
+  readonly #outputFlushTimeoutMs: number;
   #timer: NodeJS.Timeout | undefined;
   #overdueTimer: NodeJS.Timeout | undefined;
   #ended = false;
@@ -301,6 +326,8 @@ export default class StallReporter implements Reporter {
     this.#dumpStacks = options.dumpStacks;
     this.#stackDumpTimeoutMs =
       options.stackDumpTimeoutMs ?? dumpBounds.timeoutMs + flushMs;
+    this.#outputFlushed = options.outputFlushed ?? stdoutFlushed;
+    this.#outputFlushTimeoutMs = options.outputFlushTimeoutMs ?? outputFlushMs;
     const file = options.progressFile;
     this.#progress =
       file === undefined || file === ""
@@ -571,6 +598,17 @@ export default class StallReporter implements Reporter {
     };
     const stacks = await Promise.race([dumped(), tooLong()]);
     this.#write(`\nThread stacks of each workerd, by gdb:\n${stacks}\n`);
+    const flushed = async (): Promise<void> => {
+      try {
+        await this.#outputFlushed();
+      } catch {
+        // A broken stdout loses the stacks, not the run's end.
+      }
+    };
+    await Promise.race([
+      flushed(),
+      wait(this.#outputFlushTimeoutMs, undefined, { ref: false }),
+    ]);
   }
 
   /** Writes why the run ended to the summary, and annotates it. */

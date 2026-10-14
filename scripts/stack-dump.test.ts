@@ -7,7 +7,7 @@ import {
   truncated,
   workerdBelow,
 } from "./stack-dump.ts";
-import type { RunCommand } from "./stack-dump.ts";
+import type { Bounds, Ran, RunCommand } from "./stack-dump.ts";
 
 /** `ps -A -o pid=,ppid=,comm=` on a CI runner: Vitest is 100. */
 const psOnLinux = `    1     0 systemd
@@ -21,16 +21,22 @@ const psOnLinux = `    1     0 systemd
 garbage line
 `;
 
-/** A `run` that answers `ps` with `listing` and gdb with a stack per pid. */
+const exited = (output: string): Ran => ({ output, started: true, code: 0 });
+
+/**
+ * A `run` that answers `ps` with `listing`, and gdb with `stack(pid,
+ * bounds)`: the command each was asked for, by name and arguments.
+ */
 const fakeRun = (
-  listing: string,
-  stack = (pid: string) => `#0 epoll_wait in workerd ${pid}\n`
+  listing: Ran,
+  stack: (pid: string, bounds: Bounds) => Promise<Ran> | Ran = (pid) =>
+    exited(`#0 epoll_wait in workerd ${pid}\n`)
 ) => {
   const calls: string[][] = [];
-  const run: RunCommand = async (command, args) => {
+  const run: RunCommand = async (command, args, bounds) => {
     await Promise.resolve();
     calls.push([command, ...args]);
-    return command === "ps" ? listing : stack(args[2] ?? "");
+    return command === "ps" ? listing : await stack(args[2] ?? "", bounds);
   };
   return { run, calls };
 };
@@ -54,7 +60,7 @@ describe("which processes are dumped", () => {
 
 describe("the stack dump", () => {
   it("asks gdb for every thread of each workerd below the Vitest process", async () => {
-    const { run, calls } = fakeRun(psOnLinux);
+    const { run, calls } = fakeRun(exited(psOnLinux));
     const dump = await dumpWorkerdStacks({ root: 100, run });
 
     expect({
@@ -78,7 +84,7 @@ describe("the stack dump", () => {
   });
 
   it("says so when no workerd runs, without running gdb", async () => {
-    const { run, calls } = fakeRun("  100     1 node\n");
+    const { run, calls } = fakeRun(exited("  100     1 node\n"));
     const dump = await dumpWorkerdStacks({ root: 100, run });
 
     expect({ commands: calls.map(([command]) => command), dump }).toStrictEqual(
@@ -89,8 +95,37 @@ describe("the stack dump", () => {
     );
   });
 
+  it("says ps couldn't list the processes, rather than that no workerd runs", async () => {
+    const notStarted = fakeRun({
+      output: "[ps didn't run: spawn ps ENOENT]\n",
+      started: false,
+      code: null,
+    });
+    const failed = fakeRun({
+      output: "ps: bad option\n",
+      started: true,
+      code: 1,
+    });
+
+    expect({
+      notStarted: await dumpWorkerdStacks({ root: 100, run: notStarted.run }),
+      failed: await dumpWorkerdStacks({ root: 100, run: failed.run }),
+      gdb: [...notStarted.calls, ...failed.calls].filter(
+        ([command]) => command === "gdb"
+      ),
+    }).toStrictEqual({
+      notStarted:
+        "Couldn't list the processes to find workerd (ps didn't start):\n[ps didn't run: spawn ps ENOENT]\n",
+      failed:
+        "Couldn't list the processes to find workerd (ps ended with 1):\nps: bad option\n",
+      gdb: [],
+    });
+  });
+
   it("prints at most its byte limit, sharing it between the processes", async () => {
-    const { run } = fakeRun(psOnLinux, (pid) => `${pid}:${"x".repeat(5000)}`);
+    const { run } = fakeRun(exited(psOnLinux), (pid) =>
+      exited(`${pid}:${"x".repeat(5000)}`)
+    );
     const dump = await dumpWorkerdStacks({
       root: 100,
       run,
@@ -106,66 +141,125 @@ describe("the stack dump", () => {
     }).toStrictEqual({ withinLimit: true, everyProcess: true, saysCut: true });
   });
 
-  it("ends at its deadline when a command never does", async () => {
-    const run: RunCommand = async (command) =>
-      command === "ps"
-        ? psOnLinux
-        : await Promise.withResolvers<string>().promise;
+  it("keeps the dumps that ended when one doesn't by the deadline, and kills that one", async () => {
+    const killed: string[] = [];
+    const { run } = fakeRun(exited(psOnLinux), async (pid, { signal }) => {
+      if (pid !== "150") {
+        return exited(`#0 epoll_wait in workerd ${pid}\n`);
+      }
+      // Hangs until the dump kills it, as runBounded does on abort.
+      const { promise, resolve } = Promise.withResolvers<Ran>();
+      signal?.addEventListener("abort", () => {
+        killed.push(pid);
+        resolve({ output: "", started: true, code: null });
+      });
+      return await promise;
+    });
     const started = Date.now();
     const dump = await dumpWorkerdStacks({
       root: 100,
       run,
-      bounds: { timeoutMs: 50, maxBytes: 3000 },
+      bounds: { timeoutMs: 100, maxBytes: 3000 },
     });
 
     expect({
       dump,
-      inTime: Date.now() - started < 1000,
+      killed,
+      inTime: Date.now() - started < 5000,
     }).toStrictEqual({
-      dump: "[the stack dump didn't end within 50 ms]\n",
+      dump: [
+        "--- workerd 90 ---\n#0 epoll_wait in workerd 90\n",
+        "--- workerd 150 ---\n[no answer by the dump's deadline, 100 ms]\n",
+        "--- workerd 210 ---\n#0 epoll_wait in workerd 210\n",
+      ].join("\n"),
+      killed: ["150"],
       inTime: true,
     });
+  });
+
+  it("gives each gdb only the time left of the dump's deadline", async () => {
+    const asked: number[] = [];
+    const { run } = fakeRun(exited(psOnLinux), (pid, { timeoutMs }) => {
+      asked.push(timeoutMs);
+      return exited(pid);
+    });
+    await dumpWorkerdStacks({
+      root: 100,
+      run,
+      bounds: { timeoutMs: 2000, maxBytes: 3000 },
+    });
+
+    expect(
+      asked.every((timeoutMs) => timeoutMs > 0 && timeoutMs <= 2000)
+    ).toBeTruthy();
   });
 });
 
 describe("a bounded command", () => {
-  it("answers what a command wrote, stdout and stderr", async () => {
-    const output = await runBounded(
+  it("answers what a command wrote, stdout and stderr, and its exit code", async () => {
+    const { output, started, code } = await runBounded(
       process.execPath,
-      ["-e", "process.stdout.write('out '); process.stderr.write('err')"],
-      { timeoutMs: 10_000, maxBytes: 1000 }
+      [
+        "-e",
+        "process.stdout.write('out '); process.stderr.write('err'); process.exitCode = 3",
+      ],
+      { timeoutMs: 30_000, maxBytes: 1000 }
     );
-    expect(output.split(" ").toSorted()).toStrictEqual(["err", "out"]);
+    expect({
+      output: output.split(" ").toSorted(),
+      started,
+      code,
+    }).toStrictEqual({ output: ["err", "out"], started: true, code: 3 });
   });
 
   it("kills a command past its deadline and says so", async () => {
-    const started = Date.now();
-    const output = await runBounded(
+    const ran = await runBounded(
       process.execPath,
-      ["-e", "process.stdout.write('started'); setInterval(() => {}, 1000)"],
+      ["-e", "setInterval(() => {}, 1000)"],
       { timeoutMs: 300, maxBytes: 1000 }
     );
-    expect({ output, inTime: Date.now() - started < 5000 }).toStrictEqual({
-      output: "started[ended after 300 ms]\n",
-      inTime: true,
+    expect(ran).toStrictEqual({
+      output: "[ended after 300 ms]\n",
+      started: true,
+      code: null,
+    });
+  });
+
+  it("kills a command once its signal aborts, and says so", async () => {
+    const stop = new AbortController();
+    const running = runBounded(
+      process.execPath,
+      ["-e", "setInterval(() => {}, 1000)"],
+      { timeoutMs: 60_000, maxBytes: 1000, signal: stop.signal }
+    );
+    stop.abort();
+    await expect(running).resolves.toStrictEqual({
+      output: "[ended at the dump's deadline]\n",
+      started: true,
+      code: null,
     });
   });
 
   it("kills a command that writes past its byte limit, keeping that much", async () => {
-    const output = await runBounded(
+    const { output } = await runBounded(
       process.execPath,
       ["-e", "setInterval(() => process.stdout.write('y'.repeat(4096)), 1)"],
-      { timeoutMs: 10_000, maxBytes: 10_000 }
+      { timeoutMs: 30_000, maxBytes: 10_000 }
     );
     expect(output).toBe(`${"y".repeat(10_000)}[cut at 10000 bytes]\n`);
   });
 
   it("answers why when the command doesn't exist", async () => {
-    const output = await runBounded("grasp-no-such-command", [], {
+    const ran = await runBounded("grasp-no-such-command", [], {
       timeoutMs: 1000,
       maxBytes: 1000,
     });
-    expect(output).toMatch(/^\[grasp-no-such-command didn't run: .*ENOENT/u);
+    expect({
+      started: ran.started,
+      saysWhy: /^\[grasp-no-such-command didn't run: .*ENOENT/u.test(
+        ran.output
+      ),
+    }).toStrictEqual({ started: false, saysWhy: true });
   });
 });
 

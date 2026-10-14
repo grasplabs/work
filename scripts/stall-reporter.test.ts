@@ -671,7 +671,10 @@ describe("why a run ended", () => {
 /** A reporter as `ending` makes, that dumps stacks with `dumpStacks`. */
 const endingWithStacks = (
   dumpStacks: () => Promise<string>,
-  stackDumpTimeoutMs = 100
+  stackDumpTimeoutMs = 100,
+  outputFlushed: () => Promise<void> = async () => {
+    await Promise.resolve();
+  }
 ) => {
   const written: string[] = [];
   const state = { ended: 0, writtenAtEnd: 0 };
@@ -680,6 +683,8 @@ const endingWithStacks = (
     overdueCheckMs: 10,
     dumpStacks,
     stackDumpTimeoutMs,
+    outputFlushed,
+    outputFlushTimeoutMs: 100,
     write: (text) => {
       written.push(text);
     },
@@ -700,6 +705,45 @@ const stall = (reporter: StallReporter): void => {
 };
 
 describe("the stacks of a stalled run", () => {
+  it("have left stdout before the run is ended", async () => {
+    const order: string[] = [];
+    const { reporter, state } = endingWithStacks(
+      async () => {
+        await Promise.resolve();
+        return "--- workerd 150 ---\n";
+      },
+      100,
+      async () => {
+        await wait(30);
+        order.push(`flushed, ended ${state.ended} times`);
+      }
+    );
+    stall(reporter);
+    await wait(pastTheGrace);
+
+    expect({ order, ended: state.ended }).toStrictEqual({
+      order: ["flushed, ended 0 times"],
+      ended: 1,
+    });
+  });
+
+  it("don't keep the run from ending when stdout never takes them", async () => {
+    const { reporter, state } = endingWithStacks(
+      async () => {
+        await Promise.resolve();
+        return "--- workerd 150 ---\n";
+      },
+      100,
+      async () => {
+        await Promise.withResolvers<undefined>().promise;
+      }
+    );
+    stall(reporter);
+    await wait(pastTheGrace + 150);
+
+    expect(state.ended).toBe(1);
+  });
+
   it("are printed, once, before the run is ended", async () => {
     let dumps = 0;
     const { reporter, written, state } = endingWithStacks(async () => {
