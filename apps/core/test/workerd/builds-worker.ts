@@ -1,7 +1,11 @@
 import { npmRegistryOrigin } from "@grasp-os/shared/dependencies";
-import { sha512Integrity } from "@grasp-os/shared/encoding";
-import { packageLimits } from "@grasp-os/shared/packages";
-import type { PackageTarball } from "@grasp-os/shared/packages";
+import { sha256HexOfBytes, sha512Integrity } from "@grasp-os/shared/encoding";
+import {
+  packageBuildAnswerSchema,
+  packageLimits,
+  targetConditions,
+} from "@grasp-os/shared/packages";
+import type { GraspLock, PackageTarball } from "@grasp-os/shared/packages";
 
 import { packageBuilder } from "../../src/packages/builder.ts";
 import type { PackageBuilderEnv } from "../../src/packages/builder.ts";
@@ -90,6 +94,15 @@ const hostile: Readonly<Record<string, string>> = {
 };
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+/**
+ * What the built package exports: the numbers to 200,000, in order, some
+ * 1.3 MB, so its bundle is larger than a chunk the builder writes back
+ * (1 MiB), and no part of it repeats another, so a chunk out of place
+ * shows.
+ */
+const counted = Array.from({ length: 200_001 }, (_, at) => at).join(",");
 
 /** One ustar header, as tar writes it. */
 const header = (path: string, size: number): Uint8Array => {
@@ -155,7 +168,12 @@ const packageOf = async (kind: string): Promise<PackageTarball> => {
       packageLimits.extractedBytes + 1024 * 1024
     );
   }
-  if (kind === "large") {
+  if (kind === "built") {
+    files["package/index.js"] = encoder.encode(
+      `export const counted = "${counted}";\n`
+    );
+  }
+  if (kind === "large" || kind === "built") {
     // Three tarball chunks of noise gzip can't shrink, read whole and in order.
     const noise = new Uint8Array(3 * 1024 * 1024);
     for (let at = 0; at < noise.byteLength; at += 65_536) {
@@ -171,6 +189,57 @@ const packageOf = async (kind: string): Promise<PackageTarball> => {
     integrity: await sha512Integrity(tarball),
     tarball,
   };
+};
+
+/** An approved lock of `pkg` alone, its browser target importing it. */
+const lockOf = (pkg: PackageTarball): GraspLock => ({
+  lockfileVersion: 1,
+  registry: npmRegistryOrigin,
+  requested: { [pkg.name]: pkg.version },
+  direct: { [pkg.name]: pkg.version },
+  platformPeers: {},
+  targets: {
+    browser: { conditions: [...targetConditions.browser], entries: [pkg.name] },
+  },
+  packages: {
+    [pkg.key]: {
+      name: pkg.name,
+      version: pkg.version,
+      integrity: pkg.integrity,
+      license: "MIT",
+      publishedAt: "2026-01-01T00:00:00.000Z",
+      dependencies: {},
+      peers: {},
+    },
+  },
+});
+
+/**
+ * A build's answer as the test reads it: for each file the artifact
+ * describes, what it says of it and what came back, the bytes' length and
+ * SHA-256, and whether they hold what the package exports, whole and in
+ * order. Anything else as it came.
+ */
+const builtFiles = async (answer: unknown): Promise<unknown> => {
+  const built = packageBuildAnswerSchema.safeParse(answer).data;
+  if (built === undefined || !built.ok) {
+    return answer;
+  }
+  const { artifact, files } = built;
+  return await Promise.all(
+    Object.entries(artifact.files).map(async ([path, described]) => {
+      const bytes = files[path] ?? new Uint8Array();
+      return {
+        path,
+        described: { bytes: described.bytes, sha256: described.sha256 },
+        returned: {
+          bytes: bytes.byteLength,
+          sha256: await sha256HexOfBytes(bytes),
+        },
+        holdsExport: decoder.decode(bytes).includes(counted),
+      };
+    })
+  );
 };
 
 /** Core's static assets as far as the builder reads them. */
@@ -283,20 +352,14 @@ export default {
       return Response.json(
         await outcomeOf(async () => {
           const builder = await packageBuilder(builderEnv);
-          return await builder.build({
-            limits: { ...packageLimits, artifactBytes: 2 * 1024 * 1024 },
-            lock: {
-              lockfileVersion: 1,
-              registry: npmRegistryOrigin,
-              requested: {},
-              direct: {},
-              platformPeers: {},
-              targets: {},
-              packages: {},
-            },
-            target: "browser",
-            packages: [pkg],
-          });
+          return await builtFiles(
+            await builder.build({
+              limits: { ...packageLimits, artifactBytes: 2 * 1024 * 1024 },
+              lock: lockOf(pkg),
+              target: "browser",
+              packages: [pkg],
+            })
+          );
         })
       );
     }

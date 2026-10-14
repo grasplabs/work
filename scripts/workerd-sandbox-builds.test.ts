@@ -40,6 +40,23 @@ const outcomeSchema = z.object({
   ms: z.number(),
 });
 
+const builtFileSchema = z.object({
+  bytes: z.number(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/u),
+});
+
+/** What the stand-in says of each file a build returned. */
+const builtFilesSchema = z
+  .array(
+    z.object({
+      path: z.string(),
+      described: builtFileSchema,
+      returned: builtFileSchema,
+      holdsExport: z.boolean(),
+    })
+  )
+  .min(1);
+
 const inspectionsSchema = z.array(
   z.object({ key: z.string(), refusals: z.array(z.string()).optional() })
 );
@@ -173,6 +190,31 @@ describe("the package builder on the on-prem sandbox", () => {
       value: 42,
     });
     expect(app.ms).toBeLessThan(2000);
+  }, 60_000);
+
+  it("builds an approved lock on the sandbox host and puts back every file it wrote, whole and in order, as the artifact describes it", async () => {
+    const outcome = await call("package=built", "/build");
+
+    expect(outcome).toMatchObject({ status: "ok" });
+
+    const files = builtFilesSchema.parse(outcome.value);
+    const exported = files.find(({ holdsExport }) => holdsExport);
+
+    expect({
+      // Each file as the artifact describes it: its length and SHA-256.
+      returned: files.map(({ path: file, returned }) => ({
+        file,
+        ...returned,
+      })),
+      // The file holding the package's export took more than one chunk.
+      exportedPastOneChunk: (exported?.returned.bytes ?? 0) > 1024 * 1024,
+    }).toStrictEqual({
+      returned: files.map(({ path: file, described }) => ({
+        file,
+        ...described,
+      })),
+      exportedPastOneChunk: true,
+    });
   }, 60_000);
 
   it("takes no more of an artifact written back than it may be", async () => {
