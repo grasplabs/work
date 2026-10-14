@@ -28,7 +28,7 @@ import { sampleHost, storageHost } from "./fixtures/sample-connector.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import type { ProviderName } from "./oauth-provider.ts";
 import { fakeSampleApi } from "./sample-api.ts";
-import { callTool as call, toolError } from "./tool-calls.ts";
+import { callTool as call, claimedAgo, toolError } from "./tool-calls.ts";
 
 // Native connectors run in isolates of their own, and reach their provider
 // only through connect's egress handler, which adds the connection's token.
@@ -100,6 +100,35 @@ const probe = async (
 const refused = { status: 403, error: null };
 
 describe("a native connector", () => {
+  it("can't write from a lookup of a call's effect: only the action's GETs leave", async () => {
+    const connection = await connectionTo("sample");
+    const file = async () =>
+      await outcome(
+        call(
+          connection,
+          "items.file",
+          { mailbox: "invoices@acme.test", subject: "lost" },
+          { resource: "invoices@acme.test", idempotencyKey: "run-1:file" }
+        )
+      );
+    const lost = await file();
+    await claimedAgo(connection);
+    // Its recovery looks the effect up, and the lookup tries to write.
+    const recovered = await file();
+    expect({
+      lost,
+      recovered,
+      written: api.written,
+      writesSent: api.sent.filter(({ method }) => method === "POST").length,
+    }).toStrictEqual({
+      lost: "connect.outcome_unknown",
+      recovered: "connect.outcome_unknown",
+      // The first call's write; the lookup's never left.
+      written: 1,
+      writesSent: 1,
+    });
+  });
+
   it("calls its provider through the egress handler, with the connection's token", async () => {
     const connection = await connectionTo("sample");
     const token = await accessTokenFor(env, connection.id);

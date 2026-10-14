@@ -448,4 +448,40 @@ describe("a journal of another schema", () => {
     );
     await expect(wakeOf("napper", id)).resolves.toBeNull();
   });
+
+  it("upgrades a version-8 journal as it first reads it, then takes and fences controls", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await until("the run to sleep", async () => {
+      const journal = await journalOf("napper", id);
+      return journal.run.status === "waiting" ? journal : undefined;
+    });
+    // As a version-8 journal is: its version, and no control fence.
+    const exec = async (query: string): Promise<unknown[]> =>
+      await runInDurableObject(runObject("napper", id), (_, state) =>
+        state.storage.sql.exec(query).toArray()
+      );
+    await exec("UPDATE run SET schema = 8");
+    await exec("ALTER TABLE run DROP COLUMN control_fence");
+    const object = runObject("napper", id);
+
+    const status = await object.status();
+    const paused = await object.pause({ fence: 2 });
+    const late = await object.resume({ keepDeadlines: true, fence: 1 });
+    const state = await object.controlState();
+
+    expect({
+      status,
+      paused,
+      late,
+      fence: state?.fence,
+      schema: await exec("SELECT schema FROM run"),
+    }).toStrictEqual({
+      status: { status: "waiting" },
+      paused: "paused",
+      late: "fenced",
+      fence: 2,
+      schema: [{ schema: journalSchemaVersion }],
+    });
+  });
 });

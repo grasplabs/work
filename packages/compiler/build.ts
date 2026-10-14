@@ -28,6 +28,7 @@ import type { InlineConfig, Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
 
 import { withBuildLock } from "./build-lock.ts";
+import { serverSdkImports } from "./src/app-code.ts";
 import { extractCandidates } from "./src/candidates.ts";
 import { compileModule } from "./src/compile.ts";
 import { sdkImports } from "./src/imports.ts";
@@ -386,12 +387,17 @@ const buildKitModules = async (entries: Entry[]): Promise<FlatModules> => {
 };
 
 /**
- * The workflow SDK's modules, which App workflows import (`sdkImports`):
- * one module per specifier, named by it (`@grasp-os~sdk~workflow.js`),
- * and chunks for what they share (Zod), importing each other by flat name
- * like the kit's modules.
+ * The SDK's modules for `specifiers`, which App code runs with outside
+ * screens: the workflow SDK, which App workflows import (`sdkImports`),
+ * or what an App's server isolate loads (`serverSdkImports`), each a set
+ * of its own, so each isolate carries only what it uses. One module per
+ * specifier, named by it (`@grasp-os~sdk~workflow.js`), and chunks for
+ * what they share (Zod), importing each other by flat name like the kit's
+ * modules.
  */
-const buildSdkModules = async (): Promise<Record<string, string>> => {
+const buildSdkModules = async (
+  specifiers: readonly string[]
+): Promise<Record<string, string>> => {
   const exported = exportsOf(sdk);
   const config: InlineConfig = {
     configFile: false,
@@ -408,7 +414,7 @@ const buildSdkModules = async (): Promise<Record<string, string>> => {
       copyPublicDir: false,
       rolldownOptions: {
         input: Object.fromEntries(
-          sdkImports.map((specifier) => {
+          specifiers.map((specifier) => {
             const target =
               exported[`.${specifier.slice("@grasp-os/sdk".length)}`];
             if (typeof target !== "string") {
@@ -878,14 +884,16 @@ const buildScreenCompiler = async (
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
   const kitModules = modulesOf(kitCode);
-  const sdkModules = modulesOf(await buildSdkModules());
+  const workflowSdkModules = modulesOf(await buildSdkModules(sdkImports));
+  const serverSdkModules = modulesOf(await buildSdkModules(serverSdkImports));
   // Everything a build depends on: the compiler, what it knows of the kit,
   // and the kit's and the SDK's modules the App's modules import.
   const version = createHash("sha256")
     .update(compiler)
     .update(kitJson)
     .update(kitModules.version)
-    .update(sdkModules.version)
+    .update(workflowSdkModules.version)
+    .update(serverSdkModules.version)
     .update(packageBuilder)
     .update(esbuildWasm)
     .digest("hex")
@@ -894,7 +902,8 @@ const buildScreenCompiler = async (
     [compilerAssets.source]: compiler,
     [compilerAssets.kit]: kitJson,
     [compilerAssets.kitModules]: JSON.stringify(kitModules),
-    [compilerAssets.sdkModules]: JSON.stringify(sdkModules),
+    [compilerAssets.workflowSdkModules]: JSON.stringify(workflowSdkModules),
+    [compilerAssets.serverSdkModules]: JSON.stringify(serverSdkModules),
     [compilerAssets.packageBuilder]: packageBuilder,
     [compilerAssets.esbuildWasm]: esbuildWasm,
   });

@@ -1,6 +1,8 @@
 import type {
   RunActivity,
   RunActivityQuery,
+  RunHistoryPage,
+  RunHistoryPageQuery,
   RunsPage,
   RunFilter,
   WorkflowDetail,
@@ -14,6 +16,8 @@ import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { runActivity } from "./activity.ts";
+import { cancelRun } from "./controls.ts";
+import { runHistory } from "./history.ts";
 import {
   dryRunWorkflow,
   listAllRuns,
@@ -21,7 +25,7 @@ import {
   workflowOverview,
 } from "./overview.ts";
 import { WorkflowParamsRpc } from "./params-rpc.ts";
-import { cancelRun, listRuns, runStatus, startWorkflow } from "./runs.ts";
+import { listRuns, runStatus, startWorkflow } from "./runs.ts";
 
 /**
  * A signed-in person's `workflows`. Like AppsRpc, every call checks the
@@ -60,6 +64,16 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await runStatus(this.#env, by, run)
+    );
+  }
+
+  async history(
+    run: string,
+    page?: RunHistoryPageQuery
+  ): Promise<RunHistoryPage> {
+    return await withPerson(
+      this.#check,
+      async (by) => await runHistory(this.#env, by, run, page)
     );
   }
 

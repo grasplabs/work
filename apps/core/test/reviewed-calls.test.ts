@@ -6,19 +6,23 @@ import {
 } from "@grasp-os/shared/ids";
 import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Role } from "@grasp-os/shared/roles";
+import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
+import { runBindingsFor } from "../src/bindings.ts";
+import type { AttemptHost } from "../src/workflows/attempt-host.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { RunHost } from "../src/workflows/host.ts";
-import type { HostHooks, RunStep } from "../src/workflows/host.ts";
+import type { HostHooks } from "../src/workflows/host.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
+import { engineOfTest } from "./run-host.ts";
 import { endLiveRuns, finished } from "./runs.ts";
-import { signedInApi } from "./sign-in.ts";
+import { outcome, signedInApi } from "./sign-in.ts";
 import {
   server,
   appWith,
@@ -110,32 +114,58 @@ const outcomeOf = async (
   };
 };
 
-/** The engine's `step`, running each step's function once. */
-const step: RunStep = {
-  do: async (_name, _config, fn) => await fn(),
-  sleep: async () => {
-    await Promise.resolve();
-  },
-  waitForEvent: async () => await Promise.reject(new Error("No waits here")),
-};
-
 /**
  * A host for a run of a new App held to `calls`, whose App method calls
  * are counted in `appCalls`, with a permission on another App's exports
  * as `CRM`; what it says fails the run as tampering is in `tampered`.
  */
-const hostHeldTo = async (calls: WorkflowCalls) => {
-  const { userId } = await personApi("builder");
-  const app = appIdSchema.parse(crypto.randomUUID());
+const hostHeldTo = async (
+  calls: WorkflowCalls,
+  {
+    db = env.DB,
+    of,
+  }: {
+    db?: D1Database;
+    /** A real App and the person the run acts for, with its connections. */
+    of?: { app: string; userId: string };
+  } = {}
+) => {
+  const builder = of === undefined ? await personApi("builder") : undefined;
+  const userId = of?.userId ?? builder?.userId ?? "";
+  const app = appIdSchema.parse(of?.app ?? crypto.randomUUID());
   const runId = runIdSchema.parse(crypto.randomUUID());
+  const authority = authoritySchema.parse({
+    subject: { type: "app", appId: app },
+    onBehalfOf: userId,
+    mode: "workflow",
+    appVersion: 1,
+  });
+  if (of !== undefined) {
+    // The run's row, which its work context names.
+    await env.DB.prepare(
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at) VALUES (?, ?, 'tidy', 1, ?, 'running', ?)"
+    )
+      .bind(runId, app, userId, Date.now())
+      .run();
+  }
+  const { connections } =
+    of === undefined
+      ? { connections: {} }
+      : await runBindingsFor(env, authority, {
+          type: "run",
+          appId: app,
+          runId,
+        });
   const appCalls: string[] = [];
   const tampered: string[] = [];
+  const { step, leaseOf, leases } = engineOfTest();
   const hooks: HostHooks = {
     stepFailed: () => {},
+    busyRefusals: new Map(),
+    leaseOf,
     tampered: (error) => {
       tampered.push(error.code ?? error.message);
     },
-    engineStopped: () => false,
     waiting: async () => {
       await Promise.resolve();
     },
@@ -143,23 +173,24 @@ const hostHeldTo = async (calls: WorkflowCalls) => {
       appCalls.push(method);
       return await Promise.resolve({ ok: true, value: null });
     },
+    callFunction: () => {
+      throw new Error("No App function call here");
+    },
+    modelBinding: () => {
+      throw new Error("No model step here");
+    },
   };
   const host = new RunHost(
-    env,
+    { ...env, DB: db },
     step,
     {
       app,
       workflow: workflowIdSchema.parse("tidy"),
       version: 1,
       runId,
-      authority: authoritySchema.parse({
-        subject: { type: "app", appId: app },
-        onBehalfOf: userId,
-        mode: "workflow",
-        appVersion: 1,
-      }),
+      authority,
       collections: {},
-      connections: {},
+      connections,
       apps: {
         CRM: {
           permissionId: permissionIdSchema.parse(crypto.randomUUID()),
@@ -170,7 +201,7 @@ const hostHeldTo = async (calls: WorkflowCalls) => {
     },
     hooks
   );
-  return { host, runId, appCalls, tampered, userId };
+  return { host, runId, appCalls, tampered, userId, leases };
 };
 
 /** A settled call's error code, or `ok`. */
@@ -416,20 +447,22 @@ queueMicrotask(() => {
     });
   });
 
-  it("refuse a call from one step's code made while another runs, and a step whose name the review doesn't show", async () => {
-    const { host } = await hostHeldTo({
+  it("refuse a call made through a step attempt's host once that attempt is over, while another step runs, and a step whose name the review doesn't show", async () => {
+    const { host, runId, appCalls } = await hostHeldTo({
       steps: { arm: [], send: ["APP"] },
       all: ["APP"],
     });
-    let armed = "";
+    let armed: AttemptHost | undefined;
     await host.do("arm", {}, async (attempt) => {
       armed = attempt;
       return await Promise.resolve({ ok: true, value: null });
     });
     let leftBehind: Settled<unknown> = { ok: true, value: null };
     const sent = await host.do("send", {}, async () => {
-      // As code `arm` left behind would, calling with its attempt.
-      leftBehind = await host.callApp("hit", ["armed"], armed);
+      // As code `arm` left behind would, through the host `arm` was handed.
+      if (armed !== undefined) {
+        leftBehind = await armed.callApp("hit", ["armed"]);
+      }
       return { ok: true, value: null };
     });
     // Last: a step the review doesn't show ends the run.
@@ -441,12 +474,255 @@ queueMicrotask(() => {
 
     expect({
       leftBehind: codeOf(leftBehind),
+      // Its own code made no call it may not: `arm`'s call was `arm`'s.
       sent: codeOf(sent),
       unnamed: codeOf(unnamed),
+      appCalls,
+      audited: await refusals(runId),
     }).toStrictEqual({
-      leftBehind: "workflow.call_not_reviewed",
-      sent: "workflow.call_not_reviewed",
+      leftBehind: "execution.stale_attempt",
+      sent: "ok",
       unnamed: "workflow.step_not_reviewed",
+      appCalls: [],
+      audited: [
+        { step: "arm", call: "APP", errorCode: "execution.stale_attempt" },
+        { step: "evil", call: null, errorCode: "workflow.step_not_reviewed" },
+      ],
+    });
+  });
+
+  it("start no App method, nor an export, for a step attempt that no longer holds by the time the App would start it", async () => {
+    const admin = await personApi("admin");
+    const app = await appWith(admin, {});
+    // An attempt the engine let go of (or never had): its run holds no
+    // lease for it, as when it was let go during the App's reads.
+    const fence = {
+      run: crypto.randomUUID(),
+      key: "key:tidy",
+      number: 1,
+      generation: 1,
+    };
+    const refused = await outcome(
+      callApp(
+        env,
+        appIdSchema.parse(app),
+        { userId: admin.userId, mode: "workflow", fence },
+        "hit",
+        ["late"]
+      )
+    );
+
+    expect({
+      refused,
+      ran: await hitsOf(app, admin.userId, "late"),
+    }).toStrictEqual({ refused: "execution.stale_attempt", ran: 0 });
+  });
+
+  it("send no connection call whose attempt the engine gave up on while it was authorized and signed", async () => {
+    const admin = await personApi("admin");
+    const mail = await mailConnection();
+    const app = await appWith(admin, {});
+    await grantMail(idp, admin, app, mail.id);
+    let giveUp: (() => void) | undefined;
+    // Core's database, giving the attempt up once the call is checked
+    // against the run's permissions.
+    const db = new Proxy(env.DB, {
+      get: (target, key) => {
+        const value: unknown = Reflect.get(target, key);
+        if (key === "prepare" && typeof value === "function") {
+          return (query: string) => {
+            if (query.includes("permission")) {
+              giveUp?.();
+            }
+            return target.prepare(query);
+          };
+        }
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const { host, leases, runId } = await hostHeldTo(
+      { steps: { tidy: ["MAIL"] }, all: ["MAIL"] },
+      { db, of: { app, userId: admin.userId } }
+    );
+    let sent = "";
+    await host.do(
+      "tidy",
+      { sideEffect: true, input: null },
+      async (attempt) => {
+        giveUp = () => {
+          leases.delete("key:tidy");
+        };
+        sent = codeOf(
+          await attempt.callConnection("MAIL", [
+            "mail.send",
+            invoiceMail,
+            { idempotencyKey: stepIdempotencyKey(runId, "tidy") },
+          ])
+        );
+        return { ok: true, value: null };
+      }
+    );
+
+    const { calls } = await mail.did();
+    expect({ sent, server: calls }).toStrictEqual({
+      sent: "execution.stale_attempt",
+      server: 0,
+    });
+  });
+
+  it("refuse a call unless the step running now and the step whose host it came through both call it, failing both", async () => {
+    const { host, runId, appCalls } = await hostHeldTo({
+      steps: { arm: ["APP"], send: [] },
+      all: ["APP"],
+    });
+    let passed: Settled<unknown> = { ok: true, value: null };
+    let sent: Settled<unknown> = { ok: true, value: null };
+    // `arm`'s code hands its host to `send`'s, running inside it, which
+    // calls APP with it: `arm`'s review shows APP, `send`'s doesn't.
+    const armed = await host.do("arm", {}, async (arm) => {
+      sent = await host.do("send", {}, async () => {
+        passed = await arm.callApp("hit", ["passed"]);
+        return { ok: true, value: null };
+      });
+      return { ok: true, value: null };
+    });
+
+    expect({
+      passed: codeOf(passed),
+      sent: codeOf(sent),
+      armed: codeOf(armed),
+      appCalls,
+      audited: await refusals(runId),
+    }).toStrictEqual({
+      passed: "workflow.call_not_reviewed",
+      sent: "workflow.call_not_reviewed",
+      armed: "workflow.call_not_reviewed",
+      appCalls: [],
+      audited: [
+        { step: "send", call: "APP", errorCode: "workflow.call_not_reviewed" },
+      ],
+    });
+  });
+
+  it("refuse, as stale, an attempt's calls of every kind once the engine gave up on it, and audit the first", async () => {
+    const { host, runId, appCalls, leases, userId } = await hostHeldTo({
+      steps: { tidy: ["APP", "CRM", "HANDBOOK"] },
+      all: ["APP", "CRM", "HANDBOOK"],
+    });
+    const codes: Record<string, string> = {};
+    await host.do("tidy", {}, async (attempt) => {
+      // The engine gives up on it: it timed out, the run was cancelled or
+      // paused, or another activation took over.
+      leases.delete("key:tidy");
+      codes.model = codeOf(
+        await attempt.callModel({
+          step: "tidy",
+          model: "default",
+          instructions: "Summarise the invoice",
+          input: "Invoice INV-7",
+          outputSchema: { type: "string" },
+        })
+      );
+      codes.collection = codeOf(
+        await attempt.callCollection("HANDBOOK", "search", ["invoices"])
+      );
+      codes.export = codeOf(await attempt.callExport("CRM", "find", {}));
+      codes.app = codeOf(await attempt.callApp("hit", ["late"]));
+      codes.openDecision = codeOf(
+        await attempt.openDecision({
+          step: "tidy",
+          from: `person:${userId}`,
+          description: "Approve the invoice",
+          timeout: 60_000,
+        })
+      );
+      codes.decisionRecipients = codeOf(
+        await attempt.decisionRecipients(crypto.randomUUID(), false)
+      );
+      return { ok: true, value: null };
+    });
+
+    expect({ codes, appCalls, audited: await refusals(runId) }).toStrictEqual({
+      codes: {
+        model: "execution.stale_attempt",
+        collection: "execution.stale_attempt",
+        export: "execution.stale_attempt",
+        app: "execution.stale_attempt",
+        openDecision: "execution.stale_attempt",
+        decisionRecipients: "execution.stale_attempt",
+      },
+      appCalls: [],
+      audited: [
+        { step: "tidy", call: "model", errorCode: "execution.stale_attempt" },
+      ],
+    });
+  });
+
+  it("refuse, as stale, a call whose attempt the engine gave up on while the host read what the call needs", async () => {
+    let giveUp: (() => void) | undefined;
+    // Core's database, giving the attempt up as the host reads it, after
+    // the call's first check that its attempt holds.
+    const db = new Proxy(env.DB, {
+      get: (target, key) => {
+        const value: unknown = Reflect.get(target, key);
+        if (key === "prepare" && typeof value === "function") {
+          return (query: string) => {
+            giveUp?.();
+            return target.prepare(query);
+          };
+        }
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const { host, appCalls, leases } = await hostHeldTo(
+      { steps: { tidy: ["APP"] }, all: ["APP"] },
+      { db }
+    );
+    const codes: string[] = [];
+    await host.do("tidy", {}, async (attempt) => {
+      giveUp = () => {
+        leases.delete("key:tidy");
+      };
+      codes.push(codeOf(await attempt.callApp("hit", ["late"])));
+      return { ok: true, value: null };
+    });
+
+    expect({ codes, appCalls }).toStrictEqual({
+      codes: ["execution.stale_attempt"],
+      appCalls: [],
+    });
+  });
+
+  it("refuse, as stale, every call of an attempt the engine gave up on while its code ran on, and audit the first", async () => {
+    const { host, runId, appCalls, leases } = await hostHeldTo({
+      steps: { tidy: ["APP"] },
+      all: ["APP"],
+    });
+    const codes: string[] = [];
+    await host.do("tidy", {}, async (attempt) => {
+      // The engine gives up on it: it timed out, or its activation is over.
+      leases.delete("key:tidy");
+      for (let tries = 0; tries < 2; tries += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one call at a time
+        codes.push(codeOf(await attempt.callApp("hit", ["late"])));
+      }
+      return { ok: true, value: "tidied" };
+    });
+
+    expect({ codes, appCalls, audited: await refusals(runId) }).toStrictEqual({
+      codes: ["execution.stale_attempt", "execution.stale_attempt"],
+      appCalls: [],
+      audited: [
+        { step: "tidy", call: "APP", errorCode: "execution.stale_attempt" },
+      ],
     });
   });
 
@@ -456,12 +732,12 @@ queueMicrotask(() => {
       all: ["APP"],
     });
     const codes: string[] = [];
-    const done = await host.do("tidy", {}, async () => {
+    const done = await host.do("tidy", {}, async (attempt) => {
       for (let tries = 0; tries < 3; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one call at a time
-        codes.push(codeOf(await host.callExport("CRM", "find", {})));
+        codes.push(codeOf(await attempt.callExport("CRM", "find", {})));
       }
-      codes.push(codeOf(await host.callApp("hit", ["tidied"])));
+      codes.push(codeOf(await attempt.callApp("hit", ["tidied"])));
       // The code carries on as if nothing was refused.
       return { ok: true, value: "tidied" };
     });
@@ -668,59 +944,20 @@ queueMicrotask(() => {
     });
   });
 
-  it("fail a run whose code catches the refusal of an attempt ID the host never gave, audit it once, and refuse every later call and step", async () => {
-    const { host, runId, appCalls, tampered } = await hostHeldTo({
-      steps: { tidy: ["APP"], after: ["APP"] },
-      all: ["APP"],
-    });
-    const codes: string[] = [];
-    const done = await host.do("tidy", {}, async () => {
-      // Never given: an ID of its own making, and one that's no ID at all.
-      const forged = await host.callApp("hit", ["forged"], crypto.randomUUID());
-      const malformed = await host.callApp("hit", ["forged"], "not-an-id");
-      const own = await host.callApp("hit", ["tidied"]);
-      codes.push(codeOf(forged), codeOf(malformed), codeOf(own));
-      // The code carries on as if nothing was refused.
-      return { ok: true, value: "tidied" };
-    });
-    const after = await host.do(
-      "after",
-      {},
-      async () => await Promise.resolve({ ok: true, value: null })
-    );
-
-    expect({
-      codes,
-      done: codeOf(done),
-      after: codeOf(after),
-      appCalls,
-      tampered,
-      audited: await refusals(runId),
-    }).toStrictEqual({
-      codes: ["workflow.invalid", "workflow.invalid", "workflow.invalid"],
-      done: "workflow.invalid",
-      after: "workflow.invalid",
-      appCalls: [],
-      // What fails the run, whatever its code returns.
-      tampered: ["workflow.invalid"],
-      audited: [{ step: "tidy", call: "APP", errorCode: "workflow.invalid" }],
-    });
-  });
-
   it("refuse an attempt's model, attachment and decision calls once it had a call refused", async () => {
     const { host, userId } = await hostHeldTo({ steps: { tidy: [] }, all: [] });
     const codes: string[] = [];
-    const done = await host.do("tidy", {}, async () => {
-      const refused = await host.callApp("hit", ["tidied"]);
-      const model = await host.callModel({
+    const done = await host.do("tidy", {}, async (attempt) => {
+      const refused = await attempt.callApp("hit", ["tidied"]);
+      const model = await attempt.callModel({
         step: "tidy",
         model: "default",
         instructions: "Summarise the invoice",
         input: "Invoice INV-7",
         outputSchema: { type: "string" },
       });
-      const attachment = await host.readAttachment(crypto.randomUUID(), 0);
-      const decision = await host.openDecision({
+      const attachment = await attempt.readAttachment(crypto.randomUUID(), 0);
+      const decision = await attempt.openDecision({
         step: "tidy",
         from: `person:${userId}`,
         description: "Approve the invoice",

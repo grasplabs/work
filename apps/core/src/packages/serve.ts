@@ -32,14 +32,17 @@ import { forgetArtifact, keptDescription, keptFile, lockOf } from "./build.ts";
 //   Each request makes the admission check again (`admissionOf`, the one
 //   `admitDependencies` makes), for this App, graph and the browser target
 //   under the policy generation now; a refusal is logged, not audited, so
-//   a page asking for many files can't flood the audit trail. The App's
+//   a page asking for many files can't flood the audit trail. A revoked
+//   graph is refused. A retired one is admitted for what it pinned before
+//   (scope `retained`), which is all a lock can pin of it: no pin is
+//   written for a retired graph (build.ts). The App's
 //   lock must still pin this artifact as a browser build, of one of the
 //   compilers whose pins it keeps (two releases may serve side by side);
 //   the artifact's description must hash to its address; and the file's
 //   bytes to the SHA-256 the description names. A file whose bytes don't
 //   match isn't served, and its artifact is made again by the next build.
-//   Answers are never cached, so a change of policy holds from the next
-//   load, and so will an approval taken back once that exists (GRA-359).
+//   Answers are never cached, so a change of policy, a graph revoked
+//   included, holds from the next load.
 // - A file taken for another type. Each is sent with the exact type the
 //   build recorded for it, one of the few the builder writes, and
 //   `nosniff`: script is never read as a stylesheet, an image never as a
@@ -125,7 +128,8 @@ const refused = (status: 403 | 404 | 405): Response =>
   });
 
 /**
- * Whether the App's graph is approved for the browser, now. A refusal is
+ * Whether the App's graph is approved for the browser, now, or retired
+ * (its pinned artifacts, which `pinned` checks, keep working). A refusal is
  * logged, not audited: a page asks for many files, and each refused one
  * would otherwise be a row in the audit trail.
  */

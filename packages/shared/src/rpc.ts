@@ -14,10 +14,12 @@ import type { NotificationsApi } from "./notifications.ts";
 import type { OnboardingGateApi } from "./onboarding-gate.ts";
 import type { OnboardingApi, OnboardingStaffApi } from "./onboarding.ts";
 import type { PermissionsApi } from "./permissions.ts";
+import type { ResourceBindingsApi, TemplatesApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
 import type { ScreenTrustApi } from "./screen-trust.ts";
 import type { ScreensApi } from "./screens.ts";
 import type { SignalsApi } from "./signals.ts";
+import type { StoresApi } from "./stores.ts";
 import type { UploadsApi } from "./uploads.ts";
 import type { WorkflowsApi } from "./workflows.ts";
 
@@ -65,6 +67,17 @@ export interface SessionApi {
   readonly dashboard: DashboardApi;
   /** Permissions of Apps and agents. */
   readonly permissions: PermissionsApi;
+  /**
+   * Which provider serves each resource an App's actions declare: approved
+   * and revoked by admins only, listed for admins and the App's builders.
+   */
+  readonly resourceBindings: ResourceBindingsApi;
+  /**
+   * Published templates, each version written once: what template
+   * bindings read. Published by admins only, listed for admins and
+   * builders.
+   */
+  readonly templates: TemplatesApi;
   /**
    * The App registry and each App's code: the Apps the person owns or that
    * are shared with them, and every App for admins.
@@ -123,6 +136,11 @@ export interface SessionApi {
    */
   readonly models: ModelsApi;
   /**
+   * Business stores: a store's failed schema change, and abandoning it.
+   * Admins only, never Grasp staff.
+   */
+  readonly stores: StoresApi;
+  /**
    * Side effects the person's agents, Apps and runs asked for, held until
    * the person confirms or declines them: from chat, from a person using
    * an App, and from any of them once it read restricted data.
@@ -135,7 +153,8 @@ export interface SessionApi {
   readonly signals: SignalsApi;
   /**
    * The onboarding: who works where, the plan, and numbers per team, never
-   * anyone's words. Admins only, Grasp staff included.
+   * anyone's words. Admins only, Grasp staff included; its programme (the
+   * dates and the stage) for everyone signed in.
    */
   readonly onboarding: OnboardingApi;
   /** What only Grasp's staff do in the onboarding: pause it, the agreements. */

@@ -606,6 +606,301 @@ export const appVersions = sqliteTable(
 );
 
 /**
+ * The sealed release of an App version of spec 8's layout (spec 16;
+ * src/app-releases.ts): its manifest's canonical text, which pins the
+ * version's source tree, schema, contracts, runtime and artifacts, and the
+ * SHA-256 of that text. Written once, by the seal, and never changed: a
+ * seal of the same version with another manifest is refused. Its trust
+ * isn't here: the manifest always says `unreviewed`.
+ */
+export const sdkReleaseManifests = sqliteTable(
+  "sdk_release_manifests",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    manifest: text().notNull(),
+    sealedAt: timestamp("sealed_at").notNull(),
+    /**
+     * When the retention sweep last saw the version current or pending
+     * (src/release-retention.ts): it is kept at least 90 days after that.
+     * Null for one never seen so; its seal starts its retention then.
+     */
+    lastCurrentAt: timestamp("last_current_at"),
+    /**
+     * When the sweep first found nothing that keeps it: deleted once that
+     * has held for a day and still holds. Null while something keeps it.
+     */
+    unreferencedSince: timestamp("unreferenced_since"),
+    /**
+     * When an admin revoked it: it runs no more (`version.revoked`), but
+     * its bytes stay for audit and recovery, under the same retention.
+     */
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.version] })]
+);
+
+/**
+ * Which sealed releases name which artifact, by its SHA-256 (src/app-
+ * releases.ts, src/release-retention.ts): a seal reserves its artifacts
+ * here before it stores their bytes, and an artifact's bytes are deleted
+ * only once no row names it, under a deletion mark
+ * (`sdk_artifact_deletions`) a seal can't reserve past. A reservation of
+ * a seal that never finished is swept with its release's grace.
+ */
+export const sdkReleaseArtifacts = sqliteTable(
+  "sdk_release_artifacts",
+  {
+    sha256: text().notNull(),
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    reservedAt: timestamp("reserved_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.sha256, table.appId, table.version] }),
+    index("sdk_release_artifacts_release").on(table.appId, table.version),
+  ]
+);
+
+/**
+ * An artifact's bytes being deleted: marked when no release named it, so
+ * no seal reserves it again until the bytes are gone and the mark is
+ * removed. Only its owner finishes a mark, before its deadline (15
+ * minutes after it was placed), and removes it only once the bytes are
+ * deleted; a mark an hour old is taken over by whoever finds it
+ * (src/release-retention.ts).
+ */
+export const sdkArtifactDeletions = sqliteTable("sdk_artifact_deletions", {
+  sha256: text().primaryKey(),
+  owner: text().notNull(),
+  startedAt: timestamp("started_at").notNull(),
+});
+
+/**
+ * Bytes whose last reservation went: queued in the statement that removes
+ * the reservation, and dequeued only once the bytes are dealt with
+ * (deleted, reserved again, or another deleter's), so no bytes are ever
+ * left without a reservation or a queue entry (src/release-retention.ts).
+ */
+export const sdkArtifactCandidates = sqliteTable("sdk_artifact_candidates", {
+  sha256: text().primaryKey(),
+  queuedAt: timestamp("queued_at").notNull(),
+});
+
+/**
+ * The manifest hash of each sealed release the retention sweep deleted:
+ * sealing that App version again must make the same manifest, so a
+ * version's number never comes to name other code.
+ */
+export const sdkReleaseTombstones = sqliteTable(
+  "sdk_release_tombstones",
+  {
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    deletedAt: timestamp("deleted_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.version] })]
+);
+
+/**
+ * What keeps a sealed release past its retention (spec 16.3): an open
+ * screen's lease, which lapses 15 minutes after its last renewal, or a
+ * run, a compatible migration, a pinned trigger or a legal hold, held
+ * until released.
+ */
+export const sdkReleasePins = sqliteTable(
+  "sdk_release_pins",
+  {
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    holderKind: text("holder_kind", {
+      enum: ["frame", "run", "migration", "trigger", "hold"],
+    }).notNull(),
+    holderId: text("holder_id").notNull(),
+    /** When it lapses, for a frame's lease; null for a held pin. */
+    expiresAt: timestamp("expires_at"),
+    pinnedAt: timestamp("pinned_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.appId, table.version, table.holderKind, table.holderId],
+    }),
+  ]
+);
+
+/**
+ * What a sealed release binds, by alias (spec 16.1): for now the store it
+ * reads and writes, which only the host chose when it sealed the release.
+ * Routing, not a grant: whoever calls is authorized on every call. Also
+ * how a store finds the releases that still rely on it: it can't be
+ * deleted while any release kept is bound to it (data-stores.ts), and
+ * retention deletes a release's rows here with it.
+ */
+export const sdkResourceBindings = sqliteTable(
+  "sdk_resource_bindings",
+  {
+    resourceId: text("resource_id").notNull(),
+    resourceVersion: integer("resource_version").notNull(),
+    alias: text().notNull(),
+    kind: text({ enum: ["store"] }).notNull(),
+    targetId: text("target_id").notNull(),
+    schemaHash: text("schema_hash").notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    /**
+     * The target's version: for a store, the definition this release
+     * binds (`business_store_versions.version`).
+     */
+    targetVersion: integer("target_version"),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.resourceId, table.resourceVersion, table.alias],
+    }),
+    index("sdk_resource_bindings_target").on(table.kind, table.targetId),
+  ]
+);
+
+/**
+ * The definitions a business store serves, in core's inventory (spec 24):
+ * each distinct schema and operation manifest a sealed release bound the
+ * store with, numbered per store as it first appears, with the source
+ * tree of the release that first bound it. Written in the seal's batch
+ * (app-releases.ts), never changed. The store's object holds the schemas
+ * themselves, its receipts and its outbox, and stays their authority.
+ */
+export const businessStoreVersions = sqliteTable(
+  "business_store_versions",
+  {
+    storeId: text("store_id").notNull(),
+    version: integer().notNull(),
+    schemaHash: text("schema_hash").notNull(),
+    operationManifestHash: text("operation_manifest_hash").notNull(),
+    sourceTreeHash: text("source_tree_hash").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.storeId, table.version] }),
+    uniqueIndex("business_store_versions_definition").on(
+      table.storeId,
+      table.schemaHash,
+      table.operationManifestHash
+    ),
+  ]
+);
+
+/**
+ * The App a store serves, claimed by the first seal that binds it and kept
+ * for good: retention deletes releases and their bindings, never this. So
+ * a store an App stopped using never comes to serve another App, which
+ * would read what the first left behind.
+ */
+export const sdkStoreOwners = sqliteTable("sdk_store_owners", {
+  storeId: text("store_id").primaryKey(),
+  appId: text("app_id").notNull(),
+  claimedAt: timestamp("claimed_at").notNull(),
+});
+
+/**
+ * The store an App of spec 8's layout runs on, one per App: created by the
+ * host when it first seals a version of the App whose schema has tables
+ * (app-activation.ts), and bound to every later version, so the App's data
+ * outlives its versions. Never chosen by a request.
+ */
+export const appDefaultStores = sqliteTable("app_default_stores", {
+  appId: text("app_id").primaryKey(),
+  storeId: text("store_id").notNull().unique(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The fixture stores an App's tests run on (app-tests.ts), each recorded
+ * before its object is first touched and deleted once the object is
+ * discarded: a row left behind is a test run that died between the two,
+ * whose store the sweep discards. A fixture store is never in the store
+ * inventory (`business_stores`), so nothing opens or binds it as a store.
+ */
+export const appTestFixtures = sqliteTable(
+  "app_test_fixtures",
+  {
+    storeId: text("store_id").primaryKey(),
+    appId: text("app_id").notNull(),
+    version: integer().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("app_test_fixtures_created_at").on(table.createdAt)]
+);
+
+/**
+ * Published templates (resource-bindings.ts): each version's content,
+ * written once by an admin and never changed, so a binding to a version
+ * always reads exactly what was approved (spec 32.3). A template keeps the
+ * contract of its first version; a new version is a new row.
+ */
+export const resourceTemplates = sqliteTable(
+  "resource_templates",
+  {
+    id: text().notNull(),
+    version: integer().notNull(),
+    contract: text().notNull(),
+    /** The content, as canonical JSON. */
+    content: text().notNull(),
+    /** The SHA-256 of `content`. */
+    contentHash: text("content_hash").notNull(),
+    publishedBy: text("published_by").notNull(),
+    publishedAt: timestamp("published_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.id, table.version] })]
+);
+
+/**
+ * Which provider serves each resource an App of spec 8's layout declares
+ * for its actions (resource-bindings.ts): approved by an admin, for the
+ * exact declaration they reviewed (`declaration_hash`) and the contract it
+ * serves as it was then (`contract_id`, `fingerprint`). `target` is the
+ * provider (JSON, `BindingTarget`): a model, one of the App's permissions
+ * or a template version. At most one active binding per alias; approving
+ * another revokes it in the same batch. Revoked rows stay, for the audit
+ * log's references.
+ */
+export const appResourceBindings = sqliteTable(
+  "app_resource_bindings",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    alias: text().notNull(),
+    kind: text({
+      enum: ["model", "connector", "knowledge", "template"],
+    }).notNull(),
+    target: text().notNull(),
+    declarationHash: text("declaration_hash").notNull(),
+    contractId: text("contract_id").notNull(),
+    fingerprint: text().notNull(),
+    reviewedVersion: integer("reviewed_version").notNull(),
+    status: text({ enum: ["active", "revoked"] }).notNull(),
+    approvedBy: text("approved_by").notNull(),
+    approvedAt: timestamp("approved_at").notNull(),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+    /**
+     * A model binding's own caps, as JSON (`modelBindingBudgetSchema`):
+     * set at approval, null for none (model-budgets.ts).
+     */
+    budget: text(),
+  },
+  (table) => [
+    uniqueIndex("app_resource_bindings_active_idx")
+      .on(table.appId, table.alias)
+      .where(sql`${table.status} = 'active'`),
+  ]
+);
+
+/**
  * Which App a record type in a collection (a Knowledge collection, by ID)
  * belongs to: the first whose declaration took effect there
  * (knowledge/record-types.ts). Claimed when an App's write permission on
@@ -628,7 +923,7 @@ export const recordTypeOwners = sqliteTable(
  * Every run of an App's workflow (src/workflows/): the App version it is
  * pinned to, and who it acts for. A run a person started acts for them
  * (`started_by`); one a trigger started (`started_by` null) for the App's
- * owner. Cloudflare Workflows keeps the run's steps; this row is what core
+ * owner. The engine keeps the run's steps (src/workflows/engine.ts); this row is what core
  * needs to load it again, and lists runs. `status` is where the run was
  * last seen by core: `running` covers waiting too. `failure` is a failed
  * run's report (JSON): where and why it stopped, without the values it
@@ -684,6 +979,59 @@ export const workflowRuns = sqliteTable(
      * spend by it (src/model-budgets.ts).
      */
     rootRunId: text("root_run_id"),
+    /**
+     * The sequence of the engine's latest status notification this row
+     * took (src/workflows/projection.ts): one at or below it is late, and
+     * changes nothing. The engine alone decides a run's status; this row
+     * follows it.
+     */
+    engineSequence: integer("engine_sequence").notNull().default(0),
+    /**
+     * The start the engine is still to confirm, as it is sent (`{ input }`,
+     * src/workflows/engine.ts): kept until the engine's first notification
+     * of the run, so a start core stopped in the middle of is sent again,
+     * the same, by the repair (src/workflows/runs.ts, `repairStarts`).
+     * Null once confirmed, and for a run whose start failed.
+     */
+    pendingStart: text("pending_start", { mode: "json" }).$type<{
+      input?: Json;
+    }>(),
+    /**
+     * When someone cancelled the run: its tombstone. From then on the
+     * dispatcher runs nothing more of it, whatever the engine still does,
+     * and the engine is told to terminate it; its status turns `cancelled`
+     * once the engine has.
+     */
+    cancelRequestedAt: timestamp("cancel_requested_at"),
+    /**
+     * The generation of the run's controls (src/workflows/controls.ts):
+     * one more with each pause or resume admitted, and with a cancel,
+     * which supersedes them. A control applies to the engine only while
+     * its own generation is the run's, so a late one can't undo a newer.
+     */
+    controlGeneration: integer("control_generation").notNull().default(0),
+    /**
+     * Where the engine last said the run is (its own status, a phase
+     * `status` folds away: waiting, rolling back), as the projection took
+     * it (src/workflows/runs.ts). Null until the engine's first notification.
+     */
+    engineStatus: text("engine_status"),
+    /** When the engine first ran the run; null until it has. */
+    startedAt: timestamp("started_at"),
+    /**
+     * The revision of the run's summary (src/workflows/summary.ts): one
+     * more with every write that changes what it shows, in that write's own
+     * transaction, so a summary read in one statement is of one revision.
+     */
+    summaryRevision: integer("summary_revision").notNull().default(0),
+    /**
+     * How deep in its lineage the run is: 0 for a root, its parent's depth
+     * and one more for a run another started (src/workflows/quotas.ts).
+     * Written once, with the row, from the parent's row, never from what
+     * the run is given: a lineage nests no deeper than the quota policy
+     * allows however its runs start one another.
+     */
+    depth: integer().notNull().default(0),
   },
   (table) => [
     index("workflow_runs_app_idx").on(table.appId, table.createdAt),
@@ -696,6 +1044,11 @@ export const workflowRuns = sqliteTable(
       table.workflowId,
       table.createdAt
     ),
+    // The start repair (src/workflows/runs.ts, `repairStarts`): starts the
+    // engine is still to confirm, by ID, which the repair pages by.
+    index("workflow_runs_pending_start_idx")
+      .on(table.id)
+      .where(sql`pending_start IS NOT NULL`),
     // The improvement signals (src/signals.ts): runs that failed in a
     // window, latest first. Runs started in one are counted per App
     // workflow by the index above.
@@ -718,6 +1071,143 @@ export const workflowRuns = sqliteTable(
     index("workflow_runs_details_kept_idx")
       .on(table.endedAt, table.id)
       .where(sql`ended_at IS NOT NULL AND details_removed_at IS NULL`),
+  ]
+);
+
+/**
+ * Each run lineage's durable counters (src/workflows/quotas.ts): a root
+ * run and every run started under it, at any depth, keyed by the root.
+ * Created with the root's row, or with the lineage's first admission
+ * after it, from the root's row. Every admission of the lineage's work
+ * checks these against the quota policy as it is then, in one statement
+ * that changes them only if the work fits, so admissions racing each
+ * other never pass a limit, and nothing a retry, a restart, a child or a
+ * branch does starts them afresh: they only grow (but for `active_held_ms`,
+ * which moves into `active_used_ms` as attempts settle).
+ *
+ * - `created_at`: the root's start, which the lineage's age counts from.
+ *   A wait doesn't move it, nor does a child.
+ * - `descendants`: runs admitted under the root, whether or not their
+ *   start then succeeded: a slot taken is never given back.
+ * - `active_used_ms`: wall time its steps' attempts used, settled.
+ * - `active_held_ms`: what attempts under way hold, each its whole
+ *   allowance until it settles (`run_lineage_attempts`).
+ * - `policy_generation`: the quota policy's generation at the latest
+ *   admission.
+ */
+export const runLineages = sqliteTable("run_lineages", {
+  rootRunId: text("root_run_id")
+    .primaryKey()
+    .references(() => workflowRuns.id),
+  createdAt: timestamp("created_at").notNull(),
+  descendants: integer().notNull().default(0),
+  activeUsedMs: integer("active_used_ms").notNull().default(0),
+  activeHeldMs: integer("active_held_ms").notNull().default(0),
+  policyGeneration: integer("policy_generation").notNull().default(0),
+});
+
+/**
+ * The reservation receipt of each step attempt a run lineage admitted
+ * (src/workflows/quotas.ts): one per attempt, as the engine names it (its
+ * run, its step's key, its number and the generation of the activation
+ * that claimed it), so the same attempt admitted twice holds once, and an
+ * attempt of another activation is admitted afresh: it runs again. It
+ * holds `reserved_ms` (its allowance up to its deadline, at most an
+ * attempt's default active wall time) until it settles with what it used
+ * (`used_ms`, `settled_at`), up to its `deadline`; one that never settles
+ * (its activation died) is settled as having used all it could, once its
+ * deadline has passed.
+ */
+export const runLineageAttempts = sqliteTable(
+  "run_lineage_attempts",
+  {
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    stepKey: text("step_key").notNull(),
+    attempt: integer().notNull(),
+    generation: integer().notNull(),
+    rootRunId: text("root_run_id")
+      .notNull()
+      .references(() => runLineages.rootRunId),
+    reservedMs: integer("reserved_ms").notNull(),
+    /** When the engine gives up on the attempt: the most it can use ends here. */
+    deadline: timestamp("deadline").notNull(),
+    usedMs: integer("used_ms"),
+    admittedAt: timestamp("admitted_at").notNull(),
+    settledAt: timestamp("settled_at"),
+    policyGeneration: integer("policy_generation").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.runId, table.stepKey, table.attempt, table.generation],
+    }),
+    // A lineage's attempts still holding, by when they were admitted: what
+    // an admission settles once their allowance has passed, and how long a
+    // refusal for a busy lineage says to wait.
+    index("run_lineage_attempts_held_idx")
+      .on(table.rootRunId, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+  ]
+);
+
+/**
+ * Each quota policy generation core has applied (src/workflows/quotas.ts):
+ * the limits the deployment's `QUOTA_LIMITS` set under it, as canonical
+ * JSON, and their SHA-256. Written the first time core sees a generation,
+ * never changed after: a later var that sets other limits under a
+ * generation recorded here, or a lower generation than the highest, is
+ * refused, and core keeps the highest generation's limits. So two
+ * policies never share a generation, and none goes back to an older one,
+ * whatever is deployed.
+ */
+export const quotaPolicies = sqliteTable("quota_policies", {
+  generation: integer().primaryKey(),
+  limits: text().notNull(),
+  limitsHash: text("limits_hash").notNull(),
+  recordedAt: timestamp("recorded_at").notNull(),
+});
+
+/**
+ * Each pause, resume or cancel of a run that the host admitted
+ * (src/workflows/controls.ts): its durable receipt. `admitted` until the
+ * engine confirms it (`applied`), or a cancel supersedes a pause or resume
+ * still unresolved (`superseded`). At most one unresolved receipt of each
+ * kind a run: the same request again joins it. `generation` is the run's
+ * control generation it was admitted under.
+ */
+export const workflowRunControls = sqliteTable(
+  "workflow_run_controls",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    kind: text({ enum: ["pause", "resume", "cancel"] }).notNull(),
+    state: text({ enum: ["admitted", "applied", "superseded"] }).notNull(),
+    generation: integer().notNull(),
+    /** Who asked for it: a person, by their user ID. */
+    requestedBy: text("requested_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    settledAt: timestamp("settled_at"),
+    /**
+     * When the repair next sends it again (src/workflows/controls.ts),
+     * moved on further each time it does, so receipts that never settle
+     * don't keep newer ones waiting.
+     */
+    retryAt: timestamp("retry_at").notNull(),
+    /** How often the repair sent it again. */
+    retries: integer().notNull().default(0),
+  },
+  (table) => [
+    uniqueIndex("workflow_run_controls_unresolved_idx")
+      .on(table.runId, table.kind)
+      .where(sql`state = 'admitted'`),
+    // The repair (src/workflows/controls.ts): receipts the engine is
+    // still to confirm, next due first.
+    index("workflow_run_controls_admitted_idx")
+      .on(table.retryAt, table.id)
+      .where(sql`state = 'admitted'`),
   ]
 );
 
@@ -846,7 +1336,7 @@ export const dependencyRequests = sqliteTable(
     /** The request approved for the App when this one was asked, if any. */
     previous: text(),
     status: text({
-      enum: ["pending", "approved", "denied"],
+      enum: ["pending", "approved", "denied", "retired", "revoked"],
     }).notNull(),
     requestedBy: text("requested_by").notNull(),
     /** The chat's agent that proposed it (JSON); null for a person's own. */
@@ -861,6 +1351,15 @@ export const dependencyRequests = sqliteTable(
     /** The policy generation the decision was made under. */
     decidedGeneration: integer("decided_generation"),
     reason: text(),
+    /** Who retired or revoked the approval, and when: null until then. */
+    endedBy: text("ended_by"),
+    endedAt: timestamp("ended_at"),
+    /**
+     * The policy generation retiring or revoking it moved on to: what was
+     * pinned under an earlier one is what a retired approval keeps.
+     */
+    endedGeneration: integer("ended_generation"),
+    endedReason: text("ended_reason"),
   },
   (table) => [
     // One request waits per App: a second pending row is refused.
@@ -1360,6 +1859,13 @@ export const businessStores = sqliteTable("business_stores", {
    * owns each record is the record's own `_ownerId`, never this.
    */
   ownerId: text("owner_id").notNull(),
+  /**
+   * The definition (`business_store_versions`) the release of the current
+   * version of the App the store serves binds, moved in the statement that
+   * makes that version current (apps.ts), and null while that version
+   * binds the store none: a projection, never what the store's object
+   * accepts writes against.
+   */
   activeSchemaVersion: integer("active_schema_version"),
   activeSchemaHash: text("active_schema_hash"),
   activeOperationManifestHash: text("active_operation_manifest_hash"),
@@ -1370,6 +1876,17 @@ export const businessStores = sqliteTable("business_stores", {
   }).notNull(),
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
+  /**
+   * When a deletion of the store began, if one is in flight: set before
+   * its object is closed, only while no sealed release binds the store,
+   * and while set (for `storeClosingMs`) no seal binds it and no version
+   * bound to it is made current (data-stores.ts, app-releases.ts,
+   * apps.ts). Cleared, by its owner alone, if the close is refused; a
+   * deletion finished sets `deletedAt`.
+   */
+  closingAt: timestamp("closing_at"),
+  /** The deletion that set `closingAt`: only it closes the store, or clears the mark. */
+  closingOwner: text("closing_owner"),
 });
 
 /**

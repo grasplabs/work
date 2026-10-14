@@ -239,6 +239,8 @@ describe("a side effect from chat", () => {
         action: "mail.send",
         idempotencyKey: call.idempotencyKey,
         input: JSON.stringify(call.input),
+        // A chat's call came through no App resource binding.
+        binding: null,
       },
     });
     expect({
@@ -1006,14 +1008,15 @@ describe("a side effect from chat", () => {
     });
   });
 
-  it("frees its key when turned away after it was taken but before anything ran", async () => {
+  it("frees its key when the server turns it away before it was taken", async () => {
     const anna = someone();
     const connectionId = await addConnection();
     const call = mail(connectionId);
     await hold(inChat(anna), call);
     const held = await heldFor(anna);
-    // The server turns the call away: the tool never ran.
-    server.network = "unauthorised";
+    // The server refuses connect's look at its tools, before the key is
+    // taken. (Once it is, any refusal spends it; idempotency.test.ts.)
+    server.refuseList = true;
     const refused = await outcome(confirm(anna, held));
     await hold(inChat(anna), call);
     const again = await heldFor(anna);

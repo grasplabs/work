@@ -1,7 +1,7 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { callApp } from "../src/app.ts";
 import { appHost } from "../src/durable-objects.ts";
@@ -40,6 +40,38 @@ const personApi = async (role: Role) => {
   return { ...person, api: core.authenticate() };
 };
 
+type Api = Awaited<ReturnType<typeof personApi>>;
+
+/**
+ * What a run's history tells of its task `task`: its step entries, how
+ * many steps they are of, and whether it waited, held.
+ */
+const historyOfTask = async (person: Api, run: string, task: string) => {
+  const { items } = await person.api.workflows.history(run, {
+    pageSize: 100,
+  });
+  const ofTask = items.filter(({ taskId }) => taskId === task);
+  return {
+    steps: ofTask.flatMap((entry) => {
+      if (entry.kind !== "step") {
+        return [];
+      }
+      return entry.state === "failed"
+        ? [`failed ${entry.attempt} ${entry.error.code}`]
+        : [`${entry.state} ${entry.attempt}`];
+    }),
+    stepIds: new Set(
+      ofTask.flatMap((entry) => (entry.kind === "step" ? [entry.stepId] : []))
+    ).size,
+    held: ofTask.some(
+      (entry) =>
+        entry.kind === "wait" &&
+        entry.waitKind === "blocked" &&
+        entry.state === "opened"
+    ),
+  };
+};
+
 describe("a run's held side effects", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
 
@@ -75,6 +107,14 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     if (held === undefined || heldSearch === undefined) {
       throw new Error("Nothing held");
     }
+    // Asleep between its checks, with nothing of it running.
+    await vi.waitFor(
+      async () => {
+        await expect(liveStatus(run.id)).resolves.toBe("waiting");
+        await expect(liveStatus(search.id)).resolves.toBe("waiting");
+      },
+      { timeout: 10_000, interval: 100 }
+    );
     const before = {
       live: [await liveStatus(run.id), await liveStatus(search.id)],
       server: await mail.did(),
@@ -92,13 +132,16 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
       server: await mail.did(),
       searched: await mail.searched(),
       audited: await runEvents(run.id, "workflow.run.completed"),
+      // Its history: the held end no completion, the run again the step's
+      // next attempt, the wait between them a wait of the step.
+      history: await historyOfTask(admin, run.id, "send"),
     }).toMatchObject({
       held: [
         { mode: "workflow", restricted: true },
         { mode: "workflow", restricted: true },
       ],
       before: {
-        live: ["running", "running"],
+        live: ["waiting", "waiting"],
         server: { calls: 0, sent: [] },
         searched: [],
       },
@@ -114,6 +157,11 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
         "workflow.step.completed $params",
         "workflow.step.completed send",
       ],
+      history: {
+        steps: ["started 1", "started 2", "completed 2"],
+        stepIds: 1,
+        held: true,
+      },
     });
   });
 
@@ -388,9 +436,11 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     await admin.api.pendingActions.decline(held.id);
     await finished(run.id);
     const audited = await runEvents(run.id, "workflow.run.failed");
+    const { steps } = await historyOfTask(admin, run.id, "send");
     expect({
       run: await admin.api.workflows.status(run.id),
       server: await mail.did(),
+      history: steps,
       audited: audited.filter(
         (event) =>
           event.startsWith("workflow.run.waiting") ||
@@ -399,6 +449,8 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
     }).toMatchObject({
       run: { status: "failed" },
       server: { calls: 0, sent: [] },
+      // The step's run again failed, by the decline's code.
+      history: ["started 1", "started 2", "failed 2 connect.declined"],
       // Failed once, not retried: a decline is final.
       audited: ["workflow.run.waiting held", "workflow.step.failed send"],
     });
