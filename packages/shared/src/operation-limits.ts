@@ -5,6 +5,7 @@
 // root module can't bring Zod along.
 
 import { platformErrorNamespaces } from "./error-namespaces.ts";
+import { platformLimits } from "./platform-limits.ts";
 
 /**
  * The most bytes of one operation's input, as UTF-8 JSON: the public
@@ -13,21 +14,23 @@ import { platformErrorNamespaces } from "./error-namespaces.ts";
  * another of the App's functions alike. A store's own bound on one
  * transaction (`commitMaxInputBytes`) is larger and separate.
  */
-export const operationInputMaxBytes = 128 * 1024;
+export const operationInputMaxBytes = platformLimits.operationInputBytes;
 
 /**
- * The most bytes of what one operation returns, as UTF-8 JSON: the size
- * spec 18.1 gives a workflow step's result, so any operation's return
- * fits a step that calls it.
+ * The most bytes of one call's request as a screen or agent sends it, as
+ * UTF-8 JSON: the input's own bound and room for the reference and options
+ * around it. Every transport reads no more than this before parsing.
  */
-export const operationResultMaxBytes = 1024 * 1024;
+export const functionRequestMaxBytes = operationInputMaxBytes + 4 * 1024;
 
 /**
- * The most bytes of what one mutation returns, as UTF-8 JSON: less than an
- * operation's result, since it is kept with its receipt in the commit that
- * holds its writes, within one commit's bound. A whole record fits.
+ * The most bytes of what one operation returns, as UTF-8 JSON: the public
+ * operation output limit of spec 18.1, for a query, a mutation or an
+ * action, whoever called it, and an App's export answering another App.
+ * Larger data is paginated. It fits a workflow step's result, and leaves
+ * a mutation's commit room for its writes (`stagedMaxBytes`).
  */
-export const mutationResultMaxBytes = 256 * 1024;
+export const operationResultMaxBytes = platformLimits.operationOutputBytes;
 
 /**
  * The most times one function reads the store in one call: reads past it
@@ -105,3 +108,11 @@ export const usesMaxEntries = 64;
  * letters, digits or underscores, at most 64 code units.
  */
 export const resourceAliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+
+/**
+ * The most UTF-16 code units of a knowledge search's text: Knowledge's own
+ * limit (`searchQuerySchema`), which an App's knowledge resource is held
+ * to as well, so a longer one is refused up front as arguments that don't
+ * fit, never deep in Knowledge.
+ */
+export const knowledgeSearchMaxLength = 500;

@@ -2924,3 +2924,36 @@
   --icon-move: icon-there;
   --icon-wide: 0.3;
 }
+
+/* The app's own icons, drawn on Lucide's grid. */
+
+/* Integrations (frame/integrations-icon.tsx): the three apps come up one by
+   one and the links between them are drawn. */
+[data-moves="links"] > rect:nth-of-type(1) {
+  --icon-move: icon-pop;
+  --icon-time: 0.38s;
+}
+[data-moves="links"] > rect:nth-of-type(2) {
+  --icon-move: icon-pop;
+  --icon-time: 0.38s;
+  --icon-wait: 0.14s;
+}
+[data-moves="links"] > rect:nth-of-type(3) {
+  --icon-move: icon-pop;
+  --icon-time: 0.38s;
+  --icon-wait: 0.28s;
+}
+[data-moves="links"] > path:nth-of-type(1) {
+  --icon-move: icon-draw;
+  --icon-dash: 18 100;
+  --icon-from: 19.5;
+  --icon-time: 0.4s;
+  --icon-wait: 0.1s;
+}
+[data-moves="links"] > path:nth-of-type(2) {
+  --icon-move: icon-draw;
+  --icon-dash: 18 100;
+  --icon-from: 19.5;
+  --icon-time: 0.4s;
+  --icon-wait: 0.26s;
+}

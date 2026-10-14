@@ -1,4 +1,5 @@
 import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+import type { ValueShape } from "@grasp-os/sdk";
 import {
   manifestMaxBytes,
   manifestText,
@@ -9,13 +10,20 @@ import type { AccessMode } from "@grasp-os/sdk/host";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { storeMaxTables } from "@grasp-os/shared/store-limits";
 import {
+  commitMaxCascade,
   commitMaxGuards,
   commitMaxInputBytes,
   commitMaxWrites,
   documentMaxBytes,
+  dataErrors,
   documentMaxDepth,
 } from "@grasp-os/shared/stores";
-import type { Commit, Committed, StoreFields } from "@grasp-os/shared/stores";
+import type {
+  Commit,
+  Committed,
+  StoreFields,
+  WriterRoles,
+} from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -363,8 +371,14 @@ describe("schemas", () => {
       "people",
     ]);
     // A later schema of fewer tables gets its own; the store keeps them all.
-    const fewer = await store.defineTables(tablesManifest("notes"));
-    expect(fewer.tables).toStrictEqual({ notes: defined.tables.notes });
+    const fewer = await store.defineTables(
+      manifestText(
+        schemaManifest(
+          defineSchema({ people: defineTable({ name: v.string() }) })
+        )
+      )
+    );
+    expect(fewer.tables).toStrictEqual({ people: defined.tables.people });
     expect(fewer.storeTables).toStrictEqual(defined.tables);
     // The same schema declared in another order, its text's keys in yet
     // another, is the same schema: the same hash, the same tables.
@@ -376,17 +390,26 @@ describe("schemas", () => {
           ? Object.fromEntries(Object.entries(part).toReversed())
           : part
     );
-    await expect(store.defineTables(reversed)).resolves.toStrictEqual(defined);
+    // Applied again, it leaves the contract as the last schema left it.
+    const again = await store.defineTables(reversed);
+    expect({
+      ...again,
+      contract: [again.contract.hash, again.contract.changed],
+    }).toStrictEqual({
+      ...defined,
+      contract: [fewer.contract.hash, false],
+    });
   });
 
-  it("a changed access mode alone is another schema, of the same tables", async () => {
+  it("a changed access mode needs a migration, either way", async () => {
     const store = await openStore(env, await createStore(env, builder));
-    const owned = await store.defineTables(manifestText(notesManifest()));
-    const shared = await store.defineTables(
-      manifestText(notesManifest({ read: "appMembers" }))
-    );
-    expect(shared.schemaHash).not.toBe(owned.schemaHash);
-    expect(shared.tables).toStrictEqual(owned.tables);
+    await store.defineTables(manifestText(notesManifest()));
+    await expect(
+      store.defineTables(manifestText(notesManifest({ read: "appMembers" })))
+    ).rejects.toMatchObject({
+      code: "migration.required",
+      details: { changes: [{ table: "notes", reason: "access_changed" }] },
+    });
   });
 
   it("indexes declared in another order alone are the same schema", async () => {
@@ -395,7 +418,11 @@ describe("schemas", () => {
     const reversed = await store.defineTables(
       manifestText(notesManifest({ indexes: "reversed" }))
     );
-    expect(reversed).toStrictEqual(declared);
+    expect({ ...reversed, contract: reversed.contract.hash }).toStrictEqual({
+      ...declared,
+      contract: declared.contract.hash,
+    });
+    expect(reversed.contract.changed).toBeFalsy();
   });
 
   it.each([
@@ -1372,5 +1399,919 @@ describe("a staged read", () => {
       kept,
       inserted: null,
     });
+  });
+});
+
+/**
+ * A schema whose `links` refer to `notes`, and to each other, in every way
+ * a field can hold a reference; and to `secrets`, each read by its owner
+ * alone, and `drafts`, read by the App's builders alone.
+ */
+const linksManifest = manifestText(
+  schemaManifest(
+    defineSchema({
+      notes: defineTable({ title: v.string() }),
+      links: defineTable({
+        note: v.id("notes").optional(),
+        nested: v.object({ to: v.id("notes").optional() }).optional(),
+        many: v.array(v.id("notes")).optional(),
+        byName: v.record(v.id("notes")).optional(),
+        either: v.union(v.id("notes"), v.number()).optional(),
+        noteOrLink: v.union(v.id("notes"), v.id("links")).optional(),
+        noneOr: v.union(v.literal("none"), v.id("notes")).optional(),
+        textOr: v.union(v.string(), v.id("notes")).optional(),
+        shape: v
+          .union(v.object({ to: v.string() }), v.object({ to: v.id("notes") }))
+          .optional(),
+        parent: v.id("links").optional(),
+        secret: v.id("secrets").optional(),
+        draft: v.id("drafts").optional(),
+        label: v.string().optional(),
+      }),
+      secrets: defineTable({ title: v.string() }),
+      drafts: defineTable({ title: v.string() }),
+    }),
+    {
+      tables: {
+        notes: { read: "appMembers", write: "appMembers" },
+        links: { read: "appMembers", write: "appMembers" },
+        secrets: { read: "owner", write: "owner" },
+        drafts: { read: "appBuilders", write: "appBuilders" },
+      },
+    }
+  )
+);
+const linksHash = await manifestHash(linksManifest);
+
+/** A new store with the `notes` and `links` tables. */
+const newLinkedStore = async (): Promise<OpenStore> => {
+  const store = await openStore(env, await createStore(env, builder));
+  await store.defineTables(linksManifest);
+  return store;
+};
+
+/** The tables of the links schema. */
+type LinkedTable = "notes" | "links" | "secrets" | "drafts";
+
+/** Who writes: Ada, a member and builder of the App, unless changed. */
+interface Writer {
+  principal: { userId: string };
+  roles: WriterRoles;
+}
+
+const adaWrites: Writer = { principal: ada, roles: memberRoles };
+
+/** Grace, a member of the App and not a builder. */
+const graceWrites: Writer = {
+  principal: grace,
+  roles: { appMember: true, appBuilder: false },
+};
+
+/** Inserts one record of `table` with `fields`, by `writer`, and answers its ID. */
+const insertLinked = async (
+  store: OpenStore,
+  table: LinkedTable,
+  fields: StoreFields,
+  writer: Writer = adaWrites
+): Promise<string> => {
+  const id = newRecordId();
+  await commitIn(store, {
+    ...writer,
+    schemaHash: linksHash,
+    writes: [{ op: "insert", id, table, fields }],
+  });
+  return id;
+};
+
+/** The details of the data error `run` is refused with. */
+const refusalOf = async (run: () => Promise<unknown>): Promise<unknown> => {
+  try {
+    await run();
+  } catch (error) {
+    const details: unknown =
+      error instanceof Error ? Reflect.get(error, "details") : undefined;
+    return { code: dataErrors.codeOf(error), details };
+  }
+  throw new Error("It was accepted");
+};
+
+/** Deletes the record `id` of `table`, at revision `revision`. */
+const deleteFrom = async (
+  store: OpenStore,
+  table: LinkedTable,
+  id: string,
+  writer: Writer = adaWrites
+): Promise<Committed> =>
+  await commitIn(store, {
+    ...writer,
+    schemaHash: linksHash,
+    writes: [{ op: "delete", table, id, expectedRevision: 1 }],
+  });
+
+/** A schema of `notes` and `links` with fields `links`, read and written by members. */
+const notesAndLinks = (links: ValueShape): string =>
+  manifestText(
+    schemaManifest(
+      defineSchema({
+        notes: defineTable({ title: v.string() }),
+        links: defineTable(links),
+      }),
+      {
+        tables: {
+          notes: { read: "appMembers", write: "appMembers" },
+          links: { read: "appMembers", write: "appMembers" },
+        },
+      }
+    )
+  );
+
+describe("a store's references", () => {
+  it("refuses to delete a record another refers to, at any depth, and writes nothing", async () => {
+    const holders = [
+      (id: string) => ({ note: id }),
+      (id: string) => ({ nested: { to: id } }),
+      (id: string) => ({ many: [id, id] }),
+      (id: string) => ({ byName: { first: id } }),
+      (id: string) => ({ either: id }),
+    ];
+    // A store of its own for each way of holding a reference.
+    await Promise.all(
+      holders.map(async (holder) => {
+        const store = await newLinkedStore();
+        const note = await insertLinked(store, "notes", { title: "Kept" });
+        await insertLinked(store, "links", holder(note));
+        await expect(deleteFrom(store, "notes", note)).rejects.toMatchObject({
+          code: "data.referenced",
+        });
+        await expect(store.get("notes", note)).resolves.not.toBeNull();
+        await expect(recordCount(store)).resolves.toBe(2);
+      })
+    );
+  });
+
+  it("deletes a record once nothing refers to it, or with what refers to it", async () => {
+    const store = await newLinkedStore();
+    const first = await insertLinked(store, "notes", { title: "First" });
+    const firstLink = await insertLinked(store, "links", { note: first });
+    await deleteFrom(store, "links", firstLink);
+    await deleteFrom(store, "notes", first);
+    await expect(store.get("notes", first)).resolves.toBeNull();
+
+    const second = await insertLinked(store, "notes", { title: "Second" });
+    const secondLink = await insertLinked(store, "links", { many: [second] });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: linksHash,
+      writes: [
+        { op: "delete", table: "notes", id: second, expectedRevision: 1 },
+        { op: "delete", table: "links", id: secondLink, expectedRevision: 1 },
+      ],
+    });
+    await expect(store.get("notes", second)).resolves.toBeNull();
+  });
+
+  it("follows a reference as its record changes", async () => {
+    const store = await newLinkedStore();
+    const first = await insertLinked(store, "notes", { title: "First" });
+    const second = await insertLinked(store, "notes", { title: "Second" });
+    const link = await insertLinked(store, "links", { note: first });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: linksHash,
+      writes: [
+        {
+          op: "patch",
+          table: "links",
+          id: link,
+          fields: { note: second },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    await deleteFrom(store, "notes", first);
+    await expect(deleteFrom(store, "notes", second)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+  });
+
+  it("reads a union's value as the member it matches, and names only the table holding the record", async () => {
+    const store = await newLinkedStore();
+    const note = await insertLinked(store, "notes", { title: "Kept" });
+    const plain = await insertLinked(store, "notes", { title: "Free" });
+    const link = await insertLinked(store, "links", { noteOrLink: note });
+    // Each of these matches a member that isn't a record ID: none refers.
+    const plainValues: StoreFields[] = [
+      { noneOr: "none" },
+      { textOr: "hello" },
+      { textOr: plain },
+    ];
+    await Promise.all(
+      plainValues.map(
+        async (fields) => await insertLinked(store, "links", fields)
+      )
+    );
+    const indexed = await runInDurableObject(
+      objectOf(store.id),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ table: string; to: string }>(
+            `SELECT tables.name AS "table", refs.to_record_id AS "to"
+              FROM sdk_record_refs AS refs
+              JOIN sdk_tables AS tables ON tables.table_id = refs.to_table_id`
+          )
+          .toArray()
+    );
+    expect(indexed).toStrictEqual([{ table: "notes", to: note }]);
+    await expect(deleteFrom(store, "notes", note)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+    await deleteFrom(store, "notes", plain);
+    // A link's ID, the union's second record-ID member: indexed as a link.
+    const holder = await insertLinked(store, "links", { noteOrLink: link });
+    await expect(deleteFrom(store, "links", link)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+    await deleteFrom(store, "links", holder);
+    // A union's record ID that names no record of any of its tables.
+    await expect(
+      insertLinked(store, "links", { noteOrLink: newRecordId() })
+    ).rejects.toMatchObject({ code: "data.reference_invalid" });
+    await deleteFrom(store, "links", link);
+    await deleteFrom(store, "notes", note);
+  });
+
+  it("checks each place holding a record ID on its own, whatever ID another holds", async () => {
+    const store = await newLinkedStore();
+    const note = await insertLinked(store, "notes", { title: "Kept" });
+    // The same ID in a field naming notes and one naming secrets: the
+    // note exists, no secret does.
+    await expect(
+      insertLinked(store, "links", { note, secret: note })
+    ).rejects.toMatchObject({ code: "data.reference_invalid" });
+    await deleteFrom(store, "notes", note);
+  });
+
+  it("reads a union as the first member that accepts the value, objects included", async () => {
+    const store = await newLinkedStore();
+    const note = await insertLinked(store, "notes", { title: "Free" });
+    // The first object member takes `to` as text: no reference.
+    await insertLinked(store, "links", { shape: { to: note } });
+    const rows = await runInDurableObject(
+      objectOf(store.id),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ count: number }>(
+            "SELECT count(*) AS count FROM sdk_record_refs"
+          )
+          .one().count
+    );
+    expect(rows).toBe(0);
+    await deleteFrom(store, "notes", note);
+  });
+
+  it("names only the record the refused deletion asked for", async () => {
+    const store = await newLinkedStore();
+    const note = await insertLinked(store, "notes", { title: "Kept" });
+    await insertLinked(store, "links", { note }, graceWrites);
+    await expect(
+      refusalOf(async () => await deleteFrom(store, "notes", note))
+    ).resolves.toStrictEqual({
+      code: "data.referenced",
+      details: { table: "notes", id: note },
+    });
+  });
+
+  it("refuses a reference to a record that doesn't exist or that the writer can't read, alike", async () => {
+    const store = await newLinkedStore();
+    const secret = await insertLinked(store, "secrets", { title: "Ada's" });
+    const draft = await insertLinked(store, "drafts", { title: "Builders'" });
+    const gone = await insertLinked(store, "notes", { title: "Gone" });
+    await deleteFrom(store, "notes", gone);
+    const forged: StoreFields[] = [
+      { note: newRecordId() },
+      { note: gone },
+      { secret },
+      { draft },
+      // An ID of one table, named as another's.
+      { note: secret },
+    ];
+    const refusals = await Promise.all(
+      forged.map(
+        async (fields) =>
+          await refusalOf(
+            async () => await insertLinked(store, "links", fields, graceWrites)
+          )
+      )
+    );
+    // Each names the link it would have written, never what it named.
+    expect(refusals).toMatchObject(
+      refusals.map(() => ({
+        code: "data.reference_invalid",
+        details: { table: "links" },
+      }))
+    );
+    // Nothing Grace tried holds Ada's records: she deletes them.
+    await deleteFrom(store, "secrets", secret);
+    await deleteFrom(store, "drafts", draft);
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("lets a writer refer to what they may read, a record their commit inserts included", async () => {
+    const store = await newLinkedStore();
+    const secret = await insertLinked(store, "secrets", { title: "Ada's" });
+    const draft = await insertLinked(store, "drafts", { title: "Builders'" });
+    await insertLinked(store, "links", { secret, draft });
+    const own = newRecordId();
+    const link = newRecordId();
+    await commitIn(store, {
+      ...graceWrites,
+      schemaHash: linksHash,
+      writes: [
+        {
+          op: "insert",
+          id: own,
+          table: "secrets",
+          fields: { title: "Grace's" },
+        },
+        { op: "insert", id: link, table: "links", fields: { secret: own } },
+      ],
+    });
+    await expect(
+      deleteFrom(store, "secrets", own, graceWrites)
+    ).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+  });
+
+  it("keeps a reference a record held before, whoever may read its record now", async () => {
+    const store = await newLinkedStore();
+    const draft = await insertLinked(store, "drafts", { title: "Builders'" });
+    const link = await insertLinked(store, "links", { draft });
+    // A member who can't read drafts changes another field of the link.
+    await commitIn(store, {
+      ...graceWrites,
+      schemaHash: linksHash,
+      writes: [
+        {
+          op: "patch",
+          table: "links",
+          id: link,
+          fields: { label: "Seen" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    await expect(deleteFrom(store, "drafts", draft)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+  });
+
+  it("restricts or lets go as the commit that deletes a record rewrites what refers to it", async () => {
+    const store = await newLinkedStore();
+    const kept = await insertLinked(store, "notes", { title: "Kept" });
+    const freed = await insertLinked(store, "notes", { title: "Freed" });
+    const link = await insertLinked(store, "links", { note: kept });
+    const rewrite = async (note: string, fields: StoreFields) =>
+      await commitIn(store, {
+        principal: ada,
+        schemaHash: linksHash,
+        writes: [
+          {
+            op: "patch",
+            table: "links",
+            id: link,
+            fields,
+            expectedRevision: 1,
+          },
+          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        ],
+      });
+    // Still referring after the rewrite: refused.
+    await expect(rewrite(kept, { label: "Still" })).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+    // Moved away in the same commit: the note goes.
+    await rewrite(kept, { note: freed });
+    await expect(store.get("notes", kept)).resolves.toBeNull();
+  });
+
+  it("indexes a write under an older schema the store still holds", async () => {
+    const store = await newLinkedStore();
+    const later = manifestText(
+      schemaManifest(
+        defineSchema({
+          notes: defineTable({ title: v.string() }),
+          links: defineTable({ note: v.id("notes").optional() }),
+          more: defineTable({ title: v.string() }),
+        }),
+        {
+          tables: {
+            notes: { read: "appMembers", write: "appMembers" },
+            links: { read: "appMembers", write: "appMembers" },
+            more: { read: "appMembers", write: "appMembers" },
+          },
+        }
+      )
+    );
+    await store.defineTables(later);
+    const note = await insertLinked(store, "notes", { title: "Kept" });
+    // Written under the first schema, after the later one.
+    await insertLinked(store, "links", { note });
+    await expect(
+      commitIn(store, {
+        principal: ada,
+        schemaHash: await manifestHash(later),
+        writes: [
+          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        ],
+      })
+    ).rejects.toMatchObject({ code: "data.referenced" });
+  });
+
+  it("lets a record that refers only to itself be deleted", async () => {
+    const store = await newLinkedStore();
+    const link = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: linksHash,
+      writes: [
+        { op: "insert", id: link, table: "links", fields: { parent: link } },
+      ],
+    });
+    await deleteFrom(store, "links", link);
+    await expect(store.get("links", link)).resolves.toBeNull();
+  });
+
+  it("keeps a reference a newer version wrote through an older version's writes", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    // The older version knows no reference; the newer adds one.
+    const older = notesAndLinks({ label: v.string().optional() });
+    const newer = notesAndLinks({
+      label: v.string().optional(),
+      pin: v.id("notes").optional(),
+    });
+    const [olderHash, newerHash] = await Promise.all([
+      manifestHash(older),
+      manifestHash(newer),
+    ]);
+    await store.defineTables(older);
+    // The older version writes first, so the store reads its contract
+    // before the newer version widens it.
+    const note = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [
+        { op: "insert", id: note, table: "notes", fields: { title: "Kept" } },
+      ],
+    });
+    await store.defineTables(newer);
+    const link = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: newerHash,
+      writes: [
+        { op: "insert", id: link, table: "links", fields: { pin: note } },
+      ],
+    });
+    // Rolled back: the older version patches the link, then replaces it.
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [
+        {
+          op: "patch",
+          table: "links",
+          id: link,
+          fields: { label: "Patched" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [
+        {
+          op: "replace",
+          table: "links",
+          id: link,
+          fields: { label: "Replaced" },
+          expectedRevision: 2,
+        },
+      ],
+    });
+    await expect(
+      Promise.all(
+        [olderHash, newerHash].map(
+          async (pinned) =>
+            await refusalOf(
+              async () =>
+                await commitIn(store, {
+                  principal: ada,
+                  schemaHash: pinned,
+                  writes: [
+                    {
+                      op: "delete",
+                      table: "notes",
+                      id: note,
+                      expectedRevision: 1,
+                    },
+                  ],
+                })
+            )
+        )
+      )
+    ).resolves.toStrictEqual([
+      { code: "data.referenced", details: { table: "notes", id: note } },
+      { code: "data.referenced", details: { table: "notes", id: note } },
+    ]);
+  });
+});
+
+/**
+ * A schema whose `links` are deleted with the note they refer to, and
+ * whose `subs` with their link, unless a restricting field holds it too.
+ * Only the App's builders write `links`.
+ */
+const cascadeManifest = manifestText(
+  schemaManifest(
+    defineSchema({
+      notes: defineTable({ title: v.string() }),
+      links: defineTable({
+        note: v.id("notes", { onDelete: "cascade" }).optional(),
+        kept: v.id("notes").optional(),
+        either: v
+          .union(v.id("notes", { onDelete: "cascade" }), v.id("subs"))
+          .optional(),
+      }),
+      subs: defineTable({
+        link: v.id("links", { onDelete: "cascade" }).optional(),
+        pinned: v.id("links").optional(),
+        parent: v.id("subs", { onDelete: "cascade" }).optional(),
+      }),
+    }),
+    {
+      tables: {
+        notes: { read: "appMembers", write: "appMembers" },
+        links: { read: "appMembers", write: "appBuilders" },
+        subs: { read: "appMembers", write: "appMembers" },
+      },
+    }
+  )
+);
+const cascadeHash = await manifestHash(cascadeManifest);
+
+/** A new store with the `notes`, `links` and `subs` tables. */
+const newCascadeStore = async (): Promise<OpenStore> => {
+  const store = await openStore(env, await createStore(env, builder));
+  await store.defineTables(cascadeManifest);
+  return store;
+};
+
+/** Inserts records of `table`, one per entry of `fields`, and answers their IDs. */
+const insertCascading = async (
+  store: OpenStore,
+  table: "notes" | "links" | "subs",
+  ...fields: StoreFields[]
+): Promise<string[]> => {
+  const ids = fields.map(() => newRecordId());
+  await commitIn(store, {
+    principal: ada,
+    schemaHash: cascadeHash,
+    writes: fields.map((value, at) => ({
+      op: "insert" as const,
+      id: ids[at] ?? "",
+      table,
+      fields: value,
+    })),
+  });
+  return ids;
+};
+
+/** A commit deleting note `id`, by a member who can't write `links`. */
+const deleteNote = async (store: OpenStore, id: string): Promise<Committed> =>
+  await commitIn(store, {
+    principal: ada,
+    schemaHash: cascadeHash,
+    roles: { appMember: true, appBuilder: false },
+    writes: [{ op: "delete", table: "notes", id, expectedRevision: 1 }],
+  });
+
+/** The fields of `count` links to `note`. */
+const linksTo = (note: string, count: number): StoreFields[] =>
+  Array.from({ length: count }, () => ({ note }));
+
+describe("a store's cascades", () => {
+  it("cascades through a field a newer version declared, after an older version's write", async () => {
+    const store = await openStore(env, await createStore(env, builder));
+    const older = notesAndLinks({ label: v.string().optional() });
+    const newer = notesAndLinks({
+      label: v.string().optional(),
+      pin: v.id("notes", { onDelete: "cascade" }).optional(),
+    });
+    const [olderHash, newerHash] = await Promise.all([
+      manifestHash(older),
+      manifestHash(newer),
+    ]);
+    await store.defineTables(older);
+    await store.defineTables(newer);
+    const note = newRecordId();
+    const link = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: newerHash,
+      writes: [
+        { op: "insert", id: note, table: "notes", fields: { title: "Gone" } },
+        { op: "insert", id: link, table: "links", fields: { pin: note } },
+      ],
+    });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [
+        {
+          op: "patch",
+          table: "links",
+          id: link,
+          fields: { label: "Rolled back" },
+          expectedRevision: 1,
+        },
+      ],
+    });
+    const committed = await commitIn(store, {
+      principal: ada,
+      schemaHash: olderHash,
+      writes: [{ op: "delete", table: "notes", id: note, expectedRevision: 1 }],
+    });
+    expect(committed.cascaded).toStrictEqual([
+      { table: "links", id: link, owner: ada.userId },
+    ]);
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("deletes what refers to a deleted record where its field says so, level by level, whoever writes", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const [sub = ""] = await insertCascading(store, "subs", { link });
+    const [other = ""] = await insertCascading(store, "notes", {
+      title: "Kept",
+    });
+    const [otherLink = ""] = await insertCascading(store, "links", {
+      note: other,
+    });
+
+    await deleteNote(store, note);
+    await expect(store.get("notes", note)).resolves.toBeNull();
+    await expect(store.get("links", link)).resolves.toBeNull();
+    await expect(store.get("subs", sub)).resolves.toBeNull();
+    await expect(store.get("links", otherLink)).resolves.not.toBeNull();
+    // What went took its own references with it: the other note goes on
+    // its own, and takes only its link.
+    await deleteNote(store, other);
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("restricts where any place holding the same record ID restricts, whatever their order", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Held",
+    });
+    // `either` cascades and comes before `kept`, which restricts.
+    await insertCascading(store, "links", { either: note, kept: note });
+    await expect(deleteNote(store, note)).rejects.toMatchObject({
+      code: "data.referenced",
+    });
+  });
+
+  it("cascades through a union's record ID as the table holding the record says", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { either: note });
+    const committed = await deleteNote(store, note);
+    expect(committed.cascaded).toStrictEqual([
+      { table: "links", id: link, owner: ada.userId },
+    ]);
+  });
+
+  it("takes a cycle of cascading records once, and a record the commit deletes itself", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    // Two subs each deleted with the other, and with the link.
+    const first = newRecordId();
+    const second = newRecordId();
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: cascadeHash,
+      writes: [
+        {
+          op: "insert",
+          id: first,
+          table: "subs",
+          fields: { link, parent: second },
+        },
+        { op: "insert", id: second, table: "subs", fields: { parent: first } },
+      ],
+    });
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: cascadeHash,
+      writes: [
+        { op: "delete", table: "links", id: link, expectedRevision: 1 },
+        { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+      ],
+    });
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("refuses the deletion, writing nothing, where a restricting field holds a record it would take", async () => {
+    const store = await newCascadeStore();
+    const [first = "", second = ""] = await insertCascading(
+      store,
+      "notes",
+      { title: "Held twice" },
+      { title: "Held below" }
+    );
+    // The same note held by a cascading field and a restricting one.
+    await insertCascading(store, "links", { note: first, kept: first });
+    // A link that would go with its note, held by a restricting field.
+    const [link = ""] = await insertCascading(store, "links", { note: second });
+    await insertCascading(store, "subs", { pinned: link });
+
+    // The note the deletion asked for is named; a link a cascade would
+    // have taken, which may be another's, is not.
+    await expect(
+      Promise.all(
+        [first, second].map(
+          async (note) =>
+            await refusalOf(async () => await deleteNote(store, note))
+        )
+      )
+    ).resolves.toStrictEqual([
+      { code: "data.referenced", details: { table: "notes", id: first } },
+      { code: "data.referenced", details: undefined },
+    ]);
+    await expect(recordCount(store)).resolves.toBe(5);
+  });
+
+  it("keeps with the receipt whose records a cascade deleted", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const sub = newRecordId();
+    await commitIn(store, {
+      ...graceWrites,
+      schemaHash: cascadeHash,
+      writes: [{ op: "insert", id: sub, table: "subs", fields: { link } }],
+    });
+    const committed = await deleteNote(store, note);
+    expect(
+      committed.cascaded?.toSorted((a, b) => a.table.localeCompare(b.table))
+    ).toStrictEqual([
+      { table: "links", id: link, owner: ada.userId },
+      { table: "subs", id: sub, owner: grace.userId },
+    ]);
+  });
+
+  it("leaves a record the commit writes or guards itself to the commit, refusing what still refers", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Kept",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const deleting = {
+      op: "delete",
+      table: "notes",
+      id: note,
+      expectedRevision: 1,
+    } as const;
+    await expect(
+      Promise.all([
+        // Rewritten by the commit, still referring to the note.
+        refusalOf(
+          async () =>
+            await commitIn(store, {
+              principal: ada,
+              schemaHash: cascadeHash,
+              writes: [
+                {
+                  op: "patch",
+                  table: "links",
+                  id: link,
+                  fields: { kept: note },
+                  expectedRevision: 1,
+                },
+                deleting,
+              ],
+            })
+        ),
+        // Asserted by the commit to be there at its revision.
+        refusalOf(
+          async () =>
+            await commitIn(store, {
+              principal: ada,
+              schemaHash: cascadeHash,
+              guards: [{ table: "links", id: link, expectedRevision: 1 }],
+              writes: [deleting],
+            })
+        ),
+      ])
+    ).resolves.toStrictEqual([
+      { code: "data.referenced", details: { table: "notes", id: note } },
+      { code: "data.referenced", details: { table: "notes", id: note } },
+    ]);
+    await expect(recordCount(store)).resolves.toBe(2);
+  });
+
+  it("counts toward the bound only what the cascade adds to the commit's own deletions", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const extra = 5;
+    const links = [
+      ...(await insertCascading(store, "links", ...linksTo(note, extra))),
+      ...(await insertCascading(
+        store,
+        "links",
+        ...linksTo(note, commitMaxCascade)
+      )),
+    ];
+    // The commit deletes some links itself: the rest are within the bound.
+    await commitIn(store, {
+      principal: ada,
+      schemaHash: cascadeHash,
+      writes: [
+        ...links.slice(0, extra).map((id) => ({
+          op: "delete" as const,
+          table: "links",
+          id,
+          expectedRevision: 1,
+        })),
+        { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+      ],
+    });
+    await expect(recordCount(store)).resolves.toBe(0);
+  });
+
+  it("refuses a deletion that would take more than one commit may, for a workflow to batch", async () => {
+    const store = await newCascadeStore();
+    const [many = "", most = ""] = await insertCascading(
+      store,
+      "notes",
+      { title: "Too many" },
+      { title: "Just enough" }
+    );
+    await insertCascading(store, "links", ...linksTo(many, commitMaxCascade));
+    await insertCascading(store, "links", ...linksTo(many, 1));
+    await insertCascading(store, "links", ...linksTo(most, commitMaxCascade));
+    const before = await recordCount(store);
+
+    await expect(deleteNote(store, many)).rejects.toMatchObject({
+      code: "data.cascade_limit",
+      details: { limit: commitMaxCascade },
+    });
+    await expect(recordCount(store)).resolves.toBe(before);
+    await deleteNote(store, most);
+    await expect(recordCount(store)).resolves.toBe(
+      before - commitMaxCascade - 1
+    );
+  });
+
+  it("shows a mutation's staged reads what its deletion takes, as its commit will", async () => {
+    const store = await newCascadeStore();
+    const [note = ""] = await insertCascading(store, "notes", {
+      title: "Gone",
+    });
+    const [link = ""] = await insertCascading(store, "links", { note });
+    const { value } = await store.read(
+      {
+        schemaHash: cascadeHash,
+        principal: "ada",
+        appMember: true,
+        appBuilder: false,
+        consumer: { resourceId: "notes-app", resourceVersion: 1 },
+      },
+      { kind: "get", table: "links", id: link, expectedRevision: null },
+      {
+        stagedAt: Date.now(),
+        writes: [
+          { op: "delete", table: "notes", id: note, expectedRevision: 1 },
+        ],
+      }
+    );
+    expect(value).toBeNull();
+    // A staged read keeps nothing.
+    await expect(store.get("links", link)).resolves.not.toBeNull();
   });
 });

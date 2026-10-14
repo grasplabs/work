@@ -136,9 +136,13 @@ import {
   endedBy,
   forgetHistoryIn,
   lastEventId,
+  maxHistoryRecords,
+  readHistoryRecords,
   readNextEvent,
+  readStepIdentities,
   recordStartIn,
 } from "./history.ts";
+import type { HistoryRecord, StepIdentity } from "./history.ts";
 import type { Schedule } from "./identity.ts";
 import {
   createJournal,
@@ -146,6 +150,8 @@ import {
   isTombstoned,
   JournalSchemaError,
   journalSchemaVersion,
+  readAttemptLease,
+  readGeneration,
   readJournal,
   readRollbackWorklist,
   maxEventPayloadBytes,
@@ -159,7 +165,7 @@ import {
   expireTombstones,
   startRetentionIn,
 } from "./journal.ts";
-import type { Journal, RunRow, StepType } from "./journal.ts";
+import type { AttemptLease, Journal, RunRow, StepType } from "./journal.ts";
 import { warnRecovered } from "./log.ts";
 import {
   failedIn,
@@ -182,6 +188,50 @@ export type { RunNotification } from "./notifications.ts";
 
 /** What `WorkflowRun.journal()` returns. */
 export type { Journal } from "./journal.ts";
+
+/** What `WorkflowRun.history` returns each event as. */
+export type {
+  HistoryRecord,
+  ReadableHistoryRecord,
+  StepIdentity,
+  UnreadableHistoryRecord,
+} from "./history.ts";
+
+/** Which of the run's steps a history read also tells of. */
+export interface StepIdentitiesQuery {
+  /** Only steps of this kind; every kind when null. */
+  readonly kind: StepType | null;
+  /** Only steps whose name starts with this; every name when null. */
+  readonly prefix: string | null;
+}
+
+/** What `WorkflowRun.history` is asked for. */
+export interface HistoryCommand {
+  /** The last event ID the caller has; 0 for the first. */
+  readonly after: number;
+  /** The most records to return, 1 to {@link maxHistoryRecords}. */
+  readonly limit: number;
+  /**
+   * Steps to tell of beside the page, each query's in the order they were
+   * first reached: read with the page, so they stand as its records do.
+   */
+  readonly steps?: readonly StepIdentitiesQuery[];
+}
+
+/**
+ * A page of the run's history, whether more of it follows, and the steps
+ * asked for, all of one moment of the run: read in one synchronous turn,
+ * with no write between them.
+ */
+export interface HistoryPage {
+  readonly records: readonly HistoryRecord[];
+  readonly more: boolean;
+  /** Each query's steps (`HistoryCommand.steps`), in its order. */
+  readonly steps: readonly (readonly StepIdentity[])[];
+}
+
+/** What `WorkflowRun.attemptLease` returns. */
+export type { AttemptLease } from "./journal.ts";
 
 /** How long an activation may go without journaling before it's recovered. */
 export const defaultLeaseMs = 60_000;
@@ -274,13 +324,40 @@ export type StartOutcome =
  * `ignored`: the run is queued, pausing or paused already, or has ended,
  * and a pause does nothing, as on the reference engine.
  */
-export type PauseOutcome = "pausing" | "paused" | "ignored" | "missing";
+export type PauseOutcome =
+  | "pausing"
+  | "paused"
+  | "ignored"
+  | "fenced"
+  | "missing";
+
+/**
+ * A host's own order of the controls it sends a run (pause, resume,
+ * terminate): `fence`, a number the host raises with each newer control.
+ * The run keeps the greatest it took, in the same write as the state
+ * change, and ignores (`fenced`) a control with a smaller one, so a
+ * command delivered late can't undo a newer one. The same fence again (a
+ * command sent again) is taken as before. Without one, a control is
+ * taken as it comes, and fences nothing.
+ */
+export interface ControlFence {
+  fence?: number;
+}
 
 /**
  * `resumed`: the run was paused, or still pausing, and runs again.
  * `ignored`: it was neither, and a resume does nothing.
  */
-export type ResumeOutcome = "resumed" | "ignored" | "missing";
+export type ResumeOutcome = "resumed" | "ignored" | "fenced" | "missing";
+
+/**
+ * Whether a resume leaves the run's pending deadlines where they were (a
+ * host whose paused time counts, as Grasp's does), or moves them on by
+ * the time it was paused, as the reference engine does: the default.
+ */
+export interface ResumeCommand extends ControlFence {
+  keepDeadlines: boolean;
+}
 
 /**
  * `ended`: the run has ended already, and can't be terminated.
@@ -290,10 +367,11 @@ export type TerminateOutcome =
   | "terminated"
   | "ended"
   | "rolling_back"
+  | "fenced"
   | "missing";
 
 /** Whether a termination rolls the run's steps back first. */
-export interface TerminateCommand {
+export interface TerminateCommand extends ControlFence {
   rollback: boolean;
 }
 
@@ -497,22 +575,29 @@ const pauseIn = (sql: SqlStorage, now: number): void => {
 
 /**
  * Moves each of the run's pending deadlines on by `ms`, the time it was
- * paused: a sleep's or a wait's, a retry's, and that of an attempt cut
- * off, its step's latest with no outcome journaled: one still open (its
- * activation died before the pause) or one whose answer came back
- * superseded, which the next activation ends as cut off by its deadline
- * (activation.ts). Paused time doesn't count against them, as on the
- * reference engine.
+ * paused: a sleep's or a wait's, a retry's (unless the resume keeps them,
+ * `waits` false), and that of an attempt cut off, its step's latest with
+ * no outcome journaled: one still open (its activation died before the
+ * pause) or one whose answer came back superseded, which the next
+ * activation ends as cut off by its deadline (activation.ts). Paused time
+ * doesn't count against them, as on the reference engine; an attempt's
+ * always moves, so paused time never makes it one that timed out.
  */
-const shiftDeadlinesIn = (sql: SqlStorage, ms: number): void => {
-  sql.exec(
-    "UPDATE steps SET deadline = deadline + ? WHERE state = 'waiting' AND deadline IS NOT NULL",
-    ms
-  );
-  sql.exec(
-    "UPDATE attempts SET retry_at = retry_at + ? WHERE retry_at IS NOT NULL AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'retrying')",
-    ms
-  );
+const shiftDeadlinesIn = (
+  sql: SqlStorage,
+  ms: number,
+  waits: boolean
+): void => {
+  if (waits) {
+    sql.exec(
+      "UPDATE steps SET deadline = deadline + ? WHERE state = 'waiting' AND deadline IS NOT NULL",
+      ms
+    );
+    sql.exec(
+      "UPDATE attempts SET retry_at = retry_at + ? WHERE retry_at IS NOT NULL AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'retrying')",
+      ms
+    );
+  }
   sql.exec(
     "UPDATE attempts SET deadline = deadline + ? WHERE ended_at IS NULL OR (ended = 'superseded' AND EXISTS (SELECT 1 FROM steps WHERE steps.ordinal = attempts.ordinal AND steps.attempt = attempts.attempt AND steps.state = 'running'))",
     ms
@@ -615,6 +700,40 @@ const activatesNow = (run: RunRow): boolean => {
 const isDue = (run: RunRow, force: boolean): boolean =>
   run.notify_at !== null &&
   (force || run.notify_failures === 0 || run.notify_at <= Date.now());
+
+/**
+ * Whether the run takes a control that comes with `command`'s fence: not
+ * one older than the newest it took. One it takes is kept, in the
+ * command's own write.
+ */
+const takesFence = (
+  sql: SqlStorage,
+  run: RunRow,
+  command: ControlFence | undefined
+): boolean => {
+  const fence = command?.fence;
+  if (fence === undefined) {
+    return true;
+  }
+  if (!Number.isSafeInteger(fence)) {
+    throw new TypeError(
+      `A control's fence is a whole number: ${String(fence)}`
+    );
+  }
+  if (run.control_fence !== null && fence < run.control_fence) {
+    return false;
+  }
+  sql.exec("UPDATE run SET control_fence = ?", fence);
+  return true;
+};
+
+/** The earlier of two times an alarm is wanted at, either of which may be none. */
+const earlier = (a: number | null, b: number | null): number | null => {
+  if (a === null || b === null) {
+    return a ?? b;
+  }
+  return Math.min(a, b);
+};
 
 /** How long a tombstone holds by default: 30 days. */
 export const defaultTombstoneMs = 30 * 24 * 60 * 60 * 1000;
@@ -747,12 +866,36 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         return defaultTombstoneMs;
       }
     },
-    () => this.#notifyObligation(),
+    () => earlier(this.#notifyObligation(), this.#extraObligation()),
     () => {
       this.#wakeObservers();
       this.#deliverSoon();
     }
   );
+
+  /**
+   * When the host next needs the object's alarm for work of its own beside
+   * the run's, or null for none: folded into every alarm the engine sets
+   * or deletes, as the tombstones' expiry is (sharingAlarm), so the engine
+   * never moves it later or drops it. A host that overrides `alarm` does
+   * that work there, before the engine's. Read with no await, in the same
+   * turn as the alarm it goes with; one that throws counts as none.
+   */
+  // oxlint-disable-next-line class-methods-use-this -- the host's hook; by default it needs none
+  protected extraAlarm(): number | null {
+    return null;
+  }
+
+  /** The host's `extraAlarm`, checked: a time, or null. */
+  #extraObligation(): number | null {
+    try {
+      const at = this.extraAlarm();
+      return at !== null && Number.isFinite(at) ? at : null;
+    } catch (error) {
+      warnRecovered("workflow_extra_alarm_failed", error);
+      return null;
+    }
+  }
 
   /** When the batch out to the host was handed over, if one is out. */
   #handedAt: number | undefined;
@@ -1133,6 +1276,35 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * The lease of a step's attempt, as the step's callback was told it
+   * (`ctx.idempotencyKey`, `ctx.attempt`), while it still holds: for the
+   * host, which hands an attempt's code capabilities of its own, to check
+   * before each of them acts that the attempt may still act (journal.ts,
+   * `readAttemptLease`). An attempt past its deadline whose timeout the
+   * journal hasn't caught up with still has one: the host checks the
+   * deadline too. Read from the journal, in this object only: no caller
+   * outside it reaches it.
+   */
+  protected attemptLease(
+    key: string,
+    attempt: number
+  ): AttemptLease | undefined {
+    const { sql } = this.ctx.storage;
+    return hasJournal(sql) ? readAttemptLease(sql, key, attempt) : undefined;
+  }
+
+  /**
+   * The run's generation now (none before it has a journal): what the
+   * activation running its definition took, for the host to let go of
+   * anything an older one started. Read from the journal, in this object
+   * only.
+   */
+  protected generation(): number | undefined {
+    const { sql } = this.ctx.storage;
+    return hasJournal(sql) ? readGeneration(sql) : undefined;
+  }
+
+  /**
    * Creates the run, or finds the one this same start created before. The
    * run and its alarm are written together, before the answer: once a
    * caller hears `created` or `existing`, the run will execute.
@@ -1228,7 +1400,8 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     if (
       alarm === null ||
       alarm === this.#tombstoneExpiry() ||
-      alarm === notifyDue(this.ctx.storage.sql)
+      alarm === notifyDue(this.ctx.storage.sql) ||
+      alarm === this.#extraObligation()
     ) {
       await this.#store.setAlarm(ownWake(run));
     }
@@ -1268,6 +1441,20 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   }
 
   /**
+   * Where the run is, and the greatest control fence it took
+   * (`ControlFence`, null before any came with a control), read together
+   * in one turn; undefined when there is no run. What a host settles its
+   * controls from: a control whose fence is at most `fence` reached the
+   * run, one with a greater fence hasn't yet.
+   */
+  controlState(): { status: InstanceStatus; fence: number | null } | undefined {
+    const run = this.#run();
+    return run === undefined
+      ? undefined
+      : { status: statusOf(run), fence: run.control_fence };
+  }
+
+  /**
    * The run's whole journal, as plain data: raw, a sensitive step's result
    * too, for the host's own inspection. Observers subscribe.
    */
@@ -1275,6 +1462,38 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     return hasJournal(this.ctx.storage.sql)
       ? readJournal(this.ctx.storage.sql)
       : undefined;
+  }
+
+  /**
+   * The run's history after `after`, as metadata (history.ts,
+   * `HistoryRecord`): the events subscribers see, in order, without any
+   * value of the run's (no params, output or step result, sensitive or
+   * not). For a host's own history of the run, read a page at a time and
+   * taken up again from the last event ID it has. Undefined when there is
+   * no run. Who may see it is the host's to decide, and its cursor the
+   * host's to check: a page holds at least one record and at most
+   * {@link maxHistoryRecords}, whatever `limit` says. The steps a host
+   * asks for beside it (`HistoryCommand.steps`, as metadata:
+   * `StepIdentity`, who each is and its latest attempt, never what it
+   * holds) come from the same moment, for a host relating its own steps
+   * to each other in its history.
+   */
+  history(command: HistoryCommand): HistoryPage | undefined {
+    if (this.#run() === undefined) {
+      return undefined;
+    }
+    const { sql } = this.ctx.storage;
+    const limit = Number.isSafeInteger(command.limit)
+      ? Math.min(Math.max(command.limit, 1), maxHistoryRecords)
+      : maxHistoryRecords;
+    // One synchronous turn: no write lands between the page and its steps,
+    // so the steps stand as they did when the page's records were read.
+    return {
+      ...readHistoryRecords(sql, command.after, limit),
+      steps: (command.steps ?? []).map(({ kind, prefix }) =>
+        readStepIdentities(sql, kind, prefix)
+      ),
+    };
   }
 
   /**
@@ -1925,9 +2144,12 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
    * Pauses the run: at once if no activation runs it (it waits, asleep or
    * for an event), otherwise at the activation's next safe boundary.
    */
-  async pause(): Promise<PauseOutcome> {
+  async pause(command?: ControlFence): Promise<PauseOutcome> {
     const { sql } = this.ctx.storage;
     return await this.#command((run, now): CommandDecision<PauseOutcome> => {
+      if (!takesFence(sql, run, command)) {
+        return { outcome: "fenced" };
+      }
       if (run.status === "running") {
         sql.exec("UPDATE run SET status = 'waitingForPause'");
         return { outcome: "pausing" };
@@ -1943,12 +2165,18 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
 
   /**
    * Resumes a paused run, its deadlines moved on by the time it was
-   * paused, or lets a run still pausing go on as it was.
+   * paused (unless `keepDeadlines`: a sleep, a wait or a retry then comes
+   * due as it would have, at once if its time has passed), or lets a run
+   * still pausing go on as it was.
    */
-  async resume(): Promise<ResumeOutcome> {
+  async resume(command?: ResumeCommand): Promise<ResumeOutcome> {
+    const keepDeadlines = command?.keepDeadlines === true;
     const { sql } = this.ctx.storage;
     const outcome = await this.#command(
       (run, now): CommandDecision<ResumeOutcome> => {
+        if (!takesFence(sql, run, command)) {
+          return { outcome: "fenced" };
+        }
         if (run.status === "waitingForPause") {
           // Its activation goes on; what it parked for the pause comes due
           // at once when it suspends (activation.ts).
@@ -1961,7 +2189,7 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
         if (run.paused_at === null) {
           throw new Error("The journal holds a paused run with no pause time");
         }
-        shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at));
+        shiftDeadlinesIn(sql, Math.max(0, now - run.paused_at), !keepDeadlines);
         sql.exec(
           "UPDATE run SET status = 'running', paused_at = NULL, wake_at = ?",
           now
@@ -1988,6 +2216,9 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
     const { sql } = this.ctx.storage;
     const outcome = await this.#command(
       (run, now): CommandDecision<TerminateOutcome> => {
+        if (!takesFence(sql, run, command)) {
+          return { outcome: "fenced" };
+        }
         if (hasEnded(run)) {
           return { outcome: "ended" };
         }

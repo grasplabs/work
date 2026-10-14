@@ -136,12 +136,6 @@ const startScheduled = async (
       log.info("workflow.trigger_gone", { trigger: schedule.id });
       return;
     }
-    if (workflowErrors.codeOf(error) === "workflow.start_pending") {
-      // Its run is still starting, or stopped starting: the time stays
-      // due, and a later minute finds it started, or starts it (runs.ts).
-      log.info("workflow.start_pending", { trigger: schedule.id });
-      return;
-    }
     // The time stays due, so a later minute tries its key again
     // (`tryNow`), until too many have failed. A run whose start failed
     // (audited as started, then as failed to start) gave its key up, so

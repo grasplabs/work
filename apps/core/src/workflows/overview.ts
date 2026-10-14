@@ -11,6 +11,7 @@ import type { AppId, WorkflowId } from "@grasp-os/shared/ids";
 import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
+  defaultTimeZone,
   failedRunDays,
   maxFailedStarts,
   runFilterStatuses,
@@ -26,6 +27,7 @@ import type {
   WorkflowDetail,
   WorkflowDryRun,
   WorkflowSummary,
+  WorkflowTrigger,
 } from "@grasp-os/shared/workflows";
 import {
   and,
@@ -691,6 +693,62 @@ const stepsOf = (
   }
 };
 
+/**
+ * The triggers workflow `workflow` of App `app` has at `version`, in the
+ * order its code declares them: the rows the version registered as it
+ * was made current (trigger-registry.ts), from declarations checked then,
+ * so its code isn't read or run again to show them.
+ */
+const registeredTriggers = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  workflow: WorkflowId
+): Promise<WorkflowTrigger[]> => {
+  const rows = await drizzle(env.DB)
+    .select()
+    .from(workflowTriggers)
+    .where(
+      and(
+        eq(workflowTriggers.appId, app),
+        eq(workflowTriggers.version, version),
+        eq(workflowTriggers.workflowId, workflow)
+      )
+    )
+    .orderBy(asc(workflowTriggers.position));
+  return rows.flatMap((row): WorkflowTrigger[] => {
+    switch (row.type) {
+      case "schedule": {
+        return row.param === null
+          ? []
+          : [
+              {
+                type: "schedule",
+                position: row.position,
+                param: row.param,
+                timeZone: row.timeZone ?? defaultTimeZone,
+                nextRunAt: row.nextRunAt?.toISOString() ?? null,
+                stopped: row.failedStarts >= maxFailedStarts,
+              },
+            ];
+      }
+      case "email": {
+        return row.address === null
+          ? []
+          : [{ type: "email", position: row.position, address: row.address }];
+      }
+      case "event": {
+        return row.event === null
+          ? []
+          : [{ type: "event", position: row.position, event: row.event }];
+      }
+      default: {
+        return row.type satisfies never;
+      }
+    }
+  });
+};
+
 /** A workflow of an App's current version, with the version's files. */
 interface CurrentWorkflow {
   app: ListedApp;
@@ -755,9 +813,10 @@ export const workflowDetail = async (
   workflow: unknown
 ): Promise<WorkflowDetail> => {
   const current = await currentWorkflow(env, by, app, workflow, "user");
-  const [[summary], builds] = await Promise.all([
+  const [[summary], builds, triggers] = await Promise.all([
     summariesOf(env, [current]),
     buildsApp(env, by, current.app.id),
+    registeredTriggers(env, current.app.id, current.version, current.workflow),
   ]);
   if (summary === undefined) {
     throw workflowErrors.create("workflow.not_found");
@@ -769,6 +828,7 @@ export const workflowDetail = async (
       builds || !steps.ok
         ? steps
         : { ok: true, outline: { steps: withoutCode(steps.outline.steps) } },
+    triggers,
     params: builds
       ? await listParams(env, by, current.app.id, current.workflow)
       : null,

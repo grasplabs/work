@@ -1,5 +1,6 @@
-import { workflowIdOf } from "@grasp-os/compiler";
+import { isAppLayout, workflowIdOf } from "@grasp-os/compiler";
 import { appLimits } from "@grasp-os/shared/app-limits";
+import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
   appErrors,
   appVersionSchema,
@@ -26,10 +27,11 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { screenPath } from "@grasp-os/shared/screens";
+import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
-import { and, asc, desc, eq, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -45,13 +47,22 @@ import {
   storedEvent,
 } from "./audit-outbox.ts";
 import type { Acting, Member } from "./auth/identity.ts";
-import { apps, appVersions } from "./db/core/schema.ts";
-import { isUniqueViolation } from "./db/d1.ts";
+import {
+  appVersions,
+  apps,
+  auditOutbox,
+  businessStores,
+  sdkReleaseManifests,
+  sdkResourceBindings,
+} from "./db/core/schema.ts";
+import { isTransientD1Error, isUniqueViolation } from "./db/d1.ts";
 import { appMemoryPath, requireWithinLimit } from "./knowledge/memory-files.ts";
 import { requireOwnTypes } from "./knowledge/record-types.ts";
 import { madeCurrent } from "./permissions.ts";
 import { buildOnSave } from "./save-builds.ts";
 import { recordVersionBuilds } from "./screen-builds.ts";
+import { requireStoreSchemaActive } from "./store-backfill.ts";
+import { liveStoreSql } from "./store-deletion.ts";
 import { requireWorkflowTestsPass, workflowCallsIn } from "./workflows/code.ts";
 import {
   registerTriggers,
@@ -597,9 +608,8 @@ export const appContents = async (
 
 /**
  * What an App's current version exports to other Apps, for anyone with a
- * role in it: read from its row alone, no files. Off with calls between
- * Apps (`app_calls`), as everything about them is, for people and the
- * agent alike.
+ * role in it, people and the agent alike: read from its row alone, no
+ * files.
  */
 export const appExports = async (
   env: Env,
@@ -1014,6 +1024,91 @@ export const proposeVersion = async (
 };
 
 /**
+ * Holds while `version` of `app` has a sealed release that isn't revoked
+ * (app-releases.ts, release-retention.ts), and whose bound store, if any,
+ * is neither deleted nor being deleted (data-stores.ts), as the statement
+ * runs: a deletion marks the store closing first, in a statement of its
+ * own that requires no current version to bind it, so of a deletion and
+ * an activation of a version bound to the store, one wins.
+ */
+const runnableReleaseSql = (app: AppId, version: number) =>
+  sql`EXISTS (SELECT 1 FROM sdk_release_manifests
+    WHERE app_id = ${app} AND version = ${version} AND revoked_at IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
+      WHERE bound.resource_id = ${app} AND bound.resource_version = ${version}
+        AND bound.kind = 'store'
+        AND NOT ${liveStoreSql(sql`bound.target_id`, Date.now())})`;
+
+/**
+ * Refuses `version` of `app` unless it has a sealed release that isn't
+ * revoked, on a store that isn't deleted: `version.not_sealed`,
+ * `version.revoked` or `data.store_unavailable`.
+ */
+const requireRunnableRelease = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({ revokedAt: sdkReleaseManifests.revokedAt })
+    .from(sdkReleaseManifests)
+    .where(
+      and(
+        eq(sdkReleaseManifests.appId, app),
+        eq(sdkReleaseManifests.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw versionErrors.create("version.not_sealed");
+  }
+  if (row.revokedAt !== null) {
+    throw versionErrors.create("version.revoked");
+  }
+  const goneStore = await drizzle(env.DB)
+    .select({ store: sdkResourceBindings.targetId })
+    .from(sdkResourceBindings)
+    .where(
+      and(
+        eq(sdkResourceBindings.resourceId, app),
+        eq(sdkResourceBindings.resourceVersion, version),
+        eq(sdkResourceBindings.kind, "store"),
+        sql`NOT ${liveStoreSql(sql`${sdkResourceBindings.targetId}`, Date.now())}`
+      )
+    )
+    .get();
+  if (goneStore !== undefined) {
+    throw dataErrors.create("data.store_unavailable");
+  }
+};
+
+/** Most tries of the batch that makes a version current. */
+const currentBatchTries = 3;
+
+/**
+ * `batch`, tried again when D1 fails for a moment (`isTransientD1Error`),
+ * up to `currentBatchTries`; any other failure is thrown at once. Making a
+ * version current compares and sets, so a try that committed though its
+ * answer was lost only makes the next change nothing: the caller tells
+ * that from losing to someone else by its own event (`setCurrentVersion`).
+ */
+const retriedBatch = async <Result>(
+  batch: () => Promise<Result>
+): Promise<Result> => {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      // One try after the other.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      return await batch();
+    } catch (error) {
+      if (attempt >= currentBatchTries || !isTransientD1Error(error)) {
+        throw error;
+      }
+    }
+  }
+};
+
+/**
  * Makes a version the one that runs: the pending one after review, or any
  * other, such as an earlier one to roll back. The pending version is
  * cleared once it is current. Made current by someone who couldn't grant
@@ -1036,7 +1131,32 @@ export const setCurrentVersion = async (
     return found;
   }
   const files = await versionFiles(env, appId, number);
-  await requireWorkflowTestsPass(env, number, files);
+  // A version of spec 8's layout runs only from its release: activation
+  // seals it first (app-activation.ts), and nothing makes one current
+  // unsealed or revoked: checked here for a clear refusal, and again as
+  // the version is made current, so neither a revocation nor the
+  // retention sweep's deletion lands in between.
+  const sealedLayout = isAppLayout(files);
+  if (sealedLayout) {
+    await requireRunnableRelease(env, appId, number);
+    // Its migrations passed on their fixtures as it was sealed, even where
+    // the store had nothing to transform; asked before its store, whose
+    // backfill such a migration fails, so the refusal names the fixture.
+    // Imported here for the same reason as the tests' runner below.
+    const { requireMigrationEvidence } =
+      await import("./migration-evidence.ts");
+    await requireMigrationEvidence(env, appId, number);
+    // Its store's contract holds its schema, or it waits; a ready explicit
+    // migration passes here and takes over below, once every gate passed.
+    await requireStoreSchemaActive(env, appId, number);
+    // Its App tests, on fixture stores of their own (app-tests.ts),
+    // whoever makes it current. Imported here, not at the top: the
+    // runner reaches releases and the operation host, which reach back
+    // into this module for App lookups.
+    const { requireAppTestsPass } = await import("./app-tests.ts");
+    await requireAppTestsPass(env, appId, number, files);
+  }
+  await requireWorkflowTestsPass(env, appId, number, files);
   const triggers = await triggerRegistration(env, appId, number, files);
   const previous = found.currentVersion;
   const event = createAuditEvent(
@@ -1048,38 +1168,114 @@ export const setCurrentVersion = async (
     "core"
   );
   const db = drizzle(env.DB);
+  if (sealedLayout) {
+    // Last before the batch: a ready explicit migration's store switches
+    // to its contract now (store-backfill.ts), after every gate above, so
+    // no refused gate leaves the version still current locked out of its
+    // store. The store and D1 share no transaction: the batch is retried
+    // here if it fails, and a version found current after all is answered
+    // as such. Only a batch that keeps failing leaves the store switched
+    // ahead of D1, until making it current is asked again.
+    await requireStoreSchemaActive(env, appId, number, { activate: true });
+  }
   // Only over the current version read above, so the event's `previous`
   // is the version this replaced, and only while what its triggers were
   // worked out from still holds (trigger-registry.ts). The event is stored
   // only if this batch made it current, and what follows it only then.
-  const [[changed]] = await auditedBatch(env, db, [
-    db
-      .update(apps)
-      .set({
-        currentVersion: number,
-        pendingVersion: sql`CASE WHEN ${apps.pendingVersion} = ${number} THEN NULL ELSE ${apps.pendingVersion} END`,
-      })
-      .where(
-        and(
-          eq(apps.id, appId),
-          sql`${apps.currentVersion} IS ${previous}`,
-          registrationHolds(appId, triggers)
-        )
-      )
-      .returning(),
-    outboxedEventWhere(db, event, sql`changes() > 0`),
-    ...madeCurrent(env, by, {
-      app: appId,
-      version: number,
-      previous,
-      changed: storedEvent(event.id),
-      // A copy's first version, approved as it was created from the
-      // blueprint (app-blueprints.ts), made current for the first time.
-      keep: previous === null && approved === 1,
-    }),
-    ...registerTriggers(db, appId, number, triggers, storedEvent(event.id)),
-  ]);
+  const [[changed]] = await retriedBatch(
+    async () =>
+      await auditedBatch(env, db, [
+        db
+          .update(apps)
+          .set({
+            currentVersion: number,
+            pendingVersion: sql`CASE WHEN ${apps.pendingVersion} = ${number} THEN NULL ELSE ${apps.pendingVersion} END`,
+          })
+          .where(
+            and(
+              eq(apps.id, appId),
+              sql`${apps.currentVersion} IS ${previous}`,
+              registrationHolds(appId, triggers),
+              sealedLayout ? runnableReleaseSql(appId, number) : undefined
+            )
+          )
+          .returning(),
+        outboxedEventWhere(db, event, sql`changes() > 0`),
+        ...madeCurrent(env, by, {
+          app: appId,
+          version: number,
+          previous,
+          changed: storedEvent(event.id),
+          // A copy's first version, approved as it was created from the
+          // blueprint (app-blueprints.ts), made current for the first time.
+          keep: previous === null && approved === 1,
+        }),
+        ...registerTriggers(db, appId, number, triggers, storedEvent(event.id)),
+        // The store the arriving version's release binds now serves its
+        // definition, and one the leaving version's bound and the arriving
+        // one's doesn't serves none (each subquery finds no binding): core's
+        // inventory follows (data-stores.ts).
+        db
+          .update(businessStores)
+          .set({
+            activeSchemaVersion: sql`(SELECT bound.target_version FROM sdk_resource_bindings AS bound
+          WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
+            AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
+            activeSchemaHash: sql`(SELECT bound.schema_hash FROM sdk_resource_bindings AS bound
+          WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
+            AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
+            activeOperationManifestHash: sql`(SELECT definition.operation_manifest_hash
+          FROM sdk_resource_bindings AS bound
+          JOIN business_store_versions AS definition
+            ON definition.store_id = bound.target_id AND definition.version = bound.target_version
+          WHERE bound.resource_id = ${appId} AND bound.resource_version = ${number}
+            AND bound.kind = 'store' AND bound.target_id = ${businessStores.id})`,
+          })
+          .where(
+            and(
+              sql`${businessStores.id} IN (SELECT target_id FROM sdk_resource_bindings
+            WHERE resource_id = ${appId} AND resource_version IN (${number}, ${previous ?? number})
+              AND kind = 'store')`,
+              storedEvent(event.id)
+            )
+          ),
+        // The sealed releases of the version leaving and the one arriving
+        // were current until now: their retention counts from here
+        // (release-retention.ts), not from the sweep's last look.
+        db
+          .update(sdkReleaseManifests)
+          .set({ lastCurrentAt: new Date() })
+          .where(
+            and(
+              eq(sdkReleaseManifests.appId, appId),
+              inArray(sdkReleaseManifests.version, [
+                number,
+                previous ?? number,
+              ]),
+              storedEvent(event.id)
+            )
+          ),
+      ])
+  );
   if (!changed) {
+    // Only this call's batch stores its event, and only if it made the
+    // version current: found stored, an earlier try committed and its
+    // answer was lost. The version current by someone else's hand (or
+    // over changed triggers) is a conflict, even if it is this version.
+    // Once the outbox has drained the event, a lost answer is answered as
+    // a conflict too, and asking again finds the version current.
+    const ours = await db
+      .select({ id: auditOutbox.id })
+      .from(auditOutbox)
+      .where(eq(auditOutbox.id, event.id))
+      .get();
+    if (ours !== undefined) {
+      return await appFor(env, by, appId, "builder");
+    }
+    if (sealedLayout) {
+      // Revoked or deleted since it was checked: refused as such.
+      await requireRunnableRelease(env, appId, number);
+    }
     throw appErrors.create("app.conflict");
   }
   // What its screens build to with this release's kit, which may not be

@@ -141,6 +141,24 @@ describe("event triggers", () => {
     ).toStrictEqual([["system", "event", true]]);
   });
 
+  it("show with their workflow, by the event they start on and their place among its triggers", async () => {
+    const builder = await personApi("builder");
+    // Alike but for their filters: their places tell them apart.
+    const app = await inboxApp(builder, {
+      triggers: `[
+        { type: "event", event: "m365.mail.received", filter: { folder: "inbox" } },
+        { type: "event", event: "m365.mail.received", filter: { folder: "archive" } },
+      ]`,
+    });
+
+    const { triggers } = await builder.api.workflows.get(app, "inbox");
+
+    expect(triggers).toStrictEqual([
+      { type: "event", position: 0, event: "m365.mail.received" },
+      { type: "event", position: 1, event: "m365.mail.received" },
+    ]);
+  });
+
   it("start a workflow once for an event two of its triggers match, and count it once", async () => {
     const builder = await personApi("builder");
     const app = await inboxApp(builder, {

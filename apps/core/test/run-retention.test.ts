@@ -1,7 +1,8 @@
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
@@ -23,7 +24,16 @@ import {
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { racingDb } from "./racing-db.ts";
-import { endLiveRuns, finished, sleeping, stopped, woken } from "./runs.ts";
+import {
+  aroundEngine,
+  endLiveRuns,
+  finished,
+  runObject,
+  runObjectId,
+  sleeping,
+  stopped,
+  woken,
+} from "./runs.ts";
 import { openRpc, signedInApi } from "./sign-in.ts";
 import { appWith, runEvents, workflowFiles } from "./workflow-apps.ts";
 
@@ -35,10 +45,10 @@ import { appWith, runEvents, workflowFiles } from "./workflow-apps.ts";
 // left half swept; a swept run run again; and a reader handed a swept run
 // as if nothing were missing.
 //
-// Runs are real, on the Workflows engine (Miniflare's), which takes the
-// retention core gives each run but doesn't act on it: that Cloudflare's
-// removes an ended run's record then is checked on a real account. Here
-// the tests check that core asks for it, and everything core does. Time is the
+// Runs are real, on the engine (Workerflow), which takes the retention
+// core gives each run and purges an ended run's record once it is over
+// (its own tests show the purge). Here the tests check that core asks for
+// it, and everything core does. Time is the
 // cron's own: each sweep is run for a time that many days on, as
 // Cloudflare would run it then, so no test waits or sets a clock.
 
@@ -77,6 +87,19 @@ const keeps = workflowFiles(
  * A workflow that fails, quoting what it read in its error, in a step
  * keyed by what it read.
  */
+/**
+ * A workflow whose one keyed step's last attempt hangs until it times
+ * out: its receipt is never settled by the attempt itself.
+ */
+const hangs = workflowFiles(
+  "hangs",
+  `  await step.do("wait", { key: "TRANSCRIPT", description: "Hang", timeout: "1 second", retries: { limit: 0 } }, async () => {
+    await new Promise(() => {});
+  });
+  return null;`,
+  { wait: null }
+);
+
 const fails = workflowFiles(
   "fails",
   `  const { notes = "none" } = (input ?? {}) as { notes?: string };
@@ -143,6 +166,20 @@ const rowOf = async (run: string) =>
   await env.DB.prepare("SELECT * FROM workflow_runs WHERE id = ?")
     .bind(run)
     .first<Record<string, string | number | null>>();
+
+/** How many receipts of its steps' attempts its lineage keeps of `run`. */
+const receiptsOf = async (run: string): Promise<number> =>
+  (await env.DB.prepare(
+    "SELECT count(*) AS n FROM run_lineage_attempts WHERE run_id = ?"
+  )
+    .bind(run)
+    .first<number>("n")) ?? 0;
+
+/** Whether the sweep marked `run` as having had its details removed. */
+const markedOf = async (run: string): Promise<boolean> => {
+  const row = await rowOf(run);
+  return row !== null && row.details_removed_at !== null;
+};
 
 /** Whether the engine still has anything of the run. */
 const inEngine = async (run: string): Promise<boolean> =>
@@ -224,6 +261,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       done: await builder.api.workflows.status(done.id),
       failed: await builder.api.workflows.status(failed.id),
     };
+    const receiptsWithin = await receiptsOf(done.id);
     const at = daysOn(31);
     await runQuarterHourCron({}, at);
     const after = {
@@ -231,6 +269,10 @@ describe("run retention", { timeout: 60_000 }, () => {
       failed: await builder.api.workflows.status(failed.id),
     };
     const rows = [await rowOf(done.id), await rowOf(failed.id)];
+    const receipts = {
+      within: receiptsWithin > 0,
+      after: (await receiptsOf(done.id)) + (await receiptsOf(failed.id)),
+    };
     const listed = await builder.api.workflows.list(app);
     const { runs: page } = await builder.api.workflows.runs({ app });
 
@@ -245,6 +287,8 @@ describe("run retention", { timeout: 60_000 }, () => {
       after,
       markedAt: rows.map((row) => row?.details_removed_at),
       inRows: JSON.stringify(rows).includes("TRANSCRIPT"),
+      // Its attempts' settled receipts go with its details.
+      receipts,
       listed: listed.map(({ id, status, detailsRemoved }) => ({
         id,
         status,
@@ -297,6 +341,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       },
       markedAt: [at.getTime(), at.getTime()],
       inRows: false,
+      receipts: { within: true, after: 0 },
       listed: [
         { id: failed.id, status: "failed", detailsRemoved: true },
         { id: done.id, status: "completed", detailsRemoved: true },
@@ -324,6 +369,88 @@ describe("run retention", { timeout: 60_000 }, () => {
         "workflow.step.completed done",
         "workflow.step.completed read",
       ],
+    });
+  });
+
+  it("settles and removes the receipt of a last attempt that never returned, charging its lineage, once the run's retention is over", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, hangs);
+    const run = await builder.api.workflows.start(app, "hangs");
+    await finished(run.id);
+    const lineage = async () =>
+      await env.DB.prepare(
+        "SELECT active_used_ms AS used, active_held_ms AS held FROM run_lineages WHERE root_run_id = ?"
+      )
+        .bind(run.id)
+        .first<{ used: number; held: number }>();
+    const before = {
+      receipts: await receiptsOf(run.id),
+      lineage: await lineage(),
+    };
+
+    await runQuarterHourCron({}, daysOn(31));
+    const after = {
+      receipts: await receiptsOf(run.id),
+      lineage: await lineage(),
+    };
+
+    expect({
+      before: {
+        receipts: before.receipts,
+        held: (before.lineage?.held ?? 0) > 0,
+      },
+      after: {
+        receipts: after.receipts,
+        held: after.lineage?.held,
+        // Charged up to its deadline: its second of time.
+        used: (after.lineage?.used ?? 0) >= 900,
+      },
+    }).toStrictEqual({
+      before: { receipts: 2, held: true },
+      after: { receipts: 0, held: 0, used: true },
+    });
+  });
+
+  it("removes a run's attempt receipts before it marks the run, so a sweep stopped in between leaves the run due, and the next finishes it", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, hangs);
+    const run = await builder.api.workflows.start(app, "hangs");
+    await finished(run.id);
+    // The database fails at the sweep's second batch, once: the one after
+    // its receipts' (no other run is due).
+    let batches = 0;
+    const db = racingDb(() => {
+      batches += 1;
+      if (batches === 2) {
+        throw new Error("D1_ERROR: broken for the test");
+      }
+    });
+    const halted = await sweepRunDetails({ ...env, DB: db }, daysOn(31)).catch(
+      (error: unknown) => error
+    );
+    const between = {
+      receipts: await receiptsOf(run.id),
+      marked: await markedOf(run.id),
+    };
+    await sweepRunDetails({ ...env, DB: db }, daysOn(31));
+    const lineage = await env.DB.prepare(
+      "SELECT active_held_ms AS held FROM run_lineages WHERE root_run_id = ?"
+    )
+      .bind(run.id)
+      .first<{ held: number }>();
+
+    expect({
+      halted: halted instanceof Error && halted.message,
+      between,
+      after: {
+        receipts: await receiptsOf(run.id),
+        marked: await markedOf(run.id),
+        held: lineage?.held,
+      },
+    }).toStrictEqual({
+      halted: "D1_ERROR: broken for the test",
+      between: { receipts: 0, marked: false },
+      after: { receipts: 0, marked: true, held: 0 },
     });
   });
 
@@ -392,37 +519,31 @@ describe("run retention", { timeout: 60_000 }, () => {
       actor: { type: "system" },
     } as const;
 
-    const create = vi.spyOn(env.WORKFLOWS, "create");
-    let asked: unknown[];
-    try {
-      const byDefault = await startRun(env, start);
-      const shorter = await startRun(
-        { ...env, RUN_RETENTION_DAYS: "7" },
-        start
-      );
-      // A config core can't read: the engine keeps it as long as it may.
-      const unset = await startRun(
-        { ...env, RUN_RETENTION_DAYS: "soon" },
-        start
-      );
-      asked = [byDefault, shorter, unset].map(
-        ({ id }) =>
-          create.mock.calls.find(([options]) => options?.id === id)?.[0]
-            ?.retention
-      );
-      await Promise.all(
-        [byDefault, shorter, unset].map(async ({ id }) => {
-          await finished(id);
-        })
-      );
-    } finally {
-      create.mockRestore();
-    }
-
+    const byDefault = await startRun(env, start);
+    const shorter = await startRun({ ...env, RUN_RETENTION_DAYS: "7" }, start);
+    // A config core can't read: the engine keeps it as long as it may.
+    const unset = await startRun({ ...env, RUN_RETENTION_DAYS: "soon" }, start);
+    const asked = await Promise.all(
+      [byDefault, shorter, unset].map(
+        async ({ id }) =>
+          await runInDurableObject(runObject(id), (_object, state) =>
+            state.storage.sql
+              .exec<{ success: number; error: number }>(
+                "SELECT success_retention_ms AS success, error_retention_ms AS error FROM run"
+              )
+              .one()
+          )
+      )
+    );
+    await Promise.all(
+      [byDefault, shorter, unset].map(async ({ id }) => {
+        await finished(id);
+      })
+    );
     expect(asked).toStrictEqual([
-      { successRetention: "30 days", errorRetention: "30 days" },
-      { successRetention: "7 days", errorRetention: "7 days" },
-      undefined,
+      { success: 30 * day, error: 30 * day },
+      { success: 7 * day, error: 7 * day },
+      { success: 30 * day, error: 30 * day },
     ]);
   });
 
@@ -521,7 +642,7 @@ describe("run retention", { timeout: 60_000 }, () => {
       worked: await hitsOf(app, builder, "work"),
     }).toStrictEqual({
       waiting: null,
-      whileStopped: { removed: null, status: "running", engine: true },
+      whileStopped: { removed: null, status: "paused", engine: true },
       ended: {
         status: "completed",
         output: { read: transcript },
@@ -648,18 +769,17 @@ describe("run retention", { timeout: 60_000 }, () => {
     await finished(run.id);
     await runQuarterHourCron({}, daysOn(31));
     // The engine's record went as its retention ended.
-    const record = await env.WORKFLOWS.get(run.id);
-    await record.delete();
+    await runObject(run.id).deleteRun();
 
     // Its trigger delivered again: this run, no new one.
     const again = await startRun(env, delivery);
-    // And an instance under its ID, as nothing in core creates one.
+    // And its start sent to the engine again, as nothing in core sends it:
+    // the engine finds it deleted, and creates nothing.
     await runEngine(env).create({
       id: run.id,
       pinned: { app: run.app, workflow: run.workflow, version: run.version },
       input: { notes: transcript },
     });
-    await finished(run.id);
     const events = await allEvents();
     const { results: rows } = await env.DB.prepare(
       "SELECT id FROM workflow_runs WHERE app_id = ?"
@@ -681,7 +801,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     }).toMatchObject({
       again: { id: run.id, status: "completed" },
       rows: 1,
-      instance: { status: "errored" },
+      instance: undefined,
       // Still the run that completed, its details gone: not failed anew.
       status: { status: "completed", detailsRemoved: true },
       cancelled: { status: "completed" },
@@ -745,25 +865,21 @@ describe("run retention", { timeout: 60_000 }, () => {
       .run();
 
     // The engine fails for that run, and only for it.
-    const get = env.WORKFLOWS.get.bind(env.WORKFLOWS);
-    const failing = vi
-      .spyOn(env.WORKFLOWS, "get")
-      .mockImplementation(async (id) => {
-        if (id === run.id) {
+    const between = await aroundEngine(
+      async (_method, call, object) => {
+        if (object.equals(runObjectId(run.id))) {
           throw new Error("The engine is unavailable");
         }
-        return await get(id);
-      });
-    let between: unknown;
-    try {
-      await runQuarterHourCron({}, daysOn(31));
-      between = {
-        cancelled: await sweptOf([run.id]),
-        other: await sweptOf([done.id]),
-      };
-    } finally {
-      failing.mockRestore();
-    }
+        return await call();
+      },
+      async () => {
+        await runQuarterHourCron({}, daysOn(31));
+        return {
+          cancelled: await sweptOf([run.id]),
+          other: await sweptOf([done.id]),
+        };
+      }
+    );
     const stillThere = await inEngine(run.id);
     await runQuarterHourCron({}, daysOn(31));
 

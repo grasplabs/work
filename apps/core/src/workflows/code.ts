@@ -2,7 +2,7 @@ import {
   appModuleName,
   compilerVersion,
   kitModuleName,
-  sdkModules,
+  workflowSdkModules,
   workflowIdOf,
   workflowPaths,
 } from "@grasp-os/compiler";
@@ -22,11 +22,21 @@ import type {
   TriggerDeclaration,
   WorkflowCalls,
 } from "@grasp-os/shared/workflows";
+import { NonRetryableError } from "@grasp-os/workerflow/errors";
 import type { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
+import {
+  capability,
+  passedCapability,
+  runInSession,
+  sandboxVerdictOf,
+} from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
+import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
+import { attemptCallLabels } from "./attempt-host.ts";
+import type { AttemptHost } from "./attempt-host.ts";
 import { collectionMethods, fromIsolate } from "./host.ts";
 
 // An App's workflows are its code, written by the agent: they run as its
@@ -41,8 +51,10 @@ import { collectionMethods, fromIsolate } from "./host.ts";
 // come from the release that runs it, and so does the engine contract
 // between them (step names, `$params`): that contract must stay
 // the same across releases, or runs started before a release replay
-// differently after it. `env.APP` calls the App's current server version,
-// as every caller of the App does.
+// differently after it. `env.APP.call` calls the App's current server
+// version, as every caller of the App does; `env.APP.callFunction` calls a
+// public function of the sealed release of the version the run is pinned
+// to (host.ts).
 //
 // A version's workflows ship with their tests, which run in an isolate of
 // their own before the version can be made current. That is a quality
@@ -100,10 +112,6 @@ const testReportSchema = z.object({
     .max(500),
 });
 
-interface TestsEntrypoint extends Rpc.WorkerEntrypointBranded {
-  run: () => Promise<Settled<unknown>>;
-}
-
 /**
  * A workflow's parameters as its code declares them (the SDK's
  * `ParamMetadata`), within the bounds the SDK checks too. The isolate
@@ -136,10 +144,6 @@ const declaredMetadataSchema = z.object({
   triggers: z.unknown().optional(),
 });
 
-interface MetadataEntrypoint extends Rpc.WorkerEntrypointBranded {
-  read: () => Promise<Settled<unknown>>;
-}
-
 /**
  * How workflow code runs: as App server code does, with more CPU. One load
  * runs the workflow from its start (finished steps replayed) to its next
@@ -152,6 +156,106 @@ const workflowSandbox = {
   compatibilityFlags: [...sandbox.compatibilityFlags, "nodejs_als"],
   limits: { cpuMs: 30_000 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
+
+/**
+ * How long a workflow isolate's call of its metadata, tests or dry runs
+ * may take on-prem, waits included: its CPU time is bounded apart.
+ */
+const codeCallMs = 5 * 60_000;
+
+/**
+ * The sandbox's verdicts that are the code's own doing: anything else it
+ * says (its owner at its share, its call over) is the platform's, to try
+ * again (`isolateCall`).
+ */
+const codesVerdicts: ReadonlySet<string> = new Set([
+  "deadline",
+  "cpu",
+  "memory",
+  "crashed",
+  "refused",
+]);
+
+/**
+ * Calls `method` of `entrypoint` with JSON `args`, in a workflow isolate of
+ * `mainModule` and `modules`: on-prem in a sandbox session of its own, as
+ * `owner`, its CPU time and memory bounded by the supervisor, which plain
+ * workerd's Loader doesn't bound (sandbox-session.ts); elsewhere in core's
+ * Loader, kept under `key` (`null`: never kept). Throws what the isolate's
+ * entrypoint threw, or why the sandbox ended the call (`sandboxVerdictOf`).
+ */
+export const isolateCall = async (
+  env: Pick<
+    Env,
+    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+  >,
+  {
+    key,
+    owner,
+    mainModule,
+    modules,
+    entrypoint,
+    method,
+    args,
+    signal,
+  }: {
+    key: string | null;
+    owner: string;
+    mainModule: string;
+    modules: () => Promise<Record<string, string>>;
+    entrypoint: string;
+    method: string;
+    args: unknown[];
+    /** Gives up on it, freeing its process at once. */
+    signal?: AbortSignal;
+  }
+): Promise<unknown> => {
+  const host = sessionHost(env);
+  if (host !== undefined) {
+    try {
+      return await runInSession(
+        host,
+        {
+          mainModule,
+          modules: await modules(),
+          entrypoint,
+          method,
+          args: args.map((value) => ({ value })),
+          owner,
+          cpuMs: workflowSandbox.limits.cpuMs,
+          wallMs: codeCallMs,
+        },
+        signal === undefined ? {} : { signal }
+      );
+    } catch (error) {
+      // Its owner at its share of the sandbox, or anything else that isn't
+      // the code's doing: the platform's, to try again, never the code's.
+      const verdict = sandboxVerdictOf(error);
+      if (verdict !== undefined && !codesVerdicts.has(verdict)) {
+        throw new SandboxUnavailableError(
+          error instanceof Error ? error.message : "The sandbox is busy.",
+          { cause: error }
+        );
+      }
+      throw error;
+    }
+  }
+  const stub: unknown = env.LOADER.get(key, async () => ({
+    ...workflowSandbox,
+    mainModule,
+    modules: await modules(),
+    env: {},
+  })).getEntrypoint(entrypoint);
+  const fn: unknown =
+    typeof stub === "object" || typeof stub === "function"
+      ? Reflect.get(stub ?? {}, method)
+      : undefined;
+  if (typeof fn !== "function") {
+    throw new TypeError(`The workflow's isolate has no ${method}.`);
+  }
+  const answer: unknown = await Reflect.apply(fn, stub, args);
+  return answer;
+};
 
 const runModule = "grasp-run.js";
 const testsModule = "grasp-tests.js";
@@ -177,10 +281,6 @@ const dryRunsSchema = z
 
 /** Each test's dry run of a workflow. */
 export type DryRuns = z.infer<typeof dryRunsSchema>;
-
-interface DryRunsEntrypoint extends Rpc.WorkerEntrypointBranded {
-  run: (params: Record<string, string | number>) => Promise<Settled<unknown>>;
-}
 
 /**
  * The shared part of both main modules: settling a call into plain data
@@ -215,12 +315,16 @@ const settled = async (run) => {
  * audited on core's side of the RPC, whatever code makes it.
  *
  * It also keeps which attempt of a step the code running belongs to
- * (`inAttempt`), as the host names it: every binding call says which
- * attempt it comes from, so the host can tell a call of an attempt the
- * engine gave up on, or of another step's. Its storage's methods are kept
- * here too, bound as the runtime made them.
+ * (`inAttempt`): the host core minted for that attempt (host.ts,
+ * `AttemptHost`), which every binding call goes through, so each call acts
+ * as the attempt whose code makes it, and only while it may. Code outside
+ * any step has none, and its binding calls fail. Its storage's methods are
+ * kept here too, bound as the runtime made them.
  */
 const runBindingsModule = "grasp-run-bindings.js";
+
+/** What a binding called outside any step fails with, in the isolate. */
+const outsideStep = workflowErrors.create("workflow.outside_step");
 const runBindings = `import { AsyncLocalStorage } from "node:async_hooks";
 
 const ProxyOf = Proxy;
@@ -230,6 +334,17 @@ const attempts = new AsyncLocalStorage();
 const attemptOf = attempts.getStore.bind(attempts);
 
 export const inAttempt = attempts.run.bind(attempts);
+
+/** The host of the attempt whose code runs now; none outside a step. */
+export const currentAttempt = () => {
+  const attempt = attemptOf();
+  if (attempt === undefined) {
+    const error = new ErrorOf(${JSON.stringify(outsideStep.message)});
+    error.code = "workflow.outside_step";
+    throw error;
+  }
+  return attempt;
+};
 
 export const unwrapped = (result) => {
   if (result.ok) {
@@ -258,11 +373,13 @@ const guarded = (env) =>
 
 const collectionMethods = ${JSON.stringify(collectionMethods)};
 
-export const bindings = (host, { connections, apps, collections }) => {
+export const bindings = ({ connections, apps, collections }) => {
   const all = {
     __proto__: null,
     APP: {
-      call: async (method, ...args) => unwrapped(await host.callApp(method, args, attemptOf())),
+      call: async (method, ...args) => unwrapped(await currentAttempt().callApp(method, args)),
+      callFunction: async (reference, input) =>
+        unwrapped(await currentAttempt().callFunction(reference, input)),
     },
   };
   for (let index = 0; index < collections.length; index += 1) {
@@ -271,7 +388,7 @@ export const bindings = (host, { connections, apps, collections }) => {
     for (let at = 0; at < collectionMethods.length; at += 1) {
       const method = collectionMethods[at];
       methods[method] = async (...args) =>
-        unwrapped(await host.callCollection(name, method, args, attemptOf()));
+        unwrapped(await currentAttempt().callCollection(name, method, args));
     }
     all[name] = methods;
   }
@@ -279,13 +396,13 @@ export const bindings = (host, { connections, apps, collections }) => {
     const name = connections[index];
     all[name] = {
       call: async (action, input, options) =>
-        unwrapped(await host.callConnection(name, [action, input, options], attemptOf())),
+        unwrapped(await currentAttempt().callConnection(name, [action, input, options])),
     };
   }
   for (let index = 0; index < apps.length; index += 1) {
     const name = apps[index];
     all[name] = {
-      call: async (method, input) => unwrapped(await host.callExport(name, method, input, attemptOf())),
+      call: async (method, input) => unwrapped(await currentAttempt().callExport(name, method, input)),
     };
   }
   return guarded(all);
@@ -296,9 +413,9 @@ export const bindings = (host, { connections, apps, collections }) => {
  * The main module of a run of workflow `id`: the engine the SDK runs on,
  * each of its calls sent to core's host (host.ts), and each error in plain
  * data both ways. Every binding (its App, its collections, connections
- * and other Apps' exports) goes through the host too, which knows the
- * step running; each call says which attempt of the step its code runs
- * in. A binding the run doesn't have (a permission revoked since, or
+ * and other Apps' exports), and what the SDK does inside a step (a model
+ * call, a decision), goes through the host of the attempt whose code makes
+ * it, which core hands each attempt's function. A binding the run doesn't have (a permission revoked since, or
  * never granted) fails with a permission error, not `undefined`. It
  * imports what builds the bindings (`runBindings`), then the SDK's
  * `workflow`, before the workflow's module: the bindings are built from
@@ -308,7 +425,7 @@ export const bindings = (host, { connections, apps, collections }) => {
 const runMain = (
   id: WorkflowId
 ): string => `import { WorkerEntrypoint } from "cloudflare:workers";
-import { bindings, inAttempt, unwrapped } from ${JSON.stringify(runBindingsModule)};
+import { bindings, currentAttempt, inAttempt, unwrapped } from ${JSON.stringify(runBindingsModule)};
 import ${JSON.stringify(kitModuleName("@grasp-os/sdk/workflow"))};
 import definition from ${JSON.stringify(appModuleName(workflowPaths(id).workflow))};
 ${settling}
@@ -322,14 +439,14 @@ export class Run extends WorkerEntrypoint {
       const engine = {
         runId,
         params,
-        env: bindings(host, { connections, apps, collections }),
+        env: bindings({ connections, apps, collections }),
         do: async (name, options, fn) => unwrapped(await host.do(name, options, async (attempt) => await inAttempt(attempt, async () => await settled(fn)))),
         sleep: async (name, milliseconds) => unwrapped(await host.sleep(name, milliseconds)),
-        callModel: async (request) => unwrapped(await host.callModel(request)),
-        openDecision: async (request) => unwrapped(await host.openDecision(request)),
-        decisionRecipients: async (decision, reminder) => unwrapped(await host.decisionRecipients(decision, reminder)),
+        callModel: async (request) => unwrapped(await currentAttempt().callModel(request)),
+        openDecision: async (request) => unwrapped(await currentAttempt().openDecision(request)),
+        decisionRecipients: async (decision, reminder) => unwrapped(await currentAttempt().decisionRecipients(decision, reminder)),
         waitForDecision: async (name, options) => unwrapped(await host.waitForDecision(name, options)),
-        readAttachment: async (stored, index) => unwrapped(await host.readAttachment(stored, index)),
+        readAttachment: async (stored, index) => unwrapped(await currentAttempt().readAttachment(stored, index)),
       };
       return await definition.run(engine, input);
     });
@@ -463,12 +580,14 @@ const modulesOf = async (
       })),
     });
   }
-  const sdk = await sdkModules(env.ASSETS);
+  const sdk = await workflowSdkModules(env.ASSETS);
   return { ...sdk.modules, ...build.modules };
 };
 
 /** What a run's isolate is loaded for: its code. */
 export interface RunCode {
+  /** Whose run it is: the App, which the sandbox caps per owner. */
+  app: AppId;
   /** The version the run is pinned to. */
   version: number;
   workflow: WorkflowId;
@@ -477,23 +596,367 @@ export interface RunCode {
 }
 
 /**
- * The run's main module, in an isolate of its own running the run's
- * pinned version. Each load is a new isolate, which the loader keeps for
- * no other (it has no name): its env is empty, as every binding it has
- * goes through the host, and no two runs, or loads of one run, share
- * memory. Loads are few: a run's start, and each resume after a wait.
+ * The host's calls a run's code makes (`RunHost`'s, host.ts): its main
+ * module calls only these (`runMain`), and on-prem the isolate gets no
+ * other.
  */
-export const loadRun = (env: Env, { version, workflow, files }: RunCode) =>
-  env.LOADER.get(null, async () => ({
-    ...workflowSandbox,
-    mainModule: runModule,
-    modules: {
-      ...(await modulesOf(env, version, files)),
-      [runBindingsModule]: runBindings,
-      [runModule]: runMain(workflow),
+export interface RunHostCalls {
+  do: (
+    name: unknown,
+    options: unknown,
+    fn: (attempt: AttemptHost) => Promise<unknown>
+  ) => Promise<Settled<unknown>>;
+  sleep: (name: unknown, duration: unknown) => Promise<Settled<null>>;
+  waitForDecision: (
+    name: unknown,
+    options: unknown
+  ) => Promise<Settled<unknown>>;
+}
+
+/** A run's code, loaded: `run` runs it once, from its start or a resume. */
+export interface RunLoad {
+  run: (host: RunHostCalls & RpcTarget, start: RunStart) => Promise<unknown>;
+}
+
+/**
+ * The longest one load of a run may take on-prem, in wall-clock time: from
+ * its start or a resume to its next wait, the supervisor's longest session.
+ * A load past it is stopped, as the App's: its steps wait on model and
+ * connector calls, which cost it no CPU time, and its CPU time is bounded
+ * on its own (`workflowSandbox`).
+ */
+const runLoadMs = 15 * 60_000;
+
+/**
+ * How long a run's load waits, in all, for a place in the sandbox: its
+ * App's runs may hold their share, and other calls the pool, for as long
+ * as their own loads take. Nothing of the run ran yet, so waiting is safe;
+ * past it, the load fails as the platform's.
+ */
+const runLoadWaitMs = 10 * 60_000;
+
+/** The longest one wait between asks for a place. */
+const runLoadRetryMs = 30_000;
+
+/** How often a load waiting for a place looks whether its activation is over. */
+const runLoadCheckMs = 1000;
+
+/**
+ * How long a step whose function failed waits for its session's verdict
+ * (`sessionRunHost`): the session ends at once when its process does.
+ */
+const verdictWaitMs = 5000;
+
+/**
+ * Whose a run's loads are in the sandbox: the App's runs, an owner apart
+ * from the App's interactive calls (its functions, screens, Code Mode,
+ * metadata and tests), so runs, whose loads hold their places for as long
+ * as their steps take, never hold the places those wait for.
+ */
+export const runOwnerOf = (app: AppId): string => `workflow:${app}`;
+
+/**
+ * What never settles: a load let go of once its activation is over, as
+ * the engine leaves a suspended call.
+ */
+const neverSettles = async (): Promise<never> =>
+  // oxlint-disable-next-line promise/avoid-new -- a promise that never settles, which nothing else makes
+  await new Promise<never>(() => {
+    // Never settles.
+  });
+
+/**
+ * Whether `error` refused a load before any of its code ran, for want of a
+ * place: its owner at its share (`busy`), or the pool full (503).
+ */
+const noPlace = (error: unknown): boolean =>
+  sandboxVerdictOf(error) === "busy" ||
+  (error instanceof SandboxUnavailableError && error.status === 503);
+
+/** A run's load let go of: its run cancelled, or its activation superseded. */
+const letGoError = (): Error =>
+  new Error("The run was cancelled or taken over: its load let go.");
+
+/**
+ * Runs `load` on the sandbox, asking again while no place is free
+ * (`noPlace`), backing off up to {@link runLoadRetryMs}, for up to
+ * {@link runLoadWaitMs}. It looks whether the run is still its
+ * activation's (`current`) at once before each ask, with nothing awaited
+ * in between, and every {@link runLoadCheckMs} as it waits: one cancelled
+ * or taken over is refused (`letGoError`), and never takes a place. One
+ * whose activation is over (`over`: a wait suspended it) never settles.
+ */
+const waitingForPlace = async (
+  load: () => Promise<unknown>,
+  { over, current }: { over: AbortSignal | undefined; current: () => boolean }
+): Promise<unknown> => {
+  const stillWanted = async (): Promise<void> => {
+    if (over?.aborted === true) {
+      await neverSettles();
+    }
+    if (!current()) {
+      throw letGoError();
+    }
+  };
+  const until = Date.now() + runLoadWaitMs;
+  for (let wait = 1000; ; wait = Math.min(wait * 2, runLoadRetryMs)) {
+    // oxlint-disable-next-line no-await-in-loop -- one look at a time
+    await stillWanted();
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+      return await load();
+    } catch (error) {
+      if (!noPlace(error) || Date.now() + wait > until) {
+        throw error;
+      }
+    }
+    for (const next = Date.now() + wait; Date.now() < next;) {
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      await stillWanted();
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      await scheduler.wait(Math.min(runLoadCheckMs, next - Date.now()));
+    }
+  }
+};
+
+/**
+ * Aborts `letGo` once the run is no longer its activation's (`current`),
+ * looking every {@link runLoadCheckMs} until `settled` aborts: a load
+ * running for a run cancelled or taken over ends, freeing its place.
+ */
+const watchCurrent = async (
+  current: () => boolean,
+  letGo: AbortController,
+  settled: AbortSignal
+): Promise<void> => {
+  while (!settled.aborted) {
+    if (!current()) {
+      letGo.abort(letGoError());
+      return;
+    }
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one look at a time
+      await scheduler.wait(runLoadCheckMs, { signal: settled });
+    } catch {
+      return;
+    }
+  }
+};
+
+/** The calls of a step's attempt host (`AttemptHost`): the isolate's, on-prem. */
+export const attemptMethods = Object.keys(attemptCallLabels);
+
+/** The run's session, as the capabilities passed during it see it. */
+export interface RunSession {
+  /** Whether its call is open now: not once it answered or was given up on. */
+  live: () => boolean;
+  /** The load's failure once it ended (null for none). */
+  ended: Promise<unknown>;
+}
+
+/**
+ * Fails a step whose function failed rather than answered, as its
+ * session ended: for good when the sandbox stopped the code (its CPU time,
+ * memory or time past, its process gone, what it sent refused), so the
+ * step is never tried again in an isolate that is no more; as it failed,
+ * the platform's to try again, otherwise (a socket dropped, a refusal of
+ * core's own, or no verdict yet).
+ */
+const stepCodeFailure = async (
+  thrown: unknown,
+  session: RunSession
+): Promise<Error> => {
+  const failure = await Promise.race([
+    session.ended,
+    (async (): Promise<undefined> => {
+      await scheduler.wait(verdictWaitMs);
+      return undefined;
+    })(),
+  ]);
+  const verdict = sandboxVerdictOf(failure);
+  if (verdict !== undefined && codesVerdicts.has(verdict)) {
+    return new NonRetryableError(
+      `The sandbox stopped the step's code: ${failure instanceof Error ? failure.message : verdict}`
+    );
+  }
+  return thrown instanceof Error
+    ? thrown
+    : new Error("The step's code failed.");
+};
+
+/**
+ * `host` as the run's capability in a session: its three calls, and the
+ * attempt host each step's function gets, passed as a capability of its
+ * calls alone, live while that function runs and the session's call is
+ * open (`passedCapability`). A function that fails rather than answering
+ * fails its step as `stepCodeFailure` says.
+ */
+export const sessionRunHost = (
+  host: RunHostCalls,
+  session: RunSession
+): RunHostCalls => ({
+  do: async (name, options, fn) => {
+    if (typeof fn !== "function") {
+      return await host.do(name, options, fn);
+    }
+    return await host.do(name, options, async (attempt) => {
+      let live = true;
+      try {
+        return await fn(
+          // SAFETY: what the sandbox host makes of a passed capability
+          // for the isolate: `fn` is the isolate's, over the session.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          passedCapability(
+            attempt,
+            attemptMethods,
+            () => live && session.live()
+          ) as never
+        );
+      } catch (error) {
+        throw await stepCodeFailure(error, session);
+      } finally {
+        live = false;
+      }
+    });
+  },
+  sleep: async (name, duration) => await host.sleep(name, duration),
+  waitForDecision: async (name, options) =>
+    await host.waitForDecision(name, options),
+});
+
+/**
+ * What a run's load failing on-prem fails the run with: the sandbox
+ * stopping its code (its CPU time, memory or time past, its process gone,
+ * what it sent refused) as the App's, a workflow error saying so; anything
+ * else as it is, the platform's. Never a step's retryable failure.
+ */
+const runLoadFailure = (error: unknown): unknown => {
+  const verdict = sandboxVerdictOf(error);
+  if (verdict === undefined || !codesVerdicts.has(verdict)) {
+    return error;
+  }
+  const failure = workflowErrors.create("workflow.run_failed");
+  failure.message = `The sandbox stopped the workflow's code: ${error instanceof Error ? error.message : verdict}`;
+  return failure;
+};
+
+/**
+ * The run's main module, in an isolate of its own running the run's
+ * pinned version. Each load is a new isolate, which nothing else shares
+ * (it has no name): its env is empty, as every binding it has goes
+ * through the host, and no two runs, or loads of one run, share memory.
+ * Loads are few: a run's start, and each resume after a wait.
+ *
+ * On-prem it runs as a sandbox session of its own, owned by the App's runs
+ * (`runOwnerOf`), its CPU time and memory bounded by the supervisor, with
+ * only the host's calls (`sessionRunHost`). `over` says the activation it
+ * runs for is over (a wait suspended it, which never settles its call):
+ * the session ends then, freeing its process, and a load waiting for a
+ * place stops waiting: a cancel, which ends the activation, so stops it.
+ * A pause is taken at the first step boundary once loaded, as the engine
+ * takes every pause.
+ */
+export const loadRun = (
+  env: Env,
+  { app, version, workflow, files }: RunCode,
+  {
+    over,
+    current = () => true,
+  }: {
+    over?: AbortSignal;
+    /**
+     * Whether the run is still its activation's: not cancelled, nor taken
+     * over by a newer activation (run-object.ts).
+     */
+    current?: () => boolean;
+  } = {}
+): RunLoad => {
+  const modules = async () => ({
+    ...(await modulesOf(env, version, files)),
+    [runBindingsModule]: runBindings,
+    [runModule]: runMain(workflow),
+  });
+  const sandboxHost = sessionHost(env);
+  if (sandboxHost === undefined) {
+    const entrypoint = env.LOADER.get(null, async () => ({
+      ...workflowSandbox,
+      mainModule: runModule,
+      modules: await modules(),
+      env: {},
+    })).getEntrypoint<RunEntrypoint>("Run");
+    return { run: async (host, start) => await entrypoint.run(host, start) };
+  }
+  return {
+    run: async (host, start) => {
+      let sessionLive: (() => boolean) | undefined;
+      const ended = Promise.withResolvers<unknown>();
+      const session: RunSession = {
+        live: () => sessionLive?.() === true && over?.aborted !== true,
+        ended: ended.promise,
+      };
+      const call = {
+        mainModule: runModule,
+        modules: await modules(),
+        entrypoint: "Run",
+        method: "run",
+        args: [
+          {
+            capability: capability(sessionRunHost(host, session), [
+              "do",
+              "sleep",
+              "waitForDecision",
+            ]),
+          },
+          { value: start },
+        ],
+        owner: runOwnerOf(app),
+        cpuMs: workflowSandbox.limits.cpuMs,
+        wallMs: runLoadMs,
+      };
+      // Let go of once the run is cancelled or taken over, as it runs.
+      const letGo = new AbortController();
+      const signal =
+        over === undefined
+          ? letGo.signal
+          : AbortSignal.any([over, letGo.signal]);
+      try {
+        const value = await waitingForPlace(
+          async () => {
+            // Nothing awaited since `current` was last looked at.
+            const settled = new AbortController();
+            const watching = watchCurrent(current, letGo, settled.signal);
+            try {
+              return await runInSession(sandboxHost, call, {
+                signal,
+                opened: (_id, live) => {
+                  sessionLive = live;
+                },
+              });
+            } finally {
+              settled.abort();
+              await watching;
+            }
+          },
+          { over, current }
+        );
+        ended.resolve(null);
+        return value;
+      } catch (error) {
+        ended.resolve(error);
+        if (letGo.signal.aborted) {
+          throw letGoError();
+        }
+        if (over?.aborted === true) {
+          // Let go of once its activation was over: as the engine leaves a
+          // suspended call, it never settles, so nothing of the run acts on
+          // an activation that is over.
+          return await neverSettles();
+        }
+        throw runLoadFailure(error);
+      }
     },
-    env: {},
-  })).getEntrypoint<RunEntrypoint>("Run");
+  };
+};
 
 /** The most of why an isolate didn't start that a failure keeps. */
 const maxLoadFailure = 500;
@@ -509,12 +972,25 @@ const failedStart = /^Failed to start Worker:\n(?:Uncaught )?(?<cause>.*)/u;
  * What threw as an isolate's code loaded, without the stack, when `error`
  * is workerd's "Failed to start Worker"; nothing for any other error.
  */
-const startFailure = (error: unknown): string | undefined => {
+export const startFailure = (error: unknown): string | undefined => {
   const cause =
     error instanceof Error
       ? failedStart.exec(error.message)?.groups?.cause
       : undefined;
   return cause?.slice(0, maxLoadFailure);
+};
+
+/**
+ * Whether `error` is the workflow code's failure to load or finish: a
+ * module that threw as it loaded, or (on-prem) the sandbox ending it past
+ * its CPU time, memory or time. Anything else is the platform's.
+ */
+export const codesFailure = (error: unknown): string | undefined => {
+  const verdict = sandboxVerdictOf(error);
+  if (verdict !== undefined && codesVerdicts.has(verdict)) {
+    return error instanceof Error ? error.message : "it was stopped";
+  }
+  return startFailure(error);
 };
 
 /**
@@ -531,26 +1007,40 @@ const declaredMetadata = async (
   id: WorkflowId,
   files: AppFiles
 ): Promise<{ params?: unknown; triggers?: unknown }> => {
-  const code = env.LOADER.get(
-    `workflow-metadata:${app}:${version}:${id}:${compilerVersion}`,
-    async () => ({
-      ...workflowSandbox,
-      mainModule: metadataModule,
-      modules: {
-        ...(await modulesOf(env, version, files)),
-        [metadataModule]: metadataMain(id),
-      },
-      env: {},
-    })
-  ).getEntrypoint<MetadataEntrypoint>("Metadata");
+  // Refused before anything is read where no sandbox may run it.
+  sessionHost(env);
+  // Read once a version: its code never changes, and every run load,
+  // parameter read and trigger registration asks again. Kept where its
+  // builds are (screens.ts), as what it read, never what it refused.
+  const cacheKey = `workflow-metadata/${app}/${version}/${id}/${compilerVersion}.json`;
+  const cached = await env.FILES.get(cacheKey);
+  if (cached !== null) {
+    const kept = declaredMetadataSchema.safeParse(await cached.json());
+    if (kept.success) {
+      return kept.data;
+    }
+  }
   let outcome: Settled<unknown>;
   try {
-    outcome = fromIsolate(await code.read());
+    outcome = fromIsolate(
+      await isolateCall(env, {
+        key: `workflow-metadata:${app}:${version}:${id}:${compilerVersion}`,
+        owner: app,
+        mainModule: metadataModule,
+        modules: async () => ({
+          ...(await modulesOf(env, version, files)),
+          [metadataModule]: metadataMain(id),
+        }),
+        entrypoint: "Metadata",
+        method: "read",
+        args: [],
+      })
+    );
   } catch (error) {
-    // A module threw as it loaded (a definition the SDK refuses): the
-    // code's failure, as `workflow.invalid`. Anything else is the
-    // platform's.
-    if (startFailure(error) === undefined) {
+    // A module threw as it loaded (a definition the SDK refuses), or it
+    // ran past its bounds: the code's failure, as `workflow.invalid`.
+    // Anything else is the platform's.
+    if (codesFailure(error) === undefined) {
       throw error;
     }
     throw workflowErrors.create("workflow.invalid");
@@ -561,6 +1051,7 @@ const declaredMetadata = async (
   if (metadata?.success !== true) {
     throw workflowErrors.create("workflow.invalid");
   }
+  await env.FILES.put(cacheKey, JSON.stringify(metadata.data));
   return metadata.data;
 };
 
@@ -599,6 +1090,16 @@ export const declaredTriggers = async (
   return parsed.data ?? [];
 };
 
+/** What a run of tests says: why they fail (none: they pass), and whether that may be kept. */
+export interface TestOutcome {
+  failures: string[];
+  /**
+   * Whether it says what the code does, and may be kept for the version:
+   * not when its isolate crashed, which may be the sandbox's doing.
+   */
+  keep: boolean;
+}
+
 /**
  * Why workflow `id`'s tests fail on a version's `modules`, one line each;
  * none if they pass. They run App code, once, as the version is made
@@ -606,47 +1107,71 @@ export const declaredTriggers = async (
  * goes once they are done: workerd keeps a named isolate, the SDK's
  * modules in it, for as long as the process runs.
  */
-const testFailures = async (
-  env: Env,
+export const testOutcomeOf = async (
+  env: Pick<
+    Env,
+    "LOADER" | "RUNTIME_PROFILE" | "SANDBOX_HOST" | "SANDBOX_IN_PROCESS"
+  >,
+  app: AppId,
   id: WorkflowId,
   modules: Record<string, string>,
   calls: string
-): Promise<string[]> => {
-  const tests = env.LOADER.get(null, () => ({
-    ...workflowSandbox,
-    mainModule: testsModule,
-    modules: { ...modules, [testsModule]: testsMain(id, calls) },
-    env: {},
-  })).getEntrypoint<TestsEntrypoint>("Tests");
+): Promise<TestOutcome> => {
   let outcome: Settled<unknown>;
   try {
-    outcome = fromIsolate(await tests.run());
+    outcome = fromIsolate(
+      await isolateCall(env, {
+        key: null,
+        owner: app,
+        mainModule: testsModule,
+        modules: async () =>
+          await Promise.resolve({
+            ...modules,
+            [testsModule]: testsMain(id, calls),
+          }),
+        entrypoint: "Tests",
+        method: "run",
+        args: [],
+      })
+    );
   } catch (error) {
     // The isolate didn't start because a module threw as it loaded, such
-    // as a workflow whose definition the SDK refuses: the code's failure,
-    // reported as its tests'. Anything else is the platform's.
-    const cause = startFailure(error);
+    // as a workflow whose definition the SDK refuses, or it ran past its
+    // bounds: the code's failure, reported as its tests'. Anything else is
+    // the platform's.
+    const cause = codesFailure(error);
     if (cause === undefined) {
       throw error;
     }
-    return [`${id}: its code doesn't load: ${cause}`];
+    return {
+      failures: [`${id}: its code doesn't load: ${cause}`],
+      // A crash may be the sandbox's own (its process killed from outside)
+      // as much as the code's: reported, never kept.
+      keep: sandboxVerdictOf(error) !== "crashed",
+    };
   }
   if (!outcome.ok) {
-    return [`${id}: ${outcome.error.message}`];
+    return { failures: [`${id}: ${outcome.error.message}`], keep: true };
   }
   const report = testReportSchema.safeParse(outcome.value);
   if (!report.success) {
-    return [`${id}: its tests didn't report as the test harness does`];
+    return {
+      failures: [`${id}: its tests didn't report as the test harness does`],
+      keep: true,
+    };
   }
   const { passed, results } = report.data;
   if (results.length === 0) {
-    return [`${id}: has no tests`];
+    return { failures: [`${id}: has no tests`], keep: true };
   }
-  return passed
-    ? []
-    : results.flatMap(({ name, failures }) =>
-        failures.map((failure) => `${id}, "${name}": ${failure}`)
-      );
+  return {
+    keep: true,
+    failures: passed
+      ? []
+      : results.flatMap(({ name, failures }) =>
+          failures.map((failure) => `${id}, "${name}": ${failure}`)
+        ),
+  };
 };
 
 /**
@@ -668,30 +1193,39 @@ export const dryRunTests = async (
    * For a chat's draft over `version` (agent-builds.ts): its isolate is
    * loaded unnamed, never kept, as a draft's code changes with each write.
    */
-  { draft = false }: { draft?: boolean } = {}
+  {
+    draft = false,
+    signal,
+  }: {
+    draft?: boolean;
+    /** Gives up on the dry runs, freeing their process at once on-prem. */
+    signal?: AbortSignal;
+  } = {}
 ): Promise<DryRuns> => {
   const calls = callsOf(files, id);
-  const code = env.LOADER.get(
-    draft
-      ? null
-      : `workflow-dry-run:${app}:${version}:${id}:${compilerVersion}`,
-    async () => ({
-      ...workflowSandbox,
-      mainModule: dryRunModule,
-      modules: {
-        ...(await modulesOf(env, version, files)),
-        [dryRunModule]: dryRunMain(id, calls),
-      },
-      env: {},
-    })
-  ).getEntrypoint<DryRunsEntrypoint>("DryRuns");
   let outcome: Settled<unknown>;
   try {
-    outcome = fromIsolate(await code.run(params));
+    outcome = fromIsolate(
+      await isolateCall(env, {
+        key: draft
+          ? null
+          : `workflow-dry-run:${app}:${version}:${id}:${compilerVersion}`,
+        owner: app,
+        mainModule: dryRunModule,
+        modules: async () => ({
+          ...(await modulesOf(env, version, files)),
+          [dryRunModule]: dryRunMain(id, calls),
+        }),
+        entrypoint: "DryRuns",
+        method: "run",
+        args: [params],
+        ...(signal === undefined ? {} : { signal }),
+      })
+    );
   } catch (error) {
-    // As for parameters: a module that threw as it loaded is the code's
-    // failure, anything else the platform's.
-    if (startFailure(error) === undefined) {
+    // As for parameters: a module that threw as it loaded, or one that ran
+    // past its bounds, is the code's failure, anything else the platform's.
+    if (codesFailure(error) === undefined) {
       throw error;
     }
     throw workflowErrors.create("workflow.invalid");
@@ -709,22 +1243,29 @@ export const dryRunTests = async (
  * nothing when all pass, or there are no workflows. Refuses workflows that
  * don't build (`workflow.build_failed`).
  */
-export const workflowTestFailures = async (
+export const workflowTestOutcome = async (
   env: Env,
+  /** Whose tests they are: the App, which the sandbox caps per owner. */
+  app: AppId,
   version: number,
   files: AppFiles
-): Promise<string[]> => {
+): Promise<TestOutcome> => {
   const ids = workflowIdsIn(files);
   if (ids.length === 0) {
-    return [];
+    return { failures: [], keep: true };
   }
+  // Refused before anything is built where no sandbox may run them.
+  sessionHost(env);
   const modules = await modulesOf(env, version, files);
   const failures: string[] = [];
+  let keep = true;
   for (const id of ids) {
     if (Object.hasOwn(files, workflowPaths(id).tests)) {
       const calls = callsOf(files, id);
       // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
-      failures.push(...(await testFailures(env, id, modules, calls)));
+      const outcome = await testOutcomeOf(env, app, id, modules, calls);
+      failures.push(...outcome.failures);
+      keep &&= outcome.keep;
     } else {
       // Often a helper, not a workflow: say where shared code goes.
       failures.push(
@@ -732,6 +1273,18 @@ export const workflowTestFailures = async (
       );
     }
   }
+  return { failures, keep };
+};
+
+/** Why the workflows' tests in `files` fail (`workflowTestOutcome`). */
+export const workflowTestFailures = async (
+  env: Env,
+  /** Whose tests they are: the App, which the sandbox caps per owner. */
+  app: AppId,
+  version: number,
+  files: AppFiles
+): Promise<string[]> => {
+  const { failures } = await workflowTestOutcome(env, app, version, files);
   return failures;
 };
 
@@ -742,10 +1295,11 @@ export const workflowTestFailures = async (
  */
 export const requireWorkflowTestsPass = async (
   env: Env,
+  app: AppId,
   version: number,
   files: AppFiles
 ): Promise<void> => {
-  const failures = await workflowTestFailures(env, version, files);
+  const failures = await workflowTestFailures(env, app, version, files);
   if (failures.length > 0) {
     throw workflowErrors.create("workflow.tests_failed", {
       version,

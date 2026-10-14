@@ -261,3 +261,20 @@ export const busyFor = (ms: number): void => {
     clockOffset.ms += 1;
   }
 };
+
+/** What a step's attempt read of its own lease, and when. */
+export interface LeaseReading {
+  readonly at: string;
+  readonly lease: { generation: number; deadline: number } | undefined;
+}
+
+const leaseReadings = new Map<string, LeaseReading[]>();
+
+/** Records what `run`'s attempt read of its lease at `at`. */
+export const readLease = (run: string, reading: LeaseReading): void => {
+  leaseReadings.set(run, [...(leaseReadings.get(run) ?? []), reading]);
+};
+
+/** What `run`'s attempts read of their leases, in order. */
+export const leasesOf = (run: string): LeaseReading[] =>
+  leaseReadings.get(run) ?? [];
