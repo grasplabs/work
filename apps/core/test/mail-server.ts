@@ -7,8 +7,10 @@
  * every call that reached `mail.send`, every mail it really sent and every
  * search. Each server (by the name in its URL)
  * answers its next calls as a test plans them, and holds a search whose
- * query starts with `hold` until the test lets it go. Imported by vite.config.ts
- * (Node) and the tests (workerd), so it only holds data.
+ * query starts with `hold` until the test lets it go. A test can give a
+ * server other tools instead (`ToolkitServer`), as a Composio toolkit's
+ * server lists them, and change them between requests. Imported by
+ * vite.config.ts (Node) and the tests (workerd), so it only holds data.
  */
 
 /** A server's URL, as its connection stores it. */
@@ -23,10 +25,22 @@ export const mailControlUrl = (name: string): string =>
  * How the server answers its next call: `unavailable` (a 503 to the call's
  * look at its tools, before anything is sent); or, to the call itself,
  * `sent` (it sends the mail), `invalid` (the tool refuses the input and
- * says so in its result) or `slow` (it holds the call, as a server that
- * takes its time does, until the test lets it go; then sends the mail).
+ * says so in its result), `slow` (it holds the call, as a server that
+ * takes its time does, until the test lets it go; then sends the mail) or
+ * `lost` (it sends the mail, and its answer is a 502 a gateway made of it).
  */
-export type MailAnswer = "sent" | "unavailable" | "invalid" | "slow";
+export type MailAnswer = "sent" | "unavailable" | "invalid" | "slow" | "lost";
+
+/**
+ * A server's tools, set by a test in place of the mail tools: what
+ * `tools/list` answers (`list`, each tool as MCP lists it), and each tool's
+ * result by its name (`answers`, an MCP tool result). Every call that
+ * reached one of them is recorded.
+ */
+export interface ToolkitServer {
+  list?: unknown[];
+  answers?: Record<string, unknown>;
+}
 
 /** The server, as script for the `connect-providers` Worker. */
 export const mailServerScript = `
@@ -34,7 +48,7 @@ const mailServers = new Map();
 const mailServerNamed = (name) => {
   let server = mailServers.get(name);
   if (!server) {
-    server = { plan: [], calls: 0, sent: [], searched: [], holding: false, released: false, holds: 0, releases: 0 };
+    server = { plan: [], calls: 0, sent: [], searched: [], holding: false, released: false, holds: 0, releases: 0, list: null, answers: {}, ran: [] };
     mailServers.set(name, server);
   }
   return server;
@@ -49,12 +63,15 @@ const mailServer = async (request, url) => {
       if (control.release) {
         server.released = true;
         server.releases += 1;
+      } else if (control.list || control.answers) {
+        server.list = control.list ?? server.list;
+        server.answers = control.answers ?? server.answers;
       } else {
         server.plan = control.plan;
       }
       return new Response(null, { status: 204 });
     }
-    return Response.json({ calls: server.calls, sent: server.sent, searched: server.searched, holding: server.holding });
+    return Response.json({ calls: server.calls, sent: server.sent, searched: server.searched, holding: server.holding, ran: server.ran });
   }
   const server = mailServerNamed(url.pathname.split("/").at(-1));
   const { id, method, params } = await request.json();
@@ -73,12 +90,19 @@ const mailServer = async (request, url) => {
       server.plan.shift();
       return new Response("Service Unavailable", { status: 503 });
     }
+    if (server.list) {
+      return rpcResult(id, { tools: server.list });
+    }
     return rpcResult(id, {
       tools: [
         { name: "mail.send", inputSchema: { type: "object" }, annotations: { readOnlyHint: false } },
         { name: "mail.search", inputSchema: { type: "object", properties: { query: { type: "string" } } } },
       ],
     });
+  }
+  if (Object.hasOwn(server.answers, params.name)) {
+    server.ran.push({ tool: params.name, arguments: params.arguments });
+    return rpcResult(id, server.answers[params.name]);
   }
   if (params.name === "mail.search") {
     server.searched.push(params.arguments.query);
@@ -111,6 +135,9 @@ const mailServer = async (request, url) => {
   }
   const { to, subject } = params.arguments;
   server.sent.push({ to, subject });
+  if (answer === "lost") {
+    return new Response("Bad Gateway", { status: 502 });
+  }
   const sent = { messageId: "message-" + server.sent.length };
   return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(sent) }], structuredContent: sent });
 };

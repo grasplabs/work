@@ -22,6 +22,30 @@ import type {
 import { durationUnits, engineStepPattern } from "./steps.ts";
 import type { WorkflowDefinition } from "./workflow.ts";
 
+// An App's tests (`appTest`), which core's test runner runs against the
+// real host: app-test.ts.
+export {
+  appTest,
+  appTestTimeoutMs,
+  maxAppTestName,
+  maxAppTests,
+  runAppSuite,
+  TestDefinitionError,
+  testNamePattern,
+} from "./app-test.ts";
+export type {
+  AppTestContext,
+  AppTestDefinition,
+  AppTestFunction,
+  AppTestHost,
+  AppTestReport,
+  AppTestResult,
+  AppTestSession,
+  AppTestSuite,
+  PublicReference,
+  TestPrincipal,
+} from "./app-test.ts";
+
 /**
  * Test harness and dry runs for workflows. Runs a workflow in memory, with
  * the time-skipping and step-mocking of Temporal's test environment:

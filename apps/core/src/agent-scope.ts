@@ -161,7 +161,7 @@ export interface AgentCall {
 }
 
 /** How a call ended: done, refused (an expected error), or failed. */
-type CallOutcome = "ok" | "refused" | "failed";
+export type CallOutcome = "ok" | "refused" | "failed";
 
 /**
  * Records a call of the chat's code as `agent.call`, by the workspace's
@@ -361,10 +361,17 @@ export const auditedCall = async <T>(
   scope: AgentScope,
   call: AgentCall & {
     detailOf?: (result: T) => Record<string, AuditDetailValue>;
+    /**
+     * How a call that answered ended, when its answer says it was refused
+     * or failed as data (an App function's result): recorded as such.
+     */
+    endedOf?: (
+      result: T
+    ) => { outcome: CallOutcome; reason: string | null } | undefined;
   },
   run: () => Promise<T>
 ): Promise<T> => {
-  const { detailOf, ...recorded } = call;
+  const { detailOf, endedOf, ...recorded } = call;
   let result: T;
   try {
     result = await run();
@@ -372,10 +379,15 @@ export const auditedCall = async <T>(
     await auditAgentCall(env, scope, recorded, endedBy(error));
     throw error;
   }
-  await auditAgentCall(env, scope, {
-    ...recorded,
-    detail: { ...recorded.detail, ...detailOf?.(result) },
-  });
+  await auditAgentCall(
+    env,
+    scope,
+    {
+      ...recorded,
+      detail: { ...recorded.detail, ...detailOf?.(result) },
+    },
+    endedOf?.(result)
+  );
   return result;
 };
 

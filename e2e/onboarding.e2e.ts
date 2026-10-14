@@ -2,10 +2,12 @@ import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, signInAs, signInStaff, signInTo } from "./people.ts";
+import type { Person } from "./people.ts";
 
 // What only Grasp's staff do in a client's onboarding (GRA-320), end to
 // end: they put the agreements in place, and the links that waited for
-// them go out; they give the go, and the company's people sign in. Its
+// them go out; they give the go, and the company's people sign in, and
+// see the programme's week on the dashboard, from the plan. Its
 // own Playwright project, after all the others: taking the go back signs
 // out everyone the other tests signed in (playwright.config.ts).
 
@@ -126,5 +128,47 @@ test("staff give the go, and the company's people sign in", async ({
   } finally {
     signedIn.core[Symbol.dispose]();
   }
+  expect(cspViolations).toStrictEqual([]);
+});
+
+test("the dashboard counts the programme's weeks from the plan, and exports its report", async ({
+  page,
+  cspViolations,
+}) => {
+  // The plan the first test saved starts today, and Grasp's go is given:
+  // any member reads the programme's week and stage (none read it before,
+  // e2e/dashboard.e2e.ts, as no plan was saved yet).
+  const email = `person.${crypto.randomUUID()}@acme.test`;
+  const cookie = await signInAs(email);
+  const { core, api } = apiOf({ cookie });
+  let member: Person;
+  try {
+    const { userId, role } = await api.whoami();
+    member = { userId, email, role, cookie };
+  } finally {
+    core[Symbol.dispose]();
+  }
+  await signInTo(page.context(), member);
+  await page.goto("/dashboard");
+
+  await expect(page.getByText("Week 1 of 8 · Under way")).toBeVisible();
+  await expect(
+    page.getByText(/^Report on week 1 ready in [1-7] days?$/u)
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Export report" }).click();
+
+  const dialog = page.getByRole("dialog", {
+    name: "The report as it stands today",
+  });
+  const report = dialog.getByRole("article", { name: "Report" });
+  await expect(report).toContainText("What ran");
+  await expect(report).toContainText(/Made with Grasp on/u);
+  const downloading = page.waitForEvent("download");
+  await dialog.getByRole("button", { name: "Download Markdown" }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe(
+    `grasp-report-week-1-${today()}.md`
+  );
+  await expect(dialog).toBeHidden();
   expect(cspViolations).toStrictEqual([]);
 });

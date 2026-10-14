@@ -235,7 +235,7 @@ mutation({
 
 // An action has no database, and calls only what it lists.
 const mail = resource.connector("mail", {
-  contract: "grasp.mail@1",
+  contract: "microsoft-365.mail@1",
   actions: ["send"],
 });
 const help = resource.knowledge("help", {
@@ -272,7 +272,12 @@ action({
     ).resolves.toEqualTypeOf<Id<"notes">>();
     // Internal functions of the App are its own server code's to call.
     expectTypeOf(ctx.runQuery(secret, {})).resolves.toEqualTypeOf<string>();
-    await ctx.resources.mail.call("send", { to: args.to });
+    await ctx.resources.mail.call("send", {
+      mailbox: "team@acme.test",
+      subject: "Hello",
+      body: "Hi.",
+      to: [args.to],
+    });
     // @ts-expect-error -- an action the declaration doesn't list
     await ctx.resources.mail.call("delete", {});
     expectTypeOf(

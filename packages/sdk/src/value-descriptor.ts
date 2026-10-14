@@ -91,7 +91,17 @@ export type ValueKindDescriptor =
       readonly value: null | boolean | number | string;
     }
   | { readonly kind: "enum"; readonly values: readonly string[] }
-  | { readonly kind: "id"; readonly tableName: string }
+  | {
+      readonly kind: "id";
+      readonly tableName: string;
+      /**
+       * What deleting the record it names does to the record holding it:
+       * left out, the deletion is refused while it is held (restrict);
+       * `cascade`, the holding record is deleted with it, by the host,
+       * within the bound of one commit.
+       */
+      readonly onDelete?: "cascade";
+    }
   | {
       readonly kind: "object";
       readonly fields: Readonly<Record<string, ValueDescriptor>>;

@@ -12,6 +12,18 @@ export type Role = z.infer<typeof roleSchema>;
 /** Admins: manage members, teams and permissions. */
 export const isAdmin = (role: string): boolean => role === "admin";
 
+/**
+ * One of the organization's own admins: an admin, and not Grasp staff,
+ * who are admins too but never decide a client's permissions.
+ */
+export const isMemberAdmin = ({
+  role,
+  staff,
+}: {
+  role: string;
+  staff: boolean;
+}): boolean => isAdmin(role) && !staff;
+
 /** Admins and builders: build Apps and ask for the permissions they need. */
 export const canBuild = (role: string): boolean =>
   role === "admin" || role === "builder";

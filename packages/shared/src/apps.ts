@@ -1,11 +1,12 @@
 import { z } from "zod";
 
-import { appLimits } from "./app-limits.ts";
+import { appLimits, appPathSegmentPattern } from "./app-limits.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { collectionIdSchema, identifierSchema } from "./ids.ts";
 import type { AppId, BlueprintId } from "./ids.ts";
 import { recordTypeNameSchema } from "./knowledge.ts";
 import type { DeclaredPermission, Permission } from "./permissions.ts";
+import { platformLimits } from "./platform-limits.ts";
 import type { TriggerDeclaration } from "./workflows.ts";
 
 // An App's code is a tree of text files, versioned as a whole: builders
@@ -14,13 +15,6 @@ import type { TriggerDeclaration } from "./workflows.ts";
 // proposes that. Versions never change once committed.
 // One version is current, the one that runs; another can be pending, put
 // up for review before a builder makes it current.
-
-/**
- * One folder or file name: letters, digits, `_`, `-` and `.`, not starting
- * with a `.`. That rules out `.` and `..`, so a path can't step out of the
- * App, and hidden files.
- */
-const segmentPattern = /^[\w-][\w.-]*$/u;
 
 /**
  * A file's path in an App, relative to its root and `/`-separated, such
@@ -36,7 +30,7 @@ export const appPathSchema = z
       const segments = path.split("/");
       return (
         segments.length <= appLimits.pathDepth &&
-        segments.every((segment) => segmentPattern.test(segment)) &&
+        segments.every((segment) => appPathSegmentPattern.test(segment)) &&
         // Files are keyed by path in plain objects: `__proto__` would be
         // the object's prototype, not a file.
         !Object.hasOwn(Object.prototype, path)
@@ -201,6 +195,27 @@ export interface VersionReview {
    */
   server: ReviewChange | null;
   serverFiles: { path: string; change: ReviewChange }[];
+  /**
+   * Its explicit migrations (spec 17.2) that the current version doesn't
+   * have, or has otherwise (declared differently, or with server code
+   * changed, which its transform may run), read from the App's manifest
+   * wherever they are declared: each reads and rewrites every record of
+   * its table, whoever owns it, once a release sealed on it runs on the
+   * App's store. Null when its manifest can't be read (its code doesn't
+   * build or inspect): it may then rewrite any table. Each says how many
+   * fixtures it is run on as the version is sealed, and whether they all
+   * passed (`fixturesPassed`), null until the version is sealed: one that
+   * failed runs on no records, and the version can't be made current.
+   */
+  migrations:
+    | {
+        name: string;
+        table: string;
+        change: "added" | "modified";
+        fixtures: number;
+        fixturesPassed: boolean | null;
+      }[]
+    | null;
   /**
    * Its workflows that differ from the current version's: their own files,
    * or code outside `screens/` they may import (`shared`), such as the
@@ -671,15 +686,15 @@ export const appExportsMaxLength = 64_000;
 
 /**
  * The limits of a call to another App's export. The input and the answer
- * are JSON, measured in bytes of UTF-8 as sent: an answer fits a workflow
- * step's result. One call may lead to more (the called App calling
- * another), at most `depth` calls deep, so 3 hops, 4 Apps: A calls B, B
+ * are JSON, measured in bytes of UTF-8 as sent: an export is a public
+ * operation, held to spec 18.1's input and output limits as any other
+ * is. One call may lead to more (the called App calling another), at most `depth` calls deep, so 3 hops, 4 Apps: A calls B, B
  * calls C, C calls D, and D calls no further. Never back into an App
  * already in it; all of them end by the time the first one must.
  */
 export const appCallLimits = {
-  inputBytes: 256 * 1024,
-  answerBytes: 1024 * 1024,
+  inputBytes: platformLimits.operationInputBytes,
+  answerBytes: platformLimits.operationOutputBytes,
   depth: 3,
 } as const;
 

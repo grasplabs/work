@@ -7,6 +7,7 @@ import type {
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { operationErrors } from "@grasp-os/shared/operations";
 import {
   authoritySchema,
   permissionErrors,
@@ -22,6 +23,8 @@ import { signedCall } from "./bindings.ts";
 import { personOf } from "./connections.ts";
 import { workflowRuns } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
+import { isProviderUnreachable } from "./resource-adapter.ts";
+import { requireHeldBinding } from "./resource-bindings.ts";
 import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -133,6 +136,9 @@ export const confirmPendingAction = async (
     throw connectErrors.create("connect.run_ended");
   }
   let capability: string;
+  // Set while the held call's binding is being checked: refused there, it
+  // could never be confirmed, so it leaves the person's list.
+  let staleBinding = false;
   try {
     // An App's action names the version whose code asked for it, or no
     // version was approved for it: refused, as `authorize` would.
@@ -140,6 +146,22 @@ export const confirmPendingAction = async (
       throw permissionErrors.create("permission.denied", {
         action: held.action,
       });
+    }
+    // A call an App's action made through a resource binding runs only if
+    // that binding would still serve it now, as a live request would.
+    // A binding connect can no longer read is refused, never skipped.
+    if (held.subject.type === "app" && held.binding !== null) {
+      staleBinding = true;
+      if (held.binding === "unreadable") {
+        throw operationErrors.create("resource.unavailable");
+      }
+      await requireHeldBinding(
+        env,
+        held.subject.appId,
+        held.binding,
+        held.action
+      );
+      staleBinding = false;
     }
     const authority = authoritySchema.parse({
       subject: held.subject,
@@ -165,7 +187,7 @@ export const confirmPendingAction = async (
   } catch (error) {
     // Refused here (the permission is gone, the person has left, the
     // context is invalid): recorded as connect records its own refusals,
-    // and the action keeps waiting.
+    // and the action keeps waiting, unless its binding is stale (below).
     await env.CONNECT.refuseConfirmation({
       person,
       id: held.id,
@@ -173,6 +195,18 @@ export const confirmPendingAction = async (
     }).catch((auditError: unknown) => {
       log.error("audit.record_failed", errorFields(auditError));
     });
+    // Its binding no longer serves it (revoked, replaced, drifted, a
+    // version that changed the declaration): dropped, recorded, its key
+    // left free, so the same call made again is decided afresh. One whose
+    // provider couldn't be reached to say isn't known to be stale: it
+    // keeps waiting, for the person to confirm once it can be checked.
+    if (staleBinding && !isProviderUnreachable(error)) {
+      await env.CONNECT.dropStaleBinding({ person, id: held.id }).catch(
+        (dropError: unknown) => {
+          log.error("pending.stale_drop_failed", errorFields(dropError));
+        }
+      );
+    }
     throw error;
   }
   let result: ConnectResult;
@@ -182,7 +216,16 @@ export const confirmPendingAction = async (
     // Only when this confirmation took it (`markTaken`): a refused one
     // tells nothing, whatever another decision did meanwhile.
     if (wasTaken(error)) {
-      await tellChat(env, held, identity.userId, "failed");
+      // Sent, with no answer: it may have been carried out, which a
+      // failure would deny.
+      await tellChat(
+        env,
+        held,
+        identity.userId,
+        connectErrors.codeOf(error) === "connect.outcome_unknown"
+          ? "unknown"
+          : "failed"
+      );
     }
     throw error;
   }

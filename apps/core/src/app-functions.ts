@@ -1,0 +1,1056 @@
+import { appModuleName, kitModuleName } from "@grasp-os/compiler";
+import type { OperationChannel } from "@grasp-os/sdk/runner";
+import { versionErrors } from "@grasp-os/shared/app-releases";
+import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
+import { whenAborted } from "@grasp-os/shared/deadline";
+import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
+import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
+import {
+  appErrorDetailsMaxBytes,
+  appErrorMessageMaxLength,
+  functionRequestMaxBytes,
+  operationResultMaxBytes,
+} from "@grasp-os/shared/operation-limits";
+import {
+  categoryOf,
+  isRetryableCode,
+  operationErrors,
+} from "@grasp-os/shared/operations";
+import type {
+  AppErrorPayload,
+  OperationResult,
+} from "@grasp-os/shared/operations";
+import { permissionErrors } from "@grasp-os/shared/permissions";
+import type { Authority } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
+import { rpcArgumentDepth } from "@grasp-os/shared/screens";
+import { commitMaxInputBytes } from "@grasp-os/shared/stores";
+import { coreStepPrefix, stepIdempotencyKey } from "@grasp-os/shared/workflows";
+import type { RpcTarget } from "cloudflare:workers";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
+
+import { operationRoles } from "./app-access.ts";
+import { loadRelease } from "./app-releases.ts";
+import type { Release } from "./app-releases.ts";
+import { callTimeoutMs } from "./app.ts";
+import { appFor } from "./apps.ts";
+import { memberRole } from "./auth/identity.ts";
+import type { CallTree, RunnerCall } from "./call-tree.ts";
+import { openStore } from "./data-stores.ts";
+import type { OpenStore } from "./data-stores.ts";
+import { sdkReleaseManifests } from "./db/core/schema.ts";
+import { hostJsonModule, hostJsonSource } from "./host-json.ts";
+import { callOperation } from "./operations.ts";
+import type {
+  HostedApp,
+  Invocation,
+  ResourceBindings,
+  Runner,
+} from "./operations.ts";
+import { invocationSources } from "./resource-adapter.ts";
+import type {
+  InvocationProvenance,
+  InvocationSources,
+} from "./resource-adapter.ts";
+import { resourceBindingsFor } from "./resource-bindings.ts";
+import {
+  capability,
+  runInSession,
+  sessionEndedError,
+} from "./sandbox-session.ts";
+import type { NestedRun, SessionCall } from "./sandbox-session.ts";
+import { sandbox } from "./sandbox.ts";
+import { sessionHost } from "./sandboxed.ts";
+
+// Running an App's server functions from its sealed release (spec 6, 8,
+// 16, 32.6): the App's code runs in an isolate of its own for every
+// invocation, loaded from the release's verified artifacts, and holds
+// nothing but that invocation's channel to core's operation host
+// (operations.ts), which decides everything the call may do. Threat
+// model, and how each is closed:
+//
+// - App code keeps something of one caller's for another's call (a value
+//   in module state, a channel): each invocation gets a fresh isolate
+//   that no other shares (the loader names none), and its channel stops
+//   working when it ends.
+// - App code reaches outside the host: its isolate has no network
+//   (`globalOutbound: null`), no env and no importable one; its only way
+//   out is the channel it is handed.
+// - An App reaches another App's store: nothing names a store but the
+//   release, as the host sealed it, and the host's own record of that
+//   binding (`loadRelease`). No request, reference or App code can.
+// - A caller names a contract that isn't the one that runs: a reference
+//   is only data. It runs only if it names the App, the version that runs
+//   now (the App's current one, never one the caller picks, so no caller
+//   reaches an older version's looser access), a public function there,
+//   of its kind, and that function's exact fingerprint; otherwise it is
+//   refused before any of its input is read.
+// - A release changed since it was sealed, or between admission and run:
+//   every load checks every hash (`loadRelease`), and the invocation runs
+//   the code of the manifest it was admitted under, never source.
+// - A request too large to bother with: the request comes as text, and
+//   its bytes are bounded before it is parsed.
+// - What crosses the isolate boundary is data both ways: a channel call
+//   answers a settled value or failure (`IsolateChannel`), and the
+//   function's own answer comes back as bounded JSON text, so nothing
+//   depends on how RPC carries errors, and App code can't send core a
+//   value larger than any answer may be.
+
+/** The module that runs one function in its isolate. */
+const runModule = "grasp-function.js";
+
+/** The longest answer, in characters, an isolate hands back as text. */
+const answerMaxLength = operationResultMaxBytes;
+
+/**
+ * The isolate's main module: the SDK's runner, over the invocation's
+ * channel, each channel call's settled answer turned back into a value or
+ * an error, and the function's own answer or failure sent back as data.
+ * Everything in the isolate is untrusted, this module too: core checks
+ * all of it again.
+ */
+const runMain = `import { WorkerEntrypoint } from "cloudflare:workers";
+import { runFunction } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/runner"))};
+import { jsonAnswer } from ${JSON.stringify(hostJsonModule)};
+import registered from ${JSON.stringify(appModuleName("app.ts"))};
+
+const rebuilt = (settled) => {
+  if (settled.ok) {
+    return settled.value;
+  }
+  const error = new Error(settled.error.message);
+  error.name = settled.error.name;
+  if (settled.error.code !== undefined) {
+    error.code = settled.error.code;
+  }
+  if (settled.error.details !== undefined) {
+    error.details = settled.error.details;
+  }
+  throw error;
+};
+
+const channelOf = (remote) => ({
+  read: async (request) => rebuilt(await remote.read(request)),
+  write: async (request) => rebuilt(await remote.write(request)),
+  call: async (kind, path, args) => rebuilt(await remote.call(kind, path, args)),
+  resource: async (alias, method, args) => rebuilt(await remote.resource(alias, method, args)),
+});
+
+const bounded = (value, max) =>
+  typeof value === "string" ? value.slice(0, max) : undefined;
+
+const failed = (error) => {
+  try {
+    const details = error?.details === undefined ? undefined : JSON.stringify(error.details);
+    return {
+      ok: false,
+      error: {
+        name: bounded(error?.name, 100) ?? "Error",
+        message: bounded(error?.message, ${appErrorMessageMaxLength + 1}) ?? "",
+        ...(typeof error?.code === "string" ? { code: error.code.slice(0, 200) } : {}),
+        ...(typeof details === "string" && details.length <= ${appErrorDetailsMaxBytes}
+          ? { details }
+          : details === undefined ? {} : { details: "null", detailsTooLarge: true }),
+      },
+    };
+  } catch {
+    return { ok: false, error: { name: "Error", message: "" } };
+  }
+};
+
+export class Run extends WorkerEntrypoint {
+  async run(path, args, remote) {
+    let value;
+    try {
+      value = await runFunction(registered, path, args, channelOf(remote));
+    } catch (error) {
+      return failed(error);
+    }
+    // Read as the host reads a value, before it is serialized: JSON alone
+    // would turn NaN or an undefined in an array into a valid null.
+    let text;
+    try {
+      text = jsonAnswer(value);
+    } catch {
+      return { ok: true, answer: "unreadable" };
+    }
+    if (typeof text !== "string") {
+      return { ok: true, answer: "unreadable" };
+    }
+    if (text.length > ${answerMaxLength}) {
+      return { ok: true, answer: "too_large" };
+    }
+    return { ok: true, answer: "json", text };
+  }
+}
+`;
+
+interface RunEntrypoint extends Rpc.WorkerEntrypointBranded {
+  run: (path: string, args: Json, remote: RpcTarget) => Promise<Settled>;
+}
+
+/** What the isolate answers, before core reads it: data, untrusted. */
+interface Settled {
+  readonly ok: boolean;
+}
+
+/** What the isolate answers, as core reads it: nothing of it trusted. */
+const settledSchema = z.discriminatedUnion("ok", [
+  z.strictObject({
+    ok: z.literal(true),
+    answer: z.enum(["json", "too_large", "unreadable"]),
+    text: z.string().max(answerMaxLength).optional(),
+  }),
+  z.strictObject({
+    ok: z.literal(false),
+    error: z.strictObject({
+      name: z.string().max(100),
+      message: z.string().max(appErrorMessageMaxLength + 1),
+      code: z.string().max(200).optional(),
+      details: z.string().max(appErrorDetailsMaxBytes).optional(),
+      detailsTooLarge: z.literal(true).optional(),
+    }),
+  }),
+]);
+
+/** A failure as it crosses into the isolate: plain data. */
+interface CrossingError {
+  name: string;
+  message: string;
+  code?: string;
+  details?: unknown;
+}
+
+/** `error`, a failure the channel raised, as data for the isolate. */
+const crossing = (error: unknown): CrossingError => {
+  if (!(error instanceof Error)) {
+    return { name: "Error", message: "" };
+  }
+  const code: unknown = Reflect.get(error, "code");
+  const details: unknown = Reflect.get(error, "details");
+  return {
+    name: error.name,
+    message: error.message,
+    ...(typeof code === "string" ? { code } : {}),
+    ...(details === undefined ? {} : { details }),
+  };
+};
+
+/** `work`'s answer or failure, as data. */
+const settled = async (
+  work: () => Promise<unknown>
+): Promise<
+  { ok: true; value: unknown } | { ok: false; error: CrossingError }
+> => {
+  try {
+    return { ok: true, value: await work() };
+  } catch (error) {
+    return { ok: false, error: crossing(error) };
+  }
+};
+
+/**
+ * What an App's isolate holds of its invocation's channel: the same four
+ * calls, each answering a settled value or failure as data, so the
+ * failures the host raised (copies it keeps its own of) reach App code
+ * whole, whatever RPC does with an error. Bounded as the channel is.
+ */
+const IsolateChannelTarget = boundedRpcTarget({
+  depth: rpcArgumentDepth,
+  size: commitMaxInputBytes,
+});
+
+/**
+ * The channel as the isolate's calls reach it: its own checks take each
+ * argument as unknown, whatever its declared types say.
+ */
+interface ArrivingChannel {
+  readonly read: (request: unknown) => Promise<unknown>;
+  readonly write: (request: unknown) => Promise<unknown>;
+  readonly call: (
+    kind: unknown,
+    path: unknown,
+    args: unknown
+  ) => Promise<unknown>;
+  readonly resource: (
+    alias: unknown,
+    method: unknown,
+    args: unknown
+  ) => Promise<unknown>;
+}
+
+class IsolateChannel extends IsolateChannelTarget {
+  readonly #channel: ArrivingChannel;
+
+  constructor(channel: OperationChannel) {
+    super();
+    // SAFETY: the channel copies and checks every argument as it arrives
+    // (operation-channel.ts), whatever its declared types say.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    this.#channel = channel as ArrivingChannel;
+  }
+
+  async read(request: unknown): Promise<unknown> {
+    return await settled(async () => await this.#channel.read(request));
+  }
+
+  async write(request: unknown): Promise<unknown> {
+    return await settled(async () => await this.#channel.write(request));
+  }
+
+  async call(kind: unknown, path: unknown, args: unknown): Promise<unknown> {
+    return await settled(
+      async () => await this.#channel.call(kind, path, args)
+    );
+  }
+
+  async resource(
+    alias: unknown,
+    method: unknown,
+    args: unknown
+  ): Promise<unknown> {
+    return await settled(
+      async () => await this.#channel.resource(alias, method, args)
+    );
+  }
+}
+
+/** JSON text the isolate sent, parsed, or undefined. */
+const parsed = (text: string | undefined): unknown => {
+  if (text === undefined) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The session each caller's call runs its functions in on-prem, by that
+ * call (operations.ts `CallTree`), while it's open: how to run one more
+ * function in it.
+ */
+const openSessions = new WeakMap<CallTree, { run: NestedRun }>();
+
+/**
+ * Runs `sessionCall` in a sandbox session. A function nested in another
+ * runs in the session of the function its caller named (in its process,
+ * idle while it waits, taking none of the owner's share, as it would each
+ * nested call deep enough to wait on a place its own callers hold), and
+ * never in a session of its own: once that session is over, it's refused.
+ * The function a caller named opens the session, open until every nested
+ * call the operation host started has settled, authorized or not yet.
+ */
+const inSession = async (
+  host: Fetcher,
+  sessionCall: SessionCall,
+  { signal, call }: { signal?: AbortSignal; call?: RunnerCall }
+): Promise<unknown> => {
+  if (call?.nested === true) {
+    const open = openSessions.get(call.tree);
+    // Its call's session is over (it can't be, as the session waits for
+    // every nested call started): a fresh process would escape the whole
+    // call's CPU time and memory.
+    if (open === undefined) {
+      throw sessionEndedError();
+    }
+    return await open.run(sessionCall, signal);
+  }
+  if (call === undefined) {
+    return await runInSession(
+      host,
+      sessionCall,
+      signal === undefined ? {} : { signal }
+    );
+  }
+  const { tree } = call;
+  const entry: { run: NestedRun } = {
+    run: async () => await Promise.reject(sessionEndedError()),
+  };
+  const { promise: answered, resolve: answer } =
+    Promise.withResolvers<unknown>();
+  const session = (async (): Promise<unknown> => {
+    try {
+      return await runInSession(
+        host,
+        tree.parentSession === undefined
+          ? sessionCall
+          : { ...sessionCall, parent: tree.parentSession },
+        {
+          ...(signal === undefined ? {} : { signal }),
+          nesting: {
+            open: (run: NestedRun) => {
+              entry.run = run;
+              openSessions.set(tree, entry);
+            },
+            answered: answer,
+            // Every nested call the operation host started, those they
+            // start too: from the moment it starts each (`CallTree`).
+            drain: async () => {
+              await tree.settled();
+            },
+            idle: () => tree.idle(),
+          },
+        }
+      );
+    } finally {
+      // Ended however it did: no function runs in it any more. A run of
+      // the named function again (stale reads) opened a session of its own.
+      if (openSessions.get(tree) === entry) {
+        openSessions.delete(tree);
+      }
+    }
+  })();
+  tree.holdSession(session);
+  // Answered as the function answers. The session stays open behind it for
+  // the calls the function started and didn't wait for, which the operation
+  // host waits for in turn, or gives up on at its deadline (`signal`).
+  return await Promise.race([answered, session]);
+};
+
+/**
+ * The runner of `release`: each call in a fresh isolate of its own (the
+ * loader names none, so none is shared or kept), loaded with the release's
+ * verified modules and the SDK modules sealed with it (never the SDK the
+ * host serves now), with no network and an empty env. On-prem it runs in a
+ * sandbox session (sandbox-session.ts), its process killed past the CPU
+ * time Cloudflare's runtime would give it.
+ */
+export const releaseRunner =
+  (
+    env: Pick<
+      Env,
+      | "LOADER"
+      | "RUNTIME_PROFILE"
+      | "SANDBOX_HOST"
+      | "SANDBOX_IN_PROCESS"
+      | "APP_CALL_TIMEOUT_MS"
+    >,
+    release: Pick<Release, "modules" | "sdk">,
+    /** Whose release it is: the App, which the sandbox caps per owner. */
+    owner: string
+  ): Runner =>
+  async (path, args, channel, signal, call) => {
+    // The platform's modules last: no App module takes one's name.
+    const modules = {
+      ...release.modules,
+      ...release.sdk,
+      // The host's reading of what App code answers (host-json.ts).
+      [hostJsonModule]: hostJsonSource(),
+      [runModule]: runMain,
+    };
+    const isolateChannel = new IsolateChannel(channel);
+    // On-prem, in a sandbox session, where a busy loop costs only its own
+    // process (sandbox-session.ts); on Cloudflare, whose runtime ends it
+    // at the CPU limit, in a Loader isolate of core's own.
+    const host = sessionHost(env);
+    const answer = settledSchema.safeParse(
+      host === undefined
+        ? await Promise.race([
+            env.LOADER.get(null, () => ({
+              ...sandbox,
+              mainModule: runModule,
+              modules,
+              env: {},
+            }))
+              .getEntrypoint<RunEntrypoint>("Run")
+              .run(path, args, isolateChannel),
+            // Given up on: settled at once, its isolate left to the
+            // runtime, as nothing of core's is held for it.
+            ...(signal === undefined ? [] : [whenAborted(signal)]),
+          ])
+        : await inSession(
+            host,
+            {
+              mainModule: runModule,
+              modules,
+              entrypoint: "Run",
+              method: "run",
+              args: [
+                { value: path },
+                { value: args },
+                { capability: capability(isolateChannel) },
+              ],
+              owner,
+              cpuMs: sandbox.limits.cpuMs,
+              // The host's own deadline ends the invocation before this
+              // (operations.ts), and frees the process (`signal`); this only
+              // bounds the session.
+              wallMs: callTimeoutMs(env),
+            },
+            { signal, call }
+          )
+    );
+    if (!answer.success) {
+      throw Object.assign(new Error("The isolate answered something else"), {
+        unexpected: true,
+      });
+    }
+    const { data } = answer;
+    if (!data.ok) {
+      const { name, message, code, details, detailsTooLarge } = data.error;
+      // Details past their bound make the error one its contract doesn't
+      // allow, as the host decides of any (operations.ts).
+      throw Object.assign(new Error(message), {
+        name,
+        ...(code === undefined ? {} : { code }),
+        ...(details === undefined
+          ? {}
+          : {
+              details:
+                detailsTooLarge === true
+                  ? "x".repeat(appErrorDetailsMaxBytes + 1)
+                  : parsed(details),
+            }),
+      });
+    }
+    if (data.answer === "too_large") {
+      // Past every bound: the host refuses it as any return too large.
+      return "x".repeat(operationResultMaxBytes + 1);
+    }
+    return data.answer === "json" ? parsed(data.text) : undefined;
+  };
+
+/** `release` as the operation host runs it. */
+export const hostedRelease = (env: Env, release: Release): HostedApp => ({
+  manifest: release.app,
+  run: releaseRunner(env, release, release.manifest.resourceId),
+});
+
+/** Every call of a store a release without tables doesn't have. */
+const unbound = async (): Promise<never> =>
+  await Promise.reject(versionErrors.create("version.store_unbound"));
+
+/** A store for a release without tables: there is nothing to reach. */
+export const noStore = (): OpenStore => ({
+  // SAFETY: an ID no store has, for logs only: every call is refused.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  id: "none" as OpenStore["id"],
+  defineTables: unbound,
+  get: unbound,
+  claim: unbound,
+  commit: unbound,
+  read: unbound,
+  generations: unbound,
+});
+
+/** Refuses with `version.revoked` once release `version` of `app` is revoked. */
+const requireNotRevoked = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({ revokedAt: sdkReleaseManifests.revokedAt })
+    .from(sdkReleaseManifests)
+    .where(
+      and(
+        eq(sdkReleaseManifests.appId, app),
+        eq(sdkReleaseManifests.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw versionErrors.create("version.not_sealed");
+  }
+  if (row.revokedAt !== null) {
+    throw versionErrors.create("version.revoked");
+  }
+};
+
+/** What core resolved of the caller, for an invocation. */
+interface FunctionCaller {
+  readonly by: Pick<Identity, "userId" | "role">;
+  readonly requestId: string;
+  readonly deadline: number;
+  /**
+   * What else must still hold before every protected step, for a caller
+   * whose call core admitted on more than the person's role (an agent's
+   * permission, agent-apps.ts): throws once it doesn't.
+   */
+  readonly stillAllowed?: () => Promise<void>;
+  /** What the invocation reads through its resources is noted here. */
+  readonly sources?: InvocationSources;
+}
+
+/**
+ * The invocation of `release` for `caller`: the store from the release
+ * alone, the principal and roles from core's identity of the caller,
+ * never from a request.
+ */
+export const invocationFor = async (
+  env: Env,
+  release: Release,
+  {
+    by,
+    requestId,
+    deadline,
+    stillAllowed,
+    sources = invocationSources(),
+  }: FunctionCaller
+): Promise<Invocation> => {
+  // SAFETY: a release's resource ID is the App it was sealed for.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const app = release.manifest.resourceId as AppId;
+  const authority: Authority = {
+    subject: { type: "app", appId: app },
+    onBehalfOf: by.userId,
+    mode: "interactive",
+    appVersion: release.manifest.resourceVersion,
+  };
+  const bindings = resourceBindingsFor(env, {
+    app,
+    authority,
+    context: { type: "app", appId: app },
+    sources,
+    actor: delegateActorOf(authority),
+  });
+  return {
+    principal: by.userId,
+    consumer: {
+      resourceId: app,
+      resourceVersion: release.manifest.resourceVersion,
+    },
+    store:
+      release.store === null
+        ? noStore()
+        : await openStore(env, release.store.storeId),
+    requestId,
+    deadline,
+    runId: null,
+    // Before every protected step: the call starts, each mutation commits
+    // and each resource request (the operation host's one gate, `admit`).
+    // A release revoked, a role lost or an agent's permission withdrawn
+    // meanwhile stops a call already running.
+    authorize: async () => {
+      await requireNotRevoked(env, app, release.manifest.resourceVersion);
+      await stillAllowed?.();
+      return await operationRoles(env, by, app);
+    },
+    // The App's approved bindings, read again on every request, acting
+    // for the App and the person calling, with the person there. The
+    // operation host admits each request through `authorize` first, as it
+    // admits each commit, so nothing else is checked here.
+    resources: bindings,
+  };
+};
+
+/** What core resolved of a workflow run calling a function of its App. */
+export interface RunCaller {
+  /** The run, as its host loaded it: never anything its isolate sent. */
+  readonly run: {
+    readonly app: AppId;
+    readonly workflow: WorkflowId;
+    readonly runId: RunId;
+    readonly rootRunId?: RunId;
+    /** The version the run is pinned to: the release that runs. */
+    readonly version: number;
+    /** Who the run acts for in this execution, in workflow mode. */
+    readonly authority: Authority;
+  };
+  readonly requestId: string;
+  readonly deadline: number;
+  /**
+   * Throws once the step's attempt the call comes from no longer holds
+   * its lease: it timed out, the run was cancelled or paused, another
+   * activation took over, or its function returned.
+   */
+  readonly stillCurrent: () => Promise<void>;
+  /**
+   * The same, synchronously: for the last check before an effect, with
+   * nothing awaited between it and the effect's start.
+   */
+  readonly requireHolds: () => void;
+  /** Hears each side effect connect held for the person (`BindingCaller.held`). */
+  readonly held: (key: string) => void;
+}
+
+/**
+ * `bindings` for a run: each request's key under the run's
+ * (`stepIdempotencyKey`), behind core's own prefix, so no step's own key
+ * is ever one of them, and connect finds a run's held side effects, and
+ * drops them once the run has ended, by the run their key names
+ * (pending-actions.ts, workflows/retention.ts). Under it is still the key
+ * the operation host derived, so the same call made again sends the same
+ * key. The attempt's lease is checked once more as the binding is
+ * resolved, with nothing awaited between that and the request's start
+ * (`resourceCall`, operations.ts): a cancel landing during the gate's or
+ * the binding's reads stops it.
+ */
+const keyedUnderRun =
+  (
+    bindings: ResourceBindings,
+    runId: RunId,
+    requireHolds: () => void
+  ): ResourceBindings =>
+  async (declaration) => {
+    const bound = await bindings(declaration);
+    requireHolds();
+    return bound === undefined
+      ? undefined
+      : {
+          ...bound,
+          call: async (method, args, context) =>
+            await bound.call(method, args, {
+              ...context,
+              idempotencyKey: stepIdempotencyKey(
+                runId,
+                `${coreStepPrefix}${context.idempotencyKey}`
+              ),
+            }),
+        };
+  };
+
+/**
+ * `store`, its commits made only while the attempt still holds its lease,
+ * checked with nothing awaited between that and the commit.
+ */
+const fencedStore = (
+  store: OpenStore,
+  requireHolds: () => void
+): OpenStore => ({
+  ...store,
+  commit: async (commit) => {
+    requireHolds();
+    return await store.commit(commit);
+  },
+});
+
+/**
+ * The invocation of `release` (the run's own App, at the version the run
+ * is pinned to) for a step of `caller`'s run: as the person the run acts
+ * for, in workflow mode, with the run as its work context, and with the
+ * run as whoever the audit log names and whose budgets a model request
+ * counts against besides its binding's (`BindingCaller.actor`). Nothing
+ * of it comes from the run's isolate.
+ */
+export const runInvocationFor = async (
+  env: Env,
+  release: Release,
+  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller
+): Promise<Invocation> => {
+  const { app, runId, version, authority } = run;
+  const bindings = resourceBindingsFor(env, {
+    app,
+    authority: { ...authority, mode: "workflow", appVersion: version },
+    context: { type: "run", appId: app, runId },
+    sources: invocationSources(),
+    actor: runActorOf(run),
+    held,
+    requireHolds,
+  });
+  return {
+    principal: authority.onBehalfOf,
+    consumer: { resourceId: app, resourceVersion: version },
+    store:
+      release.store === null
+        ? noStore()
+        : fencedStore(
+            await openStore(env, release.store.storeId),
+            requireHolds
+          ),
+    requestId,
+    deadline,
+    runId,
+    // The one gate, as for a screen's call: before the call starts, each
+    // mutation commits and each resource request. The release, and the
+    // person, still a member with a role in the App; then, last, after
+    // every read, the step's attempt, so nothing runs for an attempt the
+    // engine let go of meanwhile. The commit and the request check the
+    // lease once more, synchronously, just before they start.
+    authorize: async () => {
+      await requireNotRevoked(env, app, version);
+      const role = await memberRole(env.DB, authority.onBehalfOf);
+      if (role === undefined) {
+        throw permissionErrors.create("permission.person_inactive");
+      }
+      const roles = await operationRoles(
+        env,
+        { userId: authority.onBehalfOf, role },
+        app
+      );
+      await stillCurrent();
+      return roles;
+    },
+    resources: keyedUnderRun(bindings, runId, requireHolds),
+  };
+};
+
+/**
+ * The public function `reference` names in `release`, of its kind: an
+ * internal one is refused as one that doesn't exist.
+ */
+const publicFunctionOf = (
+  release: Release,
+  reference: { readonly contractId: string; readonly kind: string }
+) => {
+  const operation = Object.hasOwn(release.app.operations, reference.contractId)
+    ? release.app.operations[reference.contractId]
+    : undefined;
+  if (operation === undefined || operation.visibility !== "public") {
+    throw operationErrors.create("operation.not_found");
+  }
+  if (operation.kind !== reference.kind) {
+    throw operationErrors.create("operation.kind_mismatch");
+  }
+  return operation;
+};
+
+const encoder = new TextEncoder();
+
+/** Whether `text` is more than `max` bytes as UTF-8, read no further than needed. */
+const isOverBytes = (text: string, max: number): boolean =>
+  text.length > max ||
+  (text.length * 3 > max && encoder.encode(text).byteLength > max);
+
+/** A call's request, as a screen or agent sends it (spec 32.6). */
+const functionRequestSchema = z.strictObject({
+  reference: z.strictObject({
+    resourceId: z.string().min(1).max(128),
+    resourceVersion: z.int().min(1),
+    contractId: z.string().min(1).max(256),
+    fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+    kind: z.enum(["query", "mutation", "action"]),
+  }),
+  input: z.unknown(),
+  idempotencyKey: z.string().optional(),
+});
+
+/** A call's request, read. */
+export type FunctionRequest = z.infer<typeof functionRequestSchema>;
+
+/**
+ * The call `request` (its JSON text, as its caller sent it), bounded
+ * before it is read: `contract.input_too_large` past the bound, and
+ * `contract.invalid_request` for anything that isn't a call.
+ */
+export const readFunctionRequest = (request: unknown): FunctionRequest => {
+  if (typeof request !== "string") {
+    throw operationErrors.create("contract.invalid_request");
+  }
+  if (isOverBytes(request, functionRequestMaxBytes)) {
+    throw operationErrors.create("contract.input_too_large", {
+      maxBytes: functionRequestMaxBytes,
+    });
+  }
+  try {
+    return functionRequestSchema.parse(JSON.parse(request));
+  } catch {
+    throw operationErrors.create("contract.invalid_request");
+  }
+};
+
+/**
+ * The path of the public function `reference` names exactly in
+ * `release`: refused as one that doesn't exist (`operation.not_found`)
+ * when there is none or it is internal, `operation.kind_mismatch` for
+ * another kind, and `version.mismatch` for another App, version or
+ * contract than the release's.
+ */
+export const publicOperationOf = (
+  release: Release,
+  reference: FunctionRequest["reference"]
+): string => {
+  const operation = Object.hasOwn(release.app.operations, reference.contractId)
+    ? release.app.operations[reference.contractId]
+    : undefined;
+  // An internal function is refused as one that doesn't exist.
+  if (operation === undefined || operation.visibility !== "public") {
+    throw operationErrors.create("operation.not_found");
+  }
+  if (operation.kind !== reference.kind) {
+    throw operationErrors.create("operation.kind_mismatch");
+  }
+  if (
+    reference.resourceId !== release.manifest.resourceId ||
+    reference.resourceVersion !== release.manifest.resourceVersion ||
+    release.fingerprints[operation.path] !== reference.fingerprint
+  ) {
+    throw versionErrors.create("version.mismatch");
+  }
+  return operation.path;
+};
+
+/** What a call answers (spec 32.6). */
+export interface FunctionAnswer {
+  readonly result: OperationResult;
+  /**
+   * Where what the call read through its resources comes from, with its
+   * classification (spec 32.3): the Knowledge collections, and whether
+   * any was sensitive or restricted, and each connection read from with
+   * the resources its connector named. Null when no function ran.
+   */
+  readonly provenance: InvocationProvenance | null;
+  /** The fingerprint of the contract that ran, when one did. */
+  readonly fingerprint: string | null;
+  /** The release that ran, when one did. */
+  readonly manifestHash: string | null;
+}
+
+/** `error` as the caller may see it, before any function ran. */
+export const refusalOf = (
+  error: unknown,
+  requestId: string
+): AppErrorPayload => {
+  const expected = isExpectedError(error)
+    ? error
+    : internalErrors.create("internal.unexpected", { requestId });
+  return {
+    code: expected.code,
+    message: expected.message,
+    category: categoryOf(expected.code),
+    retryable: isRetryableCode(expected.code),
+    requestId,
+  };
+};
+
+/**
+ * Calls a public function of App `app` for `by` (spec 32.6): `request`
+ * is the call as its caller sent it, as text, bounded before it is read.
+ * It runs only against the release of the App's current version, and
+ * only if its reference names exactly a public function there (see the
+ * header); then through the operation host, which decides the rest.
+ * Never throws.
+ */
+export const callAppFunction = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: unknown,
+  request: unknown,
+  deadline = Date.now() + platformLimits.serverInvocationWallMs,
+  stillAllowed?: () => Promise<void>,
+  /** The sandbox session (its call ID) of the Code Mode run that calls. */
+  parentSession?: string
+): Promise<FunctionAnswer> => {
+  const requestId = crypto.randomUUID();
+  const refused = (error: unknown): FunctionAnswer => ({
+    result: { ok: false, error: refusalOf(error, requestId) },
+    provenance: null,
+    fingerprint: null,
+    manifestHash: null,
+  });
+  let call: FunctionRequest;
+  try {
+    call = readFunctionRequest(request);
+  } catch (error) {
+    return refused(error);
+  }
+  let release: Release;
+  let path: string;
+  try {
+    // Anyone without a role in the App learns nothing of it.
+    const found = await appFor(env, by, app, "user");
+    if (found.currentVersion === null) {
+      throw versionErrors.create("version.not_sealed");
+    }
+    // The release of the App's current version: its manifest names the
+    // App and the version the reference must name.
+    release = await loadRelease(env, found.id, found.currentVersion);
+    path = publicOperationOf(release, call.reference);
+  } catch (error) {
+    return refused(error);
+  }
+  try {
+    const sources = invocationSources();
+    const invocation = await invocationFor(env, release, {
+      by,
+      requestId,
+      deadline,
+      ...(stillAllowed === undefined ? {} : { stillAllowed }),
+      sources,
+    });
+    const result = await callOperation(
+      hostedRelease(env, release),
+      invocation,
+      { path, kind: call.reference.kind },
+      call.input,
+      {
+        ...(call.idempotencyKey === undefined
+          ? {}
+          : { idempotencyKey: call.idempotencyKey }),
+        ...(parentSession === undefined ? {} : { parentSession }),
+      }
+    );
+    return {
+      result,
+      provenance: sources.snapshot(),
+      fingerprint: call.reference.fingerprint,
+      manifestHash: release.manifestHash,
+    };
+  } catch (error) {
+    return refused(error);
+  }
+};
+
+/**
+ * A function as a workflow step names it: a generated reference, or just
+ * its path and kind. Only those are read; a reference's App, version and
+ * fingerprint, where it has them, must be exactly the run's.
+ */
+const runReferenceSchema = z.object({
+  contractId: z.string().min(1).max(256),
+  kind: z.enum(["query", "mutation", "action"]),
+  resourceId: z.string().min(1).max(128).optional(),
+  resourceVersion: z.int().min(1).optional(),
+  fingerprint: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/u)
+    .optional(),
+});
+
+/**
+ * Calls a public function of a workflow run's own App for one of its
+ * steps (`env.APP.callFunction`, workflows/host.ts): only in the release
+ * of the version the run is pinned to, as the run (`runInvocationFor`),
+ * under `idempotencyKey`, which core derived from the step's. What it
+ * answers, or why it failed, as a screen's call gets it (spec 32.6).
+ * Never throws.
+ */
+export const callRunFunction = async (
+  env: Env,
+  caller: RunCaller,
+  reference: unknown,
+  input: unknown,
+  idempotencyKey: string
+): Promise<OperationResult> => {
+  const { app, version } = caller.run;
+  try {
+    const named = runReferenceSchema.safeParse(reference);
+    if (!named.success) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    const release = await loadRelease(env, app, version);
+    const operation = publicFunctionOf(release, named.data);
+    const { resourceId, resourceVersion, fingerprint } = named.data;
+    // Another App's function, another version's or another contract's:
+    // refused before any of its input is read.
+    if (
+      (resourceId !== undefined && resourceId !== app) ||
+      (resourceVersion !== undefined && resourceVersion !== version) ||
+      (fingerprint !== undefined &&
+        release.fingerprints[operation.path] !== fingerprint)
+    ) {
+      throw versionErrors.create("version.mismatch");
+    }
+    return await callOperation(
+      hostedRelease(env, release),
+      await runInvocationFor(env, release, {
+        ...caller,
+        // No longer than the step's attempt, nor than any call of an App's.
+        deadline: Math.min(caller.deadline, Date.now() + callTimeoutMs(env)),
+      }),
+      { path: operation.path, kind: operation.kind },
+      input,
+      { idempotencyKey }
+    );
+  } catch (error) {
+    return { ok: false, error: refusalOf(error, caller.requestId) };
+  }
+};

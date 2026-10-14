@@ -45,11 +45,13 @@ export const allowedTools = [
   "mail.export",
   "mail.forward",
   "mail.list",
+  "mail.mixed",
   "mail.open",
   "mail.photo",
   "mail.read",
   "mail.search",
   "mail.send",
+  "mail.unsure",
 ];
 
 /**

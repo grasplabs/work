@@ -96,6 +96,30 @@ describe("a run's host", () => {
     ]);
   });
 
+  it("is told with every status when the run's first activation started, so the newest of a batch says it too", async () => {
+    const id = newId();
+    await workflow("orders").create({ id });
+    await ended("orders", id);
+    await notifiedWith(id, "complete");
+    const { activations } = await outboxEmpty("orders", id);
+
+    const notifications = notifiedOf(id);
+    const first = activations[0]?.started_at;
+
+    expect({
+      queued: notifications[0]?.firstActivatedAt,
+      later: notifications
+        .slice(1)
+        .map(({ firstActivatedAt }) => firstActivatedAt),
+      started: typeof first,
+    }).toStrictEqual({
+      // Handed over before any activation, or with the batch after it.
+      queued: notifications[0]?.firstActivatedAt === null ? null : first,
+      later: notifications.slice(1).map(() => first),
+      started: "number",
+    });
+  });
+
   it("is told a restart's statuses in a new generation, their sequences going on", async () => {
     const id = newId();
     await workflow("orders").create({ id });

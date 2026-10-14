@@ -7,6 +7,8 @@ import type {
   ModelSpender,
 } from "@grasp-os/shared/models";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
+import type { ModelBindingBudget } from "@grasp-os/shared/resource-bindings";
 import { inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -40,6 +42,34 @@ import { microsPerDollar } from "./model-prices.ts";
 // month), so none of them starts afresh. It has a budget only where the
 // deployment sets `run`; whatever it sets, a lineage makes at most
 // {@link lineageModelRequests} provider requests.
+//
+// A model binding of an App (resource-bindings.ts) may have caps of its
+// own, set by the admin who approved it, on top of all these: per UTC
+// month and day, scopes of the ledger like the others (`bindingScopes`),
+// and per request of the App as a whole, which the gateway holds every
+// provider request of that request to (`bindingRequestMicros`, models.ts).
+// How each way a binding could spend past its caps is closed:
+//
+// - Requests racing a day's or month's cap: the ledger admits each
+//   provider request against the binding's scopes in the same transaction
+//   as every other scope, so concurrent requests never oversubscribe it.
+// - A retry or a second attempt escaping the cap per request: each
+//   provider request reserves its own bound, and is admitted only if it
+//   fits beside what the request's earlier ones still hold; one whose
+//   outcome is unknown holds all of its reservation, so a retry after a
+//   server error never gets its room back. A request's provider requests
+//   go one at a time, so its own count needs no lock.
+// - An answer streaming past the cap: a request reserves the most its
+//   answer can cost (the declaration's token bound) before it is sent, so
+//   no answer outgrows what was admitted.
+// - A cap changed or revoked between requests: the binding's row is read
+//   for every request (resource-bindings.ts), each admission takes the
+//   caps as they are then, and a revoked binding sends nothing. Spend is
+//   keyed by the App and alias, so approving the alias again changes the
+//   cap and keeps what was spent.
+// - Caps stored damaged: the binding serves nothing, never uncapped.
+// - A model with no safe price: no cap can bound it, so it is refused, as
+//   under any other budget.
 
 type Budgets = z.output<typeof budgetsSchema>;
 type Budget = NonNullable<NonNullable<Budgets>["deployment"]>;
@@ -86,7 +116,7 @@ export const budgetMonth = (
  * The most provider requests one run lineage may make, retries included
  * (platform default: 100 model requests per run lineage).
  */
-export const lineageModelRequests = 100;
+export const { lineageModelRequests } = platformLimits;
 
 /** A scope a call counts against, and the budget the deployment sets for it. */
 interface Scoped {
@@ -174,6 +204,103 @@ export const scopesFor = (
       names,
     };
   });
+};
+
+const dayPattern = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/u;
+
+/**
+ * The UTC day a binding's daily cap counts in now, such as `2026-10-12`;
+ * tests set it with `MODEL_BUDGET_DAY`.
+ */
+export const budgetDay = (
+  env: Pick<Env, "MODEL_BUDGET_DAY">,
+  now = new Date()
+): string =>
+  env.MODEL_BUDGET_DAY !== undefined && dayPattern.test(env.MODEL_BUDGET_DAY)
+    ? env.MODEL_BUDGET_DAY
+    : now.toISOString().slice(0, "yyyy-mm-dd".length);
+
+/**
+ * The UTC month and day a request counts in, read off one clock: at a
+ * month's last instant both are that month's.
+ */
+export const budgetPeriods = (
+  env: Pick<Env, "MODEL_BUDGET_MONTH" | "MODEL_BUDGET_DAY">,
+  now = new Date()
+): { month: string; day: string } => ({
+  month: budgetMonth(env, now),
+  day: budgetDay(env, now),
+});
+
+/** A model binding a call is made through, with its own caps (resource-model.ts). */
+export interface BindingBudgetInput {
+  app: string;
+  alias: string;
+  budget: ModelBindingBudget | null;
+}
+
+/** A binding's `cap` as a limit in micros, alerting where its budget says. */
+const limitOf = (
+  budget: ModelBindingBudget | null,
+  cap: "perDay" | "perMonth"
+): Pick<LedgerScope, "limitMicros" | "alertMicros"> => {
+  const dollars = budget?.[cap];
+  if (budget === null || dollars === undefined) {
+    return { limitMicros: null, alertMicros: null };
+  }
+  const limitMicros = Math.round(dollars * microsPerDollar);
+  return {
+    limitMicros,
+    alertMicros: Math.ceil((limitMicros * budget.alertAt) / 100),
+  };
+};
+
+/**
+ * The scopes a call through a model binding counts against besides
+ * `scopesFor`'s: the binding's month and its UTC `day`, each with its cap
+ * where the binding sets one, and counted where it doesn't, so a cap set
+ * later counts what was already spent.
+ *
+ * Both are keyed by the App and alias, never the binding's row: approving
+ * the alias again (another budget, a later version's declaration) changes
+ * the cap, never what was spent against it. The day's key carries the
+ * day, so each day is counted on its own within the month the ledger
+ * keeps it under, and alerted once.
+ */
+export const bindingScopes = (
+  binding: BindingBudgetInput,
+  day: string
+): LedgerScope[] => {
+  const names = { app: binding.app, binding: binding.alias };
+  return [
+    {
+      scope: "binding",
+      key: JSON.stringify([binding.app, binding.alias]),
+      ...limitOf(binding.budget, "perMonth"),
+      limitRequests: null,
+      names,
+    },
+    {
+      scope: "binding_day",
+      key: JSON.stringify([binding.app, binding.alias, day]),
+      ...limitOf(binding.budget, "perDay"),
+      limitRequests: null,
+      names: { ...names, day },
+    },
+  ];
+};
+
+/**
+ * The most one request of the App through `binding` may reserve, every
+ * provider request it sends together, in micros; none without a cap.
+ */
+export const bindingRequestMicros = (
+  binding: BindingBudgetInput | undefined
+): number | undefined => {
+  const dollars = binding?.budget?.perRequest;
+  return dollars === undefined
+    ? undefined
+    : Math.round(dollars * microsPerDollar);
 };
 
 /** Whether any of `scopes` has a budget, which a request must fit. */

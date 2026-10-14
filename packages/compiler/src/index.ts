@@ -21,8 +21,25 @@ import type ScreenCompiler from "./worker.ts";
 export type { Diagnostic } from "./diagnostic.ts";
 export type { KitModules } from "./kit.ts";
 export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
-export type { ScreenBuild, ServerBuild, WorkflowBuild } from "./worker.ts";
+export type {
+  AppCodeBuild,
+  ScreenBuild,
+  ServerBuild,
+  WorkflowBuild,
+} from "./worker.ts";
 export {
+  appCodeFiles,
+  appCodeKind,
+  appTestFiles,
+  generatedModules,
+  isAppLayout,
+  isAppTestSuite,
+  isUnderAppTests,
+  strayTestFileMessage,
+  strayTestFiles,
+} from "./app-code.ts";
+export {
+  appCodeLimitErrors,
   buildFiles,
   limitErrors,
   serverFiles,
@@ -124,8 +141,17 @@ export const kitModules = async (assets: Fetcher): Promise<KitModules> =>
  * The workflow SDK's modules, which every App's workflows import
  * (`sdkImports`): one set per release.
  */
-export const sdkModules = async (assets: Fetcher): Promise<KitModules> =>
-  await readModules(assets, compilerAssets.sdkModules);
+export const workflowSdkModules = async (
+  assets: Fetcher
+): Promise<KitModules> =>
+  await readModules(assets, compilerAssets.workflowSdkModules);
+
+/**
+ * The SDK modules an App's server isolate loads (`serverSdkImports`),
+ * which a sealed release carries: one set per release.
+ */
+export const serverSdkModules = async (assets: Fetcher): Promise<KitModules> =>
+  await readModules(assets, compilerAssets.serverSdkModules);
 
 /**
  * How the compiler's isolate runs: no bindings, no importable env, no

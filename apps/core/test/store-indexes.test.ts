@@ -498,3 +498,22 @@ describe("SQLite's plans", () => {
     });
   });
 });
+
+describe("the store's own indexes", () => {
+  it("find a cascade's references by an index alone, never reading the references table", async () => {
+    const store = await newStore();
+    // As the commit's cascade asks it (store-host.ts, `#cascade`).
+    const plan = await planOf(
+      store,
+      'select "table_id", "record_id" from "sdk_record_refs" where ("sdk_record_refs"."to_table_id" = ? and "sdk_record_refs"."to_record_id" = ? and "sdk_record_refs"."cascade" = ?) limit ?',
+      "t",
+      "r",
+      1,
+      10
+    );
+
+    expect(plan).toBe(
+      "SEARCH sdk_record_refs USING COVERING INDEX sdk_record_refs_target_cascade (to_table_id=? AND to_record_id=? AND cascade=?)"
+    );
+  });
+});

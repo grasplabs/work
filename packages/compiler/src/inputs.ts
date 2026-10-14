@@ -3,7 +3,7 @@
  * Core uses these before it hashes and sends the files; the compiler again
  * on what it is sent.
  */
-import { appLimits } from "@grasp-os/shared/app-limits";
+import { appLimits, appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 
 import type { Diagnostic } from "./diagnostic.ts";
 
@@ -110,6 +110,72 @@ export const limitErrors = (files: Record<string, string>): Diagnostic[] => {
     errors.push(
       tooMuch(
         `The App's files have ${total} characters together; a build takes at most ${limits.totalLength}.`
+      )
+    );
+  }
+  return errors;
+};
+
+/**
+ * What a build takes of the modules the host generates for an App
+ * (`.grasp/`), apart from the App's own files, so an App at its limits
+ * still builds. The host writes them, never the App: each is derived from
+ * the App's manifest, which the host has already read and bounded
+ * (`appManifestMaxBytes`, whatever the size of the App's source), and
+ * restates its descriptors at most a few times over (as types and as
+ * values). So these bounds admit every manifest the platform accepts,
+ * and still cap what one build hands the compiler.
+ */
+const generatedLimits = {
+  files: 8,
+  fileLength: 4 * appManifestMaxBytes,
+  totalLength: 8 * appManifestMaxBytes,
+} as const;
+
+/** Whether `path` is where the host puts a module it generates. */
+const isGenerated = (path: string): boolean => path.startsWith(".grasp/");
+
+/**
+ * Why a build of an App's server code (`appCodeFiles`) is more than it
+ * takes: the App's own files held to the App's limits (`limitErrors`),
+ * the host's generated modules to their own.
+ */
+export const appCodeLimitErrors = (
+  files: Record<string, string>
+): Diagnostic[] => {
+  const own: Record<string, string> = {};
+  const generated: [string, string][] = [];
+  for (const [path, source] of Object.entries(files)) {
+    if (isGenerated(path)) {
+      generated.push([path, source]);
+    } else {
+      own[path] = source;
+    }
+  }
+  const errors = limitErrors(own);
+  if (generated.length > generatedLimits.files) {
+    errors.push(
+      tooMuch(
+        `The host generated ${generated.length} modules; a build takes at most ${generatedLimits.files}.`
+      )
+    );
+  }
+  const oversized = generated.filter(
+    ([, source]) => source.length > generatedLimits.fileLength
+  );
+  for (const [path, source] of oversized) {
+    errors.push(
+      tooMuch(
+        `This generated module has ${source.length} characters; a build takes at most ${generatedLimits.fileLength}.`,
+        path
+      )
+    );
+  }
+  const total = generated.reduce((sum, [, source]) => sum + source.length, 0);
+  if (total > generatedLimits.totalLength) {
+    errors.push(
+      tooMuch(
+        `The generated modules have ${total} characters together; a build takes at most ${generatedLimits.totalLength}.`
       )
     );
   }

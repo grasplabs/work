@@ -2,13 +2,20 @@ import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { startRun } from "../src/workflows/runs.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { endLiveRuns, finished, stepDone, stopped, woken } from "./runs.ts";
+import {
+  aroundEngine,
+  endLiveRuns,
+  finished,
+  stepDone,
+  stopped,
+  woken,
+} from "./runs.ts";
 import {
   auditedDuring,
   openRpc,
@@ -381,35 +388,45 @@ describe("runs", buildTime, () => {
     async () => {
       const builder = await personApi("builder");
       const app = await invoicesApp(builder);
-      // A run pinned to v1, where the limit is money, whose engine instance
-      // is slow to be created: its first step, where it records its values,
+      // A run pinned to v1, where the limit is money, whose engine run is
+      // slow to be created: its first step, where it records its values,
       // runs only after that.
-      const create = env.WORKFLOWS.create.bind(env.WORKFLOWS);
       const { promise: created, resolve: createNow } =
         Promise.withResolvers<null>();
-      const slow = vi
-        .spyOn(env.WORKFLOWS, "create")
-        .mockImplementationOnce(async (options) => {
-          await created;
-          return await create(options);
-        });
-      const starting = startRun(env, {
-        app: appIdSchema.parse(app),
-        workflow: workflowIdSchema.parse("invoices"),
-        input: undefined,
-        startedBy: builder.userId,
-        actor: { type: "system" },
-      });
-      await vi.waitFor(() => {
-        expect(slow).toHaveBeenCalledOnce();
-      });
-      // Meanwhile v2, where the limit is text, is current, with a text value.
-      // The run's first step reads the values then.
-      await release(builder, app, textLimitVersion());
-      await builder.api.workflows.params.set(app, "invoices", "limit", "none");
-      createNow(null);
-      const run = await starting;
-      slow.mockRestore();
+      const { promise: creating, resolve: createAsked } =
+        Promise.withResolvers<null>();
+      let slowed = false;
+      const run = await aroundEngine(
+        async (method, call) => {
+          if (method === "start" && !slowed) {
+            slowed = true;
+            createAsked(null);
+            await created;
+          }
+          return await call();
+        },
+        async () => {
+          const starting = startRun(env, {
+            app: appIdSchema.parse(app),
+            workflow: workflowIdSchema.parse("invoices"),
+            input: undefined,
+            startedBy: builder.userId,
+            actor: { type: "system" },
+          });
+          await creating;
+          // Meanwhile v2, where the limit is text, is current, with a text
+          // value. The run's first step reads the values then.
+          await release(builder, app, textLimitVersion());
+          await builder.api.workflows.params.set(
+            app,
+            "invoices",
+            "limit",
+            "none"
+          );
+          createNow(null);
+          return await starting;
+        }
+      );
       expect({
         pinned: await limitOfRun(builder, run.id),
         current: await runLimit(builder, app),

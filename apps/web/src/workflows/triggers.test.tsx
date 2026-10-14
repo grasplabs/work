@@ -1,0 +1,85 @@
+import type { WorkflowTrigger } from "@grasp-os/shared/workflows";
+import { i18n } from "@lingui/core";
+import { I18nProvider } from "@lingui/react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it } from "vite-plus/test";
+
+import { formatDateTime } from "../format.ts";
+import { WorkflowTriggers } from "./triggers.tsx";
+
+// What starts a workflow on its own, as its page lists it.
+
+/** The page's text, as a person reads it: tags gone, spaces collapsed. */
+const textOf = (triggers: WorkflowTrigger[]): string =>
+  renderToStaticMarkup(
+    <I18nProvider i18n={i18n}>
+      <WorkflowTriggers triggers={triggers} />
+    </I18nProvider>
+  )
+    .replaceAll(/<[^>]+>/gu, " ")
+    .replaceAll("&#x27;", "'")
+    .replaceAll(/\s+/gu, " ")
+    .trim();
+
+describe("a workflow's triggers", () => {
+  it("shows a schedule with its next run, and one that stopped", () => {
+    const nextRunAt = "2026-10-14T07:00:00.000Z";
+    const running = textOf([
+      {
+        type: "schedule",
+        position: 0,
+        param: "every",
+        timeZone: "Europe/Amsterdam",
+        nextRunAt,
+        stopped: false,
+      },
+    ]);
+    const stopped = textOf([
+      {
+        type: "schedule",
+        position: 0,
+        param: "every",
+        timeZone: "Europe/Amsterdam",
+        nextRunAt: null,
+        stopped: true,
+      },
+    ]);
+    expect([running, stopped]).toStrictEqual([
+      `On the schedule set by every (Europe/Amsterdam) Next run: ${formatDateTime(nextRunAt)}`,
+      "On the schedule set by every (Europe/Amsterdam) No next run Stopped",
+    ]);
+  });
+
+  it("shows an email trigger's address as the part before the @ it is, and an event trigger's event", () => {
+    // Core holds the local part only, as an email trigger declares it.
+    expect(
+      textOf([
+        { type: "email", position: 0, address: "invoices" },
+        { type: "event", position: 1, event: "invoice.paid" },
+      ])
+    ).toBe(
+      "When an email arrives for invoices The part of the address before the @, on the mail domain set up for Grasp. When the event invoice.paid happens"
+    );
+  });
+
+  it("shows two triggers alike in all it shows as two rows", () => {
+    // One event under two filters: the filters aren't shown, their places are what differs.
+    const markup = renderToStaticMarkup(
+      <I18nProvider i18n={i18n}>
+        <WorkflowTriggers
+          triggers={[
+            { type: "event", position: 0, event: "invoice.paid" },
+            { type: "event", position: 1, event: "invoice.paid" },
+          ]}
+        />
+      </I18nProvider>
+    );
+    expect(markup.match(/<li\b/gu)?.length).toBe(2);
+  });
+
+  it("says when nothing starts it on its own", () => {
+    expect(textOf([])).toBe(
+      "Nothing starts it on its own: it runs when someone starts it."
+    );
+  });
+});
