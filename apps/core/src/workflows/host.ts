@@ -62,6 +62,7 @@ import type { CollectionBinding } from "../knowledge/binding.ts";
 import { models } from "../models.ts";
 import { requireActivePerson, requireApprovedVersion } from "../permissions.ts";
 import type { StepModel } from "../resource-bindings.ts";
+import { tokensOfBound } from "../resource-model.ts";
 import { commitStepStatistics } from "../statistic-steps.ts";
 import type { AttemptFence } from "./attempt-fence.ts";
 import { AttemptHost } from "./attempt-host.ts";
@@ -251,19 +252,6 @@ const heldKeysOf = (marker: unknown): string[] => {
  * waiting, and waits for those: never runs on while one waits.
  */
 const heldKeysKept = 32;
-
-/**
- * How an AI step's request spends its binding's bound on the answer: the
- * request as a whole, as an App's request does (resource-model.ts). It may
- * ask once more for an answer that doesn't fit, so each ask gets half; a
- * bound too small to halve allows one ask only.
- */
-const stepTokens = (
-  maxOutputTokens: number
-): { maxTokens: number; askAgain: boolean } =>
-  maxOutputTokens < 2
-    ? { maxTokens: maxOutputTokens, askAgain: false }
-    : { maxTokens: Math.floor(maxOutputTokens / 2), askAgain: true };
 
 /** The field of a step's result that says its lineage was busy (`busyMarker`). */
 const busyField = `${coreStepPrefix}busy`;
@@ -1624,7 +1612,7 @@ export class RunHost extends RpcTarget {
                 model: bound.model,
                 // Its caps count each attempt as a request of its own.
                 binding: bound.binding,
-                ...stepTokens(bound.maxOutputTokens),
+                ...tokensOfBound(bound.maxOutputTokens, true),
                 system: instructions,
                 input,
                 schema,

@@ -132,9 +132,18 @@ const auditFailure = async (env: Env, record: CallRecord): Promise<void> => {
 };
 
 /** How a call that returned ended, for the audit log. */
-const callOutcome = ({ failed, replayed, pending }: CallDone): CallOutcome => {
+const callOutcome = ({
+  failed,
+  replayed,
+  pending,
+  reconciled,
+}: CallDone): CallOutcome => {
   if (pending !== undefined) {
     return "held";
+  }
+  // Recovered by finding the effect: the original's answer, not a send.
+  if (reconciled === true) {
+    return "reconciled";
   }
   if (replayed) {
     return "replayed";
@@ -561,6 +570,7 @@ export default class Connect
         outcome: outcomeOf(reason),
         reason: reason ?? "internal",
         replayed: progress.replayed,
+        recovery: progress.recovery,
         pendingActionId: held?.id,
       });
       throw lost ? connectErrors.create("connect.outcome_unknown") : error;
@@ -576,6 +586,7 @@ export default class Connect
       outcome: callOutcome(done),
       reason: done.failed ? "connect.action_failed" : undefined,
       replayed: done.replayed,
+      recovery: done.recovery,
       provenance: done.result.provenance,
       pendingActionId: done.pending?.id ?? held?.id,
     };

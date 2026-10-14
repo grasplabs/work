@@ -13,6 +13,7 @@ import {
 } from "./connect.ts";
 import type { Call } from "./connect.ts";
 import { fakeMcpServer } from "./mcp-server.ts";
+import { claimedAgo } from "./tool-calls.ts";
 
 // A side effect happens once per idempotency key, however often the call is
 // repeated, retried or replayed. Keys are chosen by App and agent code, so
@@ -203,6 +204,22 @@ describe("a side effect", () => {
       "connect.idempotency_conflict"
     );
     expect(server.ran).toHaveLength(1);
+  });
+
+  it("of a remote server, its outcome unknown, is never recovered, and its server never gets an effect key", async () => {
+    const connectionId = await addConnection();
+    const call = send(connectionId, "run-1:send");
+    server.network = "drop";
+    await outcome(callAs(anna, call));
+    // Long past the claim window, still within the horizon.
+    await claimedAgo({ id: connectionId });
+    await expect(outcome(callAs(anna, call))).resolves.toBe(
+      "connect.outcome_unknown"
+    );
+    expect({ ran: server.ran.length, meta: server.callMeta }).toStrictEqual({
+      ran: 1,
+      meta: [undefined],
+    });
   });
 
   it("that may have run before its answer was lost is never sent again", async () => {

@@ -45,7 +45,7 @@ const appWith = async (
   files: Record<string, string>
 ): Promise<string> =>
   await serverAppWith(builder, {
-    ...modelRegistration({ reader: 32_768, anywhere: 12_000, eu: 32_768 }),
+    ...modelRegistration({ reader: 32_768, anywhere: 6000, eu: 32_768 }),
     ...files,
   });
 
@@ -912,7 +912,7 @@ describe("model rules", { timeout: 60_000 }, () => {
         "reader",
         `  return await step.llm("extract", {
     description: "Read the total",
-    binding: "reader",
+    binding: "anywhere",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int() }),
@@ -930,7 +930,7 @@ describe("model rules", { timeout: 60_000 }, () => {
       },
       [],
       async () => {
-        await bindModel(app, "reader", workersAi);
+        await bindModel(app, "anywhere", workersAi);
         const started = await builder.api.workflows.start(app, "reader");
         await finished(started.id);
         return started;
@@ -1272,7 +1272,7 @@ export default app({
     ];
     const attemptOnce = async (change: () => Promise<unknown>) =>
       await withDeploymentRules(
-        { gateway, models: [workersAi, anthropic] },
+        { gateway, models: [workersAi, anthropic, euModel] },
         [
           ...failing,
           { text: '{ "total": 1234 }', inputTokens: 10, outputTokens: 5 },
@@ -1309,7 +1309,7 @@ export default app({
       );
     });
     const replaced = await attemptOnce(
-      async () => await bindModel(app, "reader", workersAi)
+      async () => await bindModel(app, "reader", euModel)
     );
     expect({
       revoked: {
@@ -1320,9 +1320,7 @@ export default app({
       replaced: {
         run: replaced.result,
         // The next attempt asked the model the new binding names.
-        lastToWorkersAi: replaced.fake.requests
-          .at(-1)
-          ?.url.includes("workers-ai"),
+        lastToEuModel: replaced.fake.requests.at(-1)?.url.includes("openai"),
       },
     }).toMatchObject({
       revoked: {
@@ -1334,7 +1332,7 @@ export default app({
       },
       replaced: {
         run: { status: "completed", output: { total: 1234 } },
-        lastToWorkersAi: true,
+        lastToEuModel: true,
       },
     });
   });

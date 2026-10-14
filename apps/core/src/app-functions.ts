@@ -23,6 +23,7 @@ import type {
 } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
@@ -923,7 +924,7 @@ export const callAppFunction = async (
   by: Pick<Identity, "userId" | "role" | "teams">,
   app: unknown,
   request: unknown,
-  deadline = Date.now() + 60_000,
+  deadline = Date.now() + platformLimits.serverInvocationWallMs,
   stillAllowed?: () => Promise<void>,
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
   parentSession?: string

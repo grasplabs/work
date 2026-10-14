@@ -123,7 +123,7 @@ describe("a workflow's runs on-prem", runTime, () => {
 
   it("runs its steps in a session, a model call going through the step's attempt host", async () => {
     const { builder, app } = await appWith({
-      ...modelRegistration({ extractor: 12_000 }),
+      ...modelRegistration({ extractor: 6000 }),
       ...workflowFiles(
         "reader",
         `  const total = await step.llm("extract", {

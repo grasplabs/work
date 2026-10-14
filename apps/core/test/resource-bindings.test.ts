@@ -60,6 +60,18 @@ import { openRpc, signedInWithRole } from "./sign-in.ts";
 /** The model the tests' deployment allows. */
 const allowedModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
+/**
+ * The `writer` token bound at which one request reserves some $0.009 for
+ * its longest answer: one fits a cent, two never do.
+ */
+const nearCentBound = 3800;
+
+/**
+ * The `writer` token bound at which one request reserves some $0.0117:
+ * more than a cent, one fits two cents, two never do.
+ */
+const overCentBound = 5000;
+
 /** An App whose actions use a text model and a structured one. */
 const modelFiles = (
   maxOutputTokens = 300,
@@ -610,6 +622,76 @@ describe("resource bindings", { timeout: 120_000 }, () => {
     });
   });
 
+  it("bind a model only when it can give each request's share of the declared bound", async () => {
+    // Llama 3.3 answers at most a quarter of its 24,000-token window. The
+    // text writer asks for its whole bound at once; the structured tagger
+    // for half, as it may ask again.
+    const sealed = await sealedApp(modelFiles(6001, 12_000));
+    const admin = await person("admin");
+    const refused = await failure(
+      async () =>
+        await approveResourceBinding(env, admin, writerApproval(sealed))
+    );
+    await approveModel(sealed, "tagger");
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      answer('{"tags": ["launch"]}'),
+    ]);
+    const tagged = await call(withGateway, sealed, "assist.tag", {
+      text: "Notes",
+    });
+    const writers = await listResourceBindings(env, admin, sealed.app);
+    expect({
+      refused,
+      bound: writers.filter(({ alias }) => alias === "writer").length,
+      tagged: outcomeOf(tagged),
+      sent: gateway.requests.map(({ body }) => body),
+    }).toStrictEqual({
+      refused: "resource.model_too_small",
+      bound: 0,
+      tagged: { tags: ["launch"] },
+      sent: [expect.objectContaining({ max_completion_tokens: 6000 })],
+    });
+  });
+
+  it("hold a resource no action uses yet to what an action would ask", async () => {
+    // A later version may add an action using the alias, and the binding
+    // would serve it while the declaration stays the same.
+    const files = modelFiles();
+    const sealed = await sealedApp({
+      ...files,
+      "operations/assist.ts": `${files["operations/assist.ts"] ?? ""}
+export const idle = resource.model("idle", { maxOutputTokens: 6001 });
+`,
+      "app.ts": (files["app.ts"] ?? "")
+        .replace("twice, writer }", "twice, writer, idle }")
+        .replace(
+          "uses: [writer, tagger, labeler]",
+          "uses: [writer, tagger, labeler, idle]"
+        ),
+    });
+    await expect(
+      failure(async () => await approveModel(sealed, "idle"))
+    ).resolves.toBe("resource.model_too_small");
+  });
+
+  it("send an App's request the whole bound a model can answer", async () => {
+    const sealed = await sealedApp(modelFiles(6000));
+    await approveModel(sealed, "writer");
+    const { gateway, gatewayEnv: withGateway } = gatewayEnv([
+      answer("A long draft."),
+    ]);
+    const drafted = await call(withGateway, sealed, "assist.draft", {
+      prompt: "Hi",
+    });
+    expect({
+      drafted: outcomeOf(drafted),
+      sent: gateway.requests.map(({ body }) => body),
+    }).toStrictEqual({
+      drafted: "A long draft.",
+      sent: [expect.objectContaining({ max_completion_tokens: 6000 })],
+    });
+  });
+
   it("enforce a model's structured output, asking again once", async () => {
     const sealed = await sealedApp(modelFiles());
     await approveModel(sealed, "tagger");
@@ -718,7 +800,7 @@ describe("resource bindings", { timeout: 120_000 }, () => {
   });
 
   it("count every request against the person's budget", async () => {
-    const sealed = await sealedApp(modelFiles(100_000));
+    const sealed = await sealedApp(modelFiles(overCentBound));
     await approveModel(sealed, "writer");
     // Less than the longest answer the declaration allows could cost:
     // refused by the ledger before anything is sent.
@@ -1532,18 +1614,6 @@ const approveWriter = async (
   });
 
 /**
- * The `writer` token bound at which one request reserves some $0.009 for
- * its longest answer: one fits a cent, two never do.
- */
-const nearCentBound = 3800;
-
-/**
- * The `writer` token bound at which one request reserves some $0.0117:
- * more than a cent, one fits two cents, two never do.
- */
-const overCentBound = 5000;
-
-/**
  * An answer that uses most of what a `nearCentBound` request reserves,
  * some $0.0084, and never more: past 80% of a cent on its own.
  */
@@ -2347,6 +2417,29 @@ describe("an App's resource review", { timeout: 120_000 }, () => {
           },
         },
       ],
+    });
+  });
+
+  it("offers an admin only the models that can give a model resource's longest request", async () => {
+    // Llama 3.3 answers at most 6,000 tokens; GPT-5.4 68,000. The text
+    // writer asks for all 6,001 at once, the structured tagger for half.
+    const sealed = await sealedApp(modelFiles(6001, 12_000));
+    const { gatewayEnv: withGateway } = gatewayEnv(
+      [],
+      [allowedModel, "openai/gpt-5.4"]
+    );
+    const review = await reviewResourceBindings(
+      withGateway,
+      await person("admin"),
+      sealed.app
+    );
+    expect(
+      Object.fromEntries(
+        review.resources.map(({ alias, choices }) => [alias, choices])
+      )
+    ).toMatchObject({
+      writer: { kind: "model", models: ["openai/gpt-5.4"] },
+      tagger: { kind: "model", models: [allowedModel, "openai/gpt-5.4"] },
     });
   });
 

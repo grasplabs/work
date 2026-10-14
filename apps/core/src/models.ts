@@ -147,27 +147,32 @@ const workersAiMaxTokens = 32_768;
 const defaultMaxTokens = 16_384;
 
 /**
- * When the call doesn't say, an answer takes at most one in this many of
- * the model's window. Providers such as Workers AI count the answer's cap
- * against the window, so on a small one (Llama 3.3's 24,000 tokens)
- * {@link defaultMaxTokens} would leave too little for the request itself.
+ * An answer takes at most one in this many of the model's window.
+ * Providers such as Workers AI count the answer's cap against the window
+ * and refuse a request whose total is over it, so on a small one (Llama
+ * 3.3's 24,000 tokens) an answer of the whole window would leave nothing
+ * for the request itself.
  */
 const windowPerAnswer = 4;
+
+/**
+ * The longest answer `model` can usefully give one request: its own
+ * maximum, and no more than its share of the window. The one measure both
+ * a model binding's approval and every call go by.
+ */
+const usableAnswer = (model: Model<Api>): number =>
+  model.contextWindow > 0
+    ? Math.min(
+        model.maxTokens,
+        Math.floor(model.contextWindow / windowPerAnswer)
+      )
+    : model.maxTokens;
 
 /** The most tokens a request's answer may take, as the request says it. */
 const answerTokens = (
   call: { maxTokens?: number },
   model: Model<Api>
-): number => {
-  const fallback =
-    model.contextWindow > 0
-      ? Math.min(
-          defaultMaxTokens,
-          Math.floor(model.contextWindow / windowPerAnswer)
-        )
-      : defaultMaxTokens;
-  return Math.min(call.maxTokens ?? fallback, model.maxTokens);
-};
+): number => Math.min(call.maxTokens ?? defaultMaxTokens, usableAnswer(model));
 
 /**
  * How long a call may take, retries included, when it doesn't say; and the
@@ -318,7 +323,10 @@ const purposePattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/u;
 const sessionShape = {
   /** `<provider>/<model>`, one the deployment allows. */
   model: z.string().min(1),
-  /** The most tokens the answer may take; capped at the model's limit. */
+  /**
+   * The most tokens the answer may take: capped at what the model can
+   * usefully give (`usableAnswer`), or refused for a call through a binding.
+   */
   maxTokens: z.int().positive().optional(),
   /** How long a request may take, in milliseconds, retries included. */
   timeoutMs: z.int().positive().max(maxTimeoutMs).optional(),
@@ -441,6 +449,12 @@ export interface ModelAnswer<Output> {
   cost: number;
 }
 
+/** The most tokens `ref`'s answers may take, as the gateway sends them. */
+const maxTokensOf = (ref: ModelRef): number =>
+  ref.provider === "workers-ai"
+    ? Math.min(ref.catalog.maxTokens, workersAiMaxTokens)
+    : ref.catalog.maxTokens;
+
 /**
  * The model, pointed at the deployment's gateway over the AI binding: the
  * gateway's route for the provider's native API, the same path as over
@@ -449,11 +463,22 @@ export interface ModelAnswer<Output> {
 const gatewayModel = (gateway: string, ref: ModelRef): Model<Api> => ({
   ...ref.catalog,
   baseUrl: `https://workers-binding.ai/ai-gateway/gateways/${gateway}/${providers[ref.provider].path}`,
-  maxTokens:
-    ref.provider === "workers-ai"
-      ? Math.min(ref.catalog.maxTokens, workersAiMaxTokens)
-      : ref.catalog.maxTokens,
+  maxTokens: maxTokensOf(ref),
 });
+
+/**
+ * The longest answer model `<provider>/<model>` can usefully give one
+ * request (`usableAnswer`); undefined for a model the gateway doesn't
+ * offer. A model binding is approved only when its declaration's longest
+ * request fits (resource-model.ts), and a call through a binding that asks
+ * for more is refused, never cut short.
+ */
+export const usableAnswerTokens = (model: string): number | undefined => {
+  const ref = parseModelRef(model);
+  return ref === undefined
+    ? undefined
+    : usableAnswer({ ...ref.catalog, maxTokens: maxTokensOf(ref) });
+};
 
 const gatewayHeaders = (call: Session): ProviderHeaders => ({
   // The binding authenticates the request. pi still wants auth before it
@@ -1731,6 +1756,15 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     // Never expected: its provenance is kept to what fits, and every other
     // field is bounded. Refused, so no request goes unrecorded.
     throw modelErrors.create("model.invalid_call");
+  }
+  // A binding's bound is the App's to rely on: a request it can't fit is
+  // refused, as its approval would be now, never cut short.
+  if (
+    call.binding !== undefined &&
+    call.maxTokens !== undefined &&
+    call.maxTokens > usableAnswer(gatewayModel(config.gateway, ref))
+  ) {
+    return await refuse(env, call, { code: "model.answer_too_long" });
   }
   const verdict = await judgeCall(env, rules, call);
   if (!verdict.ok) {

@@ -8,7 +8,11 @@
  * write out and loses its answer.
  */
 import { egressHeader } from "@grasp-os/connector-kit/manifest";
-import { graphHost } from "@grasp-os/connector-microsoft-365/graph";
+import {
+  effectPropertyId,
+  graphHost,
+} from "@grasp-os/connector-microsoft-365/graph";
+import { beforeEach } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -49,6 +53,59 @@ const numberOf = (id: string): number => Number(id.at(-2)) || 1;
 
 const draftSchema = z.object({ subject: z.string() });
 
+/** A message as Graph takes it, with the extended properties it carries. */
+const taggedSchema = z.object({
+  singleValueExtendedProperties: z
+    .array(z.object({ id: z.string(), value: z.string() }))
+    .optional(),
+});
+
+/**
+ * The messages Graph made that carry an effect key, by key: the mailbox
+ * they are in and their ID. Cleared before each test.
+ */
+const tagged = new Map<string, { mailbox: string; id: string }>();
+
+/** Keeps the effect key a made message carries, if it carries one. */
+const keepTag = (mailbox: string, id: string, made: unknown): void => {
+  const value = taggedSchema
+    .safeParse(made)
+    .data?.singleValueExtendedProperties?.find(
+      (property) => property.id === effectPropertyId
+    )?.value;
+  if (value !== undefined) {
+    tagged.set(value, { mailbox, id });
+  }
+};
+
+/** Runs once while Graph answers the next lookup by effect key. */
+let duringLookup: (() => Promise<void>) | undefined;
+
+/** The effect key a lookup's `$filter` asks for, if it asks for one. */
+const keyFilter =
+  /^singleValueExtendedProperties\/Any\(ep: ep\/id eq '(?<id>[^']+)' and ep\/value eq '(?<key>[^']+)'\)$/u;
+
+/** Graph's answer to a lookup of a message by its effect key. */
+const foundByKey = (mailbox: string, filter: string): Response => {
+  const asked = keyFilter.exec(filter)?.groups;
+  if (asked?.id !== effectPropertyId) {
+    return json({ error: { code: "BadRequest" } }, 400);
+  }
+  const found = tagged.get(asked.key ?? "");
+  return json({
+    value:
+      found?.mailbox === mailbox
+        ? [
+            {
+              id: found.id,
+              conversationId: "AAQkAGE1M2IyNGNmLTI5MTktFound=",
+              webLink: `https://outlook.office365.com/owa/?ItemID=${found.id}`,
+            },
+          ]
+        : [],
+  });
+};
+
 const route = (
   method: string,
   path: string,
@@ -59,8 +116,16 @@ const graphRoutes: ProviderRoute<Part>[] = [
   route(
     "GET",
     `${users}(?:/mailFolders/[^/]+)?/messages`,
-    ({ mailbox, query }) =>
-      json(messagePage(mailbox, Number(query.get("$skip") ?? 0)))
+    async ({ mailbox, query }) => {
+      const filter = query.get("$filter") ?? "";
+      if (!filter.startsWith("singleValueExtendedProperties/")) {
+        return json(messagePage(mailbox, Number(query.get("$skip") ?? 0)));
+      }
+      const meanwhile = duringLookup;
+      duringLookup = undefined;
+      await meanwhile?.();
+      return foundByKey(mailbox, filter);
+    }
   ),
   route("GET", `${users}/messages/(?<id>[^/]+)`, ({ mailbox, id, request }) => {
     if (id === spoofedId) {
@@ -100,10 +165,17 @@ const graphRoutes: ProviderRoute<Part>[] = [
   route("POST", `${users}/messages/(?<id>[^/]+)/move`, ({ mailbox, id }) =>
     json(moved(mailbox, numberOf(id)), 201)
   ),
-  route("POST", `${users}/sendMail`, () => new Response(null, { status: 202 })),
+  route("POST", `${users}/sendMail`, async ({ mailbox, request }) => {
+    const sent = z.object({ message: z.unknown() }).parse(await request.json());
+    keepTag(mailbox, `sent-${crypto.randomUUID()}`, sent.message);
+    return new Response(null, { status: 202 });
+  }),
   route("POST", `${users}/messages`, async ({ mailbox, request }) => {
-    const { subject } = draftSchema.parse(await request.json());
-    return json(draft(mailbox, subject), 201);
+    const body: unknown = await request.json();
+    const { subject } = draftSchema.parse(body);
+    const made = draft(mailbox, subject);
+    keepTag(mailbox, made.id, body);
+    return json(made, 201);
   }),
   route("GET", `${users}/calendarView`, ({ mailbox, query }) =>
     json(eventPage(mailbox, query.get("$skiptoken")))
@@ -148,6 +220,10 @@ const sharePointAnswer = (url: URL): Response => {
 
 /** Graph, SharePoint and the rest of the internet, for each test in the file. */
 export const fakeGraph = () => {
+  beforeEach(() => {
+    tagged.clear();
+    duringLookup = undefined;
+  });
   const { sent, writesDone, fail } = fakeProvider({
     hosts: [graphHost],
     parts,
@@ -186,6 +262,27 @@ export const fakeGraph = () => {
         body: body ?? { error: { code: "Failed" } },
         writesOnly: true,
       });
+    },
+    /**
+     * Makes Graph throttle the next write, and only it, running
+     * `meanwhile` while the write is with it.
+     */
+    throttleWriteWhile: (meanwhile: () => Promise<void>) => {
+      fail({
+        status: 429,
+        body: throttled,
+        headers: { "retry-after": "7" },
+        writesOnly: true,
+        meanwhile,
+      });
+    },
+    /** Runs `meanwhile` while Graph answers the next lookup by effect key. */
+    whileLookingUp: (meanwhile: () => Promise<void>) => {
+      duringLookup = meanwhile;
+    },
+    /** Makes Graph answer the next request, a read too, with `status`. */
+    failNext: (status: number) => {
+      fail({ status, body: { error: { code: "Failed" } } });
     },
     /** Makes Graph carry out the next write, then lose its answer. */
     loseWriteAnswer: () => {
