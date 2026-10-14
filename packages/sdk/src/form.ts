@@ -289,6 +289,26 @@ const freshKey = (): string =>
     byte.toString(16).padStart(2, "0")
   ).join("");
 
+/**
+ * An issue's path as TanStack names the field: `items[0].name`, array
+ * indexes in brackets, keys after dots.
+ */
+const fieldName = (path: StandardSchemaV1.Issue["path"]): string => {
+  let name = "";
+  for (const segment of path ?? []) {
+    const key = typeof segment === "object" ? segment.key : segment;
+    if (typeof key === "number") {
+      name += `[${key}]`;
+    } else {
+      name += name === "" ? String(key) : `.${String(key)}`;
+    }
+  }
+  return name;
+};
+
+/** The form's own field a TanStack field name lies in: `items` of `items[0].name`. */
+const rootField = (name: string): string => name.split(/[.[]/u)[0] ?? "";
+
 /** TanStack's form-level error for `issues`: field errors and the rest. */
 const errorsOf = (
   issues: readonly StandardSchemaV1.Issue[],
@@ -300,12 +320,8 @@ const errorsOf = (
   const fields: Record<string, string> = {};
   const rest: string[] = [];
   for (const issue of issues) {
-    const name = (issue.path ?? [])
-      .map((segment) =>
-        typeof segment === "object" ? String(segment.key) : String(segment)
-      )
-      .join(".");
-    if (name !== "" && editable(name.split(".")[0] ?? "")) {
+    const name = fieldName(issue.path);
+    if (name !== "" && editable(rootField(name))) {
       fields[name] ??= issue.message;
     } else {
       rest.push(issue.message);
@@ -393,6 +409,8 @@ export class FormBinding {
   #form: FormApiOf<Record<string, unknown>> | undefined;
   #options: FormOptionsInput;
   #pending: Promise<unknown> | undefined;
+  /** How many submissions started: a callback speaks only for the latest. */
+  #started = 0;
   /** A submission whose outcome is unknown, asked again as it was until discarded. */
   #uncertain: Submission | undefined;
   /** The record the draft started from, and the latest supplied. */
@@ -692,6 +710,7 @@ export class FormBinding {
   }
 
   async #submitOnce(): Promise<unknown> {
+    this.#started += 1;
     const submission = await this.#prepare();
     if ("issues" in submission) {
       throw clientError("contract.invalid_args", {
@@ -819,18 +838,24 @@ export class FormBinding {
         this.#formOf().reset(this.initialValues, { keepDefaultValues: true });
       }
     }
-    void this.#notify(result);
+    void this.#notify(result, this.#started);
     return undefined;
   }
 
-  /** Runs `onSuccess` once, for a mounted form; its failure is its own. */
-  async #notify(result: unknown): Promise<void> {
+  /**
+   * Runs `onSuccess` once, for a mounted form; its failure is its own,
+   * shown only while no later submission (`started`) has begun.
+   */
+  async #notify(result: unknown, started: number): Promise<void> {
     if (this.#options.onSuccess === undefined || !this.#mounted) {
       return;
     }
     try {
       await this.#options.onSuccess(result);
     } catch (error) {
+      if (started !== this.#started) {
+        return;
+      }
       this.#set({
         applicationError:
           error instanceof Error && error.message !== ""

@@ -275,3 +275,76 @@ describe("an operation form's fields without a default", () => {
     });
   });
 });
+
+describe("a form's issues on an array's items", () => {
+  it("names an item's field as TanStack does, so the issue shows beside it", async () => {
+    const schema = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: (value: unknown) => ({ value }),
+      },
+    } as const;
+    const binding = new FormBinding(
+      { kind: "schema", schema },
+      { items: [{ name: "" }] },
+      {
+        onSubmit: () => {
+          throw new GraspError({
+            code: "contract.invalid_args",
+            message: "Invalid arguments.",
+            category: "contract",
+            retryable: false,
+            requestId: null,
+            details: {
+              issues: [{ message: "Name it.", path: ["items", 0, "name"] }],
+            },
+          });
+        },
+      }
+    );
+    mounted(binding);
+    await settle(binding.submit());
+    expect(binding.status().fieldIssues).toStrictEqual({
+      "items[0].name": "Name it.",
+    });
+  });
+});
+
+describe("a form's onSuccess that fails late", () => {
+  it("never speaks over a later submission that went through", async () => {
+    const { promise: firstCallback, reject } = Promise.withResolvers<null>();
+    const callbacks = [
+      async () => {
+        await firstCallback;
+      },
+      async () => {
+        await Promise.resolve();
+      },
+    ];
+    const binding = new FormBinding(
+      {
+        kind: "operation",
+        args: api.notes.create.args,
+        send: async () => await Promise.resolve("saved"),
+      },
+      { title: "Twice", body: "" },
+      {
+        onSuccess: async () => {
+          await callbacks.shift()?.();
+        },
+      }
+    );
+    mounted(binding);
+    await binding.submit();
+    await binding.submit();
+    reject(new Error("The first one's follow-up failed."));
+    // Every callback settled, its rejection among them.
+    const { promise: later, resolve } = Promise.withResolvers<null>();
+    setTimeout(() => {
+      resolve(null);
+    }, 0);
+    await later;
+    expect(binding.status().applicationError).toBeUndefined();
+  });
+});
