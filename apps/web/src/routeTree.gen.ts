@@ -53,6 +53,7 @@ import { Route as ShellWorkflowsAppWorkflowRouteImport } from './routes/_shell.w
 import { Route as AppsAppScreensScreenRouteImport } from './routes/apps.$app.screens.$screen'
 import { Route as ShellEnginesEngineAppsScreenRouteImport } from './routes/_shell.engines.$engine.apps.$screen'
 import { Route as EnginesEngineAppsScreenFullRouteImport } from './routes/engines.$engine.apps.$screen.full'
+import { Route as ShellWorkflowsAppWorkflowRunsRunRouteImport } from './routes/_shell.workflows.$app.$workflow_.runs.$run'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -279,6 +280,12 @@ const EnginesEngineAppsScreenFullRoute =
     path: '/engines/$engine/apps/$screen/full',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ShellWorkflowsAppWorkflowRunsRunRoute =
+  ShellWorkflowsAppWorkflowRunsRunRouteImport.update({
+    id: '/workflows/$app/$workflow_/runs/$run',
+    path: '/workflows/$app/$workflow/runs/$run',
+    getParentRoute: () => ShellRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -324,6 +331,7 @@ export interface FileRoutesByFullPath {
   '/engines/$engine/': typeof ShellEnginesEngineIndexRoute
   '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
   '/engines/$engine/apps/$screen/full': typeof EnginesEngineAppsScreenFullRoute
+  '/workflows/$app/$workflow/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 export interface FileRoutesByTo {
   '/guest': typeof GuestRoute
@@ -367,6 +375,7 @@ export interface FileRoutesByTo {
   '/engines/$engine': typeof ShellEnginesEngineIndexRoute
   '/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
   '/engines/$engine/apps/$screen/full': typeof EnginesEngineAppsScreenFullRoute
+  '/workflows/$app/$workflow/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -414,6 +423,7 @@ export interface FileRoutesById {
   '/_shell/engines/$engine/': typeof ShellEnginesEngineIndexRoute
   '/_shell/engines/$engine/apps/$screen': typeof ShellEnginesEngineAppsScreenRoute
   '/engines/$engine/apps/$screen/full': typeof EnginesEngineAppsScreenFullRoute
+  '/_shell/workflows/$app/$workflow_/runs/$run': typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -461,6 +471,7 @@ export interface FileRouteTypes {
     | '/engines/$engine/'
     | '/engines/$engine/apps/$screen'
     | '/engines/$engine/apps/$screen/full'
+    | '/workflows/$app/$workflow/runs/$run'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/guest'
@@ -504,6 +515,7 @@ export interface FileRouteTypes {
     | '/engines/$engine'
     | '/engines/$engine/apps/$screen'
     | '/engines/$engine/apps/$screen/full'
+    | '/workflows/$app/$workflow/runs/$run'
   id:
     | '__root__'
     | '/_shell'
@@ -550,6 +562,7 @@ export interface FileRouteTypes {
     | '/_shell/engines/$engine/'
     | '/_shell/engines/$engine/apps/$screen'
     | '/engines/$engine/apps/$screen/full'
+    | '/_shell/workflows/$app/$workflow_/runs/$run'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -874,6 +887,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EnginesEngineAppsScreenFullRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_shell/workflows/$app/$workflow_/runs/$run': {
+      id: '/_shell/workflows/$app/$workflow_/runs/$run'
+      path: '/workflows/$app/$workflow/runs/$run'
+      fullPath: '/workflows/$app/$workflow/runs/$run'
+      preLoaderRoute: typeof ShellWorkflowsAppWorkflowRunsRunRouteImport
+      parentRoute: typeof ShellRoute
+    }
   }
 }
 
@@ -947,6 +967,7 @@ interface ShellRouteChildren {
   ShellWorkflowsAppWorkflowRoute: typeof ShellWorkflowsAppWorkflowRoute
   ShellEnginesEngineIndexRoute: typeof ShellEnginesEngineIndexRoute
   ShellEnginesEngineAppsScreenRoute: typeof ShellEnginesEngineAppsScreenRoute
+  ShellWorkflowsAppWorkflowRunsRunRoute: typeof ShellWorkflowsAppWorkflowRunsRunRoute
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
@@ -971,6 +992,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellWorkflowsAppWorkflowRoute: ShellWorkflowsAppWorkflowRoute,
   ShellEnginesEngineIndexRoute: ShellEnginesEngineIndexRoute,
   ShellEnginesEngineAppsScreenRoute: ShellEnginesEngineAppsScreenRoute,
+  ShellWorkflowsAppWorkflowRunsRunRoute: ShellWorkflowsAppWorkflowRunsRunRoute,
 }
 
 const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)

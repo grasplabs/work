@@ -9,13 +9,10 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
+import { queryMaxReruns } from "../src/call-limits.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
 import type { OpenStore } from "../src/data-stores.ts";
-import {
-  queryMaxReruns,
-  readConsistently,
-  StoreReader,
-} from "../src/store-reader.ts";
+import { readConsistently, StoreReader } from "../src/store-reader.ts";
 import { memberRoles, newRecordId } from "./store-schemas.ts";
 
 // A query operation's reads as one state of the store (spec 6.3), through

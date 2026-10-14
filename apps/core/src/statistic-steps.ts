@@ -1,11 +1,25 @@
 import { statisticRowsPerDay } from "@grasp-os/shared/statistics";
 import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
+import { and, gte, lt } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+
+import { appStatisticSteps } from "./db/core/schema.ts";
 
 // The statistics points of a workflow run's steps (`app_statistic_steps`):
 // each attempt's are kept as they are recorded (`recordStatistic`,
 // statistics.ts), and added up once, when the step completes. Here: what
 // a run's engine does with them, apart from statistics.ts, which the
 // engine can't import.
+
+/**
+ * That run `?4` hasn't ended, as the statement runs: a run's end forgets
+ * its steps' points in the write that ends it (`stepStatisticsForgotten`),
+ * so a step completing after that adds up nothing and leaves no marker,
+ * whichever write comes first.
+ */
+const unendedRun =
+  "SELECT 1 FROM workflow_runs r WHERE r.id = ?4 AND r.ended_at IS NULL";
 
 /**
  * Adds up the points attempt `attempt` of the step `stepKey` recorded, in
@@ -19,12 +33,15 @@ import { stepIdempotencyKey } from "@grasp-os/shared/workflows";
  * a point, so other steps get no row. Points other attempts recorded,
  * one the engine gave up on included, are never added.
  *
+ * Only while run `runId` hasn't ended (`unendedRun`).
+ *
  * The day's bound (`statisticRowsPerDay`) is checked here, exactly: of
  * the new rows the points would make, in the order of their measure and
  * dimensions, those past the bound are left out.
  */
 export const commitStepStatistics = async (
   env: Env,
+  runId: string,
   stepKey: string,
   attempt: string
 ): Promise<void> => {
@@ -54,6 +71,7 @@ export const commitStepStatistics = async (
              SELECT 1 FROM app_statistic_steps c
              WHERE c.step_key = ?1 AND c.committed = 1
            )
+           AND EXISTS (${unendedRun})
        )
        WHERE known OR held + nth <= ?3
        ON CONFLICT (app_id, measure, day, dimensions) DO UPDATE SET
@@ -61,32 +79,40 @@ export const commitStepStatistics = async (
          sum = sum + excluded.sum,
          min = min(min, excluded.min),
          max = max(max, excluded.max)`
-    ).bind(stepKey, attempt, statisticRowsPerDay),
+    ).bind(stepKey, attempt, statisticRowsPerDay, runId),
     env.DB.prepare(
       `INSERT OR IGNORE INTO app_statistic_steps
          (step_key, attempt, app_id, measure, day, dimensions, count, sum, min, max, committed)
-       VALUES (?, ?, '', '', '', '', 0, 0, 0, 0, 1)`
-    ).bind(stepKey, attempt),
+       SELECT ?1, ?2, '', '', '', '', 0, 0, 0, 0, 1 WHERE EXISTS (${unendedRun})`
+    ).bind(stepKey, attempt, statisticRowsPerDay, runId),
   ]);
 };
 
 /**
- * Forgets the points the steps of run `runId` recorded, once it has ended:
- * an ended run is never replayed, so none of them is added up any more.
- * None is kept after either: a point is kept only while its run hasn't
- * ended (`recordStatistic`), and the run is marked ended before this.
+ * Forgets the points the steps of run `runId` recorded, in the batch that
+ * ends it (runs.ts, `projectStatus`): an ended run is never replayed, so
+ * none of them is added up any more, and its end and the cleanup are
+ * written together, or neither. None is kept after either: a point is
+ * kept only while its run hasn't ended (`recordStatistic`). Deleting what
+ * is already gone deletes nothing. `also`: only if it holds as the
+ * statement runs, in its batch.
  */
-export const forgetStepStatistics = async (
-  env: Env,
-  runId: string
-): Promise<void> => {
+export const stepStatisticsForgotten = (
+  db: DrizzleD1Database,
+  runId: string,
+  also?: SQL
+) => {
   // Every key of the run's steps starts with its ID and a colon
   // (`stepIdempotencyKey`), and no other run's does: a range of the
   // primary key, up to the character after the colon.
   const first = stepIdempotencyKey(runId, "");
-  await env.DB.prepare(
-    "DELETE FROM app_statistic_steps WHERE step_key >= ? AND step_key < ?"
-  )
-    .bind(first, `${first.slice(0, -1)};`)
-    .run();
+  return db
+    .delete(appStatisticSteps)
+    .where(
+      and(
+        gte(appStatisticSteps.stepKey, first),
+        lt(appStatisticSteps.stepKey, `${first.slice(0, -1)};`),
+        also
+      )
+    );
 };

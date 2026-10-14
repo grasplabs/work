@@ -1,5 +1,5 @@
-import { canonicalJson } from "@grasp-os/shared/json";
-import type { Json } from "@grasp-os/shared/json";
+import { appManifestMaxBytes } from "@grasp-os/shared/app-limits";
+import { canonicalText } from "@grasp-os/shared/json";
 import { appMaxOperations } from "@grasp-os/shared/operation-limits";
 
 import { app, AppDefinitionError, inspectApp } from "./app.ts";
@@ -9,6 +9,8 @@ import type {
   ScreenDefinition,
   TableVerbs,
 } from "./app.ts";
+import { migration } from "./migration.ts";
+import type { Migration } from "./migration.ts";
 import {
   isBrowserResource,
   isResource,
@@ -34,19 +36,13 @@ import type { AnySchema } from "./value-schema.ts";
 // again, through the same constructors App code uses: its schema through
 // `readSchemaManifest`, each function through `serverModule(schema)` with
 // schemas rebuilt from its descriptors and a handler that runs nothing,
-// each resource through `resource`, and the App through `app`. What that
+// each resource through `resource`, each migration through `migration`
+// (its handler running nothing too), and the App through `app`. What that
 // registration's inspection makes must then be exactly the manifest read,
 // canonically: anything a declaration couldn't have made (a widened verb,
 // a use of something unregistered, a public function in the internal
 // tree, a key no declaration has, a descriptor out of bounds) is refused.
 // There is no other path from text to an `AppManifest`.
-
-/**
- * The most bytes of an App's manifest's text, as UTF-8, checked before it
- * is parsed: room for the schema's own megabyte and every function's
- * descriptors.
- */
-export const appManifestMaxBytes = 4 * 1024 * 1024;
 
 const refuse = (message: string): never => {
   throw new AppDefinitionError(message);
@@ -266,14 +262,57 @@ const screensFrom = (input: unknown): ScreenDefinition[] =>
     } as ScreenDefinition;
   });
 
-/** The canonical text of `value`, which is JSON data. */
-const canonicalText = (value: unknown): string => {
-  // SAFETY: what JSON.parse answers is JSON; and what is read here
-  // (manifests, verb maps) is JSON data to begin with.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  const json = JSON.parse(JSON.stringify(value) ?? "null") as Json;
-  return canonicalJson(json);
-};
+/**
+ * A manifest's fixtures as a declaration lists them: `expect` left out
+ * where the manifest records null. Anything else is passed on as it is,
+ * for `migration` to refuse.
+ */
+const fixturesFrom = (fixtures: unknown): unknown =>
+  Array.isArray(fixtures)
+    ? fixtures.map((fixture: unknown) =>
+        isPlainObject(fixture) &&
+        hasExactly(fixture, ["row", "expect"]) &&
+        fixture.expect === null
+          ? { row: fixture.row }
+          : fixture
+      )
+    : fixtures;
+
+/** The migrations of the manifest, declared again, in the order filed. */
+const migrationsFrom = (input: unknown): Migration[] =>
+  entriesOf(input, "migrations").map(([name, declared]) => {
+    if (
+      !hasExactly(declared, [
+        "name",
+        "table",
+        "fromSchema",
+        "toSchema",
+        "input",
+        "output",
+        "fixtures",
+      ])
+    ) {
+      return refuse(
+        `Migration \`${name}\` isn't a migration as a manifest holds one.`
+      );
+    }
+    if (declared.name !== name) {
+      return refuse(`Migration \`${name}\` is filed under another name.`);
+    }
+    // SAFETY: `migration` checks each part as it checks a declaration's,
+    // and `app` checks it against the schema.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return migration({
+      name,
+      table: declared.table,
+      fromSchema: declared.fromSchema,
+      toSchema: declared.toSchema,
+      ...(declared.input === null ? {} : { input: schemaFrom(declared.input) }),
+      output: schemaFrom(declared.output),
+      fixtures: fixturesFrom(declared.fixtures),
+      handler: inert,
+    } as Parameters<typeof migration>[0]);
+  });
 
 /** Whether two verb maps grant the same verbs on every table. */
 const sameVerbs = (
@@ -310,10 +349,11 @@ export const readAppManifest = (text: string): AppManifest => {
       "browserResources",
       "screens",
       "preferences",
+      "migrations",
     ])
   ) {
     return refuse(
-      "An App's manifest is `{ name, schema, operations, resources, browserResources, screens, preferences }`."
+      "An App's manifest is `{ name, schema, operations, resources, browserResources, screens, preferences, migrations }`."
     );
   }
   const { schema, manifest: schemaManifest } = readSchemaManifest(
@@ -399,6 +439,7 @@ export const readAppManifest = (text: string): AppManifest => {
         ? {}
         : { preferences: schemaFrom(data.preferences) }),
       uses: [...resources.values(), ...browser.values()],
+      migrations: migrationsFrom(data.migrations),
     } as Parameters<typeof app>[0];
     return inspectApp(app(definition)).manifest;
   };

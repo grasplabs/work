@@ -23,12 +23,15 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  check:
-    name: check
+  # Everything but `vp test`, once: format, lint and types, the repo checks,
+  # the build, and that generated files are committed. Part of the required
+  # `check` (below).
+  static:
+    name: static
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
-    # A passing run takes 9 to 12 minutes, most of it `vp test`.
-    timeout-minutes: 20
+    # About 2 minutes with a warm cache (October 2026).
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,25 +49,73 @@ jobs:
       - run: vp run check:docs
       - run: vp run check:migrations
       - run: vp run check:wrangler-configs
-      # 8 to 10.5 minutes when it passes. Vitest's default runs a worker per
-      # CPU but one, which left a third of the runner's CPU idle; a worker
-      # per CPU measured about 6% faster.
+      - run: vp run -r build
+      # The console isn't deployed from here (see deploy-staging): check that
+      # its build is a Worker wrangler would deploy. No credentials needed.
+      - run: vp exec wrangler deploy --dry-run
+        working-directory: apps/console
+      # Generated files (Worker types, route trees, migrations, the
+      # frontend's translation catalogs) must be committed.
+      - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
+      - run: git diff --exit-code && test -z "$(git status --porcelain)"
+
+  # `vp test` in shards, a runner each: unsharded, one passing run reached
+  # 16 minutes at about 5,300 tests (October 2026). Vitest gives each shard
+  # its part of the test files, split by a hash of each file's path, so the
+  # shards together run every file once. Add a shard by adding to `shard`:
+  # `--shard` takes the count from the matrix. Part of the required `check`
+  # (below).
+  test:
+    name: test (${{ matrix.shard }}/${{ strategy.job-total }})
+    if: github.event_name != 'push'
+    runs-on: ubuntu-latest
+    # The test step's 16 minutes, and room for the steps around it.
+    timeout-minutes: 22
+    strategy:
+      # A failing shard doesn't cancel the other: each says what failed in
+      # it.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: voidzero-dev/setup-vp@3754dd7dbdb32bd8f6d28b6043de13ad3a75f21f # v1.21.1
+        with:
+          node-version-file: .node-version
+          cache: true
+          run-install: |
+            - args: ["--frozen-lockfile"]
+      # Unsharded, the step took about 9.5 minutes at about 5,350 tests
+      # (October 2026), and up to 16 on a slow runner. Split in two, it
+      # took 6.5 and 9 minutes: the split is by file, not by time, and
+      # core's heaviest files can land together, while each shard still
+      # starts its own workerd for every project. 16 minutes leaves room
+      # for a slow runner on the heavier shard.
+      # Vitest's default runs a worker per CPU but one, which left a third
+      # of the runner's CPU idle; a worker per CPU measured about 6% faster.
       # Vitest times a test out from inside its worker, so a worker that is
       # blocked, or whose request workerd cancelled, never reports its test.
       # The stall reporter (scripts/stall-reporter.ts) names such a test or
       # file and ends the run once it is well past its timeout. A hang
       # outside any test (teardown, shutting the pool down) fails at this
-      # step's timeout after 16 minutes, instead of at the job's limit: half
-      # again over the slowest pass. A minute before that, the reporter
-      # prints the files and tests still running, and each finished test is
-      # in the test-progress artifact. "0 files, 0 tests" there means the
-      # hang is in teardown or in shutting the pool down. Reporters given
-      # here replace Vitest's defaults, so github-actions is listed for the
-      # inline failure annotations.
-      - run: vp test --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
+      # step's timeout, instead of at the job's limit. Two minutes before
+      # that, the reporter prints the files and tests still running, and
+      # each finished test is in the shard's test-progress artifact. "0
+      # files, 0 tests" there means the hang is in teardown or in shutting
+      # the pool down. A run that doesn't pass says why in the shard's step
+      # summary and as an annotation: the reporter's verdict, or Vitest's
+      # failed files and unhandled errors (a worker that exits shows as
+      # one), with the runner's memory.
+      # Reporters given here replace Vitest's defaults, so github-actions is
+      # listed for the inline failure annotations.
+      - run: vp test --shard=${{ matrix.shard }}/${{ strategy.job-total }} --maxWorkers=100% --reporter=default --reporter=github-actions --reporter=./scripts/stall-reporter.ts
         timeout-minutes: 16
         env:
-          GRASP_STALL_REPORT_AFTER_MINUTES: 15
+          # Below the step's timeout, so the reporter says what still runs
+          # before the step is killed.
+          GRASP_STALL_REPORT_AFTER_MINUTES: 14
           # Seconds past a test's own timeout (counted for each attempt):
           # room for the hooks around it, which have timeouts of their own.
           # The longest is 120 s, set by workerflow's process tests
@@ -77,19 +128,47 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-progress
+          # One per shard: a run's artifact names are unique.
+          name: test-progress-${{ matrix.shard }}-of-${{ strategy.job-total }}
           path: ${{ runner.temp }}/test-progress.log
           if-no-files-found: ignore
           retention-days: 14
-      - run: vp run -r build
-      # The console isn't deployed from here (see deploy-staging): check that
-      # its build is a Worker wrangler would deploy. No credentials needed.
-      - run: vp exec wrangler deploy --dry-run
-        working-directory: apps/console
-      # Generated files (Worker types, route trees, migrations, the
-      # frontend's translation catalogs) must be committed.
-      - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
-      - run: git diff --exit-code && test -z "$(git status --porcelain)"
+      # What the runner looked like when the job failed: its memory, the
+      # processes holding the most (workerd left running shows here), and
+      # any process the kernel killed for memory, which ends a step with
+      # nothing of its own to say.
+      - if: failure()
+        run: |
+          free -m
+          ps -eo pid,ppid,rss,etime,args --sort=-rss | head -n 15 | cut -c 1-200
+          if kernel_log=$(sudo dmesg --ctime 2>&1); then
+            grep -iE 'out of memory|oom-kill|killed process' <<< "$kernel_log" || echo "The kernel killed no process for memory."
+          else
+            echo "The kernel log is unavailable, so an OOM kill can't be ruled out: $kernel_log"
+          fi
+
+  # The one required check (.github/rulesets/main.json) for static and every
+  # test shard, so sharding leaves the ruleset as it is. It runs however
+  # they ended, and passes only if all of them passed: GitHub counts a
+  # skipped required check as passing, so this job mustn't be skipped when
+  # one of them failed, was cancelled or was skipped.
+  check:
+    name: check
+    needs: [static, test]
+    if: always() && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: |
+          echo "static: $STATIC, test shards: $TEST"
+          if [ "$STATIC" != success ] || [ "$TEST" != success ]; then
+            echo "::error title=check::static ended as $STATIC and the test shards as $TEST; check passes only when both succeed."
+            exit 1
+          fi
+        env:
+          STATIC: ${{ needs.static.result }}
+          # A matrix job's result: a failure if any shard failed.
+          TEST: ${{ needs.test.result }}
 
   e2e:
     name: e2e
@@ -243,7 +322,7 @@ jobs:
       # there and refuses every request without an Access application
       # (apps/console/src/access.ts). It deploys only to grasp-os-ops, with
       # deploy-ops. A real staging console would need a route and its own
-      # Access application first. The check job still proves it builds.
+      # Access application first. The static job still proves it builds.
 
   # The router on its own: its deploy needs the account's Secrets Store
   # (scripts/wrangler-deploy.ts), and an account not set up for it yet

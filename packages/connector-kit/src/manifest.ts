@@ -24,9 +24,9 @@ export const provenanceMetaKey = "grasp-os/provenance";
  * provider rate limited it, say, before it sent any write. A connector
  * sets it with `new ToolError(message, { notPerformed: true })`. Connect
  * then frees the call's idempotency key and answers
- * `connect.server_unavailable`, which a workflow step retries. Without it,
- * a tool's error is final: the tool may have acted before it failed, so
- * its answer is kept for the key.
+ * `connect.server_unavailable`, which a workflow step retries. Without it
+ * (or `outcomeUnknownMetaKey`), a tool's error is final: the action
+ * failed, and its answer is kept for the key.
  *
  * Connect takes this only from native connectors, whose code is ours and
  * reviewed. A Composio or other remote server setting it is ignored: its
@@ -36,6 +36,69 @@ export const provenanceMetaKey = "grasp-os/provenance";
  * may send one for its provider's 429 after a first write.
  */
 export const notPerformedMetaKey = "grasp-os/not-performed";
+
+/**
+ * Result `_meta` key: `true` on an error result (`isError`) says the tool
+ * can't tell whether its write took effect: the request may have reached
+ * the provider, and its answer was lost or can't be read (a dropped
+ * connection, a server error, a timeout, an answer the tool can't parse
+ * after a write the provider took). A connector sets it with
+ * `new ToolError(message, { outcomeUnknown: true })`; `providerFetch` does
+ * for every such answer to a write, and the kit for any error a writing
+ * tool didn't foresee. Connect then answers `connect.outcome_unknown` and
+ * spends the call's idempotency key, as for a call whose answer it lost
+ * itself: the call is never sent again under that key, and its error is
+ * never kept as the answer, which a caller could take for "nothing was
+ * done" (spec 14.3, 44).
+ *
+ * Connect takes this from any server: believing it can only stop a repeat,
+ * never cause one.
+ */
+export const outcomeUnknownMetaKey = "grasp-os/outcome-unknown";
+
+/**
+ * Call `_meta` key (`tools/call` params): the call's effect key, 64
+ * lowercase hex characters, which connect derives from the call's whole
+ * idempotency scope (who, for whom, which connection, action, resource and
+ * key) and sends to native connectors only, for a side effect. It is the
+ * same for every attempt of one call and differs between calls, so a tool
+ * may give it to its provider (an idempotency key, a tag on what it makes)
+ * and find the effect by it later (`findMetaKey`). It never holds the
+ * caller's own key, which App code chooses.
+ */
+export const effectKeyMetaKey = "grasp-os/effect-key";
+
+/**
+ * Call `_meta` key: `true` asks the tool to look its effect up by the
+ * effect key instead of carrying the call out (an action whose recovery is
+ * `find`). It answers the effect's result if it happened; an error saying
+ * it isn't there (`effectAbsentMetaKey`) if it certainly didn't; any other
+ * error if it can't tell.
+ */
+export const findMetaKey = "grasp-os/find";
+
+/**
+ * Result `_meta` key: `true` on a lookup's error result says the call's
+ * effect certainly isn't there (its `find` returned null), so connect may
+ * send the call. Only this says so: a lookup that failed, however it
+ * failed (a 429 says the GET did nothing, not that the effect is absent),
+ * leaves the call unknown.
+ */
+export const effectAbsentMetaKey = "grasp-os/effect-absent";
+
+/** An effect key, as connect derives it: a SHA-256, in lowercase hex. */
+export const effectKeyPattern = /^[0-9a-f]{64}$/u;
+
+/**
+ * How connect may recover a call of an action once its outcome is unknown
+ * (spec 14.3): `none`, it stays unknown; `repeat`, it is sent again under
+ * the same effect key, because it can't take effect twice (the provider
+ * keeps the key, or the write sets a state); `find`, the tool looks its
+ * effect up by the key first (`findMetaKey`). A read-only action is
+ * always `none`: it has no effect to recover.
+ */
+export const recoveryModes = ["none", "repeat", "find"] as const;
+export type RecoveryMode = (typeof recoveryModes)[number];
 
 /**
  * Response header on the answers connect's egress gives itself: `refused`
@@ -207,6 +270,9 @@ const actionDescribeSchema = z.strictObject({
 });
 export type ActionDescribe = z.infer<typeof actionDescribeSchema>;
 
+/** A JSON Schema of a tool's input or output, as plain JSON data. */
+const jsonSchemaObject = z.record(z.string(), z.json());
+
 /**
  * What connect knows of one action (tool) before running it, and decides
  * by before it reads a token: whether it is read-only, the input property
@@ -217,12 +283,24 @@ export type ActionDescribe = z.infer<typeof actionDescribeSchema>;
 const actionManifestSchema = z.strictObject({
   routes: z.array(routeSchema).max(maxRoutes),
   readOnly: z.boolean(),
+  /** How a call of unknown outcome may be recovered (`recoveryModes`). */
+  recovery: z.enum(recoveryModes),
   resource: z
     .string()
     .regex(/^[A-Za-z_]\w*$/u)
     .nullable(),
   input: z.array(z.string().min(1).max(128)).max(128),
   describe: actionDescribeSchema.optional(),
+  /**
+   * Its input and its output, as the JSON Schemas the connector's own
+   * schemas make: the generated contract an App's resource binding is
+   * checked against (spec 12), in both directions. Data only: connect
+   * never runs anything from them.
+   */
+  contract: z.strictObject({
+    input: jsonSchemaObject,
+    output: jsonSchemaObject,
+  }),
 });
 export type ActionManifest = z.infer<typeof actionManifestSchema>;
 
@@ -272,6 +350,17 @@ export const connectorManifestSchema = z
   .refine(
     ({ actions }) =>
       Object.values(actions).every(
+        ({ readOnly, recovery, routes }) =>
+          (!readOnly || recovery === "none") &&
+          (recovery !== "find" || routes.some(({ method }) => method === "GET"))
+      ),
+    // Nothing to recover of a read; and a lookup reads, through the egress,
+    // on one of the action's own routes.
+    "A read-only action recovers nothing, and one that finds its effect declares the GET it finds it by"
+  )
+  .refine(
+    ({ actions }) =>
+      Object.values(actions).every(
         ({ routes }) =>
           routes.filter(({ method }) => method !== "GET" && method !== "HEAD")
             .length <= 1
@@ -282,6 +371,49 @@ export const connectorManifestSchema = z
     "An action may declare at most one write (a method other than GET or HEAD)"
   );
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
+
+/** One action of a generated connector contract, and the tool it calls. */
+export interface ContractAction {
+  /** The connector's tool, e.g. `mail.send`. */
+  readonly tool: string;
+  readonly declared: ActionManifest;
+}
+
+/**
+ * The one major version connector contracts are generated at: a change of
+ * an action's shape is drift on the bindings that use it, never a new
+ * major.
+ */
+export const generatedContractMajor = 1;
+
+/** An action's name in a contract: what an App's declaration may list. */
+const contractActionPattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
+
+/**
+ * The contracts `manifest` generates (spec 12): one per family of its
+ * tools, `<connector>.<family>@1`, holding each tool of the family under
+ * its name after the family (`mail.send` is `send` of
+ * `microsoft-365.mail@1`). Connect serves contracts from this, and the
+ * SDK's connector catalog is typed from it, so both name the same
+ * contracts and actions.
+ */
+export const generatedContracts = (
+  manifest: ConnectorManifest
+): ReadonlyMap<string, ReadonlyMap<string, ContractAction>> => {
+  const contracts = new Map<string, Map<string, ContractAction>>();
+  for (const [tool, declared] of Object.entries(manifest.actions)) {
+    const dot = tool.indexOf(".");
+    const action = tool.slice(dot + 1);
+    if (dot > 0 && contractActionPattern.test(action)) {
+      const contract = `${manifest.name}.${tool.slice(0, dot)}@${generatedContractMajor}`;
+      const actions =
+        contracts.get(contract) ?? new Map<string, ContractAction>();
+      actions.set(action, { tool, declared });
+      contracts.set(contract, actions);
+    }
+  }
+  return contracts;
+};
 
 const decodedSegment = (segment: string): string | undefined => {
   try {

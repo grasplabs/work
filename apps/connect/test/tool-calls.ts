@@ -4,6 +4,7 @@
  */
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectionPerson, ConnectResult } from "@grasp-os/shared/connect";
+import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { agentFor, callAs, outcome } from "./connect.ts";
@@ -148,3 +149,21 @@ export const parsedRequests = (sent: readonly SentRequest[]) =>
       body: parsed,
     };
   });
+
+/** How long connect waits on a call's claim before it may recover it. */
+const claimTimeoutMs = 5 * 60 * 1000;
+
+/**
+ * Moves the connection's calls back by `ms` (past the claim timeout,
+ * unless told), their first and last claims both: as if made that long ago.
+ */
+export const claimedAgo = async (
+  { id }: Pick<Connection, "id">,
+  ms = claimTimeoutMs + 1000
+): Promise<void> => {
+  await env.DB.prepare(
+    "UPDATE idempotent_calls SET claimed_at = claimed_at - ?1, created_at = created_at - ?1 WHERE connection_id = ?2"
+  )
+    .bind(ms, id)
+    .run();
+};

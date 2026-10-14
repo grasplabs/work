@@ -87,6 +87,27 @@ export class App extends DurableObject {
     return ["x".repeat(${appCallLimits.answerBytes})];
   }
 
+  // An answer of exactly \`bytes\` bytes of UTF-8 JSON.
+  sizedAnswer(_caller: Caller, input: { bytes: number }): string[] {
+    return ["x".repeat(input.bytes - 4)];
+  }
+
+  // Adds a customer, then answers exactly \`bytes\` bytes of UTF-8 JSON.
+  addThenAnswer(caller: Caller, input: { bytes: number }): string[] {
+    this.addCustomer(caller, { name: "Initech" });
+    return this.sizedAnswer(caller, input);
+  }
+
+  // Calls \`method\` of the App \`binding\` names with input it builds here,
+  // past what a screen may send: \`{ query }\` of exactly \`inputBytes\` bytes,
+  // or \`{ bytes: answerBytes }\`. Answers how many bytes the answer was, or
+  // why it was refused, never the answer itself.
+  async probe(caller: Caller, binding: string, method: string, size: { inputBytes?: number; answerBytes?: number }): Promise<unknown> {
+    const input = size.inputBytes === undefined ? { bytes: size.answerBytes } : { query: "x".repeat(size.inputBytes - 12) };
+    const answered = (await this.via(caller, binding, method, input)) as { ok?: unknown };
+    return "ok" in answered ? { bytes: new TextEncoder().encode(JSON.stringify(answered.ok)).byteLength } : answered;
+  }
+
   // Holds the App until the test lets go, then calls another App: how
   // independent calls come to wait in each other's Apps.
   async hold(_caller: Caller, wait: () => Promise<void>): Promise<string> {
@@ -180,6 +201,16 @@ const exported = {
   },
   hugeAnswer: {
     access: "read",
+    input: anyObject,
+    output: { type: "array", items: {} },
+  },
+  sizedAnswer: {
+    access: "read",
+    input: anyObject,
+    output: { type: "array", items: {} },
+  },
+  addThenAnswer: {
+    access: "write",
     input: anyObject,
     output: { type: "array", items: {} },
   },
@@ -483,6 +514,12 @@ const setUp = async () => {
   return { admin, clerk, invoicing, crm };
 };
 
+/** Whether a probe's call was answered, or why it was refused. */
+const answered = (probed: unknown): unknown =>
+  typeof probed === "object" && probed !== null && "bytes" in probed
+    ? "answered"
+    : probed;
+
 describe("calls between Apps", { timeout: 60_000 }, () => {
   // Lets go of every hold the test made (`holds`).
   afterEach(() => {
@@ -645,6 +682,83 @@ describe("calls between Apps", { timeout: 60_000 }, () => {
     await expect(call("findCustomers", { query: "BV" })).resolves.toBe(
       "no binding"
     );
+  });
+
+  it("hold an export's input and answer to the public operation limits, in bytes", async () => {
+    const { admin, clerk, invoicing, crm } = await setUp();
+    await grantCalls(admin, invoicing, crm, ["read"], "CRM");
+    // Spec 18.1: 128 KiB in, 256 KiB out, as for any public operation.
+    const inputLimit = 128 * 1024;
+    const answerLimit = 256 * 1024;
+    const probe = async (
+      method: string,
+      size: { inputBytes?: number; answerBytes?: number }
+    ) =>
+      await callApp(
+        env,
+        invoicing,
+        { userId: clerk.userId, mode: "interactive" },
+        "probe",
+        ["CRM", method, size]
+      );
+    expect({
+      inputAtLimit: answered(
+        await probe("findCustomers", { inputBytes: inputLimit })
+      ),
+      inputPastLimit: await probe("findCustomers", {
+        inputBytes: inputLimit + 1,
+      }),
+      answerAtLimit: await probe("sizedAnswer", { answerBytes: answerLimit }),
+      answerPastLimit: await probe("sizedAnswer", {
+        answerBytes: answerLimit + 1,
+      }),
+    }).toStrictEqual({
+      inputAtLimit: "answered",
+      inputPastLimit: { refused: "app.call_too_large" },
+      answerAtLimit: { bytes: answerLimit },
+      answerPastLimit: { refused: "app.call_too_large" },
+    });
+  });
+
+  it("record an answer refused after the export ran, a write's included", async () => {
+    const { admin, clerk, invoicing, crm } = await setUp();
+    await grantCalls(admin, invoicing, crm, ["read", "write"], "CRM");
+    let ended: unknown;
+    const events = await auditedDuring(async () => {
+      ended = await callApp(
+        env,
+        invoicing,
+        { userId: clerk.userId, mode: "interactive" },
+        "probe",
+        ["CRM", "addThenAnswer", { answerBytes: 256 * 1024 + 1 }]
+      );
+    });
+    const outcomes = callsIn(events)
+      .filter(
+        ({ action, target, detail }) =>
+          action === "app.call" &&
+          target?.id === crm &&
+          detail.method === "addThenAnswer"
+      )
+      .map(({ detail }) => [detail.outcome ?? null, detail.reason ?? null]);
+    expect({
+      ended,
+      // The write happened: the refusal is of the answer, not the call.
+      customers: await callApp(
+        env,
+        crm,
+        { userId: admin.userId, mode: "interactive" },
+        "customerCount"
+      ),
+      outcomes,
+    }).toStrictEqual({
+      ended: { refused: "app.call_too_large" },
+      customers: 1,
+      outcomes: [
+        ["called", null],
+        ["answer_refused", "app.call_too_large"],
+      ],
+    });
   });
 
   it("allow an export by name, and a write only from code an admin approved", async () => {

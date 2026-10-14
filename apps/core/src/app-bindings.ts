@@ -23,6 +23,8 @@ import type { AppGuestsBinding } from "./guests-binding.ts";
 import type { AppCollectionBinding } from "./knowledge/app-binding.ts";
 import { activePermissions, authorizeExport } from "./permissions.ts";
 import type { AppStatisticsBinding } from "./statistics-binding.ts";
+import { requireAttemptHolds } from "./workflows/attempt-fence.ts";
+import type { AttemptFence } from "./workflows/attempt-fence.ts";
 
 /** What App code passes as the caller: the one its method was called with. */
 const callerSchema = z.object({ token: z.string().min(1).max(100) });
@@ -81,8 +83,9 @@ export const tokenOf = (caller: unknown): string => {
 /**
  * Admits one stub call for the call `token` names: `first` asks the host
  * (`App.admit`, or `App.claimStatistic`, which also counts the use), what
- * let the call in is checked again (`requireStillAdmitted`), and the host
- * is asked once more, last, for `use`. That is not yet the act: a stub
+ * let the call in is checked again (`requireStillAdmitted`) and so is its
+ * workflow attempt's fence (attempt-fence.ts), and the host is asked once
+ * more, last, for `use`: no check is awaited after the host's. That is not yet the act: a stub
  * that awaits more before it acts (a permission check, signing, a lookup)
  * admits the call again, in full, just before (`stillAdmitted`): a
  * connection call before it
@@ -98,8 +101,22 @@ const admitted = async (
   first: (host: ReturnType<typeof appHost>) => Promise<Admitted>
 ): Promise<Admitted> => {
   const host = appHost(env, app);
-  const { admission } = await first(host);
+  const { admission, fence } = await first(host);
+  // Every awaited check first: what let the call in, and, for a workflow
+  // run's step, that its attempt still holds.
   await requireStillAdmitted(env, app, admission);
+  await requireAttemptHolds(env, fence);
+  // Last, with nothing awaited between it and the act: the host's word
+  // that the call still runs (its token, its deadline, its code), so a
+  // call that ended while the checks above awaited acts no more. A
+  // workflow run's call is refused here too once its run was cancelled,
+  // or its attempt let go of, while it awaited the attempt check above:
+  // the cancel revokes the run's calls in the App before it is recorded
+  // anywhere else (run-object.ts, `revokeCalls`), and this check is the
+  // App's own, synchronous. What is left: a call the App admitted before
+  // it heard of the revoke, already on its way to connect, is done; for
+  // an action, `afterEffect` withholds its answer from the attempt, and
+  // connect reports it as done (spec 14.4).
   return await host.admit(token, use);
 };
 
@@ -150,6 +167,56 @@ export const stillAdmitted = async (
 };
 
 /**
+ * `value`, what a stub read or got for `caller`, handed back, for a call
+ * from a workflow run's step (`fence`, read once the call was admitted),
+ * only while its attempt still holds (attempt-fence.ts) and the App's
+ * host still admits its token for `use` (`App.admit`, synchronous, last):
+ * nothing goes back to an attempt let go of, or cancelled, while the stub
+ * awaited. Only that: what let the call in was checked as it was admitted,
+ * and isn't read again here, and a caller with no workflow fence (a
+ * screen's, an agent's) gets its answer as it is. Every stub read of an
+ * App's server code hands back through this; a stub call that may change
+ * something through `afterEffect`. (An App's writes to its own SQLite
+ * never come through a stub, so neither can stop those.)
+ */
+export const handedBack = async <T>(
+  env: Env,
+  app: AppId,
+  caller: unknown,
+  use: InvocationKind,
+  fence: () => AttemptFence | undefined,
+  value: Promise<T>
+): Promise<T> => {
+  const answer = await value;
+  const of = fence();
+  if (of === undefined) {
+    return answer;
+  }
+  await requireAttemptHolds(env, of);
+  await appHost(env, app).admit(tokenOf(caller), use);
+  return answer;
+};
+
+/**
+ * `value`, the answer to a stub call that may have changed something
+ * (a connection's action, another App's export, a guest chat written),
+ * handed back unless the call came from a workflow run's step whose
+ * attempt no longer holds (`fence`, read once the call was admitted):
+ * nothing goes back to an attempt let go of. Not admitted again in full,
+ * as `handedBack` does for a read: what is done is done, and a refusal
+ * then would only misreport it.
+ */
+export const afterEffect = async <T>(
+  env: Env,
+  fence: () => AttemptFence | undefined,
+  value: Promise<T>
+): Promise<T> => {
+  const answer = await value;
+  await requireAttemptHolds(env, fence());
+  return answer;
+};
+
+/**
  * Who `caller` is, as `callerOf` says, counting one statistics `use` (a
  * point or a read) of their call against its bounds
  * (`App.claimStatistic`): `statistics.rate_limited` past a bound. With
@@ -165,6 +232,7 @@ export const statisticCallerOf = async (
   authority: Authority;
   idempotencyKey: string | undefined;
   attempt: string | undefined;
+  fence: AttemptFence | undefined;
 }> => {
   const token = tokenOf(caller);
   return await admitted(
@@ -215,33 +283,38 @@ export class AppConnectionBinding extends WorkerEntrypoint<
     options?: unknown
   ): Promise<ConnectResult> {
     const { app, ...grant } = this.ctx.props;
-    return await runStubCall(
+    // The action may change something, which connect knows and core
+    // doesn't: its answer goes back unless its call's workflow attempt
+    // was let go of meanwhile, not withheld for anything else once done.
+    let fence: AttemptFence | undefined;
+    return await afterEffect(
       this.env,
-      async (key) => {
-        const token = tokenOf(caller);
-        // Admitted as a read: whether the action changes anything is
-        // connect's to know, and a call that may only read has it refuse
-        // every side effect.
-        const { authority, idempotencyKey, kind, path } = await callerOf(
-          this.env,
-          app,
-          { token },
-          "read"
-        );
-        if (authority.mode === "workflow") {
-          requireStepKey(key, idempotencyKey);
-        }
-        return {
-          authority,
-          readOnly: kind === "read",
-          notAfter: path.deadline,
-          stillAllowed: async () => {
-            await stillAdmitted(this.env, app, token, "read");
-          },
-        };
-      },
-      grant,
-      [action, input, options]
+      () => fence,
+      runStubCall(
+        this.env,
+        async (key) => {
+          const token = tokenOf(caller);
+          // Admitted as a read: whether the action changes anything is
+          // connect's to know, and a call that may only read has it refuse
+          // every side effect.
+          const known = await callerOf(this.env, app, { token }, "read");
+          const { authority, idempotencyKey, kind, path } = known;
+          ({ fence } = known);
+          if (authority.mode === "workflow") {
+            requireStepKey(key, idempotencyKey);
+          }
+          return {
+            authority,
+            readOnly: kind === "read",
+            notAfter: path.deadline,
+            stillAllowed: async () => {
+              await stillAdmitted(this.env, app, token, "read");
+            },
+          };
+        },
+        grant,
+        [action, input, options]
+      )
     );
   }
 }
