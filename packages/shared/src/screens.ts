@@ -199,6 +199,36 @@ export const querySubscriptionLimits = {
   /** How long core gathers a query's changes before it reads it again. */
   coalesceMs: 50,
   /**
+   * The longest it gathers them: the window stretches with how many of
+   * the connection's queries wait to be read, so a write that wakes a
+   * page's every query is read in fewer, later rounds, not a flood.
+   */
+  maxCoalesceMs: 2000,
+  /** Reads of live queries one connection runs at once; the rest wait. */
+  concurrentReads: 4,
+  /**
+   * Reads core makes of one person's live queries of one App because a
+   * write changed what they read (the reads a page asks for are counted
+   * as its requests instead), held by the App's host across every tab.
+   * Past it a read waits, gathering every change meanwhile, and is tried
+   * again later: never dropped, only slower. The burst covers one write
+   * waking two full tabs (2 x `perConnection`); the rate, 10 a second,
+   * is five times what a person may ask directly
+   * (`screenLimits.requests`), so a write rate the person's own requests
+   * allow keeps a few screens current, while one person's commits can
+   * cost core at most this many sandboxed reads of their queries, however
+   * many they follow. Each other person pays for their own.
+   */
+  liveReads: { burst: 200, perMinute: 600 },
+  /** How long core waits before reading again past `liveReads`, at most. */
+  liveReadWaitMs: 10_000,
+  /**
+   * How often core checks that the store still holds a query's watch,
+   * when nothing else made it look: a watch the store lost without core
+   * hearing of it is then made again, and the query read afresh.
+   */
+  livenessMs: 60_000,
+  /**
    * Snapshot bytes core holds for one connection that the page hasn't
    * taken yet: past it, the snapshots in between are dropped, and each
    * query sends its latest once the page catches up.
@@ -335,7 +365,8 @@ export interface ScreensApi {
   /**
    * Follows one of the App's public queries (spec 11): `request` is the
    * call as a function call sends it (its reference and input, as JSON
-   * text), for the build this connection presented. Core reads it as the
+   * text), for the build `lease` (the following frame's own, from
+   * `open`) names. Core reads it as the
    * person, pushes its result to `onSnapshot` (`QuerySnapshotPush`), and
    * pushes it again, read afresh, after every commit that changed what
    * it read, for as long as the person may use the App and the build
@@ -349,6 +380,7 @@ export interface ScreensApi {
    */
   watchQuery: (
     app: string,
+    lease: string,
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
   ) => Promise<RunSubscriptionApi>;

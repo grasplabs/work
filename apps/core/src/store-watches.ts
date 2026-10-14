@@ -4,42 +4,45 @@ import {
   screenErrors,
 } from "@grasp-os/shared/screens";
 
-// The live queries a business store's object tells of its commits
+// The live queries a business store's object tells of its writes
 // (data-store.ts): each one core is keeping fresh for a screen
-// (query-subscriptions.ts), by the tables its last evaluation read and
-// the generation it read each at. A commit's `store.changed` outbox entry
-// names the tables it changed and the generation it moved each to; every
-// watch that read one of them at an older generation is told, and core
+// (query-subscriptions.ts), by the tables its last read read and the
+// generation it read each at. Every write that moves a table's generation
+// (a commit, a migration or backfill batch) is told here once its
+// transaction is over (store-host.ts, `onTablesMoved`), and every watch
+// that read one of those tables at an older generation is told; core
 // reads that query again. Threat model, and how each is closed:
 //
 // - A change slips between a query's read and its watch (read, then
 //   subscribe): a watch is registered with the generations its read saw,
 //   compared with the store's current ones as it is registered, with
 //   nothing awaited between, and told at once when one moved on.
-// - A commit is lost between its write and the telling (the object dies
-//   in between): the entry commits with the records and is handed over
-//   again once the object wakes (the outbox's own guarantees); the
-//   watches died with the object, and core hears that (its watcher is
-//   let go), reads its queries again and watches anew, which compares
-//   generations as above.
-// - An entry handed over twice, or late: a watch is told only of a table
-//   it read at an older generation than the entry's, so a replay of an
-//   old entry tells nobody who read after it.
-// - A screen gone without a word fills the object with watches: core
-//   holds a screen to its subscriptions, and this object holds each
-//   person to `querySubscriptionLimits.perPerson`, letting go of every
-//   watch whose watcher no longer answers before it refuses one, and the
-//   whole store to `storeMaxWatches`. A watcher that fails to take a
-//   telling is let go at once.
-// - One slow screen holds up the rest: each telling goes on by itself;
-//   the hand-over of the entry returns at once.
+// - A write is lost between its commit and the telling (the object dies
+//   in between): the watches die with the object. Core hears of that
+//   when its watcher is let go, and in any case at its next `rewatch`,
+//   which it makes now and then for every watch and which answers false
+//   for one this object doesn't hold; it then reads the query again and
+//   watches anew, comparing generations as above. So no durable record of
+//   the telling is needed.
+// - A telling twice, or late: a watch is told only of a table it read at
+//   an older generation than the one named.
+// - Screens gone without a word fill the object with watches: core holds
+//   a page to its subscriptions; this object holds each person to
+//   `querySubscriptionLimits.perPerson` and the store to
+//   `storeMaxWatches`. Before refusing one, it lets go of every watch
+//   whose watcher no longer answers: the person's at their bound, and
+//   everyone's at the store's (each at most once per `sweepGapMs`), and
+//   everyone's from the alarm (`sweep`). A watcher that fails to take a
+//   telling is let go at once. A refusal at the store's bound is one core
+//   tries again later, never one that stops a screen for good.
+// - One slow screen holds up the rest: each telling goes on by itself.
 // - Telling leaks data: a telling carries table names only, to core,
 //   which reads the query again as its person before anything reaches a
 //   screen.
 
 /**
  * Core's watcher of one live query, as the store keeps it: called with
- * the names of the tables a commit changed, or with none to see whether
+ * the names of the tables a write changed, or with none to see whether
  * it is still there.
  */
 export type StoreWatcher = Rpc.Stub<(tables: string[]) => void>;
@@ -49,6 +52,9 @@ export const storeMaxWatches = 10_000;
 
 /** How long a watcher has to answer whether it is still there. */
 const pingMs = 2000;
+
+/** The least time between two sweeps of one person's watches, or of all. */
+const sweepGapMs = 5000;
 
 interface Watch {
   readonly principal: string;
@@ -66,27 +72,43 @@ const answersWithin = async (
   const timer = setTimeout(() => {
     resolve(false);
   }, ms);
+  const settles = async (): Promise<void> => {
+    try {
+      await work;
+      resolve(true);
+    } catch {
+      resolve(false);
+    }
+  };
+  // A watcher that never answers is not waited for past `ms`.
+  void settles();
   try {
-    await work;
-    resolve(true);
-  } catch {
-    resolve(false);
+    return await promise;
   } finally {
     clearTimeout(timer);
   }
-  return await promise;
 };
 
 /** The watches one store's object keeps, in memory: a restart drops them. */
 export class StoreWatches {
   readonly #watches = new Map<string, Watch>();
+  /** How many watches each person holds. */
+  readonly #counts = new Map<string, number>();
+  /** When each person's watches, and everyone's (`""`), were last swept. */
+  readonly #swept = new Map<string, number>();
+
+  /** How many watches it holds. */
+  get size(): number {
+    return this.#watches.size;
+  }
 
   /**
    * Keeps `watcher` (dup'd: the call's own stub ends with the call) for
    * `principal`'s query, which read the tables of `readSet` at those
    * generations; tells it at once when `current` (the store's
    * generations now, read with nothing awaited since) has moved past
-   * any. Answers the watch's ID, or refuses with `TooManyWatchesError`.
+   * any. Answers the watch's ID, or refuses with
+   * `screen.too_many_queries`, for core to try again later.
    */
   async watch(
     principal: string,
@@ -94,17 +116,21 @@ export class StoreWatches {
     watcher: StoreWatcher,
     current: () => Record<string, number>
   ): Promise<string> {
-    if (this.#count(principal) >= querySubscriptionLimits.perPerson) {
-      await this.#sweep(principal);
+    if (this.#countOf(principal) >= querySubscriptionLimits.perPerson) {
+      await this.#sweepOnce(principal);
+    }
+    if (this.#watches.size >= storeMaxWatches) {
+      await this.#sweepOnce("");
     }
     if (
-      this.#count(principal) >= querySubscriptionLimits.perPerson ||
+      this.#countOf(principal) >= querySubscriptionLimits.perPerson ||
       this.#watches.size >= storeMaxWatches
     ) {
       throw screenErrors.create("screen.too_many_queries");
     }
     const id = crypto.randomUUID();
     this.#watches.set(id, { principal, watcher: watcher.dup(), readSet });
+    this.#counts.set(principal, this.#countOf(principal) + 1);
     this.#check(id, current());
     return id;
   }
@@ -131,18 +157,32 @@ export class StoreWatches {
   /** Lets go of watch `id`, if it is still kept. */
   unwatch(id: string): void {
     const watch = this.#watches.get(id);
+    if (watch === undefined) {
+      return;
+    }
     this.#watches.delete(id);
-    watch?.watcher[Symbol.dispose]();
+    const left = this.#countOf(watch.principal) - 1;
+    if (left > 0) {
+      this.#counts.set(watch.principal, left);
+    } else {
+      this.#counts.delete(watch.principal);
+    }
+    watch.watcher[Symbol.dispose]();
   }
 
   /**
    * Tells every watch that read one of `tables` at an older generation
-   * than the one named: a commit changed it since. Returns at once.
+   * than the one named: a write changed it since. Returns at once.
    */
   changed(tables: Readonly<Record<string, number>>): void {
     for (const id of this.#watches.keys()) {
       this.#check(id, tables);
     }
+  }
+
+  /** Lets go of every watch whose watcher doesn't answer (the alarm's). */
+  async sweep(): Promise<void> {
+    await this.#sweepOf([...this.#watches]);
   }
 
   /** The tables of `generations` watch `id` read at an older one. */
@@ -173,27 +213,39 @@ export class StoreWatches {
     }
   }
 
-  #count(principal: string): number {
-    let count = 0;
-    for (const watch of this.#watches.values()) {
-      if (watch.principal === principal) {
-        count += 1;
-      }
-    }
-    return count;
+  #countOf(principal: string): number {
+    return this.#counts.get(principal) ?? 0;
   }
 
-  /** Lets go of every watch of `principal`'s whose watcher doesn't answer. */
-  async #sweep(principal: string): Promise<void> {
-    const theirs = [...this.#watches].filter(
-      ([, watch]) => watch.principal === principal
+  /**
+   * Sweeps `principal`'s watches (everyone's for `""`), unless they were
+   * swept within `sweepGapMs`: a page at its bound asking over and over
+   * pings them once, not on every ask.
+   */
+  async #sweepOnce(principal: string): Promise<void> {
+    const now = Date.now();
+    if (
+      now - (this.#swept.get(principal) ?? Number.NEGATIVE_INFINITY) <
+      sweepGapMs
+    ) {
+      return;
+    }
+    this.#swept.set(principal, now);
+    await this.#sweepOf(
+      [...this.#watches].filter(
+        ([, watch]) => principal === "" || watch.principal === principal
+      )
     );
+  }
+
+  /** Lets go of each of `watches` whose watcher doesn't answer. */
+  async #sweepOf(watches: readonly [string, Watch][]): Promise<void> {
     const answers = await Promise.all(
-      theirs.map(
+      watches.map(
         async ([, watch]) => await answersWithin(watch.watcher([]), pingMs)
       )
     );
-    for (const [index, [id, watch]] of theirs.entries()) {
+    for (const [index, [id, watch]] of watches.entries()) {
       if (answers[index] !== true && this.#watches.get(id) === watch) {
         this.unwatch(id);
       }

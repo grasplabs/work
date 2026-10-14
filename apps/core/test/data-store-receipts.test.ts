@@ -1032,11 +1032,6 @@ describe("alarm", () => {
     await runInDurableObject(objectOf(store), (_instance, state) => {
       const { sql } = state.storage;
       const old = Date.now() - 31 * dayMs;
-      // Expiring a receipt deletes its settled outbox entries, as the
-      // sweep does (each commit stages one for its live queries).
-      sql.exec(
-        "DELETE FROM sdk_change_outbox WHERE receipt_id = (SELECT receipt_id FROM sdk_mutation_receipts ORDER BY created_at LIMIT 1)"
-      );
       sql.exec(
         'UPDATE sdk_mutation_receipts SET expired_at = ?, outcome = NULL, committed_at = NULL, "commit" = NULL WHERE receipt_id = (SELECT receipt_id FROM sdk_mutation_receipts ORDER BY created_at LIMIT 1)',
         old

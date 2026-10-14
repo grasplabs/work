@@ -337,7 +337,7 @@ const appTarget = (
     watchQuery: async (request, onSnapshot) =>
       await framed(
         async (screens) =>
-          await screens.watchQuery(app, request, forCore(onSnapshot))
+          await screens.watchQuery(app, lease, request, forCore(onSnapshot))
       ),
   };
 };

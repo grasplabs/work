@@ -1,6 +1,5 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { StoreId } from "@grasp-os/shared/ids";
-import { errorFields, log } from "@grasp-os/shared/log";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import type {
@@ -17,7 +16,6 @@ import { DurableObject } from "cloudflare:workers";
 import migrations from "./db/data-store/migrations/migrations.js";
 import { migrateOnWake } from "./db/migrate.ts";
 import { outboxConsumers } from "./outbox-delivery.ts";
-import type { OutboxConsumers } from "./outbox-delivery.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
 import type {
@@ -37,9 +35,8 @@ import type { StoreWatcher } from "./store-watches.ts";
 // (data-stores.ts), with a SQLite database of its own. What it does, and
 // its threat model, is in its host (store-host.ts); this is its RPC
 // surface, which only core reaches. It also keeps the live queries core
-// follows of the store (store-watches.ts) and tells them of each commit
-// from its outbox (`store.changed`): handed over as soon as the commit
-// returns, and by the alarm whatever that missed, after a restart too.
+// follows of the store (store-watches.ts), told of every write that moves
+// a table's generation as soon as its transaction is over.
 
 /**
  * A business store's Durable Object: the store's host (`StoreHost`) with
@@ -47,32 +44,22 @@ import type { StoreWatcher } from "./store-watches.ts";
  * the store's RPC surface, and take nothing a caller could choose to bend
  * time or delivery with.
  */
+/** How often the alarm sweeps the watches of screens gone without a word. */
+const watchSweepMs = 5 * 60 * 1000;
+
 /** The key a discarded fixture store keeps, alone (`discardFixture`). */
 const discardedKey = "grasp_fixture_discarded";
 
 export class DataStore extends DurableObject<Env> {
   readonly #host: StoreHost;
   readonly #watches = new StoreWatches();
-  /**
-   * The deployment's consumers, and the one only this object has: its
-   * live queries, told of the tables each commit changed.
-   */
-  readonly #consumers: OutboxConsumers = {
-    ...outboxConsumers,
-    "store.changed": async ({ intent }) => {
-      if (intent.kind === "store.changed") {
-        this.#watches.changed(intent.tables);
-      }
-      return await Promise.resolve("delivered" as const);
-    },
-  };
-  /** The hand-over under way after a commit, and whether another is owed. */
-  #delivering: Promise<void> | undefined;
-  #deliverAgain = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#host = new StoreHost(ctx, env);
+    this.#host.onTablesMoved = (moved) => {
+      this.#watches.changed(moved);
+    };
     // A discarded fixture store wakes to nothing: no tables made again, no
     // alarm armed (`discardFixture`).
     if (this.#discarded()) {
@@ -244,40 +231,11 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
-   * `StoreHost.commit`, with this object's outbox consumers, as the JSON
-   * text of its `Committed`, as for `claim`. Its outbox is handed over
-   * right after, so live queries hear of the commit without waiting for
-   * the alarm, which hands over whatever this misses.
+   * `StoreHost.commit`, with the deployment's outbox consumers, as the
+   * JSON text of its `Committed`, as for `claim`.
    */
   async commit(input: Commit): Promise<string> {
-    const committed = await this.#live().commit(input, this.#consumers);
-    this.#deliver();
-    return JSON.stringify(committed);
-  }
-
-  /**
-   * Hands the outbox over now, one hand-over at a time: a commit while
-   * one runs has it go round once more after.
-   */
-  #deliver(): void {
-    if (this.#delivering !== undefined) {
-      this.#deliverAgain = true;
-      return;
-    }
-    this.#delivering = (async () => {
-      try {
-        do {
-          this.#deliverAgain = false;
-          // oxlint-disable-next-line no-await-in-loop -- one hand-over after the other
-          await this.#host.drainOutbox(this.#consumers);
-        } while (this.#deliverAgain);
-      } catch (error) {
-        // The alarm hands it over later.
-        log.warn("store.deliver_failed", errorFields(error));
-      } finally {
-        this.#delivering = undefined;
-      }
-    })();
+    return JSON.stringify(await this.#live().commit(input, outboxConsumers));
   }
 
   /**
@@ -293,9 +251,14 @@ export class DataStore extends DurableObject<Env> {
     watcher: StoreWatcher
   ): Promise<string> {
     const host = this.#live();
-    return await this.#watches.watch(principal, readSet, watcher, () =>
+    const id = await this.#watches.watch(principal, readSet, watcher, () =>
       host.generations(storeId, Object.keys(readSet))
     );
+    // While it holds watches, the alarm sweeps the dead ones.
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now() + watchSweepMs);
+    }
+    return id;
   }
 
   /**
@@ -349,13 +312,21 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
-   * `StoreHost.runAlarm`, with this object's outbox consumers; nothing
+   * `StoreHost.runAlarm`, with the deployment's outbox consumers, and a
+   * sweep of the live queries whose watchers are gone; nothing
    * for a discarded fixture store, which arms no alarm again.
    */
   override async alarm(): Promise<void> {
     if (this.#discarded()) {
       return;
     }
-    await this.#live().runAlarm(this.#consumers);
+    await this.#live().runAlarm(outboxConsumers);
+    if (this.#watches.size > 0) {
+      await this.#watches.sweep();
+      const next = await this.ctx.storage.getAlarm();
+      if (next === null || next > Date.now() + watchSweepMs) {
+        await this.ctx.storage.setAlarm(Date.now() + watchSweepMs);
+      }
+    }
   }
 }

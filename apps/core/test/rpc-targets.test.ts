@@ -223,7 +223,7 @@ const calls = {
     // the subscription, which is let go of after that, as a page does.
     const subscription = holding(
       held,
-      await screens.watchQuery(app, "{}", page.stub)
+      await screens.watchQuery(app, "", "{}", page.stub)
     );
     await page.pushed;
     return subscription;

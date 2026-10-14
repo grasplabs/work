@@ -14,7 +14,7 @@ import {
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 
 import { evaluateAppQuery, refusalOf } from "./app-functions.ts";
-import { inJurisdiction } from "./durable-objects.ts";
+import { appHost, inJurisdiction } from "./durable-objects.ts";
 import type { PageCallback } from "./page-callbacks.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { delivering } from "./screen-trust.ts";
@@ -23,50 +23,58 @@ import type { SessionCheck } from "./session-check.ts";
 // Live queries (spec 11): what one page's connection to core (one browser
 // tab) follows of its Apps' public queries, kept fresh by core. A screen
 // asks to follow a query (`watchQuery`); core reads it as the person and
-// pushes the result; the App's store tells core of every commit that
-// changed a table the query read (store-watches.ts, from the store's
-// outbox), and core reads it again and pushes the new result. The screen
-// never asks again, and no App code subscribes or broadcasts.
+// pushes the result; the App's store tells core of every write that
+// changed a table the query read (store-watches.ts), and core reads it
+// again and pushes the new result. The screen never asks again, and no
+// App code subscribes or broadcasts.
 //
 // Delivery (spec 11.3): a query is read, then watched with the generation
 // of each table it read, compared on the spot with the store's own, so a
-// commit between the read and the watch is never missed; changes are
-// gathered for `coalesceMs` and the query read once for all of them;
-// each subscription's pushes are numbered, the screen dropping any older
-// than what it shows. Threat model, and how each is closed:
+// write between the read and the watch is never missed; changes are
+// gathered for a while and the query read once for all of them; each
+// subscription's pushes are numbered, the screen dropping any older than
+// what it shows. Threat model, and how each is closed:
 //
 // - A snapshot reaches someone who lost access: every read runs as the
 //   person behind the connection's session now (`check`), through the
 //   App's role check and the release's own authorization, inside the
 //   build's trust check (`delivering`), and every push of data is made
-//   only after the connection's access check (`stillOpen`: the person's
-//   role and the build's trust, read again). A refusal of either is
-//   pushed as the subscription's last result, which carries no data and
-//   makes the screen drop what it holds, and the subscription ends.
+//   only after the connection's access check (the person's role and the
+//   build's trust, read again). A refusal of either is pushed as the
+//   subscription's last result, which carries no data and makes the
+//   screen drop what it holds, and the subscription ends: its readers are
+//   let go of before anything is awaited, so nothing that waited to be
+//   pushed goes out after the refusal.
 // - A subscription outlives its session or the App's version: a session
 //   that ended refuses the read (`check`) and ends it; a reference to a
 //   version that is no longer current is refused (`version.*`) and ends
 //   it, never read against another contract.
-// - Results cross people: a connection is one session's, and one read is
-//   shared only by subscriptions of the same App, build, person and
-//   canonical request on it; nothing is shared across connections.
+// - Results cross people or builds: a connection is one session's, and
+//   one read is shared only by subscriptions of the same App, build,
+//   person and canonical request on it; the build is the one the
+//   subscribing frame's own lease names, never another frame's.
 // - A snapshot can't be kept fresh: when the store can't be watched (its
-//   object unreachable, or restarted since and the watch not made again)
-//   nothing more is pushed, and core lets go of the screen's callbacks,
-//   which tells the screen to follow again, from a fresh read; a lookup of
-//   generations that fails blocks the push it was for.
+//   object unreachable, restarted, or at its bound) nothing more is
+//   pushed, and core lets go of the screen's callbacks, which tells the
+//   screen to follow again, from a fresh read, later. A watch the store
+//   lost without core hearing of it is found by a `rewatch` every
+//   `livenessMs`.
 // - Ordering and staleness after a reconnect: a new subscription starts
 //   from a fresh read; the screen orders pushes by subscription and
 //   revision, so an older connection's late push is dropped.
 // - Fan-out cost: a connection follows at most `perConnection` queries
 //   (`screen.too_many_queries`), a person `perPerson` of one App's store,
-//   held by the store. A query is read at most once per `coalesceMs`
-//   while changes come, never twice at once. What waits to be pushed is
-//   at most one replacement per subscription and `unsentBytes` for the
-//   whole connection: past that, results in between are dropped, and the
-//   subscription gets the latest once the page takes what it has.
-//   Following counts as a request of the person's (`admitted`, by the
-//   caller); what core then pushes doesn't.
+//   held by the store. Reads a write causes are charged to the person's
+//   `liveReads` budget of the App, held by the App's host across tabs;
+//   past it a read waits and gathers every change meanwhile. A connection
+//   runs `concurrentReads` reads at once, the rest queued, and gathers a
+//   query's changes for longer the more of its queries wait (up to
+//   `maxCoalesceMs`). A query is never read twice at once.
+// - Memory: what waits to be pushed is at most one replacement per
+//   subscription and `unsentBytes` for the whole connection; past that,
+//   results in between are dropped, and the subscription gets the latest
+//   once the page takes what it has. A result is kept only until every
+//   subscription has it: a later subscriber gets a fresh read.
 
 /** How long a read of a live query may take. */
 const evaluationMs = 30_000;
@@ -117,15 +125,28 @@ interface Evaluation {
   readonly request: string;
   readonly listeners: Set<Listener>;
   revision: number;
+  /** The latest result, while a subscription still needs it. */
   latest: Snapshot | undefined;
-  /** Its watch in the store, once made. */
-  watch: { readonly storeId: StoreId; readonly id: string } | undefined;
-  /** What the store calls when what it read changed. */
-  readonly watcher: ((tables: string[]) => void) & Disposable;
+  /** Its watch in the store, and what that watch read, once made. */
+  watch:
+    | {
+        readonly storeId: StoreId;
+        readonly id: string;
+        readSet: Record<string, number>;
+      }
+    | undefined;
+  /** Its gathering window, its wait for budget, or its liveness check. */
   timer: ReturnType<typeof setTimeout> | undefined;
+  liveness: ReturnType<typeof setTimeout> | undefined;
+  /** Waiting in the connection's queue, or being read. */
+  queued: boolean;
   running: boolean;
-  /** Changed again while it was read. */
+  /** Changed again while it was queued or read. */
   dirty: boolean;
+  /** Its next read is one a write caused, charged to the person's budget. */
+  charged: boolean;
+  /** How long it waited for budget last, to wait longer next time. */
+  budgetWaitMs: number;
   closed: boolean;
 }
 
@@ -168,12 +189,25 @@ const refusalResult = (error: unknown): Result => ({
   error: refusalOf(error, crypto.randomUUID()),
 });
 
+/** Whether every subscription of `evaluation` has its latest result. */
+const allHaveLatest = (evaluation: Evaluation): boolean =>
+  [...evaluation.listeners].every(
+    (listener) =>
+      !listener.behind &&
+      listener.pending === undefined &&
+      listener.sent >= (evaluation.latest?.push.revision ?? 0)
+  );
+
 /** One connection's live queries. */
 export class QuerySubscriptions {
   readonly #env: Env;
   readonly #check: SessionCheck;
   readonly #access: AccessCheck;
   readonly #evaluations = new Map<string, Evaluation>();
+  /** Reads waiting their turn, oldest first. */
+  readonly #queue: Evaluation[] = [];
+  /** Reads under way. */
+  #running = 0;
   /** Subscriptions not released. */
   #count = 0;
   /** Bytes of snapshots handed to the page and not yet taken. */
@@ -187,9 +221,9 @@ export class QuerySubscriptions {
 
   /**
    * Follows the query `request` names of `app` for `by`, its results
-   * pushed to `onSnapshot`, as the build `artifact` the connection
-   * presented (see the header). The caller admitted the request and
-   * checked the build's trust.
+   * pushed to `onSnapshot`, as the build `artifact` the subscribing
+   * frame's lease names (see the header). The caller admitted the
+   * request and checked the build's trust.
    */
   subscribe(
     by: Identity,
@@ -214,10 +248,16 @@ export class QuerySubscriptions {
     };
     evaluation.listeners.add(listener);
     this.#count += 1;
+    // A result kept for another subscription that hasn't taken it yet
+    // goes to this one too; otherwise a read on its way answers it, or a
+    // fresh one, admitted as the person's request, so not charged.
     if (evaluation.latest !== undefined) {
       this.#offer(evaluation, listener, evaluation.latest);
-    } else if (!evaluation.running && evaluation.timer === undefined) {
-      void this.#evaluate(evaluation);
+    } else if (
+      !(evaluation.running || evaluation.queued) &&
+      evaluation.timer === undefined
+    ) {
+      this.#enqueue(evaluation, false);
     }
     return new RunSubscription(async () => {
       this.#release(evaluation, listener);
@@ -240,58 +280,78 @@ export class QuerySubscriptions {
       revision: 0,
       latest: undefined,
       watch: undefined,
-      watcher: Object.assign(
-        (tables: string[]): void => {
-          // Called with none to see whether it is still here.
-          if (tables.length > 0) {
-            this.#changed(evaluation);
-          }
-        },
-        {
-          [Symbol.dispose]: (): void => {
-            // The store let go of it (its object restarted): what it read
-            // is no longer watched, so read and watch it afresh.
-            if (!evaluation.closed && evaluation.watch !== undefined) {
-              evaluation.watch = undefined;
-              this.#changed(evaluation);
-            }
-          },
-        }
-      ),
       timer: undefined,
+      liveness: undefined,
+      queued: false,
       running: false,
       dirty: false,
+      charged: false,
+      budgetWaitMs: 0,
       closed: false,
     };
     this.#evaluations.set(key, evaluation);
     return evaluation;
   }
 
-  /** Something it read changed: read it again, gathered over `coalesceMs`. */
+  /**
+   * Something it read changed: read it again, gathered over a window
+   * that stretches with how many of the connection's reads wait.
+   */
   #changed(evaluation: Evaluation): void {
     if (evaluation.closed) {
       return;
     }
-    if (evaluation.running) {
+    if (evaluation.running || evaluation.queued) {
       evaluation.dirty = true;
       return;
     }
     if (evaluation.timer !== undefined) {
       return;
     }
+    const waiting = this.#queue.length + this.#running;
+    const windowMs = Math.min(
+      querySubscriptionLimits.maxCoalesceMs,
+      querySubscriptionLimits.coalesceMs *
+        (1 + Math.floor(waiting / querySubscriptionLimits.concurrentReads))
+    );
     evaluation.timer = setTimeout(() => {
       evaluation.timer = undefined;
-      void this.#evaluate(evaluation);
-    }, querySubscriptionLimits.coalesceMs);
+      this.#enqueue(evaluation, true);
+    }, windowMs);
+  }
+
+  /** Queues a read of `evaluation`, charged when a write caused it. */
+  #enqueue(evaluation: Evaluation, charged: boolean): void {
+    if (evaluation.closed || evaluation.queued || evaluation.running) {
+      return;
+    }
+    evaluation.queued = true;
+    evaluation.charged = charged;
+    this.#queue.push(evaluation);
+    this.#pump();
+  }
+
+  /** Starts queued reads while fewer than `concurrentReads` run. */
+  #pump(): void {
+    while (
+      this.#running < querySubscriptionLimits.concurrentReads &&
+      this.#queue.length > 0
+    ) {
+      const next = this.#queue.shift();
+      if (next !== undefined) {
+        next.queued = false;
+        if (!next.closed) {
+          void this.#evaluate(next);
+        }
+      }
+    }
   }
 
   /** Reads `evaluation`'s query, keeps it watched and pushes the result. */
   async #evaluate(evaluation: Evaluation): Promise<void> {
-    if (evaluation.closed || evaluation.running) {
-      return;
-    }
     evaluation.running = true;
     evaluation.dirty = false;
+    this.#running += 1;
     try {
       await this.#readAndPush(evaluation);
     } catch (error) {
@@ -299,9 +359,11 @@ export class QuerySubscriptions {
       await this.#lose(evaluation);
     } finally {
       evaluation.running = false;
+      this.#running -= 1;
       if (evaluation.dirty && !evaluation.closed) {
         this.#changed(evaluation);
       }
+      this.#pump();
     }
   }
 
@@ -314,6 +376,23 @@ export class QuerySubscriptions {
       await this.#end(evaluation, refusalResult(error));
       return;
     }
+    if (
+      evaluation.charged &&
+      !(await appHost(this.#env, app).admitLiveRead(by.userId))
+    ) {
+      // Past the person's budget: read later, gathering every change
+      // meanwhile, waiting longer each time it is still spent.
+      evaluation.budgetWaitMs = Math.min(
+        querySubscriptionLimits.liveReadWaitMs,
+        Math.max(500, evaluation.budgetWaitMs * 2)
+      );
+      evaluation.timer = setTimeout(() => {
+        evaluation.timer = undefined;
+        this.#enqueue(evaluation, true);
+      }, evaluation.budgetWaitMs);
+      return;
+    }
+    evaluation.budgetWaitMs = 0;
     let evaluated: Awaited<ReturnType<typeof evaluateAppQuery>>;
     try {
       evaluated = await delivering(
@@ -374,8 +453,40 @@ export class QuerySubscriptions {
   }
 
   /**
+   * A fresh watcher for one watch of `evaluation`: told by the store of a
+   * change, or let go of by it (its object restarted). Only the watch it
+   * was made for counts, so a late word about an older one reads nothing.
+   */
+  #watcherFor(
+    evaluation: Evaluation,
+    made: { id: string | undefined }
+  ): ((tables: string[]) => void) & Disposable {
+    const current = (): boolean =>
+      !evaluation.closed &&
+      made.id !== undefined &&
+      evaluation.watch?.id === made.id;
+    return Object.assign(
+      (tables: string[]): void => {
+        // Called with none to see whether it is still here.
+        if (tables.length > 0 && current()) {
+          this.#changed(evaluation);
+        }
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          if (current()) {
+            evaluation.watch = undefined;
+            this.#changed(evaluation);
+          }
+        },
+      }
+    );
+  }
+
+  /**
    * Watches what `evaluation` read in its store, moving its watch on or
-   * making it anew: false when the store can't be reached.
+   * making it anew: false when the store can't be reached, or holds no
+   * more watches now (core tries again later).
    */
   async #keepWatched(
     evaluation: Evaluation,
@@ -392,44 +503,86 @@ export class QuerySubscriptions {
         if (
           await storeOf(this.#env, storeId).rewatch(storeId, watch.id, readSet)
         ) {
+          watch.readSet = readSet;
+          this.#checkLater(evaluation);
           return true;
         }
       } else if (watch !== undefined) {
         await this.#unwatch(evaluation);
       }
+      const made: { id: string | undefined } = { id: undefined };
       const id = await storeOf(this.#env, storeId).watch(
         storeId,
         by.userId,
         readSet,
-        evaluation.watcher
+        this.#watcherFor(evaluation, made)
       );
+      made.id = id;
       if (evaluation.closed) {
         await storeOf(this.#env, storeId).unwatch(id);
         return true;
       }
-      evaluation.watch = { storeId, id };
+      evaluation.watch = { storeId, id, readSet };
+      this.#checkLater(evaluation);
       return true;
     } catch (error) {
-      if (screenErrors.codeOf(error) === "screen.too_many_queries") {
-        await this.#end(evaluation, refusalResult(error));
-        return true;
-      }
       log.warn("query.watch_failed", errorFields(error));
       evaluation.watch = undefined;
       return false;
     }
   }
 
+  /**
+   * Checks, `livenessMs` from now, that the store still holds the watch:
+   * one it lost without a word (`rewatch` answers false), or one a write
+   * moved past without telling, has the query read again.
+   */
+  #checkLater(evaluation: Evaluation): void {
+    clearTimeout(evaluation.liveness);
+    evaluation.liveness = setTimeout(() => {
+      evaluation.liveness = undefined;
+      void this.#checkWatch(evaluation);
+    }, querySubscriptionLimits.livenessMs);
+  }
+
+  async #checkWatch(evaluation: Evaluation): Promise<void> {
+    const { watch } = evaluation;
+    if (evaluation.closed || watch === undefined) {
+      return;
+    }
+    let held = false;
+    try {
+      held = await storeOf(this.#env, watch.storeId).rewatch(
+        watch.storeId,
+        watch.id,
+        watch.readSet
+      );
+    } catch (error) {
+      log.warn("query.liveness_failed", errorFields(error));
+    }
+    if (evaluation.watch !== watch) {
+      return;
+    }
+    if (held) {
+      this.#checkLater(evaluation);
+      return;
+    }
+    evaluation.watch = undefined;
+    this.#changed(evaluation);
+  }
+
   async #unwatch(evaluation: Evaluation): Promise<void> {
     const { watch } = evaluation;
     evaluation.watch = undefined;
+    clearTimeout(evaluation.liveness);
+    evaluation.liveness = undefined;
     if (watch === undefined) {
       return;
     }
     try {
       await storeOf(this.#env, watch.storeId).unwatch(watch.id);
     } catch (error) {
-      // The store drops it at its next telling, which fails.
+      // The store drops it at its next telling, or sweep.
       log.warn("query.unwatch_failed", errorFields(error));
     }
   }
@@ -453,6 +606,14 @@ export class QuerySubscriptions {
     evaluation.latest = snapshot;
     for (const listener of evaluation.listeners) {
       this.#offer(evaluation, listener, snapshot);
+    }
+    QuerySubscriptions.#forgetDelivered(evaluation);
+  }
+
+  /** Drops `evaluation`'s latest result once every subscription has it. */
+  static #forgetDelivered(evaluation: Evaluation): void {
+    if (evaluation.latest !== undefined && allHaveLatest(evaluation)) {
+      evaluation.latest = undefined;
     }
   }
 
@@ -505,6 +666,10 @@ export class QuerySubscriptions {
       this.#unsent -= snapshot.bytes;
       listener.inFlight = false;
     }
+    // Released meanwhile (a refusal ended it): nothing more goes out.
+    if (listener.released) {
+      return;
+    }
     const next = listener.pending;
     if (next !== undefined) {
       listener.pending = undefined;
@@ -512,6 +677,7 @@ export class QuerySubscriptions {
       this.#offer(evaluation, listener, next);
     }
     this.#catchUp();
+    QuerySubscriptions.#forgetDelivered(evaluation);
   }
 
   /** Offers the latest result to every subscription owed it. */
@@ -530,6 +696,39 @@ export class QuerySubscriptions {
   }
 
   /**
+   * Closes `evaluation` and lets go of its subscriptions at once, before
+   * anything is awaited: nothing queued for them goes out after this.
+   * Answers the subscriptions' callbacks, still to be disposed of.
+   */
+  #close(evaluation: Evaluation): PageCallback[] {
+    evaluation.closed = true;
+    evaluation.latest = undefined;
+    if (this.#evaluations.get(evaluation.key) === evaluation) {
+      this.#evaluations.delete(evaluation.key);
+    }
+    clearTimeout(evaluation.timer);
+    clearTimeout(evaluation.liveness);
+    const callbacks: PageCallback[] = [];
+    for (const listener of evaluation.listeners) {
+      callbacks.push(this.#detach(listener));
+    }
+    evaluation.listeners.clear();
+    return callbacks;
+  }
+
+  /** Marks `listener` released, dropping what waited for it. */
+  #detach(listener: Listener): PageCallback {
+    listener.released = true;
+    listener.behind = false;
+    if (listener.pending !== undefined) {
+      this.#unsent -= listener.pending.bytes;
+      listener.pending = undefined;
+    }
+    this.#count -= 1;
+    return listener.toPage;
+  }
+
+  /**
    * Ends `evaluation` with `result`, a refusal: pushed to every
    * subscription as its last, then each let go of.
    */
@@ -537,39 +736,34 @@ export class QuerySubscriptions {
     if (evaluation.closed) {
       return;
     }
-    evaluation.closed = true;
-    this.#evaluations.delete(evaluation.key);
-    clearTimeout(evaluation.timer);
-    await this.#unwatch(evaluation);
+    const callbacks = this.#close(evaluation);
     evaluation.revision += 1;
     const push: QuerySnapshotPush = { revision: evaluation.revision, result };
-    await Promise.all(
-      [...evaluation.listeners].map(async (listener) => {
+    await Promise.all([
+      this.#unwatch(evaluation),
+      ...callbacks.map(async (toPage) => {
         try {
-          await listener.toPage(push);
+          await toPage(push);
         } catch {
           // Gone already.
         }
-        this.#release(evaluation, listener);
-      })
-    );
+        toPage[Symbol.dispose]();
+      }),
+    ]);
   }
 
   /**
-   * Stops `evaluation` without a word: it can't be kept fresh. Its
+   * Stops `evaluation` without a word: it can't be kept fresh now. Its
    * subscriptions are let go of, which tells each screen to follow again.
    */
   async #lose(evaluation: Evaluation): Promise<void> {
     if (evaluation.closed) {
       return;
     }
-    evaluation.closed = true;
-    this.#evaluations.delete(evaluation.key);
-    clearTimeout(evaluation.timer);
-    await this.#unwatch(evaluation);
-    for (const listener of evaluation.listeners) {
-      this.#release(evaluation, listener);
+    for (const toPage of this.#close(evaluation)) {
+      toPage[Symbol.dispose]();
     }
+    await this.#unwatch(evaluation);
   }
 
   /** Releases `listener`; the read goes once nobody follows it. */
@@ -577,19 +771,13 @@ export class QuerySubscriptions {
     if (listener.released) {
       return;
     }
-    listener.released = true;
-    if (listener.pending !== undefined) {
-      this.#unsent -= listener.pending.bytes;
-      listener.pending = undefined;
-    }
     evaluation.listeners.delete(listener);
-    this.#count -= 1;
-    listener.toPage[Symbol.dispose]();
+    this.#detach(listener)[Symbol.dispose]();
     if (evaluation.listeners.size === 0 && !evaluation.closed) {
-      evaluation.closed = true;
-      this.#evaluations.delete(evaluation.key);
-      clearTimeout(evaluation.timer);
+      this.#close(evaluation);
       void this.#unwatch(evaluation);
+    } else {
+      QuerySubscriptions.#forgetDelivered(evaluation);
     }
   }
 }

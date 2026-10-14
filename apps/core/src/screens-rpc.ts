@@ -763,6 +763,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
 
   async watchQuery(
     app: string,
+    lease: string,
     request: string,
     onSnapshot: (snapshot: QuerySnapshotPush) => void
   ): Promise<RunSubscription> {
@@ -777,7 +778,9 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
       ) {
         throw screenErrors.create("screen.invalid");
       }
-      const artifact = this.#presented.get(id);
+      // The build of the frame that follows, by its own lease: never what
+      // another frame of the App on this connection presented last.
+      const artifact = await leasedArtifact(this.#env, by.userId, id, lease);
       await requireDelivery(this.#env, by, id, artifact, {
         operation: "watchQuery",
         stage: "admission",

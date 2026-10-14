@@ -7,7 +7,7 @@
  * this layout is a platform upgrade, migrated on the first wake-up after a
  * release.
  */
-import { storeOutboxKinds } from "@grasp-os/shared/stores";
+import { storeIntentKinds } from "@grasp-os/shared/stores";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -516,7 +516,7 @@ export const outbox = sqliteTable(
       .notNull()
       .references(() => receipts.receiptId),
     position: integer().notNull(),
-    kind: text({ enum: storeOutboxKinds }).notNull(),
+    kind: text({ enum: storeIntentKinds }).notNull(),
     /** The intent, as JSON. */
     intent: text().notNull(),
     createdAt: integer("created_at").notNull(),

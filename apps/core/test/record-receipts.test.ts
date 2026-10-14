@@ -326,7 +326,7 @@ const entriesOf = async (marker: string) => {
 
 /** Whether `entry` is one of `marker`'s (`entriesOf`). */
 const isOf = (entry: OutboxEntry, marker: string): boolean =>
-  "data" in entry.intent &&
+  entry.intent.kind !== "record.changed" &&
   z.object({ marker: z.string() }).safeParse(entry.intent.data).data?.marker ===
     marker;
 
@@ -1552,7 +1552,9 @@ describe("record save outboxes", { timeout: 60_000 }, () => {
       if (
         z
           .object({ hang: z.literal(true) })
-          .safeParse("data" in entry.intent ? entry.intent.data : null).success
+          .safeParse(
+            entry.intent.kind === "record.changed" ? null : entry.intent.data
+          ).success
       ) {
         return await hanging;
       }
