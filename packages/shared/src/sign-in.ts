@@ -29,3 +29,37 @@ const betterAuthSignInErrors = [
 export type SignInErrorCode =
   | SignInRefusal
   | (typeof betterAuthSignInErrors)[number];
+
+/** One of the person's own sessions: a browser they are signed in on. */
+export interface OwnSession {
+  /** The session's ID, never its token. */
+  id: string;
+  /** The browser's user agent, as it sent it when signing in. */
+  device: string | null;
+  /** When they signed in (ISO 8601). */
+  signedInAt: string;
+  /** When the session was last refreshed (ISO 8601). */
+  refreshedAt: string;
+  /** When it ends unless refreshed (ISO 8601). */
+  expiresAt: string;
+  /** The session this connection is signed in with. */
+  current: boolean;
+}
+
+/** Most of a person's own sessions listed at once: the latest refreshed. */
+export const ownSessionsListed = 50;
+
+/**
+ * What ending a session came to. `ended`: it was theirs, and is over:
+ * every connection on it closes within seconds. `not_found`: they hold no
+ * such session, whether it ended already or was never theirs.
+ */
+export type EndedSession = "ended" | "not_found";
+
+/** The person's own sessions, over `/rpc`. */
+export interface SessionsApi {
+  /** Their sessions that haven't expired, latest refreshed first, at most {@link ownSessionsListed}. */
+  list: () => Promise<OwnSession[]>;
+  /** Ends one of their own sessions, this one too; audited. */
+  end: (id: string) => Promise<EndedSession>;
+}
