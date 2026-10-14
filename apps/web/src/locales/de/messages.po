@@ -400,6 +400,10 @@ msgstr "{run}: fehlgeschlagen"
 msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 msgstr "{runs, plural, one {{date}: # Lauf} other {{date}: # Läufe}}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{runs, plural, one {# run} other {# runs}}"
+msgstr "{runs, plural, one {# Durchlauf} other {# Durchläufe}}"
+
 #: src/dashboard/runs-widget.tsx
 msgid "{runs, plural, one {of # run} other {of # runs}}"
 msgstr "{runs, plural, one {von # Lauf} other {von # Läufen}}"
@@ -2172,10 +2176,6 @@ msgstr "Eine Berechtigung erteilt"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp ist gerade nicht erreichbar. Versuchen Sie es gleich noch einmal."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
-msgstr "Grasp rechnet die Kosten der Modelle auf die Budgets an, die es für Sie festlegt. Es ist kein Budget festgelegt, daher gibt es nichts anzuzeigen."
-
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp hat das Go gegeben"
@@ -2847,6 +2847,10 @@ msgstr "Nächster Lauf: {next}"
 msgid "No apps yet"
 msgstr "Noch keine Apps"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "No budget is set for all calls together"
+msgstr "Für alle Aufrufe zusammen ist kein Budget festgelegt"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "No budget is set: model calls aren't limited by cost."
 msgstr "Kein Budget festgelegt: Modellaufrufe sind nicht nach Kosten begrenzt."
@@ -2958,6 +2962,10 @@ msgstr "Noch keine Läufe."
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"
 msgstr "Keine Teams"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "No workflow has called a model this month."
+msgstr "Diesen Monat hat noch kein Workflow ein Modell aufgerufen."
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No workflow in this engine yet."
@@ -4614,6 +4622,10 @@ msgid "That way of signing in isn't set up here."
 msgstr "Diese Anmeldemethode ist hier nicht eingerichtet."
 
 #: src/routes/_shell.settings.spend.tsx
+msgid "The {top} that spent most; more spent less."
+msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
+
+#: src/routes/_shell.settings.spend.tsx
 msgid "The {top} who spent most; more spent less."
 msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 
@@ -5438,6 +5450,10 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Was als Erfolg zählt"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "What each workflow's model calls cost this month, most first, and how often it ran."
+msgstr "Was die Modellaufrufe jedes Workflows diesen Monat gekostet haben, die höchsten zuerst, und wie oft er gelaufen ist."
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
 msgstr "Was jeder Agent ständig im Kontext hat."
@@ -5693,6 +5709,10 @@ msgstr "Bekannte Workflows"
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
 msgstr "Fehlgeschlagene Workflows"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Workflows this month"
+msgstr "Workflows in diesem Monat"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."

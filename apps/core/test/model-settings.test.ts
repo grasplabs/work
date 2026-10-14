@@ -552,6 +552,135 @@ describe("model settings", { timeout: 60_000 }, () => {
     });
   });
 
+  it("show admins this month's spend with no budget set: the total, and the workflows that spent most with their runs, and nobody else", async () => {
+    // The month it is: workflow runs are counted in it.
+    const coreEnv: ModelsEnv & Env = {
+      ...env,
+      MODEL_GATEWAY: { gateway: "grasp-os-test", models: [anthropic] },
+      MODEL_BUDGET_MONTH: undefined,
+    };
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, workflowFiles("idle", "  return null;"));
+    const appId = appIdSchema.parse(app);
+    const runs = [
+      await builder.api.workflows.start(app, "idle"),
+      await builder.api.workflows.start(app, "idle"),
+    ];
+    await Promise.all(
+      runs.map(async ({ id }) => {
+        await finished(id);
+      })
+    );
+    const fake = fakeGateway(...Array.from({ length: 3 }, () => pricedAnswer));
+    const { call } = models({ ...coreEnv, AI: fake.binding });
+    const step = (runId: string): ModelCall<undefined> => ({
+      model: anthropic,
+      input: "Hello.",
+      purpose: "workflow.step",
+      trigger: runActorOf({ runId, app, workflow: "idle" }),
+      work: {
+        authority: {
+          subject: { type: "app", appId },
+          onBehalfOf: builder.userId,
+          mode: "workflow",
+          appVersion: 1,
+        },
+        context: { type: "run", appId, runId: runIdSchema.parse(runId) },
+      },
+    });
+    for (const made of [
+      step(runs[0]?.id ?? ""),
+      step(runs[1]?.id ?? ""),
+      {
+        ...step(runs[0]?.id ?? ""),
+        purpose: "chat.turn",
+        trigger: { type: "person", userId: builder.userId } as const,
+        work: {
+          authority: {
+            subject: { type: "app", appId },
+            onBehalfOf: builder.userId,
+            mode: "interactive",
+            appVersion: 1,
+          },
+          context: { type: "app", appId },
+        },
+      } satisfies ModelCall<undefined>,
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await expect(outcome(call(made))).resolves.toBe("ok");
+    }
+    // Workflows of an App no longer here, as many as are listed, each
+    // spending less: the least is left out.
+    const month = new Date().toISOString().slice(0, "yyyy-mm".length);
+    const ledger = modelLedger(env);
+    await Promise.all(
+      Array.from({ length: modelSpendListed }, async (_, index) => {
+        const id = crypto.randomUUID();
+        await ledger.admit({
+          id,
+          period: month,
+          scopes: [
+            counted("workflow", JSON.stringify(["gone-app", `w${index}`])),
+          ],
+          model: anthropic,
+          price: {
+            version: "test",
+            input: 1_000_000,
+            output: 1_000_000,
+            cacheRead: 0,
+            cacheWrite: 0,
+          },
+          reservedMicros: 1000 + index,
+          actor: { type: "person", userId: "someone" },
+          deadline: Date.now() + 60_000,
+          reconcileAt: Date.now() + 60_000,
+        });
+        await ledger.settle(id, {
+          by: "usage",
+          tokens: {
+            input: 1000 + index,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+          },
+        });
+      })
+    );
+
+    const { session } = await signedInWithRole(idp, "admin");
+    const { core } = await openRpc(session, { coreEnv });
+    const spend = await core.authenticate().models.spend();
+    expect(spend.workflows).toHaveLength(modelSpendListed);
+    // The three calls: the gone App's spend never counted for the deployment.
+    expect({ ...spend, workflows: spend.workflows.slice(0, 2) }).toStrictEqual({
+      month,
+      total: 0.0135,
+      workflows: [
+        {
+          appId,
+          appName: "Invoices",
+          workflowId: "idle",
+          amount: 0.009,
+          runs: 2,
+        },
+        {
+          appId: "gone-app",
+          appName: null,
+          workflowId: `w${modelSpendListed - 1}`,
+          amount: (1000 + modelSpendListed - 1) / 1_000_000,
+          runs: 0,
+        },
+      ],
+      more: true,
+    });
+
+    const { session: builderSession } = await signedInWithRole(idp, "builder");
+    const { core: builderCore } = await openRpc(builderSession, { coreEnv });
+    await expect(
+      outcome(builderCore.authenticate().models.spend())
+    ).resolves.toBe("role.forbidden");
+  });
+
   it("read to Grasp staff too, through the admin role their access gives", async () => {
     const coreEnv = envWith({ gateway: "grasp-os-test", models: [workersAi] });
     const session = await signedIn(idp, "grasp-staff", staffPerson());
