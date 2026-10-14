@@ -139,20 +139,21 @@ describe("a form whose values don't pass", () => {
   });
 });
 
-describe("a record form whose save changed nothing", () => {
-  it("leaves syncing once the record is read again, though its revision didn't move", async () => {
-    const record = {
-      _id: "01890000-0000-7000-8000-000000000001",
-      _rev: 3,
-      title: "Same",
-      body: "",
-    };
+describe("a record form whose save answers no record", () => {
+  const record = {
+    _id: "01890000-0000-7000-8000-000000000001",
+    _rev: 3,
+    title: "Same",
+    body: "",
+  };
+
+  /** A record form over `record` whose save succeeds without answering it. */
+  const recordForm = () => {
     const binding = new FormBinding(
       {
         kind: "record",
         args: api.notes.update.args,
         fields: ["title", "body"],
-        // A save that answers no record, of values the record holds.
         send: async () => await Promise.resolve(null),
       },
       { title: record.title, body: record.body },
@@ -161,12 +162,34 @@ describe("a record form whose save changed nothing", () => {
         args: () => ({ id: record._id, expectedRevision: record._rev }),
       }
     );
-    mounted(binding);
+    return { binding, form: mounted(binding) };
+  };
+
+  it("is done at once when it saved what the record held", async () => {
+    const { binding } = recordForm();
     await binding.submit();
-    expect(binding.status().phase).toBe("syncing");
-    // The query reads the record again: the same revision, the same values.
-    binding.supply({ ...record });
     expect(binding.status().phase).toBe("idle");
+  });
+
+  it("is done at once when what it saved normalizes to what the record held", async () => {
+    const { binding, form } = recordForm();
+    // The title trims to the stored one: nothing is written.
+    form.setFieldValue("title", "  Same  ");
+    await binding.submit();
+    expect(binding.status().phase).toBe("idle");
+  });
+
+  it("waits past a read sent before the save, for the commit's revision", async () => {
+    const { binding, form } = recordForm();
+    form.setFieldValue("title", "Edited");
+    await binding.submit();
+    // A read sent before the save answers after it: the old record, at
+    // the revision the save was made against.
+    binding.supply({ ...record });
+    expect(binding.status().phase).toBe("syncing");
+    binding.supply({ ...record, _rev: 4, title: "Edited" });
+    expect(binding.status().phase).toBe("idle");
+    expect(form.state.values).toMatchObject({ title: "Edited" });
   });
 });
 

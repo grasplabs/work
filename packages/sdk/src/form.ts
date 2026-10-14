@@ -573,12 +573,16 @@ export class FormBinding {
     }
     const { phase, conflict } = this.#status;
     if (phase === "syncing") {
-      // The record read after the save: the commit's, even when it
-      // changed nothing (values saved as they were, or normalized back to
-      // what was stored), so its revision needn't have moved.
-      this.#latest = record;
-      this.#set({ phase: "idle" });
-      this.#adopt(record);
+      // Only the commit's record ends it: a revision past the one the
+      // save was made against. A read sent before the save may answer
+      // after it, with the old record at the old revision; a save that
+      // changed nothing never syncs (`#succeeded`).
+      const saved = identityOf(this.#baseline);
+      if (saved === undefined || next.rev > saved.rev) {
+        this.#latest = record;
+        this.#set({ phase: "idle" });
+        this.#adopt(record);
+      }
       return;
     }
     if (next.rev === latest.rev && same(record, this.#latest)) {
@@ -705,7 +709,7 @@ export class FormBinding {
       throw failure;
     }
     this.#uncertain = undefined;
-    this.#succeeded(result);
+    this.#succeeded(result, submission);
     return result;
   }
 
@@ -773,7 +777,7 @@ export class FormBinding {
   }
 
   /** A submission committed: the new baseline, the reset and the callback. */
-  #succeeded(result: unknown): void {
+  #succeeded(result: unknown, submission: Submission): void {
     const target = this.#target;
     if (target.kind === "record") {
       const committed = identityOf(result);
@@ -800,8 +804,19 @@ export class FormBinding {
         // Another shape of result, and the commit's record already came.
         this.#set({ phase: "idle" });
         this.#adopt(this.#latest);
+      } else if (
+        same(
+          pick(submission.input, target.fields),
+          pick(this.#baseline, target.fields)
+        )
+      ) {
+        // Values the record already held, as sent (normalized as the host
+        // normalizes them): nothing was written, so no new revision comes.
+        this.#set({ phase: "idle" });
+        this.#adopt(this.#baseline);
       } else {
-        // Another shape of result: the commit's record comes from the query.
+        // Another shape of result: the commit's record comes from the
+        // query, at a revision past the baseline's (`supply`).
         this.#set({ phase: "syncing" });
       }
     } else {
