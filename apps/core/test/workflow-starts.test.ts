@@ -1,3 +1,4 @@
+/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { agentIdSchema, appIdSchema } from "@grasp-os/shared/ids";
 import type {
   Authority,
@@ -129,6 +130,48 @@ const definitionOf = (name: string, version = "1.0.0"): string =>
     input: { schema: objectSchema({ who: { type: "string" } }) },
     output: { schema: objectSchema({ status: { type: "string" } }) },
     do: [{ finish: { set: { status: "done" } } }],
+  });
+
+/** A definition of workflow `name` that runs workflow `child` at 1.0.0. */
+const binderOf = (name: string, child: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: {
+          profile: "grasp-open-workflow/1",
+          params: {},
+          bindings: {
+            child: {
+              kind: "workflow",
+              contract: `${workflowNamespace}/${child}/1.0.0`,
+            },
+          },
+        },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      {
+        child: {
+          run: {
+            workflow: {
+              namespace: workflowNamespace,
+              name: child,
+              version: "1.0.0",
+              input: { who: "${ $workflow.input.who }" },
+            },
+          },
+          metadata: { grasp: { binding: "child" } },
+        },
+      },
+      { finish: { set: { status: "done" } } },
+    ],
   });
 
 /** A workflow `owner` created, published at version 1 (and 2, if asked). */
@@ -372,7 +415,7 @@ describe("authority changing under a start", () => {
     ).toBeTruthy();
   });
 
-  it("refuses a start decided before its workflow's members changed, or it was deleted", async () => {
+  it("refuses a start decided before its workflow's members changed, or it was deleted, and keeps one a share changed nothing for", async () => {
     const ada = await person("builder");
     const bob = await person("builder");
     const workflow = await workflowOf(ada);
@@ -390,6 +433,26 @@ describe("authority changing under a start", () => {
     const staleMembers = await outcome(
       admitWorkflowStart(env, before, { who: "Ada" }, "k1")
     );
+    // Sharing Bob with the role he has, or unsharing Carl, whom it isn't
+    // shared with, changes nothing: a start decided before still lands.
+    const unchanged = await authorizeWorkflowStart(
+      env,
+      personOf(ada),
+      workflow.id,
+      1
+    );
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    await unshareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: crypto.randomUUID(),
+    });
+    const sameShare = await outcome(
+      admitWorkflowStart(env, unchanged, { who: "Ada" }, "k3")
+    );
     const decided = await authorizeWorkflowStart(
       env,
       personOf(ada),
@@ -399,11 +462,13 @@ describe("authority changing under a start", () => {
     await deleteWorkflowResource(env, ada, workflow.id);
     expect({
       staleMembers,
+      sameShare,
       deleted: await outcome(
         admitWorkflowStart(env, decided, { who: "Ada" }, "k2")
       ),
     }).toStrictEqual({
       staleMembers: "workflow.start_denied",
+      sameShare: "ok",
       deleted: "workflow.start_denied",
     });
   });
@@ -813,6 +878,64 @@ describe("a trigger starting a workflow", () => {
       },
       audited: { triggers: 1, trigger1: trigger.id },
       whileDisabled: "ok",
+    });
+  });
+
+  it("names as many of what keeps a workflow alive as one audit event holds, and counts it all", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    // Sixteen workflows that run it, and twenty triggers that start it.
+    const binders = await Promise.all(
+      Array.from({ length: 16 }, async () => {
+        const binder = await createWorkflowResource(
+          env,
+          ada,
+          `binder-${unique()}`
+        );
+        await publishWorkflowVersion(env, ada, binder.id, {
+          definition: binderOf(binder.name, workflow.name),
+          basedOn: null,
+        });
+        return binder.id;
+      })
+    );
+    const many = 20;
+    const triggers = await Promise.all(
+      Array.from({ length: many }, async () => {
+        const trigger = await systemTrigger(ada, workflow.id);
+        await granted(
+          ada,
+          admin,
+          startsOn({ type: "trigger", triggerId: trigger.id }, workflow.id)
+        );
+        return trigger.id;
+      })
+    );
+    const bound = await refusal(deleteWorkflowResource(env, ada, workflow.id));
+    const events = await allEvents();
+    const refused = events.find(
+      ({ action, target }) =>
+        action === "workflow.delete_refused" && target?.id === workflow.id
+    );
+    const named = Object.entries(refused?.detail ?? {}).filter(([field]) =>
+      /^(?:binder|trigger)\d+$/u.test(field)
+    );
+    expect({
+      bound,
+      counted: [refused?.detail.binders, refused?.detail.triggers],
+      fields: Object.keys(refused?.detail ?? {}).length,
+      named: named.every(([, id]) =>
+        [...binders, ...triggers].includes(String(id))
+      ),
+    }).toMatchObject({
+      bound: {
+        code: "workflow.resource_bound",
+        details: { triggers: { ids: triggers.toSorted() } },
+      },
+      counted: [16, many],
+      fields: 32,
+      named: true,
     });
   });
 

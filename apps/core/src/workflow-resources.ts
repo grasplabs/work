@@ -3,7 +3,7 @@ import type { Diagnostic } from "@grasp-os/open-workflow/diagnostics";
 import { profileLimits } from "@grasp-os/open-workflow/limits";
 import { validateWorkflow } from "@grasp-os/open-workflow/validate";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -33,6 +33,7 @@ import type {
 } from "@grasp-os/shared/workflow-resources";
 import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
 import { and, asc, desc, eq, exists, isNull, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -133,11 +134,22 @@ import { quotaPolicy } from "./workflows/quotas.ts";
  * may start or follow it: a start admitted under the generation before is
  * refused (workflow-starts.ts).
  */
-export const nextGeneration = (db: ReturnType<typeof drizzle>, id: string) =>
+export const nextGeneration = (
+  db: ReturnType<typeof drizzle>,
+  id: string,
+  landed?: SQL
+) =>
   db
     .update(workflowResources)
     .set({ policyGeneration: sql`${workflowResources.policyGeneration} + 1` })
-    .where(eq(workflowResources.id, id));
+    .where(and(eq(workflowResources.id, id), landed));
+
+/**
+ * That the batch's previous statement changed a row, as SQL: for the
+ * statement right after a write, which then changes a row only if the
+ * write did, so the one after it can ask the same (`outboxedIfChanged`).
+ */
+export const previousChanged = sql`changes() > 0`;
 
 /** The audit log's target type of a workflow resource. */
 const targetType = "workflow_resource";
@@ -1267,6 +1279,9 @@ export const shareWorkflowResource = async (
           AND EXISTS (SELECT 1 FROM workflow_resources
             WHERE id = ${workflow.id} AND deleted_at IS NULL)`,
       }),
+    // Only when the share changed something (a role the member already
+    // has changes nothing): a start decided meanwhile is still good.
+    nextGeneration(db, workflow.id, previousChanged),
     outboxedIfChanged(
       db,
       memberEntry(
@@ -1276,7 +1291,6 @@ export const shareWorkflowResource = async (
         { ...member, role }
       )
     ),
-    nextGeneration(db, workflow.id),
   ]);
   try {
     await batch;
@@ -1325,6 +1339,7 @@ export const unshareWorkflowResource = async (
   }
   await auditedBatch(env, db, [
     db.delete(workflowResourceMembers).where(ofMember),
+    nextGeneration(db, workflow.id, previousChanged),
     outboxedIfChanged(
       db,
       memberEntry(
@@ -1334,7 +1349,6 @@ export const unshareWorkflowResource = async (
         { ...member, role: row.role }
       )
     ),
-    nextGeneration(db, workflow.id),
   ]);
 };
 
@@ -1372,8 +1386,32 @@ export const workflowMembers = async (
   }));
 };
 
-/** At most this many binders are named in a refused deletion's event. */
-const maxNamedBinders = 20;
+/**
+ * `counts` and as many of `groups` as fit beside them in one audit event's
+ * detail (`auditDetailMaxKeys` fields in all), each group's fields named
+ * with its place in its list (`binder1`, `trigger3`, `appBinding2` and
+ * `app2`), earlier lists first. The counts always say how many there are.
+ */
+const namedWithin = (
+  counts: Record<string, string | number>,
+  lists: readonly Record<string, string>[][]
+): Record<string, string | number> => {
+  let room = auditDetailMaxKeys - Object.keys(counts).length;
+  const named: Record<string, string> = {};
+  for (const list of lists) {
+    for (const [index, group] of list.entries()) {
+      const fields = Object.entries(group);
+      if (fields.length > room) {
+        return { ...counts, ...named };
+      }
+      for (const [field, value] of fields) {
+        named[`${field}${index + 1}`] = value;
+      }
+      room -= fields.length;
+    }
+  }
+  return { ...counts, ...named };
+};
 
 /**
  * The triggers that may start `id`, as SQL rows of their IDs: live,
@@ -1483,22 +1521,25 @@ export const deleteWorkflowResource = async (
     sql`${pinningTriggersSql(workflow.id)} ORDER BY trigger.id`
   );
   const triggers = triggerRows.map(({ id: trigger }) => trigger);
-  const named: Record<string, string> = {};
-  for (const [index, binder] of binders.slice(0, maxNamedBinders).entries()) {
-    named[`binder${index + 1}`] = binder.id;
-  }
-  for (const [index, trigger] of triggers.slice(0, maxNamedBinders).entries()) {
-    named[`trigger${index + 1}`] = trigger;
-  }
   await auditedBatch(env, db, [
     outboxed(
       db,
-      entry(by, "workflow.delete_refused", workflow.id, {
-        reason: "workflow.resource_bound",
-        binders: binders.length,
-        triggers: triggers.length,
-        ...named,
-      })
+      entry(
+        by,
+        "workflow.delete_refused",
+        workflow.id,
+        namedWithin(
+          {
+            reason: "workflow.resource_bound",
+            binders: binders.length,
+            triggers: triggers.length,
+          },
+          [
+            binders.map(({ id: binder }) => ({ binder })),
+            triggers.map((trigger) => ({ trigger })),
+          ]
+        )
+      )
     ),
   ]);
   const visible: WorkflowBinders["binders"] = [];
