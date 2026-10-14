@@ -1,14 +1,15 @@
 import { fromBase64Url } from "@grasp-os/shared/encoding";
-import { portableFunctionPath } from "@grasp-os/shared/portable";
+import { appTokenMs, portableFunctionPath } from "@grasp-os/shared/portable";
 
 import { isPlainObject } from "./value-descriptor.ts";
 
 // How a portable host's client (spec 10.7.1: `new GraspClient({ url,
 // getToken })`, outside Grasp's own shell) reaches core: a plain `fetch`
 // of `POST <url>/api/portable/app-functions/<app>` per call, with the
-// person's App token from `getToken()` as `Authorization: Bearer`, asked
-// for afresh on every call so a host that renews tokens is always
-// current. Answers and refusals read as the frame's transport reads
+// person's App token from `getToken()` as `Authorization: Bearer`. The
+// token is kept until shortly before its `exp` (read, not trusted), or
+// until core refuses it, so a host that mints per request spends neither
+// its budget nor the audit log on every call. Answers and refusals read as the frame's transport reads
 // them: core's `{ result }`, or a coded refusal; anything else (no
 // answer, an answer that isn't core's) is a lost response.
 //
@@ -18,7 +19,9 @@ import { isPlainObject } from "./value-descriptor.ts";
 // - Data of one person shown to another: the client reads whose a token
 //   is (its `sub`) before it is sent, and when that changes clears what
 //   it holds before anything of the new person's arrives (client-core.ts).
-//   The claim is only read, never trusted: core checks the token.
+//   The claim is only read, never trusted: core checks the token. A
+//   token is kept until shortly before its `exp`, so a person swapped in
+//   without the last one signing out is seen when the client next asks.
 // - A host that has no token: nothing is sent; the call is refused as
 //   `auth.unauthenticated`, as core would refuse it.
 
@@ -30,11 +33,17 @@ export interface PortableClientOptions {
    */
   readonly url: string;
   /**
-   * The person's current App token, from the host's own sign-in, asked
-   * for before every call; `null` while nobody is signed in.
+   * The person's current App token, from the host's own sign-in; `null`
+   * while nobody is signed in. Asked for when the client holds none, the
+   * one it holds is within 30 seconds of its `exp`, or core refused it.
+   * A host whose person changes without the old token being refused is
+   * noticed when the client next asks.
    */
   readonly getToken: () => Promise<string | null>;
 }
+
+/** Core's status for a token it refused. */
+const unauthorized = 401;
 
 /** A refusal before anything was sent, coded as core codes its own. */
 const refusal = (
@@ -76,8 +85,15 @@ const originOf = (url: unknown): string => {
   return parsed.origin;
 };
 
-/** Whose `token` is: its `sub`, read without checking it; or `undefined`. */
-const subjectOf = (token: string): string | undefined => {
+/** What the client reads of a token, without checking it. */
+interface TokenClaims {
+  readonly sub: string;
+  /** Its `exp`, in milliseconds, when it says one. */
+  readonly expiresAt: number | undefined;
+}
+
+/** `token`'s `sub` and `exp`, read without checking them; or `undefined`. */
+const claimsOf = (token: string): TokenClaims | undefined => {
   const [, payload, signature, ...more] = token.split(".");
   if (payload === undefined || signature === undefined || more.length > 0) {
     return undefined;
@@ -87,11 +103,34 @@ const subjectOf = (token: string): string | undefined => {
       new TextDecoder().decode(fromBase64Url(payload))
     );
     const sub = isPlainObject(claims) ? claims.sub : undefined;
-    return typeof sub === "string" && sub.length > 0 ? sub : undefined;
+    const exp = isPlainObject(claims) ? claims.exp : undefined;
+    return typeof sub === "string" && sub.length > 0
+      ? {
+          sub,
+          expiresAt:
+            typeof exp === "number" && Number.isFinite(exp)
+              ? exp * 1000
+              : undefined,
+        }
+      : undefined;
   } catch {
     return undefined;
   }
 };
+
+/** How long before a token's `exp` the client asks the host for the next. */
+const renewBeforeMs = 30_000;
+
+/**
+ * Until when a token read at `now` is used without asking again: shortly
+ * before its `exp`, and never longer than an App token lives. `exp` is a
+ * hint, not trusted: core checks it. A token without one is asked for
+ * again on the next call.
+ */
+const keepUntil = (claims: TokenClaims, now: number): number =>
+  claims.expiresAt === undefined
+    ? now
+    : Math.min(claims.expiresAt - renewBeforeMs, now + appTokenMs);
 
 /** A token as the client read it: what it sends, and whose it is. */
 export interface PortableToken {
@@ -99,10 +138,24 @@ export interface PortableToken {
   readonly principal: string;
 }
 
+/** A request to the host for a token, numbered in the order asked. */
+interface Asking {
+  readonly number: number;
+  readonly done: Promise<PortableToken>;
+}
+
 /** A portable host's way to core (see the header). */
 export class PortableTransport {
   readonly #origin: string;
   readonly #getToken: () => Promise<string | null>;
+  /** The token in use, and until when it is used without asking. */
+  #held: { readonly token: PortableToken; readonly until: number } | undefined;
+  /** The request to the host under way: calls meanwhile wait for it. */
+  #asking: Asking | undefined;
+  /** How many requests were made of the host. */
+  #asked = 0;
+  /** The first request whose answer may still be used. */
+  #current = 1;
 
   constructor(options: PortableClientOptions) {
     if (typeof options.getToken !== "function") {
@@ -115,22 +168,75 @@ export class PortableTransport {
   /**
    * The person's current token, or a coded refusal: `auth.unauthenticated`
    * without one, `auth.token_unavailable` when the host failed to say.
+   * The host is asked only when no token is held or the one held is near
+   * its `exp`, or was refused (`forget`); calls meanwhile share one
+   * request, and an answer to a request made before a refusal is never
+   * used.
    */
   async token(): Promise<PortableToken> {
-    let text: unknown;
-    try {
-      text = await this.#getToken();
-    } catch {
-      throw refusal(
-        "auth.token_unavailable",
-        "The host couldn't provide a sign-in token. Try again."
-      );
+    for (;;) {
+      const held = this.#held;
+      if (held !== undefined && Date.now() < held.until) {
+        return held.token;
+      }
+      const asking = this.#asking ?? this.#ask();
+      let token: PortableToken;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one request after another
+        token = await asking.done;
+      } catch (error) {
+        if (asking.number >= this.#current) {
+          throw error;
+        }
+        continue;
+      } finally {
+        if (this.#asking === asking) {
+          this.#asking = undefined;
+        }
+      }
+      if (asking.number >= this.#current) {
+        return token;
+      }
     }
-    const principal = typeof text === "string" ? subjectOf(text) : undefined;
-    if (typeof text !== "string" || principal === undefined) {
-      throw refusal("auth.unauthenticated", "Sign in to continue.");
-    }
-    return { text, principal };
+  }
+
+  /**
+   * Core refused the token sent: it isn't used again, and nor is any
+   * answer to a request the host was asked before now.
+   */
+  forget(): void {
+    this.#held = undefined;
+    this.#asking = undefined;
+    this.#current = this.#asked + 1;
+  }
+
+  /** Asks the host for a token, and holds it while it may be used. */
+  #ask(): Asking {
+    this.#asked += 1;
+    const number = this.#asked;
+    const read = async (): Promise<PortableToken> => {
+      let text: unknown;
+      try {
+        text = await this.#getToken();
+      } catch {
+        throw refusal(
+          "auth.token_unavailable",
+          "The host couldn't provide a sign-in token. Try again."
+        );
+      }
+      const claims = typeof text === "string" ? claimsOf(text) : undefined;
+      if (typeof text !== "string" || claims === undefined) {
+        throw refusal("auth.unauthenticated", "Sign in to continue.");
+      }
+      const token = { text, principal: claims.sub };
+      if (number >= this.#current) {
+        this.#held = { token, until: keepUntil(claims, Date.now()) };
+      }
+      return token;
+    };
+    const asking = { number, done: read() };
+    this.#asking = asking;
+    return asking;
   }
 
   /**
@@ -159,6 +265,9 @@ export class PortableTransport {
     }
     if (response.ok) {
       return answer;
+    }
+    if (response.status === unauthorized) {
+      this.forget();
     }
     const code = isPlainObject(answer) ? answer.code : undefined;
     const message = isPlainObject(answer) ? answer.message : undefined;

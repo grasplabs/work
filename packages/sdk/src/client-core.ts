@@ -6,7 +6,6 @@ import {
   clientError,
   fencingCodes,
   GraspError,
-  principalChanged,
   nothingRanCodes,
   readAnswer,
   refusedBeforeCallCodes,
@@ -84,9 +83,25 @@ export interface ClientTransport {
 }
 
 /**
- * What a call through a portable host's transport is bound to: the read's
- * fence generation, and the person its first attempt was sent for. A
- * call that finds either changed is refused before it is sent.
+ * Calls the client refused before sending them, because what they were
+ * bound to changed (`Bound`), by the error thrown: each settles as its
+ * refusal, and never fences on its own, since the change that made it
+ * stale fenced already.
+ */
+const unsentCalls = new WeakMap<object, GraspError>();
+
+/** An error for a call refused unsent as `refusal` (`unsentCalls`). */
+const unsent = (refusal: GraspError): Error => {
+  const error = new Error(refusal.message);
+  unsentCalls.set(error, refusal);
+  return error;
+};
+
+/**
+ * What a call through a portable host's transport is bound to: the fence
+ * generation it began under, and the person it began for (a submission)
+ * or its first attempt was sent for. A call that finds either changed is
+ * refused before it is sent.
  */
 interface Bound {
   readonly generation?: number;
@@ -879,6 +894,13 @@ export class GraspClient {
     try {
       settled = readAnswer(await this.#through(request, app, bound));
     } catch (error) {
+      const refusal =
+        typeof error === "object" && error !== null
+          ? unsentCalls.get(error)
+          : undefined;
+      if (refusal !== undefined) {
+        return { kind: "failed", error: refusal };
+      }
       settled = readRejection(error);
     }
     if (settled.kind === "failed" && fencingCodes.has(settled.error.code)) {
@@ -903,12 +925,15 @@ export class GraspClient {
       this.#switchPrincipal();
     }
     this.#principal = token.principal;
-    const before =
-      (bound.generation !== undefined &&
-        bound.generation !== this.#generation) ||
-      (bound.principal !== undefined && bound.principal !== token.principal);
-    if (before) {
-      throw principalChanged();
+    if (bound.principal !== undefined && bound.principal !== token.principal) {
+      throw unsent(clientError("auth.principal_changed"));
+    }
+    if (
+      bound.generation !== undefined &&
+      bound.generation !== this.#generation
+    ) {
+      // Fenced since the call began: refused unsent, as the fence was.
+      throw unsent(this.#fencedBy ?? clientError("auth.principal_changed"));
     }
     bound.principal = token.principal;
     return await portable.send(request, app, token.text);
@@ -1083,10 +1108,15 @@ export class GraspClient {
     held: { readonly scoped: string; readonly input: string }
   ): Promise<unknown> {
     const isAction = reference.kind === "action";
+    // Bound to the person and the fence it was called under: one who signs
+    // in while it waits for its token never gets it sent as theirs.
+    const bound: Bound = { generation: this.#generation };
+    if (this.#principal !== undefined) {
+      bound.principal = this.#principal;
+    }
     const run = async (): Promise<unknown> => {
       const started = Date.now();
       let lostSince: number | undefined;
-      const bound: Bound = {};
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
         const settled = await this.#call(request, reference.resourceId, bound);

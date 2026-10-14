@@ -369,7 +369,7 @@ const recordRefusal = async (
     operation,
     stage,
   ]);
-  await appHost(env, app).auditRefusal(refusal, {
+  await appHost(env, app).auditOnce(refusal, {
     actor: actorOf(by),
     action: "app.artifact.refused",
     target: { type: "app", id: app },

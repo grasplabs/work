@@ -67,7 +67,12 @@ export const appTokenResponse = async (
       actor: actorOf(session.person),
       action: "app.token.issued",
       target: { type: "app", id },
-      detail: { expiresAt: issued.expiresAt.toISOString() },
+      // The session's ID, never its token: what ties the App's later
+      // portable use to the sign-in that minted for it.
+      detail: {
+        session: session.sessionId,
+        expiresAt: issued.expiresAt.toISOString(),
+      },
     });
     return Response.json(
       { token: issued.token, expiresAt: issued.expiresAt.toISOString() },

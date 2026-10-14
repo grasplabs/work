@@ -16,6 +16,7 @@ import {
 } from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
 import { jwt } from "better-auth/plugins/jwt";
+import type { Jwk } from "better-auth/plugins/jwt";
 import { organization } from "better-auth/plugins/organization";
 import { defaultAc } from "better-auth/plugins/organization/access";
 import { and, eq, sql } from "drizzle-orm";
@@ -48,6 +49,7 @@ import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { checkClaims } from "./claims.ts";
 import { devIdpOrigin, oidcProviders, providerIds } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
+import { liveKeys } from "./token-keys.ts";
 
 /** Better Auth's routes, under core's API. */
 export const authBasePath = "/api/auth";
@@ -626,6 +628,16 @@ const createAuth = (
           expirationTime: `${appTokenMs / 1000}s`,
         },
         disableSettingJwtHeader: true,
+        // Its own key rows, read through Better Auth's adapter, less the
+        // keys that can't verify a current token any more: without this
+        // it verifies with every key it ever made (token-keys.ts).
+        adapter: {
+          getJwks: async (context) =>
+            liveKeys(
+              await context.context.adapter.findMany<Jwk>({ model: "jwks" }),
+              Date.now()
+            ),
+        },
         // Its model is `jwks` already; plural table names would make it
         // `jwkss`.
         schema: { jwks: { modelName: "jwk" } },

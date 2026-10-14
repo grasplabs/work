@@ -116,15 +116,6 @@ export const clientError = (
   });
 
 /**
- * A transport's refusal of a call it didn't send, because whose token
- * the host gives changed since the call began (client-core.ts).
- */
-export const principalChanged = (): Error =>
-  Object.assign(new Error(clientErrors["auth.principal_changed"].message), {
-    code: "auth.principal_changed",
-  });
-
-/**
  * Refusals that mean the person, or the build they run, no longer gets
  * the App's data: the client clears every cached result on one.
  */

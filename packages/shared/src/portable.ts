@@ -18,3 +18,9 @@ export const portableFunctionPath = "/api/portable/app-functions";
 
 /** How long an App token is good for, at most: its session may end sooner. */
 export const appTokenMs = 5 * 60 * 1000;
+
+/**
+ * The `typ` claim of an App token: what tells it from any other JWT the
+ * same keys might sign.
+ */
+export const appTokenType = "grasp-app";

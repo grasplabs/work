@@ -1,3 +1,4 @@
+import { actorOf } from "@grasp-os/shared/audit";
 import {
   authErrors,
   internalErrors,
@@ -6,7 +7,10 @@ import {
 } from "@grasp-os/shared/errors";
 import type { CodedError } from "@grasp-os/shared/errors";
 import { readAtMost, requestIdHeader } from "@grasp-os/shared/http";
+import type { AppId } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import type { LogFields } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { portableFunctionPath } from "@grasp-os/shared/portable";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -20,8 +24,10 @@ import {
 
 import { callAppFunction } from "./app-functions.ts";
 import type { FunctionAnswer } from "./app-functions.ts";
-import { identifyAppToken } from "./auth/app-tokens.ts";
+import { checkAppToken } from "./auth/app-tokens.ts";
+import type { TokenCheck } from "./auth/app-tokens.ts";
 import { identify } from "./auth/identity.ts";
+import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { delivering, leasedArtifact } from "./screen-trust.ts";
@@ -143,6 +149,62 @@ export const refusalResponse = (
   );
 };
 
+/** How much of a path's App ID a log line keeps: the path is the caller's. */
+const loggedAppMaxLength = 128;
+
+/** How long a window of refused-token log lines is. */
+const tokenLogWindowMs = 60_000;
+
+/** How many refused-token lines one isolate writes a window, at most. */
+const tokenLogsPerWindow = 20;
+
+/** The window being counted, its lines so far, and the lines left out. */
+const tokenLog = { window: 0, written: 0, dropped: 0 };
+
+/**
+ * Logs a genuine App token refused (for another App, a session that
+ * ended, a person without access): at most `tokenLogsPerWindow` lines a
+ * minute per isolate, the rest counted in one line when the next window
+ * starts, so someone holding a token can't flood the logs with it.
+ */
+const logRefusedToken = (fields: LogFields): void => {
+  const window = Math.floor(Date.now() / tokenLogWindowMs);
+  if (window !== tokenLog.window) {
+    if (tokenLog.dropped > 0) {
+      log.warn("portable.token_refused.dropped", { count: tokenLog.dropped });
+    }
+    Object.assign(tokenLog, { window, written: 0, dropped: 0 });
+  }
+  if (tokenLog.written >= tokenLogsPerWindow) {
+    tokenLog.dropped += 1;
+    return;
+  }
+  tokenLog.written += 1;
+  log.warn("portable.token_refused", fields);
+};
+
+/**
+ * Records that `person` called `app` from a portable host, with the
+ * session its token came from: once a window per person, session and App
+ * (the App host's `auditOnce`), not a row a call.
+ */
+const recordPortableUse = async (
+  env: Env,
+  person: Identity,
+  app: AppId,
+  session: string
+): Promise<void> => {
+  await appHost(env, app).auditOnce(
+    canonicalJson(["portable", person.userId, session]),
+    {
+      actor: actorOf(person),
+      action: "app.portable.called",
+      target: { type: "app", id: app },
+      detail: { session },
+    }
+  );
+};
+
 /** Who calls, and as which build (`undefined`: none core approved). */
 interface Caller {
   person: Identity;
@@ -150,6 +212,8 @@ interface Caller {
   lease: string | null | undefined;
   /** The gate's name for what is asked, in a refusal's record. */
   operation: string;
+  /** For a portable host's call: the session its App token came from. */
+  portableSession?: string;
 }
 
 /**
@@ -162,11 +226,14 @@ const boundedCall = async (
   request: Request,
   env: Env,
   app: string,
-  { person, lease, operation }: Caller,
+  { person, lease, operation, portableSession }: Caller,
   requestId: string
 ): Promise<Response> => {
   try {
     const id = await admitted(env, person, app);
+    if (portableSession !== undefined) {
+      await recordPortableUse(env, person, id, portableSession);
+    }
     // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
     // chunks; its type says `any` only for streams in general.
     const stream = request.body as ReadableStream<Uint8Array> | null;
@@ -328,9 +395,27 @@ export const portableFunctionResponse = async (
     return refused(403, requestErrors.create("request.forbidden"), requestId);
   }
   const token = bearerToken(request);
-  const person =
-    token === undefined ? undefined : await identifyAppToken(env, token, app);
-  if (person === undefined) {
+  let checked: TokenCheck;
+  try {
+    checked =
+      token === undefined
+        ? { ok: false, reason: "invalid" }
+        : await checkAppToken(env, token, app);
+  } catch (error) {
+    return withCors(
+      refusalResponse(error, requestId, "app_token.check_failed")
+    );
+  }
+  if (!checked.ok) {
+    if (checked.reason !== "invalid") {
+      logRefusedToken({
+        requestId,
+        app: app.slice(0, loggedAppMaxLength),
+        reason: checked.reason,
+        userId: checked.userId,
+        sessionId: checked.sessionId,
+      });
+    }
     return refused(401, authErrors.create("auth.unauthenticated"), requestId);
   }
   return withCors(
@@ -338,7 +423,12 @@ export const portableFunctionResponse = async (
       request,
       env,
       app,
-      { person, lease: undefined, operation: "portable.call" },
+      {
+        person: checked.person,
+        lease: undefined,
+        operation: "portable.call",
+        portableSession: checked.sessionId,
+      },
       requestId
     )
   );

@@ -19,7 +19,9 @@
 //
 // The token is an App token of the person's (core's `POST
 // /api/app-tokens/<app>`): good for one App, for minutes, and only while
-// the session it came from lasts. `getToken` is asked before every call.
+// the session it came from lasts. `getToken` is asked again shortly
+// before the token it gave expires, or once core refuses it; a host that
+// changes who is signed in without signing out makes a new client.
 
 export { GraspClient } from "./client-core.ts";
 export { GraspError } from "./client-error.ts";

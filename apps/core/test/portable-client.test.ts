@@ -1,5 +1,5 @@
 import { GraspClient, GraspError } from "@grasp-os/sdk/client";
-import { toBase64Url } from "@grasp-os/shared/encoding";
+import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { appTokenPath, portableFunctionPath } from "@grasp-os/shared/portable";
@@ -10,6 +10,9 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
+import { sweepTokenKeys } from "../src/auth/app-tokens.ts";
+import { authFor } from "../src/auth/auth.ts";
+import { signInConfig } from "../src/auth/config.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -98,6 +101,16 @@ const tokenFor = async (cookie: string, app: string): Promise<string> => {
   expect(response.status).toBe(200);
   return issuedSchema.parse(await response.json()).token;
 };
+
+const claimsSchema = z.object({ sub: z.string(), sid: z.string() });
+
+/** What a token's payload says, read without checking it. */
+const claimsOf = (token: string) =>
+  claimsSchema.parse(
+    JSON.parse(
+      new TextDecoder().decode(fromBase64Url(token.split(".")[1] ?? ""))
+    )
+  );
 
 /** The status and error code of a refused request. */
 const refusalOf = async (response: Response) => ({
@@ -215,6 +228,7 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("creates, reads, edits and deletes notes with the person's App token", async () => {
@@ -430,7 +444,7 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     const response = await requestToken(notes.app, { cookie });
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    const { expiresAt } = issuedSchema.parse(await response.json());
+    const { token, expiresAt } = issuedSchema.parse(await response.json());
     expect(Date.parse(expiresAt) - Date.now()).toBeLessThanOrEqual(5 * 60_000);
     const events = await eventsAfter(head);
     expect(
@@ -439,6 +453,7 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
       {
         actor: { type: "person", userId: notes.builder.userId },
         target: { type: "app", id: notes.app },
+        detail: { session: claimsOf(token).sid },
       },
     ]);
   });
@@ -527,20 +542,168 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
 
     current = builders;
     await client.mutation(api.create, { title: "Builder's own" });
-    const before = await client.query(api.list, { pagination: {} });
-    expect(before.items.map((note) => note.title)).toStrictEqual([
-      "Builder's own",
-    ]);
-    // Swapped without signing out between: the call that finds the swap
-    // is refused unsent, and every later one is the new person's alone.
+    const titles = async () => {
+      const page = await client.query(api.list, { pagination: {} });
+      return page.items.map((note) => note.title);
+    };
+    const before = await titles();
+    // Swapped without signing out between. The client keeps a token until
+    // shortly before its expiry, so it sees the swap when it next asks:
+    // the call that finds it is refused unsent, and every later one is
+    // the new person's alone.
     current = others;
-    await expect(
-      failureOf(client.query(api.list, { pagination: {} }))
-    ).resolves.toStrictEqual({
-      code: "auth.principal_changed",
-      category: "authorization",
+    const kept = await titles();
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 280_000 });
+    const raced = await failureOf(titles());
+    const after = await titles();
+    expect({ before, kept, raced, after }).toStrictEqual({
+      before: ["Builder's own"],
+      kept: ["Builder's own"],
+      raced: { code: "auth.principal_changed", category: "authorization" },
+      after: [],
     });
-    const after = await client.query(api.list, { pagination: {} });
-    expect(after.items).toStrictEqual([]);
+  });
+
+  it("verifies only with keys that could still have signed a current token, and deletes the rest", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const stopped = async (agoMs: number) => {
+      await env.DB.prepare("UPDATE jwks SET expires_at = ?")
+        .bind(Date.now() - agoMs)
+        .run();
+      return await statusOf(listWith(notes, token));
+    };
+    // Stopped signing a minute ago: a token it signed may still be current.
+    const recently = await stopped(60_000);
+    // Stopped longer ago than a token lives: whatever it signed is over.
+    const long = await stopped(6 * 60_000);
+    const before = await env.DB.prepare(
+      "SELECT count(*) AS keys FROM jwks"
+    ).first<{
+      keys: number;
+    }>();
+    await sweepTokenKeys(env, new Date());
+    const after = await env.DB.prepare(
+      "SELECT count(*) AS keys FROM jwks"
+    ).first<{
+      keys: number;
+    }>();
+    expect({
+      recently,
+      long,
+      before: before?.keys,
+      after: after?.keys,
+    }).toStrictEqual({ recently: 200, long: 401, before: 1, after: 0 });
+    // A fresh token signs with a fresh key.
+    const fresh = await tokenFor(notes.builder.session, notes.app);
+    await expect(statusOf(listWith(notes, fresh))).resolves.toBe(200);
+  });
+
+  it("refuses a token the same keys signed that isn't typed as an App token", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const auth = authFor(env, signInConfig(env));
+    if (auth === undefined) {
+      throw new Error("Sign-in isn't configured");
+    }
+    const { sub, sid } = claimsOf(token);
+    const { token: untyped } = await auth.api.signJWT({
+      body: { payload: { sub, sid, app: notes.app } },
+    });
+    await expect(
+      refusalOf(await listWith(notes, untyped))
+    ).resolves.toStrictEqual({ status: 401, code: "auth.unauthenticated" });
+  });
+
+  it("records portable use once a window with its session, and logs refused genuine tokens, boundedly", async () => {
+    const notes = await notesApp();
+    const other = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const head = await logHead();
+    await expect(statusOf(listWith(notes, token))).resolves.toBe(200);
+    await expect(statusOf(listWith(notes, token))).resolves.toBe(200);
+    const events = await eventsAfter(head);
+    const used = events.filter(
+      ({ action }) => action === "app.portable.called"
+    );
+    expect(used).toMatchObject([
+      {
+        actor: { type: "person", userId: notes.builder.userId },
+        target: { type: "app", id: notes.app },
+        detail: { session: claimsOf(token).sid },
+      },
+    ]);
+
+    const warned = vi.spyOn(console, "warn");
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    vi.setSystemTime(Math.ceil(Date.now() / 60_000) * 60_000 + 1000);
+    const elsewhere = requestFor(other, "notes.list", { pagination: {} });
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one request after another
+      await postPortable(other.app, elsewhere, {
+        authorization: `Bearer ${token}`,
+      });
+    }
+    vi.setSystemTime(Date.now() + 60_000);
+    await callAuth("/sign-out", notes.builder.session, {});
+    await postPortable(
+      notes.app,
+      requestFor(notes, "notes.list", { pagination: {} }),
+      {
+        authorization: `Bearer ${token}`,
+      }
+    );
+    const lines = warned.mock.calls
+      .map((call): unknown => call[0])
+      .filter(
+        (line): line is { event: string; reason?: string; count?: number } =>
+          typeof line === "object" &&
+          line !== null &&
+          String(Reflect.get(line, "event")).startsWith(
+            "portable.token_refused"
+          )
+      );
+    expect({
+      anotherApp: lines.filter(({ reason }) => reason === "another_app").length,
+      dropped: lines.find(
+        ({ event }) => event === "portable.token_refused.dropped"
+      )?.count,
+      sessionEnded: lines.filter(({ reason }) => reason === "session_ended")
+        .length,
+    }).toStrictEqual({ anotherApp: 20, dropped: 5, sessionEnded: 1 });
+  });
+
+  it("answers a failure checking a token readably cross-site", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    // Sessions can't be read: the token's keys can, its session can't.
+    const broken = new Proxy(env.DB, {
+      get: (target, property): unknown =>
+        property === "prepare"
+          ? (query: string) => {
+              if (query.includes('"sessions"')) {
+                throw new Error("D1 is down");
+              }
+              return target.prepare(query);
+            }
+          : Reflect.get(target, property),
+    });
+    const response = await routed(
+      `${portableFunctionPath}/${notes.app}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: requestFor(notes, "notes.list", { pagination: {} }),
+      },
+      { ...env, DB: broken }
+    );
+    expect({
+      status: response.status,
+      origin: response.headers.get("access-control-allow-origin"),
+      code: errorPayloadSchema.parse(await response.json()).code,
+    }).toStrictEqual({ status: 500, origin: "*", code: "internal.unexpected" });
   });
 });

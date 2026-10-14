@@ -15,9 +15,17 @@ import { api } from "./notes/.grasp/references.ts";
 const origin = "https://acme.grasp.example";
 const app = "app_0000000000000000000000notes";
 
-/** A token of `sub`'s, as core's are shaped; the client only reads `sub`. */
-const tokenOf = (sub: string): string =>
-  ["e30", JSON.stringify({ sub, app }), "c2ln"]
+/**
+ * A token of `sub`'s, as core's are shaped; the client reads only `sub`,
+ * and `exp` (in seconds) when given. Without one it is asked for again
+ * on every call.
+ */
+const tokenOf = (sub: string, exp?: number): string =>
+  [
+    "e30",
+    JSON.stringify({ sub, app, ...(exp === undefined ? {} : { exp }) }),
+    "c2ln",
+  ]
     .map((part, index) =>
       index === 1 ? toBase64Url(new TextEncoder().encode(part)) : part
     )
@@ -40,7 +48,8 @@ interface Seen {
 
 /**
  * The host's network: answers each call as `answer` says, with core's
- * `{ result }`; `answer` may throw to lose the answer.
+ * `{ result }` or the response it gives; `answer` may throw to lose the
+ * answer.
  */
 const network = (answer: (seen: Seen) => Promise<unknown>) => {
   const seen: Seen[] = [];
@@ -57,7 +66,9 @@ const network = (answer: (seen: Seen) => Promise<unknown>) => {
       };
       seen.push(call);
       const value = await answer(call);
-      return Response.json({ result: { ok: true, value } });
+      return value instanceof Response
+        ? value
+        : Response.json({ result: { ok: true, value } });
     }
   );
   return seen;
@@ -76,10 +87,22 @@ const failureOf = async (promise: Promise<unknown>): Promise<GraspError> => {
   throw new Error("It resolved");
 };
 
+/** A note ID, as the App's store makes them. */
+const idOf = (suffix: number): Id<"notes"> =>
+  // SAFETY: the form of the store's IDs; nothing here reads it further.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  `01890000-0000-7000-8000-${String(suffix).padStart(12, "0")}` as Id<"notes">;
+
 const noteId =
   // SAFETY: the form of the store's IDs; nothing here reads it further.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   "01890000-0000-7000-8000-000000000001" as Id<"notes">;
+
+/** An `exp` 40 seconds from now: a token kept for 10 of them. */
+const expiry = (): number => Math.floor(Date.now() / 1000) + 40;
+
+/** Core's answer to a read that found nothing. */
+const ok = (): Response => Response.json({ result: { ok: true, value: null } });
 
 /** Resolves once `ready()` holds, checking between turns of the loop. */
 const until = async (ready: () => boolean): Promise<void> => {
@@ -261,4 +284,135 @@ describe("a portable host's client", () => {
       expect(failure.details).toHaveProperty("idempotencyKey");
     }
   );
+
+  it("never sends a save as the next person when they sign in while it waits for its token", async () => {
+    const asked = [Promise.withResolvers<string>()];
+    let next = Promise.resolve(tokenOf("ann"));
+    const seen = network(async () => await Promise.resolve(noteId));
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await next,
+    });
+    await client.query(api.notes.get, { id: noteId });
+
+    const [waiting] = asked;
+    if (waiting === undefined) {
+      throw new Error("No request");
+    }
+    next = waiting.promise;
+    const save = failureOf(
+      client.mutation(api.notes.create, { title: "Ann's draft" })
+    );
+    waiting.resolve(tokenOf("bo"));
+    const failure = await save;
+    expect({
+      code: failure.code,
+      sent: seen.map(
+        ({ authorization, body }) =>
+          `${authorization} ${contractIdPattern.exec(body)?.groups?.contractId}`
+      ),
+    }).toStrictEqual({
+      code: "auth.principal_changed",
+      sent: [`Bearer ${tokenOf("ann")} notes.get`],
+    });
+  });
+
+  it("asks the host once for a token it may keep, and again only once core refuses it", async () => {
+    const later = Math.floor(Date.now() / 1000) + 300;
+    let asked = 0;
+    let refuse = false;
+    network(async () => {
+      await Promise.resolve();
+      return refuse
+        ? Response.json(
+            { code: "auth.unauthenticated", message: "Sign in to continue." },
+            { status: 401 }
+          )
+        : null;
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        asked += 1;
+        return await Promise.resolve(tokenOf("ann", later));
+      },
+    });
+    for (let call = 0; call < 5; call += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one call after another
+      await client.query(api.notes.get, { id: idOf(call) });
+    }
+    const keptFor = asked;
+    refuse = true;
+    await failureOf(client.query(api.notes.get, { id: idOf(9) }));
+    refuse = false;
+    await client.query(api.notes.get, { id: idOf(10) });
+    expect({ keptFor, after: asked }).toStrictEqual({ keptFor: 1, after: 2 });
+  });
+
+  it("asks again for a token within half a minute of its expiry", async () => {
+    const soon = Math.floor(Date.now() / 1000) + 20;
+    let asked = 0;
+    network(async () => await Promise.resolve(null));
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        asked += 1;
+        return await Promise.resolve(tokenOf("ann", soon));
+      },
+    });
+    await client.query(api.notes.get, { id: idOf(1) });
+    await client.query(api.notes.get, { id: idOf(2) });
+    expect(asked).toBe(2);
+  });
+
+  it("never keeps a token the host answered to a request made before core refused the last", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    const requests: PromiseWithResolvers<string>[] = [];
+    const answers: PromiseWithResolvers<Response>[] = [];
+    const seen = network(async () => {
+      const answer = Promise.withResolvers<Response>();
+      answers.push(answer);
+      return await answer.promise;
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        const request = Promise.withResolvers<string>();
+        requests.push(request);
+        return await request.promise;
+      },
+    });
+
+    // A token kept for 10 seconds, sent with a read whose answer waits.
+    const first = failureOf(client.query(api.notes.get, { id: idOf(1) }));
+    await until(() => requests.length === 1);
+    requests[0]?.resolve(tokenOf("ann", expiry()));
+    await until(() => answers.length === 1);
+    // Past its keeping: the next call asks the host, which takes a while.
+    vi.setSystemTime(Date.now() + 20_000);
+    const second = failureOf(client.query(api.notes.list, { pagination: {} }));
+    await until(() => requests.length === 2);
+    // Core refuses the first token; then the host answers the old request.
+    answers[0]?.resolve(
+      Response.json(
+        { code: "auth.unauthenticated", message: "Sign in to continue." },
+        { status: 401 }
+      )
+    );
+    await first;
+    const stale = tokenOf("ann-stale", expiry());
+    requests[1]?.resolve(stale);
+    // The host is asked afresh rather than the stale answer kept, and a
+    // call made now waits for that answer.
+    await until(() => requests.length === 3);
+    const third = client.query(api.notes.get, { id: idOf(3) });
+    requests[2]?.resolve(tokenOf("ann", expiry()));
+    await until(() => answers.length === 2);
+    answers[1]?.resolve(ok());
+    await third;
+    await second;
+    expect(
+      seen.map(({ authorization }) => authorization === `Bearer ${stale}`)
+    ).toStrictEqual([false, false]);
+  });
 });
