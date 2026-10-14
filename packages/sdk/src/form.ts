@@ -690,11 +690,17 @@ export class FormBinding {
       });
       return;
     }
-    if (error.code === "submission.outcome_unknown") {
+    // An outcome the host or the client can't tell (an action's lost
+    // answer, an external effect's unknown result) keeps its identity: the
+    // next submit asks again under it, never runs anew. A local form's
+    // callback has no identity to keep, so its failure is a plain one.
+    if (error.category === "uncertain" && this.#target.kind !== "schema") {
       this.#uncertain = submission;
       this.#set({ phase: "uncertain", failure: failureOf(error) });
       return;
     }
+    // A definite answer settles the submission whose outcome was unknown.
+    this.#uncertain = undefined;
     const fieldIssues: Record<string, string> = {};
     let failure: FormFailure | undefined = failureOf(error);
     if (error.code === "contract.invalid_args") {
@@ -720,13 +726,28 @@ export class FormBinding {
     if (target.kind === "record") {
       const committed = identityOf(result);
       const baseline = identityOf(this.#baseline);
+      const latest = identityOf(this.#latest);
       if (
         committed !== undefined &&
         baseline !== undefined &&
         committed.id === baseline.id
       ) {
         this.#set({ phase: "idle" });
-        this.#adopt(result);
+        // A newer record supplied while the save was in flight wins: the
+        // form is pristine now, and never goes back a revision.
+        this.#adopt(
+          latest !== undefined && latest.rev > committed.rev
+            ? this.#latest
+            : result
+        );
+      } else if (
+        latest !== undefined &&
+        baseline !== undefined &&
+        latest.rev > baseline.rev
+      ) {
+        // Another shape of result, and the commit's record already came.
+        this.#set({ phase: "idle" });
+        this.#adopt(this.#latest);
       } else {
         // Another shape of result: the commit's record comes from the query.
         this.#set({ phase: "syncing" });
