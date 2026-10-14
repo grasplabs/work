@@ -19,3 +19,30 @@ export const formatDate = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
     new Date(value)
   );
+
+/** Alternatives as the page's language joins them: "a, b or c", "a, b oder c". */
+export const formatOrList = (items: readonly string[]): string =>
+  new Intl.ListFormat(i18n.locale, { type: "disjunction" }).format(items);
+
+/** A whole number as the page's language writes it: "1,234", "1.234". */
+export const formatNumber = (value: number): string =>
+  new Intl.NumberFormat(i18n.locale, { maximumFractionDigits: 0 }).format(
+    value
+  );
+
+/** 0.42 as "42%", or "42 %" where a language puts a space before it. */
+export const formatPercent = (fraction: number): string =>
+  new Intl.NumberFormat(i18n.locale, {
+    style: "percent",
+    maximumFractionDigits: 0,
+  }).format(fraction);
+
+/** The month of an ISO date or time, "2026-09", as "Sep 2026": in UTC, as recorded. */
+export const formatMonth = (iso: string): string => {
+  const [year = 1970, month = 1] = iso.slice(0, 7).split("-").map(Number);
+  return new Intl.DateTimeFormat(i18n.locale, {
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(Date.UTC(year, month - 1, 1));
+};
