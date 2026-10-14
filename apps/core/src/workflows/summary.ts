@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { requireAppRole } from "../app-access.ts";
 import { findApp } from "../apps.ts";
+import { queueLiveMs } from "./admission.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 
 // A run's summary, as an App's screens observe it (spec 10.4.1, 10.4.5,
@@ -25,6 +26,14 @@ import { detailsRemoved, removedText } from "./retention.ts";
 // phase and the control still unresolved: never stored, and never more
 // than the host would admit. During a compensation nothing may be paused,
 // resumed or cancelled from an App.
+//
+// A run whose step waits in the client's queue for a share of the
+// attempts running at once shows as `queued`, with the share and when it
+// asks again (admission.ts): each time it joins, asks again or leaves the
+// queue its revision moves on. One whose step stopped asking (its
+// activation died while it waited) stops showing queued once its place
+// lapses, a minute and a half on, before anything writes its row: the next
+// admission that drops the place moves its revision on.
 
 /** What the one read of a run's summary returns. */
 const rowSchema = z.object({
@@ -51,6 +60,13 @@ const rowSchema = z.object({
   waits: z.string(),
   workflow_calls: z.string().nullable(),
   pending: z.enum(["pause", "resume", "cancel"]).nullable(),
+  queued: z.string().nullable(),
+});
+
+/** A step of the run waiting in the client's queue (admission.ts). */
+const queuedSchema = z.object({
+  waitingFor: z.enum(["client", "person", "app"]),
+  retryAt: z.number(),
 });
 
 const waitsSchema = z.array(
@@ -83,10 +99,15 @@ const calls = (
     : undefined;
 };
 
-/** The run's status as the summary shows it. */
+/**
+ * The run's status as the summary shows it: `queued` while it is starting,
+ * or while a step of a running run waits in the client's queue for a
+ * share of the attempts running at once (`queued`).
+ */
 const statusOf = (
   status: z.infer<typeof rowSchema>["status"],
-  engine: InstanceStatus["status"] | undefined
+  engine: InstanceStatus["status"] | undefined,
+  queued: boolean
 ): RunSummary["status"] => {
   switch (status) {
     case "starting": {
@@ -101,6 +122,9 @@ const statusOf = (
     case "running": {
       if (engine === "rollingBack") {
         return "compensating";
+      }
+      if (queued) {
+        return "queued";
       }
       if (engine === "queued" || engine === "waiting") {
         return engine;
@@ -204,19 +228,31 @@ export const runSummary = async (
        (SELECT c.kind FROM workflow_run_controls c
           WHERE c.run_id = r.id AND c.state = 'admitted'
           ORDER BY CASE c.kind WHEN 'cancel' THEN 0 ELSE 1 END
-          LIMIT 1) AS pending
+          LIMIT 1) AS pending,
+       (SELECT json_object('waitingFor', q.waiting_for, 'retryAt', q.retry_at)
+          FROM workflow_admission_queue q
+          WHERE q.run_id = r.id AND q.seen_at > ?
+          ORDER BY q.retry_at
+          LIMIT 1) AS queued
      FROM workflow_runs r
      WHERE r.id = ? AND r.app_id = ?`
   )
-    .bind(id.data, found.id)
+    // A place that stopped asking no longer holds the run in the queue
+    // (admission.ts): the run is no longer waiting there.
+    .bind(Date.now() - queueLiveMs, id.data, found.id)
     .first();
   if (read === null) {
     throw workflowErrors.create("workflow.run_not_found");
   }
   const row = rowSchema.parse(read);
+  const queued =
+    row.queued === null
+      ? undefined
+      : queuedSchema.safeParse(JSON.parse(row.queued)).data;
   const status = statusOf(
     row.status,
-    engineStatusSchema.safeParse(row.engine_status).data
+    engineStatusSchema.safeParse(row.engine_status).data,
+    queued !== undefined
   );
   const live = !ended.has(status);
   // What it failed with can hold what the run read for its person: only
@@ -269,6 +305,7 @@ export const runSummary = async (
           expiresAt,
         }))
       : [],
+    ...(status === "queued" && queued !== undefined ? { queued } : {}),
     control: controlOf(role, status, row),
   };
 };

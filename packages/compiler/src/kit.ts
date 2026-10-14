@@ -103,11 +103,15 @@ export const screenHooks = "@grasp-os/sdk/screen";
 export const screenSdk = "@grasp-os/sdk/react";
 
 /**
- * The SDK's root module, whose types the generated `#grasp` references
- * import (`OperationReference`, `Id`, …). Screens get its types, never
- * its code: the type check reads it, the kit doesn't ship it.
+ * The SDK's root module: its types, which the generated `#grasp`
+ * references import (`OperationReference`, `Id`, …), and its native
+ * values (`v`), which a screen's local form validates with (spec 10.2.4).
+ * Nothing else of it: the rest is server code (`screenRootNames`).
  */
 export const sdkRoot = "@grasp-os/sdk";
+
+/** What screens may import of the SDK's root module, besides its types. */
+export const screenRootNames: ReadonlySet<string> = new Set(["v"]);
 
 /**
  * The references the host generates for an App's server code, which its
