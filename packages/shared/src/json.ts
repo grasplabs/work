@@ -38,3 +38,15 @@ export const canonicalJson = (value: Json): string => {
   }
   return JSON.stringify(value);
 };
+
+/**
+ * The canonical text of `value`, which is JSON data (a manifest, a
+ * report, a verb map): its JSON form with every object's keys in order,
+ * so equal data has equal text.
+ */
+export const canonicalText = (value: unknown): string => {
+  // SAFETY: what JSON.parse answers is JSON.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const json = JSON.parse(JSON.stringify(value) ?? "null") as Json;
+  return canonicalJson(json);
+};

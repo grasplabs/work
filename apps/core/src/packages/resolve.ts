@@ -45,6 +45,7 @@ import { appFor } from "../apps.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
 import { proposeResolved } from "../dependencies/requests.ts";
+import { requireBoundedHere } from "../sandboxed.ts";
 import { verifiedTarball } from "./tarballs.ts";
 
 // Resolving what an App's package.json asks for into one exact graph, and
@@ -804,8 +805,21 @@ export interface Resolved {
 export const resolveDependencies = async (
   env: Env,
   by: Acting,
-  input: unknown
+  input: unknown,
+  /**
+   * Admits the proposal, called once the graph is fetched and checked,
+   * right before it is stored: throws to refuse it.
+   */
+  admit?: () => Promise<void>
 ): Promise<Resolved> => {
+  // The package builder unpacks tarballs and runs esbuild over them in a
+  // Dynamic Worker of core's own, which plain workerd (on-prem) doesn't
+  // bound. It doesn't go to the sandbox host yet, which takes only
+  // JavaScript modules (esbuild is a WebAssembly one) and calls too small
+  // to carry a graph's tarballs; until it does, nothing resolves or builds
+  // packages but where `requireBoundedHere` allows, refused before any
+  // tarball is fetched.
+  requireBoundedHere(env, "the package builder");
   const intent = dependencyErrors.parse(
     "dependency.invalid",
     dependencyIntentSchema,
@@ -870,6 +884,8 @@ export const resolveDependencies = async (
   const graph = graphOfLock(lock);
   // The lock is stored in the batch that stores the request: a request is
   // never without the lock its graph names, nor a lock without a request.
+  // Admitted after the slow fetch and checks, right before it is stored.
+  await admit?.();
   const { request, lock: kept } = await proposeResolved(
     env,
     by,

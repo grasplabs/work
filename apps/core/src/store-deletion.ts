@@ -3,6 +3,7 @@ import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import type { StoreId } from "@grasp-os/shared/ids";
 import { and, eq, isNull, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -22,6 +23,23 @@ import { businessStores } from "./db/core/schema.ts";
 // make the same event; only the batch that marks the row stores it, so it
 // is stored once whichever runs first, and an event delivered twice is
 // the same event, which the audit log takes once.
+
+/**
+ * How long a store's closing mark (`business_stores.closing_at`) holds:
+ * longer than any invocation of core runs, so a deletion that stopped
+ * half-way never keeps a store's versions from being made current for
+ * good.
+ */
+export const storeClosingMs = 15 * 60_000;
+
+/**
+ * That the store `store` (a column or expression naming its ID) is live
+ * and not being deleted at `now`: as SQL over `business_stores`.
+ */
+export const liveStoreSql = (store: SQL, now: number): SQL =>
+  sql`EXISTS (SELECT 1 FROM business_stores AS live
+    WHERE live.id = ${store} AND live.deleted_at IS NULL
+      AND (live.closing_at IS NULL OR live.closing_at <= ${now - storeClosingMs}))`;
 
 /**
  * A store's deletion mark, as its object keeps it (store-host.ts): who

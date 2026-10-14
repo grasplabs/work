@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { seedDependencyRequest } from "./dependency-request.ts";
@@ -8,7 +9,12 @@ import { pileOf, toCard } from "./pile.ts";
 // The dashboard, from the nav: what waits on the person; the widget
 // board under it, with where their workflows and engines stand, the runs
 // this week and what could be better, each block opening in full; and,
-// for admins, the latest of the audit trail. What waits is a pile of
+// for admins, the latest of the audit trail. Each person lays out their
+// own board: widgets taken off, added back and moved stay so over a
+// reload, until they put it back as it began. Without a plan for the
+// interviews there is no programme week and no weekly report: those, with
+// a plan, are in e2e/onboarding.e2e.ts, which runs after this file, as a
+// plan can't be taken back. What waits is a pile of
 // cards gone through one at a time, and what is settled on its own page
 // under it; what fills them is the failed-run, held-write and approval
 // journeys' (notifications, chat, activity, screen approval).
@@ -52,6 +58,16 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
   await expect(
     page.getByRole("heading", { level: 1, name: "Dashboard" })
   ).toBeVisible();
+  // No plan for the interviews yet: no programme week, and no report.
+  await expect(
+    page.getByText(
+      "What waits on you, each with its next step, and what could be better."
+    )
+  ).toBeVisible();
+  await expect(page.getByText(/^Week \d/u)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Export report" })).toHaveCount(
+    0
+  );
   // A pile nothing is on isn't there at all.
   await expect(page.getByRole("region", { name: "To do" })).toHaveCount(0);
   await expect(
@@ -172,6 +188,118 @@ test("a builder sees their workflows and domain on the board, and opens them in 
   await expect(ran).toContainText("tally");
   await ran.getByRole("link", { name: "tally" }).click();
   await expect(page).toHaveURL(new RegExp(`/workflows/${app}/tally$`, "u"));
+});
+
+/** The board's widgets, by their titles, in the order they stand. */
+const boardTitles = (page: Page) =>
+  page.getByRole("heading", {
+    level: 2,
+    name: /^(?:Workflows|Engines|Runs this week|Could be better)$/u,
+  });
+
+test("a person takes a widget off, adds it back and moves it, kept over a reload, and puts the board back as it began", async ({
+  browser,
+}) => {
+  const { user } = peopleIn("dashboardLayout");
+  const { core, api } = apiOf(user);
+  const saved = async () => {
+    const layout = await api.dashboard.layout();
+    return layout?.widgets;
+  };
+  const page = await pageOf(browser, user);
+  await page.goto("/dashboard");
+  const titles = boardTitles(page);
+  const reset = page.getByRole("button", { name: "Back to how it began" });
+
+  // As it begins: every widget, and nothing to put back.
+  await expect(titles).toHaveText([
+    "Workflows",
+    "Engines",
+    "Runs this week",
+    "Could be better",
+  ]);
+  await expect(reset).toHaveCount(0);
+
+  // Taken off, it stays off.
+  await page
+    .getByRole("button", { name: "Remove Engines", exact: true })
+    .click();
+  await expect(titles).toHaveText([
+    "Workflows",
+    "Runs this week",
+    "Could be better",
+  ]);
+  await expect.poll(saved).toStrictEqual(["workflows", "runs", "signals"]);
+  await page.reload();
+  await expect(titles).toHaveText([
+    "Workflows",
+    "Runs this week",
+    "Could be better",
+  ]);
+
+  // Added back from the empty card, last; with every widget on the board,
+  // the card is gone.
+  await page.getByRole("button", { name: "Add a widget" }).click();
+  await page
+    .getByRole("dialog", { name: "Add a widget" })
+    .getByRole("button", { name: "Engines" })
+    .click();
+  await expect(titles).toHaveText([
+    "Workflows",
+    "Runs this week",
+    "Could be better",
+    "Engines",
+  ]);
+  await expect(page.getByRole("button", { name: "Add a widget" })).toHaveCount(
+    0
+  );
+  await expect
+    .poll(saved)
+    .toStrictEqual(["workflows", "runs", "signals", "engines"]);
+
+  // Moved a place back with the keys on its grip, which keeps them.
+  const grip = page.getByRole("button", { name: "Move Engines", exact: true });
+  await grip.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(titles).toHaveText([
+    "Workflows",
+    "Runs this week",
+    "Engines",
+    "Could be better",
+  ]);
+  await expect(grip).toBeFocused();
+  await expect
+    .poll(saved)
+    .toStrictEqual(["workflows", "runs", "engines", "signals"]);
+  await page.reload();
+  await expect(titles).toHaveText([
+    "Workflows",
+    "Runs this week",
+    "Engines",
+    "Could be better",
+  ]);
+
+  // Back as it began, over a reload too.
+  await reset.click();
+  await expect(titles).toHaveText([
+    "Workflows",
+    "Engines",
+    "Runs this week",
+    "Could be better",
+  ]);
+  await expect(reset).toHaveCount(0);
+  await expect
+    .poll(saved)
+    .toStrictEqual(["workflows", "engines", "runs", "signals"]);
+  await page.reload();
+  await expect(titles).toHaveText([
+    "Workflows",
+    "Engines",
+    "Runs this week",
+    "Could be better",
+  ]);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  core[Symbol.dispose]();
 });
 
 test("an admin sees the latest activity, with the way to the audit trail", async ({

@@ -16,6 +16,7 @@ import worker from "../src/index.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import type { Claims, Idp } from "./idp.ts";
+import { closeWhenTestEnds } from "./open-sockets.ts";
 import {
   acmeTenant,
   clientOrigin,
@@ -184,8 +185,57 @@ export const openRpc = async (
     closed.resolve(event.code);
   });
   socket.accept();
+  closeWhenTestEnds(socket);
   const core = newWebSocketRpcSession<CoreApi>(socket);
-  return { core, closed: closed.promise };
+  return { core, socket, closed: closed.promise };
+};
+
+/** How core settled a call made over a raw connection, as it sent it. */
+export type RawSettled = ["resolve" | "reject", number, unknown];
+
+/**
+ * Opens `/rpc` with `cookie` and speaks Cap'n Web's messages by hand, as a
+ * page someone changed can: `push` sends an expression and gives the ID
+ * it gets (1, 2, ... in order), `pull` asks for what one settled as.
+ */
+export const openRawRpc = async (cookie: string) => {
+  const response = await routed("/rpc", {
+    headers: { Upgrade: "websocket", Origin: clientOrigin, cookie },
+  });
+  const socket = response.webSocket;
+  if (!socket) {
+    throw new Error(`Expected a WebSocket, got ${response.status}`);
+  }
+  const waiting = new Map<number, (settled: RawSettled) => void>();
+  socket.addEventListener("message", (event) => {
+    const message: unknown = JSON.parse(String(event.data));
+    if (
+      Array.isArray(message) &&
+      (message[0] === "resolve" || message[0] === "reject") &&
+      typeof message[1] === "number"
+    ) {
+      waiting.get(message[1])?.([message[0], message[1], message[2]]);
+    }
+  });
+  socket.accept();
+  closeWhenTestEnds(socket);
+  let pushed = 0;
+  return {
+    push: (expression: unknown): number => {
+      socket.send(JSON.stringify(["push", expression]));
+      pushed += 1;
+      return pushed;
+    },
+    pull: async (id: number): Promise<RawSettled> => {
+      const settled = Promise.withResolvers<RawSettled>();
+      waiting.set(id, settled.resolve);
+      socket.send(JSON.stringify(["pull", id]));
+      return await settled.promise;
+    },
+    close: () => {
+      socket.close();
+    },
+  };
 };
 
 /** A statement that reads the sessions table. */

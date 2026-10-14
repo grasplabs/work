@@ -22,6 +22,76 @@
       "when": 1791662271327,
       "tag": "0002_store_deletion",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791682581465,
+      "tag": "0003_schemas_and_default_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791685292838,
+      "tag": "0004_cursor_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791686888864,
+      "tag": "0005_table_generations",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1791817753180,
+      "tag": "0006_schema_contract",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1791824090389,
+      "tag": "0007_record_refs",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791824187827,
+      "tag": "0008_record_ref_cascade",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1791835681842,
+      "tag": "0009_schema_backfills",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791892187702,
+      "tag": "0010_backfill_pending_and_cascade_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1791895223232,
+      "tag": "0011_abandoned_targets",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1791907383064,
+      "tag": "0012_custom_migrations",
+      "breakpoints": true
     }
   ]
 }

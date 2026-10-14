@@ -149,6 +149,10 @@ const typeRules: readonly {
   // An App reading a measure the platform publishes of an App's runs
   // (src/statistics.ts): counts and sums only.
   { action: "statistics.read", type: "read" },
+  // Published templates (core's src/resource-templates.ts): an App reading
+  // the version its binding pins, and an admin publishing a version.
+  { action: "resource.template.read", type: "read" },
+  { action: "resource.template", type: "config" },
   // Guest chats (core's src/guests.ts): an App inviting someone, revoking
   // the link, and reading back what they wrote; the guest opening the
   // chat, sending a message and finishing it.

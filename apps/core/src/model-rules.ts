@@ -170,10 +170,18 @@ export interface Refusal {
     | "model.eu_only"
     | "model.sensitive_data"
     | "model.over_budget"
+    | "model.run_limit"
+    | "model.budget_busy"
     | "model.unpriced"
+    | "model.answer_too_long"
     | "model.ledger_unavailable"
     | "permission.context_invalid";
   because?: string;
+  /**
+   * For `model.budget_busy`: about how many seconds until the calls under
+   * way that hold the budget finish, and asking again may be admitted.
+   */
+  retryAfterSeconds?: number;
 }
 
 /**

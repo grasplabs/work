@@ -5,6 +5,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   changedScreens,
   exportChangeText,
+  migrationFixturesText,
   pendingToShow,
   previewedScreen,
   readyToMakeCurrent,
@@ -284,6 +285,29 @@ describe("the screen a draft's preview shows", () => {
       picked: "beta",
       none: [],
       noneLeft: undefined,
+    });
+  });
+});
+
+describe("a migration's fixtures", () => {
+  it("say how many it runs on, whether they passed, and warn when they failed", () => {
+    expect({
+      notYet: migrationFixturesText({ fixtures: 1, fixturesPassed: null }),
+      passed: migrationFixturesText({ fixtures: 3, fixturesPassed: true }),
+      failed: migrationFixturesText({ fixtures: 3, fixturesPassed: false }),
+    }).toStrictEqual({
+      notYet: {
+        text: "It runs on its 1 fixture when the version is sealed, before any record",
+        failed: false,
+      },
+      passed: {
+        text: "It passed all 3 of its fixtures when the version was sealed",
+        failed: false,
+      },
+      failed: {
+        text: "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current",
+        failed: true,
+      },
     });
   });
 });

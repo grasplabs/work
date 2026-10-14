@@ -29,7 +29,16 @@ const generated = [
   "scripts/release/testdata/**",
   // Third-party files vendored byte for byte, pinned by their hashes.
   "packages/*/vendor/**",
+  // What the host generates for an App, byte for byte (spec 8).
+  "**/.grasp/**",
+  // The SDK's connector catalog, from the release's connectors
+  // (apps/core/build-connector-catalog.ts).
+  "packages/sdk/src/connector-catalog.gen.ts",
 ];
+
+/** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
+const unboundedTarget =
+  "Extend CoreRpcTarget (core) or a boundedRpcTarget (@grasp-os/shared/rpc-target), so every call's arguments are bounded.";
 
 export default defineConfig({
   lint: {
@@ -113,6 +122,73 @@ export default defineConfig({
         },
       },
       {
+        // A target a browser or a screen calls must hold what its methods
+        // get to the session's limits: Cap'n Web bounds each message, not
+        // a value built from several (@grasp-os/shared/rpc-target). In
+        // workerd, Cap'n Web's RpcTarget is workerd's own.
+        files: ["apps/core/src/**", "apps/web/src/**"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: [
+                {
+                  name: "capnweb",
+                  importNames: ["RpcTarget"],
+                  message: unboundedTarget,
+                },
+                {
+                  name: "cloudflare:workers",
+                  importNames: ["RpcTarget"],
+                  allowTypeImports: true,
+                  message: unboundedTarget,
+                },
+              ],
+            },
+          ],
+          "grasp/no-unbounded-rpc-target": "error",
+        },
+      },
+      {
+        // No package passes RpcTarget on for core or the frontend to
+        // extend unbounded; the bounded base extends it in place.
+        files: ["packages/**"],
+        rules: {
+          "grasp/no-unbounded-rpc-target": ["error", { reexportsOnly: true }],
+        },
+      },
+      {
+        // A run's host, and the host of each of its steps' attempts, are
+        // served over workerd's own RPC to the run's isolate, never over
+        // Cap'n Web, and extend workerd's RpcTarget.
+        files: [
+          "apps/core/src/workflows/host.ts",
+          "apps/core/src/workflows/attempt-host.ts",
+        ],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              paths: [
+                {
+                  name: "capnweb",
+                  importNames: ["RpcTarget"],
+                  message: unboundedTarget,
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // A test's stand-ins are called by the test alone.
+        files: ["apps/web/src/**/*.test.ts", "apps/web/src/**/*.test.tsx"],
+        rules: {
+          "no-restricted-imports": "off",
+          "grasp/no-unbounded-rpc-target": "off",
+        },
+      },
+      {
         // Schema files start as comment-only placeholders until their first table.
         files: ["apps/*/src/db/**/schema.ts"],
         rules: { "unicorn/no-empty-file": "off" },
@@ -145,6 +221,7 @@ export default defineConfig({
       "!apps/console",
       "apps/console/vite.test.config.ts",
       "apps/core/vite.screens.config.ts",
+      "apps/core/vite.on-prem.config.ts",
       "packages/*",
       "packages/workerflow/vite.process.config.ts",
       "packages/connectors/*",
@@ -155,6 +232,7 @@ export default defineConfig({
           include: [
             "scripts/**/*.test.ts",
             "apps/core/build-blueprints.test.ts",
+            "apps/core/host-json.bundle.test.ts",
           ],
           environment: "node",
         },

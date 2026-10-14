@@ -18,17 +18,17 @@ import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
   BookOpenIcon,
   CogIcon,
-  BlocksIcon,
   ClipboardCheckIcon,
   MessagesSquareIcon,
   WorkflowIcon,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
 import { useEffect } from "react";
+import type { ComponentType, SVGProps } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { DashboardItem } from "../dashboard/nav-item.tsx";
 import { GraspMark } from "../grasp-mark.tsx";
+import { IntegrationsIcon } from "./integrations-icon.tsx";
 import { PersonMenu } from "./person-menu.tsx";
 
 // The product's sections, down the left beside every signed-in page. What
@@ -44,7 +44,7 @@ interface Section {
     | "/integrations"
     | "/onboarding";
   label: MessageDescriptor;
-  icon: LucideIcon;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
 }
 
 const sections: readonly Section[] = [
@@ -52,7 +52,7 @@ const sections: readonly Section[] = [
   { to: "/knowledge", label: msg`Knowledge`, icon: BookOpenIcon },
   { to: "/domains", label: msg`Domains`, icon: CogIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
-  { to: "/integrations", label: msg`Integrations`, icon: BlocksIcon },
+  { to: "/integrations", label: msg`Integrations`, icon: IntegrationsIcon },
 ];
 
 /** Grasp's onboarding area, for Grasp's staff alone. */

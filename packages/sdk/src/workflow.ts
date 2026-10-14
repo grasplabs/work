@@ -147,7 +147,6 @@ const parseOrThrow = <Schema extends z.ZodType>(
 
 export type Person = ParamValue<"person">;
 export type Schedule = ParamValue<"schedule">;
-export type Model = ParamValue<"model">;
 export type Template = ParamValue<"template">;
 
 /** A tunable value people see and can change without touching the code. */
@@ -202,8 +201,6 @@ export const text = param("text");
 export const person = param("person");
 /** A schedule, as five cron fields; what a schedule trigger runs on. */
 export const schedule = param("schedule");
-/** A model from the model gateway; required by `step.llm`. */
-export const model = param("model");
 /** A template, e.g. for an email. */
 export const template = param("template");
 
@@ -244,9 +241,10 @@ interface StepOptions {
  * attempts (as in Cloudflare Workflows): `limit: 2` is three attempts in
  * all. Only failures trying again may fix are retried: a connection's
  * server that didn't take the call, a rate limit, a model or App that
- * failed or ran out of time. Any other error (a refusal, a tool's own
- * error, one the workflow throws) fails the step at once, and stops the
- * run unless the workflow catches it. Missing, the engine's defaults apply
+ * failed or ran out of time, a model budget held by other calls still
+ * under way. Any other error (a refusal, a tool's own error, one the
+ * workflow throws) fails the step at once, and stops the run unless the
+ * workflow catches it. Missing, the engine's defaults apply
  * (Cloudflare Workflows: 5 retries, 10 seconds apart, backing off
  * exponentially).
  */
@@ -303,8 +301,14 @@ export interface SideEffectContext {
 
 export interface LlmOptions<Output extends z.ZodType>
   extends StepOptions, AttemptOptions {
-  /** A model parameter, so people see and govern which model is used. */
-  model: Model;
+  /**
+   * The alias of one of the App's model resources (`resource.model(alias,
+   * …)`, without a structured output: the step brings its own schema),
+   * written as a literal. The model is the one an admin approved for it,
+   * and the call falls under that binding's caps and the run's budgets.
+   * Until an admin binds it, the step fails with `resource.unavailable`.
+   */
+  binding: string;
   /** What the model is asked to do: the prompt. */
   instructions: string;
   /** What the model works on, e.g. the text of an invoice. */
@@ -388,11 +392,21 @@ export interface StepRunner {
     ): Promise<T>;
   };
   /**
-   * Asks a model through the model gateway. The answer must match `schema`;
-   * an answer that doesn't counts as a failure and is retried. The
-   * deployment's rules may refuse the call, say because it must stay in the
-   * EU, its App has read sensitive data, or this month's model budget is
-   * used up; the step then fails with the reason, and isn't retried.
+   * Asks a model through the model gateway, by one of the App's approved
+   * model bindings (`binding`). The answer must match `schema`; an answer
+   * that doesn't counts as a failure and is retried. A binding nobody
+   * approved, or that no longer serves its declaration, fails the step with
+   * `resource.unavailable`. The deployment's rules may refuse the call, say
+   * because it must stay in the EU, its App has read sensitive data, or a
+   * budget is used up (the binding's own caps per request, day and month,
+   * or the deployment's, workflow's, run's or person's); the step then
+   * fails with the reason, and isn't retried. Each attempt is a request of
+   * its own under the binding's cap per request, which covers both asks of
+   * an attempt whose first answer didn't fit, and the binding's bound on
+   * the answer is shared between them. A budget whose rest is
+   * held by other calls still under way is retried, as the step's retries
+   * allow, no sooner than 15 seconds on; the wait the refusal suggests is
+   * advisory.
    */
   llm: <Output extends z.ZodType>(
     name: string,
@@ -993,7 +1007,7 @@ const createRunner = (
         const { instructions, input, schema, retries, timeout } = options;
         const request = {
           step,
-          model: options.model,
+          binding: options.binding,
           instructions,
           input,
           // The model writes what the schema accepts, so describe its input

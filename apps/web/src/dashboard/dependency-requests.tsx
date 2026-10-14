@@ -35,7 +35,8 @@ import type { Pile } from "./pile-card.tsx";
 // again as the decision lands. What a package says of itself (a licence,
 // a finding) is shown as text.
 
-const targetNames: Record<DependencyTarget, MessageDescriptor> = {
+/** Where a package runs, as a person reads it. */
+export const targetNames: Record<DependencyTarget, MessageDescriptor> = {
   browser: msg({ message: "Browser", context: "where a package runs" }),
   server: msg({ message: "Server", context: "where a package runs" }),
   workflow: msg({ message: "Workflows", context: "where a package runs" }),

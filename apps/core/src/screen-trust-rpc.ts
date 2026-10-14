@@ -25,7 +25,6 @@ import type {
   ScreenTrustReview,
 } from "@grasp-os/shared/screen-trust";
 import { screenErrors } from "@grasp-os/shared/screens";
-import { RpcTarget } from "capnweb";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -47,6 +46,7 @@ import {
   requireStillAdmin,
   stillAdminSql,
 } from "./permissions.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { recordBuilds } from "./screen-builds.ts";
 import {
   advanceGeneration,
@@ -517,7 +517,7 @@ export const screensWaiting = async (
  * and hands the identity that check returned on; each function checks who
  * the person is now.
  */
-export class ScreenTrustRpc extends RpcTarget implements ScreenTrustApi {
+export class ScreenTrustRpc extends CoreRpcTarget implements ScreenTrustApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

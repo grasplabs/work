@@ -52,6 +52,13 @@ export interface RunNotification {
   readonly status: InstanceStatus["status"];
   /** When the run took the status, in ms since the epoch. */
   readonly timestamp: number;
+  /**
+   * When the run's first activation started, in ms since the epoch, as
+   * the run is when the batch is handed over; null before any did. The
+   * same in every notification of a batch, so a host that takes only the
+   * newest still has it, however many statuses the batch skips.
+   */
+  readonly firstActivatedAt: number | null;
 }
 
 /** The most notifications handed to the host at once. */
@@ -105,8 +112,20 @@ interface NotificationRow extends Record<string, SqlStorageValue> {
 }
 
 /** The oldest notifications the host hasn't taken, in order. */
-export const readPending = (sql: SqlStorage, run: RunRow): RunNotification[] =>
-  sql
+export const readPending = (
+  sql: SqlStorage,
+  run: RunRow
+): RunNotification[] => {
+  // The first activation is the one of the lowest generation, the table's
+  // key: one row read however many activations the run has had (each
+  // wake from a sleep, a wait or a retry adds one).
+  const [first] = sql
+    .exec<{ at: number }>(
+      "SELECT started_at AS at FROM activations ORDER BY generation LIMIT 1"
+    )
+    .toArray();
+  const firstActivatedAt = first?.at ?? null;
+  return sql
     .exec<NotificationRow>(
       "SELECT sequence, at, status, generation FROM notifications ORDER BY sequence LIMIT ?",
       notificationBatch
@@ -122,7 +141,9 @@ export const readPending = (sql: SqlStorage, run: RunRow): RunNotification[] =>
       sequence: row.sequence,
       status: row.status,
       timestamp: row.at,
+      firstActivatedAt,
     }));
+};
 
 /**
  * Drops what the host took, up to `sequence`, in the caller's write: the

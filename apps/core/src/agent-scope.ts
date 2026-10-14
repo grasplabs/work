@@ -8,10 +8,12 @@ import {
   permissionErrors,
 } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { and, eq, gte, isNotNull, isNull, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
+import { permissions } from "./db/core/schema.ts";
 import { workspace } from "./durable-objects.ts";
 import type { WorkContext } from "./restricted.ts";
 
@@ -99,13 +101,32 @@ export const chatContext = ({
 
 /**
  * What the Workspace object says of one API call of a code run: it may go
- * on, the run has made all the calls it may, or the run has ended; and
- * whether it is the run's first call refused so, which alone is audited.
+ * on (with when the run opened), the run has made all the calls it may, a
+ * revocation closed it, or it has ended; and whether it is the run's first
+ * call refused so, which alone is audited.
  */
-export interface CodeRunCall {
-  call: "open" | "spent" | "ended";
-  first: boolean;
-}
+export type CodeRunCall =
+  | { call: "open"; first: boolean; openedAt: number }
+  | { call: "spent" | "ended" | "revoked"; first: boolean };
+
+/**
+ * Whether a code run may have a write admitted now (`admitFromCodeRun`):
+ * open, with when it opened, or closed, and why.
+ */
+export type CodeRunAdmission =
+  | { call: "open"; openedAt: number }
+  | { call: "ended" | "revoked" };
+
+/** Why a call or write from a run that isn't open is refused. */
+const refusalCodes = {
+  spent: "agent.run_calls_spent",
+  ended: "agent.run_ended",
+  revoked: "agent.run_revoked",
+} as const;
+
+/** The refusal of a call or write from a run that isn't open. */
+export const runRefusal = (call: keyof typeof refusalCodes) =>
+  agentErrors.create(refusalCodes[call]);
 
 /**
  * Records with the chat what a call read from (collections, a
@@ -125,8 +146,8 @@ export const recordSources = async (
     runId,
     sources
   );
-  if (!recorded) {
-    throw agentErrors.create("agent.run_ended");
+  if (recorded !== "open") {
+    throw runRefusal(recorded);
   }
 };
 
@@ -140,7 +161,7 @@ export interface AgentCall {
 }
 
 /** How a call ended: done, refused (an expected error), or failed. */
-type CallOutcome = "ok" | "refused" | "failed";
+export type CallOutcome = "ok" | "refused" | "failed";
 
 /**
  * Records a call of the chat's code as `agent.call`, by the workspace's
@@ -172,10 +193,75 @@ export const auditAgentCall = async (
 };
 
 /**
+ * Whether a permission the agent was granted, holding where this chat's
+ * runs act, was revoked since `since`: one that held everywhere, or in
+ * this chat alone. Not a request that was never granted (a person
+ * declining a chat's request revokes one), nor another chat's: neither
+ * gave the run authority, so neither ends it. A run open since before acts
+ * on authority it no longer has, so its lease closes. One read of the
+ * subject's index (`permissions_revoked_idx`).
+ */
+export const revokedSince = async (
+  env: Env,
+  { agentId, chatId }: Pick<AgentScope, "agentId" | "chatId">,
+  since: number
+): Promise<boolean> => {
+  const [revoked] = await drizzle(env.DB)
+    .select({ id: permissions.id })
+    .from(permissions)
+    .where(
+      and(
+        eq(permissions.subjectType, "agent"),
+        eq(permissions.subjectId, agentId),
+        eq(permissions.status, "revoked"),
+        // From the millisecond the run opened, that one included. No
+        // margin before it: a revocation just before a run opened is in
+        // the grants the run's calls read, and a margin would end the
+        // next run after any revoke. The accepted residual is clock skew
+        // between machines: the Workspace object's clock and the one of
+        // the request that revoked may differ by a few milliseconds.
+        gte(permissions.revokedAt, new Date(since)),
+        // Granted once: both ways a permission becomes active set
+        // granted_at with it (`grantPermission`, and a person's own
+        // decision in chat-connections.ts), so only a request declined
+        // before anyone granted it is revoked without one.
+        isNotNull(permissions.grantedAt),
+        or(isNull(permissions.chatId), eq(permissions.chatId, chatId))
+      )
+    )
+    .limit(1);
+  return revoked !== undefined;
+};
+
+/**
+ * Closes the run's lease as revoked when a permission of its agent was
+ * revoked since it opened (`revokedSince`): `closed` when this call closed
+ * it (and alone records it), `closedBefore` when another got there first,
+ * `open` when nothing was revoked.
+ */
+const revocationOf = async (
+  env: Env,
+  scope: AgentScope,
+  openedAt: number
+): Promise<"open" | "closed" | "closedBefore"> => {
+  if (!(await revokedSince(env, scope, openedAt))) {
+    return "open";
+  }
+  const closed = await workspace(env, scope.workspaceId).revokeCodeRun(
+    scope.chatId,
+    scope.runId
+  );
+  return closed ? "closed" : "closedBefore";
+};
+
+/**
  * Counts the call with the Workspace object, and refuses it from a code
  * run that has ended (the turn moved on, or the run was cancelled or timed
- * out while its code kept running) or made all the calls it may. Every
- * API checks it first, on every call.
+ * out while its code kept running), made all the calls it may, or was
+ * closed by a revocation of one of its agent's permissions, found here
+ * too. Every API checks it first, on every call. A run's refusals are
+ * recorded once: by the first refused call, or the one that found the
+ * revocation.
  */
 export const requireOpenRun = async (
   env: Env,
@@ -183,26 +269,75 @@ export const requireOpenRun = async (
   method: string
 ): Promise<void> => {
   const { workspaceId, chatId, runId } = scope;
-  const { call, first } = await workspace(env, workspaceId).callFromCodeRun(
+  const counted = await workspace(env, workspaceId).callFromCodeRun(
     chatId,
     runId
   );
-  if (call === "open") {
+  const revocation =
+    counted.call === "open"
+      ? await revocationOf(env, scope, counted.openedAt)
+      : "open";
+  if (counted.call === "open" && revocation === "open") {
     return;
   }
-  const refusal = agentErrors.create(
-    call === "spent" ? "agent.run_calls_spent" : "agent.run_ended"
+  const refusal = runRefusal(
+    counted.call === "open" ? "revoked" : counted.call
   );
-  // Once per run: code that goes on calling can't flood the audit log.
-  if (first) {
+  if ((counted.call !== "open" && counted.first) || revocation === "closed") {
     await auditAgentCall(
       env,
       scope,
       { method },
-      {
-        outcome: "refused",
-        reason: refusal.code,
-      }
+      { outcome: "refused", reason: refusal.code }
+    );
+  }
+  throw refusal;
+};
+
+/**
+ * Admits a write or side effect of a code run as it commits, after its
+ * call was let in (`requireOpenRun`): refused once the run has closed,
+ * whether it ended, was cancelled, ran out of time or lost a permission
+ * meanwhile. Counts no call. The slow read of revocations comes first and
+ * the lease's own check last, right before the effect. A write into the
+ * Workspace object checks the lease once more in its own transaction.
+ *
+ * With `method`, a refusal is recorded here (for a call that nothing else
+ * records): the one that found a revocation, or one from a run that had
+ * ended; without, its caller records it (`auditedCall`). So a revoked
+ * run's refusals are recorded per refused call, not once per run.
+ */
+export const admitEffect = async (
+  env: Env,
+  scope: AgentScope,
+  method?: string
+): Promise<void> => {
+  const chats = workspace(env, scope.workspaceId);
+  const opened = await chats.admitFromCodeRun(scope.chatId, scope.runId);
+  let refused: "ended" | "revoked" | undefined;
+  let record = false;
+  if (opened.call === "open") {
+    const revocation = await revocationOf(env, scope, opened.openedAt);
+    if (revocation === "open") {
+      const now = await chats.admitFromCodeRun(scope.chatId, scope.runId);
+      refused = now.call === "open" ? undefined : now.call;
+    } else {
+      refused = "revoked";
+      record = revocation === "closed";
+    }
+  } else {
+    refused = opened.call;
+  }
+  if (refused === undefined) {
+    return;
+  }
+  const refusal = runRefusal(refused);
+  if (method !== undefined && (record || refused === "ended")) {
+    await auditAgentCall(
+      env,
+      scope,
+      { method },
+      { outcome: "refused", reason: refusal.code }
     );
   }
   throw refusal;
@@ -226,10 +361,17 @@ export const auditedCall = async <T>(
   scope: AgentScope,
   call: AgentCall & {
     detailOf?: (result: T) => Record<string, AuditDetailValue>;
+    /**
+     * How a call that answered ended, when its answer says it was refused
+     * or failed as data (an App function's result): recorded as such.
+     */
+    endedOf?: (
+      result: T
+    ) => { outcome: CallOutcome; reason: string | null } | undefined;
   },
   run: () => Promise<T>
 ): Promise<T> => {
-  const { detailOf, ...recorded } = call;
+  const { detailOf, endedOf, ...recorded } = call;
   let result: T;
   try {
     result = await run();
@@ -237,10 +379,15 @@ export const auditedCall = async <T>(
     await auditAgentCall(env, scope, recorded, endedBy(error));
     throw error;
   }
-  await auditAgentCall(env, scope, {
-    ...recorded,
-    detail: { ...recorded.detail, ...detailOf?.(result) },
-  });
+  await auditAgentCall(
+    env,
+    scope,
+    {
+      ...recorded,
+      detail: { ...recorded.detail, ...detailOf?.(result) },
+    },
+    endedOf?.(result)
+  );
   return result;
 };
 

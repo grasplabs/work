@@ -1,9 +1,14 @@
+import piAgentCore from "@earendil-works/pi-agent-core/package.json" with { type: "json" };
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { applyOutput } from "@grasp-os/shared/chat";
+import type { ChatOutput, ChatUpdate } from "@grasp-os/shared/chat";
 import type { WorkspaceId } from "@grasp-os/shared/ids";
+import { chatIdSchema } from "@grasp-os/shared/ids";
 import { memoryMaxLimit } from "@grasp-os/shared/memory";
 import { modelErrors } from "@grasp-os/shared/models";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { redact } from "@grasp-os/shared/redact";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -15,24 +20,37 @@ import {
   maxSteps,
   requestChars,
 } from "../src/agent.ts";
-import { codeLimits } from "../src/code-mode.ts";
+import {
+  codeLimits,
+  codeRuntime,
+  cutMarker,
+  cutToBytes,
+  sourceHash,
+  utf8Bytes,
+} from "../src/code-mode.ts";
 import { workspace } from "../src/durable-objects.ts";
+import { endedRunsKept } from "../src/workspace.ts";
 import {
   chatOf,
   codeResults,
+  codeStatuses,
   codeStep,
   gatewayConfig,
   model,
   pausedReply,
   pointAtGateway,
   says,
+  setObjectEnv,
+  testRunOpening,
   transcript,
 } from "./agent-chat.ts";
 import type { WorkspaceStub } from "./agent-chat.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
+import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
+import { collectionWithNote, readCollection } from "./knowledge.ts";
 import { signedInApi, signedInWithRole } from "./sign-in.ts";
 
 // A chat's agent, through the Workspace object: the loop, the code it runs
@@ -121,6 +139,28 @@ const runStep = async (code: string) => {
   return result;
 };
 
+/** The runtime's own messages for a run out of CPU time, and a hung one. */
+const cpuMessage = "Worker exceeded CPU time limit.";
+const hangMessage =
+  "The Workers runtime canceled this request because it detected that your Worker's code had hung and would never generate a response.";
+
+/**
+ * Code that makes the next value set at index 0 of any array a getter
+ * throwing `message`: an array the harness filled through [[Set]], then
+ * sent, would reject with the code's own message.
+ */
+const arrayTrap = (message: string): string =>
+  `Object.defineProperty(Array.prototype, "0", { configurable: true, set(value) { Object.defineProperty(this, "0", { enumerable: true, configurable: true, get() { throw new Error(${JSON.stringify(message)}); } }); } });`;
+
+/** Runs `code` as the chat's only code step: what it gave, and how it ended. */
+const runEnded = async (code: string) => {
+  const { stub, chat, ask } = await newChat(codeStep(code), says("Done."));
+  await ask("Run it.");
+  const [result] = await codeResults(stub, chat.id);
+  const [status] = await codeStatuses(stub, chat.id);
+  return { ...result, status };
+};
+
 /** The agent's model.call events for `userId`, once `count` have arrived. */
 const modelCallsBy = async (
   userId: string,
@@ -188,7 +228,7 @@ describe("chat agent", () => {
   it("answers a question with a code step against the chat's API", async () => {
     const { stub, chat, personId, gateway, ask } = await newChat(
       codeStep(
-        "export default async (env) => (await env.chat.info()).personId;"
+        "export default async (self, env) => (await env.chat.info()).personId;"
       ),
       says("You are the person this chat belongs to.")
     );
@@ -401,7 +441,7 @@ describe("chat agent sandbox", () => {
 
   it("gets only its APIs in env, and can't import core's env or entrypoints", async () => {
     const result = await runStep(
-      "import { env as imported, exports } from 'cloudflare:workers'; export default async (env) => ({ given: Object.keys(env), imported: Object.keys(imported ?? {}), exports: Object.keys(exports ?? {}) });"
+      "import { env as imported, exports } from 'cloudflare:workers'; export default async (self, env) => ({ given: Object.keys(env), imported: Object.keys(imported ?? {}), exports: Object.keys(exports ?? {}) });"
     );
 
     expect(result).toStrictEqual({
@@ -412,7 +452,7 @@ describe("chat agent sandbox", () => {
 
   it("names the API it doesn't have, and the ones it does", async () => {
     const result = await runStep(
-      "export default async (env) => await env.mailbox.send('hi');"
+      "export default async (self, env) => await env.mailbox.send('hi');"
     );
 
     expect(result?.isError).toBeTruthy();
@@ -421,12 +461,247 @@ describe("chat agent sandbox", () => {
     );
   });
 
-  it("stops code that waits for something that never comes", async () => {
-    const result = await runStep(
+  it("ends code that waits on what can never settle as past its wall-clock time", async () => {
+    const result = await runEnded(
       "export default async () => { await new Promise(() => {}); return 'never'; };"
     );
 
-    expect(result?.isError).toBeTruthy();
+    expect(result).toStrictEqual({
+      isError: true,
+      text: "Error (wall_expired):\nThe run waits for something that can never come, so it was stopped.",
+      status: "wall_expired",
+    });
+  });
+
+  it("ends code still waiting at its wall-clock limit", async () => {
+    const { stub, chat, ask } = await newChat(
+      codeStep(
+        "export default async () => { await scheduler.wait(60_000); return 'late'; };"
+      ),
+      says("Done.")
+    );
+    // Objects share their env: set back however the test ends.
+    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+    const started = Date.now();
+    try {
+      await ask("Wait.");
+    } finally {
+      await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
+    }
+
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: true,
+        text: "Error (wall_expired):\nThe run took longer than 1 seconds, so it was stopped.",
+      },
+    ]);
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "wall_expired",
+    ]);
+    // At its limit, long before its wait would end.
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it("runs a complete module: helpers, null self, its own ctx and parallel calls", async () => {
+    const result = await runEnded(
+      "const keys = (value) => Object.keys(value ?? {}); export default async (self, env, ctx) => { const [first, second] = await Promise.all([env.chat.info(), env.chat.info()]); return { self, ctx: keys(ctx), same: first.chatId === second.chatId }; };"
+    );
+
+    expect(result).toStrictEqual({
+      isError: false,
+      text: `Returned:\n${JSON.stringify({ self: null, ctx: ["waitUntil"], same: true })}`,
+      status: "completed",
+    });
+  });
+
+  it("refuses a module over the source limit before it loads", async () => {
+    // A module that would log as it loads: refused, it never does.
+    const code = `console.log("loaded"); export default async () => 1; // ${"x".repeat(codeLimits.sourceChars)}`;
+    const result = await runEnded(code);
+
+    expect(result).toStrictEqual({
+      isError: true,
+      text: `Error (refused):\nThe module is ${code.length} characters long; a run takes at most ${codeLimits.sourceChars}.`,
+      status: "refused",
+    });
+  });
+
+  it("runs a module of exactly the source limit, and refuses one character more", async () => {
+    const lead = "export default async () => 'ran'; // ";
+    const exact = `${lead}${"x".repeat(codeLimits.sourceChars - lead.length)}`;
+    const { stub, chat, ask } = await newChat(
+      codeStep(exact),
+      codeStep(`${exact}x`),
+      says("Done.")
+    );
+
+    await ask("Run both.");
+
+    expect(exact).toHaveLength(codeLimits.sourceChars);
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "completed",
+      "refused",
+    ]);
+  });
+
+  it.each([
+    [
+      "a thrown Proxy whose traps throw the runtime's message",
+      "const forged = () => { throw new Error('Worker exceeded CPU time limit.'); }; export default async () => { throw new Proxy({}, { get: forged, getPrototypeOf: forged, has: forged, ownKeys: forged }); };",
+      "threw",
+    ],
+    [
+      "an error that says the runtime's message",
+      "export default async () => { throw new Error('Worker exceeded CPU time limit.'); };",
+      "threw",
+    ],
+    [
+      "the harness's built-ins replaced as the module loads",
+      "const forged = () => { throw new Error('Worker exceeded CPU time limit.'); }; Object.keys = forged; Array.prototype.map = forged; Array.prototype.join = forged; String.prototype.slice = forged; JSON.stringify = forged; Reflect.get = forged; Reflect.has = forged; globalThis.String = forged; export default async (self, env) => { await env.nothing; };",
+      "threw",
+    ],
+    [
+      "the harness's methods replaced through an import of it",
+      "import Harness from 'harness.js'; const forged = async () => { throw new Error('Worker exceeded CPU time limit.'); }; try { Harness.prototype.run = forged; } catch {} try { Object.defineProperty(Harness.prototype, 'run', { value: forged }); } catch {} export default async () => 'mine';",
+      "completed",
+    ],
+    [
+      "a setter on Array.prototype[0] set up as the module loads, throwing the CPU message",
+      `${arrayTrap(cpuMessage)} console.log('x'); export default async () => { console.log('y'); return 'mine'; };`,
+      "completed",
+    ],
+    [
+      "a setter on Array.prototype[0] set up as the module loads, throwing the hang message",
+      `${arrayTrap(hangMessage)} console.log('x'); export default async () => { console.log('y'); return 'mine'; };`,
+      "completed",
+    ],
+    [
+      "a setter on Array.prototype[0] set up in the function, throwing the CPU message",
+      `export default async () => { ${arrayTrap(cpuMessage)} console.log('x'); throw new Error('then this'); };`,
+      "threw",
+    ],
+    [
+      "a setter on Array.prototype[0] set up in the function, throwing the hang message",
+      `export default async () => { ${arrayTrap(hangMessage)} console.log('x'); return 'mine'; };`,
+      "completed",
+    ],
+    [
+      "a Proxy thrown as the module loads",
+      "const forged = () => { throw new Error('Worker exceeded CPU time limit.'); }; throw new Proxy({}, { get: forged, getPrototypeOf: forged }); export default async () => 1;",
+      "load_failed",
+    ],
+    [
+      "the runtime's hang message thrown as the module loads",
+      'throw new Error("The Workers runtime canceled this request because it detected that your Worker\'s code had hung and would never generate a response."); export default async () => 1;',
+      "load_failed",
+    ],
+  ])("can't forge how its run ended, with %s", async (_, code, status) => {
+    const result = await runEnded(code);
+
+    expect(result.status).toBe(status);
+  });
+
+  it("lets no ctx.waitUntil work act through env after its run returned", async () => {
+    const { stub, chat, ask } = await newChat(
+      codeStep(
+        "export default async (self, env, ctx) => { ctx.waitUntil((async () => { await scheduler.wait(500); await env.chat.attachments(); })()); return 'returned'; };"
+      ),
+      says("Done.")
+    );
+
+    await ask("Return early.");
+    // Past when the work would call: refused at the lease, or never let
+    // reach core at all, and never answered.
+    await scheduler.wait(2000);
+
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "completed",
+    ]);
+    const events = await allEvents();
+    expect(
+      events
+        .filter(
+          ({ action, detail }) =>
+            action === "agent.call" &&
+            detail.chat === chat.id &&
+            detail.method === "chat.attachments"
+        )
+        .map(({ detail }) => detail.outcome)
+        .filter((outcome) => outcome !== "refused")
+    ).toStrictEqual([]);
+  });
+
+  it.each([
+    [
+      "no default export",
+      "export const run = async () => 1;",
+      /default export must be an async function/u,
+    ],
+    [
+      "a default export that isn't a function",
+      "export default 42;",
+      /default export must be an async function/u,
+    ],
+    [
+      "a module that throws as it loads",
+      "console.log('before'); throw new Error('broken module'); export default async () => 1;",
+      /^Logs:\nbefore\n\nError \(load_failed\):\nError: broken module/u,
+    ],
+    [
+      "a syntax error",
+      "export default async () => {",
+      /^Error \(load_failed\):\n.*Syntax/isu,
+    ],
+  ])(
+    "reports %s as a module that didn't load, without running it",
+    async (_, code, text) => {
+      const result = await runEnded(code);
+
+      expect(result.status).toBe("load_failed");
+      expect(result.isError).toBeTruthy();
+      expect(result.text).toMatch(text);
+    }
+  );
+
+  it("reports what the function throws as thrown, after what the module logged as it loaded", async () => {
+    const result = await runEnded(
+      "console.log('loaded'); export default async () => { throw new Error('nope'); };"
+    );
+
+    expect(result.status).toBe("threw");
+    expect(result.text).toMatch(
+      /^Logs:\nloaded\n\nError \(threw\):\nError: nope/u
+    );
+  });
+
+  it("refuses input with fields besides code, without running it or repeating it back", async () => {
+    const { stub, chat, ask } = await newChat(
+      {
+        text: "",
+        toolCalls: [
+          {
+            id: `call_${crypto.randomUUID()}`,
+            name: "executeCode",
+            arguments: {
+              code: "export default async () => 'ran';",
+              timeoutMs: 1,
+            },
+          },
+        ],
+        inputTokens: 200,
+        outputTokens: 40,
+      },
+      says("Done.")
+    );
+
+    await ask("Run it.");
+
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: true,
+        text: "executeCode takes one field, `code`: the module as a string. Nothing else is accepted.",
+      },
+    ]);
   });
 
   it("keeps what the code logs and returns to what the model can read", async () => {
@@ -435,8 +710,22 @@ describe("chat agent sandbox", () => {
     );
 
     expect(result?.isError).toBeFalsy();
-    expect(result?.text.length).toBeLessThan(33 * 1024);
-    expect(result?.text).toMatch(/cut: longer than 32768 characters\)$/u);
+    expect(utf8Bytes(result?.text ?? "")).toBeLessThanOrEqual(
+      codeLimits.outputBytes
+    );
+    expect(result?.text.endsWith(cutMarker)).toBeTruthy();
+  });
+
+  it("keeps a run whose output is all characters JSON must escape, within its limits", async () => {
+    // Each \u0001 is six characters as JSON: the most a character grows.
+    const result = await runEnded(
+      "export default async () => { console.log('\\x01'.repeat(65_535)); return '\\x01'.repeat(65_536); };"
+    );
+
+    expect(result.status).toBe("completed");
+    expect(
+      (result.text ?? "").startsWith(`Logs:\n${"\u0001".repeat(100)}`)
+    ).toBeTruthy();
   });
 
   it("shows a value too large to read as such, without building it all", async () => {
@@ -456,7 +745,7 @@ describe("chat agent sandbox", () => {
     // runner: the cancel ends the run, not the wait.
     const { stub, chat, personId, ask } = await newChat(
       codeStep(
-        "export default async (env) => { await scheduler.wait(5_000); await env.chat.info(); await env.chat.info(); };"
+        "export default async (self, env) => { await scheduler.wait(5_000); await env.chat.info(); await env.chat.info(); };"
       )
     );
 
@@ -531,7 +820,7 @@ describe("chat agent sandbox", () => {
   it("stops a run's API calls at the most one run may make, and audits that once", async () => {
     const { stub, chat, ask } = await newChat(
       codeStep(
-        "export default async (env) => { let answered = 0; let refused = 0; let message; for (let i = 0; i < 150; i++) { try { await env.chat.info(); answered += 1; } catch (error) { refused += 1; message = String(error.message); } } return { answered, refused, message }; };"
+        "export default async (self, env) => { let answered = 0; let refused = 0; let message; for (let i = 0; i < 150; i++) { try { await env.chat.info(); answered += 1; } catch (error) { refused += 1; message = String(error.message); } } return { answered, refused, message }; };"
       ),
       says("Done.")
     );
@@ -574,7 +863,7 @@ describe("chat agent sandbox", () => {
     [
       "a value that makes itself huge text",
       "export default async () => { const value = () => {}; value.toString = () => 'z'.repeat(30_000_000); return value; };",
-      /^Returned:\nz{32000,}\n… \(cut: longer than 32768 characters\)$/u,
+      /^Returned:\nz{60000,}\n… \(cut: over 65536 bytes of output\)$/u,
     ],
     [
       "a forged result through Object.prototype.then",
@@ -599,16 +888,9 @@ describe("chat agent sandbox", () => {
           )
           .toArray()
       );
-      expect(row?.longest).toBeLessThan(40_000);
+      expect(row?.longest).toBeLessThan(codeLimits.outputBytes + 2000);
     }
   );
-
-  it("reports code that doesn't load", async () => {
-    const result = await runStep("export default async () => {");
-
-    expect(result?.isError).toBeTruthy();
-    expect(result?.text).toMatch(/Syntax/iu);
-  });
 });
 
 describe("chat agent turns", () => {
@@ -632,7 +914,7 @@ describe("chat agent turns", () => {
 
     await expect(reply).resolves.toMatchObject({ outcome: "cancelled" });
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
-      { isError: true, text: "Error:\nThe run was cancelled." },
+      { isError: true, text: "Error (cancelled):\nThe run was cancelled." },
     ]);
     // No request after the cancelled step.
     expect(gateway.requests).toHaveLength(1);
@@ -1113,7 +1395,9 @@ describe("chat agent after a restart", () => {
 
   it("continues the conversation with everything before it", async () => {
     const { stub, chat, ask } = await newChat(
-      codeStep("export default async (env) => (await env.chat.info()).chatId;"),
+      codeStep(
+        "export default async (self, env) => (await env.chat.info()).chatId;"
+      ),
       says("This chat's ID is known.")
     );
     await ask("Which chat is this?");
@@ -1168,5 +1452,1147 @@ describe("chat agent after a restart", () => {
       answer: "It was 42.",
       sent: [true, true, true, true],
     });
+  });
+});
+
+/**
+ * A revoked permission of `agentId`, stored as a revocation leaves one:
+ * granted before, or (`granted: false`) a request declined before anyone
+ * granted it; held everywhere, or in one chat.
+ */
+const revokedRow = async (
+  agentId: string,
+  { granted, chatId }: { granted: boolean; chatId: string | null }
+) => {
+  await env.DB.prepare(
+    `INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id,
+      actions, binding, status, requested_by, requested_at, granted_by, granted_at,
+      revoked_by, revoked_at, chat_id)
+     VALUES (?, 'agent', ?, 'collection', ?, '["read"]', ?, 'revoked', 'test', 0, ?, ?, 'test', ?, ?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      agentId,
+      crypto.randomUUID(),
+      `R${crypto.randomUUID().replaceAll("-", "").slice(0, 12)}`.toUpperCase(),
+      granted ? "test" : null,
+      granted ? 0 : null,
+      Date.now(),
+      chatId
+    )
+    .run();
+};
+
+/** Points the object's database at `db` (objects may share their env). */
+const setObjectDb = async (stub: WorkspaceStub, db: D1Database) => {
+  await runInDurableObject(stub, (instance) => {
+    const objectEnv: unknown = Reflect.get(instance, "env");
+    if (typeof objectEnv === "object" && objectEnv !== null) {
+      Reflect.set(objectEnv, "DB", db);
+    }
+  });
+};
+
+/**
+ * Runs `during` with every read of revocations the object makes (the
+ * permissions query `revokedSince` sends) first going through `before`:
+ * a wait, or a throw. The rest of its database is untouched. Set back
+ * however it ends.
+ */
+const withRevocationReads = async (
+  stub: WorkspaceStub,
+  before: () => Promise<void>,
+  during: () => Promise<void>
+): Promise<void> => {
+  const real = env.DB;
+  const slowed = (statement: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(statement, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        if (property === "bind") {
+          return (...args: unknown[]) => slowed(target.bind(...args));
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          await before();
+          return await Reflect.apply(value, target, args);
+        };
+      },
+    });
+  const db = new Proxy(real, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (property === "prepare") {
+        return (query: string) => {
+          const statement = target.prepare(query);
+          // Only `revokedSince`'s read: revocations since a run opened.
+          return query.includes('"permissions"."revoked_at" >=')
+            ? slowed(statement)
+            : statement;
+        };
+      }
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  await setObjectDb(stub, db);
+  try {
+    await during();
+  } finally {
+    await setObjectDb(stub, real);
+  }
+};
+
+/** `statement`, answering two seconds late, as its bound copies do. */
+const lateStatement = (statement: D1PreparedStatement): D1PreparedStatement =>
+  new Proxy(statement, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      if (property === "bind") {
+        return (...args: unknown[]) => lateStatement(target.bind(...args));
+      }
+      return async (...args: unknown[]): Promise<unknown> => {
+        await scheduler.wait(2000);
+        return await Reflect.apply(value, target, args);
+      };
+    },
+  });
+
+/** The chat's code run records, oldest first, as the object keeps them. */
+const runRecords = async (stub: WorkspaceStub, chatId: string) =>
+  await runInDurableObject(stub, (_instance, state) =>
+    state.storage.sql
+      .exec<Record<string, string | number | null>>(
+        "SELECT id, tool_call_id, source_hash, source_chars, agent, compatibility_date, runtime, cpu_limit, status FROM chat_code_runs WHERE chat_id = ? ORDER BY started_at",
+        chatId
+      )
+      .toArray()
+  );
+
+/** The call ID of each code step the chat's agent asked for. */
+const toolCallIds = async (stub: WorkspaceStub, chatId: string) => {
+  const messages = await transcript(stub, chatId);
+  return messages.flatMap((message) =>
+    message.role === "assistant"
+      ? message.content.flatMap((block) =>
+          block.type === "toolCall" ? [block.id] : []
+        )
+      : []
+  );
+};
+
+/** Whether `call` threw `code`, the way the object's RPC hands it on. */
+const refusedWith = async (call: () => unknown) => {
+  try {
+    await call();
+  } catch (error) {
+    return agentErrors.codeOf(error) ?? "failed";
+  }
+  return "admitted";
+};
+
+describe("chat agent code run leases", () => {
+  it("keeps a record of every run: its call, its module's hash, the agent and runtime it ran on, and how it ended", async () => {
+    const code = "export default async () => 6 * 7;";
+    const { stub, chat, ask } = await newChat(codeStep(code), says("42."));
+
+    await ask("What is 6 * 7?");
+
+    const [record] = await runRecords(stub, chat.id);
+    const [toolCallId] = await toolCallIds(stub, chat.id);
+    expect({ ...record, id: typeof record?.id }).toStrictEqual({
+      id: "string",
+      tool_call_id: toolCallId,
+      source_hash: await sourceHash(code),
+      source_chars: code.length,
+      agent: `@earendil-works/pi-agent-core@${piAgentCore.version}`,
+      compatibility_date: "2026-09-15",
+      // Plain workerd doesn't enforce the isolate's CPU limit, and the
+      // record says so rather than claim it.
+      runtime: "workerd",
+      cpu_limit: "cpu_limit_unsupported",
+      status: "completed",
+    });
+  });
+
+  it("refuses every write of a run whose lease closed, in the write's own transaction", async () => {
+    const { stub, chat } = await newChat();
+    const chatId = chatIdSchema.parse(chat.id);
+    const write = (runId: string, revision: number) => async () =>
+      await stub.saveDraft(
+        chatId,
+        "app-1",
+        null,
+        { "a.md": "a" },
+        [],
+        revision,
+        runId
+      );
+
+    // Open: written. Ended (completed, cancelled, timed out): refused.
+    const ended = await stub.openCodeRun(chatId, testRunOpening);
+    const first = await refusedWith(write(ended, 0));
+    await stub.closeCodeRun(chatId, ended, "wall_expired");
+    // Revoked while open: refused as revoked, however it then ends.
+    const revoked = await stub.openCodeRun(chatId, testRunOpening);
+    await stub.revokeCodeRun(chatId, revoked);
+
+    expect({
+      first,
+      afterEnd: await refusedWith(write(ended, 1)),
+      discardAfterEnd: await refusedWith(
+        async () => await stub.dropDraft(chatId, "app-1", { runId: ended })
+      ),
+      afterRevoke: await refusedWith(write(revoked, 1)),
+      createAfterRevoke: await refusedWith(
+        async () => await stub.takeCreate(chatId, 3, revoked)
+      ),
+      unknownRun: await refusedWith(write(crypto.randomUUID(), 1)),
+      ending: await stub.closeCodeRun(chatId, revoked, "completed"),
+      draft: await stub.draft(chatId, "app-1"),
+    }).toStrictEqual({
+      first: "admitted",
+      afterEnd: "agent.run_ended",
+      discardAfterEnd: "agent.run_ended",
+      afterRevoke: "agent.run_revoked",
+      createAfterRevoke: "agent.run_revoked",
+      unknownRun: "agent.run_ended",
+      ending: "revoked",
+      draft: { base: null, changes: { "a.md": "a" }, revision: 1 },
+    });
+    await expect(
+      runRecords(stub, chat.id).then((records) =>
+        records.map(({ status }) => status)
+      )
+    ).resolves.toStrictEqual(["wall_expired", "revoked"]);
+  });
+
+  it("closes a run's lease when a permission of its agent is revoked while it runs, and admits nothing after", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { collectionId } = await collectionWithNote(admin.api, {
+      name: `Handbook ${crypto.randomUUID()}`,
+      access: "everyone",
+    });
+    // Long enough that the revoke always comes first, however slow the
+    // runner: the revoke closes the run, not the wait.
+    const { stub, chat, agent, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => { await env.chat.info(); await scheduler.wait(5_000); try { await env.chat.info(); return 'answered'; } catch (error) { return String(error.message); } };"
+      ),
+      says("Done.")
+    );
+    const permission = await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId, "HANDBOOK")
+    );
+
+    const reply = ask("Look twice.");
+    await vi.waitFor(
+      async () => {
+        await expect(
+          runRecords(stub, chat.id).then((records) => records.length)
+        ).resolves.toBe(1);
+      },
+      { timeout: 10_000 }
+    );
+    await admin.api.permissions.revoke(permission);
+    await reply;
+
+    // What the code returned rests on what was revoked: not handed on.
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: true,
+        text: `Error (revoked):\n${agentErrors.create("agent.run_revoked").message}`,
+      },
+    ]);
+    await expect(
+      runRecords(stub, chat.id).then((records) =>
+        records.map(({ status }) => status)
+      )
+    ).resolves.toStrictEqual(["revoked"]);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalsIn(chat.id, "agent.run_revoked")
+        ).resolves.toStrictEqual([
+          {
+            method: "chat.info",
+            outcome: "refused",
+            reason: "agent.run_revoked",
+          },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
+  it("notices a revocation the code never called after: it ends revoked, and hands on neither its result nor its logs", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const { collectionId } = await collectionWithNote(admin.api, {
+      name: `Handbook ${crypto.randomUUID()}`,
+      access: "everyone",
+    });
+    const { stub, chat, agent, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => { const reports = await env.chat.attachments(); await scheduler.wait(3_000); console.log('leaked', reports.length); return 'read before the revoke'; };"
+      ),
+      says("Done.")
+    );
+    const permission = await requestGranted(
+      idp,
+      admin,
+      readCollection(agent, collectionId, "HANDBOOK")
+    );
+
+    const reply = ask("Look once.");
+    // Revoked once the code's one call was answered, so it calls nothing
+    // after: the run notices the revocation as it ends, not at a call.
+    await vi.waitFor(
+      async () => {
+        const events = await allEvents();
+        expect(
+          events.some(
+            ({ action, detail }) =>
+              action === "agent.call" &&
+              detail.chat === chat.id &&
+              detail.method === "chat.attachments" &&
+              detail.outcome === "ok"
+          )
+        ).toBeTruthy();
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    await admin.api.permissions.revoke(permission);
+    await reply;
+
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: true,
+        text: `Error (revoked):\n${agentErrors.create("agent.run_revoked").message}`,
+      },
+    ]);
+    await expect(
+      runRecords(stub, chat.id).then((records) =>
+        records.map(({ status }) => status)
+      )
+    ).resolves.toStrictEqual(["revoked"]);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalsIn(chat.id, "agent.run_revoked")
+        ).resolves.toStrictEqual([
+          {
+            method: "executeCode",
+            outcome: "refused",
+            reason: "agent.run_revoked",
+          },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
+  it("leaves a run alone when what was revoked never gave it authority: a request never granted, or another chat's permission", async () => {
+    const { stub, chat, agent, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => { await env.chat.info(); await scheduler.wait(1_500); return (await env.chat.info()).chatId; };"
+      ),
+      says("Done.")
+    );
+
+    const reply = ask("Look twice.");
+    await vi.waitFor(
+      async () => {
+        await expect(
+          runRecords(stub, chat.id).then((records) => records.length)
+        ).resolves.toBe(1);
+      },
+      { timeout: 10_000 }
+    );
+    // As a person declining the chat's request stores it, and as a
+    // revocation in another of the agent's chats does.
+    await revokedRow(agent.agentId, { granted: false, chatId: chat.id });
+    await revokedRow(agent.agentId, {
+      granted: true,
+      chatId: crypto.randomUUID(),
+    });
+    await reply;
+
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "completed",
+    ]);
+    await expect(
+      refusalsIn(chat.id, "agent.run_revoked")
+    ).resolves.toStrictEqual([]);
+  });
+
+  it("takes a CPU limit as enforced only where the deployment says it runs on Cloudflare", () => {
+    expect(
+      [undefined, "workerd", "Cloudflare", "cloudflare"].map(
+        (profile) =>
+          codeRuntime(profile === undefined ? {} : { RUNTIME_PROFILE: profile })
+            .cpuLimit
+      )
+    ).toStrictEqual([
+      "cpu_limit_unsupported",
+      "cpu_limit_unsupported",
+      "cpu_limit_unsupported",
+      "enforced",
+    ]);
+  });
+
+  it("closes a run's lease as it ends whatever the revocation read does, and withholds its result when the read fails", async () => {
+    const { stub, chat, ask } = await newChat(
+      codeStep(
+        "export default async () => { console.log('read'); return 'secret'; };"
+      ),
+      says("Done.")
+    );
+
+    await withRevocationReads(
+      stub,
+      async () => {
+        await Promise.resolve();
+        throw new Error("D1 is down for a moment");
+      },
+      async () => {
+        await ask("Return it.");
+      }
+    );
+
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: true,
+        text: `Error (revoked):\n${agentErrors.create("agent.run_revoked").message}`,
+      },
+    ]);
+    const [record] = await runRecords(stub, chat.id);
+    expect(record?.status).toBe("revoked");
+    await expect(
+      runInDurableObject(stub, (instance) =>
+        instance.admitFromCodeRun(
+          chatIdSchema.parse(chat.id),
+          String(record?.id)
+        )
+      )
+    ).resolves.toStrictEqual({ call: "ended" });
+  });
+
+  it("admits nothing a run does while its end reads revocations", async () => {
+    // The run ends at its wall clock while its code still waits; the code
+    // calls during the slow read of revocations that follows.
+    const { stub, chat, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => { await scheduler.wait(1_300); await env.chat.attachments(); };"
+      ),
+      says("Done.")
+    );
+    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+    try {
+      await withRevocationReads(
+        stub,
+        async () => {
+          await scheduler.wait(2000);
+        },
+        async () => {
+          await ask("Wait, then look.");
+        }
+      );
+    } finally {
+      await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
+    }
+
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalsIn(chat.id, "agent.run_ended")
+        ).resolves.toStrictEqual([
+          {
+            method: "chat.attachments",
+            outcome: "refused",
+            reason: "agent.run_ended",
+          },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "wall_expired",
+    ]);
+  });
+
+  it("saves no USER.md for a run that ran out of time while the save was prepared", async () => {
+    const { stub, chat, agent, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => await env.memory.saveUser({ text: 'Prefers short answers.', ifVersion: 0 });"
+      ),
+      says("It ran out of time.")
+    );
+    // Knowledge answers two seconds late; the run has a second. The save
+    // is let in as it starts, then prepared past the run's end.
+    const { KNOWLEDGE: knowledge } = env;
+    const slow = new Proxy(knowledge, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "prepare") {
+          return (query: string) => lateStatement(target.prepare(query));
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "1000" });
+    env.KNOWLEDGE = slow;
+    try {
+      await ask("Remember it.");
+    } finally {
+      env.KNOWLEDGE = knowledge;
+      await setObjectEnv(stub, { CODE_RUN_TIMEOUT_MS: "" });
+    }
+
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalsIn(chat.id, "agent.run_ended")
+        ).resolves.toStrictEqual([
+          {
+            method: "memory.saveUser",
+            outcome: "refused",
+            reason: "agent.run_ended",
+          },
+        ]);
+      },
+      { timeout: 30_000, interval: 200 }
+    );
+    const events = await allEvents();
+    expect(
+      events.filter(
+        ({ action, actor }) =>
+          action === "knowledge.document.saved" &&
+          actor.type === "agent" &&
+          actor.agentId === agent.agentId
+      )
+    ).toStrictEqual([]);
+  });
+
+  it("ends a run a restart cuts short: its lease closes, its record says interrupted, and nothing runs again", async () => {
+    const { id, stub, chat, gateway, ask } = await newChat(
+      codeStep(
+        "export default async (self, env) => { await env.chat.info(); await scheduler.wait(5_000); return (await env.chat.info()).chatId; };"
+      ),
+      says("Done.")
+    );
+
+    const reply = ask("Look twice.").catch(() => "cut short");
+    await vi.waitFor(
+      async () => {
+        await expect(
+          runRecords(stub, chat.id).then((records) => records.length)
+        ).resolves.toBe(1);
+      },
+      { timeout: 10_000 }
+    );
+    // The object dies, as a restart ends it: everything in flight fails.
+    await runInDurableObject(stub, (_instance, state) => {
+      state.abort("restart");
+    }).catch(() => "aborted");
+    await expect(reply).resolves.toBe("cut short");
+    // The object as it wakes again.
+    const woken = workspace(env, id);
+
+    const [record] = await runRecords(woken, chat.id);
+    expect(record?.status).toBe("interrupted");
+    // Its lease went with the object: its stubs answer as ended.
+    await expect(
+      runInDurableObject(woken, (instance) =>
+        instance.callFromCodeRun(
+          chatIdSchema.parse(chat.id),
+          String(record?.id)
+        )
+      )
+    ).resolves.toStrictEqual({ call: "ended", first: false });
+    // Not run again: one step asked for, no result, no second request.
+    await scheduler.wait(6000);
+    const [calls, results, runs] = await Promise.all([
+      toolCallIds(woken, chat.id),
+      codeResults(woken, chat.id),
+      runRecords(woken, chat.id),
+    ]);
+    expect({
+      calls: calls.length,
+      results: results.length,
+      runs: runs.length,
+      requests: gateway.requests.length,
+    }).toStrictEqual({ calls: 1, results: 0, runs: 1, requests: 1 });
+  });
+});
+
+/**
+ * Follows a chat's running step output as the page does: every update's
+ * output so far, whether it carried a step's result, and the latest.
+ */
+const watchOutput = async (
+  stub: WorkspaceStub,
+  chatId: string,
+  personId: string
+) => {
+  let output: ChatOutput | null = null;
+  const seen: { output: ChatOutput | null; result: boolean }[] = [];
+  await stub.watch(chatId, personId, null, async (update: ChatUpdate) => {
+    output = applyOutput(output, update.output);
+    seen.push({
+      output,
+      result: update.messages.some(({ role }) => role === "result"),
+    });
+    await Promise.resolve();
+  });
+  return { seen, latest: () => seen.at(-1)?.output ?? null };
+};
+
+/**
+ * A chat whose agent an admin granted something, running `code` once,
+ * and `revoke`, which revokes it.
+ */
+const grantedChat = async (code: string) => {
+  const admin = await signedInApi(idp, "admin");
+  const { collectionId } = await collectionWithNote(admin.api, {
+    name: `Handbook ${crypto.randomUUID()}`,
+    access: "everyone",
+  });
+  const chat = await newChat(codeStep(code), says("Done."));
+  const permission = await requestGranted(
+    idp,
+    admin,
+    readCollection(chat.agent, collectionId, "HANDBOOK")
+  );
+  return {
+    ...chat,
+    revoke: async () => {
+      await admin.api.permissions.revoke(permission);
+    },
+  };
+};
+
+describe("chat agent code output", () => {
+  it("streams what the code logs to the chat before its step ends, redacted, and drops it once the step's result is stored", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { console.log('first'); console.log('key Bearer abcdefghijklmnopqrstuvwxyz0123'); await scheduler.wait(1_500); console.log('after the wait'); return 'done'; };"
+      ),
+      says("Done.")
+    );
+    // Put together as the page does, noting what showed before the result.
+    let output: ChatOutput | null = null;
+    const seen: { output: ChatOutput | null; result: boolean }[] = [];
+    await stub.watch(chat.id, personId, null, async (update: ChatUpdate) => {
+      output = applyOutput(output, update.output);
+      seen.push({
+        output,
+        result: update.messages.some(({ role }) => role === "result"),
+      });
+      await Promise.resolve();
+    });
+
+    await ask("Log it.");
+
+    const [callId] = await toolCallIds(stub, chat.id);
+    await vi.waitFor(() => {
+      expect(seen.at(-1)?.output).toBeNull();
+    });
+    const firstResult = seen.findIndex(({ result }) => result);
+    const before = seen.slice(0, firstResult).map((step) => step.output);
+    expect(before).toContainEqual({
+      callId,
+      text: "first\nkey [redacted]",
+    });
+    // What the model reads is redacted the same way.
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: false,
+        text: "Logs:\nfirst\nkey [redacted]\nafter the wait\n\nReturned:\ndone",
+      },
+    ]);
+
+    // A line that comes after the run closed shows nowhere.
+    const [record] = await runRecords(stub, chat.id);
+    const shown = seen.length;
+    await stub.codeRunOutput(
+      chatIdSchema.parse(chat.id),
+      String(record?.id),
+      callId ?? "",
+      "late"
+    );
+    await scheduler.wait(200);
+    expect(seen.slice(shown).some((step) => step.output !== null)).toBeFalsy();
+  });
+
+  it("streams nothing a run logs after a revocation, even with no call to notice it", async () => {
+    const { stub, chat, personId, ask, revoke } = await grantedChat(
+      "export default async () => { console.log('before'); await scheduler.wait(2_500); console.log('after the revoke'); await scheduler.wait(2_500); return 'done'; };"
+    );
+    const { seen, latest } = await watchOutput(stub, chat.id, personId);
+
+    const reply = ask("Log it.");
+    await vi.waitFor(
+      () => {
+        expect(latest()?.text).toBe("before");
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    await revoke();
+    await reply;
+
+    expect(
+      seen.some(
+        ({ output }) => output?.text.includes("after the revoke") === true
+      )
+    ).toBeFalsy();
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "revoked",
+    ]);
+    expect(seen.at(-1)?.output ?? null).toBeNull();
+  });
+
+  it("drops what a run showed once a call of its finds a revocation", async () => {
+    const { stub, chat, personId, ask, revoke } = await grantedChat(
+      "export default async (self, env) => { console.log('shown'); await scheduler.wait(2_500); try { await env.chat.info(); } catch {} await scheduler.wait(1_000); return 'done'; };"
+    );
+    const { seen, latest } = await watchOutput(stub, chat.id, personId);
+
+    const reply = ask("Log, then look.");
+    await vi.waitFor(
+      () => {
+        expect(latest()?.text).toBe("shown");
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    await revoke();
+    await reply;
+
+    // Gone before the step's result came: with the refused call, not after.
+    const shownAt = seen.findIndex(({ output }) => output?.text === "shown");
+    const resultAt = seen.findIndex(({ result }) => result);
+    expect(
+      seen.slice(shownAt, resultAt).some(({ output }) => output === null)
+    ).toBeTruthy();
+  });
+
+  it("redacts a private key the code logs line by line, in the chat and for the model", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { for (const line of ['-----BEGIN PRIVATE KEY-----', 'MIIEvQIBADANBgkqhkiG9w0BAQEFAASC', 'BKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj', '-----END PRIVATE KEY-----', 'done']) { console.log(line); await scheduler.wait(1_100); } };"
+      ),
+      says("Done.")
+    );
+    const { seen } = await watchOutput(stub, chat.id, personId);
+
+    await ask("Log it.");
+
+    const streamed = seen.flatMap(({ output }) =>
+      output === null ? [] : [output.text]
+    );
+    expect(streamed.length).toBeGreaterThan(0);
+    expect(streamed.some((text) => /MIIE|BKcw/u.test(text))).toBeFalsy();
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      { isError: false, text: "Logs:\n[redacted]\ndone" },
+    ]);
+  });
+
+  it("shows nothing of a run whose revocation read fails, and records why", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { console.log('read'); await scheduler.wait(1_500); return 'secret'; };"
+      ),
+      says("Done.")
+    );
+    const { seen } = await watchOutput(stub, chat.id, personId);
+
+    await withRevocationReads(
+      stub,
+      async () => {
+        await Promise.resolve();
+        throw new Error("D1 is down for a moment");
+      },
+      async () => {
+        await ask("Log it.");
+      }
+    );
+
+    expect(seen.some(({ output }) => output !== null)).toBeFalsy();
+    await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
+      "revoked",
+    ]);
+    await vi.waitFor(
+      async () => {
+        await expect(
+          refusalsIn(chat.id, "agent.revocation_read_failed")
+        ).resolves.toStrictEqual([
+          {
+            method: "output",
+            outcome: "refused",
+            reason: "agent.revocation_read_failed",
+          },
+        ]);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
+  it("holds a line until a revocation read begun after it finds none, however slow", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { console.log('held'); await scheduler.wait(1_000); return 'done'; };"
+      ),
+      says("Done.")
+    );
+    const { seen } = await watchOutput(stub, chat.id, personId);
+
+    // Every read takes longer than the run: the line is never shown before
+    // the step's result, which shows it.
+    await withRevocationReads(
+      stub,
+      async () => {
+        await scheduler.wait(3000);
+      },
+      async () => {
+        await ask("Log it.");
+      }
+    );
+
+    expect(seen.some(({ output }) => output !== null)).toBeFalsy();
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      { isError: false, text: "Logs:\nheld\n\nReturned:\ndone" },
+    ]);
+  });
+
+  it("redacts whole credential values in what streams and in what is kept", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        `export default async () => { console.log("authorization: Basic dXNlcjpwYXNz"); console.log('password: "correct horse battery staple"'); await scheduler.wait(1_500); return 'done'; };`
+      ),
+      says("Done.")
+    );
+    const { seen } = await watchOutput(stub, chat.id, personId);
+
+    await ask("Log it.");
+
+    const streamed = seen.flatMap(({ output }) =>
+      output === null ? [] : [output.text]
+    );
+    expect(streamed).toContain(
+      'authorization: [redacted]\npassword: "[redacted]"'
+    );
+    expect(
+      streamed.some((text) => /dXNlcjpwYXNz|horse|battery/u.test(text))
+    ).toBeFalsy();
+    await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
+      {
+        isError: false,
+        text: 'Logs:\nauthorization: [redacted]\npassword: "[redacted]"\n\nReturned:\ndone',
+      },
+    ]);
+  });
+
+  it("tells a new watch what output there is in its first update, none included", async () => {
+    const { stub, chat, personId } = await newChat();
+    const first = Promise.withResolvers<ChatUpdate>();
+    await stub.watch(chat.id, personId, null, async (update: ChatUpdate) => {
+      first.resolve(update);
+      await Promise.resolve();
+    });
+
+    // Explicitly none, so a page that had output from an earlier watch
+    // (before a reconnect) drops it, rather than keep it as unchanged.
+    const update = await first.promise;
+    expect(Object.hasOwn(update, "output")).toBeTruthy();
+    expect(update.output).toBeNull();
+  });
+
+  it("takes no more lines of a run than one may log, whatever is sent", async () => {
+    const { stub, chat, personId } = await newChat();
+    const chatId = chatIdSchema.parse(chat.id);
+    const run = await stub.openCodeRun(chatId, testRunOpening);
+    const { latest } = await watchOutput(stub, chat.id, personId);
+
+    for (let line = 0; line < codeLimits.logLines + 500; line += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in order, as a run sends them
+      await stub.codeRunOutput(chatId, run, "call_test", `line ${line}`);
+    }
+
+    // Every line it may log, then the marker that more was cut.
+    await vi.waitFor(
+      () => {
+        const text = latest()?.text ?? "";
+        expect(text.endsWith(cutMarker)).toBeTruthy();
+        expect(text.slice(0, -cutMarker.length).split("\n")).toHaveLength(
+          codeLimits.logLines
+        );
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+  });
+
+  it.each([
+    ["a character of three bytes", "漢".repeat(65_536)],
+    ["a character of four bytes", "😀".repeat(40_000)],
+  ])(
+    "shows what fits of a line too large for its bytes, %s, never half a character, and says it was cut",
+    async (_, line) => {
+      const { stub, chat, personId } = await newChat();
+      const chatId = chatIdSchema.parse(chat.id);
+      const run = await stub.openCodeRun(chatId, testRunOpening);
+      const { latest } = await watchOutput(stub, chat.id, personId);
+
+      await stub.codeRunOutput(chatId, run, "call_test", line);
+      await stub.codeRunOutput(chatId, run, "call_test", "after the cut");
+
+      await vi.waitFor(
+        () => {
+          expect(latest()?.text.endsWith(cutMarker)).toBeTruthy();
+        },
+        { timeout: 10_000, interval: 100 }
+      );
+      const text = latest()?.text ?? "";
+      const shown = text.slice(0, -cutMarker.length);
+      expect({
+        prefix: line.startsWith(shown),
+        some: shown.length > 1000,
+        loneSurrogate:
+          /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(
+            shown
+          ),
+        within:
+          utf8Bytes(text) <=
+          codeLimits.outputBytes - codeLimits.diagnosticBytes,
+        after: text.includes("after the cut"),
+      }).toStrictEqual({
+        prefix: true,
+        some: true,
+        loneSurrogate: false,
+        within: true,
+        after: false,
+      });
+    }
+  );
+
+  it("shares one output budget between logs and result, and keeps room for how the run ended", async () => {
+    const { stub, chat, personId, ask } = await newChat(
+      codeStep(
+        "export default async () => { for (let i = 0; i < 5_000; i++) console.log('é'.repeat(200)); await scheduler.wait(1_500); throw new Error('the end'); };"
+      ),
+      says("Done.")
+    );
+    let output: ChatOutput | null = null;
+    let longest = 0;
+    await stub.watch(chat.id, personId, null, async (update: ChatUpdate) => {
+      output = applyOutput(output, update.output);
+      longest = Math.max(longest, utf8Bytes(output?.text ?? ""));
+      await Promise.resolve();
+    });
+
+    await ask("Flood it.");
+
+    const [result] = await codeResults(stub, chat.id);
+    const text = result?.text ?? "";
+    expect({
+      within: utf8Bytes(text) <= codeLimits.outputBytes,
+      cut: text.includes(cutMarker),
+      ending: /\n\nError \(threw\):\nError: the end/u.test(text),
+      streamed:
+        longest > 0 &&
+        longest <= codeLimits.outputBytes - codeLimits.diagnosticBytes,
+    }).toStrictEqual({ within: true, cut: true, ending: true, streamed: true });
+  });
+
+  it("redacts a whole credential value: a short Basic one, and a quoted one with spaces", () => {
+    expect(
+      [
+        "authorization: Basic dXNlcjpwYXNz",
+        "Authorization: Basic YQ==",
+        'password: "correct horse battery staple"',
+        "secret='two words' and more",
+        '{"password":"a b c","user":"ann"}',
+        'token: "never closed',
+        '{"access_token":"ya29.abc","client_secret":"shh"}',
+        String.raw`"{\"password\":\"hunter2\",\"user\":\"ann\"}"`,
+        String.raw`"{\"refresh_token\":\"1//abc def\"}"`,
+        String.raw`password=abc\def next`,
+      ].map(redact)
+    ).toStrictEqual([
+      "authorization: [redacted]",
+      "Authorization: [redacted]",
+      'password: "[redacted]"',
+      "secret='[redacted]' and more",
+      '{"password":"[redacted]","user":"ann"}',
+      'token: "[redacted]',
+      '{"access_token":"[redacted]","client_secret":"[redacted]"}',
+      String.raw`"{\"password\":\"[redacted]\",\"user\":\"ann\"}"`,
+      String.raw`"{\"refresh_token\":\"[redacted]\"}"`,
+      "password=[redacted] next",
+    ]);
+  });
+
+  it("redacts adversarial floods of every credential shape in linear time", () => {
+    const units = [
+      "eyJ-",
+      "eyJ--",
+      "eyJ.",
+      "bearer ",
+      ["sk_", "live_"].join(""),
+      "sk-",
+      "ghp_",
+      ["github", "_pat_"].join(""),
+      ["xo", "xb-"].join(""),
+      "AIza-",
+      "AKIA",
+      "token:",
+      "access_token:",
+      'password: "',
+      String.raw`password\":\"`,
+      String.raw`password=abc\def`,
+      "secret='\\",
+      "authorization: Basic ",
+      "-----BEGIN PRIVATE KEY-----",
+    ];
+    const slowest = Math.max(
+      ...units.flatMap((unit) =>
+        ["", "x", "-", "."].map((tail) => {
+          const flood = `${unit}${tail}`.repeat(
+            Math.ceil(
+              (2 * codeLimits.outputBytes) / (unit.length + tail.length)
+            )
+          );
+          const started = performance.now();
+          redact(flood);
+          return performance.now() - started;
+        })
+      )
+    );
+
+    // About 128K characters each: a quadratic pattern takes seconds.
+    expect(slowest).toBeLessThan(250);
+  });
+
+  it("cuts text by UTF-8 bytes, never inside a character, and redacts credentials", () => {
+    expect({
+      cut: cutToBytes("é".repeat(10), 5),
+      short: cutToBytes("abc", 10),
+      emoji: cutToBytes("😀😀", 5),
+      redacted: redact(
+        "Authorization: Bearer abcdefghijklmnop1234 key sk-abcdefghijklmnop1234 jwt eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2Q aws AKIAABCDEFGHIJKLMNOP plain words"
+      ),
+      // Put together here, so the repository holds no token-shaped text.
+      more: [
+        ["sk_", "live_abcdefghij1234"].join(""),
+        ["rk_", "test_abcdefghij1234"].join(""),
+        ["ghp", "_abcdefghijklmnopqrstuvwxyz0123"].join(""),
+        ["github", "_pat_abcdefghijklmnopqrstuv_0123"].join(""),
+        ["xo", "xb-1234567890-abcdefghij"].join(""),
+        ["AI", "zaSyA1234567890abcdefghijklmnopqrstuv"].join(""),
+        "api_key=abc123",
+        'password: "hunter2"',
+        "token=xyz",
+        "the secret is safe",
+      ].map(redact),
+    }).toStrictEqual({
+      cut: "éé",
+      short: "abc",
+      emoji: "😀",
+      redacted:
+        "Authorization: [redacted] key [redacted] jwt [redacted] aws [redacted] plain words",
+      more: [
+        "[redacted]",
+        "[redacted]",
+        "[redacted]",
+        "[redacted]",
+        "[redacted]",
+        "[redacted]",
+        "api_key=[redacted]",
+        'password: "[redacted]"',
+        "token=[redacted]",
+        "the secret is safe",
+      ],
+    });
+  });
+});
+
+/** Orders text alphabetically. */
+const byText = (a: string, b: string): number => a.localeCompare(b, "en");
+
+describe("chat agent code run retention", () => {
+  it("keeps no more closed leases than it may, however many runs end", async () => {
+    const { stub, chat } = await newChat();
+    const chatId = chatIdSchema.parse(chat.id);
+    const runs = endedRunsKept + 50;
+
+    // Leases opened and closed as runs do, past the most it keeps.
+    const kept = await runInDurableObject(stub, (instance) => {
+      const ids: string[] = [];
+      for (let run = 0; run < runs; run += 1) {
+        const id = instance.openCodeRun(chatId, testRunOpening);
+        instance.closeCodeRun(chatId, id, "completed");
+        ids.push(id);
+      }
+      return {
+        retention: instance.codeRunRetention(),
+        // The oldest are forgotten, and answer as ended, unlogged.
+        oldest: instance.callFromCodeRun(chatId, ids[0] ?? ""),
+        newest: instance.callFromCodeRun(chatId, ids.at(-1) ?? ""),
+      };
+    });
+
+    expect(kept).toStrictEqual({
+      retention: { open: 0, closed: endedRunsKept, outputs: 0 },
+      oldest: { call: "ended", first: false },
+      newest: { call: "ended", first: true },
+    });
+  });
+
+  it("keeps no open lease or output after many runs, whether they complete, throw or fail to load", async () => {
+    const kinds = [
+      "export default async (self, env) => { console.log((await env.chat.info()).chatId); return 1; };",
+      "export default async (self, env) => { await env.chat.info(); throw new Error('nope'); };",
+      "export default async () => {",
+    ];
+    const turns = 4;
+    const replies = Array.from({ length: turns }, (_, turn) => [
+      codeStep(kinds[0] ?? "", 5),
+      codeStep(kinds[1 + (turn % 2)] ?? "", 5),
+      says("Done."),
+    ]).flat();
+    const { stub, chat, ask } = await newChat(...replies);
+
+    for (let turn = 0; turn < turns; turn += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one turn at a time per chat
+      await ask("Run them.");
+    }
+
+    // Read from the object's own state after the runs, not inferred from
+    // their cleanup. What the runtime holds for them can't be read.
+    await expect(
+      runInDurableObject(stub, (instance) => instance.codeRunRetention())
+    ).resolves.toStrictEqual({
+      open: 0,
+      closed: turns * 10,
+      outputs: 0,
+    });
+    const records = await runRecords(stub, chat.id);
+    expect(
+      records.map(({ status }) => String(status)).toSorted(byText)
+    ).toStrictEqual(
+      [
+        ...Array.from({ length: 20 }, () => "completed"),
+        ...Array.from({ length: 10 }, () => "load_failed"),
+        ...Array.from({ length: 10 }, () => "threw"),
+      ].toSorted(byText)
+    );
   });
 });

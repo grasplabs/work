@@ -8,6 +8,7 @@ import {
   identifierSchema,
 } from "./ids.ts";
 import type { CollectionId, DocumentId } from "./ids.ts";
+import { knowledgeSearchMaxLength } from "./operation-limits.ts";
 
 // Knowledge: Markdown documents with typed frontmatter, in collections. A
 // save never overwrites: it adds a version, and names the version it was
@@ -517,7 +518,7 @@ export interface BacklinkPage {
 }
 
 /** Longest search query, in characters. */
-export const searchQueryMaxLength = 500;
+export const searchQueryMaxLength = knowledgeSearchMaxLength;
 
 /** Most results one search returns. */
 export const searchMaxLimit = 50;

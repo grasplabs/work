@@ -21,6 +21,7 @@ import type { StepType } from "./journal.ts";
 import type {
   EventOutcome,
   RestartCommand,
+  ResumeCommand,
   SubscribeCommand,
   TerminateCommand,
   WorkflowRun,
@@ -91,6 +92,26 @@ const readRestart = (options: unknown): RestartCommand => {
 };
 
 /** `terminate`'s options, read once: `{ rollback? }`, false when left out. */
+const readResume = (options: unknown): ResumeCommand => {
+  if (options === undefined) {
+    return { keepDeadlines: false };
+  }
+  if (!isPlainObject(options)) {
+    throw new TypeError(
+      `A resume's options are { keepDeadlines? }, not ${options === null ? "null" : describe(options)}`
+    );
+  }
+  const { keepDeadlines } = readSettings("A resume's options", options, [
+    "keepDeadlines",
+  ] as const);
+  if (keepDeadlines !== undefined && typeof keepDeadlines !== "boolean") {
+    throw new TypeError(
+      `A resume's keepDeadlines is true or false, not ${describe(keepDeadlines)}`
+    );
+  }
+  return { keepDeadlines: keepDeadlines === true };
+};
+
 const readTerminate = (options: unknown): TerminateCommand => {
   if (options === undefined) {
     return { rollback: false };
@@ -196,12 +217,14 @@ export class WorkflowInstance {
 
   /**
    * Resumes a paused run, as Cloudflare's `resume`: its pending deadlines
-   * (sleeps, event waits, retries) are moved on by the time it was paused.
-   * A run still pausing goes on as if the pause was never asked for; any
-   * other run is left as it is.
+   * (sleeps, event waits, retries) are moved on by the time it was paused,
+   * unless `keepDeadlines` (a host whose paused time counts): then each
+   * comes due as it would have, at once if its time has passed. A run
+   * still pausing goes on as if the pause was never asked for; any other
+   * run is left as it is.
    */
-  async resume(): Promise<void> {
-    if ((await this.#stub.resume()) === "missing") {
+  async resume(options?: { keepDeadlines?: boolean }): Promise<void> {
+    if ((await this.#stub.resume(readResume(options))) === "missing") {
       throw notFound(this.id);
     }
   }

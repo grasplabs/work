@@ -60,12 +60,14 @@ import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { RunsLog } from "../workflows/runs.tsx";
+import { WorkflowTriggers } from "../workflows/triggers.tsx";
 
-// One workflow: its steps in plain words, read from its code; its
-// parameters as a form, for the App's builders; a Test that dry-runs it
-// with the values set now; and its history, the runs and, for builders,
-// the App's versions. Core checks every call; the page offers only what
-// core says the person may do.
+// One workflow: its steps in plain words, read from its code; what starts
+// it on its own, as its current version registered it; its parameters as
+// a form, for the App's builders; a Test that dry-runs it with the values
+// set now; and its history, the runs (each with its own page) and, for
+// builders, the App's versions. Core checks every call; the page offers
+// only what core says the person may do.
 
 /**
  * Who does a step, as the prototype's three types say it
@@ -582,7 +584,7 @@ const WorkflowView = ({
   model: string | undefined;
 }) => {
   const { identity } = Route.useRouteContext();
-  const { summary, steps, params, setsParams } = detail;
+  const { summary, steps, params, setsParams, triggers } = detail;
   const { t } = useLingui();
   const { version } = summary;
   const owner = summary.owner.name ?? summary.owner.userId;
@@ -637,6 +639,9 @@ const WorkflowView = ({
           <TabsTrigger value="steps">
             <Trans context="tab of a workflow">Steps</Trans>
           </TabsTrigger>
+          <TabsTrigger value="triggers">
+            <Trans context="tab of a workflow">Triggers</Trans>
+          </TabsTrigger>
           {params === null ? null : (
             <TabsTrigger value="parameters">
               <Trans context="tab of a workflow">Parameters</Trans>
@@ -661,6 +666,11 @@ const WorkflowView = ({
       <TabsContent value="steps">
         <div className="mx-auto w-full max-w-5xl p-6">
           <Steps steps={steps} />
+        </div>
+      </TabsContent>
+      <TabsContent value="triggers">
+        <div className="mx-auto w-full max-w-5xl p-6">
+          <WorkflowTriggers triggers={triggers} />
         </div>
       </TabsContent>
       {/* Kept while another tab shows: what was saved or typed stays. */}

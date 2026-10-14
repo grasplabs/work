@@ -1,4 +1,5 @@
 import {
+  indexMaxFields,
   storeMaxTables,
   storeNameMaxLength,
   storeNamePattern,
@@ -61,7 +62,7 @@ export const schemaLimits = Object.freeze({
   /** Indexes on one table. */
   indexesPerTable: 32,
   /** Fields in one index. */
-  fieldsPerIndex: 16,
+  fieldsPerIndex: indexMaxFields,
 } as const);
 
 /**
@@ -78,6 +79,7 @@ export type SchemaDefinitionCode =
   | "schema.invalid_index"
   | "schema.unknown_table"
   | "schema.too_large"
+  | "schema.invalid_access"
   | "schema.invalid_manifest";
 
 /**
@@ -305,7 +307,7 @@ const checkUnique = (names: readonly string[], what: string): void => {
   }
 };
 
-type IndexBase = "string" | "number" | "boolean";
+export type IndexBase = "string" | "number" | "boolean";
 
 /** The base type of each kind whose values are all of one scalar type. */
 const scalarBases: Readonly<
@@ -333,7 +335,9 @@ const isNullOnly = (descriptor: ValueDescriptor): boolean =>
  * base type whatever its members, with null and absence besides. Undefined
  * for anything else, which no index may name.
  */
-const indexBase = (descriptor: ValueDescriptor): IndexBase | undefined => {
+export const indexBase = (
+  descriptor: ValueDescriptor
+): IndexBase | undefined => {
   if (descriptor.kind === "literal") {
     const type = typeof descriptor.value;
     return type === "string" || type === "number" || type === "boolean"
@@ -350,6 +354,14 @@ const indexBase = (descriptor: ValueDescriptor): IndexBase | undefined => {
     return others.length === 0 ? base : undefined;
   }
   return scalarBases[descriptor.kind];
+};
+
+/** Whether a field of this descriptor may hold an explicit null. */
+export const allowsNull = (descriptor: ValueDescriptor): boolean => {
+  if (descriptor.nullable || isNullOnly(descriptor)) {
+    return true;
+  }
+  return descriptor.kind === "union" && descriptor.members.some(allowsNull);
 };
 
 /** The fields of a new index, checked against its table. */

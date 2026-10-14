@@ -165,6 +165,39 @@ export const triggerChangeText = ({
       );
 };
 
+/**
+ * What a migration's fixtures found, in a reviewer's words: how many it
+ * runs on as the version is sealed, and once it is, whether they passed
+ * (`failed`, for the panel to warn of it).
+ */
+export const migrationFixturesText = ({
+  fixtures,
+  fixturesPassed,
+}: {
+  fixtures: number;
+  fixturesPassed: boolean | null;
+}): { text: string; failed: boolean } => {
+  if (fixturesPassed === false) {
+    return {
+      text: i18n._(
+        msg`It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current`
+      ),
+      failed: true,
+    };
+  }
+  return {
+    text:
+      fixturesPassed === null
+        ? i18n._(
+            msg`${plural(fixtures, { one: "It runs on its # fixture when the version is sealed, before any record", other: "It runs on its # fixtures when the version is sealed, before any record" })}`
+          )
+        : i18n._(
+            msg`${plural(fixtures, { one: "It passed its # fixture when the version was sealed", other: "It passed all # of its fixtures when the version was sealed" })}`
+          ),
+    failed: false,
+  };
+};
+
 /** What an export lets another App do, in a reviewer's words. */
 const accessWords = {
   read: msg`reads the domain's data`,

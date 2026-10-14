@@ -57,16 +57,18 @@ export interface Signals {
 }
 
 /** Each kind of signal's mark and name, as its rows and the block's counts show them. */
-const kinds: Record<SignalKind, { icon: LucideIcon; name: MessageDescriptor }> =
-  {
-    failing_step: { icon: TriangleAlertIcon, name: msg`Keeps failing` },
-    waiting_for_person: { icon: ClockIcon, name: msg`Waiting for a person` },
-    correction: { icon: UndoIcon, name: msg`Often corrected` },
-    cost_per_run: { icon: CircleDollarSignIcon, name: msg`Model cost` },
-    unanswered_question: { icon: SearchXIcon, name: msg`Unanswered question` },
-    unread_document: { icon: BookOpenIcon, name: msg`Nobody reads it` },
-    overdue_review: { icon: ClockIcon, name: msg`Review overdue` },
-  };
+export const signalKindLooks: Record<
+  SignalKind,
+  { icon: LucideIcon; name: MessageDescriptor }
+> = {
+  failing_step: { icon: TriangleAlertIcon, name: msg`Keeps failing` },
+  waiting_for_person: { icon: ClockIcon, name: msg`Waiting for a person` },
+  correction: { icon: UndoIcon, name: msg`Often corrected` },
+  cost_per_run: { icon: CircleDollarSignIcon, name: msg`Model cost` },
+  unanswered_question: { icon: SearchXIcon, name: msg`Unanswered question` },
+  unread_document: { icon: BookOpenIcon, name: msg`Nobody reads it` },
+  overdue_review: { icon: ClockIcon, name: msg`Review overdue` },
+};
 
 /** A duration in whole days, or hours under a day, as words. */
 const waitedFor = (ms: number, t: ReturnType<typeof useLingui>["t"]) => {
@@ -96,7 +98,7 @@ const SignalRow = ({
   action?: ReactNode;
 }) => {
   const { i18n } = useLingui();
-  const { icon, name } = kinds[kind];
+  const { icon, name } = signalKindLooks[kind];
   return (
     <li className="flex min-h-14 items-center gap-3 border-t px-4 py-2">
       <ItemMark icon={icon} />
@@ -371,9 +373,9 @@ const SignalKinds = ({ signals }: { signals: Signals }) => {
             className="flex items-center gap-3 border-t py-2 first:border-t-0 first:pt-0"
             key={kind}
           >
-            <ItemMark icon={kinds[kind].icon} />
+            <ItemMark icon={signalKindLooks[kind].icon} />
             <span className="min-w-0 flex-1 truncate">
-              {i18n._(kinds[kind].name)}
+              {i18n._(signalKindLooks[kind].name)}
             </span>
             <span className="tabular-nums">{count}</span>
           </li>

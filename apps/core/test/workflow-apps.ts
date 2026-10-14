@@ -3,11 +3,75 @@
  * they are split across: one file holds only so many runs' worth of
  * workers.
  */
+import { appIdSchema } from "@grasp-os/shared/ids";
+import type { ModelBindingBudgetInput } from "@grasp-os/shared/resource-bindings";
+import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
+import { findApp } from "../src/apps.ts";
+import { approveResourceBinding } from "../src/resource-bindings.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import type { Idp } from "./idp.ts";
+import { person } from "./sealed-apps.ts";
+
+/**
+ * A registration of spec 8's layout beside an App's server, declaring a
+ * text model resource for each of `bounds`' aliases, which its workflows'
+ * AI steps go through (`step.llm`'s `binding`), each with that bound on
+ * the answer. A step may ask twice, so each ask gets half. A binding
+ * holds the whole bound to what its model can answer, as an action would
+ * ask for all of it: at most 6,000 tokens on Llama 3.3.
+ */
+export const modelRegistration = (
+  bounds: Record<string, number>
+): Record<string, string> => ({
+  "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+export default defineSchema({});
+`,
+  "app.ts": `import { app, resource } from "@grasp-os/sdk";
+
+import schema from "./schema.ts";
+
+${Object.entries(bounds)
+  .map(
+    ([alias, tokens]) =>
+      `export const ${alias} = resource.model("${alias}", { maxOutputTokens: ${tokens} });\n`
+  )
+  .join("")}
+export default app({
+  name: "Models",
+  schema,
+  access: { tables: {} },
+  operations: {},
+  internalOperations: {},
+  screens: [],
+  uses: [${Object.keys(bounds).join(", ")}],
+});
+`,
+});
+
+/**
+ * An admin's binding of App `app`'s model resource `alias` to `model`,
+ * with `budget`, for the version current now: the model must be one the
+ * deployment allows as it is approved.
+ */
+export const bindModel = async (
+  app: string,
+  alias: string,
+  model: string,
+  budget?: ModelBindingBudgetInput
+) => {
+  const { currentVersion } = await findApp(env, appIdSchema.parse(app));
+  return await approveResourceBinding(env, await person("admin"), {
+    app,
+    alias,
+    target: { kind: "model", model },
+    reviewed: { version: currentVersion ?? 0 },
+    ...(budget === undefined ? {} : { budget }),
+  });
+};
 
 /** Someone signed in, with their API. */
 type Builder = Parameters<typeof release>[0];
@@ -33,6 +97,11 @@ export class App extends DurableObject {
     this.ctx.storage.sql.exec("CREATE TABLE IF NOT EXISTS hits (name TEXT PRIMARY KEY, count INTEGER NOT NULL)");
     const [row] = this.ctx.storage.sql.exec("SELECT count FROM hits WHERE name = ?", name).toArray();
     return Number(row?.count ?? 0);
+  }
+
+  // Takes \`ms\` milliseconds, holding the App's turn meanwhile.
+  async pause(_caller: Caller, ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   purchaseOrder(_caller: Caller, number: string): { amount: number } | null {
@@ -87,12 +156,24 @@ export class App extends DurableObject {
     }
   }
 
+  // Waits at the mail server, its search naming its caller's token, until
+  // the test lets it go, then counts \`parked:done\`.
+  async parkAtMail(caller: Caller): Promise<void> {
+    await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + ((caller as { token?: string }).token ?? "") });
+    this.hit(caller, "parked:done");
+  }
+
   // Waits at the mail server, which holds its search until the test lets
   // it go (MAIL, granted \`mail.search\`), then records a point of
   // \`measure\`, and counts whether the call was taken
-  // (\`measure\`:recorded) or refused.
+  // (\`measure\`:recorded) or refused, the search's answer or the point.
   async pointAfter(caller: Caller, measure: string): Promise<void> {
-    await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + measure });
+    try {
+      await (this.env as any).MAIL.call(caller, "mail.search", { query: "hold " + measure });
+    } catch {
+      this.hit(caller, measure + ":refused");
+      return;
+    }
     try {
       await this.point(caller, measure);
       this.hit(caller, measure + ":recorded");

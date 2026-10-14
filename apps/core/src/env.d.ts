@@ -30,30 +30,75 @@ interface __BaseEnv_Env {
   AUDIT_ARCHIVE_RETENTION_DAYS?: unknown;
   /** Days an ended workflow run keeps its details (src/workflows/retention.ts). */
   RUN_RETENTION_DAYS?: unknown;
+  /**
+   * The limits the operator lowered, with the policy's generation
+   * (`quotaLimitsSchema` in @grasp-os/shared/quota-policy;
+   * src/workflows/quotas.ts).
+   */
+  QUOTA_LIMITS?: unknown;
+  /**
+   * `cloudflare` where core runs on Cloudflare's runtime, which enforces
+   * Code Mode's CPU limit; anything else, unset included, is taken as a
+   * runtime that doesn't (src/code-mode.ts). Tests, local development and
+   * on-prem say `workerd`.
+   */
+  RUNTIME_PROFILE?: string;
+  /**
+   * On-prem only: the sandbox supervisor (scripts/workerd-sandbox.ts), as an
+   * external service, where untrusted isolates run in workerd processes of
+   * their own with a deadline (src/sandboxed.ts). Plain workerd enforces no
+   * CPU limit. Unbound, core loads them itself only on Cloudflare, or where
+   * `SANDBOX_IN_PROCESS` says so; anywhere else it refuses.
+   */
+  SANDBOX_HOST?: Fetcher;
+  /**
+   * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts)
+   * and an extraction on the sandbox host (src/knowledge/extract.ts).
+   */
+  SANDBOX_DEADLINE_MS?: string;
+  /**
+   * `unbounded` where core may run untrusted isolates itself without
+   * `SANDBOX_HOST` off Cloudflare, accepting that nothing bounds their CPU:
+   * tests and local development only, never on-prem (src/sandboxed.ts).
+   */
+  SANDBOX_IN_PROCESS?: string;
   /** `none` where Durable Objects have no jurisdiction (src/durable-objects.ts). */
   DURABLE_OBJECT_JURISDICTION?: string;
-  /**
-   * Tests only: the engine's step limit, when a test lowers it with the
-   * workflow's `stepLimit` (src/workflows/host.ts).
-   */
-  WORKFLOW_STEP_LIMIT?: string;
   /**
    * Tests only: a shorter wait between a run's checks of a held side
    * effect (src/workflows/host.ts).
    */
   WORKFLOW_OFF_WAIT_MS?: string;
   /**
+   * Tests only: the delay before every step's retry, in place of the one
+   * its config says (src/workflows/dispatcher.ts).
+   */
+  WORKFLOW_RETRY_DELAY_MS?: string;
+  /**
    * Tests only: the UTC month model budgets count in, such as `2031-01`
    * (src/model-budgets.ts).
    */
   MODEL_BUDGET_MONTH?: string;
   /**
+   * Tests only: the UTC day a model binding's daily cap counts in, such as
+   * `2031-01-02` (src/model-budgets.ts).
+   */
+  MODEL_BUDGET_DAY?: string;
+  /**
    * Tests only: fewer connector events one cron run delivers
    * (src/workflows/connector-events.ts).
    */
   CONNECTOR_EVENTS_PER_RUN?: string;
+  /** Tests only: a shorter wall-clock limit for one code run (src/code-mode.ts). */
+  CODE_RUN_TIMEOUT_MS?: string;
   /** Tests only: a shorter limit for one call into an App (src/app.ts). */
   APP_CALL_TIMEOUT_MS?: string;
+  /**
+   * Tests only: shorter limits on an App's tests, in milliseconds,
+   * `test/suite/run/cleanup` (src/app-tests.ts): never longer than the
+   * defaults.
+   */
+  APP_TEST_LIMITS_MS?: string;
   /** Tests only: a shorter bound on one build of a save (src/save-builds.ts). */
   BUILD_WAIT_MS?: string;
   /**

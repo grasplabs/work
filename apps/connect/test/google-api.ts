@@ -228,5 +228,9 @@ export const fakeGoogle = () => {
         body: googleError(403, "PERMISSION_DENIED", "userRateLimitExceeded"),
       });
     },
+    /** Makes Google carry out the next write, then lose its answer. */
+    loseWriteAnswer: () => {
+      fail({ lost: true, writesOnly: true });
+    },
   };
 };

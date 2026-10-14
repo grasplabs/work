@@ -15,7 +15,6 @@ import type { AuditEntry } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -34,6 +33,7 @@ import {
 import { inList } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
 import type { PersonAccess } from "./knowledge/access.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { memberEntry, requireNotStaff, requireSharable } from "./sharing.ts";
@@ -372,7 +372,7 @@ export const removeMember = async (
 };
 
 /** A signed-in person's `apps.members`. */
-export class AppMembersRpc extends RpcTarget implements AppMembersApi {
+export class AppMembersRpc extends CoreRpcTarget implements AppMembersApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

@@ -8,10 +8,10 @@ import type {
 } from "@grasp-os/shared/onboarding-gate";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 import { z } from "zod";
 
 import { signInConfig } from "../auth/config.ts";
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import {
@@ -37,7 +37,10 @@ const requireStaff = (person: Identity): void => {
 };
 
 /** The deployment's gate, for its admin to read and Grasp's staff to move. */
-export class OnboardingGateRpc extends RpcTarget implements OnboardingGateApi {
+export class OnboardingGateRpc
+  extends CoreRpcTarget
+  implements OnboardingGateApi
+{
   readonly #env: Env;
   readonly #check: SessionCheck;
 

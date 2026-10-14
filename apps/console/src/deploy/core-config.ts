@@ -1,10 +1,14 @@
 /**
- * The deployment config every deploy derives for a client's core, before
- * its settings (src/deploy/deploy.ts, where a setting of the same name
- * replaces it): `MODEL_GATEWAY`, naming the AI Gateway the deploy's
- * resources step ensures in the client's account (src/deploy/resources.ts)
- * with the models a new deployment allows, and `SIGN_IN`, from the
- * client's record. Derived
+ * The deployment config every deploy derives for a client's core:
+ * `MODEL_GATEWAY`, naming the AI Gateway the deploy's resources step
+ * ensures in the client's account (src/deploy/resources.ts) with the
+ * models a new deployment allows, and `SIGN_IN`, from the client's
+ * record, each replaced by a client setting of the same name, if it has
+ * one (src/deploy/deploy.ts); and `RUNTIME_PROFILE`, `cloudflare`, which
+ * the deploy fixes and no client setting can change (it isn't a
+ * deployment config var): every client runs on Cloudflare, which enforces
+ * Code Mode's CPU limit, so its run records say so (core's
+ * src/code-mode.ts). Derived
  * on every deploy, so rollouts keep them. And the check every deploy makes
  * of the config it is about to set, settings included, before it changes
  * anything (`checkDeployedConfig`).
@@ -22,6 +26,7 @@ import {
 } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { memoryLimitsSchema } from "@grasp-os/shared/memory";
+import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { z } from "zod";
 
 import { DeployError } from "./errors.ts";
@@ -31,6 +36,13 @@ import { DeployError } from "./errors.ts";
  * serves them all, and a run that ensures it again finds it.
  */
 export const clientGatewayId = "grasp-os";
+
+/**
+ * The runtime every client's core runs on: Cloudflare, where the isolates
+ * Code Mode loads have their CPU limit enforced. Not a setting: a client
+ * can't make its run records claim otherwise.
+ */
+const clientRuntimeProfile = "cloudflare";
 
 const { domains, admins } = signInConfigSchema.shape;
 const { hostedDomain } = signInConfigSchema.shape.google.unwrap().shape;
@@ -247,6 +259,7 @@ const configSchemas: Readonly<Record<string, readonly z.ZodType[]>> = {
   AUDIT_RETENTION_DAYS: [auditRetentionSchema],
   AUDIT_ARCHIVE_RETENTION_DAYS: [auditArchiveRetentionSchema],
   RUN_RETENTION_DAYS: [runRetentionSchema],
+  QUOTA_LIMITS: [quotaLimitsSchema],
 };
 
 /**
@@ -322,7 +335,8 @@ export interface CoreConfigInputs {
 
 /**
  * The deployment config vars a deploy derives for a client's core:
- * `MODEL_GATEWAY` always, `SIGN_IN` when its record has sign-in.
+ * `MODEL_GATEWAY` and `RUNTIME_PROFILE` always, `SIGN_IN` when its record
+ * has sign-in.
  */
 export const derivedCoreConfig = ({
   clientId,
@@ -333,6 +347,7 @@ export const derivedCoreConfig = ({
   const config = signInOf(clientId, signIn, domain, apps);
   return {
     MODEL_GATEWAY: { gateway: clientGatewayId, models: defaultGatewayModels },
+    RUNTIME_PROFILE: clientRuntimeProfile,
     ...(config === undefined ? {} : { SIGN_IN: config }),
   };
 };

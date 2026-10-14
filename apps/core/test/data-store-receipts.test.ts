@@ -7,7 +7,7 @@ import type {
 } from "@grasp-os/shared/stores";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, openStore } from "../src/data-stores.ts";
@@ -19,6 +19,13 @@ import type {
   OutboxEntry,
 } from "../src/outbox-delivery.ts";
 import { StoreHost } from "../src/store-host.ts";
+import { gatedConsumer } from "./gated-consumer.ts";
+import {
+  manifestHash,
+  memberRoles,
+  newRecordId,
+  tablesManifest,
+} from "./store-schemas.ts";
 
 /** Who creates the stores these tests use: a builder of the organization. */
 const builder: Acting = {
@@ -34,7 +41,7 @@ const builder: Acting = {
 // once. Each test makes stores of its own.
 
 const dayMs = 24 * 60 * 60 * 1000;
-const schemaHash = "a".repeat(64);
+const schemaHash = await manifestHash(tablesManifest("notes"));
 
 const scope = {
   principal: "ada",
@@ -48,7 +55,7 @@ const scope = {
 /** A new store with a `notes` table. */
 const newStore = async (): Promise<OpenStore> => {
   const store = await openStore(env, await createStore(env, builder));
-  await store.defineTables(["notes"]);
+  await store.defineTables(tablesManifest("notes"));
   return store;
 };
 
@@ -87,9 +94,13 @@ const insertOf = (
   more: Partial<Omit<Commit, "storeId">> = {}
 ): Omit<Commit, "storeId"> => ({
   principal: { userId: "ada" },
+  roles: memberRoles,
+  stagedAt: Date.now(),
   schemaHash,
   receipt,
-  writes: [{ op: "insert", table: "notes", fields: { title } }],
+  writes: [
+    { op: "insert", id: newRecordId(), table: "notes", fields: { title } },
+  ],
   ...more,
 });
 
@@ -263,6 +274,8 @@ describe("receipts", () => {
     await expect(
       store.commit({
         principal: { userId: "ada" },
+        roles: memberRoles,
+        stagedAt: Date.now(),
         schemaHash,
         receipt: edit,
         writes: [
@@ -290,6 +303,8 @@ describe("receipts", () => {
     const check = async (key: string) =>
       await store.commit({
         principal: { userId: "ada" },
+        roles: memberRoles,
+        stagedAt: Date.now(),
         schemaHash,
         receipt: heldBy(await store.claim(await claimOf(key, { id }))),
         guards: [{ table: "notes", id, expectedRevision: 1 }],
@@ -305,6 +320,8 @@ describe("receipts", () => {
     const bump = heldBy(await store.claim(await claimOf("bump", {})));
     await store.commit({
       principal: { userId: "ada" },
+      roles: memberRoles,
+      stagedAt: Date.now(),
       schemaHash,
       receipt: bump,
       writes: [
@@ -577,6 +594,118 @@ describe("outbox", () => {
       `${held.receiptId}:${staged.commit}:0`,
       `${held.receiptId}:${staged.commit}:1`,
     ]);
+  });
+
+  it("leases each entry when its turn comes, so a drain started meanwhile hands none over again", async () => {
+    const store = await newStore();
+    const held = heldBy(await store.claim(await claimOf("k1", {})));
+    const staged = await commitWith(
+      store,
+      insertOf(held, "Launch", {
+        intents: Array.from({ length: 6 }, (_, n) => ({
+          kind: "workflow.start" as const,
+          data: { n },
+        })),
+      }),
+      { "workflow.start": taker([]) }
+    );
+    const ids = Array.from(
+      { length: 6 },
+      (_, n) => `${held.receiptId}:${staged.commit}:${n}`
+    );
+    // The drains' clock and their hand-overs' time limits are the test's
+    // to move, so no lease runs out unless the test moves the clock past
+    // it: a busy machine changes nothing here.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const first = gatedConsumer();
+    const second = gatedConsumer();
+    const timeoutMs = 1000;
+    // Every drain started, to wait out however the test ends.
+    const drains: Promise<void>[] = [];
+    try {
+      await inHost(store, async (host) => {
+        const firstDrain = host.drainOutbox(
+          { "workflow.start": first.consumer },
+          { timeoutMs }
+        );
+        drains.push(firstDrain);
+        // The first drain hands three entries over, one limit each: each
+        // fails, and is put back for later.
+        for (let n = 0; n < 3; n += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one after the other
+          await first.entered(n);
+          // oxlint-disable-next-line no-await-in-loop -- one after the other
+          await vi.advanceTimersByTimeAsync(timeoutMs);
+        }
+        // Its fourth hand-over is going, all but done: that entry's lease,
+        // taken when its turn came, holds yet; one taken as the drain
+        // started (two limits long) would have run out about two limits ago.
+        await first.entered(3);
+        await vi.advanceTimersByTimeAsync(timeoutMs - 1);
+        // Another drain starts meanwhile, and is handing over the first
+        // entry it finds due when the first drain's hand-over runs out.
+        const secondDrain = host.drainOutbox(
+          { "workflow.start": second.consumer },
+          { timeoutMs }
+        );
+        drains.push(secondDrain);
+        await second.entered(0);
+        await vi.advanceTimersByTimeAsync(1);
+        // The first drain goes on past the entry the other one holds.
+        await first.entered(4);
+        await vi.advanceTimersByTimeAsync(timeoutMs);
+        // Every hand-over here has run out by now. Let go of any that
+        // hasn't (an entry handed over twice), so the drains end either way.
+        first.release();
+        second.release();
+        await Promise.all([firstDrain, secondDrain]);
+      });
+    } finally {
+      first.release();
+      second.release();
+      await Promise.allSettled(drains);
+      vi.useRealTimers();
+    }
+    // Each drain hands over only entries no other drain holds: never one
+    // twice, however they overlap.
+    expect({ first: first.handed, second: second.handed }).toStrictEqual({
+      first: [...ids.slice(0, 4), ids[5]],
+      second: [ids[4]],
+    });
+  });
+
+  it("refuses a drain whose hand-over limit is not above 0 ms, handing nothing over", async () => {
+    const store = await newStore();
+    const held = heldBy(await store.claim(await claimOf("k1", {})));
+    await commitWith(
+      store,
+      insertOf(held, "Launch", {
+        intents: [{ kind: "workflow.start", data: {} }],
+      }),
+      { "workflow.start": taker([]) }
+    );
+    const taken: OutboxEntry[] = [];
+    const refused = await inHost(store, async (host) => {
+      try {
+        await host.drainOutbox(
+          { "workflow.start": taker(taken) },
+          { timeoutMs: 0 }
+        );
+        return "drained";
+      } catch (error) {
+        return error instanceof RangeError ? error.message : String(error);
+      }
+    });
+    const [entry] = await rowsOf(store, "sdk_change_outbox");
+    expect({
+      refused,
+      taken: taken.length,
+      settled: entry?.settled_at,
+    }).toStrictEqual({
+      refused: "A hand-over's limit must be above 0 ms, not 0.",
+      taken: 0,
+      settled: null,
+    });
   });
 
   it("settles an entry undeliverable only after its attempts, never dropping it", async () => {

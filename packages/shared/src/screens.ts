@@ -9,7 +9,7 @@ import {
   screenLimits,
 } from "./screen-limits.ts";
 import type { ScreenDelivery } from "./screen-trust.ts";
-import type { WorkflowRun } from "./workflows.ts";
+import type { RunControl, RunSummary, WorkflowRun } from "./workflows.ts";
 
 // An App's screens run in a sandboxed frame in the frontend (apps/web): a
 // document core serves for one build (core's screen-frame.ts), which runs
@@ -18,11 +18,14 @@ import type { WorkflowRun } from "./workflows.ts";
 // every call; the frame only ever talks to the page.
 
 export {
+  appFunctionPath,
   jsonBytes,
+  rpcArgumentDepth,
   screenFrameMessage,
   screenFrameMounted,
   screenFramePath,
   screenFrameReady,
+  screenLeaseHeader,
   screenLimits,
   screenModulePath,
 } from "./screen-limits.ts";
@@ -252,6 +255,13 @@ export interface ScreensApi {
   /** One of the App's runs as it is now; another App's is not found. */
   run: (app: string, run: string) => Promise<ScreenRun>;
   /**
+   * The summary of one of the App's runs, all of one revision: status,
+   * identity, times, the decisions it waits for, a compensation, and what
+   * the person may do with it now (`control`). Another App's run is not
+   * found.
+   */
+  summary: (app: string, run: string) => Promise<RunSummary>;
+  /**
    * Answers the decision `decision` (its name in the workflow) of one of
    * the App's runs, as the person, by the decision's own rules: only
    * someone it is from, and never the run's starter unless it names
@@ -263,6 +273,20 @@ export interface ScreensApi {
     decision: string,
     answer: DecisionAnswerInput
   ) => Promise<DecisionView>;
+  /**
+   * Pauses, resumes or cancels one of the App's runs, for a builder of the
+   * App, and answers the host's receipt once it admitted the request: not
+   * that the run has got there yet, which its status says. The same
+   * request again, while its receipt is unresolved, answers that receipt.
+   * Refused with `workflow.control_conflict` while a cancel, or the other
+   * of pause and resume, is unresolved, and `workflow.control_refused`
+   * once the run has ended. Audited as asked on a screen.
+   */
+  control: (
+    app: string,
+    run: string,
+    kind: RunControl["kind"]
+  ) => Promise<RunControl>;
   /**
    * Calls `onChange` each time one of the App's runs of `workflow` starts,
    * waits for a decision, has it answered or closed, or ends, for as long

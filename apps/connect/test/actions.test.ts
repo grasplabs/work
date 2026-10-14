@@ -217,8 +217,12 @@ describe("a call on a connection", () => {
     ]);
   });
 
-  it("reports the tool's own error with its output", async () => {
-    const connectionId = await addConnection();
+  it("reports a read's own error with its output", async () => {
+    // A side effect's error on Composio is of unknown outcome
+    // (idempotency.test.ts); a read's is the action's failure.
+    const connectionId = await addConnection({
+      tools: JSON.stringify([{ name: "mail.search", read: true }]),
+    });
     const failed = await callAs(
       anna,
       write(connectionId, "mail.search", { query: "" })

@@ -383,6 +383,17 @@ export default function Desk() {
     ).rejects.toThrow("Built again");
   });
 
+  it("serves no build, not even a cached one, where nothing bounds the compiler", async () => {
+    const files = screen(`unbounded ${crypto.randomUUID()}`);
+    const built = await buildScreens(env, files);
+    expect(built.ok).toBeTruthy();
+
+    // On plain workerd with no sandbox and no opt-in (src/screens.ts).
+    await expect(
+      buildScreens({ ...env, SANDBOX_IN_PROCESS: undefined }, files)
+    ).rejects.toThrow("No sandbox bounds the screen compiler here yet");
+  });
+
   it("builds other files on their own", async () => {
     const first = await buildScreens(env, screen("first"));
     const second = await buildScreens(env, screen("second"));

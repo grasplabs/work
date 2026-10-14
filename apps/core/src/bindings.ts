@@ -1,4 +1,5 @@
 import { signCapability } from "@grasp-os/shared/capability";
+import type { HeldBinding } from "@grasp-os/shared/capability";
 import { connectCallSchema, connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectCall, ConnectResult } from "@grasp-os/shared/connect";
 import { isExpectedError, toOpaqueError } from "@grasp-os/shared/errors";
@@ -48,6 +49,11 @@ export interface CallGrant {
    * epoch: the capability expires by then, whatever its usual lifetime.
    */
   notAfter?: number;
+  /**
+   * For an App action's connector resource: the approved binding the call
+   * comes through, which a held call pins and its confirmation checks.
+   */
+  binding?: HeldBinding;
 }
 
 /**
@@ -69,6 +75,7 @@ export const signedCall = async (
     permissionId,
     readOnly,
     notAfter,
+    binding,
   }: CallGrant,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
   confirms?: string
@@ -89,7 +96,11 @@ export const signedCall = async (
       restricted,
       readOnly,
       notAfter,
-      origin: { permissionId, context },
+      origin: {
+        permissionId,
+        context,
+        ...(binding === undefined ? {} : { binding }),
+      },
       context,
       confirms,
     }

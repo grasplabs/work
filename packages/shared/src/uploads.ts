@@ -142,4 +142,6 @@ export const uploadErrors = defineErrorFamily({
     "The uploaded file is gone before its text was read. Upload it again.",
   "upload.superseded":
     "A later upload of a file with the same name was saved first, so this one wasn't.",
+  "upload.extractor_busy":
+    "The file waited an hour for its text to be read, and couldn't be: uploads are busier than usual. Upload it again later.",
 });

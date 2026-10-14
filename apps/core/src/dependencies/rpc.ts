@@ -1,9 +1,12 @@
 import type {
   DependenciesApi,
   DependenciesWaiting,
+  DependencyApprovals,
   DependencyApprover,
   DependencyApproverSubject,
   DependencyDecision,
+  DependencyEnding,
+  DependencyImpact,
   DependencyRequest,
   DependencyReview,
   DependencyStatus,
@@ -13,18 +16,21 @@ import type {
   PackageBuild,
   PackageBuildRequest,
 } from "@grasp-os/shared/packages";
-import { RpcTarget } from "capnweb";
 
 import { buildDependencies } from "../packages/build.ts";
 import { resolveDependencies } from "../packages/resolve.ts";
 import type { Resolved } from "../packages/resolve.ts";
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { grantApprover, listApprovers, revokeApprover } from "./approvers.ts";
 import {
   decideDependency,
+  dependencyApprovals,
+  dependencyImpact,
   dependencyReview,
   dependencyStatus,
+  endDependency,
   waitingDependencies,
   waitingDependencyCount,
 } from "./requests.ts";
@@ -35,7 +41,7 @@ import {
  * functions, which validate what the client sent and check who the person
  * is now.
  */
-export class DependenciesRpc extends RpcTarget implements DependenciesApi {
+export class DependenciesRpc extends CoreRpcTarget implements DependenciesApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 
@@ -94,6 +100,42 @@ export class DependenciesRpc extends RpcTarget implements DependenciesApi {
     return await withPerson(
       this.#check,
       async (by) => await decideDependency(this.#env, by, request, decision)
+    );
+  }
+
+  async approvals(app: string): Promise<DependencyApprovals> {
+    return await withPerson(
+      this.#check,
+      async (by) => await dependencyApprovals(this.#env, by, app)
+    );
+  }
+
+  async impact(request: string): Promise<DependencyImpact> {
+    return await withPerson(
+      this.#check,
+      async (by) => await dependencyImpact(this.#env, by, request)
+    );
+  }
+
+  async retire(
+    request: string,
+    ending: DependencyEnding
+  ): Promise<DependencyRequest[]> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await endDependency(this.#env, by, request, "retired", ending)
+    );
+  }
+
+  async revoke(
+    request: string,
+    ending: DependencyEnding
+  ): Promise<DependencyRequest[]> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await endDependency(this.#env, by, request, "revoked", ending)
     );
   }
 
