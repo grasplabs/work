@@ -541,11 +541,6 @@ interface Submission {
 let internalsOf: (client: GraspClient) => ClientInternals;
 
 /**
- * The session client: queries, mutations and actions of the App, for the
- * person using it. One per App session, made and mounted by the
- * platform; App code gets it from `useClient()`.
- */
-/**
  * `error`, an outcome the host can't tell, with the key it was sent
  * under among its details: a caller that let the client pick the key
  * can still recover the outcome by it, and not run the call afresh.
@@ -563,6 +558,98 @@ const withKey = (error: GraspError, key: string): GraspError =>
     },
   });
 
+/** Where a submission stands, for the attempt that settled as it did. */
+interface SubmissionAttempt {
+  readonly isAction: boolean;
+  readonly key: string;
+  /** When it was first sent. */
+  readonly started: number;
+  /** Since when its answers are lost, if they are. */
+  readonly lostSince: number | undefined;
+  readonly now: number;
+}
+
+/** What a submission does next: settle, fail, or send again. */
+type SubmissionVerdict =
+  | { readonly next: "settle"; readonly value: unknown }
+  | { readonly next: "fail"; readonly error: GraspError }
+  /** `unknown`: whether it committed can't be told, its answer lost. */
+  | { readonly next: "retry"; readonly unknown: boolean };
+
+/**
+ * Whether `settled` was refused before anything of the submission ran:
+ * a mutation commits all of itself or nothing; an action commits step by
+ * step, so only a refusal before it reached the App ran nothing of it.
+ */
+const ranNothing = (settled: Settled, isAction: boolean): boolean =>
+  settled.kind === "failed" &&
+  (isAction ? refusedBeforeCallCodes : nothingRanCodes).has(settled.error.code);
+
+/**
+ * Whether, after `settled`, what the App's queries show may be out of
+ * date: a confirmed change; an action's failure after a step, or its lost
+ * answer, which undoes none of what it committed (its queries are read
+ * again, the action itself never is); or records that moved on since this
+ * client read them (`data.conflict`), so a draft kept for the person to
+ * reload gets the record as it is now.
+ */
+const showsStale = (settled: Settled, isAction: boolean): boolean =>
+  settled.kind === "value" ||
+  (isAction && !ranNothing(settled, isAction)) ||
+  (settled.kind === "failed" && settled.error.code === "data.conflict");
+
+/** What a submission does next after `settled` (see `#send`). */
+const submissionVerdict = (
+  settled: Settled,
+  attempt: SubmissionAttempt
+): SubmissionVerdict => {
+  const { isAction, key, started, lostSince, now } = attempt;
+  const outcomeUnknown = () =>
+    clientError("submission.outcome_unknown", { idempotencyKey: key });
+  if (settled.kind === "value") {
+    return { next: "settle", value: settled.value };
+  }
+  if (
+    lostSince !== undefined &&
+    settled.kind === "failed" &&
+    settled.error.category === "authorization"
+  ) {
+    // An earlier attempt's answer was lost, and access is gone or someone
+    // else signed in: whether it committed is the person's to recover
+    // with its key, not a failure, and it is never sent again for someone
+    // else.
+    return { next: "fail", error: outcomeUnknown() };
+  }
+  // An answer lost, or an outcome the host itself can't tell.
+  const unknown =
+    settled.kind === "lost" || settled.error.category === "uncertain";
+  if (unknown && isAction) {
+    return {
+      next: "fail",
+      error:
+        settled.kind === "lost"
+          ? outcomeUnknown()
+          : withKey(settled.error, key),
+    };
+  }
+  if (unknown) {
+    // A mutation is sent again under its key, which recovers its receipt,
+    // for as long as `lostBudgetMs`: never forever.
+    return now - (lostSince ?? now) >= lostBudgetMs
+      ? { next: "fail", error: outcomeUnknown() }
+      : { next: "retry", unknown: true };
+  }
+  if (!ranNothing(settled, isAction) || now - started >= submissionBudgetMs) {
+    return { next: "fail", error: settled.error };
+  }
+  return { next: "retry", unknown: false };
+};
+
+/**
+ * The session client: queries, mutations and actions of the App, for the
+ * person using it. One per App session, made and mounted by the
+ * platform; App code gets it from `useClient()`.
+ */
 export class GraspClient {
   readonly #transport: ClientTransport | undefined;
   readonly #portable: PortableTransport | undefined;
@@ -1135,68 +1222,25 @@ export class GraspClient {
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
         const settled = await this.#call(request, reference.resourceId, bound);
-        if (
-          lostSince !== undefined &&
-          settled.kind === "failed" &&
-          settled.error.category === "authorization"
-        ) {
-          // An earlier attempt's answer was lost, and access is gone or
-          // someone else signed in: whether it committed is the person's
-          // to recover with its key, not a failure, and it is never sent
-          // again for someone else.
-          throw clientError("submission.outcome_unknown", {
-            idempotencyKey: key,
-          });
-        }
-        if (settled.kind === "value") {
-          this.#changed(reference.resourceId);
-          return settled.value;
-        }
-        // A mutation commits all of itself or nothing; an action commits
-        // step by step, so only a refusal before it reached the App ran
-        // nothing of it.
-        const nothingRan =
-          settled.kind === "failed" &&
-          (isAction ? refusedBeforeCallCodes : nothingRanCodes).has(
-            settled.error.code
-          );
-        if (isAction && !nothingRan) {
-          // A failure after a step, or a lost answer, undoes none of what
-          // it committed: what the App's queries show may be out of date.
-          // They are read again; the action itself never is.
+        if (showsStale(settled, isAction)) {
           this.#changed(reference.resourceId);
         }
-        if (
-          settled.kind === "failed" &&
-          settled.error.code === "data.conflict"
-        ) {
-          // The records moved on since this client read them: what it
-          // shows is out of date, so a draft kept for the person to
-          // reload gets the record as it is now.
-          this.#changed(reference.resourceId);
+        const now = Date.now();
+        const verdict = submissionVerdict(settled, {
+          isAction,
+          key,
+          started,
+          lostSince,
+          now,
+        });
+        if (verdict.next === "settle") {
+          return verdict.value;
         }
-        // An answer lost, or an outcome the host itself can't tell.
-        const unknown =
-          settled.kind === "lost" || settled.error.category === "uncertain";
-        if (unknown && isAction) {
-          throw settled.kind === "lost"
-            ? clientError("submission.outcome_unknown", { idempotencyKey: key })
-            : withKey(settled.error, key);
+        if (verdict.next === "fail") {
+          throw verdict.error;
         }
-        if (unknown) {
-          // A mutation is sent again under its key, which recovers its
-          // receipt, for as long as `lostBudgetMs`: never forever.
-          lostSince ??= Date.now();
-          if (Date.now() - lostSince >= lostBudgetMs) {
-            throw clientError("submission.outcome_unknown", {
-              idempotencyKey: key,
-            });
-          }
-        } else if (
-          settled.kind === "failed" &&
-          (!nothingRan || Date.now() - started >= submissionBudgetMs)
-        ) {
-          throw settled.error;
+        if (verdict.unknown) {
+          lostSince ??= now;
         }
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
         await sleep(waitAfter(settled, tries));
