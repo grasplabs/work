@@ -15,6 +15,7 @@ describe("quota policy", () => {
         workflowActiveMs: 30 * 60 * 1000,
         workflowAgeMs: 365 * 24 * 60 * 60 * 1000,
         lineageModelRequests: 100,
+        lineageHostCalls: 10_000,
       },
     });
   });
@@ -44,6 +45,7 @@ describe("quota policy", () => {
       { generation: 1, limits: { lineageModelRequests: 101 } },
       { generation: 1, limits: { workflowActiveMs: 30 * 60 * 1000 + 1 } },
       { generation: 1, limits: { workflowNestingLevels: 0 } },
+      { generation: 1, limits: { lineageHostCalls: 10_001 } },
       { generation: 1, limits: { workflowBranches: 4 } },
       { generation: 1, limits: { workflowSteps: 1.5 } },
       { limits: { workflowSteps: 10 } },

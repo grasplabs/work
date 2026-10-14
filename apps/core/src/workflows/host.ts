@@ -204,6 +204,8 @@ interface StepAttempt {
    * fails with it, whatever its code made of the refusal.
    */
   refused?: Error;
+  /** Whether a call of it was refused past its lineage's host calls, and audited so. */
+  hostCallsAudited?: boolean;
   keptMessages?: Map<string, Email>;
   /** Whether the step has no retry left after it, as far as core can tell. */
   last: boolean;
@@ -297,6 +299,9 @@ const maxBusyWaitSeconds = 5;
 /** A test's host of its own admits every attempt, with nothing to settle. */
 const unadmitted: AttemptAdmission = {
   attemptsAllowed: platformLimits.workflowAttemptsPerStep,
+  hostCall: async () => {
+    // Nothing is counted.
+  },
   settle: async () => {
     // Nothing was held.
   },
@@ -1381,7 +1386,12 @@ export class RunHost extends RpcTarget {
         let current = false;
         this.#live.push(attempt);
         try {
-          result = await this.#callAttempt(attempt, fn, stepDone.promise);
+          result = await this.#callAttempt(
+            attempt,
+            admission,
+            fn,
+            stepDone.promise
+          );
         } finally {
           current = this.#holds(attempt);
           // Its function has returned: its host acts no more, whatever
@@ -1497,7 +1507,9 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * Calls `attempt`'s function in the run's isolate, `stepDone` settling
+   * Calls `attempt`'s function in the run's isolate, through a host whose
+   * every call `admission` admits as one of its lineage's host calls,
+   * `stepDone` settling
    * once its step ends in this activation: what it settled with, or, once
    * the Loader stopped the isolate past its CPU time while it ran, a
    * timeout, which its step's retries retry in a fresh activation with a
@@ -1507,12 +1519,13 @@ export class RunHost extends RpcTarget {
    */
   async #callAttempt(
     attempt: StepAttempt,
+    admission: AttemptAdmission,
     fn: (attempt: AttemptHost) => Promise<unknown>,
     stepDone: Promise<unknown>
   ): Promise<Settled<unknown>> {
     const call = this.#isolateStopped
       ? Promise.reject(new Error("Worker exceeded CPU time limit."))
-      : fn(this.#attemptHost(attempt));
+      : fn(this.#attemptHost(attempt, admission));
     this.#hooks.attemptCall?.(call, stepDone);
     try {
       return fromIsolate(await call);
@@ -1803,8 +1816,11 @@ export class RunHost extends RpcTarget {
     throw executionErrors.create("execution.stale_attempt");
   }
 
-  /** The host `attempt`'s code reaches core through, every call as it. */
-  #attemptHost(attempt: StepAttempt): AttemptHost {
+  /**
+   * The host `attempt`'s code reaches core through, every call as it, and
+   * each admitted against its lineage's host calls (`admission`).
+   */
+  #attemptHost(attempt: StepAttempt, admission: AttemptAdmission): AttemptHost {
     return new AttemptHost(
       {
         callModel: async (request) => await this.#callModel(attempt, request),
@@ -1825,8 +1841,41 @@ export class RunHost extends RpcTarget {
         readAttachment: async (stored, index) =>
           await this.#readAttachment(attempt, stored, index),
       },
-      async (call) => await this.#leaseRefusal(attempt, call)
+      async (call) => await this.#leaseRefusal(attempt, call),
+      async (call) => await this.#hostCallRefusal(attempt, admission, call)
     );
+  }
+
+  /**
+   * The refusal of a call of `attempt` past its lineage's host calls
+   * (quotas.ts, `hostCallsOf`), or nothing once it is admitted: the
+   * check `AttemptHost` makes once before each call. The first refusal
+   * for the limit of each attempt is audited: its code may catch it and
+   * carry on, though nothing it calls is admitted any more.
+   */
+  async #hostCallRefusal(
+    attempt: StepAttempt,
+    admission: AttemptAdmission,
+    call: string
+  ): Promise<Settled<never> | undefined> {
+    try {
+      await admission.hostCall();
+      return undefined;
+    } catch (error) {
+      if (
+        isExpectedError(error) &&
+        error.code === "workflow.lineage_limit" &&
+        attempt.hostCallsAudited !== true
+      ) {
+        attempt.hostCallsAudited = true;
+        await this.#auditRefusal({
+          step: attempt.step,
+          call,
+          errorCode: error.code,
+        });
+      }
+      return { ok: false, error: forIsolate(error) };
+    }
   }
 
   /**
