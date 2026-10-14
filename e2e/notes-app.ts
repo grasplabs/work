@@ -18,7 +18,8 @@ export default defineSchema({
 `;
 
 const operations = `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
-import { doc, mutation, query } from "#grasp/server";
+import { action, doc, internalMutation, mutation, query } from "#grasp/server";
+import { internal } from "#grasp/server-references";
 import { noteFields } from "../schema.ts";
 
 export const list = query({
@@ -58,6 +59,27 @@ export const update = mutation({
   },
 });
 
+/** Saves a note for an action: the App's own code only. */
+export const insert = internalMutation({
+  args: { title: noteFields.title },
+  returns: v.id("notes"),
+  handler: async (ctx, args) => await ctx.db.insert("notes", args),
+});
+
+/**
+ * Imports a note and then fails: the note it saved stays saved, as an
+ * action's mutations commit each on its own.
+ */
+export const importHalfway = action({
+  args: { title: noteFields.title },
+  returns: v.null(),
+  uses: [internal.notes.insert],
+  handler: async (ctx, args) => {
+    await ctx.runMutation(internal.notes.insert, { title: args.title });
+    throw new AppError("import.stopped", "The import stopped halfway.");
+  },
+});
+
 export const remove = mutation({
   args: { id: v.id("notes"), expectedRevision: v.number().integer().min(1) },
   returns: v.null(),
@@ -69,15 +91,15 @@ export const remove = mutation({
 `;
 
 const registration = `import { app } from "@grasp-os/sdk";
-import { create, get, list, remove, update } from "./operations/notes.ts";
+import { create, get, importHalfway, insert, list, remove, update } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { list, get, create, update, remove } },
-  internalOperations: {},
+  operations: { notes: { list, get, create, update, remove, importHalfway } },
+  internalOperations: { notes: { insert } },
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
   uses: [],
 });
@@ -90,6 +112,7 @@ import { Label } from "@grasp-os/ui/components/label";
 import { useState } from "react";
 import type { MouseEvent } from "react";
 import { api } from "#grasp";
+import { ImportNote } from "../components/import-note.tsx";
 
 export default function Notes() {
   const notes = useQuery(api.notes.list, { pagination: { pageSize: 50 } });
@@ -120,6 +143,7 @@ export default function Notes() {
           Create note
         </Button>
       </form>
+      <ImportNote />
       {notes.items.length === 0 ? (
         <p>No notes yet.</p>
       ) : (
@@ -142,10 +166,39 @@ export default function Notes() {
 }
 `;
 
+const importNote = `import { GraspError, useAction } from "@grasp-os/sdk/react";
+import { Button } from "@grasp-os/ui/components/button";
+import { useState } from "react";
+import { api } from "#grasp";
+
+/** Imports a note through an action that fails after saving it. */
+export function ImportNote() {
+  const importHalfway = useAction(api.notes.importHalfway);
+  const [outcome, setOutcome] = useState("");
+  const run = async () => {
+    try {
+      await importHalfway({ title: "Imported" });
+      setOutcome("Imported.");
+    } catch (error) {
+      setOutcome(error instanceof GraspError ? error.message : "It failed.");
+    }
+  };
+  return (
+    <div className="flex items-center gap-3">
+      <Button onClick={() => void run()} variant="outline">
+        Import a note
+      </Button>
+      <output aria-label="Import">{outcome}</output>
+    </div>
+  );
+}
+`;
+
 /** The Notes App's files. */
 export const notesAppFiles = (): Record<string, string> => ({
   "schema.ts": schema,
   "operations/notes.ts": operations,
   "app.ts": registration,
+  "components/import-note.tsx": importNote,
   "screens/notes.tsx": screen,
 });

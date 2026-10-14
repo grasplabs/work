@@ -561,6 +561,26 @@ ${body}
 `;
 
 describe("a screen's build", { timeout: 120_000 }, () => {
+  it("builds a saved or drafted version's screens with the references its own code generates", async () => {
+    // A save and a draft's check build alike (save-builds.ts): nothing of
+    // either is sealed yet, so the references come from the files.
+    const builder = await personApi("builder");
+    const { id } = await builder.api.apps.create({ name: "Notes" });
+    const { builds } = await builder.api.apps.files.commit(id, files, "First");
+    expect(builds.screens).toMatchObject({ status: "ok", diagnostics: [] });
+    const broken = await builder.api.apps.files.commit(
+      id,
+      {
+        ...files,
+        "screens/notes.tsx": screen(
+          '  useQuery(api.notes.get, { noteId: "x" });'
+        ),
+      },
+      "Second"
+    );
+    expect(broken.builds.screens.status).toBe("failed");
+  });
+
   /** The diagnostics of version 1 of an App holding `files`, as core builds its screens. */
   const diagnosticsOf = async (
     appFiles: Record<string, string>

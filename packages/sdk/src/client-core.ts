@@ -845,6 +845,15 @@ export class GraspClient {
           this.#changed(reference.resourceId);
           return settled.value;
         }
+        const mayHaveRun =
+          settled.kind === "lost" || !nothingRanCodes.has(settled.error.code);
+        if (reference.kind === "action" && mayHaveRun) {
+          // An action commits each mutation it runs on its own, and a
+          // failure after one, or a lost answer, undoes none of them: what
+          // the App's queries show may be out of date. They are read
+          // again; the action itself never is.
+          this.#changed(reference.resourceId);
+        }
         if (settled.kind === "lost" && reference.kind === "action") {
           throw clientError("submission.outcome_unknown", {
             idempotencyKey: key,

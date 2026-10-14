@@ -6,6 +6,7 @@ import { screenPath } from "@grasp-os/shared/screens";
 import { drizzle } from "drizzle-orm/d1";
 
 import { screenBuilds } from "./db/core/schema.ts";
+import { withDraftReferences } from "./draft-references.ts";
 import { versionScreens } from "./screens.ts";
 
 // What each screen of a version builds to with this release's kit, kept
@@ -52,10 +53,9 @@ export const recordBuilds = async (
  * Builds every screen of `app`'s `version` from `files` and records what
  * each builds to. Never throws: a version whose screens don't build has
  * nothing to approve, and one that can't be recorded now is when it is
- * next opened or reviewed. That includes screens that import the App's
- * references (`#grasp`): generating them inspects the App's server code
- * (screen-references.ts), which a save doesn't wait for, so they build,
- * and are recorded, once the version is reviewed or opened.
+ * next opened or reviewed. Screens that import the App's references
+ * (`#grasp`) build with them, generated from these very files
+ * (draft-references.ts): a version just saved isn't sealed yet.
  */
 export const recordVersionBuilds = async (
   env: Env,
@@ -68,7 +68,11 @@ export const recordVersionBuilds = async (
     return name === undefined ? [] : [name];
   });
   try {
-    const codeOf = await versionScreens(env, files, version);
+    const codeOf = await versionScreens(
+      env,
+      await withDraftReferences(env, app, version, files),
+      version
+    );
     const built = await Promise.all(
       screens.map(async (name) => await codeOf(name))
     );

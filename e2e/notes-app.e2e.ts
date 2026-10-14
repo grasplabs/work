@@ -66,6 +66,16 @@ test("a person creates, loads and deletes notes through the App's own operations
     /Call Acme/u,
   ]);
 
+  // An action that saves a note and then fails: the note it saved stays,
+  // and the list shows it, though the action itself failed.
+  await screen.getByRole("button", { name: "Import a note" }).click();
+  await expect(screen.getByRole("status", { name: "Import" })).toHaveText(
+    "The import stopped halfway."
+  );
+  await expect(notes.getByText("Imported", { exact: true })).toBeVisible();
+  await screen.getByRole("button", { name: "Delete Imported" }).click();
+  await expect(notes.getByRole("listitem")).toHaveCount(2);
+
   // They are the App's records: a new session loads them again.
   await page.reload();
   const reloaded = await openNotes(page, app);
