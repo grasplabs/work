@@ -12,6 +12,8 @@ import {
   readRejection,
 } from "./client-error.ts";
 import type { Settled } from "./client-error.ts";
+import { PortableTransport } from "./client-portable.ts";
+import type { PortableClientOptions } from "./client-portable.ts";
 import type {
   ArgsOf,
   OperationReference,
@@ -71,12 +73,39 @@ import { readDescriptor } from "./value-read.ts";
 //   before anything is sent; the host checks all of it again.
 
 /**
- * How the client reaches the host: one call, its request as JSON text,
- * answered with core's `{ result }` (spec 32.6), or rejected with a coded
- * refusal; a rejection without a code is a lost response.
+ * How the client reaches the host: one call of the App `app`, its
+ * request as JSON text, answered with core's `{ result }` (spec 32.6), or
+ * rejected with a coded refusal; a rejection without a code is a lost
+ * response.
  */
 export interface ClientTransport {
-  call: (request: string) => Promise<unknown>;
+  call: (request: string, app: string) => Promise<unknown>;
+}
+
+/**
+ * Calls the client refused before sending them, because what they were
+ * bound to changed (`Bound`), by the error thrown: each settles as its
+ * refusal, and never fences on its own, since the change that made it
+ * stale fenced already.
+ */
+const unsentCalls = new WeakMap<object, GraspError>();
+
+/** An error for a call refused unsent as `refusal` (`unsentCalls`). */
+const unsent = (refusal: GraspError): Error => {
+  const error = new Error(refusal.message);
+  unsentCalls.set(error, refusal);
+  return error;
+};
+
+/**
+ * What a call through a portable host's transport is bound to: the fence
+ * generation it began under, and the person it began for (a submission)
+ * or its first attempt was sent for. A call that finds either changed is
+ * refused before it is sent.
+ */
+interface Bound {
+  readonly generation?: number;
+  principal?: string;
 }
 
 /** Options of a query call. */
@@ -535,7 +564,10 @@ const withKey = (error: GraspError, key: string): GraspError =>
   });
 
 export class GraspClient {
-  readonly #transport: ClientTransport;
+  readonly #transport: ClientTransport | undefined;
+  readonly #portable: PortableTransport | undefined;
+  /** Whose token a portable host's latest call was sent with. */
+  #principal: string | undefined;
   readonly #queries = new Map<string, QueryEntry>();
   readonly #submissions = new Map<string, Submission>();
   /** Moves on at every fence: answers to older requests are dropped. */
@@ -550,12 +582,24 @@ export class GraspClient {
   #fencedBy: GraspError | undefined;
 
   /**
-   * For the platform only (screen-runtime.ts). By design, not isolation:
-   * screen code shares the frame and could make one (`constructor`), but
-   * gets nothing from it that `bridge()` doesn't already give it.
+   * A portable host's client (`{ url, getToken }`, spec 10.7.1): its
+   * bootstrap makes one per App session and mounts it with
+   * `GraspProvider`; generated App code never makes one.
+   *
+   * Over a `ClientTransport`, for the platform only (screen-runtime.ts).
+   * By design, not isolation: screen code shares the frame and could make
+   * one, but gets nothing from it that `bridge()` doesn't already give it.
    */
-  constructor(transport: ClientTransport) {
-    this.#transport = transport;
+  constructor(connection: PortableClientOptions | ClientTransport) {
+    if ("call" in connection && typeof connection.call === "function") {
+      this.#transport = connection;
+      this.#portable = undefined;
+    } else if ("url" in connection) {
+      this.#transport = undefined;
+      this.#portable = new PortableTransport(connection);
+    } else {
+      throw new TypeError("A client takes { url, getToken }.");
+    }
   }
 
   static {
@@ -775,6 +819,7 @@ export class GraspClient {
       }
       return stop.signal.aborted ? clientError("query.cancelled") : undefined;
     };
+    const bound: Bound = { generation };
     const attempt = async (): Promise<unknown> => {
       const started = Date.now();
       for (let tries = 1; ; tries += 1) {
@@ -787,7 +832,11 @@ export class GraspClient {
             throw early;
           }
           // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-          settled = await this.#call(request);
+          settled = await this.#call(
+            request,
+            entry.reference.resourceId,
+            bound
+          );
         } finally {
           release();
         }
@@ -840,17 +889,84 @@ export class GraspClient {
    * One call through the transport, settled. A refusal of the person or
    * the build fences every cache before its caller hears of it.
    */
-  async #call(request: string): Promise<Settled> {
+  async #call(request: string, app: string, bound: Bound): Promise<Settled> {
     let settled: Settled;
     try {
-      settled = readAnswer(await this.#transport.call(request));
+      settled = readAnswer(await this.#through(request, app, bound));
     } catch (error) {
+      const refusal =
+        typeof error === "object" && error !== null
+          ? unsentCalls.get(error)
+          : undefined;
+      if (refusal !== undefined) {
+        return { kind: "failed", error: refusal };
+      }
       settled = readRejection(error);
     }
-    if (settled.kind === "failed" && fencingCodes.has(settled.error.code)) {
+    // A refusal of a request sent before the latest fence is of who or
+    // what that fence already cleared: it doesn't fence whoever came after.
+    const current =
+      bound.generation === undefined || bound.generation === this.#generation;
+    if (
+      current &&
+      settled.kind === "failed" &&
+      fencingCodes.has(settled.error.code)
+    ) {
       this.#fence(settled.error);
     }
     return settled;
+  }
+
+  /**
+   * Sends `request` through the transport. A portable host's token is
+   * asked for first: when it is someone else's than the last call's, all
+   * the client holds is cleared before anything is sent with it
+   * (`#switchPrincipal`), and a call bound to before is refused unsent.
+   */
+  async #through(request: string, app: string, bound: Bound): Promise<unknown> {
+    const portable = this.#portable;
+    if (portable === undefined) {
+      return await this.#transport?.call(request, app);
+    }
+    const token = await portable.token();
+    if (this.#principal !== undefined && token.principal !== this.#principal) {
+      this.#switchPrincipal();
+    }
+    this.#principal = token.principal;
+    if (bound.principal !== undefined && bound.principal !== token.principal) {
+      throw unsent(clientError("auth.principal_changed"));
+    }
+    if (
+      bound.generation !== undefined &&
+      bound.generation !== this.#generation
+    ) {
+      // Fenced since the call began: refused unsent, as the fence was.
+      throw unsent(this.#fencedBy ?? clientError("auth.principal_changed"));
+    }
+    bound.principal = token.principal;
+    return await portable.send(request, app, token.text);
+  }
+
+  /**
+   * Someone else signed in on a portable host: drops every result held
+   * and every answer still to come for the person before, and reads
+   * again what is read now, for the person now. Submissions in flight
+   * are no longer joined; theirs stay theirs (`#send`).
+   */
+  #switchPrincipal(): void {
+    this.#generation += 1;
+    this.#fencedBy = clientError("auth.principal_changed");
+    this.#submissions.clear();
+    for (const entry of this.#queries.values()) {
+      entry.reading?.stop.abort();
+      entry.reading = undefined;
+      entry.shown = entry.sent;
+      entry.stale = true;
+      show(entry, loading);
+      if (entry.listeners.size > 0) {
+        this.#refresh(entry);
+      }
+    }
   }
 
   /**
@@ -862,6 +978,11 @@ export class GraspClient {
   #fence(refusal: GraspError): void {
     this.#generation += 1;
     this.#fencedBy = refusal;
+    // Nothing of anyone's is held now: whoever's token comes next starts
+    // afresh, without a switch to refuse calls over, and joins no save
+    // made before.
+    this.#principal = undefined;
+    this.#submissions.clear();
     for (const entry of this.#queries.values()) {
       entry.reading?.stop.abort();
       entry.reading = undefined;
@@ -964,7 +1085,12 @@ export class GraspClient {
     if (signal?.aborted === true) {
       throw clientError("submission.cancelled", { sent: false });
     }
+    // Joined only by a call for the same person, as the host scopes keys:
+    // within one generation, which a switch of person or a fence ends
+    // (each also drops the joins). Not by the person's ID, which the first
+    // token only tells after the first save was keyed.
     const scoped = canonicalJson([
+      this.#generation,
       reference.resourceId,
       reference.resourceVersion,
       reference.contractId,
@@ -997,12 +1123,31 @@ export class GraspClient {
     held: { readonly scoped: string; readonly input: string }
   ): Promise<unknown> {
     const isAction = reference.kind === "action";
+    // Bound to the person and the fence it was called under: one who signs
+    // in while it waits for its token never gets it sent as theirs.
+    const bound: Bound = { generation: this.#generation };
+    if (this.#principal !== undefined) {
+      bound.principal = this.#principal;
+    }
     const run = async (): Promise<unknown> => {
       const started = Date.now();
       let lostSince: number | undefined;
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-        const settled = await this.#call(request);
+        const settled = await this.#call(request, reference.resourceId, bound);
+        if (
+          lostSince !== undefined &&
+          settled.kind === "failed" &&
+          settled.error.category === "authorization"
+        ) {
+          // An earlier attempt's answer was lost, and access is gone or
+          // someone else signed in: whether it committed is the person's
+          // to recover with its key, not a failure, and it is never sent
+          // again for someone else.
+          throw clientError("submission.outcome_unknown", {
+            idempotencyKey: key,
+          });
+        }
         if (settled.kind === "value") {
           this.#changed(reference.resourceId);
           return settled.value;

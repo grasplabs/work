@@ -121,6 +121,22 @@ export const verifications = sqliteTable(
   (table) => [index("verifications_identifier_idx").on(table.identifier)]
 );
 
+/**
+ * Better Auth's JWT plugin's signing keys: the key pairs App tokens are
+ * signed with (auth/app-tokens.ts), each private key encrypted with the
+ * auth secret. A key is replaced once it expires; the tokens it signed
+ * still verify while its row is kept.
+ */
+export const jwks = sqliteTable("jwks", {
+  id: text().primaryKey(),
+  publicKey: text("public_key").notNull(),
+  privateKey: text("private_key").notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  expiresAt: timestamp("expires_at"),
+  alg: text(),
+  crv: text(),
+});
+
 /** The deployment's one organization. */
 export const organizations = sqliteTable("organizations", {
   id: text().primaryKey(),
