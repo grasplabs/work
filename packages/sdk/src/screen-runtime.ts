@@ -290,6 +290,9 @@ export const runScreen = async (
       createElement(
         GraspProvider,
         { client },
+        // Inside the boundary: a screen whose first render throws replaces
+        // `Mounted` with the fallback too, so the page never hears that a
+        // start which didn't work did.
         createElement(
           ScreenBoundary,
           {
@@ -297,9 +300,9 @@ export const runScreen = async (
               clientInternals(client).retryFailed();
             },
           },
-          createElement(loaded.default)
-        ),
-        createElement(Mounted, { start })
+          createElement(loaded.default),
+          createElement(Mounted, { start })
+        )
       )
     );
   } catch (error) {
