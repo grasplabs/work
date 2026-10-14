@@ -3433,6 +3433,10 @@ msgid "Often corrected"
 msgstr "Souvent corrigé"
 
 #: src/inbox/inbox-page.tsx
+msgid "Older workflows that failed are on the <0>dashboard</0>."
+msgstr "Les workflows en échec plus anciens sont sur le <0>tableau de bord</0>."
+
+#: src/inbox/inbox-page.tsx
 msgctxt "inbox sort"
 msgid "Oldest first"
 msgstr "Plus anciens d’abord"

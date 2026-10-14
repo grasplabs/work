@@ -232,11 +232,13 @@ const ToDoTab = ({
   items,
   group,
   sort,
+  olderFailures,
   onSaid,
 }: {
   items: readonly InboxItem[];
   group: Group;
   sort: Sort;
+  olderFailures: boolean;
   onSaid: (said: string) => void;
 }) => {
   const { t } = useLingui();
@@ -245,6 +247,10 @@ const ToDoTab = ({
   // On a narrow screen the item takes the list's place once one is chosen, with a way back.
   const [reading, setReading] = useState(false);
   const selected = list.find((item) => item.id === selectedId) ?? list[0];
+  // Once nothing is left to read (the last one decided, or a filter that keeps none), the list comes back.
+  if (reading && selected === undefined) {
+    setReading(false);
+  }
   return (
     <div className="@4xl/inbox:grid-cols-inbox grid min-h-0 w-full flex-1 grid-cols-1">
       {/* Whichever of the two reaches the bottom right corner leaves room at its foot for the chat box: the list while it is alone, the item always. */}
@@ -273,6 +279,17 @@ const ToDoTab = ({
             />
           ))
         )}
+        {olderFailures ? (
+          <p className="text-muted-foreground px-5 py-4">
+            <Trans>
+              Older workflows that failed are on the{" "}
+              <Link className="text-foreground underline" to="/dashboard">
+                dashboard
+              </Link>
+              .
+            </Trans>
+          </p>
+        ) : null}
       </section>
       <div
         className={
@@ -320,10 +337,13 @@ const ToDoTab = ({
 export const InboxPage = ({
   items,
   notLoaded,
+  olderFailures,
   activity,
 }: {
   items: readonly InboxItem[];
   notLoaded: readonly Loaded<unknown>[];
+  /** Whether core has failed workflows older than the ones listed: the dashboard shows them. */
+  olderFailures: boolean;
   activity: Promise<Loaded<InboxActivity>> | undefined;
 }) => {
   const { t, i18n } = useLingui();
@@ -433,7 +453,13 @@ export const InboxPage = ({
             className="@container/inbox flex min-h-0 flex-1"
             value="todo"
           >
-            <ToDoTab group={group} items={items} onSaid={setSaid} sort={sort} />
+            <ToDoTab
+              group={group}
+              items={items}
+              olderFailures={olderFailures}
+              onSaid={setSaid}
+              sort={sort}
+            />
           </TabsContent>
 
           <TabsContent className="min-h-0 flex-1 overflow-y-auto" value="done">
