@@ -64,6 +64,19 @@
   --tile-foreground: #1a1a19;
   --status-agreed: #1f8a5b;
   --status-attention: #d0561c;
+  /*
+   * The brain's notes are the one place with colour: one soft hue per
+   * group, as a dot per note in its file tree, note pages and the atlas's
+   * cards. Gaps, what nobody has answered yet, are drawn hollow in a teal
+   * of their own. Everything else stays neutral.
+   */
+  --graph-vision: oklch(0.76 0.14 70);
+  --graph-teams: oklch(0.72 0.13 150);
+  --graph-tools: oklch(0.7 0.12 250);
+  --graph-statements: oklch(0.78 0.1 355);
+  --graph-candidates: oklch(0.64 0.16 300);
+  --graph-sources: oklch(0.82 0.01 286);
+  --graph-gaps: oklch(0.7 0.1 195);
   /* Behind modals, at an opacity, in both themes: dims the page. */
   --scrim: #000000;
   /*
@@ -120,6 +133,13 @@
     --tile-foreground: oklch(0.21 0.006 285.885);
     --status-agreed: oklch(0.7 0.14 158);
     --status-attention: oklch(0.7 0.16 45);
+    --graph-vision: oklch(0.72 0.13 70);
+    --graph-teams: oklch(0.68 0.12 150);
+    --graph-tools: oklch(0.68 0.12 250);
+    --graph-statements: oklch(0.72 0.1 355);
+    --graph-candidates: oklch(0.66 0.15 300);
+    --graph-sources: oklch(0.5 0.01 286);
+    --graph-gaps: oklch(0.68 0.1 195);
     --secondary-hover: color-mix(
       in oklch,
       var(--secondary),
@@ -195,6 +215,13 @@
   --color-tile-foreground: var(--tile-foreground);
   --color-status-agreed: var(--status-agreed);
   --color-status-attention: var(--status-attention);
+  --color-graph-vision: var(--graph-vision);
+  --color-graph-teams: var(--graph-teams);
+  --color-graph-tools: var(--graph-tools);
+  --color-graph-statements: var(--graph-statements);
+  --color-graph-candidates: var(--graph-candidates);
+  --color-graph-sources: var(--graph-sources);
+  --color-graph-gaps: var(--graph-gaps);
 }
 
 @layer base {

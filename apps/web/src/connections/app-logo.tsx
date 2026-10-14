@@ -7,6 +7,8 @@ const tileClass = {
     "bg-tile text-tile-foreground flex size-9 flex-none items-center justify-center rounded-md border text-xs font-medium",
   sm: "bg-tile text-tile-foreground flex size-7 flex-none items-center justify-center rounded-md border text-xs font-medium",
   lg: "bg-tile text-tile-foreground flex size-14 flex-none items-center justify-center rounded-2xl border text-2xl font-medium shadow-xs",
+  // Inside a chip or a line of text, as a span.
+  xs: "bg-tile text-tile-foreground inline-flex size-4 flex-none items-center justify-center overflow-hidden rounded-sm text-xs leading-none font-medium",
 } as const;
 
 /** The app's tile; its name is said beside it, so the letter is hidden from assistive technology. */
@@ -16,8 +18,13 @@ export const AppLogo = ({
 }: {
   name: string;
   size?: keyof typeof tileClass;
-}) => (
-  <div aria-hidden="true" className={tileClass[size]}>
-    {name.charAt(0).toLocaleUpperCase()}
-  </div>
-);
+}) =>
+  size === "xs" ? (
+    <span aria-hidden="true" className={tileClass.xs}>
+      {name.charAt(0).toLocaleUpperCase()}
+    </span>
+  ) : (
+    <div aria-hidden="true" className={tileClass[size]}>
+      {name.charAt(0).toLocaleUpperCase()}
+    </div>
+  );

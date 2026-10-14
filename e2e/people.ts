@@ -212,6 +212,7 @@ const cast = {
   languages: { member: "user" },
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
+  brain: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;
