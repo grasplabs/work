@@ -2259,8 +2259,9 @@ export const triggerResourceVersions = sqliteTable(
  * Each start of an independent workflow the host admitted
  * (src/workflow-starts.ts): its durable receipt, written in one statement
  * with the authorization it was admitted on, read again as the statement
- * ran. One per invoker and idempotency key, so the same start sent again
- * is the same start. It pins the exact workflow version and manifest, who
+ * ran. One per invoker, person it acts for and idempotency key, so the
+ * same start sent again is the same start, and one person's key never
+ * reaches another's start. It pins the exact workflow version and manifest, who
  * invoked it (a person, an App, an agent or a trigger, with the App
  * version or trigger version), the person it acts for, the workflow's
  * policy generation it was admitted under and its validated input
@@ -2294,6 +2295,7 @@ export const workflowStartReceipts = sqliteTable(
     uniqueIndex("workflow_start_receipts_key").on(
       table.invokerType,
       table.invokerId,
+      table.principalId,
       table.idempotencyKey
     ),
     index("workflow_start_receipts_workflow").on(

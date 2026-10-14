@@ -1375,12 +1375,22 @@ export const workflowMembers = async (
 /** At most this many binders are named in a refused deletion's event. */
 const maxNamedBinders = 20;
 
-/** How many live triggers' current versions start `id`, as SQL. */
-const pinningTriggersSql = (id: string) => sql`(SELECT COUNT(*)
+/**
+ * The triggers that may start `id`, as SQL rows of their IDs: live,
+ * enabled, their current version pinning `id`, and holding an active
+ * `start` grant on it. A trigger that can't start it pins nothing.
+ */
+const pinningTriggersSql = (id: string) => sql`SELECT trigger.id AS id
     FROM trigger_resources AS trigger
     JOIN trigger_resource_versions AS pinned
       ON pinned.trigger_id = trigger.id AND pinned.version = trigger.current_version
-    WHERE pinned.workflow_resource_id = ${id} AND trigger.deleted_at IS NULL)`;
+    WHERE pinned.workflow_resource_id = ${id} AND trigger.deleted_at IS NULL
+      AND trigger.enabled = 1
+      AND EXISTS (SELECT 1 FROM permissions AS allowed
+        WHERE allowed.subject_type = 'trigger' AND allowed.subject_id = trigger.id
+          AND allowed.object_type = 'workflow' AND allowed.object_id = ${id}
+          AND allowed.status = 'active'
+          AND EXISTS (SELECT 1 FROM json_each(allowed.actions) WHERE value = 'start'))`;
 
 /**
  * That the current version of another live workflow binds `id`, or a live
@@ -1396,7 +1406,7 @@ const boundSql = (
     WHERE bound.kind = 'workflow' AND bound.target_id = ${id}
       AND bound.resource_version = binder.current_version
       AND binder.id <> ${id} AND binder.deleted_at IS NULL)
-  OR ${pinningTriggersSql(id)} > 0)`;
+  OR EXISTS (${pinningTriggersSql(id)}))`;
 
 /** The live workflows whose current version binds `id`. */
 const bindersOf = async (env: Env, id: string): Promise<Live[]> =>
@@ -1469,17 +1479,24 @@ export const deleteWorkflowResource = async (
     throw unavailable();
   }
   const binders = await bindersOf(env, workflow.id);
-  const named = Object.fromEntries(
-    binders
-      .slice(0, maxNamedBinders)
-      .map((binder, index) => [`binder${index + 1}`, binder.id])
+  const triggerRows = await drizzle(env.DB).all<{ id: string }>(
+    sql`${pinningTriggersSql(workflow.id)} ORDER BY trigger.id`
   );
+  const triggers = triggerRows.map(({ id: trigger }) => trigger);
+  const named: Record<string, string> = {};
+  for (const [index, binder] of binders.slice(0, maxNamedBinders).entries()) {
+    named[`binder${index + 1}`] = binder.id;
+  }
+  for (const [index, trigger] of triggers.slice(0, maxNamedBinders).entries()) {
+    named[`trigger${index + 1}`] = trigger;
+  }
   await auditedBatch(env, db, [
     outboxed(
       db,
       entry(by, "workflow.delete_refused", workflow.id, {
         reason: "workflow.resource_bound",
         binders: binders.length,
+        triggers: triggers.length,
         ...named,
       })
     ),
@@ -1491,13 +1508,12 @@ export const deleteWorkflowResource = async (
       visible.push({ id: binder.id, name: binder.name });
     }
   }
-  const triggers = await drizzle(env.DB).get<{ count: number }>(
-    sql`SELECT ${pinningTriggersSql(workflow.id)} AS count`
-  );
   const details: WorkflowBinders = {
     binders: visible,
     hidden: binders.length - visible.length,
-    triggers: triggers.count,
+    // A workflow's builders manage every trigger that starts it
+    // (trigger-resources.ts), and only they delete it: they see them all.
+    triggers: { ids: triggers, hidden: 0 },
   };
   throw workflowResourceErrors.create("workflow.resource_bound", {
     binders: details.binders,

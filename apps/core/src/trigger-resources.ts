@@ -1,6 +1,7 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { triggerIdSchema } from "@grasp-os/shared/ids";
 import type { TriggerId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
@@ -17,8 +18,10 @@ import {
   triggerResourceVersions,
   workflowResourceVersions,
 } from "./db/core/schema.ts";
+import { notNullFailed } from "./db/d1.ts";
 import { requireNotStaff } from "./sharing.ts";
 import { requireWorkflowRole } from "./workflow-resources.ts";
+import { quotaPolicy } from "./workflows/quotas.ts";
 
 // Independent triggers (platform specification 15, 24): each a resource of
 // its own that starts one exact workflow version on its own. This is their
@@ -37,9 +40,17 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   published workflow version; publishing a new workflow version changes
 //   no trigger. Moving a trigger to another version is a new trigger
 //   version, audited, of the same workflow only.
-// - Creating a trigger grants it something. Nothing: its creator must have
-//   a role in the workflow to name it, and its starts still need a
-//   permission an admin grants.
+// - Creating a trigger grants it something. Nothing: its creator must
+//   build the workflow, and its starts still need a permission an admin
+//   grants, naming the workflow it pins.
+// - A trigger nobody may stop: the workflow's builders, and admins, may
+//   disable or delete any trigger that starts it; only its owner moves or
+//   re-enables it. Only an enabled trigger holding an active `start`
+//   grant keeps the workflow from being deleted.
+// - A trigger acting for someone who lost access: each start requires its
+//   person to still have a role in the workflow (workflow-starts.ts).
+// - Triggers piling up: a person has at most the quota policy's
+//   `triggerResourcesPerPerson` live triggers.
 // - Disabling or deleting it under a start. Every start reads the trigger
 //   live and enabled in the statement that admits it, so one admitted
 //   after either never lands. Runs already started go on (spec 15.3).
@@ -113,8 +124,10 @@ const requirePublished = async (
 /**
  * Creates a trigger of `input.kind` that starts exactly version
  * `input.version` of workflow `input.workflowId`, acting for `by`, who must
- * build and have a role in the workflow. It may start nothing until an
- * admin grants it `start` on the workflow.
+ * build the workflow. It may start nothing until an admin grants it
+ * `start` on the workflow. A person has at most the quota policy's
+ * `triggerResourcesPerPerson` live triggers (`workflow.trigger_limit`),
+ * counted in the insert; the workflow must be live as it lands.
  */
 export const createTriggerResource = async (
   env: Env,
@@ -128,15 +141,20 @@ export const createTriggerResource = async (
     createTriggerSchema,
     input
   );
-  const workflow = await requireWorkflowRole(env, by, workflowId, "user");
+  const workflow = await requireWorkflowRole(env, by, workflowId, "builder");
   await requirePublished(env, workflow.id, version);
   const id = triggerIdSchema.parse(crypto.randomUUID());
   const configHash = await sha256Hex(canonicalJson(config));
+  const policy = await quotaPolicy(env);
+  const cap = policy.limits.triggerResourcesPerPerson;
   const now = new Date();
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
+  const batch = auditedBatch(env, db, [
     db.insert(triggerResources).values({
-      id,
+      // Only while `by` is under the cap, counted in this statement:
+      // otherwise NULL, which fails the batch.
+      id: sql`(SELECT ${id} WHERE (SELECT COUNT(*) FROM trigger_resources
+        WHERE owner_id = ${by.userId} AND deleted_at IS NULL) < ${cap})`,
       ownerId: by.userId,
       kind,
       currentVersion: 1,
@@ -146,7 +164,10 @@ export const createTriggerResource = async (
     db.insert(triggerResourceVersions).values({
       triggerId: id,
       version: 1,
-      workflowResourceId: workflow.id,
+      // Only while the workflow is live: otherwise NULL, which fails the
+      // batch, so a deletion and a new trigger never both land.
+      workflowResourceId: sql`(SELECT id FROM workflow_resources
+        WHERE id = ${workflow.id} AND deleted_at IS NULL)`,
       workflowResourceVersion: version,
       configHash,
       principalBinding: by.userId,
@@ -162,6 +183,19 @@ export const createTriggerResource = async (
       })
     ),
   ]);
+  try {
+    await batch;
+  } catch (error) {
+    if (notNullFailed(error, "trigger_resources.id")) {
+      throw workflowResourceErrors.create("workflow.trigger_limit");
+    }
+    if (
+      notNullFailed(error, "trigger_resource_versions.workflow_resource_id")
+    ) {
+      throw workflowResourceErrors.create("workflow.resource_unavailable");
+    }
+    throw error;
+  }
   return {
     id,
     kind,
@@ -175,14 +209,19 @@ export const createTriggerResource = async (
 };
 
 /**
- * The live trigger `id`, which `by` manages: its owner, or an admin, and
- * never Grasp staff. Anyone else gets `workflow.trigger_unavailable`, as
- * for one that doesn't exist.
+ * The live trigger `id`, if `by` may act on it as `as` says, never Grasp
+ * staff: to `manage` it (see it, disable or delete it), its owner, an
+ * admin, or a builder of the workflow it starts, so no trigger keeps a
+ * workflow's builders from stopping it; to `own` it (move it to another
+ * version, enable it again), its owner alone, whose person it acts for.
+ * Anyone else gets `workflow.trigger_unavailable`, as for one that
+ * doesn't exist.
  */
 export const requireTriggerManager = async (
   env: Env,
   by: Acting,
-  id: unknown
+  id: unknown,
+  as: "manage" | "own" = "manage"
 ): Promise<TriggerResource> => {
   requireNotStaff(by);
   const parsed = triggerIdSchema.safeParse(id);
@@ -214,16 +253,33 @@ export const requireTriggerManager = async (
       )
     )
     .get();
-  if (row === undefined || !(isAdmin(by.role) || row.owner === by.userId)) {
+  if (row === undefined) {
     throw unavailable();
+  }
+  if (row.owner === by.userId) {
+    return { id: parsed.data, ...row };
+  }
+  if (as === "own") {
+    throw unavailable();
+  }
+  if (isAdmin(by.role)) {
+    return { id: parsed.data, ...row };
+  }
+  try {
+    await requireWorkflowRole(env, by, row.workflowId, "builder");
+  } catch (error) {
+    if (isExpectedError(error)) {
+      throw unavailable();
+    }
+    throw error;
   }
   return { id: parsed.data, ...row };
 };
 
 /**
  * Moves trigger `id` to version `version` of its own workflow, for `by`,
- * who manages it and has a role in the workflow: a new trigger version,
- * audited, used by future starts only. Its principal stays.
+ * its owner, who must still have a role in the workflow: a new trigger
+ * version, audited, used by future starts only. Its principal stays.
  */
 export const updateTriggerVersion = async (
   env: Env,
@@ -231,7 +287,7 @@ export const updateTriggerVersion = async (
   id: unknown,
   version: unknown
 ): Promise<TriggerResource> => {
-  const trigger = await requireTriggerManager(env, by, id);
+  const trigger = await requireTriggerManager(env, by, id, "own");
   const target = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     z.number().int().positive(),
@@ -268,8 +324,8 @@ export const updateTriggerVersion = async (
 };
 
 /**
- * Enables or disables trigger `id` for `by`, who manages it: disabled, it
- * starts nothing more; runs it started go on.
+ * Disables trigger `id` for `by`, who manages it, or enables it again for
+ * its owner: disabled, it starts nothing more; runs it started go on.
  */
 export const setTriggerEnabled = async (
   env: Env,
@@ -277,7 +333,12 @@ export const setTriggerEnabled = async (
   id: unknown,
   enabled: boolean
 ): Promise<void> => {
-  const trigger = await requireTriggerManager(env, by, id);
+  const trigger = await requireTriggerManager(
+    env,
+    by,
+    id,
+    enabled ? "own" : "manage"
+  );
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db

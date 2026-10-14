@@ -2,7 +2,7 @@ import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { issuesOf } from "@grasp-os/shared/errors";
+import { isExpectedError, issuesOf } from "@grasp-os/shared/errors";
 import {
   triggerIdSchema,
   workflowResourceIdSchema,
@@ -80,9 +80,17 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   admitting statement, not from the session's list of teams.
 // - A person who left: every principal must be an active member when the
 //   statement runs.
-// - The same start sent twice: one receipt per invoker and idempotency
-//   key; the same key with the same version and input is the same start,
-//   with another is refused (`workflow.start_conflict`).
+// - The same start sent twice: one receipt per invoker, person acted for
+//   and idempotency key; the same key with the same version, input and
+//   App or trigger version is the same start, with another is refused
+//   (`workflow.start_conflict`). One person never gets another's receipt
+//   through the same App, agent or trigger.
+// - Probing through code: an App, agent or trigger is checked against its
+//   own grant before anything is read of the workflow, and every refusal
+//   it gets is `workflow.start_denied`, so it can't learn which workflows
+//   or versions exist.
+// - A trigger acting for someone who lost access: its principal must still
+//   have a role in the workflow when each start is admitted.
 // - Input the workflow doesn't accept: checked against the version's
 //   contract by the SDK's validator, within the operation input limit;
 //   refusals name paths, never values.
@@ -141,6 +149,28 @@ const roleSql = (person: string, id: string): SQL => sql`(${activeSql(person)}
         AND team_members.user_id = ${person}
       WHERE shared.workflow_resource_id = ${id}
         AND shared.member_type = 'team')))`;
+
+/**
+ * That `person` has a role in App `app` now, as SQL: an admin of the
+ * organization, its owner, or someone it is shared with, as a person or
+ * through a team they are in now. Only while they are an active member.
+ */
+const appRoleSql = (
+  person: string,
+  app: string
+): SQL => sql`(${activeSql(person)}
+  AND (${activeMember(person, ["admin"])}
+    OR EXISTS (SELECT 1 FROM apps AS owned
+      WHERE owned.id = ${app} AND owned.owner_id = ${person})
+    OR EXISTS (SELECT 1 FROM app_members AS shared
+      WHERE shared.app_id = ${app}
+        AND shared.member_type = 'person' AND shared.member_id = ${person})
+    OR EXISTS (SELECT 1 FROM app_members AS shared
+      JOIN teams ON teams.id = shared.member_id
+        AND teams.organization_id = ${organizationId}
+      JOIN team_members ON team_members.team_id = shared.member_id
+        AND team_members.user_id = ${person}
+      WHERE shared.app_id = ${app} AND shared.member_type = 'team')))`;
 
 /** That a permission allowing `start` on `id` for the invoker holds, as SQL. */
 const grantSql = (allowing: SQL): SQL =>
@@ -264,9 +294,14 @@ const ruleOf = async (
         triggerVersion: null,
         principal: onBehalfOf,
         actor: delegateActorOf(invoker.authority),
-        holds: sql`(${activeSql(onBehalfOf)} AND ${grantSql(
-          allowingPermissionSql(subject, appVersion, object, "start")
-        )})`,
+        // The App's own grant, from a version the App has (one no admin
+        // approved changes nothing), for someone who may use the App now.
+        holds: sql`(${appRoleSql(onBehalfOf, subject.appId)}
+          AND EXISTS (SELECT 1 FROM app_versions AS code
+            WHERE code.app_id = ${subject.appId} AND code.version = ${appVersion})
+          AND ${grantSql(
+            allowingPermissionSql(subject, appVersion, object, "start")
+          )})`,
       };
     }
     case "agent": {
@@ -308,7 +343,9 @@ const ruleOf = async (
         triggerVersion: trigger.version,
         principal: trigger.principal,
         actor: { type: "system" },
-        holds: sql`(${activeSql(trigger.principal)}
+        // Its principal must still have a role in the workflow: a trigger
+        // never acts for someone the workflow is no longer shared with.
+        holds: sql`(${roleSql(trigger.principal, id)}
           AND EXISTS (SELECT 1 FROM trigger_resources AS live
             JOIN trigger_resource_versions AS current
               ON current.trigger_id = live.id AND current.version = live.current_version
@@ -356,11 +393,26 @@ export const authorizeWorkflowStart = async (
     });
   }
   const rule = await ruleOf(env, invoker, id, version);
-  const { generation, manifestHash, inputDescriptor } = await pinned(
-    env,
-    id,
-    version
-  );
+  if (invoker.type !== "person") {
+    // Code and triggers learn nothing of a workflow they may not start:
+    // their own rule first, and then any refusal is `start_denied`.
+    const allowed = await drizzle(env.DB).get<{ holds: number }>(
+      sql`SELECT ${rule.holds} AS holds`
+    );
+    if (allowed.holds === 0) {
+      throw denied();
+    }
+  }
+  let found: Awaited<ReturnType<typeof pinned>>;
+  try {
+    found = await pinned(env, id, version);
+  } catch (error) {
+    if (invoker.type !== "person" && isExpectedError(error)) {
+      throw denied();
+    }
+    throw error;
+  }
+  const { generation, manifestHash, inputDescriptor } = found;
   // Read again as the admitting statement runs: the workflow live at the
   // same policy generation, the same version and manifest, and the
   // invoker's own rule.
@@ -443,10 +495,15 @@ const startOf = (
   createdAt: row.createdAt.toISOString(),
 });
 
-/** The receipt of `invoker`'s start under `key`, if there is one. */
+/**
+ * The receipt of `invoker`'s start for `principal` under `key`, if there
+ * is one: keys are an invoker's for each person it acts for, so one person
+ * never gets another's start through the same App, agent or trigger.
+ */
 const receiptOf = async (
   env: Env,
   invoker: WorkflowStart["invoker"],
+  principal: string,
   key: string
 ) =>
   await drizzle(env.DB)
@@ -456,6 +513,7 @@ const receiptOf = async (
       and(
         eq(workflowStartReceipts.invokerType, invoker.type),
         eq(workflowStartReceipts.invokerId, invoker.id),
+        eq(workflowStartReceipts.principalId, principal),
         eq(workflowStartReceipts.idempotencyKey, key)
       )
     )
@@ -470,6 +528,9 @@ const sameStart = (
   if (
     row.workflowResourceId !== authorization.workflowId ||
     row.workflowResourceVersion !== authorization.version ||
+    row.principalId !== authorization.principal ||
+    row.originAppVersion !== authorization.originAppVersion ||
+    row.triggerVersion !== authorization.triggerVersion ||
     row.inputHash !== inputHash
   ) {
     throw workflowResourceErrors.create("workflow.start_conflict");
@@ -492,7 +553,12 @@ export const admitWorkflowStart = async (
 ): Promise<WorkflowStart> => {
   const text = acceptedInput(authorization.inputDescriptor, input);
   const inputHash = await sha256Hex(text);
-  const existing = await receiptOf(env, authorization.invoker, key);
+  const existing = await receiptOf(
+    env,
+    authorization.invoker,
+    authorization.principal,
+    key
+  );
   if (existing !== undefined) {
     return sameStart(existing, authorization, inputHash);
   }
@@ -545,7 +611,12 @@ export const admitWorkflowStart = async (
     }
     // The same key, admitted as this ran.
   }
-  const admitted = await receiptOf(env, authorization.invoker, key);
+  const admitted = await receiptOf(
+    env,
+    authorization.invoker,
+    authorization.principal,
+    key
+  );
   if (admitted !== undefined) {
     return sameStart(admitted, authorization, inputHash);
   }

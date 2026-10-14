@@ -72,6 +72,8 @@ import {
   appVersions,
   auditOutbox,
   permissions,
+  triggerResources,
+  triggerResourceVersions,
   workflowResources,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
@@ -632,6 +634,41 @@ const requireObjectFits = (
 };
 
 /**
+ * Refuses a trigger's grant on any workflow but the one the trigger's
+ * current version starts: a trigger starts one workflow, and its grant
+ * names it. A trigger that isn't live names none.
+ */
+const requireTriggerPins = async (
+  env: Env,
+  subject: PermissionSubject,
+  object: PermissionObject
+): Promise<void> => {
+  if (subject.type !== "trigger" || object.type !== "workflow") {
+    return;
+  }
+  const pinned = await drizzle(env.DB)
+    .select({ workflowId: triggerResourceVersions.workflowResourceId })
+    .from(triggerResources)
+    .innerJoin(
+      triggerResourceVersions,
+      and(
+        eq(triggerResourceVersions.triggerId, triggerResources.id),
+        eq(triggerResourceVersions.version, triggerResources.currentVersion)
+      )
+    )
+    .where(
+      and(
+        eq(triggerResources.id, subject.triggerId),
+        isNull(triggerResources.deletedAt)
+      )
+    )
+    .get();
+  if (pinned?.workflowId !== object.workflowId) {
+    refuseRequest("object: A trigger's grant names the workflow it starts.");
+  }
+};
+
+/**
  * Inserts `row` only while `condition` holds as the statement runs: one
  * statement, so nothing lands between the check and the insert. Each
  * column's value as the table stores it, in the order an insert from a
@@ -683,6 +720,7 @@ export const requestPermission = async (
   );
   await requireSubjectBuilder(subject, roles);
   requireObjectFits(subject, object, actions);
+  await requireTriggerPins(env, subject, object);
   if (object.type === "workflow") {
     // Only someone with a role in the workflow names it: anyone else is
     // told it doesn't exist, as for one that doesn't.
@@ -1052,7 +1090,9 @@ const changesThings = (object: PermissionObject, action: string): boolean =>
 /**
  * That `version` of `app` is one no admin approved (`madeCurrent`), as
  * SQL; each a value, or a column of the query it runs in. A version from
- * before approvals (null) counts as approved.
+ * before approvals (null) counts as approved. The host always names a
+ * version the App has; an independent workflow's start also requires the
+ * version to exist (workflow-starts.ts).
  */
 const unapprovedSql = (
   app: string | SQLWrapper,

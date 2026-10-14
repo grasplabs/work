@@ -101,6 +101,8 @@ export const platformLimits = {
    * names are never released (core's workflow-resources.ts).
    */
   workflowResourcesPerPerson: 200,
+  /** Live independent triggers one person has (core's trigger-resources.ts). */
+  triggerResourcesPerPerson: 100,
 
   // Calls a run lineage makes.
   /** Provider requests of one run lineage, retries included. */

@@ -1391,7 +1391,7 @@ build: {
     object:
       | { type: "connection"; connectionId: string; resource?: string }
       | { type: "collection"; collectionId: string }
-      | { type: "workflow"; appId: string; workflowId: string }
+      | { type: "workflow"; workflowId: string }
       | { type: "app"; appId: string };
     actions: string[];
     binding: string;

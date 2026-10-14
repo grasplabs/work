@@ -23,6 +23,7 @@ describe("quota policy", () => {
         workflowQueuedPerPerson: 64,
         workflowQueuedPerApp: 64,
         workflowQueuedStepMs: 24 * 60 * 60 * 1000,
+        triggerResourcesPerPerson: 100,
       },
     });
   });

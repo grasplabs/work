@@ -86,6 +86,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "This idempotency key already started this workflow with another version or input.",
   "workflow.trigger_unavailable":
     "This trigger doesn't exist, was disabled or was deleted.",
+  "workflow.trigger_limit":
+    "You have as many live triggers as one person may: delete one first.",
 });
 
 /**
@@ -150,8 +152,11 @@ export interface WorkflowVersionBinding {
 export interface WorkflowBinders {
   binders: { id: string; name: string }[];
   hidden: number;
-  /** Live triggers whose current version starts it. */
-  triggers: number;
+  /**
+   * Enabled triggers holding an active `start` grant whose current version
+   * starts it: those the caller may see, and how many more.
+   */
+  triggers: { ids: string[]; hidden: number };
 }
 
 /** One published version of a workflow. */
