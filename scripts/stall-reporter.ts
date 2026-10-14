@@ -20,6 +20,9 @@
 //   it until the step's timeout. A blocked worker may not even have sent
 //   that its test started: hence the file's silence. Past that, nothing
 //   will report it any more;
+// - before it ends a run, prints the thread stacks of every workerd the
+//   run started, when GRASP_STALL_DUMP_STACKS is "gdb" (stack-dump.ts):
+//   what the stalled runtime is stuck in, which nothing else records;
 // - says why a run that didn't pass ended, in the step's summary on GitHub
 //   (GITHUB_STEP_SUMMARY) and as an error annotation: its own verdict, or
 //   Vitest's failed files and unhandled errors, with the runner's memory.
@@ -45,6 +48,8 @@ import { finished } from "node:stream/promises";
 import { setTimeout as wait } from "node:timers/promises";
 
 import type { Reporter } from "vite-plus/test/node";
+
+import { dumpBounds, dumpWorkerdStacks } from "./stack-dump.ts";
 
 const minuteMs = 60 * 1000;
 
@@ -167,6 +172,14 @@ export interface StallReporterOptions {
   /** Where the report goes. */
   write?: (text: string) => void;
   /**
+   * The stacks of the processes a stalled run is stuck in, printed before
+   * the run is ended (stack-dump.ts); none when unset. Given more than its
+   * bound, the run ends without them.
+   */
+  dumpStacks?: () => Promise<string>;
+  /** How long to wait for `dumpStacks` before ending the run regardless. */
+  stackDumpTimeoutMs?: number;
+  /**
    * Ends the run, failed, once a test is overdue; by default, the process
    * exits 1. Exiting stops workerd too: miniflare disposes of it on exit.
    */
@@ -180,6 +193,11 @@ const fromEnv = (): StallReporterOptions => ({
   progressFile: process.env.GRASP_TEST_PROGRESS_FILE,
   summaryFile: process.env.GITHUB_STEP_SUMMARY,
   annotate: process.env.GITHUB_ACTIONS === "true",
+  // CI installs gdb and lets it attach (.github/workflows/ci.yml).
+  dumpStacks:
+    process.env.GRASP_STALL_DUMP_STACKS === "gdb"
+      ? async () => await dumpWorkerdStacks({ root: process.pid })
+      : undefined,
 });
 
 const moduleName = (testModule: ReportedModule): string =>
@@ -247,6 +265,8 @@ export default class StallReporter implements Reporter {
   readonly #uptimeSeconds: () => number;
   readonly #write: (text: string) => void;
   readonly #end: () => void;
+  readonly #dumpStacks: (() => Promise<string>) | undefined;
+  readonly #stackDumpTimeoutMs: number;
   #timer: NodeJS.Timeout | undefined;
   #overdueTimer: NodeJS.Timeout | undefined;
   #ended = false;
@@ -278,6 +298,9 @@ export default class StallReporter implements Reporter {
       (() => {
         process.exit(1);
       });
+    this.#dumpStacks = options.dumpStacks;
+    this.#stackDumpTimeoutMs =
+      options.stackDumpTimeoutMs ?? dumpBounds.timeoutMs + flushMs;
     const file = options.progressFile;
     this.#progress =
       file === undefined || file === ""
@@ -509,6 +532,7 @@ export default class StallReporter implements Reporter {
     clearInterval(this.#overdueTimer);
     const verdict = `Ending the run, as Vitest no longer times it out: ${overdue}`;
     this.#report(verdict);
+    await this.#printStacks();
     await Promise.race([
       // The verdict, and the progress file as far as it goes, for the
       // artifact; not waited for past a few seconds.
@@ -522,6 +546,31 @@ export default class StallReporter implements Reporter {
       wait(flushMs, undefined, { ref: false }),
     ]);
     this.#end();
+  }
+
+  /**
+   * Prints the stacks of what the run is stuck in, if asked to, waiting no
+   * longer than the dump's own bound and a little: a dump that hangs or
+   * fails must not keep the run from ending.
+   */
+  async #printStacks(): Promise<void> {
+    const dumpStacks = this.#dumpStacks;
+    if (dumpStacks === undefined) {
+      return;
+    }
+    const dumped = async (): Promise<string> => {
+      try {
+        return await dumpStacks();
+      } catch (error) {
+        return `[the stack dump failed: ${error instanceof Error ? error.message : String(error)}]\n`;
+      }
+    };
+    const tooLong = async (): Promise<string> => {
+      await wait(this.#stackDumpTimeoutMs, undefined, { ref: false });
+      return "[the stack dump took too long]\n";
+    };
+    const stacks = await Promise.race([dumped(), tooLong()]);
+    this.#write(`\nThread stacks of each workerd, by gdb:\n${stacks}\n`);
   }
 
   /** Writes why the run ended to the summary, and annotates it. */

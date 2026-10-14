@@ -87,6 +87,18 @@ jobs:
           cache: true
           run-install: |
             - args: ["--frozen-lockfile"]
+      # gdb, for the stall reporter to print the thread stacks of each
+      # workerd before it ends a stalled run (GRASP_STALL_DUMP_STACKS below,
+      # scripts/stack-dump.ts). Ubuntu lets a process trace only its own
+      # descendants, and workerd is gdb's sibling, so tracing is opened up:
+      # the runner is a throwaway VM. A failed install leaves the dump to say
+      # gdb didn't run, and the tests run regardless.
+      - name: Install gdb for stall stack dumps
+        continue-on-error: true
+        timeout-minutes: 3
+        run: |
+          command -v gdb || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends gdb)
+          sudo sysctl -w kernel.yama.ptrace_scope=0
       # Unsharded, the step took about 9.5 minutes at about 5,350 tests
       # (October 2026), and up to 16 on a slow runner. Split in two, it
       # took 6.5 and 9 minutes: the split is by file, not by time, and
@@ -125,6 +137,9 @@ jobs:
           # longest hook timeout if that drops.
           GRASP_TEST_OVERDUE_GRACE_SECONDS: 300
           GRASP_TEST_PROGRESS_FILE: ${{ runner.temp }}/test-progress.log
+          # Before ending a stalled run, print each workerd's thread stacks
+          # (at most 20 s and 300 KB), so the log shows where it is stuck.
+          GRASP_STALL_DUMP_STACKS: gdb
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
