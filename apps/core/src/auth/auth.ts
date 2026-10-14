@@ -5,6 +5,7 @@ import { staffWindowOpen } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
+import { appTokenMs, portableFunctionPath } from "@grasp-os/shared/portable";
 import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
@@ -15,6 +16,8 @@ import {
   getSessionFromCtx,
 } from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
+import { jwt } from "better-auth/plugins/jwt";
+import type { Jwk } from "better-auth/plugins/jwt";
 import { organization } from "better-auth/plugins/organization";
 import { defaultAc } from "better-auth/plugins/organization/access";
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -31,6 +34,7 @@ import {
 import {
   accounts,
   invitations,
+  jwks,
   memberRemovals,
   members,
   organizations,
@@ -46,6 +50,7 @@ import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { checkClaims } from "./claims.ts";
 import { devIdpOrigin, oidcProviders, providerIds } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
+import { liveKeys } from "./token-keys.ts";
 
 /** Better Auth's routes, under core's API. */
 export const authBasePath = "/api/auth";
@@ -62,6 +67,16 @@ const hour = 60 * 60 * 1000;
 const sessionMs = 12 * hour;
 /** Staff sessions end sooner, and never after the staff window closes. */
 const staffSessionMs = hour;
+
+/** How long one key signs App tokens before the next replaces it: 30 days. */
+const keyRotationSeconds = 30 * 24 * 60 * 60;
+
+/**
+ * Who App tokens are for: a portable host's calls of this deployment's
+ * App functions, and nothing else that reads a token of core's.
+ */
+export const appTokenAudience = (origin: string): string =>
+  `${origin}${portableFunctionPath}`;
 
 /**
  * Roles as the organization plugin checks them. Admins manage teams (the
@@ -94,6 +109,7 @@ const schema = {
   teams,
   teamMembers,
   ssoProviders,
+  jwks,
 };
 
 /** Better Auth's log lines, message only: arguments can hold tokens or claims. */
@@ -678,6 +694,35 @@ const createAuth = (
           },
         })),
         providersLimit: 0,
+      }),
+      // Signs App tokens (app-tokens.ts) with its own keys, and nothing
+      // else: its `/token` and `/jwks` routes are off (routes.ts), and it
+      // adds no token to `/get-session`'s answers. Core signs and checks
+      // every token itself, so no key is published.
+      jwt({
+        jwks: {
+          keyPairConfig: { alg: "EdDSA", crv: "Ed25519" },
+          rotationInterval: keyRotationSeconds,
+        },
+        jwt: {
+          issuer: config.origin,
+          audience: appTokenAudience(config.origin),
+          expirationTime: `${appTokenMs / 1000}s`,
+        },
+        disableSettingJwtHeader: true,
+        // Its own key rows, read through Better Auth's adapter, less the
+        // keys that can't verify a current token any more: without this
+        // it verifies with every key it ever made (token-keys.ts).
+        adapter: {
+          getJwks: async (context) =>
+            liveKeys(
+              await context.context.adapter.findMany<Jwk>({ model: "jwks" }),
+              Date.now()
+            ),
+        },
+        // Its model is `jwks` already; plural table names would make it
+        // `jwkss`.
+        schema: { jwks: { modelName: "jwk" } },
       }),
     ],
   });

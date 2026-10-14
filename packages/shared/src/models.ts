@@ -22,6 +22,10 @@ export const modelErrors = defineErrorFamily({
     "That model can't give an answer as long as this call asks for, so it wasn't sent. Choose a model with a larger window, or ask for a shorter answer.",
   "model.ledger_unavailable":
     "Model spend can't be accounted for right now, so no model call was made. Try again later.",
+  "model.quota_policy_unavailable":
+    "This deployment's quota policy can't be read right now, so no model call was made. Try again later.",
+  "model.quota_policy_behind":
+    "This deployment's quota policy is behind the one its model spend was last accounted under, so no model call was made. Ask your admin to have Grasp check the deployment's quota policy.",
   "model.failed": "The model call failed. Try again later.",
   "model.invalid_output":
     "The model's answer didn't match the expected shape, also when asked again.",

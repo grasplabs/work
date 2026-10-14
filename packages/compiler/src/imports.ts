@@ -1,5 +1,10 @@
 import { appCodeImport, screenImportError } from "./app-code.ts";
-import { appModuleName, kitModuleName, ownEntry } from "./kit.ts";
+import {
+  appModuleName,
+  kitModuleName,
+  ownEntry,
+  screenReferences,
+} from "./kit.ts";
 import type { Kit } from "./kit.ts";
 
 /** An import in a source file, as written. */
@@ -233,6 +238,11 @@ export const importError = (
       ? `"${specifier}" is not a file in this App.`
       : undefined;
   }
+  if (specifier === screenReferences.specifier) {
+    return files.has(screenReferences.path)
+      ? undefined
+      : `"${specifier}" holds the references the host generates from the App's server code (app.ts, schema.ts, operations/), which this App doesn't have yet.`;
+  }
   if (specifier === "lucide-react") {
     return iconError(names, kit);
   }
@@ -308,6 +318,14 @@ export const rewriteImports =
       return module;
     };
     const moduleFor = (specifier: string): string => {
+      if (
+        specifier === screenReferences.specifier &&
+        files.has(screenReferences.path)
+      ) {
+        const module = appModuleName(screenReferences.path);
+        imported.app.add(module);
+        return module;
+      }
       if (!isRelative(specifier)) {
         if (!allowed.has(specifier)) {
           throw new Error(

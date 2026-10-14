@@ -68,10 +68,21 @@ export class SandboxUnavailableError extends Error {
    * room in its pool, or no process free in time); undefined otherwise.
    */
   readonly status: number | undefined;
+  /**
+   * Whether the App's code may have started: false only where it surely
+   * didn't (no sandbox here, or a session refused before its call was
+   * sent). A call that may have started may have changed something, so
+   * its caller must not take it for one that ran nothing.
+   */
+  readonly started: boolean;
 
-  constructor(message: string, options?: ErrorOptions & { status?: number }) {
+  constructor(
+    message: string,
+    options?: ErrorOptions & { status?: number; started?: boolean }
+  ) {
     super(message, options);
     this.status = options?.status;
+    this.started = options?.started ?? true;
   }
 }
 
@@ -206,7 +217,8 @@ export const requireBoundedHere = (
     env.SANDBOX_IN_PROCESS !== "unbounded"
   ) {
     throw new SandboxUnavailableError(
-      `No sandbox bounds ${what} here yet, not even with SANDBOX_HOST bound: run on Cloudflare, or set SANDBOX_IN_PROCESS=unbounded to accept that nothing bounds it.`
+      `No sandbox bounds ${what} here yet, not even with SANDBOX_HOST bound: run on Cloudflare, or set SANDBOX_IN_PROCESS=unbounded to accept that nothing bounds it.`,
+      { started: false }
     );
   }
 };
@@ -229,7 +241,8 @@ export const sessionHost = (
     env.SANDBOX_IN_PROCESS !== "unbounded"
   ) {
     throw new SandboxUnavailableError(
-      "No sandbox bounds App code here: bind SANDBOX_HOST to the sandbox supervisor."
+      "No sandbox bounds App code here: bind SANDBOX_HOST to the sandbox supervisor.",
+      { started: false }
     );
   }
   return undefined;
@@ -260,7 +273,8 @@ export const callSandboxed = async (
     env.SANDBOX_IN_PROCESS !== "unbounded"
   ) {
     throw new SandboxUnavailableError(
-      "No sandbox bounds App code here: bind SANDBOX_HOST to the sandbox supervisor."
+      "No sandbox bounds App code here: bind SANDBOX_HOST to the sandbox supervisor.",
+      { started: false }
     );
   }
   const stub = env.LOADER.get(null, () => ({

@@ -52,8 +52,9 @@ interface __BaseEnv_Env {
    */
   SANDBOX_HOST?: Fetcher;
   /**
-   * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts)
-   * and an extraction on the sandbox host (src/knowledge/extract.ts).
+   * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts),
+   * and for an extraction, a screen build and a package build on the
+   * sandbox host (src/knowledge/extract.ts, src/platform-sandbox.ts).
    */
   SANDBOX_DEADLINE_MS?: string;
   /**
@@ -69,6 +70,11 @@ interface __BaseEnv_Env {
    * effect (src/workflows/host.ts).
    */
   WORKFLOW_OFF_WAIT_MS?: string;
+  /**
+   * Tests only: a shorter deadline for a run waiting on an unknown outcome
+   * its person hasn't resolved (src/workflows/host.ts).
+   */
+  WORKFLOW_UNKNOWN_HOLD_MS?: string;
   /**
    * Tests only: the delay before every step's retry, in place of the one
    * its config says (src/workflows/dispatcher.ts).

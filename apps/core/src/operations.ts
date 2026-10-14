@@ -656,7 +656,15 @@ const sandboxFailureOf = (
       depth,
       ...errorFields(thrown),
     });
-    return hostError(operationErrors.create("operation.sandbox_unavailable"));
+    // Only a call that surely never started ran nothing, to try again; one
+    // that may have started is an unknown outcome, never to repeat blindly.
+    return hostError(
+      operationErrors.create(
+        thrown.started
+          ? "operation.sandbox_lost"
+          : "operation.sandbox_unavailable"
+      )
+    );
   }
   const verdict = sandboxVerdictOf(thrown);
   if (!isSandboxVerdict(verdict)) {
@@ -1327,7 +1335,9 @@ const readBudget = (): ReadBudget => ({ reads: 0, shipped: 0 });
  * Spends one read of `budget`, sending `staged` bytes of staged writes
  * with it: `operation.read_limit` past `invocationMaxReads` reads or
  * `stagedReadMaxBytes` sent, so one call can't make the store apply its
- * staged writes without end.
+ * staged writes without end. The budget is the whole call's, its nested
+ * functions' reads with the one it named (`runReads`): each invocation
+ * alone is held to its host calls first (operation-channel.ts).
  */
 const spendRead = (budget: ReadBudget, staged: number): void => {
   budget.reads += 1;

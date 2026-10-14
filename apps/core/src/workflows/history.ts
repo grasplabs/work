@@ -66,7 +66,7 @@ import type { RunRow } from "./runs.ts";
 // an attempt whose answer came after another took over records no
 // outcome. A step whose side effect connect held ends as held, and runs
 // again once the person decided, in steps of core's own
-// (`$grasp:wait:<key>:held:<round>:…`, host.ts): those runs are told as
+// (`$grasp:wait:<key>:held:<round>:…`, or `:unknown:`, host.ts): those runs are told as
 // more attempts of the step that was held, numbered on from its own, and
 // the waits between them as `blocked` waits of it, while its held end is
 // no completion. Core's other steps (named `$…`: the parameters, a
@@ -90,7 +90,7 @@ const stepFailedText = workflowErrors.create("workflow.step_failed").message;
 
 /** A held step's run again, a wait between them, or a check of it. */
 const heldStep =
-  /^\$grasp:wait:(?<key>[0-9a-f]{16}):held:(?<round>[1-9]\d*):(?<rest>.+)$/u;
+  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?:held|unknown):(?<round>[1-9]\d*):(?<rest>.+)$/u;
 
 /** A step whose side effect was held, and its runs since. */
 interface HeldStep {

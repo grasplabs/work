@@ -50,6 +50,34 @@ describe("a screen's function call through the page", () => {
     ]);
   });
 
+  it("passes on how long core said to wait, and nothing else of its details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          await Promise.resolve(
+            Response.json(
+              {
+                code: "screen.rate_limited",
+                message: "Too much at once.",
+                details: { retryAfterMs: 500, requestId: "r1" },
+              },
+              { status: 429 }
+            )
+          )
+      )
+    );
+    const refused = await callFunction("app", "lease", "{}").catch(
+      (error: unknown) => error
+    );
+    expect(refused).toMatchObject({
+      code: "screen.rate_limited",
+      details: { retryAfterMs: 500 },
+    });
+    // Nothing else of what core said: not its request ID.
+    expect(refused).not.toMatchObject({ details: { requestId: "r1" } });
+  });
+
   it("turns a request that never reached core into a coded error", async () => {
     vi.stubGlobal(
       "fetch",

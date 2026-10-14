@@ -140,7 +140,7 @@ export interface EngineRetries {
 export interface EngineStepOptions {
   /** The engine's defaults when missing. */
   retries?: EngineRetries;
-  /** How long one attempt may take, in milliseconds; the engine's when missing. */
+  /** How long one attempt may take, in milliseconds; a minute when missing. */
   timeout?: number;
   /**
    * The step changes something outside Grasp. A dry run records it with its
