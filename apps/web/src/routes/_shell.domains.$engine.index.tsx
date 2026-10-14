@@ -568,8 +568,8 @@ const PackagesOnlyView = ({ listed }: { listed: DependencyApprovals }) => {
           </h1>
           <p className="text-muted-foreground">
             <Trans>
-              The packages approved for this engine. You see them because you
-              may approve packages; the rest of the engine is for its members.
+              The packages approved for this domain. You see them because you
+              may approve packages; the rest of the domain is for its members.
             </Trans>
           </p>
         </div>

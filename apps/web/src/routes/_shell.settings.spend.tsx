@@ -116,7 +116,7 @@ const spenderName = (of: ModelSpender, i18n: I18n): string => {
     const started = formatDateTime(of.startedAt);
     const shortId = runId.slice(0, shortRunId);
     return i18n._(
-      msg`Run ${shortId} of ${workflowId} in ${engine}, started ${started}`
+      msg`Run ${shortId} of ${workflowId} in ${ph({ domain: engine })}, started ${started}`
     );
   }
   return of.name ?? of.userId;

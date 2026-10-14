@@ -190,8 +190,8 @@ msgid "{domain}: run of {workflowId}"
 msgstr "{domain}: run of {workflowId}"
 
 #: src/engines/store-changes.tsx
-msgid "{engineName}, version {version}"
-msgstr "{engineName}, version {version}"
+msgid "{domainName}, version {version}"
+msgstr "{domainName}, version {version}"
 
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
@@ -312,8 +312,8 @@ msgid "{name} in {domain}"
 msgstr "{name} in {domain}"
 
 #: src/dashboard/report.ts
-msgid "{name} in {engine}: {started} started, {completed} completed, {failed} failed"
-msgstr "{name} in {engine}: {started} started, {completed} completed, {failed} failed"
+msgid "{name} in {domain}: {started} started, {completed} completed, {failed} failed"
+msgstr "{name} in {domain}: {started} started, {completed} completed, {failed} failed"
 
 #: src/connections/connect-dialog.tsx
 msgid "{name} is read-only"
@@ -551,12 +551,12 @@ msgid "A connection refused to say what changed"
 msgstr "A connection refused to say what changed"
 
 #: src/engines/store-change-errors.ts
-msgid "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
-msgstr "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
+msgid "A data migration moved this domain's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
+msgstr "A data migration moved this domain's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
 
 #: src/engines/store-change-errors.ts
-msgid "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
-msgstr "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
+msgid "A data migration moved this domain's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
+msgstr "A data migration moved this domain's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
 
 #: src/activity/audit-words.ts
 msgid "A decision was put to people, or answered"
@@ -823,16 +823,16 @@ msgid "An admin"
 msgstr "An admin"
 
 #: src/engines/store-change-errors.ts
-msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
-msgstr "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
+msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the domain to be built again."
+msgstr "An admin abandoned the data change this version needs, so it can never be made current. Ask the domain to be built again."
 
 #: src/engines/store-change-errors.ts
-msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
-msgstr "An admin can see the record that holds it back, and abandon the change, on the engine's page."
+msgid "An admin can see the record that holds it back, and abandon the change, on the domain's page."
+msgstr "An admin can see the record that holds it back, and abandon the change, on the domain's page."
 
 #: src/engines/store-change-errors.ts
-msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
-msgstr "An admin can see what went wrong, and abandon the change, on the engine's page."
+msgid "An admin can see what went wrong, and abandon the change, on the domain's page."
+msgstr "An admin can see what went wrong, and abandon the change, on the domain's page."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "An admin changes it, in Members and roles."
@@ -1189,8 +1189,8 @@ msgid "Caps"
 msgstr "Caps"
 
 #: src/routes/_shell.settings.models.tsx
-msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
-msgstr "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
+msgid "Caps an admin set on a domain's model, on the domain's Resources tab, on top of the deployment's budgets, and what the domain's actions spent through it. A workflow's own AI steps don't count here."
+msgstr "Caps an admin set on a domain's model, on the domain's Resources tab, on top of the deployment's budgets, and what the domain's actions spent through it. A workflow's own AI steps don't count here."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
@@ -1301,8 +1301,8 @@ msgid "Changes the domain's data"
 msgstr "Changes the domain's data"
 
 #: src/engines/store-changes.tsx
-msgid "Changes to the engine's stores"
-msgstr "Changes to the engine's stores"
+msgid "Changes to the domain's stores"
+msgstr "Changes to the domain's stores"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "Charge"
@@ -1766,10 +1766,15 @@ msgstr "Doesn't build now"
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
+#: src/routes/_shell.settings.models.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflows-table.tsx
 msgid "Domain"
 msgstr "Domain"
+
+#: src/engines/store-changes.tsx
+msgid "domain {app}, version {version}"
+msgstr "domain {app}, version {version}"
 
 #: src/connections/connection-list.tsx
 msgid "Domain {domain}"
@@ -1778,6 +1783,10 @@ msgstr "Domain {domain}"
 #: src/screens/screen-frame.tsx
 msgid "Domain app"
 msgstr "Domain app"
+
+#: src/routes/_shell.settings.models.tsx
+msgid "Domain budgets"
+msgstr "Domain budgets"
 
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
@@ -1871,18 +1880,6 @@ msgstr "Edit"
 #: src/routes/_shell.settings.profile.tsx
 msgid "Email"
 msgstr "Email"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Engine"
-msgstr "Engine"
-
-#: src/engines/store-changes.tsx
-msgid "engine {app}, version {version}"
-msgstr "engine {app}, version {version}"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Engine budgets"
-msgstr "Engine budgets"
 
 #: src/onboarding/staff-words.ts
 msgid "Enough is known ({known}% of {threshold}%): the company waits for Grasp's go"
@@ -2895,6 +2892,10 @@ msgstr "No call has to stay in the EU."
 msgid "No caps of its own"
 msgstr "No caps of its own"
 
+#: src/routes/_shell.settings.models.tsx
+msgid "No domain has a model bound to it."
+msgstr "No domain has a model bound to it."
+
 #: src/chat/side-panel.tsx
 #: src/routes/_shell.domains.index.tsx
 msgid "No domains yet"
@@ -2903,10 +2904,6 @@ msgstr "No domains yet"
 #: src/dashboard/widget-board.tsx
 msgid "No domains yet. Domains are made in chat."
 msgstr "No domains yet. Domains are made in chat."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "No engine has a model bound to it."
-msgstr "No engine has a model bound to it."
 
 #: src/activity/audit-log.tsx
 msgid "No events match in the latest stretch of the log."
@@ -2959,8 +2956,8 @@ msgid "No next run"
 msgstr "No next run"
 
 #: src/engines/package-approvals.tsx
-msgid "No packages are approved for this engine."
-msgstr "No packages are approved for this engine."
+msgid "No packages are approved for this domain."
+msgstr "No packages are approved for this domain."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "No packages were approved for this domain before."
@@ -2971,8 +2968,8 @@ msgid "No permissions."
 msgstr "No permissions."
 
 #: src/engines/store-change-errors.ts
-msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
-msgstr "No record is to blame, so an admin can only abandon the change, on the engine's page."
+msgid "No record is to blame, so an admin can only abandon the change, on the domain's page."
+msgstr "No record is to blame, so an admin can only abandon the change, on the domain's page."
 
 #: src/dashboard/report.ts
 msgid "No run asked anyone for a decision."
@@ -3061,8 +3058,8 @@ msgid "none now"
 msgstr "none now"
 
 #: src/engines/resource-bindings.tsx
-msgid "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
-msgstr "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
+msgid "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
+msgstr "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "None stated"
@@ -3934,12 +3931,12 @@ msgid "Retire"
 msgstr "Retire"
 
 #: src/engines/package-approvals.tsx
-msgid "Retire the packages for {engine}"
-msgstr "Retire the packages for {engine}"
+msgid "Retire the packages for {domain}"
+msgstr "Retire the packages for {domain}"
 
 #: src/engines/package-approvals.tsx
-msgid "Retire the packages for {engine}?"
-msgstr "Retire the packages for {engine}?"
+msgid "Retire the packages for {domain}?"
+msgstr "Retire the packages for {domain}?"
 
 #: src/engines/package-approvals.tsx
 msgid "Retired"
@@ -3984,12 +3981,12 @@ msgid "Revoke the binding of {alias}?"
 msgstr "Revoke the binding of {alias}?"
 
 #: src/engines/package-approvals.tsx
-msgid "Revoke the packages for {engine}"
-msgstr "Revoke the packages for {engine}"
+msgid "Revoke the packages for {domain}"
+msgstr "Revoke the packages for {domain}"
 
 #: src/engines/package-approvals.tsx
-msgid "Revoke the packages for {engine}?"
-msgstr "Revoke the packages for {engine}?"
+msgid "Revoke the packages for {domain}?"
+msgstr "Revoke the packages for {domain}?"
 
 #: src/activity/audit-words.ts
 msgid "Revoked a permission"
@@ -4034,8 +4031,8 @@ msgid "Run {runId}"
 msgstr "Run {runId}"
 
 #: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
-msgstr "Run {shortId} of {workflowId} in {engine}, started {started}"
+msgid "Run {shortId} of {workflowId} in {domain}, started {started}"
+msgstr "Run {shortId} of {workflowId} in {domain}, started {started}"
 
 #: src/workflows/history-view.tsx
 msgid "Run history"
@@ -4740,37 +4737,37 @@ msgstr "The data processing agreement isn't signed"
 msgid "The default, {each}"
 msgstr "The default, {each}"
 
+#: src/engines/resource-bindings.tsx
+msgid "The domain has no permission to read a collection. Grant one first."
+msgstr "The domain has no permission to read a collection. Grant one first."
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+msgstr "The domain has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain's actions can't use it until an admin binds it."
+msgstr "The domain's actions can't use it until an admin binds it."
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr "The domain's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
+msgstr "The domain's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain's current version declares no resource for its actions."
+msgstr "The domain's current version declares no resource for its actions."
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+msgstr "The domain's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
+
 #: src/chat/builds.tsx
 msgid "The domains this chat builds didn't load."
 msgstr "The domains this chat builds didn't load."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine has no permission to read a collection. Grant one first."
-msgstr "The engine has no permission to read a collection. Grant one first."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
-msgstr "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions can't use it until an admin binds it."
-msgstr "The engine's actions can't use it until an admin binds it."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-msgstr "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's current version declares no resource for its actions."
-msgstr "The engine's current version declares no resource for its actions."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
-msgstr "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
 
 #: src/dashboard/report-dialog.tsx
 #: src/export/export-menu.tsx
@@ -4778,8 +4775,8 @@ msgid "The export didn't work. Try again."
 msgstr "The export didn't work. Try again."
 
 #: src/routes/_shell.settings.models.tsx
-msgid "The first {shown} by engine; more engines have models bound."
-msgstr "The first {shown} by engine; more engines have models bound."
+msgid "The first {shown} by domain; more domains have models bound."
+msgstr "The first {shown} by domain; more domains have models bound."
 
 #: src/engines/store-change-errors.ts
 msgid "the fixture's row doesn't fit what the migration takes"
@@ -4845,12 +4842,12 @@ msgid "The list is full: remove a line to add another."
 msgstr "The list is full: remove a line to add another."
 
 #: src/engines/store-change-errors.ts
-msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
-msgstr "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
+msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
+msgstr "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
 
 #: src/engines/store-change-errors.ts
-msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
-msgstr "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
+msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the domain again."
+msgstr "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the domain again."
 
 #: src/engines/store-changes.tsx
 msgid "The migration {migration} of the table {table} failed as a whole: its code failed, not a record."
@@ -4895,8 +4892,8 @@ msgid "The one before"
 msgstr "The one before"
 
 #: src/routes/_shell.domains.$engine.index.tsx
-msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
-msgstr "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
+msgid "The packages approved for this domain. You see them because you may approve packages; the rest of the domain is for its members."
+msgstr "The packages approved for this domain. You see them because you may approve packages; the rest of the domain is for its members."
 
 #: src/engines/package-approvals.tsx
 msgid "The packages couldn't be read again, so this list may be out of date: {unread}"
@@ -4932,8 +4929,8 @@ msgid "The steps can't be read from this workflow's code: {message}"
 msgstr "The steps can't be read from this workflow's code: {message}"
 
 #: src/engines/store-changes.tsx
-msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-msgstr "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this domain or any other domain using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
+msgstr "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this domain or any other domain using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
 
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "The team is told, so this stays as it was agreed. To stop the interviews, pause them."
@@ -5132,20 +5129,20 @@ msgid "This store no longer exists, so there is nothing to abandon."
 msgstr "This store no longer exists, so there is nothing to abandon."
 
 #: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
-msgstr "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+msgid "This version changes the domain's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
+msgstr "This version changes the domain's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
 
 #: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
-msgstr "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
+msgid "This version changes the domain's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
+msgstr "This version changes the domain's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
 
 #: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
-msgstr "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgid "This version changes the domain's data, and the change can't be applied: filling in its new fields stopped making progress."
+msgstr "This version changes the domain's data, and the change can't be applied: filling in its new fields stopped making progress."
 
 #: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
-msgstr "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgid "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
+msgstr "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
 
 #: src/engines/store-change-errors.ts
 msgid "This version's data change is still being applied. Try again in a moment."
@@ -5283,12 +5280,12 @@ msgid "Until {until}"
 msgstr "Until {until}"
 
 #: src/engines/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
-msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. Mend the record through the domain and the change is tried again, or abandon it."
+msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. Mend the record through the domain and the change is tried again, or abandon it."
 
 #: src/engines/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
-msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgid "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
+msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this domain or any other domain using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
 
 #: src/activity/audit-words.ts
 msgid "Updated Grasp"
@@ -5562,8 +5559,8 @@ msgid "What the domain holds"
 msgstr "What the domain holds"
 
 #: src/engines/resource-bindings.tsx
-msgid "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
-msgstr "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
+msgid "What the domain's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
+msgstr "What the domain's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
