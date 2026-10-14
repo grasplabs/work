@@ -351,6 +351,11 @@ export interface QueryEntry {
   shown: number;
   /** Set once a confirmed change may have made what it shows old. */
   stale: boolean;
+  /**
+   * How many confirmed changes marked it old: a read clears `stale` only
+   * if none came after it was sent.
+   */
+  changes: number;
   reading:
     | { readonly done: Promise<unknown>; readonly stop: AbortController }
     | undefined;
@@ -381,10 +386,13 @@ const worthRetrying = (settled: Settled): boolean =>
  */
 const settleRead = (
   entry: QueryEntry,
-  number: number,
+  read: { readonly number: number; readonly changes: number },
   settled: Settled
 ): unknown => {
+  const { number } = read;
   const newest = number > entry.shown;
+  // A change confirmed after the read was sent may be missing from it.
+  const current = read.changes === entry.changes;
   if (settled.kind === "lost") {
     const error = clientError("operation.unreachable");
     if (newest && entry.snapshot.value === undefined) {
@@ -396,14 +404,14 @@ const settleRead = (
   if (settled.kind === "failed") {
     if (newest) {
       entry.shown = number;
-      entry.stale = false;
+      entry.stale &&= !current;
       show(entry, { value: undefined, error: settled.error });
     }
     throw settled.error;
   }
   if (newest) {
     entry.shown = number;
-    entry.stale = false;
+    entry.stale &&= !current;
     show(entry, { value: settled.value, error: undefined });
   }
   return settled.value;
@@ -570,6 +578,7 @@ export class GraspClient {
       sent: 0,
       shown: 0,
       stale: false,
+      changes: 0,
       reading: undefined,
       evict: undefined,
     };
@@ -661,6 +670,7 @@ export class GraspClient {
     }
     entry.sent += 1;
     const number = entry.sent;
+    const { changes } = entry;
     const generation = this.#generation;
     const stop = new AbortController();
     const request = JSON.stringify({
@@ -689,7 +699,7 @@ export class GraspClient {
         const keepTrying =
           entry.listeners.size > 0 || tries < imperativeAttempts;
         if (!worthRetrying(settled) || !keepTrying || !wanted(entry)) {
-          return settleRead(entry, number, settled);
+          return settleRead(entry, { number, changes }, settled);
         }
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
         await sleep(retryDelay(tries), stop.signal);
@@ -762,6 +772,7 @@ export class GraspClient {
     for (const entry of this.#queries.values()) {
       if (entry.reference.resourceId === resourceId) {
         entry.stale = true;
+        entry.changes += 1;
         if (entry.listeners.size > 0 && entry.reading === undefined) {
           this.#refresh(entry);
         }
