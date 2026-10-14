@@ -667,3 +667,38 @@ describe("the session client and a cancel asked for while a stream opens", () =>
     expect(seen).toStrictEqual(["open asked", "opened", "cancel sent"]);
   });
 });
+
+describe("the session client and a caller who leaves while a stream opens", () => {
+  it("stops waiting for an open that stalls, and lets go of the connection that arrives late", async () => {
+    const opening = Promise.withResolvers<null>();
+    let released = 0;
+    const transport: ClientTransport = {
+      call: async () => await Promise.reject(new Error("Not this.")),
+      stream: async () => {
+        await opening.promise;
+        return {
+          release: () => {
+            released += 1;
+          },
+        };
+      },
+      cancelStream: async () => await Promise.resolve({ requested: true }),
+    };
+    const client = new GraspClient(transport);
+    const controller = new AbortController();
+    const running = failureOf(
+      client.stream(
+        api.notes.exportAll,
+        { format: "csv" },
+        { signal: controller.signal, onProgress: unheard }
+      )
+    );
+    controller.abort();
+    const left = await running;
+    opening.resolve(null);
+    await vi.waitFor(() => {
+      expect(released).toBe(1);
+    });
+    expect(left.code).toBe("stream.cancelled");
+  });
+});

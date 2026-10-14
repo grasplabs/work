@@ -980,6 +980,47 @@ const submissionVerdict = (
 };
 
 /**
+ * The connection `opening` resolves with, or undefined once `signal`
+ * aborts first: a caller who left stops waiting for an open that stalls,
+ * and a connection that arrives after it left is let go of at once.
+ */
+const openedUnlessAborted = async (
+  opening: Promise<StreamLink>,
+  signal: AbortSignal | undefined
+): Promise<StreamLink | undefined> => {
+  if (signal === undefined) {
+    return await opening;
+  }
+  const left = Promise.withResolvers<"left">();
+  const onAbort = (): void => {
+    left.resolve("left");
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) {
+    onAbort();
+  }
+  try {
+    const first = await Promise.race([opening, left.promise]);
+    if (first !== "left") {
+      return first;
+    }
+    const letGo = async (): Promise<void> => {
+      try {
+        const late = await opening;
+        await late.release();
+      } catch {
+        // Never opened, or gone already.
+      }
+    };
+    // Nobody waits for it: the caller left already.
+    void letGo();
+    return undefined;
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+};
+
+/**
  * The session client: queries, mutations and actions of the App, for the
  * person using it. One per App session, made and mounted by the
  * platform; App code gets it from `useClient()`.
@@ -1218,7 +1259,12 @@ export class GraspClient {
       };
       let link: StreamLink;
       try {
-        link = await open(what, request, onFrame);
+        const opening = open(what, request, onFrame);
+        const arrived = await openedUnlessAborted(opening, signal);
+        if (arrived === undefined) {
+          return { kind: "aborted" };
+        }
+        link = arrived;
         opened.resolve(true);
       } catch (error) {
         return {

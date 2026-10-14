@@ -399,15 +399,29 @@ class StreamRun {
  * }
  * ```
  *
- * Unmounting stops this component following it; it never becomes
- * background work: the host cancels a run no one follows.
+ * Unmounting, or switching to another action or client, stops this
+ * component following its run, and the view starts again from `idle`;
+ * it never becomes background work: the host cancels a run no one
+ * follows.
  */
 export const useStream = <Reference extends StreamReference>(
   reference: Reference
 ): StreamHandle<Reference> => {
   const client = useClient();
-  // oxlint-disable-next-line react/hook-use-state -- made once per component, never replaced
-  const [stream] = useState(() => new StreamRun());
+  // One run per client and action: another of either starts afresh, and
+  // the run of the last is let go of (the effect's cleanup below), so it
+  // neither shows the last one's view nor blocks this one.
+  const [bound, setBound] = useState(() => ({
+    client,
+    reference,
+    stream: new StreamRun(),
+  }));
+  let current = bound;
+  if (bound.client !== client || bound.reference !== reference) {
+    current = { client, reference, stream: new StreamRun() };
+    setBound(current);
+  }
+  const { stream } = current;
   const view = useSyncExternalStore(stream.subscribe, stream.view);
   useEffect(
     () => () => {

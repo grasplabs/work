@@ -1,7 +1,8 @@
 /**
  * A Writer App whose one screen follows a streaming action (spec 10.7.6)
  * through `useStream`: a draft written a word at a time, each word a
- * whole progress snapshot, then its result; a run the person can cancel.
+ * whole progress snapshot, then its result; a run the person can cancel,
+ * and an outline to switch to.
  */
 
 const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
@@ -30,17 +31,28 @@ export const draft = action({
     return { text: text + "." };
   },
 });
+
+export const outline = action({
+  args: { topic: v.string().trim().min(1).max(200), pauseMs: v.number().integer().min(0).max(2000) },
+  returns: v.object({ text: v.string() }),
+  stream: v.object({ text: v.string() }),
+  handler: async (ctx, args) => {
+    await ctx.emit({ text: "An outline" });
+    await pause(args.pauseMs);
+    return { text: "An outline about " + args.topic + "." };
+  },
+});
 `;
 
 const registration = `import { app } from "@grasp-os/sdk";
-import { draft } from "./operations/writer.ts";
+import { draft, outline } from "./operations/writer.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Writer",
   schema,
   access: { tables: { drafts: { read: "owner", write: "owner" } } },
-  operations: { writer: { draft } },
+  operations: { writer: { draft, outline } },
   internalOperations: {},
   screens: [{ name: "writer", path: "/", source: "screens/writer.tsx" }],
   uses: [],
@@ -53,7 +65,8 @@ import { useState } from "react";
 import { api } from "#grasp";
 
 export default function Writer() {
-  const draft = useStream(api.writer.draft);
+  const [outlining, setOutlining] = useState(false);
+  const draft = useStream(outlining ? api.writer.outline : api.writer.draft);
   const [finished, setFinished] = useState(0);
   const [refused, setRefused] = useState("");
   const write = async (pauseMs: number, options?: { signal?: AbortSignal }) => {
@@ -83,6 +96,7 @@ export default function Writer() {
         <Button disabled={busy} onClick={() => void write(0, { signal: AbortSignal.abort() })} variant="outline">Write, stopped already</Button>
         <Button disabled={busy} onClick={() => void wronglyOptioned()} variant="outline">Write with a wrong option</Button>
         <Button disabled={!busy} onClick={() => void draft.cancel()} variant="outline">Cancel</Button>
+        <Button onClick={() => setOutlining(true)} variant="outline">Outline instead</Button>
       </div>
       <p role="status">{draft.status}</p>
       <p aria-label="Finished">{finished}</p>

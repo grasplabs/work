@@ -61,4 +61,15 @@ test("a person watches a draft stream in, then cancels a slow one", async ({
   await screen.getByRole("button", { name: "Cancel" }).click();
   await expect(status).toHaveText("cancelled", { timeout: 15_000 });
   await expect(draft).toHaveText("A");
+
+  // Switching to another action mid-run lets go of the run: the view
+  // starts again, and the other action runs at once.
+  await screen.getByRole("button", { name: "Write slowly" }).click();
+  await expect(draft).toHaveText("A");
+  await screen.getByRole("button", { name: "Outline instead" }).click();
+  await expect(status).toHaveText("idle");
+  await expect(draft).toHaveText("");
+  await screen.getByRole("button", { name: "Write", exact: true }).click();
+  await expect(status).toHaveText("completed", { timeout: 15_000 });
+  await expect(draft).toHaveText("An outline about launch.");
 });
