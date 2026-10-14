@@ -1243,7 +1243,14 @@ export class GraspClient {
     /** Follows the invocation over one connection, until it ends. */
     const follow = async (what: "stream" | "attach"): Promise<Followed> => {
       const ended = Promise.withResolvers<Followed>();
+      // Whether this connection still speaks for the caller: once it left,
+      // or the connection ended, a frame it delivers late is dropped, so it
+      // never reaches `onProgress` after the run settled for the caller.
+      let live = true;
       const onFrame = (raw: unknown): void => {
+        if (!live) {
+          return;
+        }
         const frame = readFrame(raw);
         if (frame?.type === "closed") {
           ended.resolve({ kind: "lost" });
@@ -1262,11 +1269,13 @@ export class GraspClient {
         const opening = open(what, request, onFrame);
         const arrived = await openedUnlessAborted(opening, signal);
         if (arrived === undefined) {
+          live = false;
           return { kind: "aborted" };
         }
         link = arrived;
         opened.resolve(true);
       } catch (error) {
+        live = false;
         return {
           kind: "settled",
           settled: readRejection(error),
@@ -1286,6 +1295,7 @@ export class GraspClient {
       try {
         return await ended.promise;
       } finally {
+        live = false;
         signal?.removeEventListener("abort", onAbort);
         try {
           await link.release();

@@ -702,3 +702,44 @@ describe("the session client and a caller who leaves while a stream opens", () =
     expect(left.code).toBe("stream.cancelled");
   });
 });
+
+describe("the session client and frames that arrive after the caller left", () => {
+  it("hands no progress on from a connection whose open the caller stopped waiting for", async () => {
+    const opening = Promise.withResolvers<null>();
+    const delivering = Promise.withResolvers<(frame: unknown) => void>();
+    const transport: ClientTransport = {
+      call: async () => await Promise.reject(new Error("Not this.")),
+      stream: async (_what, _request, onFrame) => {
+        // The page relays frames as they come, before the open resolves.
+        delivering.resolve(onFrame);
+        await opening.promise;
+        return { release: () => null };
+      },
+      cancelStream: async () => await Promise.resolve({ requested: true }),
+    };
+    const client = new GraspClient(transport);
+    const controller = new AbortController();
+    const heard: unknown[] = [];
+    const running = failureOf(
+      client.stream(
+        api.notes.exportAll,
+        { format: "csv" },
+        {
+          signal: controller.signal,
+          onProgress: (progress) => {
+            heard.push(progress);
+          },
+        }
+      )
+    );
+    const deliver = await delivering.promise;
+    controller.abort();
+    const left = await running;
+    deliver({ type: "progress", seq: 1, value: { done: 1 } });
+    opening.resolve(null);
+    expect({ left: left.code, heard }).toStrictEqual({
+      left: "stream.cancelled",
+      heard: [],
+    });
+  });
+});
