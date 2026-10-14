@@ -70,6 +70,11 @@ interface __BaseEnv_Env {
    */
   WORKFLOW_OFF_WAIT_MS?: string;
   /**
+   * Tests only: a shorter deadline for a run waiting on an unknown outcome
+   * its person hasn't resolved (src/workflows/host.ts).
+   */
+  WORKFLOW_UNKNOWN_HOLD_MS?: string;
+  /**
    * Tests only: the delay before every step's retry, in place of the one
    * its config says (src/workflows/dispatcher.ts).
    */
