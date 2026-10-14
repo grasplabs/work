@@ -172,7 +172,7 @@ test("an admin signs someone out everywhere, then removes them, and is told what
   const who = `Person (${leaving.email})`;
   const actions = page.getByRole("button", { name: `Actions for ${who}` });
   const notice = page
-    .getByRole("region", { name: "Members and roles" })
+    .getByRole("region", { name: "Members" })
     .getByRole("status");
 
   await actions.click();

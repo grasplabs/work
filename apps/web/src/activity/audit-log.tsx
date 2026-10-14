@@ -612,7 +612,7 @@ export const LogRecords = ({
           aria-label={monthName(inMonth[0]?.receivedAt ?? "")}
           key={month}
         >
-          <h3 className="bg-muted/50 text-muted-foreground border-t px-5 py-2">
+          <h3 className="bg-row-group text-muted-foreground border-t px-5 py-2">
             {monthName(inMonth[0]?.receivedAt ?? "")}
           </h3>
           <ul aria-label={t`Entries`}>

@@ -1,4 +1,13 @@
 import { isAdmin } from "@grasp-os/shared/roles";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -7,10 +16,16 @@ import {
   Link,
   Outlet,
   useLocation,
+  useNavigate,
 } from "@tanstack/react-router";
 import {
+  ActivityIcon,
+  BellIcon,
+  BuildingIcon,
   CoinsIcon,
+  CreditCardIcon,
   HistoryIcon,
+  KeyRoundIcon,
   SparklesIcon,
   UserRoundIcon,
   UsersIcon,
@@ -21,23 +36,34 @@ import { SiteHeader } from "../frame/site-header.tsx";
 
 // Settings, as in the prototype (`routes/settings.tsx`): the workspace and
 // who may do what in it, then one's own account, one section at a time.
-// Only the sections core has something behind are here, and only those
-// the person may open are listed: Profile for everyone; Members and roles,
-// Models, AI spend and the audit trail for admins (Members and
-// roles never for Grasp staff). Core checks the role on every call
-// whatever is listed.
+// The workspace's sections are for admins (Members and roles never for
+// Grasp staff); the account's for everyone. Core checks the role on every
+// call whatever is listed. The prototype's Onboarding section is not here:
+// in Grasp OS the onboarding is Grasp staff's own area (`/onboarding`).
 
 type SettingsPath =
-  | "/settings/profile"
+  | "/settings/workspace"
   | "/settings/members"
   | "/settings/models"
   | "/settings/spend"
-  | "/settings/audit";
+  | "/settings/pulse"
+  | "/settings/audit"
+  | "/settings/billing"
+  | "/settings/profile"
+  | "/settings/notifications"
+  | "/settings/security";
 
 interface SettingsItem {
-  label: MessageDescriptor;
+  /** Pulse is a name and stays as it is; the other labels are translated. */
+  label: MessageDescriptor | string;
   to: SettingsPath;
   icon: LucideIcon;
+}
+
+interface SettingsGroup {
+  id: string;
+  title: MessageDescriptor;
+  items: SettingsItem[];
 }
 
 /** The sections this person may open, in their groups. */
@@ -47,9 +73,14 @@ const groupsFor = ({
 }: {
   admin: boolean;
   staff: boolean;
-}): { id: string; title: MessageDescriptor; items: SettingsItem[] }[] => {
+}): SettingsGroup[] => {
   const workspace: SettingsItem[] = admin
     ? [
+        {
+          label: msg`Workspace`,
+          to: "/settings/workspace",
+          icon: BuildingIcon,
+        },
         ...(staff
           ? []
           : [
@@ -61,7 +92,9 @@ const groupsFor = ({
             ]),
         { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
         { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
+        { label: "Pulse", to: "/settings/pulse", icon: ActivityIcon },
         { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
+        { label: msg`Billing`, to: "/settings/billing", icon: CreditCardIcon },
       ]
     : [];
   return [
@@ -79,67 +112,116 @@ const groupsFor = ({
       title: msg`Your account`,
       items: [
         { label: msg`Profile`, to: "/settings/profile", icon: UserRoundIcon },
+        {
+          label: msg`Notifications`,
+          to: "/settings/notifications",
+          icon: BellIcon,
+        },
+        { label: msg`Security`, to: "/settings/security", icon: KeyRoundIcon },
       ],
     },
   ];
 };
 
+/**
+ * Settings: the workspace and who may do what in it, then one's own account. One section at a time.
+ * The list of sections stands beside the section only where the page has the room for both, which
+ * is about the page and not the window: Grasp's own sidebar takes its share. With less room the
+ * sections are one control above the section, so a section is never squeezed into a sliver.
+ */
 const SettingsLayout = () => {
   const { t, i18n } = useLingui();
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const { identity } = Route.useRouteContext();
   const groups = groupsFor({
     admin: isAdmin(identity.role),
     staff: identity.staff,
   });
-  const current = groups
-    .flatMap((group) => group.items)
-    .find((item) => pathname.startsWith(item.to));
+  const labelOf = (label: MessageDescriptor | string): string =>
+    typeof label === "string" ? label : i18n._(label);
+  const items = groups.flatMap((group) => group.items);
+  const current = items.find((item) => pathname.startsWith(item.to));
   return (
     <>
       <SiteHeader
         crumbs={
           current === undefined
             ? [{ label: t`Settings` }]
-            : [{ label: t`Settings` }, { label: i18n._(current.label) }]
+            : [{ label: t`Settings` }, { label: labelOf(current.label) }]
         }
       />
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-medium tracking-tight">
-            <Trans>Settings</Trans>
-          </h1>
-          <p className="text-muted-foreground text-sm">
-            <Trans>
-              Your workspace, who may do what in it, and your own account.
-            </Trans>
-          </p>
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 pb-24">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex min-w-0 flex-1 basis-64 flex-col gap-1">
+            <h1 className="text-2xl font-medium tracking-tight">
+              <Trans>Settings</Trans>
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              <Trans>
+                Your workspace, who may do what in it, and your own account.
+              </Trans>
+            </p>
+          </div>
         </div>
-        <div className="flex flex-col gap-8 text-sm md:flex-row md:items-start">
-          <nav
-            aria-label={t`Settings`}
-            className="flex w-full flex-none flex-col gap-5 md:sticky md:top-16 md:w-52"
-          >
-            {groups.map((group) => (
-              <div className="flex flex-col gap-0.5" key={group.id}>
-                <span className="text-muted-foreground px-2 pb-1 text-xs">
-                  {i18n._(group.title)}
-                </span>
-                {group.items.map(({ label, to, icon: Icon }) => (
-                  <Link
-                    className="text-muted-foreground hover:bg-accent data-[status=active]:bg-muted data-[status=active]:text-foreground hover:text-foreground focus-visible:ring-ring/50 flex items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-3"
-                    key={to}
-                    to={to}
-                  >
-                    <Icon aria-hidden="true" className="size-4" />
-                    {i18n._(label)}
-                  </Link>
-                ))}
-              </div>
-            ))}
-          </nav>
-          <div className="flex max-w-5xl min-w-0 flex-1 flex-col gap-6">
-            <Outlet />
+        <div className="@container">
+          <div className="flex flex-col gap-6 text-sm @3xl:flex-row @3xl:items-start @3xl:gap-8">
+            <div className="@3xl:hidden">
+              <Select
+                items={items.map((item) => ({
+                  value: item.to,
+                  label: labelOf(item.label),
+                }))}
+                value={current?.to ?? null}
+                onValueChange={(value) => {
+                  const to = items.find((item) => item.to === value)?.to;
+                  if (to !== undefined) {
+                    void navigate({ to });
+                  }
+                }}
+              >
+                <SelectTrigger aria-label={t`Settings`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {groups.map((group) => (
+                    <SelectGroup key={group.id}>
+                      <SelectLabel>{i18n._(group.title)}</SelectLabel>
+                      {group.items.map((item) => (
+                        <SelectItem key={item.to} value={item.to}>
+                          {labelOf(item.label)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <nav
+              aria-label={t`Settings`}
+              className="hidden w-52 flex-none flex-col gap-5 @3xl:sticky @3xl:top-16 @3xl:flex"
+            >
+              {groups.map((group) => (
+                <div className="flex flex-col gap-0.5" key={group.id}>
+                  <span className="text-muted-foreground px-2 pb-1 text-xs">
+                    {i18n._(group.title)}
+                  </span>
+                  {group.items.map(({ label, to, icon: Icon }) => (
+                    <Link
+                      className="text-muted-foreground hover:bg-accent data-[status=active]:bg-muted data-[status=active]:text-foreground hover:text-foreground focus-visible:ring-ring/50 flex items-center gap-2 rounded-md px-2 py-1.5 outline-none focus-visible:ring-3"
+                      key={to}
+                      to={to}
+                    >
+                      <Icon aria-hidden="true" className="size-4" />
+                      {labelOf(label)}
+                    </Link>
+                  ))}
+                </div>
+              ))}
+            </nav>
+            <div className="flex max-w-5xl min-w-0 flex-1 flex-col gap-6">
+              <Outlet />
+            </div>
           </div>
         </div>
       </div>
