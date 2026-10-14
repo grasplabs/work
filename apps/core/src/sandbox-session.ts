@@ -517,8 +517,10 @@ const openSession = async (
     // It may have taken the session, and hold a process for it.
     await endSession(host, id, "cancel");
     signal?.throwIfAborted();
+    // Before its socket, no call went to the session: nothing ran.
     throw new SandboxUnavailableError("The sandbox host didn't answer.", {
       cause: error,
+      started: false,
     });
   } finally {
     clearTimeout(answerBy);
@@ -537,7 +539,7 @@ const openSession = async (
     }
     throw new SandboxUnavailableError(
       `The sandbox host answered ${response.status}.`,
-      { status: response.status }
+      { status: response.status, started: false }
     );
   }
   socket.accept();
@@ -548,7 +550,8 @@ const openSession = async (
     // It holds a process for the session all the same.
     await endSession(host, id, "end");
     throw new SandboxUnavailableError(
-      "The sandbox doesn't bound the call's CPU time."
+      "The sandbox doesn't bound the call's CPU time.",
+      { started: false }
     );
   }
   return socket;

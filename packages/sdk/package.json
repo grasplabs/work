@@ -21,6 +21,8 @@
     "./params": "./src/params.ts",
     "./describe": "./src/describe.ts",
     "./testing": "./src/testing.ts",
+    "./client": "./src/client.ts",
+    "./react": "./src/react.ts",
     "./screen": "./src/screen.ts",
     "./screen-runtime": "./src/screen-runtime.ts"
   },

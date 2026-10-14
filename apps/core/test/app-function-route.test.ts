@@ -305,7 +305,7 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
     }
   });
 
-  it("refuses a call of a revoked release", async () => {
+  it("refuses a call of a revoked release before it runs, as the build revoked, and tells the page so", async () => {
     const approved = await approvedApp();
     const admin = await person("admin");
     await revokeRelease(
@@ -314,17 +314,19 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
       { app: appIdSchema.parse(approved.app), version: 1 },
       "Leaks data"
     );
-    const result = await resultOf(
-      await post(
-        approved.app,
-        requestFor(approved, "notes.create", { title: "After" }),
-        { cookie: approved.builder.session, lease: approved.lease }
+    await expect(
+      refusalOf(
+        await post(
+          approved.app,
+          requestFor(approved, "notes.create", { title: "After" }),
+          { cookie: approved.builder.session, lease: approved.lease }
+        )
       )
-    );
-    expect(result).toMatchObject({
-      ok: false,
-      error: { code: "version.revoked" },
-    });
+    ).resolves.toStrictEqual({ status: 403, code: "screen.revoked" });
+    // The page asks core on its own connection, and tears the frame down.
+    await expect(
+      approved.builder.api.screens.present(approved.app, approved.lease)
+    ).resolves.toBe("revoked");
   });
 
   it("refuses a body whose length says it is past the bound, unread", async () => {

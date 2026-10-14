@@ -656,7 +656,15 @@ const sandboxFailureOf = (
       depth,
       ...errorFields(thrown),
     });
-    return hostError(operationErrors.create("operation.sandbox_unavailable"));
+    // Only a call that surely never started ran nothing, to try again; one
+    // that may have started is an unknown outcome, never to repeat blindly.
+    return hostError(
+      operationErrors.create(
+        thrown.started
+          ? "operation.sandbox_lost"
+          : "operation.sandbox_unavailable"
+      )
+    );
   }
   const verdict = sandboxVerdictOf(thrown);
   if (!isSandboxVerdict(verdict)) {

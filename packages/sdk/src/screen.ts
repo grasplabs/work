@@ -1,4 +1,10 @@
 /**
+ * The legacy screen SDK, for Apps whose server is an `app/server.ts`
+ * class. An App of spec 8's layout uses `@grasp-os/sdk/react` instead:
+ * its queries, mutations and actions through the generated `#grasp`
+ * references. GRA-343 removes this module, with `callServer`, `live`,
+ * `useLive`, the string `useWorkflow`, `useRun` and `followRuns`.
+ *
  * What an App's screens use to reach their App's server, from inside their
  * sandboxed frame. A screen has no network: these calls go through the
  * page around it, to core, which checks the person's session and role on
