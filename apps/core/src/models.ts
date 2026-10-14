@@ -63,10 +63,12 @@ import {
   bindingScopes,
   budgetPeriods,
   hasBudget,
+  lineageModelRequests,
   scopesFor,
 } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
+  Admitted as LedgerAdmitted,
   LedgerScope,
   LedgerScopeName,
   Settled,
@@ -83,6 +85,7 @@ import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
+import { quotaPolicy } from "./workflows/quotas.ts";
 
 // The model gateway: every model call in a deployment goes through here, and
 // from here through the deployment's AI Gateway, never straight to a
@@ -628,8 +631,17 @@ interface Route extends Admitted {
   transport: FetchFunction;
   /** The prices its provider requests are pinned to; none for a model with none. */
   price: PinnedPrice | undefined;
-  /** The scopes a provider request sent now counts against, in this month. */
-  scopesNow: () => { period: string; scopes: LedgerScope[] };
+  /**
+   * The scopes a provider request sent now counts against, in this month,
+   * its run lineage's limited by the quota policy in force now, and that
+   * policy's generation (none for a call with no lineage). Throws when the
+   * policy can't be read.
+   */
+  scopesNow: () => Promise<{
+    period: string;
+    scopes: LedgerScope[];
+    policyGeneration: number | undefined;
+  }>;
   /**
    * What the call's provider requests may reserve together, under its
    * binding's cap per request, and what they hold of it now: each one's
@@ -909,20 +921,74 @@ const settleAdmitted = async (
   return { reservedMicros: admission.reservedMicros, settled };
 };
 
+/** `route`'s scopes now, or held back when the quota policy can't be read. */
+const scopesRead = async (
+  route: Route
+): Promise<Awaited<ReturnType<Route["scopesNow"]>> | { held: Refusal }> => {
+  try {
+    return await route.scopesNow();
+  } catch (error) {
+    // No lineage's request limit, so nothing is admitted.
+    log.error("model.quota_policy_failed", errorFields(error));
+    return { held: { code: "model.quota_policy_unavailable" } };
+  }
+};
+
+/** Why the ledger's refusal `admitted` holds back a request of `call`. */
+const heldBecause = (
+  call: Session,
+  admitted: Exclude<
+    LedgerAdmitted,
+    { ok: true } | { policyBehind: true; highest: number }
+  >
+): Refusal => {
+  if ("unpriced" in admitted) {
+    return { code: "model.unpriced" };
+  }
+  // The run lineage's own limits: no wait helps a lineage out of
+  // requests, nor one whose spend leaves no room.
+  if ("requests" in admitted) {
+    return { code: "model.run_limit", because: "requests" };
+  }
+  if ("reused" in admitted) {
+    // Never expected: every ID is a new UUID.
+    log.error("model.request_id_reused", { model: call.model });
+    return { code: "model.ledger_unavailable" };
+  }
+  // A guest's user scope is the member who invited them: whether that
+  // member has calls under way is theirs to know, not the guest's.
+  if ("heldUntil" in admitted && call.trigger.type !== "guest") {
+    return {
+      code: "model.budget_busy",
+      because: admitted.scope,
+      retryAfterSeconds: retryAfterSeconds(admitted.heldBy, admitted.heldUntil),
+    };
+  }
+  return admitted.scope === "run"
+    ? { code: "model.run_limit", because: "spend" }
+    : { code: "model.over_budget", because: admitted.scope };
+};
+
 /**
  * Asks the model ledger to admit one provider request, with the body it
  * will send: reserves the most it can cost, its prompt bounded by the
  * body's size and its answer by the cap the body sets (or the model's,
  * where it sets none), at the model's pinned prices. Its ID, or why it
- * is held back.
+ * is held back. Asked once more, under the quota policy read again, when
+ * the ledger already admitted under a newer one (`retried`).
  */
 const admitRequest = async (
   route: Route,
   body: unknown,
-  endsAt: number
+  endsAt: number,
+  retried = false
 ): Promise<Admission | { held: Refusal }> => {
   const { env, call, model, price, perRequest } = route;
-  const { period, scopes } = route.scopesNow();
+  const now = await scopesRead(route);
+  if ("held" in now) {
+    return now;
+  }
+  const { period, scopes, policyGeneration } = now;
   const budgeted = hasBudget(scopes) || perRequest !== undefined;
   if (price === undefined && budgeted) {
     return { held: { code: "model.unpriced" } };
@@ -972,43 +1038,31 @@ const admitRequest = async (
       actor: call.trigger,
       deadline: callDeadline,
       reconcileAt: callDeadline + reconcileGraceMs,
+      ...(policyGeneration === undefined ? {} : { policyGeneration }),
     });
+    if ("policyBehind" in admitted) {
+      if (!retried) {
+        return await admitRequest(route, body, endsAt, true);
+      }
+      // Never expected: core records a generation before any admission
+      // carries it, and reads the highest it recorded. A ledger ahead of
+      // core (core's database restored, say) holds back every workflow's
+      // call until core's policy passes it: logged with both generations,
+      // and refused for what it is, never as a ledger outage.
+      log.error("model.quota_policy_behind", {
+        model: call.model,
+        generation: policyGeneration,
+        ledgerGeneration: admitted.highest,
+      });
+      return { held: { code: "model.quota_policy_behind" } };
+    }
     if (admitted.ok) {
       if (perRequest !== undefined) {
         perRequest.heldMicros += reservedMicros;
       }
       return { id, reservedMicros };
     }
-    if ("unpriced" in admitted) {
-      return { held: { code: "model.unpriced" } };
-    }
-    // The run lineage's own limits: no wait helps a lineage out of
-    // requests, nor one whose spend leaves no room.
-    if ("requests" in admitted) {
-      return { held: { code: "model.run_limit", because: "requests" } };
-    }
-    if ("reused" in admitted) {
-      // Never expected: every ID is a new UUID.
-      log.error("model.request_id_reused", { model: call.model });
-      return { held: { code: "model.ledger_unavailable" } };
-    }
-    // A guest's user scope is the member who invited them: whether that
-    // member has calls under way is theirs to know, not the guest's.
-    if ("heldUntil" in admitted && call.trigger.type !== "guest") {
-      return {
-        held: {
-          code: "model.budget_busy",
-          because: admitted.scope,
-          retryAfterSeconds: retryAfterSeconds(
-            admitted.heldBy,
-            admitted.heldUntil
-          ),
-        },
-      };
-    }
-    return admitted.scope === "run"
-      ? { held: { code: "model.run_limit", because: "spend" } }
-      : { held: { code: "model.over_budget", because: admitted.scope } };
+    return { held: heldBecause(call, admitted) };
   } catch (error) {
     log.error("model.ledger_failed", errorFields(error));
     // The admission may have committed with its answer lost: nothing was
@@ -1721,15 +1775,18 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     listPricesOf(ref.provider, ref.id, ref.catalog.cost)
   );
   const { binding } = call;
-  const scopes = scopesFor(rules.budgets, call);
-  const scopesOn = (day: string): LedgerScope[] =>
-    binding === undefined
+  const scopesOn = (day: string, lineageRequests: number): LedgerScope[] => {
+    const scopes = scopesFor(rules.budgets, call, lineageRequests);
+    return binding === undefined
       ? scopes
       : [...scopes, ...bindingScopes(binding, day)];
+  };
   const requestMicros = bindingRequestMicros(binding);
+  // Whether a budget applies: the lineage's request limit limits no spend.
   if (
     price === undefined &&
-    (hasBudget(scopesOn(budgetPeriods(env).day)) || requestMicros !== undefined)
+    (hasBudget(scopesOn(budgetPeriods(env).day, lineageModelRequests)) ||
+      requestMicros !== undefined)
   ) {
     return await refuse(env, call, { code: "model.unpriced" });
   }
@@ -1740,11 +1797,22 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     model: gatewayModel(config.gateway, ref),
     transport: createAiBindingFetch(env.AI),
     price,
-    scopesNow: () => {
+    scopesNow: async () => {
+      // A run lineage's request limit, as the policy stands for this
+      // request: lowered for runs already under way too (model-budgets.ts).
+      const lineage =
+        call.trigger.type === "workflow" ? await quotaPolicy(env) : undefined;
       // One clock for both, so a request at a month's last instant never
       // counts its day in one month and its month in the next.
       const { month, day } = budgetPeriods(env);
-      return { period: month, scopes: scopesOn(day) };
+      return {
+        period: month,
+        scopes: scopesOn(
+          day,
+          lineage?.limits.lineageModelRequests ?? lineageModelRequests
+        ),
+        policyGeneration: lineage?.generation,
+      };
     },
     perRequest:
       requestMicros === undefined

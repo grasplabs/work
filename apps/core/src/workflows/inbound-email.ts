@@ -1,10 +1,15 @@
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { readAtMost } from "@grasp-os/shared/http";
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   inboundEmailMaxBytes as maxMessageBytes,
   inboundEmailMaxListed as maxListed,
+  workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { InboundEmail } from "@grasp-os/shared/workflows";
 import { and, eq } from "drizzle-orm";
@@ -14,6 +19,12 @@ import type { Address, Email } from "postal-mime";
 import { keepAuditEvent } from "../audit-outbox.ts";
 import { apps, workflowTriggers } from "../db/core/schema.ts";
 import { isWorthKeeping, keepMessage, parsedOf } from "./kept-email.ts";
+import {
+  learnMailDomain,
+  lineageRefusals,
+  mailRecipient,
+  runsOwnMail,
+} from "./mail-stamps.ts";
 import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 
 // Mail to workflows' email triggers (trigger-registry.ts). Email Routing
@@ -69,8 +80,29 @@ import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 // every message here was sent to the deployment's domain, so it needs no
 // setting of its own, and can't be set wrong. A message from a person's
 // mailbox at the client's own domain still starts runs: people forward
-// mail to their workflows. Which runs a run's own mail starts, as its
-// descendants, is for a later change (GRA-273's follow-up).
+// mail to their workflows.
+//
+// A run's own mail to the domain carries its token: core put it on the
+// recipient as the run's send left (`local+<token>@domain`,
+// mail-stamps.ts). Mail to a tokened address goes to the address without
+// the token. It is the run's own mail, and starts its runs under the run,
+// admitted against its lineage (quotas.ts, `admitChild`), only when it
+// goes to the address the token was put on and its envelope sender (which
+// SPF vouches for, unlike its From) is the run's; its key is then the
+// token's and its Message-ID's, so the same message delivered again is
+// one run, and a new one from that mailbox another run in the lineage.
+// Anything else to a tokened address (a customer's reply to all, the
+// token on another address) is mail like any other: a root, keyed by its
+// Message-ID. A token core didn't record is part of the address, which
+// no one receives at. Past the lineage's limits the run is refused and
+// audited (`workflow.email.refused`, `lineage_limit`): the message
+// bounces when every workflow it would start is refused so, and fails for
+// now when another started or is only at its hourly limit, so a delivery
+// tried again starts only what it didn't (and its sender hears of it once
+// it gives up). Each message also tells core its mail domain, from
+// the envelope recipient Email Routing sets, which no sender chooses: a
+// run's mail to it is what core stamps, from the first message on, so a
+// fresh deployment's first hop is a root.
 
 /** Longest subject a run's input keeps, in characters. */
 const maxSubjectLength = 1000;
@@ -358,13 +390,23 @@ export const receiveEmail = async (
   message: ForwardableEmailMessage,
   env: Env
 ): Promise<void> => {
-  // Who receives it first, one query: mail nobody receives is never read.
+  // Who receives it first: mail nobody receives is never read. A token
+  // core recorded goes, and names the run that may have sent it
+  // (mail-stamps.ts).
   const at = message.to.lastIndexOf("@");
-  const address = message.to.slice(0, Math.max(at, 0)).toLowerCase();
+  const local = message.to.slice(0, Math.max(at, 0)).toLowerCase();
+  const { local: address, stamp: recorded } =
+    local === ""
+      ? { local: "", stamp: undefined }
+      : await mailRecipient(env, local);
   const receivers = address === "" ? [] : await receiversAt(env, address);
   if (receivers.length === 0) {
     message.setReject("No such address.");
     return;
+  }
+  const domain = domainOf(message.to);
+  if (domain !== undefined) {
+    await learnMailDomain(env, domain);
   }
   const raw = await readAtMost(message.raw, maxMessageBytes);
   if (raw === undefined) {
@@ -377,6 +419,12 @@ export const receiveEmail = async (
     return;
   }
   const id = toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", raw)));
+  // The run's own mail only to the address it mailed, from its sender.
+  const stamp = runsOwnMail(
+    recorded,
+    `${address}@${domain ?? ""}`,
+    message.from
+  );
   const loop = loopOf(message.to, message.from, parsed);
   if (loop !== undefined) {
     // Once for each App it would have started a run of. Identifiers only:
@@ -396,12 +444,17 @@ export const receiveEmail = async (
     return;
   }
   // Only a Message-ID with an `@` names one message: `<>` or `x` would
-  // make every message that carries it the same one.
+  // make every message that carries it the same one. A run's own mail is
+  // keyed by its token too, so it is never taken for mail to another.
   const { messageId } = parsed;
-  const same =
+  const messageKey =
     messageId !== undefined && messageId.includes("@")
       ? await sha256Hex(messageId)
       : id;
+  const same =
+    stamp === undefined
+      ? messageKey
+      : await sha256Hex(`stamp:${stamp.token}:${messageKey}`);
   // By workflow, not by trigger row: the rows are written anew each time
   // a version is made current.
   const keyOf = ({
@@ -458,11 +511,38 @@ export const receiveEmail = async (
             key: keyOf(receiver),
             version: receiver.version,
           },
+          ...(stamp === undefined
+            ? {}
+            : { parent: runIdSchema.parse(stamp.run) }),
         })
     )
   );
+  const refused = lineageRefusals(started, withRoom);
+  if (refused.length > 0) {
+    // Refused for good: the lineage's limits would refuse it again.
+    const db = drizzle(env.DB);
+    await Promise.all(
+      refused.map(async ({ receiver, limit }) => {
+        await keepAuditEvent(env, db, {
+          actor: { type: "system" },
+          action: "workflow.email.refused",
+          target: { type: "app", id: receiver.appId },
+          detail: {
+            address,
+            workflow: receiver.workflowId,
+            reason: "lineage_limit",
+            limit,
+            message: id,
+          },
+        });
+      })
+    );
+  }
   const failures = started.flatMap((result): unknown[] =>
-    result.status === "rejected" ? [result.reason] : []
+    result.status === "rejected" &&
+    workflowErrors.codeOf(result.reason) !== "workflow.lineage_limit"
+      ? [result.reason]
+      : []
   );
   for (const failure of failures) {
     log.error("workflow.trigger_failed", {
@@ -474,6 +554,14 @@ export const receiveEmail = async (
   if (failures.length > 0) {
     throw new Error(`Message ${id} didn't start every run it should`);
   }
+  if (refused.length > 0 && refused.length === receivers.length) {
+    // Bounced, so its sender hears of it: every workflow it would start
+    // is past the limits of the run that sent it.
+    message.setReject(
+      "This message would start a workflow run past the limits of the run that sent it."
+    );
+    return;
+  }
   if (withRoom.length < receivers.length) {
     // Fails for now, so its sender tries again once the hour allows: the
     // runs started now are the same runs then (their keys), and the
@@ -484,5 +572,16 @@ export const receiveEmail = async (
       capped: receivers.length - withRoom.length,
     });
     throw new Error(`Message ${id} is over a workflow's hourly limit`);
+  }
+  if (refused.length > 0) {
+    // Started some, refused others: fails for now, as for a workflow at
+    // its hourly limit, so the runs started are the same runs when its
+    // sender tries again, and a sender who gives up hears of it.
+    log.warn("workflow.trigger_lineage_refused", {
+      type: "email",
+      message: id,
+      refused: refused.length,
+    });
+    throw new Error(`Message ${id} is past a lineage's limits for a workflow`);
   }
 };

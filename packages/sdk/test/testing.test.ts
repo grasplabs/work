@@ -21,6 +21,33 @@ const unusedSystems: InvoiceSystems = {
 
 const noAsk = async (): Promise<void> => {};
 
+/**
+ * How many attempts a step that always fails for a moment gets, declaring
+ * `retries` (none: undeclared), and how its run ends.
+ */
+const attemptsOf = async (retries?: { limit: number }) => {
+  let attempts = 0;
+  const run = await testRun(
+    workflow("flaky", { params: {} }, async (step) => {
+      await step.do(
+        "read",
+        {
+          description: "Read",
+          ...(retries === undefined ? {} : { retries }),
+        },
+        async () => {
+          attempts += 1;
+          throw Object.assign(new Error("Too slow"), {
+            name: "TimeoutError",
+          });
+        }
+      );
+      return null;
+    })
+  );
+  return { status: run.status, attempts };
+};
+
 /** Reads a customer, then emails each of their open orders. */
 const reminders = (systems: {
   customer: (id: string) => Promise<{ email: string; open: string[] }>;
@@ -126,6 +153,18 @@ describe("test runs", () => {
     });
     expect(systems.reads).toStrictEqual([]);
     expect(run.sideEffects).toStrictEqual([]);
+  });
+
+  it("try a step that fails for a moment as a run does: five attempts when it declares no retries, fewer when it declares fewer", async () => {
+    expect({
+      undeclared: await attemptsOf(),
+      once: await attemptsOf({ limit: 0 }),
+      twice: await attemptsOf({ limit: 1 }),
+    }).toStrictEqual({
+      undeclared: { status: "failed", attempts: 5 },
+      once: { status: "failed", attempts: 1 },
+      twice: { status: "failed", attempts: 2 },
+    });
   });
 
   it("still check a mocked model answer against the step's schema", async () => {

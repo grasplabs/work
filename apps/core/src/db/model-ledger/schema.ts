@@ -81,6 +81,12 @@ export const requests = sqliteTable(
     /** How often reconciling it failed; quarantined once it reaches three. */
     reconcileFailures: integer("reconcile_failures").notNull().default(0),
     settledAt: integer("settled_at"),
+    /**
+     * The generation of the quota policy whose run lineage limit it was
+     * admitted under; null for a request with no lineage, or one admitted
+     * before it was recorded.
+     */
+    policyGeneration: integer("policy_generation"),
   },
   (table) => [
     check("requests_reserved", sql`${table.reservedMicros} >= 0`),
@@ -92,6 +98,22 @@ export const requests = sqliteTable(
     index("requests_open").on(table.state, table.reconcileAt),
     // Settled requests, oldest first, for the retention sweep.
     index("requests_settled_at").on(table.settledAt),
+  ]
+);
+
+/**
+ * The highest quota policy generation an admission carried, one row: no
+ * admission under a lower one is admitted after it (model-ledger.ts).
+ */
+export const policy = sqliteTable(
+  "policy",
+  {
+    id: integer().primaryKey(),
+    generation: integer().notNull(),
+  },
+  (table) => [
+    check("policy_one_row", sql`${table.id} = 0`),
+    check("policy_generation", sql`${table.generation} >= 0`),
   ]
 );
 

@@ -259,8 +259,19 @@ describe("an App's function on the on-prem sandbox", () => {
     await holding;
   }, 30_000);
 
-  it("fails a call as the sandbox unavailable, to try again, when the supervisor is gone", async () => {
+  it("fails a call cut off mid-call as an unknown outcome, and one that can't start as the sandbox unavailable, to try again", async () => {
+    // Started, then its sandbox went away: it may have changed something,
+    // so it is never one that ran nothing.
+    const cutOff = call("waits", { within: 8000 });
+    await expect
+      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
+      .toBe(1);
     await supervisor.stop();
+    expect(failure(await cutOff)).toMatchObject({
+      code: "operation.sandbox_lost",
+      retryable: false,
+    });
+    // With no supervisor to take it, the next call never starts.
     const outcome = await call("echo");
     expect(failure(outcome)).toMatchObject({
       code: "operation.sandbox_unavailable",

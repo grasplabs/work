@@ -12,7 +12,9 @@ import { signInConfig } from "./config.ts";
  * the organization plugin's own permission checks (`auth.ts`). Removing
  * members and changing roles go only through core's own API
  * (`members.ts`), which keeps the organization an admin: no route here
- * may change a membership or a role.
+ * may change a membership or a role. The JWT plugin's `/token` and
+ * `/jwks` stay off too: a token for the whole session, or the keys App
+ * tokens are checked with, are nothing a browser needs (app-tokens.ts).
  */
 const allowedRoutes = new Set([
   "POST /sign-in/sso",

@@ -324,3 +324,21 @@ export const screenErrors = defineErrorFamily({
     "The app or its approvals changed since they were reviewed. Review them again.",
   "screen.not_approved": "That build of the app isn't approved.",
 });
+
+/**
+ * How long a screen refused as `screen.rate_limited` should wait before it
+ * asks again: the time its request budget takes to give back one request.
+ */
+export const rateLimitedRetryMs = Math.ceil(
+  60_000 / screenLimits.requests.perMinute
+);
+
+/**
+ * `screen.rate_limited`, with how long to wait before asking again
+ * (`retryAfterMs`), so a client waits for the budget rather than spending
+ * its retries while it is empty.
+ */
+export const rateLimited = () =>
+  screenErrors.create("screen.rate_limited", {
+    retryAfterMs: rateLimitedRetryMs,
+  });

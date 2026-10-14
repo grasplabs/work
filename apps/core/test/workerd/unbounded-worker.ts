@@ -22,7 +22,9 @@ import {
 // screen compiler and the package builder on plain workerd
 // with no sandbox and no `SANDBOX_IN_PROCESS=unbounded`
 // (scripts/workerd-unbounded-loaders.test.ts): core loads none of them, as
-// no sandbox bounds them here.
+// no sandbox bounds them here. Those the sandbox host runs (a workflow's
+// code, the compiler, the builder) are asked for with `SANDBOX_HOST`
+// unbound, as by a deployment that forgot it.
 
 /** An App's builder, as far as a package resolve or build reads one first. */
 const builder: Acting = {
@@ -138,20 +140,37 @@ export default {
       return new Response(
         await refusal(
           async () =>
-            await buildScreens(env, {
-              "screens/home.tsx": "export default () => null;",
-            })
+            await buildScreens(
+              { ...env, SANDBOX_HOST: undefined },
+              {
+                "screens/home.tsx": "export default () => null;",
+              }
+            )
         )
       );
     }
     if (pathname === "/resolve") {
       return new Response(
-        await refusal(async () => await resolveDependencies(env, builder, {}))
+        await refusal(
+          async () =>
+            await resolveDependencies(
+              { ...env, SANDBOX_HOST: undefined },
+              builder,
+              {}
+            )
+        )
       );
     }
     if (pathname === "/build") {
       return new Response(
-        await refusal(async () => await buildDependencies(env, builder, {}))
+        await refusal(
+          async () =>
+            await buildDependencies(
+              { ...env, SANDBOX_HOST: undefined },
+              builder,
+              {}
+            )
+        )
       );
     }
     return new Response("core answers");

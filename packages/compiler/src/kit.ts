@@ -90,8 +90,35 @@ export const compilerLock = (assets: string): string =>
 /** The name the compiler's isolate has `Kit` under, as a JSON module. */
 export const kitModule = "kit.json";
 
-/** What screens import to reach their App's server. */
+/**
+ * What screens import to reach their App's server: the legacy hooks
+ * (`callServer`, `useLive`, string `useWorkflow`), which GRA-343 removes.
+ */
 export const screenHooks = "@grasp-os/sdk/screen";
+
+/**
+ * The React SDK screens use (spec 10.1, 10.7.1): the platform's session
+ * client and the App's queries, mutations and actions through `#grasp`.
+ */
+export const screenSdk = "@grasp-os/sdk/react";
+
+/**
+ * The SDK's root module, whose types the generated `#grasp` references
+ * import (`OperationReference`, `Id`, …). Screens get its types, never
+ * its code: the type check reads it, the kit doesn't ship it.
+ */
+export const sdkRoot = "@grasp-os/sdk";
+
+/**
+ * The references the host generates for an App's server code, which its
+ * screens import as `#grasp` (spec 8): `api`, `screens` and the browser
+ * resources, data only. A build has them when the host put them among
+ * its files (core does for a version of spec 8's layout).
+ */
+export const screenReferences = {
+  specifier: "#grasp",
+  path: ".grasp/references.ts",
+} as const;
 
 /**
  * What renders a screen in its frame. App code doesn't import it, but every
