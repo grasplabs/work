@@ -38,6 +38,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
+import { withScreenReferences } from "./screen-references.ts";
 import {
   deliveryOf,
   deliveryOpen,
@@ -181,7 +182,12 @@ const openScreen = async (
   if (version === null) {
     throw appErrors.create("app.not_running");
   }
-  const files = await versionFiles(env, id, version);
+  const files = await withScreenReferences(
+    env,
+    id,
+    version,
+    await versionFiles(env, id, version)
+  );
   const built = await screenCode(env, files, screen, version);
   const { artifact } = built;
   // What it builds to now, refused or not: a fact about the version, for

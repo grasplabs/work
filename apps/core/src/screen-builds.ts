@@ -52,7 +52,10 @@ export const recordBuilds = async (
  * Builds every screen of `app`'s `version` from `files` and records what
  * each builds to. Never throws: a version whose screens don't build has
  * nothing to approve, and one that can't be recorded now is when it is
- * next opened or reviewed.
+ * next opened or reviewed. That includes screens that import the App's
+ * references (`#grasp`): generating them inspects the App's server code
+ * (screen-references.ts), which a save doesn't wait for, so they build,
+ * and are recorded, once the version is reviewed or opened.
  */
 export const recordVersionBuilds = async (
   env: Env,
