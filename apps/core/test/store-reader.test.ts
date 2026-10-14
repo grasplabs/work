@@ -3,6 +3,7 @@ import type { Id } from "@grasp-os/sdk";
 import { databaseReader } from "@grasp-os/sdk/database";
 import { manifestText, schemaManifest } from "@grasp-os/sdk/host";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
+import { commitMaxGuards } from "@grasp-os/shared/stores";
 import type { Commit, StoreFields } from "@grasp-os/shared/stores";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -275,6 +276,43 @@ describe("a reader's guards", () => {
     expect(reader.guards()).toStrictEqual([
       { table: "notes", id, expectedRevision: 1 },
     ]);
+  });
+
+  it("refuse a mutation's guard past what its commit holds, at the read, and leave a plain query's uncapped", async () => {
+    const fixture = await storeWithNotes();
+    const ids = [
+      ...(await commit(
+        fixture,
+        Array.from({ length: commitMaxGuards }, (_, index) => ({
+          op: "insert" as const,
+          id: newRecordId(),
+          table: "notes",
+          fields: { title: `n${index}` },
+        }))
+      )),
+      await insertNote(fixture, { title: "one more" }),
+    ];
+    const assertAll = async (reader: StoreReader) => {
+      const db = dbOver(reader);
+      for (const id of ids) {
+        // oxlint-disable-next-line no-await-in-loop -- one read after the other
+        await db.get("notes", noteId(id), { expectedRevision: 1 });
+      }
+      return reader.guards().length;
+    };
+    // A mutation's reader stages writes (none yet); a query's doesn't.
+    const mutation = new StoreReader(fixture.store, fixture.scope, () => {});
+    const query = new StoreReader(fixture.store, fixture.scope);
+
+    expect({
+      mutation: await failureOf(assertAll(mutation)),
+      mutationGuards: mutation.guards().length,
+      query: await assertAll(query),
+    }).toStrictEqual({
+      mutation: { code: "data.guard_limit", details: undefined },
+      mutationGuards: commitMaxGuards,
+      query: commitMaxGuards + 1,
+    });
   });
 });
 

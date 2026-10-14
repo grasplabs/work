@@ -426,7 +426,8 @@ const runHostCase = async (env: StandInEnv, name: string) => {
   const runHost: RunHostCalls = {
     do: async (_name, _options, fn) => {
       try {
-        const attempt = new AttemptHost(calls, holds);
+        // Every call admitted: a lineage's host calls aren't this test's.
+        const attempt = new AttemptHost(calls, holds, holds);
         return { ok: true, value: await fn(attempt) };
       } catch (error) {
         stepErrors.push(error instanceof Error ? error.name : "?");
@@ -564,7 +565,11 @@ const attemptLiveness = async () => {
         await Promise.resolve({ ok: true, value: new Uint8Array() }),
     },
     async (call: string) =>
-      await Promise.resolve(new Map<string, Settled<never>>().get(call))
+      await Promise.resolve(new Map<string, Settled<never>>().get(call)),
+    // Every call admitted: a lineage's host calls aren't this test's.
+    async () => {
+      await Promise.resolve();
+    }
   );
   const runHost: RunHostCalls = {
     do: async (_name, _options, fn) => ({ ok: true, value: await fn(attempt) }),

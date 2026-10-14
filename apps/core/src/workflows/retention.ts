@@ -5,6 +5,9 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
+  runLineageChildren,
+  runMailCalls,
+  runMailStamps,
   runLineageAttempts,
   runLineages,
   workflowDecisions,
@@ -166,7 +169,8 @@ const unkeyed = (step: SQL): SQL =>
  * that never returned: its run has ended) is settled first, as an
  * admission would, charging its lineage up to its deadline (now, at the
  * latest), so the lineage's row, which stays, neither keeps holding it nor
- * loses what it used. Every receipt of the runs goes. Run before its runs
+ * loses what it used. Every receipt of the runs goes, and every token of
+ * their mail. Run before its runs
  * are marked, so a sweep that stops before marking them leaves them due,
  * and none of a marked run is left.
  */
@@ -196,6 +200,21 @@ const receiptsPruned = (
       ),
     db.update(held).set({ usedMs: used, settledAt: now }).where(lapsed),
     db.delete(held).where(inArray(held.runId, runs)),
+    // The tokens of the runs' mail (mail-stamps.ts): mail to one this
+    // late is mail to an address no one receives at.
+    db.delete(runMailStamps).where(inArray(runMailStamps.runId, runs)),
+    db.delete(runMailCalls).where(inArray(runMailCalls.runId, runs)),
+    // The children their keys admitted (quotas.ts): what a delivery this
+    // late starts is admitted afresh, if its lineage has room.
+    db.delete(runLineageChildren).where(
+      inArray(
+        runLineageChildren.triggerKey,
+        db
+          .select({ key: sql<string>`${workflowRuns.triggerKey}` })
+          .from(workflowRuns)
+          .where(inArray(workflowRuns.id, runs))
+      )
+    ),
   ] as const;
 };
 

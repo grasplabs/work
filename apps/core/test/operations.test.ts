@@ -15,7 +15,9 @@ import { serverModule } from "@grasp-os/sdk/server";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
+import { commitMaxWrites } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -154,6 +156,29 @@ const peek = mutation({
  * Stages `inserts` notes with bodies of `size` characters, then reads the
  * table `reads` times, for the bounds on what one mutation stages and reads.
  */
+/** Reads one more time than an invocation may, catching it, then inserts. */
+const readPastThenWrite = mutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    let refused = 0;
+    for (
+      let index = 0;
+      index <= platformLimits.invocationHostCalls;
+      index += 1
+    ) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one read after the other
+        await ctx.db.query("notes").first();
+      } catch {
+        refused += 1;
+      }
+    }
+    await ctx.db.insert("notes", { title: "after", body: "" });
+    return refused;
+  },
+});
+
 const stress = mutation({
   args: {
     inserts: v.number().integer().min(0).max(100),
@@ -306,19 +331,6 @@ const assertMany = mutation({
   },
 });
 
-/** Reads each of `ids` asserting it is at revision 1, as a query. */
-const assertManyInQuery = query({
-  args: { ids: v.array(v.id("notes")).max(200) },
-  returns: v.number(),
-  handler: async (ctx, args) => {
-    for (const id of args.ids) {
-      // oxlint-disable-next-line no-await-in-loop -- one read after the other
-      await ctx.db.get("notes", id, { expectedRevision: 1 });
-    }
-    return args.ids.length;
-  },
-});
-
 const secret = internalQuery({
   args: {},
   returns: v.string(),
@@ -340,6 +352,7 @@ const notesApp = app({
       insertOnly,
       peek,
       stress,
+      readPastThenWrite,
       insertThenGuard,
       echo,
       repeated,
@@ -349,7 +362,6 @@ const notesApp = app({
       readTimes,
       floatingBadWrite,
       assertMany,
-      assertManyInQuery,
     },
   },
   internalOperations: { secret },
@@ -1244,7 +1256,9 @@ describe("audit follow-ups", () => {
     });
   });
 
-  it("refuses the read that asserts one revision more than a commit holds", async () => {
+  // The guard limit itself is held at the read (store-reader.test.ts): a
+  // mutation's host calls end before a commit's guards would.
+  it("lets a mutation assert as many revisions as a commit holds, and its host calls end there", async () => {
     const fixture = await notes();
     const { owner } = fixture;
     const ids = await Promise.all(
@@ -1262,18 +1276,10 @@ describe("audit follow-ups", () => {
           ids: ids.slice(0, 100),
         })
       ),
-      past: failureOf(
+      past: codeOf(
         await call(fixture, owner, "mutation", "notes.assertMany", { ids })
       ),
-    }).toStrictEqual({
-      within: "ok",
-      past: {
-        code: "data.guard_limit",
-        message: "A mutation asserts the revisions of at most 100 records.",
-        category: "contract",
-        retryable: false,
-      },
-    });
+    }).toStrictEqual({ within: "ok", past: "operation.call_limit" });
   });
 });
 
@@ -1303,7 +1309,7 @@ describe("bounds on one mutation", () => {
     });
   });
 
-  it("caps the reads of one call, and the staged bytes they send the store", async () => {
+  it("caps the host calls of one invocation, counting each read, and the staged bytes reads send the store", async () => {
     const fixture = await notes();
     const { owner } = fixture;
     const run = async (inserts: number, reads: number) =>
@@ -1314,13 +1320,28 @@ describe("bounds on one mutation", () => {
           reads,
         })
       );
+    // A read is one host call of its invocation: one past them is refused.
+    // Staged writes aren't: a commit's worth of them fits beside reads.
     expect({
-      manyReads: await run(0, 257),
-      allowedReads: await run(0, 256),
+      manyReads: await run(0, platformLimits.invocationHostCalls + 1),
+      allowedReads: await run(0, platformLimits.invocationHostCalls),
+      wholeCommit: codeOf(
+        await call(fixture, owner, "mutation", "notes.stress", {
+          inserts: commitMaxWrites,
+          size: 1,
+          reads: 1,
+        })
+      ),
       heavyReads: await run(6, 40),
+      // The refused read caught, its write still stages and commits.
+      writeAfter: valueOf(
+        await call(fixture, owner, "mutation", "notes.readPastThenWrite", {})
+      ),
     }).toStrictEqual({
-      manyReads: "operation.read_limit",
+      writeAfter: 1,
+      manyReads: "operation.call_limit",
       allowedReads: "ok",
+      wholeCommit: "ok",
       heavyReads: "operation.read_limit",
     });
   });
@@ -1674,28 +1695,6 @@ describe("App code misusing its channel", () => {
         retryable: false,
       },
     });
-  });
-
-  it("keeps the guard limit to mutations: a plain query may assert as many revisions as it reads", async () => {
-    const fixture = await notes();
-    const { owner } = fixture;
-    const ids = await Promise.all(
-      Array.from({ length: 101 }, async (_, index) =>
-        valueOf(
-          await call(fixture, owner, "mutation", "notes.create", {
-            title: `q${index}`,
-          })
-        )
-      )
-    );
-    expect({
-      query: valueOf(
-        await call(fixture, owner, "query", "notes.assertManyInQuery", { ids })
-      ),
-      mutation: codeOf(
-        await call(fixture, owner, "mutation", "notes.assertMany", { ids })
-      ),
-    }).toStrictEqual({ query: 101, mutation: "data.guard_limit" });
   });
 
   it("fails a mutation whose write was refused at the channel, before staging", async () => {

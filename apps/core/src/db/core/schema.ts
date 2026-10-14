@@ -1085,7 +1085,8 @@ export const workflowRuns = sqliteTable(
  * that changes them only if the work fits, so admissions racing each
  * other never pass a limit, and nothing a retry, a restart, a child or a
  * branch does starts them afresh: they only grow (but for `active_held_ms`,
- * which moves into `active_used_ms` as attempts settle).
+ * which moves into `active_used_ms` as attempts settle, and `host_calls`,
+ * of which an attempt gives back what it reserved and didn't make).
  *
  * - `created_at`: the root's start, which the lineage's age counts from.
  *   A wait doesn't move it, nor does a child.
@@ -1096,6 +1097,8 @@ export const workflowRuns = sqliteTable(
  *   allowance until it settles (`run_lineage_attempts`).
  * - `policy_generation`: the quota policy's generation at the latest
  *   admission.
+ * - `host_calls`: host calls its attempts reserved, in blocks; once an
+ *   attempt settles, only those it made.
  */
 export const runLineages = sqliteTable("run_lineages", {
   rootRunId: text("root_run_id")
@@ -1106,6 +1109,7 @@ export const runLineages = sqliteTable("run_lineages", {
   activeUsedMs: integer("active_used_ms").notNull().default(0),
   activeHeldMs: integer("active_held_ms").notNull().default(0),
   policyGeneration: integer("policy_generation").notNull().default(0),
+  hostCalls: integer("host_calls").notNull().default(0),
 });
 
 /**
@@ -1139,6 +1143,11 @@ export const runLineageAttempts = sqliteTable(
     admittedAt: timestamp("admitted_at").notNull(),
     settledAt: timestamp("settled_at"),
     policyGeneration: integer("policy_generation").notNull(),
+    /**
+     * Host calls the attempt reserved of its lineage while it runs, then,
+     * once it settled, those it made; all it reserved if it never did.
+     */
+    hostCalls: integer("host_calls").notNull().default(0),
   },
   (table) => [
     primaryKey({
@@ -1152,6 +1161,85 @@ export const runLineageAttempts = sqliteTable(
       .where(sql`settled_at IS NULL`),
   ]
 );
+
+/**
+ * The token core put on each address of the deployment's mail domain that
+ * a workflow run's step mailed through a native mail connector
+ * (src/workflows/mail-stamps.ts): `local+<token>@domain`. Mail back to
+ * the tokened address starts its runs under the run, in its lineage, only
+ * when it goes to `address` (the address the run mailed, without the
+ * token) and comes from one of `senders` (the mailbox the run sent from,
+ * and its connection's account). `origin` is the SHA-256 of the step's
+ * key, the connection and the address, so the same call made again under
+ * its key carries the same token. Removed with its run's details
+ * (src/workflows/retention.ts).
+ */
+export const runMailStamps = sqliteTable(
+  "run_mail_stamps",
+  {
+    token: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    origin: text().notNull(),
+    address: text().notNull(),
+    senders: text({ mode: "json" }).$type<string[]>().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("run_mail_stamps_origin_idx").on(table.origin),
+    index("run_mail_stamps_run_idx").on(table.runId),
+  ]
+);
+
+/**
+ * What each mail call of a workflow run's step was sent with
+ * (src/workflows/mail-stamps.ts): its recipients that carry a token, as
+ * they were and as they went, none for a call that stamped nothing. Keyed
+ * by the SHA-256 of the step's key, the connection, the action and the
+ * call's input, so the same call made again under its key sends what it
+ * sent the first time, whatever core learned since. Removed with its
+ * run's details (src/workflows/retention.ts).
+ */
+export const runMailCalls = sqliteTable(
+  "run_mail_calls",
+  {
+    origin: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    replaced: text({ mode: "json" }).$type<Record<string, string>>().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("run_mail_calls_run_idx").on(table.runId)]
+);
+
+/**
+ * The children each run lineage admitted by a trigger's key
+ * (src/workflows/quotas.ts, `admitChild`): a delivery of the same message
+ * admitted again, at once or later, is the same child, in the same place,
+ * and takes no other slot of its lineage. Removed with its run's details
+ * (src/workflows/retention.ts).
+ */
+export const runLineageChildren = sqliteTable("run_lineage_children", {
+  triggerKey: text("trigger_key").primaryKey(),
+  rootRunId: text("root_run_id")
+    .notNull()
+    .references(() => runLineages.rootRunId),
+  depth: integer().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
+ * The domains Email Routing delivered mail for (src/workflows/
+ * inbound-email.ts): the deployment's mail domain, learned from the
+ * envelope recipient Email Routing sets, which no sender can choose. A
+ * run's mail to an address on one is stamped (`run_mail_stamps`).
+ */
+export const mailDomains = sqliteTable("mail_domains", {
+  domain: text().primaryKey(),
+  firstSeenAt: timestamp("first_seen_at").notNull(),
+});
 
 /**
  * Each quota policy generation core has applied (src/workflows/quotas.ts):

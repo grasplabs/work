@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "d511454d-c6ed-4186-a2a9-37b513dbeaa3",
+  "id": "ee532a08-a0e3-4221-a952-24df6ec53805",
   "prevId": "0c7d109f-7757-4b79-9536-4985aca30def",
   "tables": {
     "accounts": {
@@ -2354,6 +2354,30 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "mail_domains": {
+      "name": "mail_domains",
+      "columns": {
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "member_removals": {
       "name": "member_removals",
       "columns": {
@@ -2704,13 +2728,6 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "time_zone": {
-          "name": "time_zone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         }
       },
@@ -3269,6 +3286,58 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "run_lineage_children": {
+      "name": "run_lineage_children",
+      "columns": {
+        "trigger_key": {
+          "name": "trigger_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "root_run_id": {
+          "name": "root_run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "depth": {
+          "name": "depth",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "run_lineage_children_root_run_id_run_lineages_root_run_id_fk": {
+          "name": "run_lineage_children_root_run_id_run_lineages_root_run_id_fk",
+          "tableFrom": "run_lineage_children",
+          "tableTo": "run_lineages",
+          "columnsFrom": [
+            "root_run_id"
+          ],
+          "columnsTo": [
+            "root_run_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "run_lineages": {
       "name": "run_lineages",
       "columns": {
@@ -3327,6 +3396,147 @@
           "tableTo": "workflow_runs",
           "columnsFrom": [
             "root_run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "run_mail_calls": {
+      "name": "run_mail_calls",
+      "columns": {
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "replaced": {
+          "name": "replaced",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "run_mail_calls_run_idx": {
+          "name": "run_mail_calls_run_idx",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "run_mail_calls_run_id_workflow_runs_id_fk": {
+          "name": "run_mail_calls_run_id_workflow_runs_id_fk",
+          "tableFrom": "run_mail_calls",
+          "tableTo": "workflow_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "run_mail_stamps": {
+      "name": "run_mail_stamps",
+      "columns": {
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "origin": {
+          "name": "origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "address": {
+          "name": "address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "senders": {
+          "name": "senders",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "run_mail_stamps_origin_idx": {
+          "name": "run_mail_stamps_origin_idx",
+          "columns": [
+            "origin"
+          ],
+          "isUnique": true
+        },
+        "run_mail_stamps_run_idx": {
+          "name": "run_mail_stamps_run_idx",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "run_mail_stamps_run_id_workflow_runs_id_fk": {
+          "name": "run_mail_stamps_run_id_workflow_runs_id_fk",
+          "tableFrom": "run_mail_stamps",
+          "tableTo": "workflow_runs",
+          "columnsFrom": [
+            "run_id"
           ],
           "columnsTo": [
             "id"
