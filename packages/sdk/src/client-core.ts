@@ -11,6 +11,7 @@ import {
   readAnswer,
   refusedBeforeCallCodes,
   readRejection,
+  settlesSubmission,
 } from "./client-error.ts";
 import type { Settled } from "./client-error.ts";
 import { PortableTransport } from "./client-portable.ts";
@@ -603,23 +604,6 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
   settled.kind === "value" ||
   (isAction && !ranNothing(settled, isAction)) ||
   (settled.kind === "failed" && settled.error.code === "data.conflict");
-
-/**
- * Whether `failure`, what `settled` came to, tells a submission's outcome:
- * the host's own definite answer about it. Not a refusal of the person
- * (a sign-out, someone else signed in, refused unsent), nor one that ran
- * nothing: the outcome a key was left unknown under stays unknown, and the
- * key stays the person's it was sent for.
- */
-const settlesOutcome = (
-  settled: Settled,
-  failure: GraspError,
-  isAction: boolean
-): boolean =>
-  settled.kind === "failed" &&
-  settled.error === failure &&
-  failure.category !== "authorization" &&
-  !ranNothing(settled, isAction);
 
 /** What a submission does next after `settled` (see `#send`). */
 const submissionVerdict = (
@@ -1285,7 +1269,7 @@ export class GraspClient {
         if (verdict.next === "fail") {
           if (verdict.error.category === "uncertain") {
             this.#uncertainKeys.set(key, bound.generation ?? this.#generation);
-          } else if (settlesOutcome(settled, verdict.error, isAction)) {
+          } else if (settlesSubmission(verdict.error)) {
             this.#uncertainKeys.delete(key);
           }
           throw verdict.error;

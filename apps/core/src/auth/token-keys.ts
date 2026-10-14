@@ -40,6 +40,9 @@ const keysKeptMs = 60_000;
  */
 const unknownKeyRereadMs = 5000;
 
+/** How many unheld keys an isolate remembers checking unread: a bound on forged ones. */
+const unreadKeysMax = 1024;
+
 /** A key row, by the ID a token's header names it with (`kid`). */
 interface IdentifiedKeyRow extends KeyRow {
   id: string;
@@ -71,6 +74,11 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
   let version = 0;
   /** How many reads began: the one under way is the latest. */
   let begunReads = 0;
+  /**
+   * The keys tokens named that the held copy lacks, checked with it unread
+   * since it was read: each may be a key made since in another isolate.
+   */
+  let unread = new Set<string>();
   /** Whether a token naming `kid` is checked with what is held, unread. */
   const fresh = (kid: string | undefined, now: number): boolean => {
     if (held === undefined) {
@@ -93,6 +101,7 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
           const keys = await read();
           if (begun === version) {
             held = { keys, readAt: now };
+            unread = new Set();
           }
           return keys;
         } finally {
@@ -112,25 +121,34 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
       now: number
     ): Promise<Key[]> => {
       if (!("sign" in use) && held !== undefined && fresh(use.kid, now)) {
+        const { kid } = use;
+        if (
+          kid !== undefined &&
+          unread.size < unreadKeysMax &&
+          !held.keys.some(({ id }) => id === kid)
+        ) {
+          unread.add(kid);
+        }
         return liveKeys(held.keys, now);
       }
       return liveKeys(await readOnce(read, now), now);
     },
     /**
-     * Whether a token naming `kid` was refused only because its key is one
-     * this isolate doesn't hold yet and won't read for a few seconds: a
-     * key another isolate made since. Its holder is told to try again
-     * (`auth.token_unavailable`), not to sign in.
+     * Whether a token naming `kid` was checked with the held copy, unread,
+     * though the copy lacks its key: one another isolate may have made
+     * since. Its holder is told to try again (`auth.token_unavailable`),
+     * not to sign in. A key a fresh read didn't find is refused outright.
      */
     pending: (kid: string | undefined, now: number): boolean =>
       kid !== undefined &&
       held !== undefined &&
-      !held.keys.some(({ id }) => id === kid) &&
-      fresh(kid, now),
+      now - held.readAt < keysKeptMs &&
+      unread.has(kid),
     /** Drops the held copy: a key was made, or removed. */
     forget: (): void => {
       held = undefined;
       reading = undefined;
+      unread = new Set();
       version += 1;
     },
   };

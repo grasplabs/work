@@ -21,7 +21,7 @@ import {
   detailIssues,
   GraspError,
   issueDetails,
-  nothingRanCodes,
+  settlesSubmission,
 } from "./client-error.ts";
 import type { ArgsOf, ReturnOf } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -781,14 +781,15 @@ export class FormBinding {
       this.#set({ phase: "uncertain", failure: failureOf(error) });
       return error;
     }
-    // A resend refused before it ran (a sign-out, the request budget, the
-    // host without a token) leaves its outcome as unknown as it was: kept,
-    // key and all, so the next submit sends it again rather than anew. Not
-    // once someone else signed in: then it was the person's before.
+    // A resend that may not have run (a sign-out, the request budget, a
+    // busy sandbox) leaves its outcome as unknown as it was: kept, key and
+    // all, so the next submit sends it again rather than anew, by the same
+    // rule the session client keeps the key's person by. Not once someone
+    // else signed in: then it was the person's before.
     if (
       submission.key !== undefined &&
       error.code !== "auth.principal_changed" &&
-      (error.category === "authorization" || nothingRanCodes.has(error.code))
+      !settlesSubmission(error)
     ) {
       this.#set({ phase: "uncertain", failure: failureOf(error) });
       return error;

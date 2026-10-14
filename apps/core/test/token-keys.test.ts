@@ -50,21 +50,33 @@ describe("an isolate's token keys", () => {
     await ring.keys(keys.read, { kid: "one" }, now);
     keys.add("two");
     const soon = await ring.keys(keys.read, { kid: "two" }, now + 1000);
+    // Checked with the copy unread: maybe made since, so try again.
     const pending = ring.pending("two", now + 1000);
     const later = await ring.keys(keys.read, { kid: "two" }, now + 5000);
-    await ring.keys(keys.read, { kid: "made-up" }, now + 6000);
-    await ring.keys(keys.read, { kid: undefined }, now + 7000);
-    await ring.keys(keys.read, { kid: undefined }, now + 9000);
+    const nobodys = await ring.keys(
+      keys.read,
+      { kid: "nobody's" },
+      now + 10_000
+    );
+    // A fresh read didn't find it: refused outright.
+    const refused = ring.pending("nobody's", now + 10_000);
+    await ring.keys(keys.read, { kid: "made-up" }, now + 11_000);
+    await ring.keys(keys.read, { kid: undefined }, now + 12_000);
+    await ring.keys(keys.read, { kid: undefined }, now + 14_000);
     expect({
       soon: idsOf(soon),
       pending,
       later: idsOf(later),
+      nobodys: idsOf(nobodys),
+      refused,
       reads: keys.reads(),
     }).toStrictEqual({
       soon: ["one"],
       pending: true,
       later: ["one", "two"],
-      reads: 2,
+      nobodys: ["one", "two"],
+      refused: false,
+      reads: 3,
     });
   });
 

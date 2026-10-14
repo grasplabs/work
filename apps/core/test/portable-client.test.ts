@@ -694,15 +694,32 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
       }
     }
     // A genuine token verifies all the same, with the keys held.
-    statuses.push(await statusOf(listWith(notes, token, isolate.coreEnv)));
+    const genuine = await statusOf(listWith(notes, token, isolate.coreEnv));
+    const readsHeld = isolate.reads();
+    // Once a read may be made again, a key it doesn't find is refused.
+    vi.setSystemTime(Date.now() + 5000);
+    const afterRead = await statusOf(
+      listWith(
+        notes,
+        `${headerOf({ alg: "EdDSA", kid: "made-up-0" })}.${claims}.c2lnbmVk`,
+        isolate.coreEnv
+      )
+    );
     expect({
-      // Refused, or told to try again for a key it may not hold yet.
-      refused: statuses
-        .slice(0, -1)
-        .every((status) => status === 401 || status === 503),
-      genuine: statuses.at(-1),
+      statuses,
+      genuine,
+      readsHeld,
+      afterRead,
       reads: isolate.reads(),
-    }).toStrictEqual({ refused: true, genuine: 200, reads: 1 });
+    }).toStrictEqual({
+      // Unsigned: refused. A key the held copy lacks, checked unread: try
+      // again. A key that can't be read: refused.
+      statuses: Array.from({ length: 10 }, () => [401, 503, 401, 401]).flat(),
+      genuine: 200,
+      readsHeld: 1,
+      afterRead: 401,
+      reads: 2,
+    });
   });
 
   it("tells a token's holder to try again, not to sign in, when its key was made seconds ago in another isolate", async () => {

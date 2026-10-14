@@ -235,6 +235,54 @@ describe("a form whose submission's outcome is unknown", () => {
     });
   });
 
+  it.each([
+    "operation.sandbox_busy",
+    "operation.sandbox_unavailable",
+    "mutation.concurrent_change",
+    "submission.superseded",
+  ])(
+    "never sends it as whoever signs in after a resend refused with %s",
+    async (code) => {
+      let signedOut = false;
+      const { client, sent } = host(({ contractId }) => {
+        if (contractId === "notes.get") {
+          return signedOut
+            ? { refused: "auth.unauthenticated" }
+            : { value: null };
+        }
+        if (sent.length === 1) {
+          return "lost";
+        }
+        return sent.filter((call) => call.contractId === "notes.tally")
+          .length === 2
+          ? { failed: code, category: "operational" }
+          : { value: 3 };
+      });
+      const { binding } = formOf(client, api.notes.tally, {
+        defaultValues: {},
+      });
+      await settle(binding.submit());
+      // The resend may not have run: the form keeps it, key and all.
+      await settle(binding.submit());
+      const kept = binding.status().phase;
+      // A's session ends, and B signs in and submits.
+      signedOut = true;
+      await settle(client.query(api.notes.get, { id: noteId }));
+      signedOut = false;
+      const refused = await settle(binding.submit());
+      expect({
+        kept,
+        refused,
+        actions: sent.filter((call) => call.contractId === "notes.tally")
+          .length,
+      }).toMatchObject({
+        kept: "uncertain",
+        refused: { rejected: { code: "auth.principal_changed" } },
+        actions: 2,
+      });
+    }
+  );
+
   it("sends it again under its key after a resend refused before it ran, never anew", async () => {
     const { client, sent } = host(() => {
       if (sent.length === 1) {

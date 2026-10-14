@@ -219,6 +219,22 @@ export const nothingRanCodes: ReadonlySet<string> = new Set([
   "submission.superseded",
 ]);
 
+/**
+ * Whether `failure`, what a call of a submission came to, makes the
+ * outcome of a key left unknown known: the host's own answer (it carries
+ * a request ID) that the call ran and failed. Anything that may mean
+ * nothing ran (a refusal of the person or the page, one the client made
+ * itself, a busy or unavailable sandbox, a change superseded) leaves it as
+ * unknown as it was. The session client forgets whose such a key is, and a
+ * form gives up the submission it keeps, only on this, so neither ever
+ * sends it again for someone else.
+ */
+export const settlesSubmission = (failure: GraspError): boolean =>
+  failure.requestId !== null &&
+  failure.category !== "authorization" &&
+  failure.category !== "uncertain" &&
+  !nothingRanCodes.has(failure.code);
+
 /** Refusals sent before a call reached the App's code: nothing of it ran. */
 export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([
   "screen.rate_limited",
