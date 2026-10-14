@@ -19,6 +19,7 @@ import {
   sandboxCallIdHeader,
   sandboxCpuHeader,
   sandboxDeadlineHeader,
+  sandboxMemoryHeader,
   sandboxOwnerHeader,
   sandboxParentHeader,
   sandboxWaitHeader,
@@ -59,10 +60,41 @@ export type SessionArgument =
   | { readonly value: unknown }
   | { readonly capability: SessionCapability };
 
+/**
+ * A module of the release's own platform code (the screen compiler, the
+ * package builder, and what they load), as its bytes: JavaScript, a JSON
+ * module or a WebAssembly module, which the sandbox host reads a chunk at
+ * a time (`platformModules`).
+ */
+export interface PlatformModule {
+  readonly type: "js" | "json" | "wasm";
+  readonly bytes: Uint8Array;
+}
+
 /** One call in a session. */
 export interface SessionCall {
   readonly mainModule: string;
   readonly modules: Readonly<Record<string, string>>;
+  /**
+   * Modules too large for the call's message, or of another type than
+   * JavaScript: the release's platform code, never an App's. The sandbox
+   * host reads each through a reader core passes with the call, a chunk at
+   * a time, in order and once (`inOrderReader`), before it loads the
+   * isolate.
+   */
+  readonly platformModules?: Readonly<Record<string, PlatformModule>>;
+  /**
+   * Whether the isolate runs with `nodejs_compat`, which the screen
+   * compiler's React Compiler needs: core's own platform code only. The
+   * sandbox host adds that flag and no other.
+   */
+  readonly nodejsCompat?: boolean;
+  /**
+   * The resident memory the call's process may use, in MiB, where core's
+   * platform code needs more than App code gets: the supervisor holds it
+   * to its most. Never set for App code.
+   */
+  readonly memoryMib?: number;
   readonly entrypoint: string;
   readonly method: string;
   readonly args: readonly SessionArgument[];
@@ -88,6 +120,40 @@ export interface SessionCall {
    */
   readonly lingerMs?: number;
 }
+
+/**
+ * How much the sandbox host reads at a time of what a session hands it in
+ * chunks: well within a session's message once Cap'n Web has encoded it.
+ */
+export const sessionChunkBytes = 1024 * 1024;
+
+/**
+ * A reader of `parts`' bytes, for the sandbox host to call as
+ * `read(name, offset)`: a chunk at a time, the parts in their order and
+ * each from where its last chunk ended, never again. So a session reads
+ * at most as many chunks as the parts make, rounded up, and nothing it
+ * wasn't handed.
+ */
+export const inOrderReader = (
+  parts: readonly (readonly [string, Uint8Array])[]
+): ((name: unknown, offset: unknown) => Uint8Array) => {
+  let index = 0;
+  let next = 0;
+  return (name, offset) => {
+    const part = parts[index];
+    if (part === undefined || name !== part[0] || offset !== next) {
+      throw new RangeError("Each part is read once, in order.");
+    }
+    const [, bytes] = part;
+    const chunk = bytes.slice(next, next + sessionChunkBytes);
+    next += chunk.byteLength;
+    if (next >= bytes.byteLength) {
+      index += 1;
+      next = 0;
+    }
+    return chunk;
+  };
+};
 
 /** A call made in a session already open, in its process. */
 export type NestedCall = Pick<
@@ -428,6 +494,9 @@ const openSession = async (
         upgrade: "websocket",
         [sandboxDeadlineHeader]: String(call.wallMs),
         [sandboxCpuHeader]: String(call.cpuMs),
+        ...(call.memoryMib === undefined
+          ? {}
+          : { [sandboxMemoryHeader]: String(call.memoryMib) }),
         [sandboxWaitHeader]: String(sandboxWaitMs),
         [sandboxCallIdHeader]: id,
         ...(call.parent === undefined
@@ -668,7 +737,10 @@ export const runInSession = async (
   // A call in the session: each capability by a name of the call's own,
   // its forwarder live while `isLive` says; the isolate never sees these,
   // only what the sandbox host makes of them.
-  const callIn = (given: NestedCall, isCallLive: () => boolean): unknown => {
+  const callIn = (
+    given: NestedCall & Pick<SessionCall, "platformModules" | "nodejsCompat">,
+    isCallLive: () => boolean
+  ): unknown => {
     const specs: Record<string, { methods: string[] } | { function: true }> =
       {};
     const stubs: Record<string, object> = {};
@@ -683,6 +755,27 @@ export const runInSession = async (
     const args = given.args.map((arg) =>
       "capability" in arg ? { capability: named(arg.capability) } : arg
     );
+    // Platform modules go as their sizes, read through a reader of their
+    // own in their order: the sandbox host takes no more than they are.
+    const platform = Object.entries(given.platformModules ?? {});
+    const chunked =
+      platform.length === 0
+        ? {}
+        : {
+            chunkedModules: Object.fromEntries(
+              platform.map(([name, { type, bytes }]) => [
+                name,
+                { type, size: bytes.byteLength },
+              ])
+            ),
+            moduleReader: named(
+              functionCapability(
+                inOrderReader(
+                  platform.map(([name, { bytes }]) => [name, bytes] as const)
+                )
+              )
+            ),
+          };
     const remote: unknown = session.getRemoteMain();
     const run: unknown =
       typeof remote === "object" || typeof remote === "function"
@@ -699,6 +792,8 @@ export const runInSession = async (
         method: given.method,
         args,
         capabilities: specs,
+        nodejsCompat: given.nodejsCompat === true,
+        ...chunked,
       },
       stubs,
     ]);

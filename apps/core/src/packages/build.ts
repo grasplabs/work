@@ -1,8 +1,4 @@
-import {
-  compilerVersion,
-  platformPeers,
-  startPackageBuilder,
-} from "@grasp-os/compiler";
+import { compilerVersion, platformPeers } from "@grasp-os/compiler";
 import type { BuildRequest } from "@grasp-os/compiler";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
@@ -53,9 +49,10 @@ import {
 import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
 import type { Admitted } from "../dependencies/requests.ts";
-import { requireBoundedHere } from "../sandboxed.ts";
+import { PlatformBoundError } from "../platform-sandbox.ts";
 import { windowedAccessEnd } from "../screen-frame.ts";
 import { packageArtifactAddress } from "./address.ts";
+import { packageBuilder, requireBuilderBound } from "./builder.ts";
 import { clearBuildCleanup, recordCleanup } from "./cleanup-records.ts";
 import { holdLockFor } from "./locks.ts";
 import { graphOfLock } from "./resolve.ts";
@@ -110,9 +107,6 @@ import { verifiedTarball } from "./tarballs.ts";
 //   missing or corrupt; a target config with no pin, or an earlier
 //   compiler's pin whose bytes are gone (anything new), is refused with
 //   `dependency.retired`.
-
-/** How the runtime says it stopped an isolate over its limits. */
-const overLimit = /exceeded (?:its )?(?:CPU|memory)/iu;
 
 const artifactKey = (hash: string): string => `package-builds/${hash}.json`;
 const filesPrefix = (hash: string): string => `package-builds/${hash}/`;
@@ -616,13 +610,13 @@ const lockedTarballs = async (
  * and the artifact's size.
  */
 const builtArtifact = async (env: Env, request: BuildRequest) => {
-  const builder = await startPackageBuilder(env.LOADER, env.ASSETS);
+  const builder = await packageBuilder(env);
   const started = Date.now();
   let answer: unknown;
   try {
     answer = await builder.build(request);
   } catch (error) {
-    if (error instanceof Error && overLimit.test(error.message)) {
+    if (error instanceof PlatformBoundError) {
       throw packageErrors.create("package.refused", {
         refusals: ["building the packages took more than the builder may"],
       });
@@ -1060,10 +1054,9 @@ export const buildDependencies = async (
   by: Acting,
   input: unknown
 ): Promise<PackageBuild> => {
-  // As in resolveDependencies (resolve.ts): nothing bounds the package
-  // builder on plain workerd yet, so it runs only where
-  // `requireBoundedHere` allows, refused before any tarball is fetched.
-  requireBoundedHere(env, "the package builder");
+  // As in resolveDependencies (resolve.ts): only where the builder is
+  // bounded (builder.ts), refused before any tarball is fetched.
+  requireBuilderBound(env);
   const asked = dependencyErrors.parse(
     "dependency.invalid",
     packageBuildRequestSchema,
