@@ -52,14 +52,16 @@ export const bundle = (out: string, worker: string): string[] => {
 
 /**
  * Serves `worker` with `SANDBOX_HOST` at `socket`, and answers its URL:
- * `bindings` as text bindings, and `files` as text bindings of the files'
- * contents (too large to write into the config itself).
+ * `bindings` as text bindings, `files` as text bindings of the files'
+ * contents (too large to write into the config itself), and `dataFiles`
+ * as data bindings of theirs (bytes that aren't text).
  */
 export const serveStandIn = async (
   worker: string,
   socket: string,
   bindings: Readonly<Record<string, string>> = {},
-  files: Readonly<Record<string, string>> = {}
+  files: Readonly<Record<string, string>> = {},
+  dataFiles: Readonly<Record<string, string>> = {}
 ): Promise<string> => {
   const out = tempDir();
   const modules = bundle(out, worker);
@@ -70,6 +72,10 @@ export const serveStandIn = async (
     ...Object.entries(files).map(([name, file]) => {
       copyFileSync(file, path.join(out, `${name}.txt`));
       return `(name = "${name}", text = embed "${name}.txt")`;
+    }),
+    ...Object.entries(dataFiles).map(([name, file]) => {
+      copyFileSync(file, path.join(out, `${name}.bin`));
+      return `(name = "${name}", data = embed "${name}.bin")`;
     }),
   ];
   const served = await serveOnWorkerd(

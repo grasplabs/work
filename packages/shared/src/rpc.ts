@@ -1,7 +1,11 @@
 import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
 import type { ChatsApi } from "./chat.ts";
-import type { ConnectionsApi, PendingActionsApi } from "./connect.ts";
+import type {
+  ConnectionsApi,
+  PendingActionsApi,
+  UnknownOutcomesApi,
+} from "./connect.ts";
 import type { DashboardApi } from "./dashboard.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
@@ -152,6 +156,11 @@ export interface SessionApi {
    * an App, and from any of them once it read restricted data.
    */
   readonly pendingActions: PendingActionsApi;
+  /**
+   * Side effects sent for the signed-in person whose answer was lost, and
+   * that connect couldn't recover: the person says what became of each.
+   */
+  readonly unknownOutcomes: UnknownOutcomesApi;
   /**
    * Improvement signals from runs and the audit log, computed daily: every
    * one for admins, an App's for its builders.

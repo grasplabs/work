@@ -32,6 +32,63 @@ export interface InspectRequest {
 
 export type { BuildRequest } from "./build.ts";
 
+/** A tarball as the on-prem sandbox host hands it over: its size, not its bytes. */
+export type TarballHeader = Omit<PackageTarball, "tarball"> & { size: number };
+
+/** Reads part `key` from `offset`, a chunk at a time (`inOrderReader` in core). */
+type ReadChunk = (key: string, offset: number) => Promise<unknown>;
+
+/** Writes the next chunk of the artifact's file at `path`. */
+type WriteChunk = (path: string, chunk: Uint8Array) => Promise<unknown>;
+
+/**
+ * How much of a file the builder writes back at a time: well within a
+ * session's message once Cap'n Web has encoded it.
+ */
+const writeChunkBytes = 1024 * 1024;
+
+/** The most tarballs one request may hand over. */
+const maxHeaders = 10_000;
+
+/**
+ * Each tarball `headers` names, read through `read` a chunk at a time,
+ * whole and in order. A chunk that isn't bytes, is empty or runs past the
+ * tarball's size fails the call, as a tarball that doesn't match its
+ * integrity would.
+ */
+const readTarballs = async (
+  headers: readonly TarballHeader[],
+  read: ReadChunk
+): Promise<PackageTarball[]> => {
+  if (headers.length > maxHeaders) {
+    throw new TypeError("The tarballs aren't in the expected shape.");
+  }
+  const tarballs: PackageTarball[] = [];
+  for (const { key, name, version, integrity, size } of headers) {
+    if (!Number.isSafeInteger(size) || size <= 0) {
+      throw new TypeError(`The tarball of ${key} has no size.`);
+    }
+    const tarball = new Uint8Array(size);
+    let offset = 0;
+    while (offset < size) {
+      // In order: each chunk starts where the last one ended.
+      // oxlint-disable-next-line no-await-in-loop
+      const chunk = await read(key, offset);
+      if (
+        !(chunk instanceof Uint8Array) ||
+        chunk.byteLength === 0 ||
+        offset + chunk.byteLength > size
+      ) {
+        throw new TypeError(`The tarball of ${key} didn't arrive as sent.`);
+      }
+      tarball.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    tarballs.push({ key, name, version, integrity, tarball });
+  }
+  return tarballs;
+};
+
 export default class PackageBuilder extends WorkerEntrypoint {
   /**
    * Unpacks and reads each tarball, one after another, without running
@@ -56,5 +113,49 @@ export default class PackageBuilder extends WorkerEntrypoint {
   // oxlint-disable-next-line class-methods-use-this
   async build(request: BuildRequest): Promise<PackageBuildAnswer> {
     return await buildTarget(request, esbuildWasm);
+  }
+
+  /**
+   * `inspect`, with the tarballs read through `read`: on the on-prem
+   * sandbox host, where one message can't carry both this module and a
+   * graph's tarballs (apps/core/src/packages/builder.ts).
+   */
+  async inspectRead(
+    limits: PackageLimits,
+    headers: TarballHeader[],
+    read: ReadChunk
+  ): Promise<PackageInspection[]> {
+    return await this.inspect({
+      limits,
+      packages: await readTarballs(headers, read),
+    });
+  }
+
+  /**
+   * `build`, with the tarballs read through `read` and the artifact's
+   * files written back through `write`, a chunk at a time: what it answers
+   * has no files of its own, as the artifact may be larger than a
+   * message.
+   */
+  async buildRead(
+    request: Omit<BuildRequest, "packages"> & { packages: TarballHeader[] },
+    read: ReadChunk,
+    write: WriteChunk
+  ): Promise<PackageBuildAnswer> {
+    const answer = await this.build({
+      ...request,
+      packages: await readTarballs(request.packages, read),
+    });
+    if (!answer.ok) {
+      return answer;
+    }
+    for (const [path, bytes] of Object.entries(answer.files)) {
+      for (let at = 0; at < bytes.byteLength; at += writeChunkBytes) {
+        // In order: core appends each chunk to the file's last.
+        // oxlint-disable-next-line no-await-in-loop
+        await write(path, bytes.slice(at, at + writeChunkBytes));
+      }
+    }
+    return { ...answer, files: {} };
   }
 }

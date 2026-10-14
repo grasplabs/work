@@ -8,6 +8,7 @@ import type {
 import type { AppId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 
+import { withDraftReferences } from "./draft-references.ts";
 import {
   buildScreens,
   buildServer,
@@ -105,7 +106,13 @@ export const buildOnSave = async (
       "screens",
       source,
       buildFiles,
-      async () => await buildScreens(env, files),
+      // With the references its screens import, generated from these
+      // files themselves: neither a save nor a draft is sealed yet.
+      async () =>
+        await buildScreens(
+          env,
+          await withDraftReferences(env, source.app, source.version, files)
+        ),
       env
     ),
     savedBuild(
