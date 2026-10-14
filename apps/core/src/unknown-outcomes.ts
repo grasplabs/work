@@ -17,6 +17,7 @@ import {
   permissionErrors,
 } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { z } from "zod";
 
 import { signedCall } from "./bindings.ts";
 import { personOf } from "./connections.ts";
@@ -45,7 +46,7 @@ const resolutionCapability = async (
   env: Env,
   identity: Identity,
   { key, resource, origin }: UnknownOutcome,
-  choice: ResolutionChoice
+  resolves: { choice: ResolutionChoice; claimedAt: number }
 ): Promise<string> => {
   // Where it came from isn't known, or an App's call names no version:
   // its permission can't be checked, so it can't be resolved.
@@ -86,7 +87,7 @@ const resolutionCapability = async (
     },
     { action: key.action, idempotencyKey: key.idempotencyKey },
     undefined,
-    choice
+    resolves
   );
   return capability;
 };
@@ -102,11 +103,13 @@ export const resolveUnknownOutcome = async (
   env: Env,
   identity: Identity,
   key: unknown,
-  choice: unknown
+  choice: unknown,
+  claim: unknown
 ): Promise<void> => {
   const parsedKey = unknownOutcomeKeySchema.safeParse(key);
   const parsedChoice = resolutionChoiceSchema.safeParse(choice);
-  if (!parsedKey.success || !parsedChoice.success) {
+  const parsedClaim = z.int().nonnegative().safeParse(claim);
+  if (!parsedKey.success || !parsedChoice.success || !parsedClaim.success) {
     throw connectErrors.create("connect.invalid");
   }
   const person = await personOf(env, identity);
@@ -118,7 +121,11 @@ export const resolveUnknownOutcome = async (
   });
   if (found === null) {
     // Connect refuses it, and records who tried: nothing is resolved.
-    await env.CONNECT.resolveOutcome({ ...request, capability: null });
+    await env.CONNECT.resolveOutcome({
+      ...request,
+      claim: parsedClaim.data,
+      capability: null,
+    });
     return;
   }
   let capability: string;
@@ -127,7 +134,9 @@ export const resolveUnknownOutcome = async (
       env,
       identity,
       found,
-      parsedChoice.data
+      // The claim the person was shown, signed: connect resolves only
+      // that send, never one made again since and lost again.
+      { choice: parsedChoice.data, claimedAt: parsedClaim.data }
     );
   } catch (error) {
     // Refused here: recorded as connect records its own refusals, and the
@@ -140,7 +149,11 @@ export const resolveUnknownOutcome = async (
     });
     throw error;
   }
-  await env.CONNECT.resolveOutcome({ ...request, capability });
+  await env.CONNECT.resolveOutcome({
+    ...request,
+    claim: parsedClaim.data,
+    capability,
+  });
 };
 
 /** A signed-in person's calls of unknown outcome, over `/rpc`. */
@@ -170,10 +183,11 @@ export class UnknownOutcomesRpc
 
   async resolve(
     key: UnknownOutcomeKey,
-    choice: ResolutionChoice
+    choice: ResolutionChoice,
+    claim: number
   ): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      await resolveUnknownOutcome(this.#env, person, key, choice);
+      await resolveUnknownOutcome(this.#env, person, key, choice, claim);
     });
   }
 }

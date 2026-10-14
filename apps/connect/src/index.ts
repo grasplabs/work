@@ -172,6 +172,21 @@ const statedOf = ({
 const detailsOf = (error: unknown): ErrorPayload["details"] =>
   isExpectedError(error) ? error.details : undefined;
 
+/**
+ * `connect.outcome_unknown`, with `details`: a native connector's marked
+ * as waiting for its person to resolve it (`awaitsResolution`), so a
+ * workflow run waits on it. A Composio tool's error, whose text nobody is
+ * shown yet, fails the run's step instead.
+ */
+const unknownOutcome = (
+  progress: CallProgress,
+  details?: ErrorPayload["details"]
+): Error =>
+  connectErrors.create(
+    "connect.outcome_unknown",
+    progress.native === true ? { ...details, awaitsResolution: true } : details
+  );
+
 const codeOf = (error: unknown): string | undefined =>
   connectErrors.codeOf(error) ?? capabilityErrors.codeOf(error);
 
@@ -611,16 +626,9 @@ export default class Connect
         recovery: progress.recovery,
         pendingActionId: held?.id,
       });
-      if (reason === "connect.outcome_unknown" && progress.native === true) {
-        // A native connector's lost answer: a run waits for its person to
-        // resolve it. A Composio tool's error, whose text nobody is shown
-        // yet, fails the run's step instead.
-        throw connectErrors.create("connect.outcome_unknown", {
-          ...detailsOf(error),
-          awaitsResolution: true,
-        });
-      }
-      throw lost ? connectErrors.create("connect.outcome_unknown") : error;
+      throw reason === "connect.outcome_unknown"
+        ? unknownOutcome(progress, lost ? undefined : detailsOf(error))
+        : error;
     }
     // Nothing is returned, or stored for a repeat, that the audit log
     // doesn't have: a side effect's answer is stored with its events. If
@@ -653,7 +661,9 @@ export default class Connect
         outcome: "unknown",
         reason: "connect.outcome_unknown",
       });
-      throw connectErrors.create("connect.outcome_unknown");
+      // Sent, unrecorded: as any lost answer, a native one waits for its
+      // person to resolve it.
+      throw unknownOutcome(progress);
     }
     if (done.failed) {
       throw connectErrors.create("connect.action_failed", {

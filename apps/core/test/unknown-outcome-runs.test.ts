@@ -250,7 +250,11 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       { timeout: 10_000, interval: 100 }
     );
     const before = await sentFrom(mailbox);
-    await admin.api.unknownOutcomes.resolve(unknown.key, "happened");
+    await admin.api.unknownOutcomes.resolve(
+      unknown.key,
+      "happened",
+      unknown.claim
+    );
     await finished(run.id);
     expect({
       unknown,
@@ -297,13 +301,21 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
   it("sends it once more, under the same key, once its person says it didn't happen", async () => {
     const admin = await personApi("admin");
     const { mailbox, run, unknown } = await waitingRun(admin);
-    await admin.api.unknownOutcomes.resolve(unknown.key, "not_happened");
+    await admin.api.unknownOutcomes.resolve(
+      unknown.key,
+      "not_happened",
+      unknown.claim
+    );
     await finished(run.id);
     expect({
       run: await admin.api.workflows.status(run.id),
       sent: await sentFrom(mailbox),
       again: await codeOf(
-        admin.api.unknownOutcomes.resolve(unknown.key, "happened")
+        admin.api.unknownOutcomes.resolve(
+          unknown.key,
+          "happened",
+          unknown.claim
+        )
       ),
     }).toMatchObject({
       run: { status: "completed", output: { mailbox, sent: true } },
@@ -318,11 +330,19 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       await waitingRun(admin);
     const other = await personApi("admin");
     const stranger = await codeOf(
-      other.api.unknownOutcomes.resolve(unknown.key, "not_happened")
+      other.api.unknownOutcomes.resolve(
+        unknown.key,
+        "not_happened",
+        unknown.claim
+      )
     );
     await admin.api.permissions.revoke(permission);
     const revoked = await codeOf(
-      admin.api.unknownOutcomes.resolve(unknown.key, "not_happened")
+      admin.api.unknownOutcomes.resolve(
+        unknown.key,
+        "not_happened",
+        unknown.claim
+      )
     );
     expect({
       stranger,
@@ -406,6 +426,42 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
         listed: 1,
       });
     } finally {
+      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
+    }
+  });
+
+  it("ends by its deadline, not the run's step allowance, however many rounds the hold takes", async () => {
+    const admin = await personApi("admin");
+    const { CONNECT: connect } = env;
+    const deadline = env.WORKFLOW_UNKNOWN_HOLD_MS;
+    // Each round runs the step again (connect says nothing waits), some
+    // four steps every first wait: past the tests' allowance of 60 steps
+    // long before the deadline.
+    env.WORKFLOW_UNKNOWN_HOLD_MS = "8000";
+    env.CONNECT = new Proxy(connect, {
+      get: (target, name) => {
+        if (name === "anyPending") {
+          return async () => await Promise.resolve(false);
+        }
+        const real: unknown = Reflect.get(target, name);
+        return real;
+      },
+    });
+    try {
+      const { mailbox, run } = await lostRun(admin);
+      await finished(run.id);
+      expect({
+        run: await admin.api.workflows.status(run.id),
+        sent: await sentFrom(mailbox),
+      }).toMatchObject({
+        run: {
+          status: "failed",
+          failure: { error: { code: "connect.outcome_unknown_unresolved" } },
+        },
+        sent: 1,
+      });
+    } finally {
+      env.CONNECT = connect;
       env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
     }
   });
@@ -553,7 +609,11 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     }
     expect({
       resolved: await codeOf(
-        admin.api.unknownOutcomes.resolve(unknown.key, "happened")
+        admin.api.unknownOutcomes.resolve(
+          unknown.key,
+          "happened",
+          unknown.claim
+        )
       ),
       stillListed: await listedFor(admin),
     }).toStrictEqual({ resolved: "resource.unavailable", stillListed: 1 });

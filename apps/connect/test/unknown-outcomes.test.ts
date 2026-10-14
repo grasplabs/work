@@ -90,36 +90,56 @@ const keyOf = (
  * The capability core signs once it checked the call's permission again,
  * resolving it by `choice`, unless `signed` says otherwise.
  */
+/** The claim the call under `key` is at now, as its person is shown it. */
+const claimOf = async (key: UnknownOutcomeKey): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT claimed_at AS claim FROM idempotent_calls WHERE connection_id = ? AND action = ? AND idempotency_key = ?"
+  )
+    .bind(key.connectionId, key.action, key.idempotencyKey)
+    .first<{ claim: number }>();
+  return row?.claim ?? 0;
+};
+
 const resolutionCapability = async (
   key: UnknownOutcomeKey,
   choice: ResolutionChoice | undefined,
   authority: Authority,
-  extra: Pick<CapabilityScope, "confirms"> = {}
-): Promise<string> =>
-  await signCapability(env.CAPABILITY_SIGNING_KEY, authority, {
+  extra: Pick<CapabilityScope, "confirms"> & { claim?: number } = {}
+): Promise<string> => {
+  const { claim = await claimOf(key), ...signed } = extra;
+  return await signCapability(env.CAPABILITY_SIGNING_KEY, authority, {
     origin: originOf(authority),
     connectionId: key.connectionId,
     resource: invoices,
     action: key.action,
     idempotencyKey: key.idempotencyKey,
-    ...(choice === undefined ? {} : { resolves: choice }),
-    ...extra,
+    ...(choice === undefined ? {} : { resolves: { choice, claimedAt: claim } }),
+    ...signed,
   });
+};
 
-/** Resolves `key` as core does for `person`, with its capability. */
+/**
+ * Resolves `key` as core does for `person`, at the claim the call is at
+ * now unless `claim` says another, with its capability.
+ */
 const resolve = async (
   person: ConnectionPerson,
   key: UnknownOutcomeKey,
   choice: ResolutionChoice,
-  capability?: string
+  capability?: string,
+  claim?: number
 ): Promise<void> => {
+  const at = claim ?? (await claimOf(key));
   await exports.default.resolveOutcome({
     person,
     key,
     choice,
+    claim: at,
     capability:
       capability ??
-      (await resolutionCapability(key, choice, agentFor(person.userId))),
+      (await resolutionCapability(key, choice, agentFor(person.userId), {
+        claim: at,
+      })),
   });
 };
 
@@ -330,7 +350,12 @@ describe("a call of unknown outcome", () => {
             input: email,
             idempotencyKey: "run-4:send",
           },
-          { resolves: "not_happened" }
+          {
+            resolves: {
+              choice: "not_happened",
+              claimedAt: await claimOf(key),
+            },
+          }
         )
       ),
       asHeldOutcome: await outcome(
@@ -675,5 +700,125 @@ describe("a native connector's call of unknown outcome", () => {
       ],
       stillListed: 1,
     });
+  });
+});
+
+describe("two resolutions that it didn't happen, at once", () => {
+  it("let it be sent once more, never twice, even when that send is lost again", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await outcome(send(connection, "run-12:send"));
+    const key = keyOf(connection, "mail.send", "run-12:send");
+    // Both read, and signed for, the claim the person was shown.
+    const shown = await claimOf(key);
+    const capabilities = await Promise.all([
+      resolutionCapability(
+        key,
+        "not_happened",
+        agentFor(connection.person.userId),
+        {
+          claim: shown,
+        }
+      ),
+      resolutionCapability(
+        key,
+        "not_happened",
+        agentFor(connection.person.userId),
+        {
+          claim: shown,
+        }
+      ),
+    ]);
+    const first = await outcome(
+      resolve(connection.person, key, "not_happened", capabilities[0], shown)
+    );
+    // Its one more send is lost again: a new claim, of unknown outcome.
+    graph.loseWriteAnswer();
+    const resent = await outcome(send(connection, "run-12:send"));
+    // The second, late, finds the claim it was signed for gone.
+    const second = await outcome(
+      resolve(connection.person, key, "not_happened", capabilities[1], shown)
+    );
+    expect({
+      first,
+      resent,
+      second,
+      again: await outcome(send(connection, "run-12:send")),
+      writes: writes().length,
+    }).toStrictEqual({
+      first: "ok",
+      resent: "connect.outcome_unknown",
+      second: "connect.outcome_not_found",
+      again: "connect.outcome_unknown",
+      // The first send and the one more it was let go: no third.
+      writes: 2,
+    });
+  });
+});
+
+describe("a native connector's call whose audit couldn't be recorded", () => {
+  it("says a run waits on it for its person to resolve, as any lost answer", async () => {
+    const connection = await connected();
+    // The call's second batch is its answer with its audit events: it
+    // fails, after Graph sent the mail.
+    const batch = env.DB.batch.bind(env.DB);
+    let batches = 0;
+    vi.spyOn(env.DB, "batch").mockImplementation(async (statements) => {
+      batches += 1;
+      if (batches === 2) {
+        throw new Error("D1 is unavailable");
+      }
+      return await batch(statements);
+    });
+    const failed = await detailsOf(send(connection, "run-13:send"));
+    vi.restoreAllMocks();
+    expect({
+      failed,
+      repeat: await outcome(send(connection, "run-13:send")),
+      writes: writes().length,
+    }).toStrictEqual({
+      failed: { awaitsResolution: true },
+      repeat: "connect.outcome_unknown",
+      writes: 1,
+    });
+  });
+});
+
+describe("a run's step key with many calls of unknown outcome", () => {
+  it("waits while any of them waits for its person, however many come before it", async () => {
+    const connection = await connected();
+    // A draft connect may recover now, under the step's key...
+    graph.loseWriteAnswer();
+    await outcome(draft(connection, "run-14:step"));
+    await claimedAgo(connection);
+    const columns = await env.DB.prepare("PRAGMA table_info(connections)").all<{
+      name: string;
+    }>();
+    const names = columns.results.map(({ name }) => name);
+    const copies = Array.from(
+      { length: 11 },
+      () => `connection-${crypto.randomUUID()}`
+    );
+    // ...the same on ten more connections, and, last, an email nothing
+    // recovers, all under it.
+    for (const [index, copy] of copies.entries()) {
+      const action =
+        index === copies.length - 1 ? "mail.send" : "mail.createDraft";
+      // oxlint-disable-next-line no-await-in-loop -- in order: the email last
+      await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO connections (${names.join(", ")}) SELECT ${names.map((name) => (name === "id" || name === "account_id" ? "?1" : name)).join(", ")} FROM connections WHERE id = ?2`
+        ).bind(copy, connection.id),
+        env.DB.prepare(
+          "INSERT INTO idempotent_calls (subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key, input_hash, state, output, provenance, created_at, claimed_at, connector_version, resource, input, origin) SELECT subject_type, subject_id, on_behalf_of, ?1, ?2, idempotency_key, input_hash, state, output, provenance, created_at, claimed_at, connector_version, resource, input, origin FROM idempotent_calls WHERE connection_id = ?3"
+        ).bind(copy, action, connection.id),
+      ]);
+    }
+    await expect(
+      exports.default.anyPending({
+        onBehalfOf: connection.person.userId,
+        idempotencyKey: "run-14:step",
+      })
+    ).resolves.toBeTruthy();
   });
 });

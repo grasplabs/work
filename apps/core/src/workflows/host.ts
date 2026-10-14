@@ -573,6 +573,20 @@ const defaultWaitMs = 60_000;
 const maxWaits = 15;
 
 /**
+ * The longest wait between checks of a call of unknown outcome, in first
+ * waits: an hour, so its 7 days take some 180 checks, a bounded journal.
+ */
+const maxUnknownWaits = 60;
+
+/**
+ * The steps of a hold on an unknown outcome (`#waitBefore`): its checks,
+ * sleeps and the step's runs again. Not the run's own steps: the hold is
+ * bounded by its deadline (`unknownHoldMsOf`) and the run lineage's age,
+ * not by the steps the run's code takes, as a run waits on its person.
+ */
+const unknownHoldStep = /^\$grasp:wait:[0-9a-f]{16}:unknown:[1-9]\d*:/u;
+
+/**
  * Tries of one check whether a held side effect still waits, after the
  * first: a connect that fails that often in a row fails the step.
  */
@@ -795,7 +809,8 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
   /** The step's place among the run's own steps; none for core's own. */
   const take = (name: string): number | undefined => {
     const core =
-      name.startsWith(coreStepPrefix) && !name.startsWith(waitStepPrefix);
+      (name.startsWith(coreStepPrefix) && !name.startsWith(waitStepPrefix)) ||
+      unknownHoldStep.test(name);
     const sdk = name === paramsStep && !params;
     params ||= sdk;
     if (core || sdk) {
@@ -1223,10 +1238,13 @@ export class RunHost extends RpcTarget {
           },
         },
         async (): Promise<boolean | "expired"> => {
-          const still = await this.#stillHeld(step, keys);
-          return still && deadline !== undefined && Date.now() >= deadline
-            ? "expired"
-            : still;
+          // Past its deadline the hold ends, whatever connect says now:
+          // a call still of unknown outcome then is its person's to
+          // resolve, with no run waiting on it.
+          if (deadline !== undefined && Date.now() >= deadline) {
+            return "expired";
+          }
+          return await this.#stillHeld(step, keys);
         }
       );
       if (held === "expired") {
@@ -1246,7 +1264,10 @@ export class RunHost extends RpcTarget {
       // oxlint-disable-next-line no-await-in-loop -- one check at a time
       await this.#step.sleep(
         `${prefix}:${checks}`,
-        Math.min(first * 2 ** checks, first * maxWaits)
+        Math.min(
+          first * 2 ** checks,
+          first * (unknownSince === undefined ? maxWaits : maxUnknownWaits)
+        )
       );
     }
   }
@@ -1352,7 +1373,9 @@ export class RunHost extends RpcTarget {
     const key = await waitKeyOf(step);
     const busyFor = busyWaitOf(value);
     if (busyFor === undefined) {
-      const prefix = `${waitStepPrefix}${key}:held:${round}`;
+      // A hold on an unknown outcome waits in steps of its own kind,
+      // outside the run's step allowance (`countedStep`).
+      const prefix = `${waitStepPrefix}${key}:${isUnknownMarker(value) ? "unknown" : "held"}:${round}`;
       if (isUnknownMarker(value)) {
         // When the step was first held on an unknown outcome, recorded
         // once, so its deadline holds across rounds and replays.

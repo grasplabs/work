@@ -90,6 +90,7 @@ const summaryOf = ({
     ...(description === undefined ? {} : { description }),
     input: row.input,
     sentAt: row.createdAt.toISOString(),
+    claim: row.claimedAt.getTime(),
     origin:
       origin === null
         ? null
@@ -280,8 +281,9 @@ export const refuseResolution = async (
 /**
  * Whether `claims` are core's resolution of exactly the call `row`
  * records, by `choice`, for `person`, the person it acted for: the same
- * App or agent, and marked as a resolution, never a call's or a held
- * action's confirmation.
+ * App or agent, the claim of its key it is now (one sent again since, and
+ * lost again, is another call to decide on), and marked as a resolution,
+ * never a call's or a held action's confirmation.
  */
 const resolvesThis = (
   claims: CapabilityClaims,
@@ -292,7 +294,8 @@ const resolvesThis = (
   const { subject, onBehalfOf } = claims.authority;
   const subjectId = subject.type === "app" ? subject.appId : subject.agentId;
   return (
-    claims.resolves === choice &&
+    claims.resolves?.choice === choice &&
+    claims.resolves.claimedAt === row.claimedAt.getTime() &&
     claims.confirms === undefined &&
     onBehalfOf === person.userId &&
     onBehalfOf === row.onBehalfOf &&
@@ -318,14 +321,16 @@ export const resolveOutcome = async (
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
-  const { capability, person, key, choice } = parsed.data;
+  const { capability, person, key, choice, claim } = parsed.data;
   const row = await unknownRowOf(env, person, key);
   if (row === undefined && !(await anyUnder(env, key))) {
     // No call was ever made under it: nothing to record a refusal of.
     throw connectErrors.create("connect.outcome_not_found");
   }
   try {
-    if (row === undefined) {
+    // Not the claim of its key the person was shown: sent again since,
+    // and lost again, it is another call to decide on.
+    if (row === undefined || row.claimedAt.getTime() !== claim) {
       throw connectErrors.create("connect.outcome_not_found");
     }
     const claims = await verifyCapability(signingKeys, capability, {
@@ -408,10 +413,14 @@ export const unresolvedUnder = async (
         eq(connections.serverKind, "native"),
         unknownNow(Date.now())
       )
-    )
-    .limit(10);
-  const recoverable = await Promise.all(
-    rows.map(async ({ row }) => await recoverableNow(env, row))
-  );
-  return recoverable.includes(false);
+    );
+  // Every one under the step's key: a step makes few calls, each its own
+  // row, and the first that waits for its person settles it.
+  for (const { row } of rows) {
+    // oxlint-disable-next-line no-await-in-loop -- stops at the first
+    if (!(await recoverableNow(env, row))) {
+      return true;
+    }
+  }
+  return false;
 };

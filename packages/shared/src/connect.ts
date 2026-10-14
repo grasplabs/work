@@ -694,6 +694,8 @@ export const resolveOutcomeSchema = z.strictObject({
   person: connectionPersonSchema,
   key: unknownOutcomeKeySchema,
   choice: resolutionChoiceSchema,
+  /** The claim of the key the person was shown (`UnknownOutcome.claim`). */
+  claim: z.int().nonnegative(),
 });
 export type ResolveOutcome = z.input<typeof resolveOutcomeSchema>;
 
@@ -735,6 +737,11 @@ export interface UnknownOutcome {
   input: string | null;
   /** When it was first sent, ISO 8601. */
   sentAt: string;
+  /**
+   * Which claim of its key this is, in milliseconds: a resolution names it,
+   * so it applies to this send only, never to one sent again since.
+   */
+  claim: number;
   /** Null for a call whose origin connect doesn't have: it can't be resolved. */
   origin: UnknownOutcomeOrigin | null;
 }
@@ -749,9 +756,14 @@ export interface UnknownOutcomesApi {
    * Says what became of the call `key` names: `happened` keeps it from
    * ever being sent again; `not_happened` lets it be sent once more, with
    * the same input, under the same key. Refused once the call's permission
-   * is gone.
+   * is gone. `claim` is the call's `UnknownOutcome.claim`, as shown: one
+   * sent again since, and lost again, is another call to decide on.
    */
-  resolve: (key: UnknownOutcomeKey, choice: ResolutionChoice) => Promise<void>;
+  resolve: (
+    key: UnknownOutcomeKey,
+    choice: ResolutionChoice,
+    claim: number
+  ) => Promise<void>;
 }
 
 /**

@@ -117,10 +117,17 @@ export const capabilityClaimsSchema = z.strictObject({
   /**
    * Only on the capability core signs once the person a call acted for
    * resolved its unknown outcome, from their own session, after checking
-   * the call's permission again: what they said of it. Connect resolves
-   * the call's outcome only with it, and takes it nowhere else.
+   * the call's permission again: what they said of it, and of which claim
+   * of its key (`claimedAt`, the claim they were shown). Connect resolves
+   * the call's outcome only with it, only while that claim is the key's,
+   * and takes it nowhere else.
    */
-  resolves: z.enum(["happened", "not_happened"]).optional(),
+  resolves: z
+    .strictObject({
+      choice: z.enum(["happened", "not_happened"]),
+      claimedAt: z.int().nonnegative(),
+    })
+    .optional(),
 });
 export type CapabilityClaims = z.infer<typeof capabilityClaimsSchema>;
 
@@ -151,7 +158,9 @@ export interface CapabilityScope extends CapabilityCall {
   /** The held action the person confirmed: signed, not compared. */
   confirms?: string | undefined;
   /** What the person said of an unknown outcome: signed, not compared. */
-  resolves?: "happened" | "not_happened" | undefined;
+  resolves?:
+    | { choice: "happened" | "not_happened"; claimedAt: number }
+    | undefined;
 }
 
 /** Why connect refuses a call before looking at it any further. */

@@ -87,7 +87,7 @@ export const signedCall = async (
   }: CallGrant,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
   confirms?: string,
-  resolves?: ResolutionChoice
+  resolves?: { choice: ResolutionChoice; claimedAt: number }
 ) => {
   await authorize(env, authority, connection, action, permissionId, context);
   const restricted = await isRestricted(env, authority, context);
