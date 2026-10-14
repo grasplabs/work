@@ -10,6 +10,7 @@ import {
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
 import type {
+  CatalogEntry,
   CatalogSource,
   ConnectionScope,
   CatalogTool,
@@ -189,6 +190,20 @@ const hiddenEntries = async (env: Env): Promise<Set<string>> => {
     })
     .from(hiddenConnectors);
   return new Set(rows.map(({ source, id }) => entryKey(source, id)));
+};
+
+/**
+ * The catalog's entries an admin hasn't hidden: what can be connected
+ * here, as everyone but an admin sees the catalog.
+ */
+export const offeredEntries = async (env: Env): Promise<CatalogEntry[]> => {
+  const [catalog, hidden] = await Promise.all([
+    env.CONNECT.catalog(),
+    hiddenEntries(env),
+  ]);
+  return catalog.entries.filter(
+    ({ source, id }) => !hidden.has(entryKey(source, id))
+  );
 };
 
 /** Whether an admin hid the entry `source` `id`. */

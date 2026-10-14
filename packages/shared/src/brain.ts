@@ -1,8 +1,9 @@
 /**
  * What the company brain is built from: everything steps 1 and 2 of the
  * Playbook collected, as records. The prototype read these from its mock
- * workspace; here they are the shape a core adapter fills. Only the fields
- * the brain reads are here, as the prototype named them.
+ * workspace; here they are what core assembles (`brain.read`, core's
+ * brain-rpc.ts) and the web app's brain is built from. Only the fields the
+ * brain reads are here, as the prototype named them.
  */
 
 /** The standard business processes a workflow belongs to. */
@@ -300,4 +301,13 @@ export interface Workspace {
   connections: Connection[];
   landscape: LandscapeApp[];
   policies: PolicyDocument[];
+}
+
+/**
+ * The brain's workspace, assembled by core from what it holds: the
+ * onboarding, the Playbook's records and the connections. Each part as the
+ * person may read it; what core has no source for yet comes back empty.
+ */
+export interface BrainApi {
+  read: () => Promise<Workspace>;
 }

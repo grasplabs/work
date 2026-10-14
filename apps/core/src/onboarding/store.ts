@@ -282,6 +282,21 @@ export class Onboarding extends DurableObject<Env> {
     };
   }
 
+  /**
+   * When who works where was last saved (ISO 8601), from the log; null
+   * before it was. The brain dates the teams' sizes by it.
+   */
+  rosterSavedAt(): string | null {
+    const [row] = this.#db
+      .select({ at: events.at })
+      .from(events)
+      .where(eq(events.what, "onboarding.roster.saved"))
+      .orderBy(desc(events.seq))
+      .limit(1)
+      .all();
+    return row?.at ?? null;
+  }
+
   /** Whether interviews may happen now: not paused, and the agreements in. */
   isOpen(): boolean {
     const row = this.#row();
