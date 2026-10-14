@@ -17,6 +17,9 @@
  *   whole group (`SIGKILL`) and starts another.
  * - A call allocates without end. Its process's resident memory is read
  *   while it runs; past `memoryLimitBytes` it's killed and the App refused.
+ *   Core's own platform code (the screen compiler, the package builder)
+ *   may ask for more, up to `maxMemoryLimitBytes`, never App code: only
+ *   core reaches this supervisor, and it asks only for those.
  *   Should V8 reach its own heap limit first, it aborts the process: a
  *   process that dies during its one call is that call's doing, refused as
  *   the App's too, never an outage it could fake.
@@ -73,6 +76,7 @@ import {
   sandboxCallIdHeader,
   sandboxCpuHeader,
   sandboxDeadlineHeader,
+  sandboxMemoryHeader,
   sandboxOwnerHeader,
   sandboxParentHeader,
   sandboxVerdictHeader,
@@ -119,6 +123,7 @@ export const nativeWorkerd = path.join(
 export const deadlineHeader = sandboxDeadlineHeader;
 export const waitHeader = sandboxWaitHeader;
 export const cpuHeader = sandboxCpuHeader;
+export const memoryHeader = sandboxMemoryHeader;
 export const callIdHeader = sandboxCallIdHeader;
 export const ownerHeader = sandboxOwnerHeader;
 export const parentHeader = sandboxParentHeader;
@@ -150,6 +155,11 @@ export interface SandboxSupervisorOptions {
   maxAnswerBytes?: number;
   /** The most resident memory a process may use during a call. */
   memoryLimitBytes?: number;
+  /**
+   * The most a session may ask for (`memoryHeader`): core's platform code
+   * (the screen compiler, the package builder) needs more than App code.
+   */
+  maxMemoryLimitBytes?: number;
   /** How often a busy process's memory is read. */
   memoryPollMs?: number;
   /** Where processes' memory and CPU time are read: `/proc` on Linux, `/bin/ps` on macOS. */
@@ -222,6 +232,12 @@ const defaults = {
   maxAnswerBytes: 2 * manifestMaxBytes + 64 * 1024,
   // A Cloudflare isolate may use 128 MB; workerd itself takes about 40.
   memoryLimitBytes: 256 * MIB,
+  /**
+   * The screen compiler type-checks with TypeScript, which on plain
+   * workerd (no heap limit to collect against) grows well past what
+   * Cloudflare's 128 MB isolate holds it to: about 400 MB for one screen.
+   */
+  maxMemoryLimitBytes: 1024 * MIB,
   memoryPollMs: 100,
   usageProbe: defaultUsageProbe,
   startupMs: 10_000,
@@ -923,7 +939,11 @@ class SandboxPool {
    */
   #guard(
     host: HostProcess,
-    { deadlineMs, cpuLimitMs }: { deadlineMs: number; cpuLimitMs?: number },
+    {
+      deadlineMs,
+      cpuLimitMs,
+      memoryLimitBytes = this.#settings.memoryLimitBytes,
+    }: { deadlineMs: number; cpuLimitMs?: number; memoryLimitBytes?: number },
     caller: AbortSignal
   ): Guard {
     const run = new AbortController();
@@ -943,10 +963,15 @@ class SandboxPool {
       onCaller();
     }
     caller.addEventListener("abort", onCaller);
-    void this.#watchUsage(host, run.signal, cpuLimitMs, (why, detail) => {
-      unreadable = detail;
-      end(why);
-    });
+    void this.#watchUsage(
+      host,
+      run.signal,
+      { cpuLimitMs, memoryLimitBytes },
+      (why, detail) => {
+        unreadable = detail;
+        end(why);
+      }
+    );
     return {
       signal: run.signal,
       reason: () => reason,
@@ -966,10 +991,13 @@ class SandboxPool {
   async #watchUsage(
     host: HostProcess,
     signal: AbortSignal,
-    cpuLimitMs: number | undefined,
+    {
+      cpuLimitMs,
+      memoryLimitBytes,
+    }: { cpuLimitMs: number | undefined; memoryLimitBytes: number },
     over: (why: "memory" | "cpu" | "unreadable", detail: string) => void
   ): Promise<void> {
-    const { memoryLimitBytes, memoryPollMs, usageProbe } = this.#settings;
+    const { memoryPollMs, usageProbe } = this.#settings;
     const watched = await watchUsage(
       usageProbe,
       host.pid,
@@ -1155,6 +1183,7 @@ class SandboxPool {
         callId,
         deadlineMs,
         cpuLimitMs,
+        memoryLimitBytes: this.#memoryOf(request),
         waitMs,
         refuse,
         parent,
@@ -1168,6 +1197,19 @@ class SandboxPool {
     }
   }
 
+  /**
+   * The resident memory a session may use: what it asks for in MiB
+   * (`memoryHeader`), at most `maxMemoryLimitBytes`; `memoryLimitBytes`
+   * when it asks for nothing.
+   */
+  #memoryOf(request: IncomingMessage): number {
+    const { memoryLimitBytes, maxMemoryLimitBytes } = this.#settings;
+    const mib = Number(request.headers[memoryHeader]);
+    return Number.isInteger(mib) && mib > 0
+      ? Math.min(mib * MIB, maxMemoryLimitBytes)
+      : memoryLimitBytes;
+  }
+
   /** A session past its checks: its places, then its relay. */
   async #admitted(
     request: IncomingMessage,
@@ -1178,6 +1220,7 @@ class SandboxPool {
       callId,
       deadlineMs,
       cpuLimitMs,
+      memoryLimitBytes,
       waitMs,
       refuse,
       parent,
@@ -1187,6 +1230,7 @@ class SandboxPool {
       callId: string;
       deadlineMs: number;
       cpuLimitMs: number;
+      memoryLimitBytes: number;
       waitMs: number;
       refuse: (status: number, message: string) => void;
       parent: string | undefined;
@@ -1256,6 +1300,7 @@ class SandboxPool {
       await this.#relay(request, client, head, {
         deadlineMs,
         cpuLimitMs,
+        memoryLimitBytes,
         waitMs,
         callId,
         refuse,
@@ -1284,6 +1329,7 @@ class SandboxPool {
     session: {
       deadlineMs: number;
       cpuLimitMs: number;
+      memoryLimitBytes: number;
       waitMs: number;
       callId: string;
       refuse: (status: number, message: string) => void;
@@ -1298,6 +1344,7 @@ class SandboxPool {
     const {
       deadlineMs,
       cpuLimitMs,
+      memoryLimitBytes,
       waitMs,
       callId,
       refuse,
@@ -1360,7 +1407,7 @@ class SandboxPool {
     const endsAt = Date.now() + deadlineMs;
     const guard = this.#guard(
       host,
-      { deadlineMs, cpuLimitMs },
+      { deadlineMs, cpuLimitMs, memoryLimitBytes },
       cancelled.signal
     );
     const upstream = connect(host.socket);
@@ -1424,7 +1471,7 @@ class SandboxPool {
             AbortSignal.any([caller.signal, finished.signal]),
             endsAt
           );
-      this.#judge(host, callId, endedAs, deadlineMs);
+      this.#judge(host, callId, endedAs, { deadlineMs, memoryLimitBytes });
     } finally {
       this.#running.delete(callId);
       guard.stop();
@@ -1467,7 +1514,10 @@ class SandboxPool {
     host: HostProcess,
     callId: string,
     ending: Ending,
-    deadlineMs: number
+    {
+      deadlineMs,
+      memoryLimitBytes,
+    }: { deadlineMs: number; memoryLimitBytes: number }
   ): void {
     const { log } = this.#settings;
     const blame = (verdict: Verdict["verdict"], message: string): void => {
@@ -1492,7 +1542,7 @@ class SandboxPool {
         this.#counts.memory += 1;
         blame(
           "memory",
-          `The App's code used more than ${Math.round(this.#settings.memoryLimitBytes / MIB)} MiB of memory.`
+          `The App's code used more than ${Math.round(memoryLimitBytes / MIB)} MiB of memory.`
         );
         return;
       }
@@ -2123,6 +2173,7 @@ export const startSandboxSupervisor = async (
   // A bound that isn't a positive number (NaN, say) would bound nothing.
   for (const name of [
     "memoryLimitBytes",
+    "maxMemoryLimitBytes",
     "memoryPollMs",
     "maxDeadlineMs",
     "maxWaitMs",
@@ -2137,6 +2188,11 @@ export const startSandboxSupervisor = async (
       );
     }
   }
+  // A session that asks for more never gets less than App code does.
+  settings.maxMemoryLimitBytes = Math.max(
+    settings.maxMemoryLimitBytes,
+    settings.memoryLimitBytes
+  );
   // No App code runs where memory can't be bounded.
   await checkUsageProbe(settings.usageProbe);
   // Checked before anything starts: past the limit, workerd would only say

@@ -14,7 +14,14 @@
  * the session ends (with it, the process: one call per process).
  *
  * Whatever the call says, the isolate gets no network and an empty env:
- * this module sets both. Capabilities arrive as the call's arguments only;
+ * this module sets both, and the sandbox host's settings, with one flag a
+ * call may add: `nodejs_compat`, for core's own screen compiler. Core's
+ * platform modules (the compiler, the package builder: JavaScript, JSON
+ * and WebAssembly, far larger than a message) come as their sizes, and
+ * this module reads each through a reader core passed with the call, a
+ * chunk at a time and in order, before the isolate loads; a call may
+ * hand over only so many, and only so much. Capabilities arrive as the
+ * call's arguments only;
  * workerd refuses an RpcTarget in a loaded Worker's env ("Remote RPC
  * references can only be serialized for RPC").
  */
@@ -54,6 +61,12 @@ type CapabilitySpec = { methods: string[] } | { function: true };
 /** One argument of the call: a JSON value, or a capability by name. */
 type ArgumentSpec = { value: unknown } | { capability: string };
 
+/** A module the call hands over in chunks: its type, and how large it is. */
+interface ChunkedModule {
+  type: "js" | "json" | "wasm";
+  size: number;
+}
+
 /** One call, as core describes it. */
 interface SessionCall {
   mainModule: string;
@@ -62,10 +75,31 @@ interface SessionCall {
   method: string;
   args: ArgumentSpec[];
   capabilities: Record<string, CapabilitySpec>;
+  /** Whether the isolate gets `nodejs_compat`, the one flag a call may add. */
+  nodejsCompat: boolean;
+  /**
+   * Core's own platform modules (the screen compiler, the package
+   * builder), too large for one message or not JavaScript, read through
+   * the function capability `moduleReader` names.
+   */
+  chunkedModules: Record<string, ChunkedModule>;
+  moduleReader: string | undefined;
 }
 
 /** The most capabilities a call may name. */
 const maxCapabilities = 32;
+
+/** The most modules a call may hand over in chunks. */
+const maxChunkedModules = 8;
+
+/**
+ * The most bytes a call's chunked modules may have together: the screen
+ * compiler and what it knows of the kit, or the package builder and
+ * esbuild's WebAssembly, with room to grow.
+ */
+const maxChunkedBytes = 64 * 1024 * 1024;
+
+const moduleTypes = new Set(["js", "json", "wasm"]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -83,6 +117,83 @@ const capabilitySpecOf = (value: unknown): CapabilitySpec | undefined => {
   }
   const methods = declaredMethodsOf(value.methods);
   return methods === undefined ? undefined : { methods };
+};
+
+const isChunkedModule = (value: unknown): value is ChunkedModule =>
+  isRecord(value) &&
+  typeof value.type === "string" &&
+  moduleTypes.has(value.type) &&
+  typeof value.size === "number" &&
+  Number.isSafeInteger(value.size) &&
+  value.size > 0;
+
+/**
+ * `value` as a call's chunked modules: at most {@link maxChunkedModules},
+ * {@link maxChunkedBytes} together, none named as one of `modules`;
+ * undefined for anything else.
+ */
+const chunkedModulesOf = (
+  value: unknown,
+  modules: Record<string, string>
+): Record<string, ChunkedModule> | undefined => {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value);
+  if (entries.length > maxChunkedModules) {
+    return undefined;
+  }
+  let total = 0;
+  const chunked: Record<string, ChunkedModule> = {};
+  for (const [name, spec] of entries) {
+    if (!isChunkedModule(spec) || Object.hasOwn(modules, name)) {
+      return undefined;
+    }
+    total += spec.size;
+    chunked[name] = { type: spec.type, size: spec.size };
+  }
+  return total <= maxChunkedBytes ? chunked : undefined;
+};
+
+/**
+ * What `body` says of the call's platform code: its flag, its chunked
+ * modules and their reader, which comes with chunked modules and only
+ * with them, as a function capability of the call's own; undefined for
+ * anything else.
+ */
+const platformOf = (
+  body: Record<string, unknown>,
+  modules: Record<string, string>,
+  specs: Record<string, CapabilitySpec>
+):
+  | Pick<SessionCall, "nodejsCompat" | "chunkedModules" | "moduleReader">
+  | undefined => {
+  const { nodejsCompat, moduleReader } = body;
+  const chunkedModules = chunkedModulesOf(body.chunkedModules, modules);
+  if (
+    chunkedModules === undefined ||
+    (nodejsCompat !== undefined && typeof nodejsCompat !== "boolean")
+  ) {
+    return undefined;
+  }
+  if (Object.keys(chunkedModules).length === 0) {
+    return moduleReader === undefined
+      ? { nodejsCompat: nodejsCompat === true, chunkedModules, moduleReader }
+      : undefined;
+  }
+  const reader =
+    typeof moduleReader === "string" ? specs[moduleReader] : undefined;
+  if (
+    typeof moduleReader !== "string" ||
+    reader === undefined ||
+    !("function" in reader)
+  ) {
+    return undefined;
+  }
+  return { nodejsCompat: nodejsCompat === true, chunkedModules, moduleReader };
 };
 
 /** `body` as a call, or undefined for anything else. */
@@ -123,6 +234,10 @@ const sessionCallOf = (body: unknown): SessionCall | undefined => {
       return undefined;
     }
   }
+  const platform = platformOf(body, modules, specs);
+  if (platform === undefined) {
+    return undefined;
+  }
   return {
     mainModule,
     modules,
@@ -130,7 +245,51 @@ const sessionCallOf = (body: unknown): SessionCall | undefined => {
     method,
     args: argSpecs,
     capabilities: specs,
+    ...platform,
   };
+};
+
+/** What a Loader takes as a module that isn't JavaScript text. */
+type LoadedModule = string | { json: unknown } | { wasm: ArrayBuffer };
+
+const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
+
+/**
+ * The call's chunked modules, read through `read` a chunk at a time, each
+ * whole and in order, and made what the Loader takes. A chunk that isn't
+ * bytes, is empty or runs past the module's size fails the call.
+ */
+const readChunkedModules = async (
+  chunked: Record<string, ChunkedModule>,
+  read: (...args: unknown[]) => Promise<unknown>
+): Promise<Record<string, LoadedModule>> => {
+  const loaded: Record<string, LoadedModule> = {};
+  for (const [name, { type, size }] of Object.entries(chunked)) {
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    while (offset < size) {
+      // In order: each chunk starts where the last one ended.
+      // oxlint-disable-next-line no-await-in-loop
+      const chunk = await read(name, offset);
+      if (
+        !(chunk instanceof Uint8Array) ||
+        chunk.byteLength === 0 ||
+        offset + chunk.byteLength > size
+      ) {
+        throw new TypeError(`Module ${name} didn't arrive as it was sent.`);
+      }
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    if (type === "wasm") {
+      loaded[name] = { wasm: bytes.buffer };
+    } else if (type === "json") {
+      loaded[name] = { json: JSON.parse(utf8.decode(bytes)) };
+    } else {
+      loaded[name] = utf8.decode(bytes);
+    }
+  }
+  return loaded;
 };
 
 /** What the isolate gets for capability `name`. */
@@ -184,10 +343,22 @@ class Session extends CapnwebTarget {
     const args = parsed.args.map((arg) =>
       "capability" in arg ? given(arg.capability) : arg.value
     );
+    const reader =
+      parsed.moduleReader === undefined
+        ? undefined
+        : given(parsed.moduleReader);
+    const chunked =
+      typeof reader === "function"
+        ? await readChunkedModules(parsed.chunkedModules, reader)
+        : {};
+    const { compatibilityFlags } = this.#settings;
     const entrypoint: unknown = this.#env.LOADER.get(null, () => ({
       ...this.#settings,
+      compatibilityFlags: parsed.nodejsCompat
+        ? [...compatibilityFlags, "nodejs_compat"]
+        : compatibilityFlags,
       mainModule: parsed.mainModule,
-      modules: parsed.modules,
+      modules: { ...parsed.modules, ...chunked },
       env: {},
       globalOutbound: null,
     })).getEntrypoint(

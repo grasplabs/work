@@ -201,6 +201,44 @@ export const startScreenCompiler = (
     .getEntrypoint<ScreenCompiler>();
 
 /**
+ * The screen compiler's or the package builder's code as bytes, for the
+ * on-prem sandbox host, which loads it in a process of its own
+ * (apps/core/src/platform-sandbox.ts): its modules, whether it needs
+ * `nodejs_compat`, and the CPU time a call may use, as `isolateSettings`
+ * and `packageBuilderSettings` give them a Loader isolate.
+ */
+export interface PlatformCode {
+  mainModule: string;
+  modules: Record<string, { type: "js" | "json" | "wasm"; bytes: Uint8Array }>;
+  nodejsCompat: boolean;
+  cpuMs: number;
+}
+
+/**
+ * The screen compiler's code, read from core's static assets for each
+ * build: the sandbox host runs one call per process, so nothing there
+ * stays warm, and core keeps none of it once the call is over. The kit
+ * goes as its JSON text, which core never parses.
+ */
+export const screenCompilerCode = async (
+  assets: Fetcher
+): Promise<PlatformCode> => {
+  const [source, kit] = await Promise.all([
+    readCompilerBytes(assets, compilerAssets.source, "javascript"),
+    readCompilerBytes(assets, compilerAssets.kit, "json"),
+  ]);
+  return {
+    mainModule: "compiler.js",
+    modules: {
+      "compiler.js": { type: "js", bytes: new Uint8Array(source) },
+      [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
+    },
+    nodejsCompat: true,
+    cpuMs: isolateSettings.limits.cpuMs,
+  };
+};
+
+/**
  * How the package builder's isolate runs: no bindings, no importable env,
  * no network (`globalOutbound: null` and no subrequests), no Node.js
  * compatibility, and at most 30 s of CPU per call.
@@ -238,4 +276,27 @@ export const startPackageBuilder = async (
       },
     })
     .getEntrypoint<PackageBuilder>();
+};
+
+/**
+ * The package builder's code, for the on-prem sandbox host as
+ * `screenCompilerCode` gives the compiler's: esbuild's WebAssembly goes
+ * as its bytes, which the sandbox host compiles as it loads the isolate.
+ */
+export const packageBuilderCode = async (
+  assets: Fetcher
+): Promise<PlatformCode> => {
+  const [source, wasm] = await Promise.all([
+    readCompilerBytes(assets, compilerAssets.packageBuilder, "javascript"),
+    readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+  ]);
+  return {
+    mainModule: "package-builder.js",
+    modules: {
+      "package-builder.js": { type: "js", bytes: new Uint8Array(source) },
+      "esbuild.wasm": { type: "wasm", bytes: new Uint8Array(wasm) },
+    },
+    nodejsCompat: false,
+    cpuMs: packageBuilderSettings.limits.cpuMs,
+  };
 };

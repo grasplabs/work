@@ -52,8 +52,9 @@ interface __BaseEnv_Env {
    */
   SANDBOX_HOST?: Fetcher;
   /**
-   * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts)
-   * and an extraction on the sandbox host (src/knowledge/extract.ts).
+   * Tests only: a shorter deadline for a sandboxed call (src/sandboxed.ts),
+   * and for an extraction, a screen build and a package build on the
+   * sandbox host (src/knowledge/extract.ts, src/platform-sandbox.ts).
    */
   SANDBOX_DEADLINE_MS?: string;
   /**
