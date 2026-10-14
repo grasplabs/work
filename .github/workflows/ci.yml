@@ -138,7 +138,10 @@ jobs:
           GRASP_TEST_OVERDUE_GRACE_SECONDS: 300
           GRASP_TEST_PROGRESS_FILE: ${{ runner.temp }}/test-progress.log
           # Before ending a stalled run, print each workerd's thread stacks
-          # (at most 20 s and 300 KB), so the log shows where it is stuck.
+          # (a busy main thread sampled again, with V8's JavaScript stack),
+          # their sockets and peers by ss, and the Vitest process's own
+          # stack and sockets: at most 20 s and 300 KB, so the log shows
+          # where it is stuck.
           GRASP_STALL_DUMP_STACKS: gdb
       - if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

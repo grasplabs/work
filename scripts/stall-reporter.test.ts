@@ -759,7 +759,7 @@ describe("the stacks of a stalled run", () => {
       dumps,
       ended: state.ended,
       printed: beforeEnd.includes(
-        "Thread stacks of each workerd, by gdb:\n--- workerd 150 ---\n#0 epoll_wait"
+        "What the stalled run is stuck in (stack-dump.ts):\n--- workerd 150 ---\n#0 epoll_wait"
       ),
     }).toStrictEqual({ dumps: 1, ended: 1, printed: true });
   });

@@ -597,7 +597,9 @@ export default class StallReporter implements Reporter {
       return "[the stack dump took too long]\n";
     };
     const stacks = await Promise.race([dumped(), tooLong()]);
-    this.#write(`\nThread stacks of each workerd, by gdb:\n${stacks}\n`);
+    this.#write(
+      `\nWhat the stalled run is stuck in (stack-dump.ts):\n${stacks}\n`
+    );
     const flushed = async (): Promise<void> => {
       try {
         await this.#outputFlushed();
