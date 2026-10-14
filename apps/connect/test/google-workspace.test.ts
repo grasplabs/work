@@ -42,6 +42,7 @@ import {
 import { fakeProviders } from "./oauth-provider.ts";
 import {
   callTool as call,
+  claimedAgo,
   outputOf,
   parsedRequests,
   refusalsFor,
@@ -1109,6 +1110,97 @@ describe("the Google Workspace connector's answers", () => {
       code: "connect.server_unavailable",
       retryAfterSeconds: 60,
     });
+    expect(google.sent).toHaveLength(1);
+  });
+
+  it("say an email Gmail sent is of unknown outcome when its answer was lost, and never send it again", async () => {
+    const connection = await connected();
+    const send = async () =>
+      await outcome(
+        call(
+          connection,
+          "mail.send",
+          {
+            mailbox: invoices,
+            subject: "Payment of invoice 2026-0041",
+            body: "Paid today.",
+            to: ["billing@northwind.example.org"],
+          },
+          { resource: invoices, idempotencyKey: "run-9:send-receipt" }
+        )
+      );
+    google.loseWriteAnswer();
+    const outcomes = [await send(), await send()];
+    expect(outcomes).toStrictEqual([
+      "connect.outcome_unknown",
+      "connect.outcome_unknown",
+    ]);
+    expect(google.writesDone()).toBe(1);
+    expect(google.sent).toHaveLength(1);
+  });
+
+  it("send a label change of unknown outcome again once its call can no longer be out: it sets the same labels", async () => {
+    const connection = await connected();
+    const label = async () =>
+      await outcome(
+        call(
+          connection,
+          "mail.label",
+          {
+            mailbox: invoices,
+            message: messageId(invoices, 1),
+            add: ["Label_7"],
+            remove: ["INBOX"],
+          },
+          { resource: invoices, idempotencyKey: "run-8:label" }
+        )
+      );
+    google.loseWriteAnswer();
+    const lost = await label();
+    const early = await label();
+    await claimedAgo(connection);
+    const recovered = await label();
+    const modified = parsedRequests(google.sent).map(({ method, body }) => ({
+      method,
+      body,
+    }));
+    expect({
+      lost,
+      early,
+      recovered,
+      writesDone: google.writesDone(),
+      sameWrite:
+        modified.length === 2 &&
+        JSON.stringify(modified[0]) === JSON.stringify(modified[1]),
+    }).toStrictEqual({
+      lost: "connect.outcome_unknown",
+      early: "connect.outcome_unknown",
+      recovered: "ok",
+      writesDone: 2,
+      sameWrite: true,
+    });
+  });
+
+  it("leave a Gmail send of unknown outcome unknown: nothing finds or repeats it", async () => {
+    const connection = await connected();
+    const send = async () =>
+      await outcome(
+        call(
+          connection,
+          "mail.send",
+          {
+            mailbox: invoices,
+            subject: "Payment of invoice 2026-0041",
+            body: "Paid today.",
+            to: ["billing@northwind.example.org"],
+          },
+          { resource: invoices, idempotencyKey: "run-8:send" }
+        )
+      );
+    google.loseWriteAnswer();
+    await send();
+    await claimedAgo(connection);
+    await expect(send()).resolves.toBe("connect.outcome_unknown");
     expect(google.sent).toHaveLength(1);
   });
 

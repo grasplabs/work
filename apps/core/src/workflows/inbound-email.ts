@@ -11,9 +11,10 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { Address, Email } from "postal-mime";
 
+import { keepAuditEvent } from "../audit-outbox.ts";
 import { apps, workflowTriggers } from "../db/core/schema.ts";
 import { isWorthKeeping, keepMessage, parsedOf } from "./kept-email.ts";
-import { deliveryRoom, maxInputLength, startRun } from "./runs.ts";
+import { deliveryRoom, jsonBytes, maxInputBytes, startRun } from "./runs.ts";
 
 // Mail to workflows' email triggers (trigger-registry.ts). Email Routing
 // sends every message for the deployment's mail domain to core's email
@@ -54,6 +55,22 @@ import { deliveryRoom, maxInputLength, startRun } from "./runs.ts";
 // message is untrusted data for the run, its From address included. A
 // start that fails fails the delivery, so the sending server can try
 // again, starting only what didn't start.
+//
+// Mail loops. A run can send mail (through a connection), and mail can
+// start a run: a workflow that mails its own App's address, or two that
+// mail each other, or an auto-reply answering a run's mail, would start
+// runs without end, each a new run lineage with quotas of its own. So a
+// message that says it was sent automatically (`Auto-Submitted` other
+// than `no`, RFC 3834), or that comes from the deployment's own mail
+// domain (its From or its envelope sender), starts nothing: it is
+// accepted and dropped, never bounced, as a bounce is mail that can loop
+// too, and the refusal is audited (`workflow.email.refused`). The mail
+// domain is the recipient's own, as Email Routing hands the message over:
+// every message here was sent to the deployment's domain, so it needs no
+// setting of its own, and can't be set wrong. A message from a person's
+// mailbox at the client's own domain still starts runs: people forward
+// mail to their workflows. Which runs a run's own mail starts, as its
+// descendants, is for a later change (GRA-273's follow-up).
 
 /** Longest subject a run's input keeps, in characters. */
 const maxSubjectLength = 1000;
@@ -80,9 +97,12 @@ const sizeOf = (content: ArrayBuffer | Uint8Array | string): number =>
     ? new TextEncoder().encode(content).byteLength
     : content.byteLength;
 
-/** How much `input` is over a run's input, as JSON text; 0 or less fits. */
+/**
+ * How many bytes `input` is over a run's input, as UTF-8 JSON; 0 or less
+ * fits.
+ */
 const overBy = (input: InboundEmail): number =>
-  JSON.stringify(input).length - maxInputLength;
+  jsonBytes(input) - maxInputBytes;
 
 /** Whether `code` is the first half of a character UTF-16 splits in two. */
 const isHighSurrogate = (code: number): boolean =>
@@ -101,21 +121,35 @@ const cutWhole = (text: string, length: number): string => {
 };
 
 /**
- * `input` made to fit a run's input: its text cut first, again until it
- * fits (each character cut takes at least one off the JSON, and cutting a
- * character JSON escapes takes more), then, should the rest still not
- * fit, Cc, To and attachments dropped from the end, in that order.
+ * The longest start of `input`'s text, cut on a character's edge, with
+ * which it fits a run's input; none if not even no text does. Found by
+ * halving: a longer start never takes fewer bytes, and how many bytes a
+ * character takes as JSON (one to six) can't be told from its length.
+ */
+const fittingText = (input: InboundEmail): string => {
+  let fits = 0;
+  let over = input.text.length;
+  while (fits < over) {
+    const length = Math.ceil((fits + over) / 2);
+    if (overBy({ ...input, text: cutWhole(input.text, length) }) <= 0) {
+      fits = length;
+    } else {
+      over = length - 1;
+    }
+  }
+  return cutWhole(input.text, fits);
+};
+
+/**
+ * `input` made to fit a run's input: its text cut first, to the longest
+ * start that fits (`fittingText`), then, should the rest still not fit,
+ * Cc, To and attachments dropped from the end, in that order.
  */
 const fitted = (input: InboundEmail): InboundEmail => {
-  let { text } = input;
-  let over = overBy(input);
-  if (over <= 0) {
+  if (overBy(input) <= 0) {
     return input;
   }
-  while (over > 0 && text.length > 0) {
-    text = cutWhole(text, text.length - over);
-    over = overBy({ ...input, text });
-  }
+  const text = fittingText(input);
   const cutText = {
     ...input,
     text,
@@ -138,10 +172,11 @@ const fitted = (input: InboundEmail): InboundEmail => {
 };
 
 /**
- * The most of a message's HTML read for its text: more than a run's input
- * could hold of what's left once the tags are gone.
+ * The most of a message's HTML read for its text, in characters: more
+ * than a run's input could hold of what's left once the tags are gone, as
+ * each character takes at least a byte.
  */
-const maxHtmlLength = 4 * maxInputLength;
+const maxHtmlLength = 4 * maxInputBytes;
 
 /** Tags whose content isn't text. */
 const skippedTags = new Set(["script", "style"]);
@@ -277,10 +312,47 @@ const receiversAt = async (env: Env, address: string) =>
       )
     );
 
+/** Why a message may loop, and so starts nothing (see above). */
+type LoopReason = "auto_submitted" | "own_domain";
+
+/** The domain of `address`, lower case; none without an `@`. */
+const domainOf = (address: string | undefined): string | undefined => {
+  const at = address?.lastIndexOf("@") ?? -1;
+  return address === undefined || at < 0
+    ? undefined
+    : address.slice(at + 1).toLowerCase();
+};
+
+/**
+ * Why `parsed`, sent to `to` by the envelope sender `from`, may be part of
+ * a mail loop: it says it was sent automatically (an `Auto-Submitted`
+ * header whose value isn't `no`), or it comes from the recipient's own
+ * domain, the deployment's. None for mail a person sent from elsewhere.
+ */
+const loopOf = (
+  to: string,
+  from: string,
+  parsed: Email
+): LoopReason | undefined => {
+  const submitted = parsed.headers.find(
+    ({ key }) => key.toLowerCase() === "auto-submitted"
+  );
+  const kind = submitted?.value.split(";", 1)[0]?.trim().toLowerCase();
+  if (kind !== undefined && kind !== "no") {
+    return "auto_submitted";
+  }
+  const own = domainOf(to);
+  const senders = [from, parsed.from?.address];
+  return own !== undefined && senders.some((sender) => domainOf(sender) === own)
+    ? "own_domain"
+    : undefined;
+};
+
 /**
  * Takes a message Email Routing delivers: starts a run of each workflow
  * that receives mail at its recipient's address, with the message as
- * input, bounces it, or fails it for now.
+ * input, bounces it, or fails it for now. A message that may loop
+ * (`loopOf`) is dropped, and its refusal audited.
  */
 export const receiveEmail = async (
   message: ForwardableEmailMessage,
@@ -305,6 +377,24 @@ export const receiveEmail = async (
     return;
   }
   const id = toHex(new Uint8Array(await crypto.subtle.digest("SHA-256", raw)));
+  const loop = loopOf(message.to, message.from, parsed);
+  if (loop !== undefined) {
+    // Once for each App it would have started a run of. Identifiers only:
+    // the address it was sent to, why, and the hash of its bytes; never
+    // who sent it or what it says.
+    const db = drizzle(env.DB);
+    await Promise.all(
+      [...new Set(receivers.map(({ appId }) => appId))].map(async (appId) => {
+        await keepAuditEvent(env, db, {
+          actor: { type: "system" },
+          action: "workflow.email.refused",
+          target: { type: "app", id: appId },
+          detail: { address, reason: loop, message: id },
+        });
+      })
+    );
+    return;
+  }
   // Only a Message-ID with an `@` names one message: `<>` or `x` would
   // make every message that carries it the same one.
   const { messageId } = parsed;

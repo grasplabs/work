@@ -9,6 +9,7 @@ import type { AppAnswer } from "./app.ts";
 import { draftFiles } from "./apps.ts";
 import { previewBindings } from "./preview-bindings.ts";
 import { sandbox } from "./sandbox.ts";
+import { requireBoundedHere } from "./sandboxed.ts";
 import { buildFailed, buildServer } from "./screens.ts";
 import type { TailOf } from "./server-logs.ts";
 import type { Draft } from "./workspace.ts";
@@ -39,11 +40,14 @@ const facetName = (chatId: ChatId, app: string): string =>
  * changes with each write. What it writes with `console` goes to the
  * chat's Workspace object, for the agent's next check (server-logs.ts).
  */
-const loadPreview = async (
+export const loadPreview = async (
   env: Env,
   { app, preview }: Required<Omit<TailOf, "version">>,
   draft: Draft
 ): Promise<DurableObjectClass> => {
+  // On-prem, nothing bounds a draft's server object (a facet of core's own
+  // Loader): refused unless the deployment says that's fine (GRA-501).
+  requireBoundedHere(env, "a draft's preview");
   const files = Object.fromEntries(await draftFiles(env, app, draft));
   const build = await buildServer(env, files);
   if (!build.ok) {

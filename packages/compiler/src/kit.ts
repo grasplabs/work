@@ -70,7 +70,10 @@ export const compilerAssets = {
   source: "compiler.js",
   kit: "kit.json",
   kitModules: "kit-modules.json",
-  sdkModules: "sdk-modules.json",
+  /** The SDK modules an App's workflows import (`sdkImports`). */
+  workflowSdkModules: "sdk-workflow-modules.json",
+  /** The SDK modules an App's server isolate loads (`serverSdkImports`). */
+  serverSdkModules: "sdk-server-modules.json",
   /** The package builder's module (src/packages/worker.ts). */
   packageBuilder: "package-builder.js",
   /** esbuild's WebAssembly, which the package builder runs. */

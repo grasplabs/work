@@ -14,6 +14,7 @@ import {
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import { and, eq, exists, gt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -21,7 +22,11 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxedIfChanged,
+  outboxedWhere,
+} from "../audit-outbox.ts";
 import { notRemoved, organizationId } from "../auth/auth.ts";
 import { signInConfig } from "../auth/config.ts";
 import type { Member } from "../auth/identity.ts";
@@ -93,9 +98,32 @@ export type DecisionOutcome =
   | { answered: true; approved: boolean; by: string; payload: Json | null }
   | { answered: false };
 
+/**
+ * The run's next summary revision (workflows/summary.ts), after the
+ * statement before it changed one of its decisions: their audit event,
+ * stored only if the decision changed.
+ */
+const summaryChanged = (db: DrizzleD1Database, run: string) =>
+  db
+    .update(workflowRuns)
+    .set({ summaryRevision: sql`${workflowRuns.summaryRevision} + 1` })
+    .where(and(eq(workflowRuns.id, run), sql`changes() > 0`));
+
+const decisionEventPrefix = "grasp-decision-";
+
 /** The event that wakes a run waiting on `decision`: core's own type. */
 export const decisionEventType = (decision: string): string =>
-  `grasp-decision-${decision}`;
+  `${decisionEventPrefix}${decision}`;
+
+/**
+ * The decision an event type of `decisionEventType` wakes a run for;
+ * nothing for any other type.
+ */
+export const decisionOfEventType = (type: string): string | undefined =>
+  type.startsWith(decisionEventPrefix) &&
+  type.length > decisionEventPrefix.length
+    ? type.slice(decisionEventPrefix.length)
+    : undefined;
 
 /** The longest description of a decision kept; the rest is cut. */
 const maxDescription = 500;
@@ -181,6 +209,11 @@ export const openDecision = async (
     decidedAt: null,
     payload: null,
   };
+  // Opened only for a run that goes on, as the batch finds it: a decision
+  // of a run cancelled meanwhile is taken out again in the same batch, and
+  // neither audited nor told of.
+  const liveRun = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run.runId} AND ${workflowRuns.cancelRequestedAt} IS NULL AND ${workflowRuns.endedAt} IS NULL)`;
+  const stands = sql`EXISTS (SELECT 1 FROM ${workflowDecisions} WHERE ${workflowDecisions.id} = ${row.id})`;
   const [[inserted]] = await auditedBatch(env, db, [
     db
       .insert(workflowDecisions)
@@ -189,13 +222,26 @@ export const openDecision = async (
         target: [workflowDecisions.runId, workflowDecisions.step],
       })
       .returning({ id: workflowDecisions.id }),
-    outboxedIfChanged(
+    db
+      .delete(workflowDecisions)
+      .where(and(eq(workflowDecisions.id, row.id), sql`NOT ${liveRun}`)),
+    outboxedWhere(
       db,
       decisionEntry(runActorOf(run), "workflow.decision.opened", run, row, {
         from: request.from,
-      })
+      }),
+      stands
     ),
+    summaryChanged(db, run.runId),
   ]);
+  const live = await db
+    .select({ id: workflowRuns.id })
+    .from(workflowRuns)
+    .where(and(eq(workflowRuns.id, run.runId), liveRun))
+    .get();
+  if (live === undefined) {
+    throw executionErrors.create("execution.stale_attempt");
+  }
   // The run now waits for it; a step run again after a crash opened
   // nothing, and tells no one.
   if (inserted) {
@@ -348,7 +394,10 @@ export const decisionRecipients = async (
   env: Env,
   run: DecisionRun,
   decision: string,
-  reminder: boolean
+  reminder: boolean,
+  stillAsking: () => Promise<void> = async () => {
+    await Promise.resolve();
+  }
 ): Promise<DecisionRecipient[]> => {
   const row = await runDecision(env, run, decision);
   // Past its deadline, nobody can answer it, so nobody is asked: a link
@@ -371,15 +420,32 @@ export const decisionRecipients = async (
   if (people.length > maxDeciders) {
     throw decisionErrors.create("decision.too_many_deciders");
   }
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      ...decisionEntry(runActorOf(run), "workflow.decision.asked", run, row, {
-        recipients: people.length,
-        reminder,
-      }),
-      provenance: people.map(({ userId }) => userId),
-    }),
+  // Last before the ask is recorded: the step asking may have been let go
+  // of while the people were read (the caller's check, `stillAsking`), and
+  // its run cancelled or ended, which the write itself checks, so an ask
+  // of a run that was cancelled meanwhile is never recorded.
+  await stillAsking();
+  const liveRun = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run.runId} AND ${workflowRuns.cancelRequestedAt} IS NULL AND ${workflowRuns.endedAt} IS NULL)`;
+  const [, live] = await auditedBatch(env, db, [
+    outboxedWhere(
+      db,
+      {
+        ...decisionEntry(runActorOf(run), "workflow.decision.asked", run, row, {
+          recipients: people.length,
+          reminder,
+        }),
+        provenance: people.map(({ userId }) => userId),
+      },
+      liveRun
+    ),
+    db
+      .select({ id: workflowRuns.id })
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.id, run.runId), liveRun)),
   ]);
+  if (live.length === 0) {
+    throw executionErrors.create("execution.stale_attempt");
+  }
   const link = new URL(`/decisions/${encodeURIComponent(row.id)}`, origin);
   return people.map((person) => ({ ...person, link: link.href }));
 };
@@ -418,6 +484,7 @@ export const decisionOutcome = async (
           found
         )
       ),
+      summaryChanged(db, run.runId),
     ]);
     if (closed) {
       await tellScreens(env, changed(run));
@@ -544,12 +611,17 @@ export const decisionFor = async (
   toView(env, await allowedDecision(env, by, decision));
 
 /**
- * Wakes the run waiting on the decision. A run that misses it still finds
- * the answer: when its wait ends, it reads the decision again.
+ * Wakes the run waiting on the decision, once: the decision's ID names the
+ * delivery, so a wake sent again is the same event. A run that misses it
+ * still finds the answer: when its wait ends, it reads the decision again.
  */
 const wake = async (env: Env, row: DecisionRow): Promise<void> => {
   try {
-    await runEngine(env).sendEvent(row.runId, decisionEventType(row.id));
+    await runEngine(env).sendEvent(
+      row.runId,
+      decisionEventType(row.id),
+      row.id
+    );
   } catch (error) {
     log.warn("decision.wake_failed", {
       decision: row.id,
@@ -662,6 +734,7 @@ export const answerDecision = async (
         via === undefined ? {} : { via }
       )
     ),
+    summaryChanged(db, row.runId),
   ]);
   if (!answered) {
     // Who may answer can have changed since it was checked above.

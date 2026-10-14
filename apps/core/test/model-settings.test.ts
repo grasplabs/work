@@ -6,6 +6,7 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { budgetDay } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
 import type { LedgerScope } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
@@ -240,8 +241,11 @@ describe("model settings", { timeout: 60_000 }, () => {
         ],
       },
       month: coreEnv.MODEL_BUDGET_MONTH,
+      day: budgetDay(coreEnv),
       // Nothing held for review: this file's first test.
       held: [],
+      // No App has a model binding here (resource-bindings.test.ts lists them).
+      bindings: { listed: [], more: false },
     });
   });
 

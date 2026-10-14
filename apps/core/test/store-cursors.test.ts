@@ -416,15 +416,31 @@ describe("cursors", () => {
     const other = await storeWith("owner");
     await insertNotes(fixture, ranked);
     await insertNotes(fixture, ranked, "grace");
-    // Another schema of the same store: another generation of its tables.
+    // Another schema of the same store, one optional field more: another
+    // generation of its tables.
     const later = await fixture.store.defineTables(
       manifestText(
-        schemaManifest(schema, {
-          tables: {
-            notes: { read: "owner", write: "appMembers" },
-            people: { read: "owner", write: "owner" },
-          },
-        })
+        schemaManifest(
+          defineSchema({
+            notes: defineTable({
+              title: v.string(),
+              rank: v.number().nullable().optional(),
+              done: v.boolean().default(false),
+              label: v.string().nullable().optional(),
+              note: v.string().optional(),
+            })
+              .index("by_title", ["title"])
+              .index("by_done_rank", ["done", "rank"])
+              .index("by_label", ["label"]),
+            people: defineTable({ name: v.string() }),
+          }),
+          {
+            tables: {
+              notes: { read: "owner", write: "owner" },
+              people: { read: "owner", write: "owner" },
+            },
+          }
+        )
       )
     );
     const scope = scopeOf(fixture.schemaHash);

@@ -1,4 +1,4 @@
-import { model, money, person, workflow, z } from "@grasp-os/sdk/workflow";
+import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
 import type { DecisionRequest } from "@grasp-os/sdk/workflow";
 
 /**
@@ -43,11 +43,6 @@ export const invoiceWorkflow = (systems: InvoiceSystems) =>
           sensitive: true,
         }),
         reviewer: person({ label: "Reviewer", default: "team:finance" }),
-        extractionModel: model({
-          label: "Extraction model",
-          default: "mistral-large",
-          sensitive: true,
-        }),
       },
       triggers: [{ type: "event", event: "invoice.received" }],
     },
@@ -66,7 +61,7 @@ export const invoiceWorkflow = (systems: InvoiceSystems) =>
 
       const extracted = await step.llm("extract", {
         description: "Read the total and currency from the invoice",
-        model: params.extractionModel,
+        binding: "extractor",
         instructions:
           "Read the invoice's total amount in whole minor units (cents for EUR) and its ISO 4217 currency code.",
         input: input.text,

@@ -247,3 +247,41 @@ describe("our stubs as the peer subscribes and lets go", () => {
     expect(ended.reason).toBeUndefined();
   });
 });
+
+describe("receives as one of our own messages is refused", () => {
+  it("holds nothing for the receives before, and ends only the one waiting", async () => {
+    const incoming = channel();
+    const transport = accountedTransport(
+      {
+        send: () => {
+          // Nothing listens: only what we refuse matters here.
+        },
+        receive: incoming.take,
+      },
+      limits,
+      (refusal) => new Error(`refused: ${refusal}`)
+    );
+    const received = 1000;
+    for (let index = 0; index < received; index += 1) {
+      incoming.deliver(JSON.stringify(["push", index]));
+      // oxlint-disable-next-line no-await-in-loop -- one message after another
+      await transport.receive();
+    }
+    const heldAfterReceives = transport.endable();
+    const waiting = transport.receive();
+    const heldWhileWaiting = transport.endable();
+    // An answer to the peer's first call holding more than the session
+    // may: refused as it's sent, which ends the session.
+    transport.send(["resolve", 1, "x".repeat(5 * 1024 * 1024)]);
+    await expect(waiting).rejects.toThrow("refused:");
+    expect({
+      heldAfterReceives,
+      heldWhileWaiting,
+      heldAfter: transport.endable(),
+    }).toStrictEqual({
+      heldAfterReceives: 0,
+      heldWhileWaiting: 1,
+      heldAfter: 0,
+    });
+  });
+});

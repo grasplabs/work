@@ -14,6 +14,7 @@ import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
+import { appFunctionResponse, functionCallApp } from "./app-function-route.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -154,6 +155,25 @@ const frameCodeResponse = async (
   return await packageArtifactResponse(env, request);
 };
 
+/**
+ * The connection routes: a provider's OAuth callback, and a catalog app's
+ * logo. Undefined for any other path, and for a callback that isn't one.
+ */
+const connectionRouteResponse = async (
+  request: Request,
+  env: Env,
+  pathname: string,
+  requestId: string
+): Promise<Response | undefined> => {
+  if (pathname === connectionCallbackPath) {
+    return await handleConnectionCallback(request, env);
+  }
+  if (isCatalogLogoPath(pathname)) {
+    return await catalogLogoResponse(request, env, pathname, requestId);
+  }
+  return undefined;
+};
+
 /** Routes a request that has passed the router-secret check. */
 const route = async (
   request: Request,
@@ -184,14 +204,14 @@ const route = async (
   if (isUnder(pathname, authBasePath)) {
     return await handleAuthRequest(request, env, requestId);
   }
-  if (pathname === connectionCallbackPath) {
-    const response = await handleConnectionCallback(request, env);
-    if (response !== undefined) {
-      return response;
-    }
-  }
-  if (isCatalogLogoPath(pathname)) {
-    return await catalogLogoResponse(request, env, pathname, requestId);
+  const connection = await connectionRouteResponse(
+    request,
+    env,
+    pathname,
+    requestId
+  );
+  if (connection !== undefined) {
+    return connection;
   }
   if (pathname === auditExportPath) {
     return await auditExportResponse(request, env, requestId);
@@ -208,6 +228,10 @@ const route = async (
   }
   if (pathname === platformUpdatePath) {
     return await platformUpdateResponse(request, env, requestId);
+  }
+  const functionApp = functionCallApp(pathname);
+  if (functionApp !== undefined) {
+    return await appFunctionResponse(request, env, functionApp, requestId);
   }
   const original = originalPath.exec(pathname)?.groups?.id;
   if (original !== undefined) {

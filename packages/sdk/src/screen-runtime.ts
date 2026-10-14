@@ -34,6 +34,14 @@ export interface ScreenBridge {
    * can keep and call later.
    */
   call: (method: string, args: unknown[]) => Promise<unknown>;
+  /**
+   * Calls one of the App's functions (spec 32.6), for the person using the
+   * screen: `request` is the call as JSON text (its reference, input and
+   * idempotency key), passed to core as it is; the answer is core's
+   * `{ result, fingerprint, manifestHash }`. The transport the screen
+   * client builds on, not a call for screen code itself.
+   */
+  callFunction: (request: string) => Promise<unknown>;
   /** Adds a problem to the App's error log. */
   report: (problem: ScreenProblem) => void;
   /** Calls `onTheme` with the page's theme now and whenever it changes. */
@@ -46,6 +54,10 @@ export interface ScreenBridge {
   run: (run: string) => Promise<unknown>;
   /** Answers the decision `decision` of one of the App's runs. */
   decide: (run: string, decision: string, answer: unknown) => Promise<unknown>;
+  /** Pauses, resumes or cancels one of the App's runs (`kind`). */
+  control: (run: string, kind: string) => Promise<unknown>;
+  /** One of the App's runs, as its summary of one revision. */
+  summary: (run: string) => Promise<unknown>;
   /**
    * Calls `onChange` each time one of the App's runs of `workflow`
    * changes, until the subscription it answers is released (`release()`)
