@@ -53,6 +53,12 @@ export const workflowErrors = defineErrorFamily({
     "This workflow run, with the runs it started, has reached a limit it may have: how many steps a run takes, how deep its runs nest, how many runs it starts, how long its steps run in all, how many calls its steps make, or how old it is. No more of it can be admitted.",
   "workflow.lineage_busy":
     "Steps still running in this workflow run, or in runs it started, hold what's left of its run time. Try again once they finish.",
+  "workflow.queued":
+    "Workflow steps already running take this App's, this person's or the organization's share of the steps that may run at once. This one waits its turn and runs once a share comes free.",
+  "workflow.queue_timeout":
+    "This workflow step waited its turn to run for as long as a step may wait, so it was stopped. Steps already running kept the organization, this person or this App busy throughout: try again later.",
+  "workflow.queue_full":
+    "As many of this person's, or this App's, workflow steps are already waiting for their turn to run as may wait at once. Try again once some have run.",
   "workflow.idempotency_key_invalid":
     "A workflow's connection calls take their step's own idempotency key (the `idempotencyKey` a side-effect step gets), or none: the platform keeps side effects to once per step and run.",
   "workflow.param_not_found":
@@ -431,6 +437,10 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "model.budget_busy",
   // Nothing ran; room comes back as the lineage's attempts under way settle.
   "workflow.lineage_busy",
+  // Nothing ran; a share comes back as attempts running at once settle.
+  "workflow.queued",
+  // Nothing ran, nor was queued; places come free as waiting steps run.
+  "workflow.queue_full",
   "internal.unexpected",
   "workflow.invalid_model_output",
 ]);
@@ -538,6 +548,12 @@ export interface RunSummary {
   error?: { code: string; message: string };
   /** The decisions it waits for now: none once it has ended. */
   waits: { kind: "decision"; name: string; expiresAt: number }[];
+  /**
+   * While it is `queued` for a share of the attempts that run at once (its
+   * App's, its person's or the organization's): which, and when it asks
+   * again at the latest. Throttling, not a fault of the workflow.
+   */
+  queued?: { waitingFor: "client" | "person" | "app"; retryAt: number };
   /**
    * What the person asking may do now, as the host would admit it, and a
    * control the host admitted that the engine is still applying.

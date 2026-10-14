@@ -386,6 +386,7 @@ const checkedManifest = async (
       .from(sdkResourceBindings)
       .where(
         and(
+          eq(sdkResourceBindings.kind, "store"),
           eq(sdkResourceBindings.resourceId, app),
           eq(sdkResourceBindings.resourceVersion, version),
           eq(sdkResourceBindings.alias, "default")

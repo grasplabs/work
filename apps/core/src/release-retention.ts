@@ -623,15 +623,16 @@ const deleteRelease = async (
       .delete(sdkReleaseManifests)
       .where(deletable)
       .returning({ appId: sdkReleaseManifests.appId }),
-    db
-      .delete(sdkResourceBindings)
-      .where(
-        and(
-          eq(sdkResourceBindings.resourceId, key.app),
-          eq(sdkResourceBindings.resourceVersion, key.version),
-          gone
-        )
-      ),
+    db.delete(sdkResourceBindings).where(
+      and(
+        // A release's own store bindings: a workflow resource's bindings
+        // (workflow-resources.ts) are never an App release's.
+        eq(sdkResourceBindings.kind, "store"),
+        eq(sdkResourceBindings.resourceId, key.app),
+        eq(sdkResourceBindings.resourceVersion, key.version),
+        gone
+      )
+    ),
     db
       .delete(sdkReleasePins)
       .where(

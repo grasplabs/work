@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "aeaea0a4-a8b2-4e68-bb94-1af9d8d2dfdc",
+  "id": "ec43a3fe-6bea-40ea-bb13-b970a73ce089",
   "prevId": "fc29fb32-f450-4f69-943c-b16b03a498ce",
   "tables": {
     "accounts": {
@@ -4184,6 +4184,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "contract_id": {
+          "name": "contract_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -4877,73 +4884,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "workflow_owners": {
-      "name": "workflow_owners",
-      "columns": {
-        "app_id": {
-          "name": "app_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "workflow_id": {
-          "name": "workflow_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "owner_id": {
-          "name": "owner_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "set_by": {
-          "name": "set_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "set_at": {
-          "name": "set_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "workflow_owners_app_id_apps_id_fk": {
-          "name": "workflow_owners_app_id_apps_id_fk",
-          "tableFrom": "workflow_owners",
-          "tableTo": "apps",
-          "columnsFrom": [
-            "app_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "workflow_owners_app_id_workflow_id_pk": {
-          "columns": [
-            "app_id",
-            "workflow_id"
-          ],
-          "name": "workflow_owners_app_id_workflow_id_pk"
-        }
-      },
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "workflow_param_values": {
       "name": "workflow_param_values",
       "columns": {
@@ -5016,6 +4956,282 @@
           "name": "workflow_param_values_app_id_workflow_id_param_pk"
         }
       },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workflow_resource_members": {
+      "name": "workflow_resource_members",
+      "columns": {
+        "workflow_resource_id": {
+          "name": "workflow_resource_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "member_type": {
+          "name": "member_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "added_by": {
+          "name": "added_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "added_at": {
+          "name": "added_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "workflow_resource_members_member_idx": {
+          "name": "workflow_resource_members_member_idx",
+          "columns": [
+            "member_type",
+            "member_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "workflow_resource_members_workflow_resource_id_workflow_resources_id_fk": {
+          "name": "workflow_resource_members_workflow_resource_id_workflow_resources_id_fk",
+          "tableFrom": "workflow_resource_members",
+          "tableTo": "workflow_resources",
+          "columnsFrom": [
+            "workflow_resource_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "workflow_resource_members_workflow_resource_id_member_type_member_id_pk": {
+          "columns": [
+            "workflow_resource_id",
+            "member_type",
+            "member_id"
+          ],
+          "name": "workflow_resource_members_workflow_resource_id_member_type_member_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workflow_resource_versions": {
+      "name": "workflow_resource_versions",
+      "columns": {
+        "workflow_resource_id": {
+          "name": "workflow_resource_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "definition_version": {
+          "name": "definition_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "definition": {
+          "name": "definition",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "definition_json_hash": {
+          "name": "definition_json_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "profile_version": {
+          "name": "profile_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evaluator_hash": {
+          "name": "evaluator_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contract": {
+          "name": "contract",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "contract_hash": {
+          "name": "contract_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "manifest": {
+          "name": "manifest",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "manifest_hash": {
+          "name": "manifest_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "author_id": {
+          "name": "author_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "workflow_resource_versions_definition_version": {
+          "name": "workflow_resource_versions_definition_version",
+          "columns": [
+            "workflow_resource_id",
+            "definition_version"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "workflow_resource_versions_workflow_resource_id_workflow_resources_id_fk": {
+          "name": "workflow_resource_versions_workflow_resource_id_workflow_resources_id_fk",
+          "tableFrom": "workflow_resource_versions",
+          "tableTo": "workflow_resources",
+          "columnsFrom": [
+            "workflow_resource_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "workflow_resource_versions_workflow_resource_id_version_pk": {
+          "columns": [
+            "workflow_resource_id",
+            "version"
+          ],
+          "name": "workflow_resource_versions_workflow_resource_id_version_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "workflow_resources": {
+      "name": "workflow_resources",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_id": {
+          "name": "owner_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "current_version": {
+          "name": "current_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "workflow_resources_name_unique": {
+          "name": "workflow_resources_name_unique",
+          "columns": [
+            "name"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
     },

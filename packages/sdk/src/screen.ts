@@ -251,6 +251,8 @@ export interface RunSummary {
   };
   error?: { code: string; message: string };
   waits: { kind: "decision"; name: string; expiresAt: number }[];
+  /** While it waits its turn to run a step: for whose share, and until when at the latest. */
+  queued?: { waitingFor: "client" | "person" | "app"; retryAt: number };
   control: {
     canPause: boolean;
     canResume: boolean;

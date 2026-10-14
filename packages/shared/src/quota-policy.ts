@@ -21,8 +21,11 @@ import { platformLimits } from "./platform-limits.ts";
  * checks as it admits work: a run's steps, a step's attempts (its first
  * included), the levels and descendant runs of a run lineage, the
  * lineage's active execution and age, the provider requests it sends to
- * models (core's model ledger, model-budgets.ts), and the host calls its
- * attempts make.
+ * models (core's model ledger, model-budgets.ts), the host calls its
+ * attempts make, the attempts running at once in the client, for one
+ * person and of one App, the steps waiting for a share, for one person and
+ * of one App, how long one step waits, and the independent workflows one
+ * person creates (core's workflow-resources.ts).
  */
 export const lowerableLimits = [
   "workflowSteps",
@@ -33,6 +36,13 @@ export const lowerableLimits = [
   "workflowAgeMs",
   "lineageModelRequests",
   "lineageHostCalls",
+  "workflowResourcesPerPerson",
+  "workflowClientAttempts",
+  "workflowPersonAttempts",
+  "workflowAppAttempts",
+  "workflowQueuedPerPerson",
+  "workflowQueuedPerApp",
+  "workflowQueuedStepMs",
 ] as const;
 
 export type LowerableLimit = (typeof lowerableLimits)[number];
@@ -63,6 +73,13 @@ export const quotaLimitsSchema = z.strictObject({
     workflowAgeMs: lowered("workflowAgeMs"),
     lineageModelRequests: lowered("lineageModelRequests"),
     lineageHostCalls: lowered("lineageHostCalls"),
+    workflowResourcesPerPerson: lowered("workflowResourcesPerPerson"),
+    workflowClientAttempts: lowered("workflowClientAttempts"),
+    workflowPersonAttempts: lowered("workflowPersonAttempts"),
+    workflowAppAttempts: lowered("workflowAppAttempts"),
+    workflowQueuedPerPerson: lowered("workflowQueuedPerPerson"),
+    workflowQueuedPerApp: lowered("workflowQueuedPerApp"),
+    workflowQueuedStepMs: lowered("workflowQueuedStepMs"),
   } satisfies Record<LowerableLimit, z.ZodType>),
 });
 
@@ -91,6 +108,13 @@ export const quotaPolicyOf = (
     workflowAgeMs: platformLimits.workflowAgeMs,
     lineageModelRequests: platformLimits.lineageModelRequests,
     lineageHostCalls: platformLimits.lineageHostCalls,
+    workflowResourcesPerPerson: platformLimits.workflowResourcesPerPerson,
+    workflowClientAttempts: platformLimits.workflowClientAttempts,
+    workflowPersonAttempts: platformLimits.workflowPersonAttempts,
+    workflowAppAttempts: platformLimits.workflowAppAttempts,
+    workflowQueuedPerPerson: platformLimits.workflowQueuedPerPerson,
+    workflowQueuedPerApp: platformLimits.workflowQueuedPerApp,
+    workflowQueuedStepMs: platformLimits.workflowQueuedStepMs,
   };
   if (configured === undefined) {
     return { generation: 0, limits };
