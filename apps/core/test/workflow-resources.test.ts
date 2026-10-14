@@ -285,7 +285,7 @@ describe("publishing a version", () => {
     );
   });
 
-  it("answers a retried publication with the version it made, though a workflow it binds is no longer the publisher's, or is gone", async () => {
+  it("answers a retried publication with the version it made, as the publisher may see it, though a workflow it binds is no longer the publisher's, or is gone", async () => {
     const ada = await person("builder");
     const bob = await person("builder");
     const child = await workflowOf(ada, "child");
@@ -323,13 +323,24 @@ describe("publishing a version", () => {
     await deleteWorkflowResource(env, ada, child.id);
     const deleted = await publish(bob, parent.id, bound);
 
-    expect({ unshared, deleted }).toStrictEqual({
-      unshared: first,
-      deleted: first,
+    const versions = await workflowVersions(env, bob, parent.id);
+    const seen = versions.find(({ version }) => version === first.version);
+    // Bob builds the parent, not the child: a retry tells him no more of
+    // what the version binds than its listing does.
+    expect({
+      unshared,
+      deleted,
+      versions: versions.length,
+      binds: seen?.bindings.map(({ resourceId, contractId }) => ({
+        resourceId,
+        contractId,
+      })),
+    }).toStrictEqual({
+      unshared: seen,
+      deleted: seen,
+      versions: 2,
+      binds: [{ resourceId: null, contractId: null }],
     });
-    await expect(workflowVersions(env, bob, parent.id)).resolves.toHaveLength(
-      2
-    );
   });
 
   it("answers two identical publications racing each other with the one version", async () => {

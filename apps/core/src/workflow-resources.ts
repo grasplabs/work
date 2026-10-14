@@ -797,9 +797,13 @@ const statedVersionSchema = z.object({
  * from the same definition (`definitionHashOf`, so whitespace and key
  * order aside). Read off the text alone: a saved version passed
  * validation as it was published, and nothing is written for it again.
+ * Its bindings are answered as `by` may see them (`visibleTo`): a builder
+ * of this workflow can read its definition and submit it again, but that
+ * doesn't let them learn which workflow it binds where they don't build it.
  */
 const savedPublication = async (
   env: Env,
+  by: Acting,
   id: string,
   definition: string
 ): Promise<WorkflowResourceVersion | undefined> => {
@@ -820,7 +824,13 @@ const savedPublication = async (
   ) {
     return undefined;
   }
-  return existing;
+  const byVersion = await bindingsOf(env, id);
+  const pinned = byVersion.get(existing.version) ?? [];
+  const visible = await visibleTo(env, by, pinned);
+  return {
+    ...existing,
+    bindings: pinned.map((binding) => visible.get(binding) ?? binding),
+  };
 };
 
 /** A version about to be written: everything its row and manifest hold. */
@@ -1020,7 +1030,7 @@ export const publishWorkflowVersion = async (
   // before its bindings are resolved again: the builder may have lost
   // their role in a workflow it binds since, or that workflow been
   // deleted, and the version still binds what it pinned then.
-  const saved = await savedPublication(env, workflow.id, definition);
+  const saved = await savedPublication(env, by, workflow.id, definition);
   if (saved !== undefined) {
     return saved;
   }
