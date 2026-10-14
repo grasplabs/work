@@ -21,6 +21,7 @@ import { z } from "zod";
 import {
   quotaPolicies,
   runLineageAttempts,
+  runLineageChildren,
   runLineages,
   workflowRuns,
 } from "../db/core/schema.ts";
@@ -52,7 +53,8 @@ import {
 //   another joins the lineage of its parent's root and sits one deeper,
 //   both read from the parent's row, never from what any run is given.
 //   Its slot is counted on the root's row, and is never given back, even
-//   when its start then fails.
+//   when its start then fails. A trigger's deliveries of one message are
+//   one child, in one slot, claimed by its key (`run_lineage_children`).
 // - Admissions racing past a limit: each is one conditional statement in
 //   one batch (a transaction), which changes the counters only if the work
 //   fits as they stand then. No count is read first and written after.
@@ -280,10 +282,75 @@ export interface ChildPlace {
   depth: number;
 }
 
+/** A slot of the lineage of `root`, while it `fits`: where it sits, or none. */
+const admittedUnkeyed = async (
+  db: DrizzleD1Database,
+  { root, depth }: { root: string; depth: number },
+  policy: QuotaPolicy,
+  fits: SQL | undefined
+): Promise<ChildPlace | undefined> => {
+  const [, taken] = await db.batch([
+    lineageCreated(db, root),
+    db
+      .update(runLineages)
+      .set({
+        descendants: sql`${runLineages.descendants} + 1`,
+        policyGeneration: policy.generation,
+      })
+      .where(fits)
+      .returning({ descendants: runLineages.descendants }),
+  ]);
+  return taken.length > 0 ? { rootRunId: root, depth } : undefined;
+};
+
+/**
+ * The child of the trigger key `key`, admitted once: claimed with a slot
+ * of the lineage of `root` while it `fits`, in one batch, so deliveries of
+ * one message admitted at once, or one after another, are one child in
+ * one slot, and none is refused for the slot another took for it. Where
+ * it sits, or none.
+ */
+const admittedKeyed = async (
+  db: DrizzleD1Database,
+  { root, depth, key }: { root: string; depth: number; key: string },
+  policy: QuotaPolicy,
+  fits: SQL | undefined
+): Promise<ChildPlace | undefined> => {
+  const children = runLineageChildren;
+  const admitted = await db.batch([
+    lineageCreated(db, root),
+    // The claim, only while the lineage has room: one statement, so no
+    // other admission comes between the check and the claim.
+    db
+      .insert(children)
+      .select(
+        sql`SELECT ${key}, ${root}, ${depth}, ${Date.now()} FROM ${runLineages} WHERE ${fits}`
+      )
+      .onConflictDoNothing(),
+    // Its slot, only if that statement claimed it.
+    db
+      .update(runLineages)
+      .set({
+        descendants: sql`${runLineages.descendants} + 1`,
+        policyGeneration: policy.generation,
+      })
+      .where(and(eq(runLineages.rootRunId, root), sql`changes() > 0`)),
+    db
+      .select({ rootRunId: children.rootRunId, depth: children.depth })
+      .from(children)
+      .where(eq(children.triggerKey, key)),
+  ]);
+  const {
+    3: [claimed],
+  } = admitted;
+  return claimed;
+};
+
 /** `admitChild` under `policy`; `retried` once read again (`policyStill`). */
 const admitChildOnce = async (
   env: Pick<Env, "DB" | "QUOTA_LIMITS">,
   parent: { id: string; rootRunId: string | null; depth: number },
+  key: string | undefined,
   policy: QuotaPolicy,
   retried: boolean
 ): Promise<ChildPlace> => {
@@ -295,29 +362,20 @@ const admitChildOnce = async (
   }
   const db = drizzle(env.DB);
   const bornAfter = new Date(Date.now() - policy.limits.workflowAgeMs);
-  const [, taken] = await db.batch([
-    lineageCreated(db, root),
-    db
-      .update(runLineages)
-      .set({
-        descendants: sql`${runLineages.descendants} + 1`,
-        policyGeneration: policy.generation,
-      })
-      .where(
-        and(
-          eq(runLineages.rootRunId, root),
-          lt(runLineages.descendants, policy.limits.workflowDescendantRuns),
-          gt(runLineages.createdAt, bornAfter),
-          stillCurrent(policy)
-        )
-      )
-      .returning({ descendants: runLineages.descendants }),
-  ]);
-  if (taken.length > 0) {
-    return { rootRunId: root, depth };
+  const fits = and(
+    eq(runLineages.rootRunId, root),
+    lt(runLineages.descendants, policy.limits.workflowDescendantRuns),
+    gt(runLineages.createdAt, bornAfter),
+    stillCurrent(policy)
+  );
+  const taken = await (key === undefined
+    ? admittedUnkeyed(db, { root, depth }, policy, fits)
+    : admittedKeyed(db, { root, depth, key }, policy, fits));
+  if (taken !== undefined) {
+    return taken;
   }
   if (!retried && !(await policyStill(db, policy))) {
-    return await admitChildOnce(env, parent, await quotaPolicy(env), true);
+    return await admitChildOnce(env, parent, key, await quotaPolicy(env), true);
   }
   const lineage = await db
     .select({ createdAt: runLineages.createdAt })
@@ -337,14 +395,17 @@ const admitChildOnce = async (
  * Admits a run started under `parent` (its row): it sits one deeper than
  * its parent, within the levels a lineage may have, and takes one of the
  * descendant runs its lineage may start, while the lineage is young
- * enough. Throws `workflow.lineage_limit` past any of them, having taken
+ * enough. A run of a trigger's `key` is admitted once: a delivery of it
+ * admitted again, at once or later, is the same child, and takes no other
+ * slot. Throws `workflow.lineage_limit` past any of them, having taken
  * nothing; a slot taken is never given back.
  */
 export const admitChild = async (
   env: Pick<Env, "DB" | "QUOTA_LIMITS">,
-  parent: { id: string; rootRunId: string | null; depth: number }
+  parent: { id: string; rootRunId: string | null; depth: number },
+  key?: string
 ): Promise<ChildPlace> =>
-  await admitChildOnce(env, parent, await quotaPolicy(env), false);
+  await admitChildOnce(env, parent, key, await quotaPolicy(env), false);
 
 /** A step's attempt, as the engine claimed it and its host knows it. */
 export interface QuotaAttempt {

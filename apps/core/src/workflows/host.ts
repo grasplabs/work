@@ -2067,6 +2067,9 @@ export class RunHost extends RpcTarget {
                 stillAllowed: async () => {
                   await this.#requireCurrent(attempt, name);
                 },
+                // Its mail to the deployment's domain is stamped with
+                // this run (mail-stamps.ts).
+                stamping: { run: this.#run.runId, stepKey },
               });
             },
             grant,

@@ -221,6 +221,12 @@ export const connectionOwnersSchema = z
 export interface ConnectionOwner {
   id: string;
   ownerUserId: string | null;
+  /** Who carries out its actions: a native connector, or Composio. */
+  source: CatalogSource;
+  /** A native provider (`microsoft`), or a Composio toolkit's slug. */
+  provider: string;
+  /** The account at the provider, such as its email address. */
+  accountName: string | null;
 }
 
 /**
