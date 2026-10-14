@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 import { localSignIn } from "./apps/core/test/sign-in-config.ts";
-import { testAuthSecret } from "./e2e/people.ts";
+import { testAuthSecret, testCapabilityKey } from "./e2e/people.ts";
 import { corePort, idpOrigin, idpPort, origin, stateDir } from "./e2e/stack.ts";
 
 /** The end-to-end tests of the Playbook's built-ins (their own project). */
@@ -134,6 +134,10 @@ export default defineConfig({
             typeof value === "string" ? value : JSON.stringify(value)
           )
         ),
+        // A run waits on its person (a held change, or a call whose answer
+        // was lost) checking every 2 s at first, not every minute, so a
+        // test sees it go on once they decided.
+        devVar("WORKFLOW_OFF_WAIT_MS", "2000"),
         // `--local` has no Workers AI: a deployment kept in the EU extracts
         // uploads' text in the Worker instead (knowledge/extract.ts). The
         // Models page shows the rules and budgets.
@@ -147,7 +151,13 @@ export default defineConfig({
           })
         ),
       ].join(" "),
-      env: { DEV_PERSIST_TO: stateDir },
+      env: {
+        DEV_PERSIST_TO: stateDir,
+        // Core signs each connector call's capability and connect checks
+        // it: from the environment, which wrangler gives both Workers, as
+        // a `--var` reaches core alone.
+        CAPABILITY_SIGNING_KEY: testCapabilityKey,
+      },
       port: corePort,
       reuseExistingServer: false,
       timeout: 120_000,

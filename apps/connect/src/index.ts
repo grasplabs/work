@@ -33,6 +33,7 @@ import type {
   StartConnection,
   StartToolkitConnection,
   UnknownOutcome,
+  UnknownOutcomeListing,
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
@@ -71,6 +72,7 @@ import {
   startConnection,
 } from "./oauth.ts";
 import {
+  listAllUnknownOutcomes,
   listUnknownOutcomes,
   refuseResolution,
   resolveOutcome,
@@ -456,12 +458,19 @@ export default class Connect
   }
 
   // Calls of unknown outcome (src/outcomes.ts). Core names the person from
-  // their session; only they see and resolve what acted for them.
+  // their session; only they see and resolve what acted for them. An
+  // organization's own admins list everyone's, without what was sent.
 
   async listUnknownOutcomes(
     person: ConnectionPerson
   ): Promise<UnknownOutcome[]> {
     return await listUnknownOutcomes(this.env, person);
+  }
+
+  async listAllUnknownOutcomes(
+    admin: ConnectionPerson
+  ): Promise<UnknownOutcomeListing[]> {
+    return await listAllUnknownOutcomes(this.env, admin);
   }
 
   async unknownOutcome(request: unknown): Promise<UnknownOutcome | null> {

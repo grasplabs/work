@@ -354,7 +354,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       audited: [
         "workflow.run.completed",
         "workflow.run.started",
-        "workflow.run.waiting held",
+        "workflow.run.waiting outcome_unknown",
         "workflow.step.completed $params",
         "workflow.step.completed send",
       ],
@@ -436,6 +436,77 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
           reason: "permission.denied",
         },
       ],
+    });
+  });
+
+  it("is listed for the organization's other admins, read only and without what was sent, who can't resolve it; refused to anyone else", async () => {
+    const admin = await personApi("admin");
+    const { mailbox, connectionId, app, run, unknown } =
+      await waitingRun(admin);
+    const other = await personApi("admin");
+    const member = await personApi("builder");
+    const listed = await other.api.unknownOutcomes.listAll();
+    const theirs = listed.filter(
+      ({ onBehalfOf }) => onBehalfOf === admin.userId
+    );
+    const { items } = await admin.api.workflows.history(run.id, {
+      pageSize: 100,
+    });
+    expect({
+      theirs,
+      shown: theirs.map((listing) => Object.keys(listing).toSorted()),
+      // Even with its key and claim, as its person was shown them.
+      resolved: await codeOf(
+        other.api.unknownOutcomes.resolve(
+          unknown.key,
+          "happened",
+          unknown.claim
+        )
+      ),
+      memberAll: await codeOf(member.api.unknownOutcomes.listAll()),
+      memberOwn: await member.api.unknownOutcomes.list(),
+      stillListed: await listedFor(admin),
+      live: await liveStatus(run.id),
+      sent: await sentFrom(mailbox),
+      waitsOnOutcome: items.some(
+        (entry) =>
+          entry.kind === "wait" &&
+          entry.waitKind === "outcome_unknown" &&
+          entry.state === "opened"
+      ),
+    }).toMatchObject({
+      theirs: [
+        {
+          onBehalfOf: admin.userId,
+          subject: { type: "app", appId: app },
+          connectionId,
+          action: "mail.send",
+          title: "Send an email",
+          resource: null,
+        },
+      ],
+      // Never the input, its description, its key, its claim or its origin.
+      shown: [
+        [
+          "action",
+          "connectionId",
+          "connectionName",
+          "id",
+          "onBehalfOf",
+          "resource",
+          "sentAt",
+          "subject",
+          "title",
+        ],
+      ],
+      resolved: "connect.outcome_not_found",
+      memberAll: "role.forbidden",
+      memberOwn: [],
+      stillListed: 1,
+      live: "waiting",
+      sent: 1,
+      // The run's page says why it waits.
+      waitsOnOutcome: true,
     });
   });
 

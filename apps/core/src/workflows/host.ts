@@ -231,12 +231,15 @@ interface StepAttempt {
 
 /**
  * Why a run waits before running a step again: a side effect held for its
- * person, or its step queued for a share of the client's attempts running
- * at once (admission.ts), with the share and the seconds until it asks
- * again at the latest.
+ * person (`held`); a side effect of unknown outcome, until its person says
+ * what became of it (`outcome_unknown`, listed for them with their held
+ * actions); or its step queued for a share of the client's attempts
+ * running at once (admission.ts), with the share and the seconds until it
+ * asks again at the latest.
  */
 export type WaitReason =
   | { reason: "held" }
+  | { reason: "outcome_unknown" }
   | { reason: "queued"; waitingFor: Share; retryAfterSeconds: number };
 
 /** The code a held side effect answers a run's call with (connect). */
@@ -1462,9 +1465,11 @@ export class RunHost extends RpcTarget {
         return checks > 0;
       }
       if (checks === 0) {
+        // The step's name stays as it was for either reason: a replay
+        // finds it recorded, whatever reason it was recorded with.
         // oxlint-disable-next-line no-await-in-loop -- once per wait
         await this.#recordWaiting(`${prefix}:waiting:held`, {
-          reason: "held",
+          reason: unknownSince === undefined ? "held" : "outcome_unknown",
         });
       }
       // Until its person decides, which wakes the step (wakes.ts), or the

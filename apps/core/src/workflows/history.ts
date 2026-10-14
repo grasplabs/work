@@ -68,7 +68,8 @@ import type { RunRow } from "./runs.ts";
 // again once the person decided, in steps of core's own
 // (`$grasp:wait:<key>:held:<round>:…`, or `:unknown:`, host.ts): those runs are told as
 // more attempts of the step that was held, numbered on from its own, and
-// the waits between them as `blocked` waits of it, while its held end is
+// the waits between them as `blocked` waits of it (`outcome_unknown` for
+// an unknown outcome's, which its person resolves), while its held end is
 // no completion. Core's other steps (named `$…`: the parameters, a
 // decision's bookkeeping, a held effect's checks) are left out. A
 // decision's wait is a wait of kind `decision` with the decision's ID;
@@ -90,7 +91,7 @@ const stepFailedText = workflowErrors.create("workflow.step_failed").message;
 
 /** A held step's run again, a wait between them, or a check of it. */
 const heldStep =
-  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?:held|unknown):(?<round>[1-9]\d*):(?<rest>.+)$/u;
+  /^\$grasp:wait:(?<key>[0-9a-f]{16}):(?<kind>held|unknown):(?<round>[1-9]\d*):(?<rest>.+)$/u;
 
 /** A step whose side effect was held, and its runs since. */
 interface HeldStep {
@@ -350,7 +351,7 @@ const coreStepOf = (
     return waitOf(record, {
       taskId: told.taskId,
       waitId: told.stepId,
-      waitKind: "blocked",
+      waitKind: parts.kind === "unknown" ? "outcome_unknown" : "blocked",
     });
   }
   return undefined;

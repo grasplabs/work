@@ -9,9 +9,11 @@ import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import { Link } from "@tanstack/react-router";
 import {
   ActivityIcon,
   CircleAlertIcon,
+  CircleHelpIcon,
   HandIcon,
   LockIcon,
   TimerIcon,
@@ -20,6 +22,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
@@ -203,6 +206,7 @@ const waitIcons: Readonly<Record<WaitKind, LucideIcon>> = {
   event: ZapIcon,
   decision: HandIcon,
   blocked: LockIcon,
+  outcome_unknown: CircleHelpIcon,
 };
 
 /** What a wait waits for, in words: of `label`'s step, when it names one. */
@@ -218,6 +222,15 @@ export const waitText = (kind: WaitKind, label: string | null): string => {
       ? i18n._(msg`Waiting for a decision`)
       : i18n._(msg`Waiting for the decision ${label}`);
   }
+  if (kind === "outcome_unknown") {
+    return label === null
+      ? i18n._(
+          msg`A change was sent but its answer was lost: it waits for the person the run acts for to say whether it happened`
+        )
+      : i18n._(
+          msg`A change by ${label} was sent but its answer was lost: it waits for the person the run acts for to say whether it happened`
+        );
+  }
   return label === null
     ? i18n._(msg`A change waits for approval by the person the run acts for`)
     : i18n._(
@@ -227,8 +240,10 @@ export const waitText = (kind: WaitKind, label: string | null): string => {
 
 const WaitItem = ({
   item,
+  outcomeLink,
 }: {
   item: Extract<HistoryItem, { type: "wait" }>;
+  outcomeLink: ReactNode;
 }) => {
   const { t } = useLingui();
   const Icon = waitIcons[item.waitKind];
@@ -260,17 +275,27 @@ const WaitItem = ({
         {openedAt === null ? null : <span>{formatDateTime(openedAt)}</span>}
         {until === undefined ? null : <span>{t`Until ${until}`}</span>}
       </span>
+      {/* Where its person says what became of it, while it waits. */}
+      {item.waitKind === "outcome_unknown" && closedAt === null
+        ? outcomeLink
+        : null}
     </li>
   );
 };
 
-const Item = ({ item }: { item: HistoryItem }) => {
+const Item = ({
+  item,
+  outcomeLink,
+}: {
+  item: HistoryItem;
+  outcomeLink: ReactNode;
+}) => {
   const { t } = useLingui();
   if (item.type === "step") {
     return <StepItem item={item} />;
   }
   if (item.type === "wait") {
-    return <WaitItem item={item} />;
+    return <WaitItem item={item} outcomeLink={outcomeLink} />;
   }
   if (item.type === "unreadable") {
     const { sequence } = item;
@@ -304,12 +329,15 @@ export const HistoryView = ({
   busy = false,
   failure,
   onMore,
+  outcomeLink,
 }: {
   entries: readonly RunHistoryEntry[];
   hasMore: boolean;
   busy?: boolean;
   failure?: string;
   onMore: () => void;
+  /** Where an open wait on an unknown outcome is resolved, under it. */
+  outcomeLink?: ReactNode;
 }) => {
   const { t } = useLingui();
   const items = historyItems(entries);
@@ -324,7 +352,7 @@ export const HistoryView = ({
     <div className="flex flex-col gap-3">
       <ol aria-label={t`Run history`} className="flex flex-col gap-2">
         {items.map((item) => (
-          <Item item={item} key={item.id} />
+          <Item item={item} key={item.id} outcomeLink={outcomeLink} />
         ))}
       </ol>
       {hasMore ? (
@@ -395,6 +423,16 @@ export const RunHistory = ({
       onMore={() => {
         void more();
       }}
+      outcomeLink={
+        <Link
+          className="text-sm underline-offset-4 hover:underline focus-visible:underline"
+          to="/dashboard"
+        >
+          <Trans>
+            The person the run acts for says what happened on their dashboard
+          </Trans>
+        </Link>
+      }
     />
   );
 };

@@ -213,6 +213,44 @@ describe("a call of unknown outcome", () => {
     });
   });
 
+  it("is listed for the organization's own admins without what was sent, its key or its origin, and refused to anyone else, staff included", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await outcome(send(connection, "run-admins:send"));
+    const admin = someone("admin");
+    const listed = await exports.default.listAllUnknownOutcomes(admin);
+    const theirs = listed.filter(
+      ({ onBehalfOf }) => onBehalfOf === connection.person.userId
+    );
+    expect({
+      theirs,
+      leaked: /Paid today|run-admins|permission-mail/u.test(
+        JSON.stringify(theirs)
+      ),
+      user: await outcome(exports.default.listAllUnknownOutcomes(someone())),
+      builder: await outcome(
+        exports.default.listAllUnknownOutcomes(someone("builder"))
+      ),
+      staff: await outcome(
+        exports.default.listAllUnknownOutcomes({ ...admin, staff: true })
+      ),
+    }).toMatchObject({
+      theirs: [
+        {
+          onBehalfOf: connection.person.userId,
+          connectionId: connection.id,
+          action: "mail.send",
+          title: "Send an email",
+          resource: invoices,
+        },
+      ],
+      leaked: false,
+      user: "role.forbidden",
+      builder: "role.forbidden",
+      staff: "role.forbidden",
+    });
+  });
+
   it("resolved as having happened is never sent again: a repeat gets `connect.resolved_done`, with no output", async () => {
     const connection = await connected();
     graph.loseWriteAnswer();

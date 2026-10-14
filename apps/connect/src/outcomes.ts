@@ -20,9 +20,11 @@ import type {
   ResolutionChoice,
   UnknownOutcome,
   UnknownOutcomeKey,
+  UnknownOutcomeListing,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -161,6 +163,73 @@ export const listUnknownOutcomes = async (
     .orderBy(desc(idempotentCalls.createdAt))
     .limit(listLimit);
   return rows.map(summaryOf);
+};
+
+/**
+ * What `row` shows an admin: never its input, key, claim or origin
+ * (`UnknownOutcomeListing`). Its title is its tool's, which names the
+ * action, never a value of what was sent.
+ */
+const listingOf = async ({
+  row,
+  connection,
+}: {
+  row: Row;
+  connection: ShownConnection;
+}): Promise<UnknownOutcomeListing> => {
+  const title = descriptionOf(
+    { action: row.action, input: {} },
+    connection
+  )?.title;
+  return {
+    // A digest of the call's key and claim: App code chooses keys, so the
+    // key itself isn't shown, as the audit log hashes it.
+    id: await sha256Hex(
+      JSON.stringify([
+        row.subjectType,
+        row.subjectId,
+        row.connectionId,
+        row.action,
+        row.idempotencyKey,
+        row.claimedAt.getTime(),
+      ])
+    ),
+    onBehalfOf: row.onBehalfOf,
+    subject: keyOf(row).subject,
+    connectionId: row.connectionId,
+    connectionName: nameOf(connection),
+    action: row.action,
+    ...(title === undefined ? {} : { title }),
+    resource: row.resource,
+    sentAt: row.createdAt.toISOString(),
+  };
+};
+
+/**
+ * Every person's calls of unknown outcome, newest first, at most
+ * {@link listLimit}, as an admin sees them (`listingOf`): only for one of
+ * the organization's own admins, as core read them now; refused to anyone
+ * else, Grasp staff included, who act for nobody here.
+ */
+export const listAllUnknownOutcomes = async (
+  env: Env,
+  request: unknown
+): Promise<UnknownOutcomeListing[]> => {
+  const parsed = connectionPersonSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  if (!isMemberAdmin(parsed.data)) {
+    throw roleErrors.create("role.forbidden");
+  }
+  const rows = await drizzle(env.DB)
+    .select({ row: idempotentCalls, connection: shownConnection })
+    .from(idempotentCalls)
+    .leftJoin(connections, eq(connections.id, idempotentCalls.connectionId))
+    .where(unknownNow(Date.now()))
+    .orderBy(desc(idempotentCalls.createdAt))
+    .limit(listLimit);
+  return await Promise.all(rows.map(listingOf));
 };
 
 /** The person's call of unknown outcome `key` names, as stored, if any. */

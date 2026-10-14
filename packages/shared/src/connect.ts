@@ -962,11 +962,41 @@ export interface UnknownOutcome {
 }
 
 /**
+ * A call of unknown outcome as an organization's admin sees it, to follow
+ * up with the person it acted for: whose it is, what and where, and when.
+ * Never what was sent, nor its key (App code chooses keys), its claim or
+ * its origin: only that person resolves it, and only they see its input.
+ */
+export interface UnknownOutcomeListing {
+  /** Stable for this call of its key, for telling rows apart: a digest. */
+  id: string;
+  /** The person it acted for: theirs to resolve. */
+  onBehalfOf: string;
+  subject: PermissionSubject;
+  connectionId: string;
+  /** As `PendingAction.connectionName`. */
+  connectionName: string | null;
+  action: string;
+  /** What the action does, as its tool names it, such as "Send an email". */
+  title?: string;
+  resource: string | null;
+  /** When it was first sent, ISO 8601. */
+  sentAt: string;
+}
+
+/**
  * The calls of unknown outcome of a signed-in person, over `/rpc`: only
  * their own. Grasp staff have none, and resolve none.
  */
 export interface UnknownOutcomesApi {
   list: () => Promise<UnknownOutcome[]>;
+  /**
+   * Every person's open calls of unknown outcome, newest first, for the
+   * organization's own admins only (never Grasp staff), to follow up
+   * with each call's person: read only, as `UnknownOutcomeListing` shows
+   * them. An admin resolves only their own, with `resolve`.
+   */
+  listAll: () => Promise<UnknownOutcomeListing[]>;
   /**
    * Says what became of the call `key` names: `happened` keeps it from
    * ever being sent again; `not_happened` lets it be sent once more, with
@@ -1213,6 +1243,14 @@ export interface ConnectApi extends PackageRegistryApi {
    * for Grasp staff.
    */
   listUnknownOutcomes: (person: ConnectionPerson) => Promise<UnknownOutcome[]>;
+  /**
+   * Every person's calls of unknown outcome, newest first (at most 200), as
+   * an admin sees them: for `admin`, one of the organization's own admins
+   * as core read them now, never Grasp staff; refused to anyone else.
+   */
+  listAllUnknownOutcomes: (
+    admin: ConnectionPerson
+  ) => Promise<UnknownOutcomeListing[]>;
   /** One call of unknown outcome of the person's, or `null`. */
   unknownOutcome: (
     request: UnknownOutcomeRequest

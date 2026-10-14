@@ -641,9 +641,11 @@ export type RunHistoryEntry = {
       waitId: string;
       /**
        * `blocked`: a side effect of the step `stepId` is held until the
-       * person the run acts for decides.
+       * person the run acts for decides. `outcome_unknown`: a side effect
+       * of it was sent and its answer lost, so nobody can tell whether it
+       * took effect, until that person says (`UnknownOutcomesApi`).
        */
-      waitKind: "timer" | "event" | "decision" | "blocked";
+      waitKind: "timer" | "event" | "decision" | "blocked" | "outcome_unknown";
       state: "opened" | "closed";
       deadline: number | null;
     }

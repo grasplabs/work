@@ -65,7 +65,7 @@ const failed = (
   entry({ kind: "step", stepId, state: "failed", attempt, error }, at, taskId);
 
 const wait = (
-  waitKind: "timer" | "event" | "decision" | "blocked",
+  waitKind: "timer" | "event" | "decision" | "blocked" | "outcome_unknown",
   waitId: string,
   state: "opened" | "closed",
   at: number,
@@ -270,6 +270,7 @@ describe("a run's history", () => {
         wait("decision", "dec_1", "opened", 65, "approve"),
         wait("decision", "dec_1", "closed", 125, "approve"),
         wait("blocked", "step-9", "opened", 130, "pay"),
+        wait("outcome_unknown", "step-10", "opened", 140, "notify"),
       ])
     );
     expect({
@@ -280,6 +281,9 @@ describe("a run's history", () => {
       blocked: text.includes(
         "A change by pay waits for approval by the person the run acts for Open"
       ),
+      lost: text.includes(
+        "A change by notify was sent but its answer was lost: it waits for the person the run acts for to say whether it happened Open"
+      ),
       open: occurrences(text, "Open"),
     }).toStrictEqual({
       timer: true,
@@ -287,7 +291,8 @@ describe("a run's history", () => {
       event: true,
       decision: true,
       blocked: true,
-      open: 1,
+      lost: true,
+      open: 2,
     });
   });
 

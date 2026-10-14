@@ -148,14 +148,17 @@ msgid "{collection}: {name}"
 msgstr "{collection}: {name}"
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "{connection} ({tool})"
 msgstr "{connection} ({tool})"
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "{connection}, {resource}"
 msgstr "{connection}, {resource}"
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "{connection}, {resource} ({tool})"
 msgstr "{connection}, {resource} ({tool})"
 
@@ -757,6 +760,7 @@ msgid "{title} is now in place {place} of {count}."
 msgstr "{title} is now in place {place} of {count}."
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "{title} on {connection}"
 msgstr "{title} on {connection}"
 
@@ -859,6 +863,10 @@ msgstr "A change applies to runs that start after it: runs already going keep th
 msgid "A change by {label} waits for approval by the person the run acts for"
 msgstr "A change by {label} waits for approval by the person the run acts for"
 
+#: src/workflows/history-view.tsx
+msgid "A change by {label} was sent but its answer was lost: it waits for the person the run acts for to say whether it happened"
+msgstr "A change by {label} was sent but its answer was lost: it waits for the person the run acts for to say whether it happened"
+
 #: src/engines/store-changes.tsx
 msgid "A change to the store {name} can't be applied"
 msgstr "A change to the store {name} can't be applied"
@@ -874,6 +882,10 @@ msgstr "A change to the store {name} is ready"
 #: src/workflows/history-view.tsx
 msgid "A change waits for approval by the person the run acts for"
 msgstr "A change waits for approval by the person the run acts for"
+
+#: src/workflows/history-view.tsx
+msgid "A change was sent but its answer was lost: it waits for the person the run acts for to say whether it happened"
+msgstr "A change was sent but its answer was lost: it waits for the person the run acts for to say whether it happened"
 
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
@@ -1658,6 +1670,10 @@ msgstr "Caps an admin set on a domain's model, on the domain's Resources tab, on
 msgid "Categories"
 msgstr "Categories"
 
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Change"
+msgstr "Change"
+
 #: src/chat/builds.tsx
 msgid "Changed"
 msgstr "Changed"
@@ -1753,6 +1769,10 @@ msgstr "Changed: it reads and rewrites every record of {table}, whoever owns it"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
 msgstr "Changes"
+
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
+msgstr "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
@@ -2036,6 +2056,7 @@ msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "Connecting didn't work. Try again, or ask an admin."
 
 #: src/engines/resource-bindings.tsx
+#: src/routes/_shell.settings.outcomes.tsx
 msgid "Connection"
 msgstr "Connection"
 
@@ -2276,6 +2297,9 @@ msgstr "Developer tools"
 #: src/brain/brain-atlas.ts
 msgid "Directory"
 msgstr "Directory"
+#: src/dashboard/outcome-card.tsx
+msgid "Did this happen? {who}"
+msgstr "Did this happen? {who}"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -2838,6 +2862,14 @@ msgstr "Grasp access"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp can't be reached right now. Try again in a moment."
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
+msgstr "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
+
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp doesn't know where this came from, so it can't be resolved here."
+msgstr "Grasp doesn't know where this came from, so it can't be resolved here."
+
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp gave its go"
@@ -2855,9 +2887,17 @@ msgctxt "who did it, in the log"
 msgid "Grasp itself"
 msgstr "Grasp itself"
 
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp lets it be sent once more, exactly as before, and a run waiting on it sends it again now. Nothing is undone: if it did take effect on {connection}, it takes effect twice."
+msgstr "Grasp lets it be sent once more, exactly as before, and a run waiting on it sends it again now. Nothing is undone: if it did take effect on {connection}, it takes effect twice."
+
 #: src/dashboard/pile-cards.tsx
 msgid "Grasp makes this change on {connection}, with exactly what is shown."
 msgstr "Grasp makes this change on {connection}, with exactly what is shown."
+
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
+msgstr "Grasp never sends it again. Nothing is changed or undone on {connection}."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Grasp opens"
@@ -2870,10 +2910,17 @@ msgstr "Grasp opens for everyone soon, once Stephen has talked with the teams. I
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 msgstr "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on {connection}."
+msgstr "Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on {connection}."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
 msgstr "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
+
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
+msgstr "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Grasp sets these for your organization, as agreed with you. To change them, contact Grasp."
@@ -2952,6 +2999,10 @@ msgstr "Hi {name}"
 #: src/activity/audit-log.tsx
 msgid "Hide"
 msgstr "Hide"
+
+#: src/chat/held-writes.tsx
+msgid "Hide exactly what was sent"
+msgstr "Hide exactly what was sent"
 
 #: src/chat/held-writes.tsx
 msgid "Hide exactly what will be sent"
@@ -3089,9 +3140,21 @@ msgstr "Invited for step 2"
 msgid "it answered something that isn't its records"
 msgstr "it answered something that isn't its records"
 
+#: src/dashboard/outcome-card.tsx
+msgid "It can be sent once more, exactly as before. Nothing is undone."
+msgstr "It can be sent once more, exactly as before. Nothing is undone."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
 msgstr "It counts against the budgets as spent: the most it could have cost. This can't be undone."
+
+#: src/dashboard/outcome-card.tsx
+msgid "It didn't happen"
+msgstr "It didn't happen"
+
+#: src/dashboard/outcome-card.tsx
+msgid "It didn't happen: {who}"
+msgstr "It didn't happen: {who}"
 
 #: src/engines/store-change-errors.ts
 msgid "it didn't pass"
@@ -3100,6 +3163,14 @@ msgstr "it didn't pass"
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
+
+#: src/dashboard/outcome-card.tsx
+msgid "It happened"
+msgstr "It happened"
+
+#: src/dashboard/outcome-card.tsx
+msgid "It happened: {who}"
+msgstr "It happened: {who}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
@@ -3546,6 +3617,9 @@ msgstr "More for {title}"
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
+#: src/dashboard/outcome-card.tsx
+msgid "More was sent than is shown above. Read exactly what was sent."
+msgstr "More was sent than is shown above. Read exactly what was sent."
 
 #: src/chat/held-writes.tsx
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
@@ -3652,6 +3726,10 @@ msgstr "No budget is set: model calls aren't limited by cost."
 #: src/routes/_shell.settings.models.tsx
 msgid "No call has to stay in the EU."
 msgstr "No call has to stay in the EU."
+
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "No call of unknown outcome is open."
+msgstr "No call of unknown outcome is open."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "No caps of its own"
@@ -4078,6 +4156,7 @@ msgid "Often corrected"
 msgstr "Often corrected"
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "On {where}"
 msgstr "On {where}"
 
@@ -4319,6 +4398,10 @@ msgctxt "tab of a workflow"
 msgid "Parameters"
 msgstr "Parameters"
 
+#: src/dashboard/outcome-card.tsx
+msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
+msgstr "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
+
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
@@ -4413,6 +4496,10 @@ msgstr "Permission {permission}"
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
 msgstr "Permissions asked for"
+
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Person"
+msgstr "Person"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "who does a step"
@@ -5033,6 +5120,14 @@ msgstr "Runs this week"
 msgid "Runs: {total}"
 msgstr "Runs: {total}"
 
+#: src/dashboard/outcome-card.tsx
+msgid "Said it didn't happen: {who}."
+msgstr "Said it didn't happen: {who}."
+
+#: src/dashboard/outcome-card.tsx
+msgid "Said it happened: {who}."
+msgstr "Said it happened: {who}."
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Said yes"
 msgstr "Said yes"
@@ -5057,6 +5152,14 @@ msgstr "Save the agreements"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Saved."
 msgstr "Saved."
+
+#: src/dashboard/outcome-card.tsx
+msgid "Say it didn't happen?"
+msgstr "Say it didn't happen?"
+
+#: src/dashboard/outcome-card.tsx
+msgid "Say it happened?"
+msgstr "Say it happened?"
 
 #: src/workflows/workflows-table.tsx
 msgid "Schedule stopped"
@@ -5130,6 +5233,13 @@ msgstr "Sent by the app"
 #: src/brain/brain.ts
 msgid "Served by"
 msgstr "Served by"
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Sent"
+msgstr "Sent"
+
+#: src/dashboard/outcome-card.tsx
+msgid "Sent <0>{sent}</0>"
+msgstr "Sent <0>{sent}</0>"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "where a package runs"
@@ -5185,6 +5295,10 @@ msgstr "Show every package"
 #: src/dashboard/dependency-requests.tsx
 msgid "Show every package before you approve them."
 msgstr "Show every package before you approve them."
+
+#: src/chat/held-writes.tsx
+msgid "Show exactly what was sent"
+msgstr "Show exactly what was sent"
 
 #: src/chat/held-writes.tsx
 msgid "Show exactly what will be sent"
@@ -5981,6 +6095,10 @@ msgstr "The packages couldn't be read again, so this list may be out of date: {u
 msgid "The part of the address before the @, on the mail domain set up for Grasp."
 msgstr "The part of the address before the @, on the mail domain set up for Grasp."
 
+#: src/workflows/history-view.tsx
+msgid "The person the run acts for says what happened on their dashboard"
+msgstr "The person the run acts for says what happened on their dashboard"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
 msgstr "The platform is open to everyone at the company: it was never closed for the onboarding."
@@ -6396,6 +6514,10 @@ msgstr "Unknown"
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Unknown source"
+#: src/routes/_shell.settings.outcomes.tsx
+#: src/routes/_shell.settings.tsx
+msgid "Unknown outcomes"
+msgstr "Unknown outcomes"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx
@@ -6790,6 +6912,9 @@ msgstr "What was heard, written and connected"
 #: src/brain/brain.ts
 msgid "What was said"
 msgstr "What was said"
+#: src/dashboard/outcome-card.tsx
+msgid "What was sent is no longer kept: its run's details were removed."
+msgstr "What was sent is no longer kept: its run's details were removed."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "What was spent this month is under <0>AI spend</0>."

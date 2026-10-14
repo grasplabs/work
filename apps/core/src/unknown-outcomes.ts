@@ -7,6 +7,7 @@ import type {
   ResolutionChoice,
   UnknownOutcome,
   UnknownOutcomeKey,
+  UnknownOutcomeListing,
   UnknownOutcomesApi,
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
@@ -16,6 +17,7 @@ import {
   authoritySchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
+import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
@@ -36,7 +38,10 @@ import { wakingHeld } from "./workflows/wakes.ts";
 // resolves exactly that call, that way, for that person (`resolves`). A
 // caller whose permission is gone can't have its call resolved; the
 // refusal is recorded in connect. Nothing an App or agent holds reaches
-// this: it is only on `/rpc`, behind the person's session.
+// this: it is only on `/rpc`, behind the person's session. The
+// organization's own admins list everyone's, read only and without what
+// was sent, to follow up with each call's person; they resolve only their
+// own, as anyone does.
 
 /**
  * The capability resolving the call `found` names by `choice`, signed only
@@ -190,6 +195,23 @@ export class UnknownOutcomesRpc
         return [];
       }
       return await this.#env.CONNECT.listUnknownOutcomes(
+        await personOf(this.#env, person)
+      );
+    });
+  }
+
+  /**
+   * Every person's open calls of unknown outcome, for the organization's
+   * own admins, to follow up with each call's person: read only, without
+   * what was sent (`UnknownOutcomeListing`). Grasp staff are refused, as
+   * is everyone who isn't an admin; connect checks the same again.
+   */
+  async listAll(): Promise<UnknownOutcomeListing[]> {
+    return await withPerson(this.#check, async (person) => {
+      if (!isMemberAdmin(person)) {
+        throw roleErrors.create("role.forbidden");
+      }
+      return await this.#env.CONNECT.listAllUnknownOutcomes(
         await personOf(this.#env, person)
       );
     });

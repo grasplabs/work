@@ -44,6 +44,7 @@ import { Route as ShellSettingsApprovalsRouteImport } from './routes/_shell.sett
 import { Route as ShellSettingsAuditRouteImport } from './routes/_shell.settings.audit'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsModelsRouteImport } from './routes/_shell.settings.models'
+import { Route as ShellSettingsOutcomesRouteImport } from './routes/_shell.settings.outcomes'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellSettingsSpendRouteImport } from './routes/_shell.settings.spend'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
@@ -236,6 +237,11 @@ const ShellSettingsModelsRoute = ShellSettingsModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
+const ShellSettingsOutcomesRoute = ShellSettingsOutcomesRouteImport.update({
+  id: '/outcomes',
+  path: '/outcomes',
+  getParentRoute: () => ShellSettingsRoute,
+} as any)
 const ShellSettingsProfileRoute = ShellSettingsProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -341,6 +347,7 @@ export interface FileRoutesByFullPath {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -389,6 +396,7 @@ export interface FileRoutesByTo {
   '/settings/audit': typeof ShellSettingsAuditRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/models': typeof ShellSettingsModelsRoute
+  '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/spend': typeof ShellSettingsSpendRoute
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -441,6 +449,7 @@ export interface FileRoutesById {
   '/_shell/settings/audit': typeof ShellSettingsAuditRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/models': typeof ShellSettingsModelsRoute
+  '/_shell/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
   '/_shell/settings/spend': typeof ShellSettingsSpendRoute
   '/kit_/components/$name': typeof KitComponentsNameRoute
@@ -493,6 +502,7 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/members'
     | '/settings/models'
+    | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/spend'
     | '/kit/components/$name'
@@ -541,6 +551,7 @@ export interface FileRouteTypes {
     | '/settings/audit'
     | '/settings/members'
     | '/settings/models'
+    | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/spend'
     | '/kit/components/$name'
@@ -592,6 +603,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/audit'
     | '/_shell/settings/members'
     | '/_shell/settings/models'
+    | '/_shell/settings/outcomes'
     | '/_shell/settings/profile'
     | '/_shell/settings/spend'
     | '/kit_/components/$name'
@@ -875,6 +887,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsModelsRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
+    '/_shell/settings/outcomes': {
+      id: '/_shell/settings/outcomes'
+      path: '/outcomes'
+      fullPath: '/settings/outcomes'
+      preLoaderRoute: typeof ShellSettingsOutcomesRouteImport
+      parentRoute: typeof ShellSettingsRoute
+    }
     '/_shell/settings/profile': {
       id: '/_shell/settings/profile'
       path: '/profile'
@@ -1005,6 +1024,7 @@ interface ShellSettingsRouteChildren {
   ShellSettingsAuditRoute: typeof ShellSettingsAuditRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsModelsRoute: typeof ShellSettingsModelsRoute
+  ShellSettingsOutcomesRoute: typeof ShellSettingsOutcomesRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
   ShellSettingsSpendRoute: typeof ShellSettingsSpendRoute
   ShellSettingsIndexRoute: typeof ShellSettingsIndexRoute
@@ -1015,6 +1035,7 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsAuditRoute: ShellSettingsAuditRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsModelsRoute: ShellSettingsModelsRoute,
+  ShellSettingsOutcomesRoute: ShellSettingsOutcomesRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,
   ShellSettingsSpendRoute: ShellSettingsSpendRoute,
   ShellSettingsIndexRoute: ShellSettingsIndexRoute,
