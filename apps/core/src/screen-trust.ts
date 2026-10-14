@@ -18,10 +18,12 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
+  apps,
   auditOutbox,
   permissions,
   screenArtifacts,
   screenPolicies,
+  sdkReleaseManifests,
 } from "./db/core/schema.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 import { appHost } from "./durable-objects.ts";
@@ -272,6 +274,11 @@ export interface Standing {
   output: OutputClass;
   generation: number;
   trust: ArtifactTrust;
+  /**
+   * Whether the release of the App's current version was revoked: its
+   * screens then get nothing more, whatever their build's approval.
+   */
+  releaseRevoked: boolean;
 }
 
 /**
@@ -287,29 +294,41 @@ export const standingOf = async (
     output: OutputClass | null;
     generation: number;
     trust: ArtifactTrust | null;
+    releaseRevoked: number;
   }>(
     sql`SELECT
       (SELECT ${screenPolicies.output} FROM ${screenPolicies} WHERE ${screenPolicies.appId} = ${app}) AS output,
       ${generationSql(app)} AS generation,
       (SELECT ${screenArtifacts.status} FROM ${screenArtifacts}
         WHERE ${screenArtifacts.appId} = ${app}
-          AND ${screenArtifacts.artifact} = ${artifact ?? null}) AS trust`
+          AND ${screenArtifacts.artifact} = ${artifact ?? null}) AS trust,
+      EXISTS (SELECT 1 FROM ${sdkReleaseManifests}
+        WHERE ${sdkReleaseManifests.appId} = ${app}
+          AND ${sdkReleaseManifests.version} =
+            (SELECT ${apps.currentVersion} FROM ${apps} WHERE ${apps.id} = ${app})
+          AND ${sdkReleaseManifests.revokedAt} IS NOT NULL) AS releaseRevoked`
   );
   return {
     output: row.output ?? "sensitive",
     generation: row.generation,
     trust: row.trust ?? "unreviewed",
+    releaseRevoked: row.releaseRevoked === 1,
   };
 };
 
 /**
  * Whether a build with that standing gets its App's data: never once its
- * approval was taken back, whatever the App's data is classified as;
+ * approval was taken back, or the release it runs was revoked, whatever
+ * the App's data is classified as;
  * otherwise always when an admin classified the data `ordinary`, and
  * only once approved when it is `sensitive`.
  */
-export const deliveryOf = ({ output, trust }: Standing): ScreenDelivery => {
-  if (trust === "revoked") {
+export const deliveryOf = ({
+  output,
+  trust,
+  releaseRevoked,
+}: Standing): ScreenDelivery => {
+  if (trust === "revoked" || releaseRevoked) {
     return "revoked";
   }
   return output === "ordinary" || trust === "approved" ? "open" : "unreviewed";
@@ -350,7 +369,7 @@ const recordRefusal = async (
     operation,
     stage,
   ]);
-  await appHost(env, app).auditRefusal(refusal, {
+  await appHost(env, app).auditOnce(refusal, {
     actor: actorOf(by),
     action: "app.artifact.refused",
     target: { type: "app", id: app },

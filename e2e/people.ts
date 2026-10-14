@@ -159,6 +159,7 @@ const cast = {
   screenAttacks: { builder: "builder", admin: "admin" },
   screenWorkflows: { builder: "builder", admin: "admin" },
   screenApproval: { builder: "builder", admin: "admin" },
+  notesApp: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },

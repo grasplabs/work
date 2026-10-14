@@ -9,6 +9,7 @@ import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import {
   rpcArgumentDepth,
+  rateLimited,
   screenErrors,
   screenLimits,
   screenProblemSchema,
@@ -119,7 +120,7 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
     );
     this.#requests = bucket;
     if (!taken) {
-      throw screenErrors.create("screen.rate_limited");
+      throw rateLimited();
     }
   }
 

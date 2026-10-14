@@ -12,6 +12,7 @@ import type { ParamKind } from "@grasp-os/sdk/params";
 import type { AppFiles } from "@grasp-os/shared/apps";
 import { workflowIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   paramDeclarationSchema,
   paramDeclarationsSchema,
@@ -146,15 +147,32 @@ const declaredMetadataSchema = z.object({
 
 /**
  * How workflow code runs: as App server code does, with more CPU. One load
- * runs the workflow from its start (finished steps replayed) to its next
- * wait, where one App call runs one method.
+ * runs an activation of the run: the workflow from its start (finished
+ * steps replayed) until it suspends, at a wait or a parked retry, or
+ * ends. Its code between steps is bounded by no attempt's timeout, only
+ * by the CPU limit below; where one App call runs one method.
+ *
+ * Its CPU time is a workflow attempt's (spec 18.1, 30 seconds). Cloudflare
+ * documents `limits.cpuMs` as applying "per invocation", without saying
+ * whether a call back into the isolate (a step's function, which the host
+ * calls through RPC) is an invocation of its own. So it is taken at its
+ * strictest: the run's call into the isolate may count the replay and
+ * every attempt of its activation together. No attempt gets more, retried
+ * or not; one may get less, after earlier steps spent some. When the
+ * Loader stops the isolate past it, an attempt it cut off fails as a
+ * retryable timeout, and the run waits for that retry in a fresh
+ * activation, with a fresh isolate and limit, rather than fail for CPU an
+ * earlier step spent (dispatcher.ts, `afterCpuKill`). On-prem the
+ * sandbox supervisor bounds each run load by the same CPU time, and its
+ * `cpu` verdict still fails the run (`runLoadFailure`). Its wall time is
+ * the engine's to end, at each attempt's timeout (host.ts, `stepConfig`).
  */
 const workflowSandbox = {
   ...sandbox,
   // `AsyncLocalStorage` only, for a run's bindings: which attempt of a
   // step a call comes from (`runBindings`).
   compatibilityFlags: [...sandbox.compatibilityFlags, "nodejs_als"],
-  limits: { cpuMs: 30_000 },
+  limits: { cpuMs: platformLimits.workflowAttemptCpuMs },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
 /**

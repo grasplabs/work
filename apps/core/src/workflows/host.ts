@@ -1,5 +1,6 @@
 import { runActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
+import { connectErrors } from "@grasp-os/shared/connect";
 import { decidersSchema } from "@grasp-os/shared/decisions";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema, isExpectedError } from "@grasp-os/shared/errors";
@@ -22,6 +23,7 @@ import {
   isRetryable,
   paramsStep,
   maxAttemptTimeoutMs,
+  maxStepRetries,
   stepIdempotencyKey,
   inboundEmailIndexSchema,
   storedEmailSchema,
@@ -185,6 +187,12 @@ interface StepAttempt {
   step: string;
   held: boolean;
   /**
+   * Whether it was held because a call of it under the step's key came
+   * back of unknown outcome, for its person to resolve (`heldNoted`): its
+   * wait sleeps before its first check and ends by a deadline.
+   */
+  unknown: boolean;
+  /**
    * The keys of the side effects its App's functions asked for through
    * their resource bindings that connect held (`BindingCaller.held`): the
    * step waits while any of them, or one under its own key, does. At most
@@ -203,6 +211,8 @@ interface StepAttempt {
    * fails with it, whatever its code made of the refusal.
    */
   refused?: Error;
+  /** Whether a call of it was refused past its lineage's host calls, and audited so. */
+  hostCallsAudited?: boolean;
   keptMessages?: Map<string, Email>;
   /** Whether the step has no retry left after it, as far as core can tell. */
   last: boolean;
@@ -216,8 +226,14 @@ export interface WaitReason {
 /** The code a held side effect answers a run's call with (connect). */
 const heldCode = "connect.held";
 
+/** The code a side effect of unknown outcome answers a run's call with. */
+const unknownCode = "connect.outcome_unknown";
+
 /** The field of a held marker (`heldMarkerOf`). */
 const heldField = `${coreStepPrefix}held`;
+
+/** The field of a held marker that says it waits on an unknown outcome. */
+const unknownField = `${coreStepPrefix}unknown`;
 
 /**
  * What an attempt of a step answers when a side effect of it was held:
@@ -226,9 +242,16 @@ const heldField = `${coreStepPrefix}held`;
  * for (`StepAttempt.heldKeys`), which a wait after a restart still checks.
  * Workflow code can't return it (`do` refuses it).
  */
-const heldMarkerOf = (keys: readonly string[]) => ({
+const heldMarkerOf = (keys: readonly string[], unknown: boolean) => ({
   [heldField]: [...keys].toSorted(),
+  ...(unknown ? { [unknownField]: true } : {}),
 });
+
+/** Whether a held marker says its step waits on an unknown outcome. */
+const isUnknownMarker = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  Reflect.get(value, unknownField) === true;
 
 const isHeldMarker = (value: unknown): boolean =>
   typeof value === "object" &&
@@ -296,6 +319,9 @@ const maxBusyWaitSeconds = 5;
 /** A test's host of its own admits every attempt, with nothing to settle. */
 const unadmitted: AttemptAdmission = {
   attemptsAllowed: platformLimits.workflowAttemptsPerStep,
+  hostCall: async () => {
+    // Nothing is counted.
+  },
   settle: async () => {
     // Nothing was held.
   },
@@ -339,10 +365,14 @@ const milliseconds = z
   .positive()
   .max(365 * 86_400_000);
 
+// What a step may declare: no more retries, and no longer an attempt,
+// than the platform allows (spec 18.1). The SDK refuses wider ones where
+// the step is written; code that gets past it is refused here, never
+// held to less without saying so.
 const doOptionsSchema = z.object({
   retries: z
     .object({
-      limit: z.int().min(0).max(10_000),
+      limit: z.int().min(0).max(maxStepRetries),
       delay: milliseconds.optional(),
       backoff: z.enum(["constant", "linear", "exponential"]).optional(),
     })
@@ -476,42 +506,49 @@ export const fromIsolate = (value: unknown): Settled<unknown> => {
       };
 };
 
-/** The engine's delay before a retry when the SDK names none. */
+/** The delay before a step's first retry when the SDK names none. */
 const defaultRetryDelayMs = 10_000;
 
 /**
- * The engine's retries of a step when the SDK names none: the engine's
- * own default, which it journals as the step's config.
+ * A step's retries when the SDK names none: the platform's, never the
+ * engine's own default (5, one attempt more than a step may have, which
+ * its admission would refuse after minutes of backoff, failing the step
+ * with that refusal instead of its own error).
  */
-const defaultRetryLimit = 5;
+const defaultRetryLimit = maxStepRetries;
 
 /**
  * The step config the engine takes: what the SDK gave, its defaults
- * where it gave none, exactly as the engine has always journaled it.
+ * where it gave none, as the engine journals it.
  *
- * Never held to the platform's ceiling on a step's attempts here: the
- * engine journals a step's config, and a replay must give it the same,
- * so any change to what this returns for a step (a clamp, another
- * default, another `defaultRetryDelayMs`) halts every run in flight on
- * replay. The ceiling (spec 18.1's five attempts, all counted, or the
- * operator's lower one) is enforced as each attempt is admitted instead
+ * An attempt always runs under a timeout of the platform's, a minute when
+ * the step declares none (spec 18.1's active wall time): the engine's own
+ * default is ten minutes, and the engine ends an attempt at its timeout,
+ * whatever its code still does. The engine journals a step's config, and
+ * a replay must give it the same, so any change to what this returns for
+ * a step (a clamp, another default, another `defaultRetryDelayMs`) halts
+ * the runs in flight that journaled the old one on replay.
+ *
+ * Its retries are always given too: what the step declared, at most
+ * `maxStepRetries` (`doOptionsSchema`), or `defaultRetryLimit`. The
+ * ceiling on its attempts (spec 18.1's five, all counted, or the
+ * operator's lower one) is enforced as each attempt is admitted
  * (quotas.ts, `admitAttempt`), which refuses an attempt past it, and
- * `isLastAttempt` takes it into account.
+ * `isLastAttempt` takes it into account. A step whose side effect is held
+ * runs again in steps of core's own (`#waitBefore`), each with these
+ * retries afresh: the ceiling is per round, and every round is still held
+ * to its lineage's active time.
  */
 const stepConfig = ({
   retries,
   timeout,
 }: z.output<typeof doOptionsSchema>): WorkflowStepConfig => ({
-  ...(retries === undefined
-    ? {}
-    : {
-        retries: {
-          limit: retries.limit,
-          delay: retries.delay ?? defaultRetryDelayMs,
-          backoff: retries.backoff ?? "exponential",
-        },
-      }),
-  ...(timeout === undefined ? {} : { timeout }),
+  retries: {
+    limit: retries?.limit ?? defaultRetryLimit,
+    delay: retries?.delay ?? defaultRetryDelayMs,
+    backoff: retries?.backoff ?? "exponential",
+  },
+  timeout: timeout ?? maxAttemptTimeoutMs,
 });
 
 /**
@@ -541,6 +578,20 @@ const defaultWaitMs = 60_000;
 const maxWaits = 15;
 
 /**
+ * The longest wait between checks of a call of unknown outcome, in first
+ * waits: an hour, so its 7 days take some 180 checks, a bounded journal.
+ */
+const maxUnknownWaits = 60;
+
+/**
+ * The steps of a hold on an unknown outcome (`#waitBefore`): its checks,
+ * sleeps and the step's runs again. Not the run's own steps: the hold is
+ * bounded by its deadline (`unknownHoldMsOf`) and the run lineage's age,
+ * not by the steps the run's code takes, as a run waits on its person.
+ */
+const unknownHoldStep = /^\$grasp:wait:[0-9a-f]{16}:unknown:[1-9]\d*:/u;
+
+/**
  * Tries of one check whether a held side effect still waits, after the
  * first: a connect that fails that often in a row fails the step.
  */
@@ -564,6 +615,20 @@ const waitMsOf = (env: Env): number => {
   return Number.isInteger(set) && set > 0 && set < defaultWaitMs
     ? set
     : defaultWaitMs;
+};
+
+/**
+ * How long a step waits, from when it was first held on an unknown outcome,
+ * for its person to resolve it: 7 days, then it fails with
+ * `connect.outcome_unknown_unresolved`. Tests shorten it.
+ */
+const unknownHoldMs = 7 * 24 * 60 * 60 * 1000;
+
+const unknownHoldMsOf = (env: Env): number => {
+  const set = Number(env.WORKFLOW_UNKNOWN_HOLD_MS);
+  return Number.isInteger(set) && set > 0 && set < unknownHoldMs
+    ? set
+    : unknownHoldMs;
 };
 
 /**
@@ -680,6 +745,18 @@ export interface BusyRefusals {
  *   it was given up on (it timed out while the gateway answered), which
  *   the step's next attempt asking the same takes instead of asking, and
  *   paying, again.
+ *
+ * This is how an AI step whose model takes longer than an attempt's
+ * minute is served, rather than by an exception to that minute. Only the
+ * one provider request already sent runs on past the attempt that asked
+ * for it, as long as the gateway lets a call run (`models.ts`, its
+ * timeout); no other is sent for it, as `beforeSend` refuses the
+ * gateway's retries once the attempt no longer holds. The step's next
+ * attempts wait for that answer, each within its own minute. The handoff
+ * lives in the run's object's memory only: an object evicted meanwhile
+ * loses it, and the next attempt asks, and pays, again. A step that runs
+ * out of attempts first fails as timed out; one whose model is that slow
+ * is split into smaller calls.
  */
 export interface AiCalls {
   asking: Map<string, Promise<unknown>>;
@@ -737,7 +814,8 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
   /** The step's place among the run's own steps; none for core's own. */
   const take = (name: string): number | undefined => {
     const core =
-      name.startsWith(coreStepPrefix) && !name.startsWith(waitStepPrefix);
+      (name.startsWith(coreStepPrefix) && !name.startsWith(waitStepPrefix)) ||
+      unknownHoldStep.test(name);
     const sdk = name === paramsStep && !params;
     params ||= sdk;
     if (core || sdk) {
@@ -781,13 +859,29 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
 };
 
 /**
+ * How the Loader stops an isolate past its `limits.cpuMs`: it throws, as
+ * Cloudflare documents, "Worker exceeded CPU time limit." to whoever
+ * called into it. Known by its message, which is all that survives RPC.
+ * The run's own code can't make a call into its isolate reject so: every
+ * entrypoint and step function settles what its code threw into a report
+ * (code.ts, `settled`).
+ */
+const cpuLimit = /\bCPU time limit\b/u;
+export const isCpuLimitKill = (error: unknown): boolean =>
+  error instanceof Error && cpuLimit.test(error.message);
+
+/**
  * One of core's errors as the isolate, and the run's own record, may see
- * it: an expected error as it is, a timeout as one, anything else as
- * `internal.unexpected`, with the cause only in the log.
+ * it: an expected error as it is, a timeout as one (the Loader's CPU limit
+ * too), anything else as `internal.unexpected`, with the cause only in
+ * the log.
  */
 export const forIsolate = (error: unknown): StepError => {
   if (isTimeout(error)) {
     return { name: "TimeoutError", message: "The step ran out of time." };
+  }
+  if (isCpuLimitKill(error)) {
+    return { name: "TimeoutError", message: "The step ran out of CPU time." };
   }
   const seen = forSandbox(error);
   return {
@@ -834,23 +928,48 @@ const requireUnrefused = (attempt: StepAttempt): void => {
 };
 
 /**
+ * Whether connect said an unknown outcome waits for its person's word
+ * (`awaitsResolution`): a native connector's lost answer. A Composio
+ * tool's error, which its person can't yet see, fails the step instead.
+ */
+const awaitsResolution = (error: object): boolean => {
+  const details: unknown = Reflect.get(error, "details");
+  return (
+    typeof details === "object" &&
+    details !== null &&
+    Reflect.get(details, "awaitsResolution") === true
+  );
+};
+
+/**
  * Runs `call` for the step attempt `attempt`, noting when it answered that
  * a side effect was held, whatever the workflow code does with the error.
+ * With `unknownHolds`, for a call under the step's own key, an outcome
+ * nobody can tell (`connect.outcome_unknown`) that connect says waits for
+ * its person (`awaitsResolution`) holds the step too: it waits until
+ * connect can recover the call or its person resolved it (connect's
+ * `anyPending` says so), then runs again under the same key, rather than
+ * spend its retries on the same answer or fail the run.
  */
 const heldNoted = async <T>(
-  attempt: { held: boolean },
-  call: () => Promise<T>
+  attempt: { held: boolean; unknown?: boolean },
+  call: () => Promise<T>,
+  unknownHolds = false
 ): Promise<T> => {
   try {
     return await call();
   } catch (error) {
-    if (
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      error.code === heldCode
-    ) {
-      attempt.held = true;
+    if (typeof error === "object" && error !== null && "code" in error) {
+      if (error.code === heldCode) {
+        attempt.held = true;
+      } else if (
+        unknownHolds &&
+        error.code === unknownCode &&
+        awaitsResolution(error)
+      ) {
+        attempt.held = true;
+        attempt.unknown = true;
+      }
     }
     throw error;
   }
@@ -915,6 +1034,14 @@ export interface FailedStep {
 export interface HostHooks {
   /** Hears of each step that failed, with the error it failed with. */
   stepFailed: (failure: FailedStep) => void;
+  /**
+   * Hears of each call of an attempt's function into the run's isolate as
+   * it starts, with a promise that settles once the attempt's step ends in
+   * this activation (done, or failed for good): so the run can tell, once
+   * the Loader stops the isolate past its CPU time, whether an attempt was
+   * cut off, and whether its step is to be retried (dispatcher.ts).
+   */
+  attemptCall?: (call: Promise<unknown>, stepDone: Promise<unknown>) => void;
   /** Each step's last refusal for a busy budget (`#untilAsking`). */
   busyRefusals: BusyRefusals;
   /**
@@ -1014,6 +1141,11 @@ export class RunHost extends RpcTarget {
    * (`#requireReviewed`).
    */
   readonly #live: StepAttempt[] = [];
+  /**
+   * Whether the Loader stopped the run's isolate past its CPU time: no
+   * later attempt of this execution calls into it (`do`).
+   */
+  #isolateStopped = false;
 
   constructor(env: Env, step: RunStep, run: HostedRun, hooks: HostHooks) {
     super();
@@ -1083,9 +1215,20 @@ export class RunHost extends RpcTarget {
   async #waitWhileHeld(
     step: string,
     prefix: string,
-    keys: readonly string[]
+    keys: readonly string[],
+    unknownSince?: number
   ): Promise<void> {
     const first = waitMsOf(this.#env);
+    if (unknownSince !== undefined) {
+      // Never run again at once on an unknown outcome: should connect
+      // and the step's call disagree on whether it may be recovered now,
+      // the step would come back held at once, again and again.
+      await this.#step.sleep(`${prefix}:first`, first);
+    }
+    const deadline =
+      unknownSince === undefined
+        ? undefined
+        : unknownSince + unknownHoldMsOf(this.#env);
     for (let checks = 0; ; checks += 1) {
       // Its answer is recorded, so a replay asks connect nothing, and a
       // failing connect is tried again rather than failing the step.
@@ -1099,8 +1242,25 @@ export class RunHost extends RpcTarget {
             backoff: "exponential",
           },
         },
-        async () => await this.#stillHeld(step, keys)
+        async (): Promise<boolean | "expired"> => {
+          // Past its deadline the hold ends, unless its person resolved
+          // it meanwhile (the step then runs again, as they said): a call
+          // still of unknown outcome is theirs to resolve, with no run
+          // waiting on it, and never recovered on its own after it, so
+          // one connect could recover counts as unresolved here.
+          if (deadline !== undefined && Date.now() >= deadline) {
+            return (await this.#stillHeld(step, keys, true))
+              ? "expired"
+              : false;
+          }
+          return await this.#stillHeld(step, keys);
+        }
       );
+      if (held === "expired") {
+        // Nobody resolved it in time: the step fails, saying so, rather
+        // than wait out the run's steps.
+        throw connectErrors.create("connect.outcome_unknown_unresolved");
+      }
       if (held !== true) {
         return;
       }
@@ -1113,7 +1273,10 @@ export class RunHost extends RpcTarget {
       // oxlint-disable-next-line no-await-in-loop -- one check at a time
       await this.#step.sleep(
         `${prefix}:${checks}`,
-        Math.min(first * 2 ** checks, first * maxWaits)
+        Math.min(
+          first * 2 ** checks,
+          first * (unknownSince === undefined ? maxWaits : maxUnknownWaits)
+        )
       );
     }
   }
@@ -1143,13 +1306,18 @@ export class RunHost extends RpcTarget {
    */
   async #stillHeld(
     step: string,
-    keys: readonly string[] = []
+    keys: readonly string[] = [],
+    orRecoverable = false
   ): Promise<boolean> {
     const { onBehalfOf } = this.#run.authority;
     const waiting = await Promise.all(
       [stepIdempotencyKey(this.#run.runId, step), ...keys].map(
         async (idempotencyKey) =>
-          await this.#env.CONNECT.anyPending({ onBehalfOf, idempotencyKey })
+          await this.#env.CONNECT.anyPending({
+            onBehalfOf,
+            idempotencyKey,
+            ...(orRecoverable ? { orRecoverable } : {}),
+          })
       )
     );
     return waiting.includes(true);
@@ -1213,13 +1381,34 @@ export class RunHost extends RpcTarget {
   async #waitBefore(
     step: string,
     value: unknown,
-    round: number
+    round: number,
+    unknown: { since?: number }
   ): Promise<string> {
     const key = await waitKeyOf(step);
     const busyFor = busyWaitOf(value);
     if (busyFor === undefined) {
-      const prefix = `${waitStepPrefix}${key}:held:${round}`;
-      await this.#waitWhileHeld(step, prefix, heldKeysOf(value));
+      // A hold on an unknown outcome waits in steps of its own kind,
+      // outside the run's step allowance (`countedStep`).
+      const prefix = `${waitStepPrefix}${key}:${isUnknownMarker(value) ? "unknown" : "held"}:${round}`;
+      if (isUnknownMarker(value)) {
+        // When the step was first held on an unknown outcome, recorded
+        // once, so its deadline holds across rounds and replays.
+        unknown.since ??= z
+          .number()
+          .parse(
+            await this.#step.do(
+              `${prefix}:since`,
+              {},
+              async () => await Promise.resolve(Date.now())
+            )
+          );
+      }
+      await this.#waitWhileHeld(
+        step,
+        prefix,
+        heldKeysOf(value),
+        isUnknownMarker(value) ? unknown.since : undefined
+      );
       return prefix;
     }
     const prefix = `${waitStepPrefix}${key}:busy:${round}`;
@@ -1266,6 +1455,7 @@ export class RunHost extends RpcTarget {
     let step = "";
     let sideEffect = false;
     let input: InputShape | null = null;
+    const stepDone = Promise.withResolvers<null>();
     try {
       this.#requireUntampered();
       step = checked(stepNameSchema, name);
@@ -1302,6 +1492,7 @@ export class RunHost extends RpcTarget {
           over: false,
           step,
           held: false,
+          unknown: false,
           heldKeys: [],
           functionCalls: 0,
           calledApp: false,
@@ -1327,7 +1518,12 @@ export class RunHost extends RpcTarget {
         let current = false;
         this.#live.push(attempt);
         try {
-          result = fromIsolate(await fn(this.#attemptHost(attempt)));
+          result = await this.#callAttempt(
+            attempt,
+            admission,
+            fn,
+            stepDone.promise
+          );
         } finally {
           current = this.#holds(attempt);
           // Its function has returned: its host acts no more, whatever
@@ -1361,7 +1557,7 @@ export class RunHost extends RpcTarget {
           throw toStepError(failed);
         }
         if (held) {
-          return heldMarkerOf(attempt.heldKeys);
+          return heldMarkerOf(attempt.heldKeys, attempt.unknown);
         }
         if (!result.ok) {
           failed = result.error;
@@ -1415,9 +1611,10 @@ export class RunHost extends RpcTarget {
       // seconds the lineage said, then run the step again under the same
       // key, in a step of its own each time, so every execution replays the
       // same steps.
+      const unknown: { since?: number } = {};
       for (let round = 1; isCoreMarker(value); round += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
-        const prefix = await this.#waitBefore(step, value, round);
+        const prefix = await this.#waitBefore(step, value, round, unknown);
         tries = 0;
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         value = await this.#step.do(
@@ -1437,6 +1634,40 @@ export class RunHost extends RpcTarget {
         });
       }
       return { ok: false, error: reported };
+    } finally {
+      stepDone.resolve(null);
+    }
+  }
+
+  /**
+   * Calls `attempt`'s function in the run's isolate, through a host whose
+   * every call `admission` admits as one of its lineage's host calls,
+   * `stepDone` settling
+   * once its step ends in this activation: what it settled with, or, once
+   * the Loader stopped the isolate past its CPU time while it ran, a
+   * timeout, which its step's retries retry in a fresh activation with a
+   * fresh isolate (dispatcher.ts, `afterCpuKill`). An isolate so stopped
+   * runs nothing more: an attempt that comes after it in this activation
+   * (a retry due at once) times out as the one cut off did.
+   */
+  async #callAttempt(
+    attempt: StepAttempt,
+    admission: AttemptAdmission,
+    fn: (attempt: AttemptHost) => Promise<unknown>,
+    stepDone: Promise<unknown>
+  ): Promise<Settled<unknown>> {
+    const call = this.#isolateStopped
+      ? Promise.reject(new Error("Worker exceeded CPU time limit."))
+      : fn(this.#attemptHost(attempt, admission));
+    this.#hooks.attemptCall?.(call, stepDone);
+    try {
+      return fromIsolate(await call);
+    } catch (error) {
+      if (!isCpuLimitKill(error)) {
+        throw error;
+      }
+      this.#isolateStopped = true;
+      return { ok: false, error: forIsolate(error) };
     }
   }
 
@@ -1718,8 +1949,11 @@ export class RunHost extends RpcTarget {
     throw executionErrors.create("execution.stale_attempt");
   }
 
-  /** The host `attempt`'s code reaches core through, every call as it. */
-  #attemptHost(attempt: StepAttempt): AttemptHost {
+  /**
+   * The host `attempt`'s code reaches core through, every call as it, and
+   * each admitted against its lineage's host calls (`admission`).
+   */
+  #attemptHost(attempt: StepAttempt, admission: AttemptAdmission): AttemptHost {
     return new AttemptHost(
       {
         callModel: async (request) => await this.#callModel(attempt, request),
@@ -1740,8 +1974,41 @@ export class RunHost extends RpcTarget {
         readAttachment: async (stored, index) =>
           await this.#readAttachment(attempt, stored, index),
       },
-      async (call) => await this.#leaseRefusal(attempt, call)
+      async (call) => await this.#leaseRefusal(attempt, call),
+      async (call) => await this.#hostCallRefusal(attempt, admission, call)
     );
+  }
+
+  /**
+   * The refusal of a call of `attempt` past its lineage's host calls
+   * (quotas.ts, `hostCallsOf`), or nothing once it is admitted: the
+   * check `AttemptHost` makes once before each call. The first refusal
+   * for the limit of each attempt is audited: its code may catch it and
+   * carry on, though nothing it calls is admitted any more.
+   */
+  async #hostCallRefusal(
+    attempt: StepAttempt,
+    admission: AttemptAdmission,
+    call: string
+  ): Promise<Settled<never> | undefined> {
+    try {
+      await admission.hostCall();
+      return undefined;
+    } catch (error) {
+      if (
+        isExpectedError(error) &&
+        error.code === "workflow.lineage_limit" &&
+        attempt.hostCallsAudited !== true
+      ) {
+        attempt.hostCallsAudited = true;
+        await this.#auditRefusal({
+          step: attempt.step,
+          call,
+          errorCode: error.code,
+        });
+      }
+      return { ok: false, error: forIsolate(error) };
+    }
   }
 
   /**
@@ -1982,11 +2249,16 @@ export class RunHost extends RpcTarget {
                 stillAllowed: async () => {
                   await this.#requireCurrent(attempt, name);
                 },
+                // Its mail to the deployment's domain is stamped with
+                // this run (mail-stamps.ts).
+                stamping: { run: this.#run.runId, stepKey },
               });
             },
             grant,
             checked(z.array(z.unknown()), call)
-          )
+          ),
+        // Its key is the step's: an unknown outcome holds the step.
+        true
       );
     });
   }

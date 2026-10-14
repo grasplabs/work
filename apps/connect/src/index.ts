@@ -32,8 +32,10 @@ import type {
   PendingAction,
   StartConnection,
   StartToolkitConnection,
+  UnknownOutcome,
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
+import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { NpmMetadata } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -68,6 +70,13 @@ import {
   resealFlows,
   startConnection,
 } from "./oauth.ts";
+import {
+  listUnknownOutcomes,
+  refuseResolution,
+  resolveOutcome,
+  unknownOutcomeFor,
+  unresolvedUnder,
+} from "./outcomes.ts";
 import {
   anyPending,
   auditRefusedDecision,
@@ -160,6 +169,25 @@ const statedOf = ({
   input: _input,
   ...stated
 }: Omit<ConnectCall, "capability">): StatedCall => stated;
+
+/** An expected error's details, such as a `retryAfterSeconds`, if any. */
+const detailsOf = (error: unknown): ErrorPayload["details"] =>
+  isExpectedError(error) ? error.details : undefined;
+
+/**
+ * `connect.outcome_unknown`, with `details`: a native connector's marked
+ * as waiting for its person to resolve it (`awaitsResolution`), so a
+ * workflow run waits on it. A Composio tool's error, whose text nobody is
+ * shown yet, fails the run's step instead.
+ */
+const unknownOutcome = (
+  progress: CallProgress,
+  details?: ErrorPayload["details"]
+): Error =>
+  connectErrors.create(
+    "connect.outcome_unknown",
+    progress.native === true ? { ...details, awaitsResolution: true } : details
+  );
 
 const codeOf = (error: unknown): string | undefined =>
   connectErrors.codeOf(error) ?? capabilityErrors.codeOf(error);
@@ -361,7 +389,7 @@ export default class Connect
     let read: Awaited<ReturnType<typeof heldOutcome>>;
     try {
       claims = await verifyCapability(signingKeys(this.env), capability, call);
-      if (claims.confirms !== undefined) {
+      if (claims.confirms !== undefined || claims.resolves !== undefined) {
         throw capabilityErrors.create("capability.invalid", {
           reason: "scope",
         });
@@ -421,7 +449,31 @@ export default class Connect
   }
 
   async anyPending(request: unknown): Promise<boolean> {
-    return await anyPending(this.env, request);
+    return (
+      (await anyPending(this.env, request)) ||
+      (await unresolvedUnder(this.env, request))
+    );
+  }
+
+  // Calls of unknown outcome (src/outcomes.ts). Core names the person from
+  // their session; only they see and resolve what acted for them.
+
+  async listUnknownOutcomes(
+    person: ConnectionPerson
+  ): Promise<UnknownOutcome[]> {
+    return await listUnknownOutcomes(this.env, person);
+  }
+
+  async unknownOutcome(request: unknown): Promise<UnknownOutcome | null> {
+    return await unknownOutcomeFor(this.env, request);
+  }
+
+  async resolveOutcome(request: unknown): Promise<void> {
+    await resolveOutcome(this.env, signingKeys(this.env), request);
+  }
+
+  async refuseResolution(request: unknown): Promise<void> {
+    await refuseResolution(this.env, request);
   }
 
   async declineChatActions(request: unknown): Promise<number> {
@@ -474,6 +526,7 @@ export default class Connect
       // Not the App version: core signs the one the held action recorded.
       const forThisAction =
         claims.confirms === held.id &&
+        claims.resolves === undefined &&
         authority.mode === held.mode &&
         authority.onBehalfOf === person.userId &&
         authority.subject.type === held.subjectType &&
@@ -527,7 +580,7 @@ export default class Connect
       claims = await verifyCapability(signingKeys(this.env), capability, call);
       // A confirmation's capability runs a held action through
       // `confirmAction`, never anything here.
-      if (claims.confirms !== undefined) {
+      if (claims.confirms !== undefined || claims.resolves !== undefined) {
         throw capabilityErrors.create("capability.invalid", {
           reason: "scope",
         });
@@ -579,7 +632,9 @@ export default class Connect
         recovery: progress.recovery,
         pendingActionId: held?.id,
       });
-      throw lost ? connectErrors.create("connect.outcome_unknown") : error;
+      throw reason === "connect.outcome_unknown"
+        ? unknownOutcome(progress, lost ? undefined : detailsOf(error))
+        : error;
     }
     // Nothing is returned, or stored for a repeat, that the audit log
     // doesn't have: a side effect's answer is stored with its events. If
@@ -612,7 +667,9 @@ export default class Connect
         outcome: "unknown",
         reason: "connect.outcome_unknown",
       });
-      throw connectErrors.create("connect.outcome_unknown");
+      // Sent, unrecorded: as any lost answer, a native one waits for its
+      // person to resolve it.
+      throw unknownOutcome(progress);
     }
     if (done.failed) {
       throw connectErrors.create("connect.action_failed", {
