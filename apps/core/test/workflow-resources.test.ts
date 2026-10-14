@@ -285,6 +285,53 @@ describe("publishing a version", () => {
     );
   });
 
+  it("answers a retried publication with the version it made, though a workflow it binds is no longer the publisher's, or is gone", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const child = await workflowOf(ada, "child");
+    await publish(ada, child.id, definitionOf({ name: child.name }));
+    await shareWorkflowResource(env, ada, child.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const parent = await workflowOf(bob, "parent");
+    const bound = definitionOf({
+      name: parent.name,
+      bindings: {
+        greeting: {
+          kind: "workflow",
+          contract: `${workflowNamespace}/${child.name}/1.0.0`,
+        },
+      },
+      tasks: [runTask("greeting", child.name, "1.0.0")],
+    });
+    const first = await publish(bob, parent.id, bound);
+    // Bob loses his role in the child.
+    await unshareWorkflowResource(env, ada, child.id, {
+      type: "person",
+      id: bob.userId,
+    });
+    const unshared = await publish(bob, parent.id, bound);
+    // A later version binds it no more, and Ada deletes the child.
+    await publish(
+      bob,
+      parent.id,
+      definitionOf({ name: parent.name, version: "2.0.0" }),
+      first.version
+    );
+    await deleteWorkflowResource(env, ada, child.id);
+    const deleted = await publish(bob, parent.id, bound);
+
+    expect({ unshared, deleted }).toStrictEqual({
+      unshared: first,
+      deleted: first,
+    });
+    await expect(workflowVersions(env, bob, parent.id)).resolves.toHaveLength(
+      2
+    );
+  });
+
   it("answers two identical publications racing each other with the one version", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);

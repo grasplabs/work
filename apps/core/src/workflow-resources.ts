@@ -786,6 +786,43 @@ const publishedAs = async (
   return versionOf(row, bindings.get(row.version) ?? []);
 };
 
+/** Where a definition's text says its semantic version. */
+const statedVersionSchema = z.object({
+  document: z.object({ version: z.string() }),
+});
+
+/**
+ * The version of workflow `id` already published from `definition`: the
+ * one under the semantic version its text states, if it was published
+ * from the same definition (`definitionHashOf`, so whitespace and key
+ * order aside). Read off the text alone: a saved version passed
+ * validation as it was published, and nothing is written for it again.
+ */
+const savedPublication = async (
+  env: Env,
+  id: string,
+  definition: string
+): Promise<WorkflowResourceVersion | undefined> => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(definition);
+  } catch {
+    return undefined;
+  }
+  const stated = statedVersionSchema.safeParse(parsed).data?.document.version;
+  if (stated === undefined) {
+    return undefined;
+  }
+  const existing = await publishedAs(env, id, stated);
+  if (
+    existing === undefined ||
+    existing.definitionHash !== (await definitionHashOf(parsed))
+  ) {
+    return undefined;
+  }
+  return existing;
+};
+
 /** A version about to be written: everything its row and manifest hold. */
 interface Publication {
   workflow: Live;
@@ -979,6 +1016,14 @@ export const publishWorkflowVersion = async (
     publishSchema,
     input
   );
+  // A retry of a publication that was saved answers the saved version
+  // before its bindings are resolved again: the builder may have lost
+  // their role in a workflow it binds since, or that workflow been
+  // deleted, and the version still binds what it pinned then.
+  const saved = await savedPublication(env, workflow.id, definition);
+  if (saved !== undefined) {
+    return saved;
+  }
   const { checked, bindings } = await checkDefinition(
     env,
     by,
