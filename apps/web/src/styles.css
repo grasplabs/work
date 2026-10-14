@@ -434,3 +434,9 @@
   opacity: 0;
   margin-bottom: calc(var(--spacing) * -6);
 }
+
+/* A name on the brain's atlas (brain/atlas-canvas.tsx): it fades, and goes invisible only once it has faded out. */
+@utility fade-shown {
+  transition-property: opacity, visibility;
+  transition-duration: 300ms;
+}

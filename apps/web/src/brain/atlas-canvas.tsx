@@ -207,8 +207,9 @@ const neuronClass = (chosen: boolean, state: Neuron["state"]): string => {
     : "bg-card font-medium";
 };
 
+// Hidden, a name can't be pointed at or reached with Tab: it goes invisible once it has faded.
 const PLACE =
-  "pointer-events-none absolute top-0 left-0 transition-opacity duration-300 data-[shown=false]:opacity-0";
+  "pointer-events-none absolute top-0 left-0 fade-shown data-[shown=false]:invisible data-[shown=false]:opacity-0";
 
 /** The brain's dots, made once and kept: every atlas on screen draws from them. */
 let cloudOnce: AtlasDots | null = null;

@@ -162,6 +162,11 @@ const stepOut = (view: AtlasView): AtlasView | undefined => {
 };
 
 /** Whether a key was meant for what is typed in, or for the browser. */
+/** Whether two layouts of a region hold the same neurons, in the same order. */
+const sameNeurons = (one: Neuron[], other: Neuron[]): boolean =>
+  one.length === other.length &&
+  one.every((neuron, index) => neuron.id === other[index]?.id);
+
 const keyIsElsewhere = (event: KeyboardEvent): boolean => {
   const typing =
     event.target instanceof Element &&
@@ -208,8 +213,15 @@ const AtlasPage = () => {
   // The keys' place on the whole brain, before it is entered.
   const [cursor, setCursor] = useState(-1);
   const pointed = region === undefined ? REGION_IDS[cursor] : undefined;
-  // The note the camera is going in on, on its way to its page.
+  // The note the camera is going in on, on its way to its page. Leaving the view it began in
+  // (a crumb, a group, the browser's back) ends it: the note may not be on the next one.
   const [dive, setDive] = useState<string>();
+  const viewKey = JSON.stringify(searchOf(view));
+  const [diveView, setDiveView] = useState(viewKey);
+  if (viewKey !== diveView) {
+    setDiveView(viewKey);
+    setDive(undefined);
+  }
   // The mark of the legend the pointer is on: its dots light up.
   const [spot, setSpot] = useState<Spot>();
   const { gap, neuron } = inHandOf(ws, neurons, view.note);
@@ -309,7 +321,7 @@ const AtlasPage = () => {
         setLaid((before) =>
           before.region === region &&
           before.group === group &&
-          before.neurons === shown
+          sameNeurons(before.neurons, shown)
             ? before
             : { region, group, neurons: shown }
         );

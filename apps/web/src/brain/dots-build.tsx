@@ -529,8 +529,8 @@ const play = (
     }
   };
   // The first frame before the page paints, so the dots never blink at the hand-over.
+  // It queues the frames after it itself, so the one `frame` held is always the next.
   draw(began);
-  frame = requestAnimationFrame(draw);
   return () => {
     cancelAnimationFrame(frame);
   };
