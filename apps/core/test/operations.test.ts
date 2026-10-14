@@ -156,6 +156,29 @@ const peek = mutation({
  * Stages `inserts` notes with bodies of `size` characters, then reads the
  * table `reads` times, for the bounds on what one mutation stages and reads.
  */
+/** Reads one more time than an invocation may, catching it, then inserts. */
+const readPastThenWrite = mutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    let refused = 0;
+    for (
+      let index = 0;
+      index <= platformLimits.invocationHostCalls;
+      index += 1
+    ) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one read after the other
+        await ctx.db.query("notes").first();
+      } catch {
+        refused += 1;
+      }
+    }
+    await ctx.db.insert("notes", { title: "after", body: "" });
+    return refused;
+  },
+});
+
 const stress = mutation({
   args: {
     inserts: v.number().integer().min(0).max(100),
@@ -329,6 +352,7 @@ const notesApp = app({
       insertOnly,
       peek,
       stress,
+      readPastThenWrite,
       insertThenGuard,
       echo,
       repeated,
@@ -1309,7 +1333,12 @@ describe("bounds on one mutation", () => {
         })
       ),
       heavyReads: await run(6, 40),
+      // The refused read caught, its write still stages and commits.
+      writeAfter: valueOf(
+        await call(fixture, owner, "mutation", "notes.readPastThenWrite", {})
+      ),
     }).toStrictEqual({
+      writeAfter: 1,
       manyReads: "operation.call_limit",
       allowedReads: "ok",
       wholeCommit: "ok",

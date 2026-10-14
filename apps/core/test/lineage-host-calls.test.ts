@@ -149,6 +149,53 @@ const countingDb = () => {
   return { counted, env: { ...env, DB: database } };
 };
 
+/**
+ * Core's database, each batch sent once `armed` held a moment: one sent
+ * meanwhile goes first, as another isolate's write can land between this
+ * one's check and its write.
+ */
+const reorderingDb = () => {
+  const control = { armed: false };
+  let held: ((value: null) => void) | undefined;
+  const database = new Proxy(env.DB, {
+    get: (target, property) => {
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          if (control.armed) {
+            const overtaken = held;
+            if (overtaken === undefined) {
+              const { promise, resolve } = Promise.withResolvers<null>();
+              held = resolve;
+              await Promise.race([promise, scheduler.wait(300)]);
+              held = undefined;
+            } else {
+              const result = await target.batch(statements);
+              overtaken(null);
+              return result;
+            }
+          }
+          return await target.batch(statements);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  return { control, env: { ...env, DB: database } };
+};
+
+/** The host calls `root`'s lineage counts now. */
+const lineageHostCalls = async (root: string): Promise<unknown> => {
+  const row = await env.DB.prepare(
+    "SELECT host_calls AS calls FROM run_lineages WHERE root_run_id = ?"
+  )
+    .bind(root)
+    .first<{ calls: number }>();
+  return row?.calls;
+};
+
 /** A run of an App's no-op workflow, finished: the root of a lineage. */
 const lineageOf = async () => {
   const builder = await signedInApi(idp, "builder");
@@ -401,6 +448,35 @@ ${calling("over", 1)}
     expect(result).toStrictEqual({
       before: "ok",
       after: "execution.stale_attempt",
+    });
+  });
+
+  it("give back a block a call was still reserving as its attempt settled, the attempt's function having returned without waiting for the call", async () => {
+    const lineage = await lineageOf();
+
+    const result = await withQuotas({ lineageHostCalls: 50 }, async () => {
+      const { control, env: reordering } = reorderingDb();
+      const admission = await admitAttempt(reordering, lineage, attemptOf("a"));
+      // Four calls: blocks of one, one and two, all used.
+      for (const _ of [1, 2, 3, 4]) {
+        // oxlint-disable-next-line no-await-in-loop -- one call after the other
+        await admission.hostCall();
+      }
+      control.armed = true;
+      // A fifth, never awaited, reserves a block of four as the attempt
+      // settles: whichever write lands first, the block comes back.
+      const unawaited = outcome(admission.hostCall());
+      await admission.settle();
+      control.armed = false;
+      return {
+        unawaited: await unawaited,
+        calls: await lineageHostCalls(lineage.root),
+      };
+    });
+
+    expect(result).toStrictEqual({
+      unawaited: "execution.stale_attempt",
+      calls: 4,
     });
   });
 });

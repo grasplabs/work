@@ -178,13 +178,15 @@ class Channel extends ChannelTarget implements OperationChannel {
   ): Promise<unknown> {
     const capability = this.#capabilities[name];
     try {
-      if (name !== "write") {
+      const counted = name !== "write";
+      if (counted) {
         this.#state.uses += 1;
       }
       if (this.#state.ended) {
         throw operationErrors.create("operation.ended");
       }
-      if (this.#state.uses > platformLimits.invocationHostCalls) {
+      // A write is never refused for the reads and calls before it.
+      if (counted && this.#state.uses > platformLimits.invocationHostCalls) {
         throw operationErrors.create("operation.call_limit", {
           maxHostCalls: platformLimits.invocationHostCalls,
         });

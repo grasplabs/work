@@ -645,9 +645,10 @@ const reserveHostCallsOnce = async (
  * time: calls made at once wait for the same block). Blocks start at one
  * call and double, up to {@link hostCallBlockMax}, so an attempt that
  * makes few calls reserves few, and one that makes many writes once every
- * few dozen. `close` ends it as the attempt settles, answering what it
- * reserved and didn't use, for its settle to give back; no call is
- * admitted after it. Once the lineage has none left, every later call of
+ * few dozen. `close` ends it as the attempt settles: no call is admitted
+ * after it, and once a reservation still in flight has landed, it answers
+ * what the attempt reserved and didn't use, that block included, for its
+ * settle to give back. Once the lineage has none left, every later call of
  * the attempt is refused here, without asking the database again: a step
  * that catches the refusal in a loop costs nothing more.
  *
@@ -660,7 +661,7 @@ const hostCallsOf = (
   env: Pick<Env, "DB" | "QUOTA_LIMITS">,
   root: string,
   identity: ReturnType<typeof and>
-): { take: () => Promise<void>; close: () => number } => {
+): { take: () => Promise<void>; close: () => Promise<number> } => {
   let reserved = 0;
   let used = 0;
   let closed = false;
@@ -709,8 +710,15 @@ const hostCallsOf = (
         await reserving;
       }
     },
-    close: () => {
+    close: async () => {
       closed = true;
+      // A block a call left reserving lands, or fails, before the count:
+      // one counted before it landed would never be given back.
+      try {
+        await reserving;
+      } catch {
+        // Refused or failed: it reserved nothing.
+      }
       return reserved - used;
     },
   };
@@ -831,7 +839,7 @@ const admitAttemptOnce = async (
           root,
           identity,
           admitted.admittedAt,
-          hostCalls.close()
+          await hostCalls.close()
         );
       },
     };
