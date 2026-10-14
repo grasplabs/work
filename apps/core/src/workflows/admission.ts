@@ -96,12 +96,14 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 //   statement per admission, which counts nothing more once its lease is
 //   taken.
 // - Waiting for ever, and a journal that grows without bound: a wait
-//   spends none of the run's steps (host.ts, `loadWaitStep`), since
+//   spends none of the run's steps (host.ts, `uncountedWaitStep`), since
 //   others' load causes it, but each round adds to the run's journal. So
 //   a step waits longer each round, five seconds doubling to a minute
-//   (`askAgainSeconds`), and fails once it has waited a day in all
-//   (`workflowQueuedStepMs`, `workflow.queue_timeout`), spending none of
-//   its retries: at most some 1,450 rounds a step.
+//   (`askAgainSeconds`), and fails once its rounds have waited a day in
+//   all since it was last admitted (`workflowQueuedStepMs`,
+//   `workflow.queue_timeout`), spending none of its retries: at most some
+//   1,450 rounds a wait. Only those rounds count: a pause, or a wait for
+//   its person after an admission, is not a wait for load (host.ts).
 // - A fake identity for an extra share: who a run acts for and its App
 //   come from its row (dispatcher.ts), never from its input or code, and
 //   people are the organization's members, from its identity provider.
@@ -165,7 +167,7 @@ export interface Shares {
  * seconds, whatever a refusal said (host.ts): a lease holds what an
  * attempt may take, and most give it back far sooner.
  */
-export const maxAskAgainSeconds = 5;
+const maxAskAgainSeconds = 5;
 
 /** The longest a step that kept waiting waits between asks, in seconds. */
 const maxBackedOffSeconds = 60;
@@ -176,7 +178,7 @@ const maxBackedOffSeconds = 60;
  * so a step queued for long adds a round to its run's journal a minute at
  * most. It starts again from five seconds at the step's next wait.
  */
-export const askAgainSeconds = (waited: number): number =>
+const askAgainSeconds = (waited: number): number =>
   Math.min(maxAskAgainSeconds * 2 ** Math.max(0, waited), maxBackedOffSeconds);
 
 /** What decides when a waiting step asks again (`askAgainMs`). */
@@ -185,34 +187,35 @@ export interface AskingAgain {
   waited: number;
   /** What the refusal said, in seconds: the true wait, at the latest. */
   retryAfterSeconds: number;
-  /** When it first waited for load (ms since the epoch). */
-  since: number;
+  /**
+   * How long it has waited for load since it was last admitted: the sum
+   * of its rounds' waits, never the time between, so a pause or a wait
+   * for its person counts for none of it (host.ts).
+   */
+  waitedMs: number;
   /** How long a step may wait for load in all, in ms. */
   maxWaitMs: number;
-  /** Now, as the refusal was made. */
-  now: number;
 }
 
 /**
  * How long a waiting step waits before it asks again, in ms, and so when
  * it says it asks again: its backoff (`askAgainSeconds`), what the
- * refusal said and what is left of the time a step may wait, measured
- * from when it first waited, whichever is soonest. One rule for the
- * host's sleep, the summary's `retryAt` and the timeout.
+ * refusal said and what is left of the time a step may wait
+ * (`waitedMs`), whichever is soonest. One rule for the host's sleep, the
+ * summary's `retryAt` and the timeout.
  */
 export const askAgainMs = ({
   waited,
   retryAfterSeconds,
-  since,
+  waitedMs,
   maxWaitMs,
-  now,
 }: AskingAgain): number =>
   Math.max(
     0,
     Math.min(
       askAgainSeconds(waited) * 1000,
       retryAfterSeconds * 1000,
-      maxWaitMs - (now - since)
+      maxWaitMs - waitedMs
     )
   );
 
@@ -435,16 +438,12 @@ export const standingOf = async (
           live
         )
       ),
+    // The turn as a new place takes it (`nextTurn`), off the run's row,
+    // which every run has.
     db
-      .select({ next: sql<number>`coalesce(max(${queue.turn}) + 1, 0)` })
-      .from(queue)
-      .where(
-        and(
-          eq(queue.subject, scope.subject),
-          eq(queue.resource, scope.resource),
-          live
-        )
-      ),
+      .select({ next: sql<number>`${nextTurn(scope, now)}` })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, place.runId)),
   ]);
   const [held] = mine;
   if (held !== undefined) {
@@ -643,9 +642,9 @@ export const queuedRefusal = async (
   read: unknown,
   {
     waited,
-    since,
+    waitedMs,
     maxWaitMs,
-  }: Pick<AskingAgain, "waited" | "since" | "maxWaitMs">
+  }: Pick<AskingAgain, "waited" | "waitedMs" | "maxWaitMs">
 ): Promise<Error> => {
   const rows = z.array(sharesRowSchema).safeParse(read).data;
   const { waitingFor, retryAfterSeconds } = waitOf(rows?.[0], shares, now);
@@ -653,7 +652,7 @@ export const queuedRefusal = async (
   // When it asks again at the latest, as the host waits (`askAgainMs`):
   // never after it would time out.
   const retryAt = new Date(
-    now + askAgainMs({ waited, retryAfterSeconds, since, maxWaitMs, now })
+    now + askAgainMs({ waited, retryAfterSeconds, waitedMs, maxWaitMs })
   );
   const queue = workflowAdmissionQueue;
   const mine = placeIs(place);

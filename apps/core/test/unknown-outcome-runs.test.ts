@@ -555,6 +555,51 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     }
   });
 
+  it("gives each call of unknown outcome on a step its own deadline, however long the step's last one waited", async () => {
+    const admin = await personApi("admin");
+    const deadline = env.WORKFLOW_UNKNOWN_HOLD_MS;
+    env.WORKFLOW_UNKNOWN_HOLD_MS = "6000";
+    try {
+      const { mailbox, run, unknown } = await waitingRun(admin);
+      // Its one more send loses its answer too.
+      await loseAnswers(mailbox);
+      await elapse(3000);
+      await admin.api.unknownOutcomes.resolve(
+        unknown.key,
+        "not_happened",
+        unknown.claim
+      );
+      const second = await vi.waitFor(
+        async () => {
+          const listed = await admin.api.unknownOutcomes.list();
+          await expect(sentFrom(mailbox)).resolves.toBe(2);
+          expect(listed).toHaveLength(1);
+          return listed[0];
+        },
+        { timeout: 15_000, interval: 100 }
+      );
+      // Past the first's deadline, well within its own.
+      await elapse(5000);
+      if (second !== undefined) {
+        await admin.api.unknownOutcomes.resolve(
+          second.key,
+          "happened",
+          second.claim
+        );
+      }
+      await finished(run.id);
+      expect({
+        run: await admin.api.workflows.status(run.id),
+        sent: await sentFrom(mailbox),
+      }).toMatchObject({
+        run: { status: "completed", output: { resolved: true } },
+        sent: 2,
+      });
+    } finally {
+      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
+    }
+  });
+
   it("never runs the step again at once, even when connect says it may be recovered and the call says otherwise", async () => {
     const admin = await personApi("admin");
     const { CONNECT: connect } = env;
