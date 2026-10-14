@@ -1973,6 +1973,10 @@ msgstr "Navigatie uitklappen"
 msgid "Expand the sections"
 msgstr "Onderdelen uitklappen"
 
+#: src/workflows/workflows-table.tsx
+msgid "expected on top, from designs and tests"
+msgstr "verwacht daarbovenop, uit ontwerpen en tests"
+
 #: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exporteren"
@@ -3913,6 +3917,10 @@ msgstr "Uitgefaseerd"
 msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
 msgstr "Uitgefaseerd door {endedBy}, {endedAt}: {endedReason}"
 
+#: src/workflows/workflows-table.tsx
+msgid "return a month, measured"
+msgstr "opbrengst per maand, gemeten"
+
 #: src/dashboard/to-do.tsx
 msgid "Review"
 msgstr "Beoordelen"
@@ -4054,6 +4062,14 @@ msgstr "Draait {how} {count, plural, one {# keer minder} other {# keer minder}} 
 #: src/chat/builds-state.ts
 msgid "Runs {how} {count, plural, one {# more time} other {# more times}} ({now} now)"
 msgstr "Draait {how} {count, plural, one {# keer vaker} other {# keer vaker}} (nu {now})"
+
+#: src/workflows/workflows-table.tsx
+msgid "Runs a week"
+msgstr "Runs per week"
+
+#: src/workflows/workflows-table.tsx
+msgid "runs a week by these workflows"
+msgstr "runs per week door deze workflows"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
