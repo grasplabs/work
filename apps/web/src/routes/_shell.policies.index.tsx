@@ -80,7 +80,8 @@ const Figure = ({
   attention = false,
 }: {
   label: string;
-  value: number;
+  /** Null while nothing measures it: shown as a dash. */
+  value: number | null;
   attention?: boolean;
 }) => (
   <div className="bg-card flex flex-col gap-1 px-4 py-3">
@@ -92,7 +93,7 @@ const Figure = ({
           : "text-2xl font-medium tabular-nums"
       }
     >
-      {formatNumber(value)}
+      {value === null ? "–" : formatNumber(value)}
     </dd>
   </div>
 );

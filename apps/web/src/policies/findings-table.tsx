@@ -163,7 +163,13 @@ export const FindingsTable = ({
                 </TableCell>
                 <TableCell className="hidden @xl:table-cell" variant="roomy">
                   <span className="text-muted-foreground tabular-nums">
-                    {plural(app.users, { one: "# person", other: "# people" })}
+                    {app.users === null ? (
+                      <Trans context="usage of an app, which nothing measures yet">
+                        Unknown
+                      </Trans>
+                    ) : (
+                      plural(app.users, { one: "# person", other: "# people" })
+                    )}
                   </span>
                 </TableCell>
                 <TableCell className="text-right" variant="end">

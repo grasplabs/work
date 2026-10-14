@@ -22,7 +22,7 @@ import { Section } from "./section.tsx";
 // prototype's empty state.
 
 /** The data categories an app touches, and its users by team. */
-const DataExposure = ({ users }: { users: number }) => {
+const DataExposure = ({ users }: { users: number | null }) => {
   const { t } = useLingui();
   return (
     <Section
@@ -60,7 +60,12 @@ const DataExposure = ({ users }: { users: number }) => {
               </p>
             </div>
             <span className="text-muted-foreground shrink-0 tabular-nums">
-              {t`${plural(users, { one: "# user", other: "# users" })}`}
+              {users === null
+                ? t({
+                    message: "Unknown",
+                    context: "usage of an app, which nothing measures yet",
+                  })
+                : t`${plural(users, { one: "# user", other: "# users" })}`}
             </span>
           </div>
           <p className="text-muted-foreground">

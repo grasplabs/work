@@ -9,14 +9,17 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@grasp-os/ui/components/tabs";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import {
+  Await,
   createFileRoute,
   Link,
   Outlet,
   useLocation,
 } from "@tanstack/react-router";
 import { DownloadIcon, SearchXIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { AppLogo } from "../connections/app-logo.tsx";
+import { ErrorText } from "../error-text.tsx";
 import { PageLoading } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -25,9 +28,17 @@ import { loadAppPage } from "../landscape/app-page.ts";
 import type { AppAudit } from "../landscape/app-page.ts";
 import { downloadCsv } from "../landscape/download.ts";
 import { appTabs, tabOf } from "../landscape/landscape-app.ts";
-import { auditCsv, auditFileName } from "../landscape/landscape-audit.ts";
+import {
+  auditCsv,
+  auditFileName,
+  hasOlder,
+  readWholeAppAudit,
+  trailEvents,
+} from "../landscape/landscape-audit.ts";
+import type { AppAuditTrail } from "../landscape/landscape-audit.ts";
 import type { LandscapeApp } from "../landscape/landscape.ts";
 import { NotLoaded } from "../load-from-core.tsx";
+import { useCoreAction } from "../use-core-action.ts";
 
 // The frame of every app page, as in the prototype
 // (`components/landscape/app-layout.tsx`): the app's name with its vendor
@@ -35,10 +46,77 @@ import { NotLoaded } from "../load-from-core.tsx";
 // tab itself. The prototype also shows the app's browser extension there;
 // Grasp sees no extensions yet.
 
+/**
+ * The export of the app's whole audit trail: it reads on from the stretch
+ * the page read to the start of the log, then downloads. Only admins read
+ * the log.
+ */
+const ExportTrail = ({
+  appName,
+  audit,
+}: {
+  appName: string;
+  audit: AppAudit;
+}) => {
+  const { busy, failure, run } = useCoreAction();
+  const trail = audit.state === "ready" ? audit.data : undefined;
+  const exportAll = async (from: AppAuditTrail) => {
+    const whole = await run(
+      async (session) => await readWholeAppAudit(session, from)
+    );
+    if (whole !== undefined) {
+      downloadCsv(auditCsv(trailEvents(whole)), auditFileName(appName));
+    }
+  };
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button
+        disabled={
+          busy ||
+          trail === undefined ||
+          (trailEvents(trail).length === 0 && !hasOlder(trail.read))
+        }
+        onClick={() => {
+          if (trail !== undefined) {
+            void exportAll(trail);
+          }
+        }}
+        size="sm"
+        variant="ghost"
+      >
+        <DownloadIcon data-icon="inline-start" />
+        <Trans>Export</Trans>
+      </Button>
+      <ErrorText>{failure}</ErrorText>
+    </div>
+  );
+};
+
 /** The app's logo and name, its vendor and how many use it; the export on the right. */
-const AppHeader = ({ app, audit }: { app: LandscapeApp; audit: AppAudit }) => {
+const AppHeader = ({
+  app,
+  audit,
+}: {
+  app: LandscapeApp;
+  audit: Promise<AppAudit>;
+}) => {
+  const { t } = useLingui();
   const { users, vendor } = app;
-  const events = audit.state === "ready" ? audit.data : [];
+  let about: ReactNode;
+  if (users === null) {
+    about = vendor === null ? t`Usage unknown` : t`${vendor} · usage unknown`;
+  } else {
+    about =
+      vendor === null ? (
+        <Plural one="# user" other="# users" value={users} />
+      ) : (
+        <Plural
+          one={`${vendor} · # user`}
+          other={`${vendor} · # users`}
+          value={users}
+        />
+      );
+  }
   return (
     <div className="flex items-center gap-4">
       <AppLogo name={app.name} />
@@ -46,30 +124,17 @@ const AppHeader = ({ app, audit }: { app: LandscapeApp; audit: AppAudit }) => {
         <h1 className="truncate text-2xl font-medium tracking-tight">
           {app.name}
         </h1>
-        <span className="text-muted-foreground truncate">
-          {vendor === null ? (
-            <Plural one="# user" other="# users" value={users} />
-          ) : (
-            <Plural
-              one={`${vendor} · # user`}
-              other={`${vendor} · # users`}
-              value={users}
-            />
-          )}
-        </span>
+        <span className="text-muted-foreground truncate">{about}</span>
       </div>
       <div className="ml-auto flex items-center gap-2">
-        <Button
-          disabled={events.length === 0}
-          onClick={() => {
-            downloadCsv(auditCsv(events), auditFileName(app.name));
-          }}
-          size="sm"
-          variant="ghost"
+        <Await
+          fallback={
+            <ExportTrail appName={app.name} audit={{ state: "adminsOnly" }} />
+          }
+          promise={audit}
         >
-          <DownloadIcon data-icon="inline-start" />
-          <Trans>Export</Trans>
-        </Button>
+          {(loaded) => <ExportTrail appName={app.name} audit={loaded} />}
+        </Await>
       </div>
     </div>
   );

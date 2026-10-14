@@ -266,7 +266,7 @@ const AdoptionSection = ({ appId }: { appId: string }) => {
             size="sm"
             variant="outline"
           >
-            <Trans>Set up usage tracking</Trans>
+            <Trans>View usage</Trans>
           </Button>
         </EmptyContent>
       </Empty>

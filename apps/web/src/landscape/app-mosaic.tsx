@@ -20,15 +20,20 @@ import type { Rect } from "./treemap.ts";
 // inline sizes; here each sits in an SVG `foreignObject` at its place, so
 // the layout needs no inline styles. On narrow screens it is a list.
 
-/** "12 users" for a category, and for an app the same or "No usage seen". */
+/**
+ * "12 users" for a category, and for an app the same or "No usage seen";
+ * "Usage unknown" for either while nothing measures it.
+ */
 const useUserCounts = () => {
   const { t } = useLingui();
-  const usersCount = (users: number) =>
-    t`${plural(users, { one: "# user", other: "# users" })}`;
+  const usersCount = (users: number | null) =>
+    users === null
+      ? t`Usage unknown`
+      : t`${plural(users, { one: "# user", other: "# users" })}`;
   return {
     usersCount,
-    usersLabel: (users: number) =>
-      users > 0 ? usersCount(users) : t`No usage seen`,
+    usersLabel: (users: number | null) =>
+      users === 0 ? t`No usage seen` : usersCount(users),
   };
 };
 
@@ -170,7 +175,7 @@ const Treemap = ({
 
   const height = Math.max(640, Math.min(880, width * 0.62));
   const blocks = squarify(
-    groups.map((group) => Math.max(group.users, group.apps.length * 3)),
+    groups.map((group) => Math.max(group.users ?? 0, group.apps.length * 3)),
     { x: 0, y: 0, width, height }
   );
 

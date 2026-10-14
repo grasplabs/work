@@ -164,7 +164,8 @@ export interface AppFacts {
   ai: AiKind | null;
   training: TrainingKind;
   data: DataExposureType[];
-  people: number;
+  /** How many use it; null while nothing measures it. */
+  people: number | null;
   hasOwner: boolean;
   certificates: RequiredCertificate[];
   dpa: DpaState | null;
@@ -200,6 +201,10 @@ export const appFacts = (app: LandscapeApp): AppFacts => ({
 
 const sameVendor = (one: string, other: string) =>
   one.trim().toLocaleLowerCase() === other.trim().toLocaleLowerCase();
+
+/** Whether more than `moreThan` use an app; never when nothing measures it. */
+const usedByMoreThan = (people: number | null, moreThan: number): boolean =>
+  people !== null && people > moreThan;
 
 /**
  * Whether one condition holds for an app. What Grasp does not know never
@@ -240,7 +245,7 @@ export const conditionMatches = (
       return facts.data.some((kind) => condition.values.includes(kind));
     }
     case "people": {
-      return facts.people > condition.moreThan;
+      return usedByMoreThan(facts.people, condition.moreThan);
     }
     case "owner": {
       return !facts.hasOwner;
@@ -353,7 +358,7 @@ export const findings = (
     .toSorted(
       (one, other) =>
         stateRank[one.state] - stateRank[other.state] ||
-        other.app.users - one.app.users ||
+        (other.app.users ?? 0) - (one.app.users ?? 0) ||
         one.app.name.localeCompare(other.app.name)
     );
 
@@ -391,10 +396,20 @@ export const applyPolicy = (
   });
 };
 
-/** Everyone who uses an app a finding is about, counted once per app. */
-export const peopleAffected = (found: readonly Finding[]): number => {
+/**
+ * Everyone who uses an app a finding is about, counted once per app; null
+ * when nothing measures how many use one of them, so no total is known.
+ */
+export const peopleAffected = (found: readonly Finding[]): number | null => {
   const apps = new Map(found.map(({ app }) => [app.id, app.users]));
-  return [...apps.values()].reduce((sum, users) => sum + users, 0);
+  let sum = 0;
+  for (const users of apps.values()) {
+    if (users === null) {
+      return null;
+    }
+    sum += users;
+  }
+  return sum;
 };
 
 /** How many apps a rule catches, in the words of what it does to them. */

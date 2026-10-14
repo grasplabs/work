@@ -92,6 +92,9 @@ test("an admin finds a connected app in the landscape, with the engine that uses
   await expect(
     page.getByRole("textbox", { name: "Search events" })
   ).toBeVisible();
+  // Among them the permission the engine was granted on its connection,
+  // which core records on the permission rather than the connection.
+  await expect(page.getByText("Granted a permission").first()).toBeVisible();
 
   // An app nothing in Grasp knows isn't there.
   await page.goto("/landscape/native:nothing/overview");

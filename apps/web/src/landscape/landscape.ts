@@ -38,8 +38,12 @@ export interface AppEngine {
 export interface AppUse {
   /** Who connected it: Grasp's own connector, or Composio. */
   sources: CatalogSource[];
-  /** The engines holding a permission on one of its connections. */
-  engines: AppEngine[];
+  /**
+   * The engines holding a permission on one of its connections; null when
+   * they couldn't be read (only admins list permissions), which isn't the
+   * same as none.
+   */
+  engines: AppEngine[] | null;
 }
 
 /** One app in the landscape. */
@@ -58,8 +62,8 @@ export interface LandscapeApp {
   dataExposureReason: string;
   /** Where its data is hosted, as the vendor states it; empty when nothing says. */
   hosting: HostingRegion[];
-  /** People Grasp saw use it; 0 while it sees no usage. */
-  users: number;
+  /** People Grasp saw use it; null while nothing measures its usage. */
+  users: number | null;
   owner: string | null;
   /** When Grasp first knew of it: its first connection (ISO 8601). */
   firstSeen: string;
@@ -251,7 +255,11 @@ export const activeFilterCount = ({
   owner.length +
   app.length;
 
-const inBucket = (users: number, bucket: UsersBucket): boolean => {
+/** Whether a count is in the bucket; a count nothing measured is in none. */
+const inBucket = (users: number | null, bucket: UsersBucket): boolean => {
+  if (users === null) {
+    return false;
+  }
   switch (bucket) {
     case "lt10": {
       return users < 10;
@@ -277,7 +285,8 @@ const matchesQuickFilter = (
 ): boolean => {
   switch (filter) {
     case "unused": {
-      return app.use.engines.length === 0;
+      // Engines that couldn't be read aren't known to be none.
+      return app.use.engines?.length === 0;
     }
     case "core": {
       return app.aiType === "Core";
@@ -369,7 +378,8 @@ const compareBy = (
       return one.name.localeCompare(other.name);
     }
     case "users": {
-      return one.users - other.users;
+      // Unknown counts are put last before the direction applies (sortApps).
+      return (one.users ?? 0) - (other.users ?? 0);
     }
     case "owner": {
       // Apps without an owner go last when ascending.
@@ -391,10 +401,16 @@ export const sortApps = (
   if (sort === null) {
     return [...apps];
   }
-  return apps.toSorted((one, other) =>
-    sort.dir === "asc"
-      ? compareBy(sort.key, one, other)
-      : compareBy(sort.key, other, one)
+  // Apps whose usage nothing measures go last either way: an unknown count
+  // is neither the most nor the least.
+  const unknown = (app: LandscapeApp) =>
+    sort.key === "users" && app.users === null ? 1 : 0;
+  return apps.toSorted(
+    (one, other) =>
+      unknown(one) - unknown(other) ||
+      (sort.dir === "asc"
+        ? compareBy(sort.key, one, other)
+        : compareBy(sort.key, other, one))
   );
 };
 
@@ -492,7 +508,7 @@ export const landscapeCsv = (apps: readonly LandscapeApp[]): string =>
       app.category ?? "",
       i18n._(aiTypeLabel[app.aiType]),
       exposureText(app.dataExposure),
-      String(app.users),
+      app.users === null ? "" : String(app.users),
       app.owner ?? "",
       app.description ?? "",
     ]),
@@ -502,9 +518,13 @@ export const landscapeCsv = (apps: readonly LandscapeApp[]): string =>
 
 export interface MosaicGroup {
   category: string;
-  users: number;
+  /** Its apps' users together; null when nothing measures any of theirs. */
+  users: number | null;
   apps: { app: LandscapeApp; weight: number }[];
 }
+
+/** A count to rank by: one nothing measured weighs as none, so it never outranks one seen. */
+const seen = (users: number | null): number => users ?? 0;
 
 /** Apps grouped by category, the most used category and app first. Every app gets some room. */
 export const mosaicGroups = (apps: readonly LandscapeApp[]): MosaicGroup[] => {
@@ -515,18 +535,28 @@ export const mosaicGroups = (apps: readonly LandscapeApp[]): MosaicGroup[] => {
     groups.set(category, [...(groups.get(category) ?? []), app]);
   }
   return [...groups]
-    .map(([category, members]) => ({
-      category,
-      users: members.reduce((sum, app) => sum + app.users, 0),
-      apps: members
-        .toSorted(
-          (one, other) =>
-            other.users - one.users || one.name.localeCompare(other.name)
-        )
-        .map((app) => ({ app, weight: Math.max(app.users, 3) })),
-    }))
+    .map(([category, members]) => {
+      const counted = members.flatMap(({ users }) =>
+        users === null ? [] : [users]
+      );
+      return {
+        category,
+        users:
+          counted.length === 0
+            ? null
+            : counted.reduce((sum, users) => sum + users, 0),
+        apps: members
+          .toSorted(
+            (one, other) =>
+              seen(other.users) - seen(one.users) ||
+              one.name.localeCompare(other.name)
+          )
+          .map((app) => ({ app, weight: Math.max(seen(app.users), 3) })),
+      };
+    })
     .toSorted(
       (one, other) =>
-        other.users - one.users || one.category.localeCompare(other.category)
+        seen(other.users) - seen(one.users) ||
+        one.category.localeCompare(other.category)
     );
 };

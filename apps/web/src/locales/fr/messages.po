@@ -576,6 +576,10 @@ msgstr "{users, plural, one {{vendor} · # utilisateur} other {{vendor} · # uti
 msgid "{users, plural, one {# user} other {# users}}"
 msgstr "{users, plural, one {# utilisateur} other {# utilisateurs}}"
 
+#: src/routes/_shell.landscape.$appId.tsx
+msgid "{vendor} · usage unknown"
+msgstr "{vendor} · utilisation inconnue"
+
 #: src/landscape/columns-menu.tsx
 msgid "{visible, plural, one {# shown. Drag to reorder.} other {# shown. Drag to reorder.}}"
 msgstr "{visible, plural, one {# affichée. Faites glisser pour réorganiser.} other {# affichées. Faites glisser pour réorganiser.}}"
@@ -3427,6 +3431,7 @@ msgstr "Recharger le code serveur"
 #: src/chat/thread.tsx
 #: src/frame/page-states.tsx
 #: src/knowledge/nav.tsx
+#: src/landscape/audit-trail.tsx
 #: src/workflows/history-view.tsx
 msgid "Loading…"
 msgstr "Chargement…"
@@ -3738,6 +3743,10 @@ msgstr "Aucun moteur pour l’instant"
 #: src/dashboard/widget-board.tsx
 msgid "No engines yet. Engines are made in chat."
 msgstr "Aucun moteur pour l’instant. Les moteurs se créent dans le chat."
+
+#: src/landscape/audit-trail.tsx
+msgid "No events in the latest stretch of the log"
+msgstr "Aucun événement dans la partie la plus récente du journal"
 
 #: src/landscape/audit-trail.tsx
 msgid "No events match"
@@ -4231,6 +4240,10 @@ msgstr "Proposé à votre organisation"
 #: src/dashboard/signals.tsx
 msgid "Often corrected"
 msgstr "Souvent corrigé"
+
+#: src/landscape/audit-trail.tsx
+msgid "Older events haven't been read yet."
+msgstr "Les événements plus anciens n’ont pas encore été lus."
 
 #: src/chat/held-writes.tsx
 msgid "On {where}"
@@ -5398,10 +5411,6 @@ msgstr "Défini par la connexion de votre organisation."
 msgid "Set in your organization’s directory."
 msgstr "Défini dans l’annuaire de votre organisation."
 
-#: src/landscape/overview-tab.tsx
-msgid "Set up usage tracking"
-msgstr "Configurer le suivi de l’usage"
-
 #: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
@@ -5448,8 +5457,13 @@ msgid "Show more"
 msgstr "Afficher plus"
 
 #: src/dashboard/failed-workflows.tsx
+#: src/landscape/audit-trail.tsx
 msgid "Show older"
 msgstr "Afficher les plus anciennes"
+
+#: src/landscape/audit-trail.tsx
+msgid "Show older events to read further back."
+msgstr "Affichez les événements plus anciens pour remonter plus loin."
 
 #: src/frame/site-header.tsx
 msgid "Show or hide the sidebar"
@@ -6603,7 +6617,19 @@ msgid "Unknown"
 msgstr "Inconnu"
 
 #: src/landscape/app-cells.tsx
+msgctxt "engines that use an app, which couldn't be read"
+msgid "Unknown"
+msgstr "Inconnu"
+
+#: src/landscape/app-cells.tsx
 msgctxt "how Grasp knows an app is used"
+msgid "Unknown"
+msgstr "Inconnue"
+
+#: src/landscape/app-cells.tsx
+#: src/landscape/data-tab.tsx
+#: src/policies/findings-table.tsx
+msgctxt "usage of an app, which nothing measures yet"
 msgid "Unknown"
 msgstr "Inconnue"
 
@@ -6659,6 +6685,11 @@ msgstr "Utilisation"
 msgctxt "tab of an app page"
 msgid "Usage"
 msgstr "Utilisation"
+
+#: src/landscape/app-mosaic.tsx
+#: src/routes/_shell.landscape.$appId.tsx
+msgid "Usage unknown"
+msgstr "Utilisation inconnue"
 
 #: src/routes/sign-in.tsx
 msgid "Use your organization’s account to go on."
@@ -6771,6 +6802,10 @@ msgstr "Affichage"
 #: src/chat/studio.tsx
 msgid "View app"
 msgstr "Voir l’app"
+
+#: src/landscape/overview-tab.tsx
+msgid "View usage"
+msgstr "Voir l’utilisation"
 
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"

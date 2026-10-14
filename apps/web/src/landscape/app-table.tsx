@@ -241,7 +241,9 @@ const AppRow = ({
       <ContextMenuContent className="w-56">
         <ContextMenuGroup>
           <ContextMenuLabel>
-            {t`${plural(users, { one: `${appName} · # user`, other: `${appName} · # users` })}`}
+            {users === null
+              ? appName
+              : t`${plural(users, { one: `${appName} · # user`, other: `${appName} · # users` })}`}
           </ContextMenuLabel>
           <ContextMenuItem
             onClick={() => {

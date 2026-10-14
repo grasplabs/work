@@ -36,7 +36,7 @@ const app = (patch: Partial<LandscapeApp> & { id: string }): LandscapeApp => ({
   dataExposure: null,
   dataExposureReason: "",
   hosting: [],
-  users: 0,
+  users: null,
   owner: null,
   firstSeen: "2026-09-01T10:00:00.000Z",
   connectionIds: [],
@@ -91,10 +91,15 @@ describe("matching the landscape's filters", () => {
       "ChatGPT",
       "Notion",
     ]);
-    expect(matching({ users: ["lt10", "gte100"] })).toStrictEqual([
-      "Notion",
-      "Lender portals",
-    ]);
+    // Nothing measures how many use Lender portals: it is in no bucket.
+    expect(matching({ users: ["lt10", "gte100"] })).toStrictEqual(["Notion"]);
+    expect(
+      matchesLandscape(
+        { ...lenders, users: 4 },
+        { ...noFilters, users: ["lt10"] },
+        ""
+      )
+    ).toBeTruthy();
   });
 
   it("needs every quick filter to hold", () => {
@@ -107,6 +112,15 @@ describe("matching the landscape's filters", () => {
       "Lender portals",
     ]);
     expect(matching({ show: ["core", "unowned"] })).toStrictEqual([]);
+  });
+
+  it("counts an app as not in an engine only when its engines were read", () => {
+    const unread = { ...lenders, use: { sources: [], engines: null } };
+    expect(
+      [lenders, unread].map((each) =>
+        matchesLandscape(each, { ...noFilters, show: ["unused"] }, "")
+      )
+    ).toStrictEqual([true, false]);
   });
 
   it('treats an app without an owner as "unowned"', () => {
@@ -145,13 +159,16 @@ describe("sorting", () => {
     expect(nextSort(desc, "name")).toStrictEqual({ key: "name", dir: "asc" });
   });
 
-  it("sorts by users without changing the list it was given", () => {
+  it("sorts by users without changing the list it was given, unknown counts last", () => {
     const sorted = sortApps(all, { key: "users", dir: "desc" });
     expect(sorted.map(({ id }) => id)).toStrictEqual([
       "notion",
       "chatgpt",
       "lenders",
     ]);
+    expect(
+      sortApps(all, { key: "users", dir: "asc" }).map(({ id }) => id)
+    ).toStrictEqual(["chatgpt", "notion", "lenders"]);
     expect(all.map(({ id }) => id)).toStrictEqual([
       "chatgpt",
       "notion",
@@ -190,13 +207,13 @@ describe("exports", () => {
     );
   });
 
-  it("leaves data it doesn't know empty, and says None for an app that touches none", () => {
+  it("leaves data and usage it doesn't know empty, and says None for an app that touches none", () => {
     const [, unknown] = landscapeCsv([lenders]).split("\n");
-    const [, none] = landscapeCsv([{ ...lenders, dataExposure: [] }]).split(
-      "\n"
-    );
+    const [, none] = landscapeCsv([
+      { ...lenders, dataExposure: [], users: 0 },
+    ]).split("\n");
     expect([unknown, none]).toStrictEqual([
-      "Lender portals,,Productivity,Unknown,,0,,",
+      "Lender portals,,Productivity,Unknown,,,,",
       "Lender portals,,Productivity,Unknown,None,0,,",
     ]);
   });
@@ -220,10 +237,22 @@ describe("mosaic", () => {
       "Productivity",
       "AI assistants",
     ]);
-    // An app nobody was seen using still gets some room.
+    // An app whose usage nothing measures still gets some room.
     expect(
       groups[0]?.apps.find((each) => each.app.id === "lenders")?.weight
     ).toBe(3);
+  });
+
+  it("knows a category's users only when something measures them", () => {
+    expect(
+      mosaicGroups(all).map(({ category, users }) => ({ category, users }))
+    ).toStrictEqual([
+      { category: "Productivity", users: 120 },
+      { category: "AI assistants", users: 46 },
+    ]);
+    expect(mosaicGroups([lenders]).map(({ users }) => users)).toStrictEqual([
+      null,
+    ]);
   });
 
   it("fills the frame with rectangles in proportion to their values", () => {
@@ -359,7 +388,7 @@ describe("the landscape's apps", () => {
       dataExposure: null,
       hosting: [],
       owner: null,
-      users: 0,
+      users: null,
     });
   });
 
@@ -384,5 +413,15 @@ describe("the landscape's apps", () => {
       { id: "e2", name: "e2" },
       { id: "e1", name: "Invoices" },
     ]);
+  });
+
+  it("know none of their engines when the permissions couldn't be read, and none when no engine holds one", () => {
+    const integrations = integrationsOf(entries, [connection({ id: "c1" })]);
+    expect(
+      [
+        landscapeAppsOf(integrations),
+        landscapeAppsOf(integrations, { permissions: [], appNames: new Map() }),
+      ].map(([only]) => only?.use.engines)
+    ).toStrictEqual([null, []]);
   });
 });

@@ -11,13 +11,22 @@ import {
   eventTime,
   groupByMonth,
   hasAuditFilters,
+  hasOlder,
   matchesAudit,
   noAuditFilters,
   parentOf,
+  readTrail,
   shortHash,
+  startTrail,
+  trailRecords,
   visibleCountFor,
 } from "./landscape-audit.ts";
-import type { AppAuditEvent, AuditFilters } from "./landscape-audit.ts";
+import type {
+  AppAuditEvent,
+  AuditFilters,
+  SearchLog,
+  TrailRead,
+} from "./landscape-audit.ts";
 
 // An app's audit trail, as the prototype tests it (lib/landscape-audit.test.ts),
 // and how core's audit records become its events.
@@ -245,5 +254,148 @@ describe("from core's audit log", () => {
     expect(
       appAuditEventOf(record(9, null), directory, accounts)
     ).toBeUndefined();
+  });
+});
+
+/**
+ * Core's audit log as `audit.search` reads it: newest first, below
+ * `before`, at most `stretch` entries a page and at most `limit` matches,
+ * `next` where the page stopped (core's src/audit-log.ts).
+ */
+const auditLog =
+  (entries: readonly AuditRecord[], stretch: number, limit = 100): SearchLog =>
+  async (filter, before) => {
+    const lowest = Math.min(...entries.map(({ seq }) => seq));
+    const read = entries
+      .filter(({ seq }) => before === undefined || seq < before)
+      .toSorted((one, other) => other.seq - one.seq)
+      .slice(0, stretch);
+    const records: AuditRecord[] = [];
+    let last: number | undefined;
+    for (const entry of read) {
+      last = entry.seq;
+      const target = entry.event?.target;
+      if (
+        (filter?.targetType === undefined ||
+          target?.type === filter.targetType) &&
+        (filter?.targetId === undefined || target?.id === filter.targetId)
+      ) {
+        records.push(entry);
+        if (records.length === limit) {
+          break;
+        }
+      }
+    }
+    return await Promise.resolve({
+      records,
+      next: last === undefined || last === lowest ? null : last,
+    });
+  };
+
+const seqs = (records: readonly AuditRecord[]) => records.map(({ seq }) => seq);
+
+/** Reads on, a page of each search at a time, until nothing older is left. */
+const readToTheEnd = async (search: SearchLog, from: TrailRead) => {
+  let read = from;
+  while (hasOlder(read)) {
+    // oxlint-disable-next-line no-await-in-loop -- each read starts where the last ended
+    read = await readTrail(search, read, 1);
+  }
+  return read;
+};
+
+describe("reading an app's trail from core's audit log", () => {
+  const stored = {
+    id: "00000000-0000-4000-8000-000000000000",
+    at: "2026-09-02T10:00:00.000Z",
+    source: "core" as const,
+    actor: { type: "person" as const, userId: "u1" },
+    provenance: [],
+  };
+  const onConnection = (seq: number, id: string) =>
+    record(seq, {
+      ...stored,
+      action: "connection.call",
+      target: { type: "connection", id },
+      detail: {},
+    });
+  const onPermission = (seq: number, connectionId?: string) =>
+    record(seq, {
+      ...stored,
+      action: "permission.granted",
+      target: { type: "permission", id: `p${String(seq)}` },
+      detail:
+        connectionId === undefined
+          ? { objectType: "dependencies" }
+          : { objectType: "connection", connectionId, actions: "read" },
+    });
+
+  it("keeps the permissions granted on the app's connections, named by the account they're on", async () => {
+    const search = auditLog(
+      [
+        onConnection(1, "c1"),
+        onPermission(2, "c1"),
+        onPermission(3, "elsewhere"),
+        onPermission(4),
+        onConnection(5, "elsewhere"),
+      ],
+      100
+    );
+    const read = await readTrail(search, startTrail(["c1"]));
+    const [granted] = trailRecords(read);
+    expect(seqs(trailRecords(read))).toStrictEqual([2, 1]);
+    expect(
+      granted === undefined
+        ? undefined
+        : appAuditEventOf(
+            granted,
+            { people: new Map([["u1", "Eva Bakker"]]), apps: new Map() },
+            new Map([["c1", "eva@acme.test"]])
+          )
+    ).toMatchObject({
+      title: "Granted a permission",
+      description: "On the connection eva@acme.test",
+      actor: "Eva Bakker",
+      category: "access",
+    });
+  });
+
+  it("reads a stretch of the log at a time, and older stretches as asked for, until none is left", async () => {
+    const entries = Array.from({ length: 60 }, (_, index) =>
+      index % 3 === 0
+        ? onPermission(index + 1, "c1")
+        : onConnection(index + 1, index % 3 === 1 ? "c1" : "c2")
+    );
+    const search = auditLog(entries, 5);
+    const first = await readTrail(search, startTrail(["c1", "c2"]), 2);
+    expect(hasOlder(first)).toBeTruthy();
+    expect(seqs(trailRecords(first))).toStrictEqual([
+      60, 59, 58, 57, 56, 55, 54, 53, 52, 51,
+    ]);
+    const second = await readTrail(search, first, 2);
+    expect(seqs(trailRecords(second))).toHaveLength(20);
+    const whole = await readToTheEnd(search, second);
+    expect(hasOlder(whole)).toBeFalsy();
+    expect(seqs(trailRecords(whole))).toStrictEqual(seqs(entries).toReversed());
+  });
+
+  it("shows an older event only once every search has read past the newer ones", async () => {
+    // Each page holds at most 2 matches: the busy connection's search
+    // falls behind the permission search, which reads further back.
+    const entries = Array.from({ length: 30 }, (_, index) =>
+      index % 5 === 0
+        ? onPermission(index + 1, "c1")
+        : onConnection(index + 1, "c1")
+    );
+    const search = auditLog(entries, 10, 2);
+    const expected = seqs(entries).toReversed();
+    let read = startTrail(["c1"]);
+    while (hasOlder(read)) {
+      // oxlint-disable-next-line no-await-in-loop -- each read starts where the last ended
+      read = await readTrail(search, read, 1);
+      const shown = seqs(trailRecords(read));
+      expect(shown).toStrictEqual(expected.slice(0, shown.length));
+    }
+    expect(seqs(trailRecords(read))).toStrictEqual(expected);
   });
 });

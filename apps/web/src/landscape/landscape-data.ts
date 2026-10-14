@@ -17,13 +17,17 @@ import type { AppEngine, LandscapeApp } from "./landscape.ts";
 // (its vendor, AI type, data, hosting, owner, usage) nothing records yet,
 // so it stays unknown and the pages show the prototype's empty states.
 
-/** The engines holding an active permission on any of `connectionIds`, by name. */
+/**
+ * The engines holding an active permission on any of `connectionIds`, by
+ * name; null when the permissions couldn't be read (members may not list
+ * them, or the read failed), since then nobody knows.
+ */
 const enginesOn = (
   connectionIds: readonly string[],
   held?: HeldPermissions
-): AppEngine[] => {
+): AppEngine[] | null => {
   if (held === undefined) {
-    return [];
+    return null;
   }
   const engines = new Map<string, AppEngine>();
   for (const { subject, object, status } of held.permissions) {
@@ -65,7 +69,7 @@ const appOf = (
     dataExposure: null,
     dataExposureReason: "",
     hosting: [],
-    users: 0,
+    users: null,
     owner: null,
     firstSeen,
     connectionIds,

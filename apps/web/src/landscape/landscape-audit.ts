@@ -1,4 +1,9 @@
-import type { AuditRecord } from "@grasp-os/shared/audit-log";
+import type { AuditEvent } from "@grasp-os/shared/audit";
+import type {
+  AuditFilter,
+  AuditPage,
+  AuditRecord,
+} from "@grasp-os/shared/audit-log";
 import type { ListedConnection } from "@grasp-os/shared/connect";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
@@ -17,7 +22,8 @@ import { toCsv } from "./landscape.ts";
 // every recorded access and permission event, newest first, grouped by
 // month, to search, filter, open and export. The prototype's events are
 // demo records; here they are core's audit log, the events on the app's
-// connections, read by admins (the only ones who may read the log).
+// connections and on the permissions on them, read by admins (the only
+// ones who may read the log), a stretch of the log at a time.
 
 /**
  * What the platform does with an app: Grasp finds it, follows who reaches
@@ -294,9 +300,25 @@ export const auditCsv = (
 const discoveryActions = new Set(["connection.connect"]);
 
 /**
- * One of core's audit records about an app's connection, as its trail
- * shows it: what was done in words, by whom, on which account. A record
- * whose stored event can't be read is left out.
+ * The connection an event is about: its target, or, for a permission
+ * asked for, granted or revoked on one, the connection the permission
+ * names (core records those on the permission, with the connection in its
+ * detail).
+ */
+const connectionOf = (event: AuditEvent): string | undefined => {
+  if (event.target?.type === "connection") {
+    return event.target.id;
+  }
+  const named = event.detail.connectionId;
+  return event.target?.type === "permission" && typeof named === "string"
+    ? named
+    : undefined;
+};
+
+/**
+ * One of core's audit records about an app's connection, or a permission
+ * on one, as its trail shows it: what was done in words, by whom, on which
+ * account. A record whose stored event can't be read is left out.
  */
 export const appAuditEventOf = (
   record: AuditRecord,
@@ -308,8 +330,8 @@ export const appAuditEventOf = (
     return undefined;
   }
   const words = actionWords(event.action);
-  const target = event.target?.id ?? "";
-  const account = accounts.get(target) ?? target;
+  const connection = connectionOf(event) ?? event.target?.id ?? "";
+  const account = accounts.get(connection) ?? connection;
   const person =
     event.actor.type === "person" ||
     event.actor.type === "staff" ||
@@ -327,48 +349,193 @@ export const appAuditEventOf = (
   };
 };
 
-/** Most pages of the log read for one connection: each page reads a bounded stretch. */
-const pagesPerConnection = 10;
+/** One page of core's audit log, as `session.audit.search` reads it. */
+export type SearchLog = (
+  filter: AuditFilter,
+  before: number | undefined
+) => Promise<AuditPage>;
 
-/** Every record core holds on `connectionId`, newest first, as far as `pagesPerConnection` reach. */
-const recordsOn = async (
-  session: Session,
-  connectionId: string
-): Promise<AuditRecord[]> => {
+/**
+ * One search of the log an app's trail reads, and where its next, older
+ * page starts: `undefined` before its first page, `null` once it has read
+ * back to the start of the log.
+ */
+export interface TrailSearch {
+  filter: AuditFilter;
+  next: number | null | undefined;
+}
+
+/**
+ * How far an app's trail is read: the records found on its connections so
+ * far, newest first, and the searches it reads. Each connection has its
+ * own search for the events on it. Core can't search on the connection a
+ * permission names, so one more search reads every permission event and
+ * the trail keeps those on the app's connections.
+ */
+export interface TrailRead {
+  connectionIds: string[];
+  records: AuditRecord[];
+  searches: TrailSearch[];
+}
+
+/** An app's trail before anything is read. */
+export const startTrail = (connectionIds: readonly string[]): TrailRead => ({
+  connectionIds: [...connectionIds],
+  records: [],
+  searches: [
+    ...connectionIds.map((id) => ({
+      filter: { targetType: "connection", targetId: id },
+      next: undefined,
+    })),
+    { filter: { targetType: "permission" }, next: undefined },
+  ],
+});
+
+/** Most pages read of each search at a time: each page reads a bounded stretch of the log. */
+export const pagesPerRead = 10;
+
+/** Whether a record is about one of `connectionIds`. */
+const onConnections = (
+  { event }: AuditRecord,
+  connectionIds: readonly string[]
+): boolean => {
+  const connection = event === null ? undefined : connectionOf(event);
+  return connection !== undefined && connectionIds.includes(connection);
+};
+
+/** Up to `pages` more pages of one search, from where it stopped. */
+const readSearch = async (
+  search: SearchLog,
+  from: TrailSearch,
+  pages: number
+): Promise<{ search: TrailSearch; records: AuditRecord[] }> => {
   const records: AuditRecord[] = [];
-  let before: number | undefined;
-  for (let page = 0; page < pagesPerConnection; page += 1) {
+  let before = from.next ?? undefined;
+  for (let page = 0; page < pages; page += 1) {
     // oxlint-disable-next-line no-await-in-loop -- each page starts where the last ended
-    const { records: found, next } = await session.audit.search(
-      { targetType: "connection", targetId: connectionId },
-      before
-    );
+    const { records: found, next } = await search(from.filter, before);
     records.push(...found);
     if (next === null) {
-      break;
+      return { search: { ...from, next: null }, records };
     }
     before = next;
   }
-  return records;
+  return { search: { ...from, next: before }, records };
 };
 
 /**
- * The audit trail of an app: the events on each of its connections,
- * newest first. Admins only; core refuses anyone else.
+ * Reads on: up to `pages` more pages of each search that has more, keeping
+ * what they find on the app's connections.
+ */
+export const readTrail = async (
+  search: SearchLog,
+  read: TrailRead,
+  pages = pagesPerRead
+): Promise<TrailRead> => {
+  const done = await Promise.all(
+    read.searches.map(async (each) =>
+      each.next === null
+        ? { search: each, records: [] }
+        : await readSearch(search, each, pages)
+    )
+  );
+  const records = new Map(read.records.map((record) => [record.seq, record]));
+  for (const record of done.flatMap((each) => each.records)) {
+    if (onConnections(record, read.connectionIds)) {
+      records.set(record.seq, record);
+    }
+  }
+  return {
+    connectionIds: read.connectionIds,
+    records: [...records.values()].toSorted(
+      (one, other) => other.seq - one.seq
+    ),
+    searches: done.map((each) => each.search),
+  };
+};
+
+/** Whether older events may be left to read. */
+export const hasOlder = (read: TrailRead): boolean =>
+  read.searches.some(({ next }) => next !== null);
+
+/**
+ * The records the trail shows: those down to where every search has read,
+ * so an older event never shows while a newer one waits in a search that
+ * hasn't reached it yet. The rest show after the next read.
+ */
+export const trailRecords = (read: TrailRead): AuditRecord[] => {
+  const open = read.searches.flatMap(({ next }) =>
+    typeof next === "number" ? [next] : []
+  );
+  if (open.length === 0) {
+    return read.records;
+  }
+  const whole = Math.max(...open);
+  return read.records.filter(({ seq }) => seq >= whole);
+};
+
+/** An app's connection, as its trail names it. */
+export type TrailConnection = Pick<ListedConnection, "id" | "accountName">;
+
+/** An app's audit trail as read so far, with who's who to show it. */
+export interface AppAuditTrail {
+  read: TrailRead;
+  directory: Directory;
+  /** The account each connection is on, by connection ID. */
+  accounts: ReadonlyMap<string, string>;
+}
+
+/** The events the trail shows, newest first. */
+export const trailEvents = (trail: AppAuditTrail): AppAuditEvent[] =>
+  trailRecords(trail.read).flatMap(
+    (record) => appAuditEventOf(record, trail.directory, trail.accounts) ?? []
+  );
+
+const searchOn =
+  (session: Session): SearchLog =>
+  async (filter, before) =>
+    await session.audit.search(filter, before);
+
+/**
+ * The audit trail of an app, its latest stretch: the events on each of its
+ * connections and on the permissions on them, newest first. Admins only;
+ * core refuses anyone else.
  */
 export const readAppAudit = async (
   session: Session,
-  connections: readonly Pick<ListedConnection, "id" | "accountName">[]
-): Promise<AppAuditEvent[]> => {
-  const [directory, ...perConnection] = await Promise.all([
+  connections: readonly TrailConnection[]
+): Promise<AppAuditTrail> => {
+  const [directory, read] = await Promise.all([
     readDirectory(session),
-    ...connections.map(async ({ id }) => await recordsOn(session, id)),
+    readTrail(searchOn(session), startTrail(connections.map(({ id }) => id))),
   ]);
-  const accounts = new Map(
-    connections.map(({ id, accountName }) => [id, accountName ?? id])
-  );
-  return perConnection
-    .flat()
-    .toSorted((one, other) => other.seq - one.seq)
-    .flatMap((record) => appAuditEventOf(record, directory, accounts) ?? []);
+  return {
+    read,
+    directory,
+    accounts: new Map(
+      connections.map(({ id, accountName }) => [id, accountName ?? id])
+    ),
+  };
+};
+
+/** The trail with its next, older stretch read. */
+export const readOlderAppAudit = async (
+  session: Session,
+  trail: AppAuditTrail
+): Promise<AppAuditTrail> => ({
+  ...trail,
+  read: await readTrail(searchOn(session), trail.read),
+});
+
+/** The whole trail, read on from where it stopped to the start of the log. */
+export const readWholeAppAudit = async (
+  session: Session,
+  trail: AppAuditTrail
+): Promise<AppAuditTrail> => {
+  let { read } = trail;
+  while (hasOlder(read)) {
+    // oxlint-disable-next-line no-await-in-loop -- each read starts where the last ended
+    read = await readTrail(searchOn(session), read);
+  }
+  return { ...trail, read };
 };

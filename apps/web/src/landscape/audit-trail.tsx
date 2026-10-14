@@ -39,8 +39,10 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { flushSync } from "react-dom";
 
+import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
 import { downloadCsv } from "./download.ts";
 import { FacetedFilter } from "./faceted-filter.tsx";
@@ -316,16 +318,158 @@ const EventRow = ({
   );
 };
 
+/** Why the timeline is empty: nothing matches, nothing in the stretch read, or nothing yet. */
+const NoEvents = ({
+  appName,
+  narrowed,
+  older,
+  onClear,
+}: {
+  appName: string;
+  narrowed: boolean;
+  older: boolean;
+  onClear: () => void;
+}) => {
+  let title: ReactNode = <Trans>No events yet</Trans>;
+  let description: ReactNode = (
+    <Trans>
+      Access and permission changes on {appName} show up here as they are
+      recorded.
+    </Trans>
+  );
+  if (narrowed) {
+    title = <Trans>No events match</Trans>;
+    description = (
+      <Trans>
+        Try another search, or clear the filters to see the whole trail.
+      </Trans>
+    );
+  } else if (older) {
+    title = <Trans>No events in the latest stretch of the log</Trans>;
+    description = <Trans>Show older events to read further back.</Trans>;
+  }
+  return (
+    <Empty>
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          {narrowed ? <SearchXIcon /> : <ClipboardListIcon />}
+        </EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+      {narrowed ? (
+        <EmptyContent>
+          <Button onClick={onClear} size="sm" variant="outline">
+            <Trans>Clear search and filters</Trans>
+          </Button>
+        </EmptyContent>
+      ) : null}
+    </Empty>
+  );
+};
+
+/**
+ * Below the timeline: more of what's read, then older events to read, and
+ * the end of the trail once there's nothing older left.
+ */
+const TrailEnd = ({
+  shown,
+  visible,
+  older,
+  busy,
+  failure,
+  onShowMore,
+  onShowOlder,
+}: {
+  /** How many events match. */
+  shown: number;
+  /** How many of those are in view. */
+  visible: number;
+  older: boolean;
+  busy: boolean;
+  failure: string | undefined;
+  onShowMore: () => void;
+  onShowOlder: () => void;
+}) => {
+  const { t } = useLingui();
+  const matching = shown;
+  const shownCount = formatNumber(shown);
+  const showing = formatNumber(visible);
+  const more = formatNumber(Math.min(auditPageSize, shown - visible));
+  if (shown === 0 && !older) {
+    return null;
+  }
+  let end: ReactNode = (
+    <p className="text-muted-foreground text-center text-xs tabular-nums">
+      {t`${plural(matching, { one: "End of the audit trail · # event", other: "End of the audit trail · # events" })}`}
+    </p>
+  );
+  if (visible < shown) {
+    end = (
+      <div className="flex items-center justify-center gap-3">
+        <span className="text-muted-foreground tabular-nums">
+          <Trans>
+            Showing {showing} of {shownCount}
+          </Trans>
+        </span>
+        <Button onClick={onShowMore} size="sm" variant="outline">
+          <Trans>Show {more} more</Trans>
+        </Button>
+      </div>
+    );
+  } else if (older) {
+    end = (
+      <div className="flex flex-col items-center gap-2">
+        <span className="text-muted-foreground text-xs">
+          <Trans>Older events haven&apos;t been read yet.</Trans>
+        </span>
+        <Button
+          disabled={busy}
+          onClick={onShowOlder}
+          size="sm"
+          variant="outline"
+        >
+          {busy ? <Trans>Loading…</Trans> : <Trans>Show older</Trans>}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <>
+      <Separator />
+      {end}
+      <ErrorText>{failure}</ErrorText>
+    </>
+  );
+};
+
 /**
  * The audit trail of an app: every recorded access and permission event,
- * newest first, grouped by month, to search, filter, open and export.
+ * newest first, grouped by month, to search, filter, open and export. The
+ * log is read a stretch at a time: older events show as asked for, and an
+ * export reads the whole trail first.
  */
 export const AuditTrail = ({
   appName,
   events,
+  older,
+  busy,
+  failure,
+  onShowOlder,
+  readWhole,
 }: {
   appName: string;
+  /** The events read so far. */
   events: readonly AppAuditEvent[];
+  /** Whether older events may be left to read. */
+  older: boolean;
+  /** Whether a read is under way. */
+  busy: boolean;
+  /** Why the last read didn't go through. */
+  failure: string | undefined;
+  onShowOlder: () => void;
+  /** Reads the rest of the trail: all its events, or nothing when that failed. */
+  readWhole: () => Promise<readonly AppAuditEvent[] | undefined>;
 }) => {
   const { t, i18n } = useLingui();
   const [query, setQuery] = useState("");
@@ -347,11 +491,6 @@ export const AuditTrail = ({
   const narrowed = hasAuditFilters(filters, query);
   const total = events.length;
   const shownCount = formatNumber(shown.length);
-  const showing = formatNumber(visible.length);
-  const matching = shown.length;
-  const more = formatNumber(
-    Math.min(auditPageSize, shown.length - visible.length)
-  );
 
   const changeQuery = (next: string) => {
     setQuery(next);
@@ -360,6 +499,20 @@ export const AuditTrail = ({
   const changeFilters = (next: AuditFilters) => {
     setFilters(next);
     setVisibleCount(auditPageSize);
+  };
+  /** Every event that matches, the whole trail read first, as a file. */
+  const exportCsv = async () => {
+    const all = older ? await readWhole() : events;
+    if (all === undefined) {
+      return;
+    }
+    downloadCsv(
+      auditCsv(
+        all.filter((event) => matchesAudit(event, filters, query)),
+        all
+      ),
+      auditFileName(appName)
+    );
   };
   const clearAll = () => {
     setQuery("");
@@ -466,9 +619,9 @@ export const AuditTrail = ({
                 open={filterOpen}
               />
               <Button
-                disabled={shown.length === 0}
+                disabled={busy || (shown.length === 0 && !older)}
                 onClick={() => {
-                  downloadCsv(auditCsv(shown, events), auditFileName(appName));
+                  void exportCsv();
                 }}
                 size="sm"
                 variant="ghost"
@@ -480,40 +633,12 @@ export const AuditTrail = ({
           </div>
 
           {shown.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  {narrowed ? <SearchXIcon /> : <ClipboardListIcon />}
-                </EmptyMedia>
-                <EmptyTitle>
-                  {narrowed ? (
-                    <Trans>No events match</Trans>
-                  ) : (
-                    <Trans>No events yet</Trans>
-                  )}
-                </EmptyTitle>
-                <EmptyDescription>
-                  {narrowed ? (
-                    <Trans>
-                      Try another search, or clear the filters to see the whole
-                      trail.
-                    </Trans>
-                  ) : (
-                    <Trans>
-                      Access and permission changes on {appName} show up here as
-                      they are recorded.
-                    </Trans>
-                  )}
-                </EmptyDescription>
-              </EmptyHeader>
-              {narrowed ? (
-                <EmptyContent>
-                  <Button onClick={clearAll} size="sm" variant="outline">
-                    <Trans>Clear search and filters</Trans>
-                  </Button>
-                </EmptyContent>
-              ) : null}
-            </Empty>
+            <NoEvents
+              appName={appName}
+              narrowed={narrowed}
+              older={older}
+              onClear={clearAll}
+            />
           ) : (
             <div className="relative flex flex-col">
               <span
@@ -546,33 +671,17 @@ export const AuditTrail = ({
             </div>
           )}
 
-          {shown.length > 0 ? (
-            <>
-              <Separator />
-              {visible.length < shown.length ? (
-                <div className="flex items-center justify-center gap-3">
-                  <span className="text-muted-foreground tabular-nums">
-                    <Trans>
-                      Showing {showing} of {shownCount}
-                    </Trans>
-                  </span>
-                  <Button
-                    onClick={() => {
-                      setVisibleCount((current) => current + auditPageSize);
-                    }}
-                    size="sm"
-                    variant="outline"
-                  >
-                    <Trans>Show {more} more</Trans>
-                  </Button>
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-center text-xs tabular-nums">
-                  {t`${plural(matching, { one: "End of the audit trail · # event", other: "End of the audit trail · # events" })}`}
-                </p>
-              )}
-            </>
-          ) : null}
+          <TrailEnd
+            busy={busy}
+            failure={failure}
+            older={older}
+            onShowMore={() => {
+              setVisibleCount((current) => current + auditPageSize);
+            }}
+            onShowOlder={onShowOlder}
+            shown={shown.length}
+            visible={visible.length}
+          />
         </div>
       </Section>
     </div>

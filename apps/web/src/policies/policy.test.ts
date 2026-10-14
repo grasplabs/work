@@ -172,6 +172,15 @@ describe("conditions", () => {
     ).toBeTruthy();
   });
 
+  it("never counts more people than any number when nothing measures how many use an app", () => {
+    expect(
+      conditionMatches(
+        { field: "people", moreThan: 0 },
+        appFacts({ ...byName("ChatGPT"), users: null })
+      )
+    ).toBeFalsy();
+  });
+
   it("tells lacking any certificate from lacking all, counting an undeclared one as lacking", () => {
     const chatGpt = appFacts(byName("ChatGPT"));
     expect(
@@ -376,6 +385,14 @@ describe(findings, () => {
   it("counts the people using affected apps once per app", () => {
     const found = inForce(findings([china, eu], apps, [], today));
     expect(peopleAffected(found)).toBe(47 + 6 + 3);
+  });
+
+  it("knows no total of people when nothing measures an affected app's usage", () => {
+    const unmeasured = apps.map((each) =>
+      each.name === "Kimi" ? { ...each, users: null } : each
+    );
+    const found = inForce(findings([china, eu], unmeasured, [], today));
+    expect(peopleAffected(found)).toBeNull();
   });
 
   it("says how many apps a rule catches in the words of what it does", () => {

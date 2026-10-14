@@ -164,10 +164,21 @@ const MoreBadge = ({
  * The engines that use the app: one shows, the rest behind "+N". The
  * prototype lists the processes it came up in and the workflows that use
  * it; in Grasp an app is used by the engines holding a permission on it.
+ * Engines that couldn't be read are unknown, which isn't the same as none.
  */
 export const ProcessesCell = ({ use }: { use: AppUse }) => {
   const { t } = useLingui();
-  const [first, ...rest] = use.engines;
+  if (use.engines === null) {
+    return (
+      <span className="text-muted-foreground">
+        <Trans context="engines that use an app, which couldn't be read">
+          Unknown
+        </Trans>
+      </span>
+    );
+  }
+  const { engines } = use;
+  const [first, ...rest] = engines;
   if (first === undefined) {
     return (
       <span className="text-muted-foreground">
@@ -209,7 +220,7 @@ export const ProcessesCell = ({ use }: { use: AppUse }) => {
           title={t`Engines`}
         >
           <ItemGroup spacing="tight">
-            {use.engines.map((engine) => (
+            {engines.map((engine) => (
               <Item
                 key={engine.id}
                 render={
@@ -337,17 +348,26 @@ export interface Team {
   count: number;
 }
 
-/** The user count, with the biggest teams on hover. */
+/** The user count, with the biggest teams on hover; unknown while nothing measures it. */
 export const UsersCell = ({
   users,
   teams,
   onOpen,
 }: {
-  users: number;
+  users: number | null;
   teams: readonly Team[];
   onOpen: () => void;
 }) => {
   const { t } = useLingui();
+  if (users === null) {
+    return (
+      <span className="text-muted-foreground">
+        <Trans context="usage of an app, which nothing measures yet">
+          Unknown
+        </Trans>
+      </span>
+    );
+  }
   const total = teams.reduce((sum, team) => sum + team.count, 0) || users;
   const teamCount = Math.max(teams.length, 1);
   return (
