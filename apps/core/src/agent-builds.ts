@@ -48,6 +48,7 @@ import { workspace } from "./durable-objects.ts";
 import { appsCollectionId } from "./knowledge/app-entries.ts";
 import { resolveDependencies } from "./packages/resolve.ts";
 import type { Resolved } from "./packages/resolve.ts";
+import { requireResourceRole } from "./permission-resources.ts";
 import { requestPermission } from "./permissions.ts";
 import { serverProblem } from "./preview-reports.ts";
 import { isRestricted } from "./restricted.ts";
@@ -931,7 +932,14 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
           typeof request === "object" && request !== null
             ? { ...request, subject }
             : request,
-          async (named, role) => await appFor(this.env, by, named, role),
+          {
+            app: async (named, role) => await appFor(this.env, by, named, role),
+            // An App's own request names no independent resource it may
+            // not: the same registry decides as for a person.
+            resource: async (ref, needed) => {
+              await requireResourceRole(this.env, by, ref, needed);
+            },
+          },
           this.#admit
         );
       },

@@ -73,12 +73,44 @@ export const workflowResourceErrors = defineErrorFamily({
     "Someone published another version since you started from this one. Start again from the current version.",
   "workflow.version_not_found": "This workflow has no such version.",
   "workflow.resource_bound":
-    "The current version of another workflow calls this one, so it can't be deleted.",
+    "The current version of another workflow calls this one, or a trigger starts it, so it can't be deleted.",
   "workflow.resource_limit":
     "You have created as many workflows as one person may, deleted ones included.",
   "workflow.version_corrupt":
     "This version's stored record doesn't match what was published, so it isn't used. Report it to Grasp.",
+  "workflow.start_invalid":
+    "That isn't a valid start: name an exact published version, and input the workflow accepts.",
+  "workflow.start_denied":
+    "You, or what starts it for you, may not start this workflow, or that changed as it started. Check again, then retry.",
+  "workflow.start_conflict":
+    "This idempotency key already started this workflow with another version or input.",
+  "workflow.trigger_unavailable":
+    "This trigger doesn't exist, was disabled or was deleted.",
 });
+
+/**
+ * A start of an independent workflow: the exact version (a publication
+ * number, never an alias such as "latest"), its input, and a key of the
+ * invoker's own, so the same start sent again is the same start.
+ */
+export const workflowStartSchema = z.strictObject({
+  version: z.number().int().positive(),
+  input: z.json(),
+  key: identifierSchema,
+});
+
+/** A start the host admitted: its receipt. */
+export interface WorkflowStart {
+  id: string;
+  workflowId: string;
+  version: number;
+  manifestHash: string;
+  invoker: { type: "person" | "app" | "agent" | "trigger"; id: string };
+  principal: string;
+  authorityGeneration: number;
+  inputHash: string;
+  createdAt: string;
+}
 
 /** A workflow resource, as its members see it. */
 export interface WorkflowResource {
@@ -118,6 +150,8 @@ export interface WorkflowVersionBinding {
 export interface WorkflowBinders {
   binders: { id: string; name: string }[];
   hidden: number;
+  /** Live triggers whose current version starts it. */
+  triggers: number;
 }
 
 /** One published version of a workflow. */
@@ -169,4 +203,9 @@ export interface WorkflowResourcesApi {
   unshare: (id: string, input: unknown) => Promise<void>;
   members: (id: string) => Promise<WorkflowMember[]>;
   delete: (id: string) => Promise<void>;
+  /**
+   * Starts an exact version of a workflow the caller has a role in, acting
+   * for them (`workflowStartSchema`): its admitted receipt.
+   */
+  start: (id: string, input: unknown) => Promise<WorkflowStart>;
 }

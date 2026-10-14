@@ -741,7 +741,6 @@ msgid "Agent"
 msgstr "Agent"
 
 #: src/activity/pending.tsx
-#: src/connections/connection-list.tsx
 msgid "Agent {agent}"
 msgstr "Agent {agent}"
 
@@ -4471,6 +4470,10 @@ msgstr "A arrêté de suivre ce qui change sur une connexion"
 msgid "Stopped."
 msgstr "Arrêté."
 
+#: src/activity/pending.tsx
+msgid "Store {store}"
+msgstr "Magasin {store}"
+
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
 msgstr "ID du magasin : {store}"
@@ -5185,6 +5188,10 @@ msgstr "Outils à autoriser"
 msgid "Tools, products and the company's own words, so he hears them right."
 msgstr "Outils, produits et mots propres à l’entreprise, pour qu’il les comprenne bien."
 
+#: src/activity/pending.tsx
+msgid "Trigger {trigger}"
+msgstr "Déclencheur {trigger}"
+
 #: src/workflows/triggers.tsx
 msgid "Triggers"
 msgstr "Déclencheurs"
@@ -5648,8 +5655,8 @@ msgid "Workflow"
 msgstr "Workflow"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {engine}"
-msgstr "Workflow {workflowId} de {engine}"
+msgid "Workflow {workflow}"
+msgstr "Workflow {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"

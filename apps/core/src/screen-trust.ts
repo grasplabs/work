@@ -185,8 +185,10 @@ export const advanceGeneration = (
 /**
  * The Apps whose reach a grant to `grantee` widens, as a recursive SQL
  * table `reaching(app_id)`: the grantee, and every App that reaches an
- * App in it through an active permission on its exports or workflows,
- * however many Apps away.
+ * App in it through an active permission on its exports, however many
+ * Apps away. A permission's workflow is an independent workflow resource,
+ * never an App's: what an App reaches through the workflows it starts
+ * joins this with App bindings of workflows (GRA-267, part 3).
  */
 const reachingSql = (grantee: AppId): SQL => sql`reaching(app_id) AS (
   SELECT ${grantee}
@@ -195,7 +197,7 @@ const reachingSql = (grantee: AppId): SQL => sql`reaching(app_id) AS (
     JOIN reaching ON ${permissions.objectId} = reaching.app_id
   WHERE ${permissions.subjectType} = 'app'
     AND ${permissions.status} = 'active'
-    AND ${permissions.objectType} IN ('app', 'workflow')
+    AND ${permissions.objectType} = 'app'
 )`;
 
 /** A random version 4 UUID, as SQL, for each row it is read in. */

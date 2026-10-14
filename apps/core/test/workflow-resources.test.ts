@@ -831,7 +831,7 @@ describe("what keeps a workflow from being deleted", () => {
     // Ada can't see Bob's workflow: she learns there is one, not which.
     await expect(
       detailsOf(deleteWorkflowResource(env, ada, child.id))
-    ).resolves.toStrictEqual({ binders: [], hidden: 1 });
+    ).resolves.toStrictEqual({ binders: [], hidden: 1, triggers: 0 });
     const events = await allEvents();
     const refused = events.find(
       ({ action, target }) =>
@@ -861,6 +861,7 @@ describe("what keeps a workflow from being deleted", () => {
     ).resolves.toStrictEqual({
       binders: [{ id: parent.id, name: parent.name }],
       hidden: 0,
+      triggers: 0,
     });
   });
 

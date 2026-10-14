@@ -128,6 +128,17 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   may read definitions and publish versions that bind nothing new, as
 //   for Apps.
 
+/**
+ * Moves workflow `id`'s policy generation on, for a batch that changes who
+ * may start or follow it: a start admitted under the generation before is
+ * refused (workflow-starts.ts).
+ */
+export const nextGeneration = (db: ReturnType<typeof drizzle>, id: string) =>
+  db
+    .update(workflowResources)
+    .set({ policyGeneration: sql`${workflowResources.policyGeneration} + 1` })
+    .where(eq(workflowResources.id, id));
+
 /** The audit log's target type of a workflow resource. */
 const targetType = "workflow_resource";
 
@@ -219,9 +230,11 @@ const liveWorkflow = async (
 /**
  * The live workflow `id` and `by`'s role in it, which must be `needed` or
  * more: a workflow they have no role in is `workflow.resource_unavailable`,
- * as one that doesn't exist; too low a role is `role.forbidden`.
+ * as one that doesn't exist; too low a role is `role.forbidden`. Whom it
+ * is shared with is read now; `by`'s role and teams are their identity as
+ * read for this call.
  */
-const accessible = async (
+export const requireWorkflowRole = async (
   env: Env,
   by: Acting,
   id: unknown,
@@ -330,7 +343,7 @@ export const getWorkflowResource = async (
   by: Acting,
   id: unknown
 ): Promise<WorkflowResource> => {
-  const workflow = await accessible(env, by, id, "user");
+  const workflow = await requireWorkflowRole(env, by, id, "user");
   return resourceOf(workflow, workflow.role);
 };
 
@@ -1022,7 +1035,7 @@ const publish = async (
   id: unknown,
   input: unknown
 ): Promise<WorkflowResourceVersion> => {
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   const { definition, basedOn } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     publishSchema,
@@ -1135,7 +1148,7 @@ export const workflowVersions = async (
   by: Acting,
   id: unknown
 ): Promise<WorkflowResourceVersion[]> => {
-  const workflow = await accessible(env, by, id, "user");
+  const workflow = await requireWorkflowRole(env, by, id, "user");
   const rows = await drizzle(env.DB)
     .select()
     .from(workflowResourceVersions)
@@ -1163,7 +1176,7 @@ export const workflowDefinition = async (
   id: unknown,
   version: unknown
 ): Promise<string> => {
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   if (typeof version !== "number" || !Number.isSafeInteger(version)) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
@@ -1210,7 +1223,7 @@ export const shareWorkflowResource = async (
   input: unknown
 ): Promise<void> => {
   requireNotStaff(by);
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   const { role, ...member } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowShareSchema,
@@ -1263,6 +1276,7 @@ export const shareWorkflowResource = async (
         { ...member, role }
       )
     ),
+    nextGeneration(db, workflow.id),
   ]);
   try {
     await batch;
@@ -1288,7 +1302,7 @@ export const unshareWorkflowResource = async (
   input: unknown
 ): Promise<void> => {
   requireNotStaff(by);
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   const member: MemberRef = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowMemberSchema,
@@ -1320,6 +1334,7 @@ export const unshareWorkflowResource = async (
         { ...member, role: row.role }
       )
     ),
+    nextGeneration(db, workflow.id),
   ]);
 };
 
@@ -1333,7 +1348,7 @@ export const workflowMembers = async (
   by: Acting,
   id: unknown
 ): Promise<WorkflowMember[]> => {
-  const workflow = await accessible(env, by, id, "user");
+  const workflow = await requireWorkflowRole(env, by, id, "user");
   const rows = await drizzle(env.DB)
     .select()
     .from(workflowResourceMembers)
@@ -1360,20 +1375,28 @@ export const workflowMembers = async (
 /** At most this many binders are named in a refused deletion's event. */
 const maxNamedBinders = 20;
 
+/** How many live triggers' current versions start `id`, as SQL. */
+const pinningTriggersSql = (id: string) => sql`(SELECT COUNT(*)
+    FROM trigger_resources AS trigger
+    JOIN trigger_resource_versions AS pinned
+      ON pinned.trigger_id = trigger.id AND pinned.version = trigger.current_version
+    WHERE pinned.workflow_resource_id = ${id} AND trigger.deleted_at IS NULL)`;
+
 /**
- * That the current version of another live workflow binds `id`, as SQL.
- * Only the current version counts: an older, immutable version can't keep
- * a workflow from ever being deleted. Versions pinned by live runs, App
- * bindings and rollback targets come with starts and App bindings, and
- * will count here then.
+ * That the current version of another live workflow binds `id`, or a live
+ * trigger's current version starts it, as SQL. Only the current version
+ * counts: an older, immutable version can't keep a workflow from ever
+ * being deleted. Versions pinned by live runs, App bindings and rollback
+ * targets come with runs and App bindings, and will count here then.
  */
 const boundSql = (
   id: string
-) => sql`EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
+) => sql`(EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
     JOIN workflow_resources AS binder ON binder.id = bound.resource_id
     WHERE bound.kind = 'workflow' AND bound.target_id = ${id}
       AND bound.resource_version = binder.current_version
-      AND binder.id <> ${id} AND binder.deleted_at IS NULL)`;
+      AND binder.id <> ${id} AND binder.deleted_at IS NULL)
+  OR ${pinningTriggersSql(id)} > 0)`;
 
 /** The live workflows whose current version binds `id`. */
 const bindersOf = async (env: Env, id: string): Promise<Live[]> =>
@@ -1420,12 +1443,15 @@ export const deleteWorkflowResource = async (
   id: unknown
 ): Promise<void> => {
   requireNotStaff(by);
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   const db = drizzle(env.DB);
   const [deleted] = await auditedBatch(env, db, [
     db
       .update(workflowResources)
-      .set({ deletedAt: new Date() })
+      .set({
+        deletedAt: new Date(),
+        policyGeneration: sql`${workflowResources.policyGeneration} + 1`,
+      })
       .where(
         and(
           eq(workflowResources.id, workflow.id),
@@ -1465,12 +1491,17 @@ export const deleteWorkflowResource = async (
       visible.push({ id: binder.id, name: binder.name });
     }
   }
+  const triggers = await drizzle(env.DB).get<{ count: number }>(
+    sql`SELECT ${pinningTriggersSql(workflow.id)} AS count`
+  );
   const details: WorkflowBinders = {
     binders: visible,
     hidden: binders.length - visible.length,
+    triggers: triggers.count,
   };
   throw workflowResourceErrors.create("workflow.resource_bound", {
     binders: details.binders,
     hidden: details.hidden,
+    triggers: details.triggers,
   });
 };

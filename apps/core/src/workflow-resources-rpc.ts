@@ -3,6 +3,7 @@ import type {
   WorkflowResource,
   WorkflowResourcesApi,
   WorkflowResourceVersion,
+  WorkflowStart,
 } from "@grasp-os/shared/workflow-resources";
 
 import { CoreRpcTarget } from "./rpc-target.ts";
@@ -20,6 +21,7 @@ import {
   workflowMembers,
   workflowVersions,
 } from "./workflow-resources.ts";
+import { startWorkflow } from "./workflow-starts.ts";
 
 // Independent workflows over `/rpc` (workflow-resources.ts, where who may
 // do what is decided).
@@ -97,6 +99,14 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await workflowMembers(this.#env, person, id)
+    );
+  }
+
+  async start(id: string, input: unknown): Promise<WorkflowStart> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await startWorkflow(this.#env, { type: "person", person }, id, input)
     );
   }
 
