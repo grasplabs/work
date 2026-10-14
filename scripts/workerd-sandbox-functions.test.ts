@@ -259,17 +259,42 @@ describe("an App's function on the on-prem sandbox", () => {
     await holding;
   }, 30_000);
 
+  /** Nested calls core has authorized so far, across every call. */
+  const nestedCalls = async (): Promise<number> => {
+    const response = await fetch(`${coreUrl}nested`);
+    return z.object({ nested: z.number() }).parse(await response.json()).nested;
+  };
+
   it("fails a call cut off mid-call as an unknown outcome, and one that can't start as the sandbox unavailable, to try again", async () => {
+    // Two calls running inside the sandbox, one each of its two processes:
+    // each has reached core from there, so its code surely runs.
+    const before = await nestedCalls();
+    const cutOff = [
+      call("waitsInside", { within: 8000, owner: "app-cut-a" }),
+      call("waitsInside", { within: 8000, owner: "app-cut-b" }),
+    ];
+    await expect
+      .poll(nestedCalls, { timeout: 5000, interval: 20 })
+      .toBe(before + 2);
+    // A third waits for a process: counted in flight, its session not yet
+    // open, so no call of it went to the sandbox.
+    const opening = call("echo", { owner: "app-cut-c" });
+    await expect
+      .poll(() => supervisor.stats(), { timeout: 3000, interval: 10 })
+      .toMatchObject({ inFlight: 3, waiting: 1 });
+    await supervisor.stop();
     // Started, then its sandbox went away: it may have changed something,
     // so it is never one that ran nothing.
-    const cutOff = call("waits", { within: 8000 });
-    await expect
-      .poll(() => supervisor.stats().inFlight, { timeout: 3000 })
-      .toBe(1);
-    await supervisor.stop();
-    expect(failure(await cutOff)).toMatchObject({
-      code: "operation.sandbox_lost",
-      retryable: false,
+    for (const outcome of await Promise.all(cutOff)) {
+      expect(failure(outcome)).toMatchObject({
+        code: "operation.sandbox_lost",
+        retryable: false,
+      });
+    }
+    // Stopped while its session opened: nothing of it ran, to try again.
+    expect(failure(await opening)).toMatchObject({
+      code: "operation.sandbox_unavailable",
+      retryable: true,
     });
     // With no supervisor to take it, the next call never starts.
     const outcome = await call("echo");
@@ -277,5 +302,5 @@ describe("an App's function on the on-prem sandbox", () => {
       code: "operation.sandbox_unavailable",
       retryable: true,
     });
-  });
+  }, 30_000);
 });
