@@ -1,3 +1,4 @@
+import { actorOf } from "@grasp-os/shared/audit";
 import {
   connectErrors,
   resolutionChoiceSchema,
@@ -21,6 +22,7 @@ import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
+import { appendAuditEvent } from "./audit-outbox.ts";
 import { signedCall } from "./bindings.ts";
 import { personOf } from "./connections.ts";
 import { requireHeldBinding } from "./resource-bindings.ts";
@@ -211,9 +213,17 @@ export class UnknownOutcomesRpc
       if (!isMemberAdmin(person)) {
         throw roleErrors.create("role.forbidden");
       }
-      return await this.#env.CONNECT.listAllUnknownOutcomes(
+      const listed = await this.#env.CONNECT.listAllUnknownOutcomes(
         await personOf(this.#env, person)
       );
+      // Recorded before the admin gets it, as reading the audit log is:
+      // who looked at everyone's activity, and how much they saw.
+      await appendAuditEvent(this.#env, {
+        actor: actorOf(person),
+        action: "connection.call.unknown_listed",
+        detail: { count: listed.length },
+      });
+      return listed;
     });
   }
 

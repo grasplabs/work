@@ -222,8 +222,20 @@ describe("a call of unknown outcome", () => {
     const theirs = listed.filter(
       ({ onBehalfOf }) => onBehalfOf === connection.person.userId
     );
+    // Nothing in a listing comes of the key: not even its id, a digest a
+    // guess of the key could be checked against.
+    await env.DB.prepare(
+      "UPDATE idempotent_calls SET idempotency_key = 'run-guessed:send' WHERE connection_id = ?"
+    )
+      .bind(connection.id)
+      .run();
+    const relisted = await exports.default.listAllUnknownOutcomes(admin);
+    const rekeyed = relisted.find(
+      ({ onBehalfOf }) => onBehalfOf === connection.person.userId
+    );
     expect({
       theirs,
+      sameId: rekeyed?.id === theirs[0]?.id,
       leaked: /Paid today|run-admins|permission-mail/u.test(
         JSON.stringify(theirs)
       ),
@@ -244,6 +256,7 @@ describe("a call of unknown outcome", () => {
           resource: invoices,
         },
       ],
+      sameId: true,
       leaked: false,
       user: "role.forbidden",
       builder: "role.forbidden",

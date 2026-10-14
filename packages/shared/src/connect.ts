@@ -968,7 +968,10 @@ export interface UnknownOutcome {
  * its origin: only that person resolves it, and only they see its input.
  */
 export interface UnknownOutcomeListing {
-  /** Stable for this call of its key, for telling rows apart: a digest. */
+  /**
+   * For telling rows apart: a digest of what the listing shows anyway,
+   * never of the call's key.
+   */
   id: string;
   /** The person it acted for: theirs to resolve. */
   onBehalfOf: string;

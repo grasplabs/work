@@ -138,7 +138,7 @@ const loseSend = async ({
 test("a run's lost answer shows up for its person, and saying it happened completes the run", async ({
   browser,
 }) => {
-  const { admin, other } = peopleIn("unknownOutcome");
+  const { admin, other, member } = peopleIn("unknownOutcome");
   const account = `invoices-${crypto.randomUUID().slice(0, 8)}@acme.test`;
   const connectionId = await sharedMail(admin, account);
   const { core, api } = apiOf(admin);
@@ -215,6 +215,11 @@ test("a run's lost answer shows up for its person, and saying it happened comple
   await expect(otherPage.getByRole("button", { name: /happen/u })).toHaveCount(
     0
   );
+
+  // Anyone else who follows a link to it goes to their own settings.
+  const memberPage = await pageOf(browser, member);
+  await memberPage.goto("/settings/outcomes");
+  await expect(memberPage).toHaveURL(/\/settings\/profile$/u);
 
   // Asked once more, then said: the card goes, and the run completes.
   await card

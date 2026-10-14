@@ -4641,6 +4641,14 @@ msgid "Read an email attachment"
 msgstr "A lu une pièce jointe d’e-mail"
 
 #: src/activity/audit-words.ts
+msgid "Read an engine's statistics"
+msgstr "A lu les statistiques d’un moteur"
+
+#: src/activity/audit-words.ts
+msgid "Read everyone's calls of unknown outcome"
+msgstr "A lu les appels au résultat inconnu de tout le monde"
+
+#: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
 msgstr "A lu comment les connaissances sont utilisées"
 

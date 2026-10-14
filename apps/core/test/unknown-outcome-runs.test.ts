@@ -452,8 +452,19 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     const { items } = await admin.api.workflows.history(run.id, {
       pageSize: 100,
     });
+    // Who read everyone's, and how many: recorded as a read.
+    const events = await allEvents();
+    const reads = events
+      .filter(
+        ({ action, actor }) =>
+          action === "connection.call.unknown_listed" &&
+          "userId" in actor &&
+          actor.userId === other.userId
+      )
+      .map(({ actor, detail }) => ({ actor: actor.type, count: detail.count }));
     expect({
       theirs,
+      reads,
       shown: theirs.map((listing) => Object.keys(listing).toSorted()),
       // Even with its key and claim, as its person was shown them.
       resolved: await codeOf(
@@ -499,6 +510,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
           "title",
         ],
       ],
+      reads: [{ actor: "person", count: listed.length }],
       resolved: "connect.outcome_not_found",
       memberAll: "role.forbidden",
       memberOwn: [],
@@ -508,6 +520,47 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       // The run's page says why it waits.
       waitsOnOutcome: true,
     });
+  });
+
+  it("wakes the waiting run once its person resolves it, rather than leaving it to its next check", async () => {
+    const admin = await personApi("admin");
+    const wait = env.WORKFLOW_OFF_WAIT_MS;
+    // Its first wait alone outlasts how long the run is given to finish.
+    env.WORKFLOW_OFF_WAIT_MS = "50000";
+    try {
+      const { mailbox, run } = await lostRun(admin);
+      const unknown = await vi.waitFor(
+        async () => {
+          const [listed] = await admin.api.unknownOutcomes.list();
+          if (listed === undefined) {
+            throw new Error("Not listed yet");
+          }
+          return listed;
+        },
+        { timeout: 10_000, interval: 50 }
+      );
+      await vi.waitFor(
+        async () => {
+          await expect(liveStatus(run.id)).resolves.toBe("waiting");
+        },
+        { timeout: 10_000, interval: 100 }
+      );
+      await admin.api.unknownOutcomes.resolve(
+        unknown.key,
+        "happened",
+        unknown.claim
+      );
+      await finished(run.id);
+      expect({
+        run: await admin.api.workflows.status(run.id),
+        sent: await sentFrom(mailbox),
+      }).toMatchObject({
+        run: { status: "completed", output: { resolved: true } },
+        sent: 1,
+      });
+    } finally {
+      env.WORKFLOW_OFF_WAIT_MS = wait;
+    }
   });
 
   it("stays an obligation of its person when the run is cancelled: only the run's wait goes, and nothing says it was undone", async () => {

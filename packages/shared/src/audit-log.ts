@@ -50,6 +50,9 @@ const typeRules: readonly {
   // refused that): their word, never a send.
   { action: "connection.call.resolved", type: "decision" },
   { action: "connection.call.resolve_refused", type: "decision" },
+  // An admin reading every person's calls of unknown outcome, without what
+  // was sent: who looked at whose activity.
+  { action: "connection.call.unknown_listed", type: "read" },
   // A connector call that changed something at the provider, or only read.
   { action: "connection.call", sideEffect: true, type: "action" },
   { action: "connection.call", type: "read" },

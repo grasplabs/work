@@ -198,7 +198,7 @@ const cast = {
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
   chat: { user: "user" },
-  unknownOutcome: { admin: "admin", other: "admin" },
+  unknownOutcome: { admin: "admin", other: "admin", member: "user" },
   chatDock: { user: "user" },
   exports: { admin: "admin" },
   chatBuilds: { builder: "builder" },

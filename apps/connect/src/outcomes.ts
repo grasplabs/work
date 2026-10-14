@@ -182,15 +182,17 @@ const listingOf = async ({
     connection
   )?.title;
   return {
-    // A digest of the call's key and claim: App code chooses keys, so the
-    // key itself isn't shown, as the audit log hashes it.
+    // Only tells rows apart, of what the admin is shown anyway, and never
+    // of its key: App code chooses keys and may put data in them, and a
+    // digest of a key a reader can guess would confirm the guess. Two calls
+    // alike in all of these, claimed in the same millisecond, share an id.
     id: await sha256Hex(
       JSON.stringify([
         row.subjectType,
         row.subjectId,
+        row.onBehalfOf,
         row.connectionId,
         row.action,
-        row.idempotencyKey,
         row.claimedAt.getTime(),
       ])
     ),

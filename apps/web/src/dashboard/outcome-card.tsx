@@ -205,6 +205,8 @@ export const OutcomeCard = ({
         label: t`It happened`,
         name: t`It happened: ${who}`,
         does: t`Grasp never sends it again. Nothing is changed or undone on ${connection}.`,
+        // Not held back until everything sent was seen, as "It didn't
+        // happen" is: saying it happened sends nothing.
         disabled: unresolvable,
         describedBy: unresolvable ? unresolvableId : undefined,
         confirm: {

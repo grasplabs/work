@@ -1465,6 +1465,8 @@ export class RunHost extends RpcTarget {
         return checks > 0;
       }
       if (checks === 0) {
+        // The reason is the wait's, fixed for all of it: an unknown
+        // outcome's wait (`unknownSince`) never turns into a held one's.
         // The step's name stays as it was for either reason: a replay
         // finds it recorded, whatever reason it was recorded with.
         // oxlint-disable-next-line no-await-in-loop -- once per wait
