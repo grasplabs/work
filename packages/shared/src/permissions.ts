@@ -153,6 +153,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "CF_VERSION_METADATA",
   "COMPOSIO_API_KEY",
   "CONNECT",
+  "DATA_STORES",
   "DB",
   "DEV_SKIP_ROUTER_SECRET",
   "DURABLE_OBJECT_JURISDICTION",
@@ -171,9 +172,17 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "ONBOARDING",
   "PACKAGE_LIMITS",
   "PLATFORM_CHANGE",
+  // The deployment's quota policy (core's src/workflows/quotas.ts).
+  "QUOTA_LIMITS",
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
   "RUN_RETENTION_DAYS",
+  // Whether Code Mode's CPU limit is enforced (core's src/code-mode.ts).
+  "RUNTIME_PROFILE",
+  // The on-prem sandbox for untrusted isolates (core's src/sandboxed.ts).
+  "SANDBOX_DEADLINE_MS",
+  "SANDBOX_HOST",
+  "SANDBOX_IN_PROCESS",
   "SIGN_IN",
   // An App's statistics (core's src/statistics.ts), next to its permissions.
   "STATISTICS",
@@ -182,8 +191,8 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "TOKEN_ENCRYPTION_KEY",
   "TOKEN_ENCRYPTION_KEY_PREVIOUS",
   "WORKFLOW_OFF_WAIT_MS",
-  "WORKFLOW_STEP_LIMIT",
-  "WORKFLOWS",
+  "WORKFLOW_RETRY_DELAY_MS",
+  "WORKFLOW_RUNS",
   "WORKSPACES",
 ]);
 

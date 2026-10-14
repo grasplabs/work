@@ -358,7 +358,7 @@ describe("chats", () => {
     await answering(
       ann,
       codeStep(
-        'export default async (env) => await env.connections.call("HELD_MAIL", "mail.send", { to: "ben@acme.test", subject: "Invoice" });'
+        'export default async (self, env) => await env.connections.call("HELD_MAIL", "mail.send", { to: "ben@acme.test", subject: "Invoice" });'
       ),
       reply
     );
@@ -378,17 +378,20 @@ describe("chats", () => {
     await settled(follower);
   });
 
-  it("tell their agent, on its next turn, how each write it had held ended: confirmed, declined or failed", async () => {
+  it("tell their agent, on its next turn, how each write it had held ended: confirmed, declined, unknown or failed", async () => {
     const ann = await person();
     const admin = await signedInApi(idp, "admin");
-    // Four writes, each on a mail connection of its own; the third one's
-    // server refuses the mail once it is confirmed, and connect fails
-    // unexpectedly on the fourth once it took it.
+    // Five writes, each on a mail connection of its own; the third one's
+    // server refuses the mail once it is confirmed (on Composio, connect
+    // can't tell that from a refusal after acting, so it is unknown too),
+    // connect fails unexpectedly on the fourth once it took it, and the
+    // fifth's server sends the mail and loses its answer.
     const mails = {
       OUTCOME_SENT: await mailConnection(),
       OUTCOME_DECLINED: await mailConnection(),
       OUTCOME_FAILED: await mailConnection(["invalid"]),
       OUTCOME_BROKEN: await mailConnection(),
+      OUTCOME_UNKNOWN: await mailConnection(["lost"]),
     };
     for (const [binding, { id }] of Object.entries(mails)) {
       // oxlint-disable-next-line no-await-in-loop -- one grant after the other
@@ -402,7 +405,7 @@ describe("chats", () => {
     await answering(
       ann,
       codeStep(
-        `export default async (env) => { for (const name of ${JSON.stringify(Object.keys(mails))}) { await env.connections.call(name, "mail.send", { to: "ben@acme.test", subject: name }); } };`
+        `export default async (self, env) => { for (const name of ${JSON.stringify(Object.keys(mails))}) { await env.connections.call(name, "mail.send", { to: "ben@acme.test", subject: name }); } };`
       ),
       says("They wait for you.")
     );
@@ -424,6 +427,7 @@ describe("chats", () => {
     const declined = heldOn(mails.OUTCOME_DECLINED);
     const failed = heldOn(mails.OUTCOME_FAILED);
     const broken = heldOn(mails.OUTCOME_BROKEN);
+    const unknown = heldOn(mails.OUTCOME_UNKNOWN);
     // Connect finds a stored answer to the fourth write's call it can't
     // read, once it has taken the write: a plain error, not one of its own.
     await connectDb()
@@ -449,6 +453,9 @@ describe("chats", () => {
       broken: await outcome(
         ann.api.pendingActions.confirm(broken.id, broken.inputHash)
       ),
+      unknown: await outcome(
+        ann.api.pendingActions.confirm(unknown.id, unknown.inputHash)
+      ),
     };
     // No turn started by itself; the next question's request holds each
     // outcome, which the person isn't shown.
@@ -468,11 +475,13 @@ describe("chats", () => {
       told: [
         `(pending ID ${sent.id}), was decided. The person confirmed it and it was carried out. Don't ask for it again.`,
         `(pending ID ${declined.id}), was decided. The person declined it: it was not carried out and won't be.`,
-        `(pending ID ${failed.id}), was decided. The person confirmed it, but carrying it out failed`,
+        `(pending ID ${failed.id}), was decided. The person confirmed it and it was sent, but whether it took effect is unknown`,
         `(pending ID ${broken.id}), was decided. The person confirmed it, but carrying it out failed`,
+        // Never told it failed: it may have been sent.
+        `(pending ID ${unknown.id}), was decided. The person confirmed it and it was sent, but whether it took effect is unknown`,
       ].map((text) => asked.includes(text)),
       // Each names the call that reads how it ended (quoted, in JSON).
-      readWith: [sent, declined, failed, broken].map(({ id }) =>
+      readWith: [sent, declined, failed, broken, unknown].map(({ id }) =>
         asked.includes(`env.connections.outcome(\\"${id}\\")`)
       ),
       outcomes: asked.split("was decided.").length - 1,
@@ -482,24 +491,30 @@ describe("chats", () => {
         await mails.OUTCOME_SENT.did(),
         await mails.OUTCOME_DECLINED.did(),
         await mails.OUTCOME_BROKEN.did(),
+        await mails.OUTCOME_UNKNOWN.did(),
       ],
     }).toStrictEqual({
       decided: {
         refused: "connect.pending_changed",
         sent: "ok",
         declined: "ok",
-        failed: "connect.action_failed",
+        failed: "connect.outcome_unknown",
         broken: "connect.action_failed",
+        unknown: "connect.outcome_unknown",
       },
       requests: 1,
-      told: [true, true, true, true],
-      readWith: [true, true, true, true],
-      outcomes: 4,
+      told: [true, true, true, true, true],
+      readWith: [true, true, true, true, true],
+      outcomes: 5,
       shown: 0,
       mail: [
         { calls: 1, sent: [{ to: "ben@acme.test", subject: "OUTCOME_SENT" }] },
         { calls: 0, sent: [] },
         { calls: 0, sent: [] },
+        {
+          calls: 1,
+          sent: [{ to: "ben@acme.test", subject: "OUTCOME_UNKNOWN" }],
+        },
       ],
     });
   });
@@ -517,7 +532,7 @@ describe("chats", () => {
     await answering(
       ann,
       codeStep(
-        'export default async (env) => await env.connections.call("RACED_MAIL", "mail.send", { to: "ben@acme.test", subject: "Raced" });'
+        'export default async (self, env) => await env.connections.call("RACED_MAIL", "mail.send", { to: "ben@acme.test", subject: "Raced" });'
       ),
       says("It waits for you.")
     );

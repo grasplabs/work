@@ -34,6 +34,12 @@ export const consentCode = (url: URL, tenant: string, subject: string) =>
 export const graphControlUrl = "https://graph-control.test/receive";
 
 /**
+ * Where tests read the mail Microsoft Graph sent for them (`sendMail`), in
+ * order: `{ mailbox, subject, to }` each.
+ */
+export const graphSentUrl = "https://graph-control.test/sent";
+
+/**
  * Where tests publish a package on the fake npm registry: POST one
  * version as connect's test/npm-registry-fake.ts takes it, as JSON.
  */
@@ -57,6 +63,7 @@ const base64Url = (bytes) =>
 const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
 const graphEvents = (${graphEventsFake.toString()})();
+const graphSent = [];
 const npm = (${npmRegistryFake.toString()})();
 
 export default {
@@ -69,7 +76,26 @@ export default {
       return await mailServer(request, url);
     }
     if (url.hostname === "graph.microsoft.com") {
+      // Graph's mail, as Microsoft 365's native actions use it: sending
+      // records the message; a mailbox's messages are none.
+      const [, version, users, mailbox, ...rest] = decodeURIComponent(url.pathname).split("/");
+      const mailPath = version === "v1.0" && users === "users" && mailbox && rest.length === 1;
+      if (request.method === "POST" && mailPath && rest[0] === "sendMail") {
+        const { message } = await request.json();
+        graphSent.push({
+          mailbox,
+          subject: message.subject,
+          to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
+        });
+        return new Response(null, { status: 202 });
+      }
+      if (request.method === "GET" && mailPath && rest[0] === "messages") {
+        return Response.json({ value: [] });
+      }
       return graphEvents.answer(request, url);
+    }
+    if (url.href === ${JSON.stringify(graphSentUrl)}) {
+      return Response.json(graphSent);
     }
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);

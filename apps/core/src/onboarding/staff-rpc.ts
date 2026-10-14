@@ -36,10 +36,10 @@ import type {
   StephenSetupView,
 } from "@grasp-os/shared/onboarding-staff";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 import { z } from "zod";
 
 import { appendAuditEvent } from "../audit-outbox.ts";
+import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { gateView } from "./gate.ts";
@@ -78,7 +78,7 @@ const requireStaff = (person: Identity): void => {
 
 /** What only Grasp's staff do in the onboarding. */
 export class OnboardingStaffRpc
-  extends RpcTarget
+  extends CoreRpcTarget
   implements OnboardingStaffApi
 {
   readonly #env: Env;

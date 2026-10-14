@@ -230,6 +230,7 @@ const DockThread = ({
       loaded={view.loaded || failure !== undefined}
       messages={view.messages}
       onRetry={onRetry}
+      output={view.output}
       partial={view.partial}
       running={view.running}
     >

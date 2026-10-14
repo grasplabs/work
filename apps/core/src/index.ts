@@ -1,5 +1,6 @@
 import { errorFields, log } from "@grasp-os/shared/log";
 
+import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
 import { refreshDailySignals } from "./daily-signals.ts";
@@ -12,13 +13,15 @@ import { sweepUploads } from "./knowledge/uploads.ts";
 import { retryDisconnects } from "./members.ts";
 import { sweepPackageFiles } from "./packages/cleanup.ts";
 import { recordPlatformUpdate } from "./platform-updates.ts";
+import { sweepReleases } from "./release-retention.ts";
 import { sweepScreenFrames } from "./screen-frame.ts";
 import { sweepStatistics } from "./statistics.ts";
 import { pumpConnectorEvents } from "./workflows/connector-events.ts";
+import { repairControls } from "./workflows/controls.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import { sweepRunDetails } from "./workflows/retention.ts";
-import { failOrphans } from "./workflows/runs.ts";
+import { repairStarts } from "./workflows/runs.ts";
 import { startDueSchedules } from "./workflows/triggers.ts";
 
 /** The cron trigger that runs every 15 minutes (wrangler.jsonc). */
@@ -36,6 +39,7 @@ export { WorkflowsApi } from "./agent-workflows.ts";
 export { Builtins } from "./builtins.ts";
 export { Onboarding } from "./onboarding/store.ts";
 export { ModelLedger } from "./model-ledger.ts";
+export { DataStore } from "./data-store.ts";
 export { AppTail } from "./server-logs.ts";
 export { AppConnectionBinding } from "./app-bindings.ts";
 export { AppExportBinding } from "./app-calls.ts";
@@ -45,8 +49,7 @@ export { ConnectionBinding } from "./bindings.ts";
 export { AppCollectionBinding } from "./knowledge/app-binding.ts";
 export { CollectionBinding } from "./knowledge/binding.ts";
 export { KnowledgeBinding } from "./knowledge/tools-binding.ts";
-export { WorkflowDispatcher } from "./workflows/dispatcher.ts";
-export { DynamicWorkflowBinding } from "./workflows/engine.ts";
+export { WorkflowRuns } from "./workflows/run-object.ts";
 export {
   PreviewCollection,
   PreviewConnection,
@@ -70,8 +73,10 @@ export default {
   // (see src/knowledge/uploads.ts), a new version of core, audited as
   // a platform update (see src/platform-updates.ts), and workflows'
   // schedules due by the minute it runs for (see src/workflows/triggers.ts),
-  // runs whose start stopped before the engine had them, marked failed
-  // (see `failOrphans`, src/workflows/runs.ts), and connector events:
+  // starts core stopped in the middle of, sent to the engine again (see
+  // `repairStarts`, src/workflows/runs.ts) and pauses, resumes and
+  // cancels the engine is still to confirm (see `repairControls`,
+  // src/workflows/controls.ts), and connector events:
   // where connect listens, and the events it read, delivered (see
   // src/workflows/connector-events.ts).
   //
@@ -88,7 +93,10 @@ export default {
   // src/workflows/retention.ts), and screens' staged builds 30 days
   // after they were last staged (see src/screen-frame.ts), and npm
   // tarballs and package builds no lock names any more (see
-  // src/packages/cleanup.ts). And the
+  // src/packages/cleanup.ts), and sealed App releases nothing keeps any
+  // more, with the artifacts no other release names (see
+  // src/release-retention.ts), and the fixture stores App test runs
+  // left behind (see src/app-tests.ts). And the
   // audit log's retention alarm armed, if it isn't yet: retention itself
   // runs on that alarm (see
   // src/audit-log.ts), and a deployment that appends nothing after a
@@ -106,6 +114,8 @@ export default {
             sweepScreenFrames(env, new Date(controller.scheduledTime)),
             sweepPackageFiles(env, new Date(controller.scheduledTime)),
             sweepReceipts(env, new Date(controller.scheduledTime)),
+            sweepReleases(env, new Date(controller.scheduledTime)),
+            sweepTestFixtures(env, new Date(controller.scheduledTime)),
             auditLog(env).armRetention(),
           ]
         : [
@@ -120,7 +130,8 @@ export default {
             // version that came and went in between goes unrecorded.
             recordPlatformUpdate(env),
             startDueSchedules(env, new Date(controller.scheduledTime)),
-            failOrphans(env),
+            repairStarts(env),
+            repairControls(env),
             pumpConnectorEvents(env),
           ];
     const results = await Promise.allSettled(jobs);

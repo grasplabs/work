@@ -13,20 +13,10 @@ import {
 } from "@grasp-os/shared/submissions";
 import type { SubmissionIntent } from "@grasp-os/shared/submissions";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
-import {
-  and,
-  asc,
-  eq,
-  inArray,
-  isNotNull,
-  isNull,
-  lte,
-  sql,
-} from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
-import { workflowRuns } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
 import {
   documents,
@@ -34,8 +24,9 @@ import {
   submissionOutcomes,
   submissionReceipts,
 } from "../db/knowledge/schema.ts";
-import { outboxConsumers } from "./outbox.ts";
-import type { OutboxConsumers } from "./outbox.ts";
+import { liveRuns } from "../live-runs.ts";
+import { consumerFor, outboxConsumers } from "../outbox-delivery.ts";
+import type { OutboxConsumers } from "../outbox-delivery.ts";
 
 // Receipts of record saves an App's code makes (knowledge/app-binding.ts),
 // so a save retried after its answer was lost is made once, and an
@@ -228,7 +219,7 @@ export const claim = async (
   }
   // New work stages nothing that nothing would take: it would only be
   // settled away unread.
-  if (intents.some(({ kind }) => consumers[kind] === undefined)) {
+  if (intents.some(({ kind }) => consumerFor(consumers, kind) === undefined)) {
     throw submissionErrors.create("submission.intent_unsupported");
   }
   const db = drizzle(env.KNOWLEDGE);
@@ -297,7 +288,11 @@ export const claim = async (
  * (`unchanged`), unless the document is still at the version the save
  * expected. The receipt is then kept `submissionRetentionDays` from the
  * commit, and the intents it staged go to its outbox (outbox.ts), each
- * under an ID made of the receipt's and its place.
+ * under an ID made of the receipt's, this commit's and its place. The
+ * commit's part keeps IDs from repeating once a receipt's tombstone is
+ * deleted and its key commits again (from fence 1), so a consumer that
+ * takes each ID once still takes the new entries. The ID is stored with
+ * the entry, so it stays the same across hand-overs.
  */
 export const commitOf = (
   env: Env,
@@ -307,6 +302,7 @@ export const commitOf = (
 ): [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]] => {
   const db = drizzle(env.KNOWLEDGE);
   const now = new Date();
+  const commit = crypto.randomUUID();
   return [
     db.insert(submissionOutcomes).values({
       receiptId: held.id,
@@ -336,7 +332,7 @@ export const commitOf = (
     // 100 parameters to one statement.
     ...held.intents.map((intent, position) =>
       db.insert(submissionOutbox).values({
-        id: `${held.id}:${position}`,
+        id: `${held.id}:${commit}:${position}`,
         receiptId: held.id,
         position,
         kind: intent.kind,
@@ -439,26 +435,6 @@ export const settled = async (
     throw knowledgeErrors.create("knowledge.conflict");
   }
   throw error;
-};
-
-/** The runs of `runIds` that are live: started and not yet ended. */
-const liveRuns = async (
-  env: Env,
-  runIds: readonly string[]
-): Promise<Set<string>> => {
-  if (runIds.length === 0) {
-    return new Set();
-  }
-  const rows = await drizzle(env.DB)
-    .select({ id: workflowRuns.id })
-    .from(workflowRuns)
-    .where(
-      and(
-        inList(workflowRuns.id, runIds),
-        inArray(workflowRuns.status, ["starting", "running", "paused"])
-      )
-    );
-  return new Set(rows.map(({ id }) => id));
 };
 
 /**

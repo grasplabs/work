@@ -22,7 +22,6 @@ import {
   screenProblemSchema,
 } from "@grasp-os/shared/screens";
 import type { ScreenProblem } from "@grasp-os/shared/screens";
-import { RpcTarget } from "capnweb";
 
 import { appFor, draftFiles, screensIn } from "./apps.ts";
 import { organizationId } from "./auth/auth.ts";
@@ -32,6 +31,7 @@ import { workspace } from "./durable-objects.ts";
 import { gatewaySettings, modelEffortsOf } from "./models.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { fixQuestion, runToFix } from "./run-fixes.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
@@ -106,7 +106,7 @@ const refusals = {
 };
 
 /** The signed-in person's chats with the organization's agent. */
-export class ChatsRpc extends RpcTarget implements ChatsApi {
+export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
   /** This connection's watches, each until it's released. */

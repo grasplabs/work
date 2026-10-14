@@ -38,10 +38,11 @@ export default workflowTests(approval, [
 `;
 
 /**
- * Reads an invoice's total with a model, asks a reviewer above a limit,
- * and books it.
+ * Reads an invoice's total with a model, through its App's `reader`
+ * binding, asks a reviewer above a limit, and books it. Its runs here are
+ * Tests, which mock the model step, so no binding is approved.
  */
-const approve = `import { model, money, person, workflow, z } from "@grasp-os/sdk/workflow";
+const approve = `import { money, person, workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(
   "approve",
@@ -50,13 +51,12 @@ export default workflow(
     params: {
       limit: money({ label: "Review invoices above", currency: "EUR", default: 500_000, sensitive: true }),
       reviewer: person({ label: "Reviewer", default: "role:admin" }),
-      reader: model({ label: "Reading model", default: "mistral-large" }),
     },
   },
   async (step, { input, params }) => {
     const extracted = await step.llm("extract", {
       description: "Read the invoice's total",
-      model: params.reader,
+      binding: "reader",
       instructions: "Read the total in cents.",
       input: input.text,
       schema: z.object({ total: z.int() }),
@@ -294,7 +294,12 @@ test("someone an App is shared with reads its workflow, with nothing to change o
   // The steps without their code: no condition, only that there is one.
   await expect(page.getByText("Only when a condition holds:")).toBeVisible();
   await expect(page.getByText("params.limit")).toHaveCount(0);
-  await expect(page.getByRole("tab")).toHaveText(["Steps", /^Runs/u]);
+  // What starts it is shown to anyone with a role in the App, as its runs are.
+  await expect(page.getByRole("tab")).toHaveText([
+    "Steps",
+    "Triggers",
+    /^Runs/u,
+  ]);
   await expect(page.getByRole("button", { name: "Test" })).toHaveCount(0);
 
   // The run waits for the builder's answer, not theirs: no link to decide.

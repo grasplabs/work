@@ -5,22 +5,22 @@ import type {
   FileDiff,
   VersionReview,
 } from "@grasp-os/shared/apps";
-import { RpcTarget } from "capnweb";
 
+import { activateVersion } from "./app-activation.ts";
 import {
   diffVersions,
   getVersion,
   listVersions,
   proposeVersion,
-  setCurrentVersion,
 } from "./apps.ts";
 import { indexAppNow } from "./knowledge/apps-collection.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { reviewVersion } from "./version-review.ts";
 
 /** A signed-in person's `apps.versions`. */
-export class AppVersionsRpc extends RpcTarget implements AppVersionsApi {
+export class AppVersionsRpc extends CoreRpcTarget implements AppVersionsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 
@@ -66,14 +66,15 @@ export class AppVersionsRpc extends RpcTarget implements AppVersionsApi {
   }
 
   /**
-   * Makes a version current, then indexes the App into the Apps collection
+   * Makes a version current (sealed first when it is of spec 8's layout,
+   * app-activation.ts), then indexes the App into the Apps collection
    * (knowledge/apps-collection.ts): its entry holds the new version once
    * this returns, unless indexing failed or raced another; the cron
    * trigger then heals it within 15 minutes.
    */
   async setCurrent(app: string, version: number): Promise<App> {
     return await withPerson(this.#check, async (by) => {
-      const current = await setCurrentVersion(this.#env, by, app, version);
+      const current = await activateVersion(this.#env, by, app, version);
       await indexAppNow(this.#env, current.id);
       return current;
     });

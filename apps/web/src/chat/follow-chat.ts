@@ -1,6 +1,7 @@
-import { applyPartial } from "@grasp-os/shared/chat";
+import { applyOutput, applyPartial } from "@grasp-os/shared/chat";
 import type {
   ChatMessage,
+  ChatOutput,
   ChatPartial,
   ChatProvenance,
   ChatUpdate,
@@ -21,6 +22,8 @@ export interface ChatView {
   messages: ChatMessage[];
   /** The response being written; `null` between responses. */
   partial: ChatPartial | null;
+  /** What the running code step has logged so far; `null` while none runs. */
+  output: ChatOutput | null;
   running: boolean;
   provenance: ChatProvenance;
   /** Why the last question stopped short; `null` once another starts. */
@@ -36,6 +39,7 @@ export interface ChatView {
 export const emptyView: ChatView = {
   messages: [],
   partial: null,
+  output: null,
   running: false,
   provenance: { sources: [], restricted: false },
   stopped: null,
@@ -53,6 +57,7 @@ export const applyUpdate = (view: ChatView, update: ChatUpdate): ChatView => {
       ...update.messages.filter(({ id }) => id > last),
     ],
     partial: applyPartial(view.partial, update.partial),
+    output: applyOutput(view.output, update.output),
     running: update.running,
     // Sent first, then only when it changes.
     provenance: update.provenance ?? view.provenance,

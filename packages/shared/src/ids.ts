@@ -1,12 +1,8 @@
 import { z } from "zod";
 
-/**
- * The longest an ID, or any other identifier, may be: room for provider IDs
- * (Microsoft Graph item IDs run past 100 characters), not for content.
- * Everything that names something has to fit in an audit event, which names
- * things and never carries their content.
- */
-export const identifierMaxLength = 256;
+import { identifierMaxLength } from "./identifier.ts";
+
+export { identifierMaxLength } from "./identifier.ts";
 
 /** An identifier: non-empty, and at most {@link identifierMaxLength}. */
 export const identifierSchema = z.string().min(1).max(identifierMaxLength);
@@ -26,6 +22,13 @@ export const identifierSchema = z.string().min(1).max(identifierMaxLength);
 /* @__NO_SIDE_EFFECTS__ */
 // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- the brand is type-only by design
 const idSchema = <Brand extends string>() => identifierSchema.brand<Brand>();
+
+/**
+ * A business store: its logical tables and records, independent of any
+ * App, workflow or run that uses it.
+ */
+export const storeIdSchema = idSchema<"StoreId">();
+export type StoreId = z.infer<typeof storeIdSchema>;
 
 /** An App: its screens, workflows and permissions, installed as one unit. */
 export const appIdSchema = idSchema<"AppId">();

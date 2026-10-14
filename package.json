@@ -7,8 +7,10 @@
   "scripts": {
     "prepare": "vp config --no-agent",
     "dev": "node scripts/dev.ts",
+    "seed": "node scripts/seed.ts",
     "e2e": "playwright test",
     "smoke:workerd": "node scripts/workerd-smoke.ts",
+    "smoke:code-mode": "node scripts/workerd-code-mode.ts",
     "check:docs": "node scripts/check-docs.ts",
     "check:migrations": "node scripts/check-migrations.ts",
     "check:wrangler-configs": "node scripts/check-wrangler-configs.ts",

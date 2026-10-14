@@ -204,6 +204,58 @@ export type RunStatus =
   | "failed"
   | "cancelled";
 
+/**
+ * The receipt of a pause, resume or cancel the platform admitted:
+ * `admitted` until the run has got there, then `applied`; `superseded`
+ * when a cancel overtook it first.
+ */
+export interface RunControl {
+  id: string;
+  kind: "pause" | "resume" | "cancel";
+  state: "admitted" | "applied" | "superseded";
+}
+
+/**
+ * A run as the platform sums it up, all of one revision (`revision`, a
+ * greater one newer): its status, who it is, its times in Unix
+ * milliseconds, the decisions it waits for, a compensation, and what the
+ * person may do with it now. `can*` say what the platform would admit; it
+ * checks again on every request.
+ */
+export interface RunSummary {
+  revision: number;
+  runId: string;
+  workflowId: string;
+  workflowVersion: number;
+  status:
+    | "queued"
+    | "running"
+    | "waiting"
+    | "paused"
+    | "compensating"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  createdAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  compensation?: {
+    cause: "failure" | "cancellation";
+    activity: "running" | "waiting" | "paused";
+  };
+  error?: { code: string; message: string };
+  waits: { kind: "decision"; name: string; expiresAt: number }[];
+  control: {
+    canPause: boolean;
+    canResume: boolean;
+    canCancel: boolean;
+    pendingControl: {
+      kind: "pause" | "resume" | "cancel";
+      stage: "applying";
+    } | null;
+  };
+}
+
 /** A decision a run waits for. */
 export interface WaitingDecision {
   /** Its name in the workflow (`step.decision(name, …)`): what `decide` takes. */
@@ -521,6 +573,17 @@ export const useRun = (
   return followed.key === `${workflow}/${run}` ? followed.run : undefined;
 };
 
+/** Pauses, resumes or cancels `run`, and answers the platform's receipt. */
+const controlled = async (
+  run: string,
+  kind: RunControl["kind"]
+): Promise<RunControl> => {
+  const receipt: unknown = await bridge().control(run, kind);
+  // SAFETY: core's `screens.control` answers a `RunControl`.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return receipt as RunControl;
+};
+
 /**
  * One of the App's workflows, in a component, for the person using the
  * screen: its runs, live (`followRuns`), and what they can do with them.
@@ -548,6 +611,8 @@ export const useWorkflow = (
   start: (input?: unknown) => Promise<WorkflowRun>;
   /** A run as it is now, with what it returned for its starter and admins. */
   status: (run: string) => Promise<ScreenRun>;
+  /** A run's summary, all of one revision, with what the person may do. */
+  summary: (run: string) => Promise<RunSummary>;
   /**
    * Answers the run's decision `decision` (its name in the workflow), if
    * the person may: someone it is from, never the run's starter unless it
@@ -559,6 +624,19 @@ export const useWorkflow = (
     decision: string,
     answer: DecisionAnswer
   ) => Promise<void>;
+  /**
+   * Pauses a run at its next safe point, if the person builds the App;
+   * resolves once the platform admitted it, with its receipt: the run's
+   * status says when it is paused. A paused run's deadlines still pass.
+   */
+  pause: (run: string) => Promise<RunControl>;
+  /** Resumes a paused run, as `pause` does. */
+  resume: (run: string) => Promise<RunControl>;
+  /**
+   * Cancels a run, as `pause` does: it takes priority over a pause or a
+   * resume still being applied, and doesn't undo what the run already did.
+   */
+  cancel: (run: string) => Promise<RunControl>;
 } => {
   // Kept with the workflow they are of, so a screen that switches to
   // another workflow never shows the last one's runs meanwhile.
@@ -590,5 +668,14 @@ export const useWorkflow = (
     decide: async (run, decision, answer) => {
       await bridge().decide(run, decision, answer);
     },
+    summary: async (run) => {
+      const found: unknown = await bridge().summary(run);
+      // SAFETY: core's `screens.summary` answers a `RunSummary`.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      return found as RunSummary;
+    },
+    pause: async (run) => await controlled(run, "pause"),
+    resume: async (run) => await controlled(run, "resume"),
+    cancel: async (run) => await controlled(run, "cancel"),
   };
 };

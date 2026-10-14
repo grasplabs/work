@@ -10,7 +10,8 @@ import { loopbackHosts } from "./router.ts";
 // never sets a value core would refuse. Each var is deployment config,
 // never an in-product setting, so no admin session can change it. The
 // `MEMORY_LIMITS` var's schema is `memoryLimitsSchema` in
-// @grasp-os/shared/memory, and `PLATFORM_CHANGE`'s is in
+// @grasp-os/shared/memory, `QUOTA_LIMITS`'s is `quotaLimitsSchema` in
+// @grasp-os/shared/quota-policy, and `PLATFORM_CHANGE`'s is in
 // @grasp-os/shared/platform-change.
 
 // SIGN_IN (core's src/auth/config.ts)
@@ -178,7 +179,10 @@ export const defaultGatewayModels = [
 ] as const;
 
 const budgetSchema = z.strictObject({
-  /** US dollars a month: a cent at least, and well within an integer. */
+  /**
+   * US dollars a month (a run lineage's: for its whole life): a cent at
+   * least, and well within an integer.
+   */
   limit: z.number().min(0.01).max(1_000_000_000),
   /** The percent of the limit at which admins are alerted. */
   alertAt: z.int().min(1).max(99).default(80),
@@ -193,6 +197,12 @@ export const budgetsSchema = z
     workflow: budgetSchema.optional(),
     /** The calls made by or for each person, each on their own. */
     user: budgetSchema.optional(),
+    /**
+     * Each run lineage on its own: a run and every run started under it,
+     * all its steps and retries, for the lineage's whole life, never reset
+     * by a new month. No limit when absent: the lineage is still counted.
+     */
+    run: budgetSchema.optional(),
   })
   .optional();
 
@@ -301,4 +311,5 @@ export const deploymentConfigVars = [
   "AUDIT_RETENTION_DAYS",
   "AUDIT_ARCHIVE_RETENTION_DAYS",
   "RUN_RETENTION_DAYS",
+  "QUOTA_LIMITS",
 ] as const;

@@ -10,6 +10,7 @@ import {
   codeResults,
   codeStep,
   model,
+  openTestRun,
   pausedReply,
   pointAtGateway,
   says,
@@ -114,14 +115,14 @@ export class App extends DurableObject {
 /** Finds the Invoice desk, and writes `files` into its draft. */
 const write = (
   files: Record<string, string>
-) => `export default async (env) => {
+) => `export default async (self, env) => {
   const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
   await env.build.write(app.id, ${JSON.stringify(files)});
   return "written";
 };`;
 
 /** Checks the draft, with what its preview reported. */
-const check = `export default async (env) => {
+const check = `export default async (self, env) => {
   const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
   const checked = await env.build.check(app.id);
   return {
@@ -132,7 +133,7 @@ const check = `export default async (env) => {
 };`;
 
 /** Checks the draft, with what its server code wrote in the preview. */
-const checkLogs = `export default async (env) => {
+const checkLogs = `export default async (self, env) => {
   const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
   const { preview } = await env.build.check(app.id);
   return {
@@ -333,7 +334,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
 
   it("waits a moment for the preview of a write checked at once, and fails on what it ran into", async () => {
     const { builder, app, chatId, stub } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
         await env.build.write(app.id, ${JSON.stringify({
           "app/server.ts": server(false),
@@ -357,7 +358,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       1,
       { "screens/desk.tsx": screen, "app/server.ts": server(true) },
       [],
-      0
+      0,
+      await openTestRun(stub, chatIdSchema.parse(chatId))
     );
     await builder.api.chats.preview(chatId, app);
     // The next write and the check in one step: the panel previews the
@@ -382,7 +384,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
 
   it("waits for no preview when the draft doesn't build, even with the panel open", async () => {
     const { builder, app, chatId, stub } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
         await env.build.write(app.id, { "app/server.ts": "export class App {" });
         const started = Date.now();
@@ -403,7 +405,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       1,
       { "screens/desk.tsx": screen, "app/server.ts": server(true) },
       [],
-      0
+      0,
+      await openTestRun(stub, chatIdSchema.parse(chatId))
     );
     await builder.api.chats.preview(chatId, app);
 
@@ -448,7 +451,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         1,
         { "screens/desk.tsx": screen, "app/server.ts": mailing },
         [],
-        revision
+        revision,
+        await openTestRun(stub, id)
       );
       return revision + 1;
     };
@@ -540,7 +544,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         1,
         { "screens/desk.tsx": screen, "app/server.ts": mailing },
         [],
-        revision
+        revision,
+        await openTestRun(stub, id)
       );
       return revision + 1;
     };
@@ -612,7 +617,8 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
         1,
         { "screens/desk.tsx": screen, "app/server.ts": mailing },
         [],
-        revision
+        revision,
+        await openTestRun(stub, id)
       );
       return revision + 1;
     };
@@ -659,7 +665,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
   it("lets the agent call its draft's server code in the preview, never the App's live data", async () => {
     const drafted = { "screens/desk.tsx": screen, "app/server.ts": mailing };
     const { builder, app, chatId, stub, gateway } = await setUp([
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const [app] = (await env.apps.list()).filter(({ name }) => name === "Invoice desk");
         await env.build.write(app.id, ${JSON.stringify(drafted)});
         const first = await env.build.call(app.id, "count");

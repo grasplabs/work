@@ -34,8 +34,8 @@ import { loadFromCore } from "../load-from-core.tsx";
 // sidebar, and the open one beside them, its answers streaming in as the
 // agent writes them, the changes it holds for the person to confirm, and a
 // side panel with the versions it built up for review. A new chat starts on
-// Grasp's buddy and the question "What should we look at today?", in the
-// middle of the page; once its agent writes a draft of an App, the chat
+// Grasp's buddy and the question "What should we look at today?", centred
+// in the middle of the page; once its agent writes a draft of an App, the chat
 // moves left and the App's preview stands on the right (chat/studio.tsx),
 // and the chats' sidebar folds to its rail to give it the room.
 
@@ -93,14 +93,17 @@ const NewChat = ({
     >
       <div className="flex min-h-full items-center justify-center px-6 py-12">
         <div className="flex w-full max-w-3xl flex-col gap-8 pb-10">
-          <div className="flex flex-col gap-6">
-            <GraspBuddy aligned />
-            <h1 className="text-2xl font-medium tracking-tight" id="new-chat">
+          <div className="flex flex-col items-center gap-6 text-center">
+            <GraspBuddy />
+            <h1
+              className="text-2xl font-medium tracking-tight text-balance"
+              id="new-chat"
+            >
               <Trans>What should we look at today?</Trans>
             </h1>
           </div>
           <Composer running={false} {...composer} />
-          <p className="text-muted-foreground text-sm">
+          <p className="text-muted-foreground text-center text-xs text-balance">
             <Trans>
               Describe what you want. The agent answers from what it can read,
               and holds every change to an outside system until you confirm it.
@@ -224,6 +227,7 @@ const OpenChat = ({
                 void ask(lastQuestion.text);
               }
             }}
+            output={view.output}
             partial={view.partial}
             running={view.running}
           >
