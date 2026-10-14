@@ -143,12 +143,12 @@ describe("a record form whose save answers no record", () => {
   const record = {
     _id: "01890000-0000-7000-8000-000000000001",
     _rev: 3,
-    title: "Same",
+    title: "Before",
     body: "",
   };
 
-  /** A record form over `record` whose save succeeds without answering it. */
-  const recordForm = () => {
+  /** A record form over `record`, its title edited and saved, the save answering no record. */
+  const saved = async () => {
     const binding = new FormBinding(
       {
         kind: "record",
@@ -162,33 +162,39 @@ describe("a record form whose save answers no record", () => {
         args: () => ({ id: record._id, expectedRevision: record._rev }),
       }
     );
-    return { binding, form: mounted(binding) };
-  };
-
-  it("is done at once when it saved what the record held", async () => {
-    const { binding } = recordForm();
-    await binding.submit();
-    expect(binding.status().phase).toBe("idle");
-  });
-
-  it("is done at once when what it saved normalizes to what the record held", async () => {
-    const { binding, form } = recordForm();
-    // The title trims to the stored one: nothing is written.
-    form.setFieldValue("title", "  Same  ");
-    await binding.submit();
-    expect(binding.status().phase).toBe("idle");
-  });
-
-  it("waits past a read sent before the save, for the commit's revision", async () => {
-    const { binding, form } = recordForm();
+    const form = mounted(binding);
     form.setFieldValue("title", "Edited");
     await binding.submit();
-    // A read sent before the save answers after it: the old record, at
-    // the revision the save was made against.
-    binding.supply({ ...record });
-    expect(binding.status().phase).toBe("syncing");
-    binding.supply({ ...record, _rev: 4, title: "Edited" });
+    return { binding, form };
+  };
+
+  it("unlocks its fields at once, holding what was saved", async () => {
+    const { binding, form } = await saved();
     expect(binding.status().phase).toBe("idle");
+    expect(form.state.values).toMatchObject({ title: "Edited" });
+  });
+
+  it("adopts a newer revision supplied afterwards, with no edits since", async () => {
+    const { binding, form } = await saved();
+    // Idle first, not waiting for it: the form adopts it as it would any.
+    expect(binding.status().phase).toBe("idle");
+    binding.supply({ ...record, _rev: 4, title: "Edited", body: "Set too" });
+    expect(binding.status()).toMatchObject({ phase: "idle", newer: false });
+    expect(form.state.values).toMatchObject({ body: "Set too" });
+  });
+
+  it("keeps edits made since over a newer revision, saying one came", async () => {
+    const { binding, form } = await saved();
+    form.setFieldValue("title", "Edited again");
+    binding.supply({ ...record, _rev: 4, title: "Edited" });
+    expect(binding.status()).toMatchObject({ phase: "idle", newer: true });
+    expect(form.state.values).toMatchObject({ title: "Edited again" });
+  });
+
+  it("ignores a read sent before the save that answers after it", async () => {
+    const { binding, form } = await saved();
+    binding.supply({ ...record, title: "Stale" });
+    expect(binding.status()).toMatchObject({ phase: "idle", newer: false });
     expect(form.state.values).toMatchObject({ title: "Edited" });
   });
 });

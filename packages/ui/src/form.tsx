@@ -145,12 +145,7 @@ const TextFieldShell = <Values,>({
   const id = useId();
   const descriptionId = `${id}-description`;
   const errorId = `${id}-error`;
-  // Locked until the saved record arrives too: an edit made while it syncs
-  // would be replaced by the record it adopts.
-  const locked =
-    status.phase === "submitting" ||
-    status.phase === "uncertain" ||
-    status.phase === "syncing";
+  const locked = status.phase === "submitting" || status.phase === "uncertain";
   return (
     // SAFETY: a text field's name is one of the form's keys (TextFieldName).
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -264,8 +259,7 @@ const TextareaField = <Values,>({
  * What `form`'s last submission came to, when there is something to say:
  * why it failed or was refused (a conflict among them), that its outcome
  * is unknown (submitting sends it again; discarding it, once confirmed,
- * unlocks the fields), that a save committed and waits
- * for its record, or that what came after a save failed. Each message is
+ * unlocks the fields), or that what came after a save failed. Each message is
  * the platform's or the App's own, safe to show.
  */
 /**
@@ -339,7 +333,6 @@ const UncertainSubmission = ({
 
 const FormError = ({
   form,
-  syncing = "Saved. Waiting for the saved version to arrive.",
   savedButFailed = "Saved, but what should happen next failed:",
   discardLabel = "Discard",
   keepLabel = "Keep it",
@@ -347,8 +340,6 @@ const FormError = ({
   className,
 }: {
   form: AnyForm;
-  /** What shows while a save waits for its record. */
-  syncing?: string;
   /** What leads the message of a failed `onSuccess`. */
   savedButFailed?: string;
   /** The button that gives up a submission whose outcome is unknown. */
@@ -360,13 +351,6 @@ const FormError = ({
   className?: string;
 }): React.JSX.Element | null => {
   const status = useFormStatus(form);
-  if (status.phase === "syncing") {
-    return (
-      <Alert className={className} live="polite">
-        <AlertDescription>{syncing}</AlertDescription>
-      </Alert>
-    );
-  }
   if (status.failure !== undefined && status.phase === "uncertain") {
     return (
       <UncertainSubmission
@@ -422,7 +406,7 @@ const SubmitButton = ({
     <Button
       {...props}
       aria-busy={busy}
-      disabled={busy || status.phase === "syncing" || props.disabled}
+      disabled={busy || props.disabled}
       onClick={(event) => {
         event.preventDefault();
         void submitFrom(form, event.currentTarget.form);

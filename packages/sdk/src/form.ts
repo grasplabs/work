@@ -89,12 +89,7 @@ export type SubmitPhase =
    * outcome; an action has no receipt, so it runs again (steps it already
    * completed aren't repeated). `discard` gives it up instead.
    */
-  | "uncertain"
-  /**
-   * The save committed, and the form waits for the record of its
-   * commit before another save against the old revision.
-   */
-  | "syncing";
+  | "uncertain";
 
 /** A failure the form shows at its level: a safe code and message. */
 export interface FormFailure {
@@ -385,6 +380,11 @@ export class FormBinding {
   /** The record the draft started from, and the latest supplied. */
   #baseline: unknown;
   #latest: unknown;
+  /**
+   * The values a save committed that answered no record: until a newer
+   * record is adopted, what the form compares edits with.
+   */
+  #saved: Record<string, unknown> | undefined;
   #mounted = true;
   /** The values TanStack starts from: never changed after. */
   readonly initialValues: Record<string, unknown>;
@@ -512,7 +512,11 @@ export class FormBinding {
     return this.#form;
   }
 
-  /** Whether the editable values differ from the record's baseline. */
+  /**
+   * Whether the editable values hold edits: they differ from what was last
+   * saved without the record coming back (`#saved`), or else from the
+   * record's baseline.
+   */
   #dirty(): boolean {
     const target = this.#target;
     if (target.kind !== "record") {
@@ -520,7 +524,7 @@ export class FormBinding {
     }
     return !same(
       this.#formOf().state.values,
-      pick(this.#baseline, target.fields)
+      this.#saved ?? pick(this.#baseline, target.fields)
     );
   }
 
@@ -531,6 +535,7 @@ export class FormBinding {
       return;
     }
     this.#baseline = record;
+    this.#saved = undefined;
     const latest = identityOf(this.#latest);
     const adopted = identityOf(record);
     if (
@@ -571,24 +576,17 @@ export class FormBinding {
     ) {
       return;
     }
-    const { phase, conflict } = this.#status;
-    if (phase === "syncing") {
-      // Only the commit's record ends it: a revision past the one the
-      // save was made against. A read sent before the save may answer
-      // after it, with the old record at the old revision; a save that
-      // changed nothing never syncs (`#succeeded`).
-      const saved = identityOf(this.#baseline);
-      if (saved === undefined || next.rev > saved.rev) {
-        this.#latest = record;
-        this.#set({ phase: "idle" });
-        this.#adopt(record);
-      }
-      return;
-    }
     if (next.rev === latest.rev && same(record, this.#latest)) {
       return;
     }
     this.#latest = record;
+    // A record at the baseline's revision or below is one the form holds
+    // already, or older: a read sent before a save that answered after it.
+    const baseline = identityOf(this.#baseline);
+    if (baseline !== undefined && next.rev <= baseline.rev) {
+      return;
+    }
+    const { phase, conflict } = this.#status;
     if (phase === "idle" && !conflict && !this.#dirty()) {
       this.#adopt(record);
       return;
@@ -607,9 +605,10 @@ export class FormBinding {
       return;
     }
     const target = this.#target;
+    // A record form's last save that answered no record is what it holds.
     const values =
       target.kind === "record"
-        ? pick(this.#baseline, target.fields)
+        ? (this.#saved ?? pick(this.#baseline, target.fields))
         : this.initialValues;
     this.#formOf().reset(values, { keepDefaultValues: true });
     this.#set({
@@ -686,10 +685,6 @@ export class FormBinding {
   }
 
   async #submitOnce(): Promise<unknown> {
-    const { phase } = this.#status;
-    if (phase === "syncing") {
-      throw clientError("submission.syncing");
-    }
     const submission = await this.#prepare();
     if ("issues" in submission) {
       throw clientError("contract.invalid_args", {
@@ -796,28 +791,22 @@ export class FormBinding {
             ? this.#latest
             : result
         );
-      } else if (
-        latest !== undefined &&
-        baseline !== undefined &&
-        latest.rev > baseline.rev
-      ) {
-        // Another shape of result, and the commit's record already came.
-        this.#set({ phase: "idle" });
-        this.#adopt(this.#latest);
-      } else if (
-        same(
-          pick(submission.input, target.fields),
-          pick(this.#baseline, target.fields)
-        )
-      ) {
-        // Values the record already held, as sent (normalized as the host
-        // normalizes them): nothing was written, so no new revision comes.
-        this.#set({ phase: "idle" });
-        this.#adopt(this.#baseline);
       } else {
-        // Another shape of result: the commit's record comes from the
-        // query, at a revision past the baseline's (`supply`).
-        this.#set({ phase: "syncing" });
+        // Another shape of result: nothing says what the record is now
+        // (fields set through `args`, or by the handler, may have
+        // changed), so the fields unlock with what was saved, and a record
+        // newer than the baseline is adopted once one comes, unless edited
+        // since.
+        this.#saved = pick(submission.input, target.fields);
+        this.#formOf().reset(this.#saved, { keepDefaultValues: true });
+        this.#set({ phase: "idle", attempted: false });
+        if (
+          latest !== undefined &&
+          baseline !== undefined &&
+          latest.rev > baseline.rev
+        ) {
+          this.#adopt(this.#latest);
+        }
       }
     } else {
       this.#set({ phase: "idle", attempted: false });

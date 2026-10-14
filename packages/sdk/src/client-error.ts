@@ -80,11 +80,6 @@ const clientErrors = {
       "You stopped waiting for this change. It may still be saved: the platform keeps checking its outcome, and it won't be submitted twice.",
     category: "operational",
   },
-  "submission.syncing": {
-    message:
-      "The last save is still arriving. Save again once the form shows it.",
-    category: "operational",
-  },
   "submission.outcome_unknown": {
     message:
       "Whether this finished is unknown, so it wasn't sent again. Sending it again with the same idempotency key gets a change's outcome; an action runs again, though steps it already completed aren't repeated.",
