@@ -472,6 +472,29 @@ describe("a portable host's client", () => {
     });
   });
 
+  it("joins the same save sent again before its first token arrived", async () => {
+    const asked = Promise.withResolvers<string>();
+    const held = Promise.withResolvers<null>();
+    const seen = network(async () => {
+      await held.promise;
+      return noteId;
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await asked.promise,
+    });
+    const keyed = { idempotencyKey: "first-save" };
+    const first = client.mutation(api.notes.create, { title: "Once" }, keyed);
+    asked.resolve(tokenOf("ann", expiry()));
+    await until(() => seen.length === 1);
+    const again = client.mutation(api.notes.create, { title: "Once" }, keyed);
+    held.resolve(null);
+    expect({
+      answers: await Promise.all([first, again]),
+      sent: seen.length,
+    }).toStrictEqual({ answers: [noteId, noteId], sent: 1 });
+  });
+
   it("lets a late refusal of the last person's request clear nothing of the next person's", async () => {
     let token = tokenOf("ann");
     const late = Promise.withResolvers<null>();

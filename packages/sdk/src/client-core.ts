@@ -1085,9 +1085,12 @@ export class GraspClient {
     if (signal?.aborted === true) {
       throw clientError("submission.cancelled", { sent: false });
     }
-    // Joined only by a call for the same person, as the host scopes keys.
+    // Joined only by a call for the same person, as the host scopes keys:
+    // within one generation, which a switch of person or a fence ends
+    // (each also drops the joins). Not by the person's ID, which the first
+    // token only tells after the first save was keyed.
     const scoped = canonicalJson([
-      this.#principal ?? null,
+      this.#generation,
       reference.resourceId,
       reference.resourceVersion,
       reference.contractId,
