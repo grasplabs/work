@@ -54,6 +54,20 @@ const rpcWrapperLevels = 2;
 export const rpcArgumentDepth = valueDepth + rpcWrapperLevels - 1;
 
 /**
+ * Room in one of Cap'n Web's messages for what wraps a value: the message
+ * kind, its IDs and the call's path, a few hundred code units at most.
+ */
+const rpcEnvelopeSize = 4 * 1024;
+
+/**
+ * The longest message a frame may send over its port, in UTF-16 code
+ * units: a public operation's output (the larger of its input and output)
+ * and the envelope around it. The largest input fits even as Cap'n Web
+ * writes it, each array bracketed twice, which at most doubles its text.
+ */
+const rpcMessageMaxSize = platformLimits.operationOutputBytes + rpcEnvelopeSize;
+
+/**
  * The limits of a screen's start and traffic, in one place. They are the
  * product's defaults: nothing an App declares or a frame sends raises
  * them. Each is in the unit it names; a count of characters is never
@@ -90,7 +104,7 @@ export const screenLimits = {
    */
   rpc: {
     maxDepth: valueDepth + rpcWrapperLevels,
-    maxMessageSize: 262_144,
+    maxMessageSize: rpcMessageMaxSize,
     maxBigIntDigits: 32,
   },
   /** A server call's arguments, as UTF-8 JSON, in bytes. */
@@ -115,7 +129,7 @@ export const screenLimits = {
    * characters together (four of the longest): they are read as they
    * come, so more than this is a side sending faster than it is heard.
    */
-  portQueue: { messages: 256, characters: 4 * 262_144 },
+  portQueue: { messages: 256, characters: 4 * rpcMessageMaxSize },
   /**
    * What a frame's unreleased pushes and unanswered calls may hold at once,
    * in bytes of heap as the page's accountant estimates them

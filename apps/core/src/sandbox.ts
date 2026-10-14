@@ -1,3 +1,4 @@
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { isolateBase } from "@grasp-os/shared/runtime";
 
 /**
@@ -14,5 +15,6 @@ export const sandbox = {
   ...isolateBase,
   globalOutbound: null,
   // No `subRequests` cap: its only way out is the stubs in its env.
-  limits: { cpuMs: 10_000 },
+  // A server invocation's CPU time (spec 18.1).
+  limits: { cpuMs: platformLimits.serverInvocationCpuMs },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;

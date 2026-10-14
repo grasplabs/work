@@ -24,18 +24,13 @@ export const operationInputMaxBytes = platformLimits.operationInputBytes;
 export const functionRequestMaxBytes = operationInputMaxBytes + 4 * 1024;
 
 /**
- * The most bytes of what one operation returns, as UTF-8 JSON: the size
- * spec 18.1 gives a workflow step's result, so any operation's return
- * fits a step that calls it.
+ * The most bytes of what one operation returns, as UTF-8 JSON: the public
+ * operation output limit of spec 18.1, for a query, a mutation or an
+ * action, whoever called it, and an App's export answering another App.
+ * Larger data is paginated. It fits a workflow step's result, and leaves
+ * a mutation's commit room for its writes (`stagedMaxBytes`).
  */
-export const operationResultMaxBytes = 1024 * 1024;
-
-/**
- * The most bytes of what one mutation returns, as UTF-8 JSON: less than an
- * operation's result, since it is kept with its receipt in the commit that
- * holds its writes, within one commit's bound. A whole record fits.
- */
-export const mutationResultMaxBytes = 256 * 1024;
+export const operationResultMaxBytes = platformLimits.operationOutputBytes;
 
 /**
  * The most times one function reads the store in one call: reads past it

@@ -3,6 +3,7 @@ import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { redact } from "@grasp-os/shared/redact";
 import { compatibilityDate } from "@grasp-os/shared/runtime";
 import { RpcPromise, RpcStub } from "capnweb";
@@ -24,10 +25,10 @@ import { SandboxUnavailableError } from "./sandboxed.ts";
 // Code Mode: the agent acts by writing code against typed APIs, and the
 // code runs here, in a Dynamic Worker of its own, locked down like App code
 // (sandbox.ts): no network (`globalOutbound: null`), no importable env or
-// exports (`disallow_importable_env`), the same CPU limit per run, and on
-// top a cap on its calls out. It has no Cache API (a cache shared between
-// runs would let one chat hand data to another), and its env holds only
-// the stubs it is given: loopback entrypoints of core whose props core
+// exports (`disallow_importable_env`), a CPU limit per run of its own
+// (`codeLimits`), and on top a cap on its calls out. It has no Cache API
+// (a cache shared between runs would let one chat hand data to another),
+// and its env holds only the stubs it is given: loopback entrypoints of core whose props core
 // sets, never a raw binding. What the code returns, logs or throws comes
 // back as data, and core bounds it again: the code runs in the same
 // isolate as the harness, so nothing the harness does is trusted.
@@ -55,16 +56,18 @@ import { SandboxUnavailableError } from "./sandboxed.ts";
  * Loader has no setting for less.
  */
 export const codeLimits = {
-  sourceChars: 200_000,
-  subRequests: 100,
-  timeoutMs: 30_000,
+  sourceChars: platformLimits.codeModeSourceCharacters,
+  subRequests: platformLimits.codeModeHostCalls,
+  /** CPU time of one run, which the runtime (or the sandbox host) ends past it. */
+  cpuMs: platformLimits.codeModeCpuMs,
+  timeoutMs: platformLimits.codeModeWallMs,
   /**
    * Most UTF-8 bytes of output a run may have, shared by what it logs (as
    * it streams to the chat and as the model reads it), what it returns
    * and its error: one budget, so a flood of one leaves no room unbounded
    * for the others.
    */
-  outputBytes: 64 * 1024,
+  outputBytes: platformLimits.codeModeOutputBytes,
   /** Of {@link outputBytes}, kept for how the run ended, whatever it logged. */
   diagnosticBytes: 1024,
   /** Most log lines a run may send back. */
@@ -611,7 +614,7 @@ const loaderCalls = (
     mainModule: "harness.js",
     modules: { "harness.js": harness, "code.js": code },
     env,
-    limits: { ...sandbox.limits, subRequests: codeLimits.subRequests },
+    limits: { cpuMs: codeLimits.cpuMs, subRequests: codeLimits.subRequests },
   });
   const entry = worker.getEntrypoint<Harness>();
   return {
@@ -747,7 +750,7 @@ const sessionCalls = (
           { capability: capability(apiBridge(env), ["invoke"]) },
         ],
         owner,
-        cpuMs: sandbox.limits.cpuMs,
+        cpuMs: codeLimits.cpuMs,
         wallMs: timeoutMs,
       },
       // A cancel or the run's wall-clock limit ends the session, and frees
