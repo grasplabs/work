@@ -553,6 +553,10 @@ msgstr "{one} et {other} citent le même passage de relais, chacun de son côté
 msgid "{oneTeam} and {otherTeam} both name the same handover, each from their own side."
 msgstr "{oneTeam} et {otherTeam} décrivent la même passation, chacune de son côté."
 
+#: src/brain/region-marks.tsx
+msgid "{open, plural, one {# open question} other {# open questions}}"
+msgstr "{open, plural, one {# question ouverte} other {# questions ouvertes}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{open} still open"
 msgstr "{open} encore ouvertes"
@@ -1161,6 +1165,7 @@ msgstr "Alerter les admins à, en pourcentage du plafond journalier ou mensuel"
 msgid "Alert at"
 msgstr "Alerter à"
 
+#: src/brain/atlas-overlays.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
 msgstr "Tout"
@@ -1527,9 +1532,14 @@ msgstr "Disponible, en direct"
 msgid "Available, via Composio"
 msgstr "Disponible, via Composio"
 
+#: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
 msgid "Back"
 msgstr "Retour"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Back to {destination}"
+msgstr "Retour à {destination}"
 
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
@@ -1578,6 +1588,7 @@ msgstr "Lié à"
 
 #: src/brain/brain-nav.tsx
 #: src/frame/app-sidebar.tsx
+#: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 msgid "Brain"
 msgstr "Cerveau"
@@ -2700,6 +2711,10 @@ msgstr "Constats"
 msgid "Finish"
 msgstr "Terminer"
 
+#: src/brain/atlas-overlays.tsx
+msgid "Fit and center"
+msgstr "Ajuster et centrer"
+
 #: src/workflows/fix-in-chat.tsx
 msgid "Fix in chat"
 msgstr "Corriger dans le chat"
@@ -3245,6 +3260,10 @@ msgstr "Type de propos"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Knowledge"
 msgstr "Connaissances"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Known"
+msgstr "Connu"
 
 #: src/onboarding/staff-words.ts
 msgid "Known: {known}% of the {threshold}% to open"
@@ -4231,6 +4250,10 @@ msgstr "Ouvertes : {open}"
 msgid "Opening the chat…"
 msgstr "Ouverture du chat…"
 
+#: src/brain/note-reveal.tsx
+msgid "Opening the note"
+msgstr "Ouverture de la note"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Opens at {threshold}%"
 msgstr "Ouvre à {threshold} %"
@@ -5155,6 +5178,10 @@ msgstr "Code partagé modifié"
 msgid "Shared with"
 msgstr "Partagée avec"
 
+#: src/brain/atlas-overlays.tsx
+msgid "Show"
+msgstr "Afficher"
+
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Afficher les {count} lignes ({characters} caractères)"
@@ -5457,6 +5484,7 @@ msgid "Still deciding"
 msgstr "Décision en cours"
 
 #: src/brain/atlas-map.ts
+#: src/brain/atlas-overlays.tsx
 #: src/brain/brain.ts
 msgid "Still open"
 msgstr "En suspens"
@@ -5468,6 +5496,10 @@ msgstr "En suspens : {question}"
 #: src/brain/brain-atlas.ts
 msgid "Still open: {question} {who} can answer it."
 msgstr "En suspens : {question} {who} peut y répondre."
+
+#: src/brain/atlas-overlays.tsx
+msgid "Still waiting"
+msgstr "En attente"
 
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
@@ -6840,6 +6872,10 @@ msgstr "Où se trouvent les documents"
 msgid "Where the onboarding stands, stage by stage."
 msgstr "Où en est l’onboarding, étape par étape."
 
+#: src/brain/atlas-overlays.tsx
+msgid "Where you are in the brain"
+msgstr "Où vous êtes dans le cerveau"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which engines and agents hold permissions: {why}"
 msgstr "Quels moteurs et quels agents ont des autorisations : {why}"
@@ -7144,3 +7180,11 @@ msgstr "Votre session a expiré. Reconnectez-vous pour continuer."
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Votre espace de travail, qui peut y faire quoi, et votre propre compte."
+
+#: src/brain/atlas-overlays.tsx
+msgid "Zoom in"
+msgstr "Zoom avant"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Zoom out"
+msgstr "Zoom arrière"
