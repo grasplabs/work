@@ -547,6 +547,13 @@
       "when": 1792008555636,
       "tag": "0077_fair_workflow_admission",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1792011052144,
+      "tag": "0078_workflow_start_authorization",
+      "breakpoints": true
     }
   ]
 }
