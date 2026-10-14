@@ -54,9 +54,9 @@ import { validateValue } from "./value-interpreter.ts";
 //   a mutation under its key, which it alone picks. A submission whose
 //   outcome is unknown keeps its arguments and the key the client says it
 //   went under, and the fields stay locked: the next submit sends both
-//   again, which gets a change's outcome. An action has no receipt, so it
-//   runs again, its completed steps not repeated; the person can
-//   `discard` it instead, knowingly.
+//   again, which gets its outcome from its receipt: a change's or an
+//   action's, never a second run, while the receipt is kept. The person
+//   can `discard` it instead, knowingly.
 // - One person's draft is sent as another's: the session client sends a
 //   key left unknown only for the person it was sent for, and refuses it
 //   unsent as `auth.principal_changed` once someone else signed in or
@@ -102,9 +102,9 @@ export type SubmitPhase =
   | "submitting"
   /**
    * Whether the submission ran is unknown: fields stay locked. The next
-   * submit sends it again under the same key, which gets a change's
-   * outcome; an action has no receipt, so it runs again (steps it already
-   * completed aren't repeated). `discard` gives it up instead.
+   * submit sends it again under the same key, which gets its outcome from
+   * its receipt, a change's or an action's, and never runs it a second
+   * time. `discard` gives it up instead.
    */
   | "uncertain";
 
