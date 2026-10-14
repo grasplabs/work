@@ -22,6 +22,7 @@
  * rendering, to the platform's error boundary; a mutation's or action's
  * rejects its promise.
  */
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { createContext, createElement, use, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
@@ -35,11 +36,33 @@ import type {
   QuerySnapshot,
   SubmitOptions,
 } from "./client-core.ts";
+import { useGraspForm } from "./form.ts";
+import type {
+  AnswersRecord,
+  EditableKey,
+  FormOptionsInput,
+  GraspForm,
+  OperationFormOptions,
+  RecordForm,
+  RecordFormOptions,
+  SchemaFormOptions,
+} from "./form.ts";
 import type { ArgsOf, ReturnOf } from "./references.ts";
 
 export { GraspError } from "./client-error.ts";
 export type { ErrorCategory } from "./client-error.ts";
 export type { QueryOptions, SubmitOptions } from "./client-core.ts";
+export type {
+  FormFailure,
+  FormStatus,
+  GraspForm,
+  OperationFormOptions,
+  RecordForm,
+  RecordFormOptions,
+  SchemaFormOptions,
+  SubmitPhase,
+  TextFieldName,
+} from "./form.ts";
 
 const ClientContext = createContext<GraspClient | null>(null);
 
@@ -128,3 +151,50 @@ export const useAction = <Reference extends ActionReference>(
   const client = useClient();
   return async (...args) => await client.action(reference, ...args);
 };
+
+/** `useForm`'s three ways in, each typed by what it binds. */
+interface UseForm {
+  <
+    Reference extends MutationReference,
+    Doc,
+    Field extends EditableKey<Reference, Doc>,
+  >(
+    reference: Reference,
+    options: RecordFormOptions<Reference, Doc, Field> &
+      AnswersRecord<Reference, Doc>
+  ): RecordForm<Pick<Doc, Field>, ReturnOf<Reference>>;
+  <Reference extends MutationReference | ActionReference>(
+    reference: Reference,
+    options: OperationFormOptions<Reference>
+  ): GraspForm<ArgsOf<Reference>, ReturnOf<Reference>>;
+  // A form's values are named fields: an array or a single value has none
+  // to render or edit, so a local form's schema takes an object.
+  <Schema extends StandardSchemaV1<Readonly<Record<string, unknown>>>, Result>(
+    schema: Schema,
+    options: SchemaFormOptions<Schema, Result>
+  ): GraspForm<StandardSchemaV1.InferInput<Schema>, Result>;
+}
+
+/**
+ * A form (spec 10.2.1–10.3), one hook with three ways in:
+ *
+ * - `useForm(ref, { defaultValues, onSuccess?, resetOnSuccess? })`: a
+ *   public mutation or action, its input the fields, its argument
+ *   contract the validator.
+ * - `useForm(ref, { record, fields, args, onSuccess? })`: a live document
+ *   edited with explicit Save, through a mutation that returns the record
+ *   it saved (or `null`, delete-style); a save answering anything else
+ *   fails as `contract.invalid_result`. `fields` are editable; `args` maps the
+ *   captured baseline to the rest of the arguments (its ID and revision).
+ * - `useForm(schema, { defaultValues, onSubmit })`: a local form, checked
+ *   by a native schema, `onSubmit` given its normalized output.
+ *
+ * Render it with `Form`, `TextField`, `TextareaField`, `FormError` and
+ * `SubmitButton` from `@grasp-os/ui/form`, or custom controls through
+ * `form.Field`.
+ */
+// SAFETY: one implementation serves the three typed ways in above; it
+// reads which one it was given at run time (form.ts, `targetOf`).
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+export const useForm = ((target: unknown, options: FormOptionsInput) =>
+  useGraspForm(useClient(), target, options)) as UseForm;

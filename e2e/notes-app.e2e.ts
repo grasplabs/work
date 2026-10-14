@@ -1,17 +1,17 @@
 import { expect } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { notesAppFiles } from "./notes-app.ts";
 import { apiOf, pageOf, peopleIn, release } from "./people.ts";
 
-// The Notes App end to end on the platform's own runtime and React SDK:
-// a builder's App of spec 8's layout, sealed and current, its screen in
-// its sandboxed frame reading and writing the App's store through the
-// session client the platform mounts (`useQuery`, `useMutation` and the
-// generated `#grasp` references). What a lost answer, a cancelled save or
-// a reused key does is core's own test, through the same client
-// (apps/core/test/screen-client.test.ts).
+// The Notes App end to end on the platform's own runtime and React SDK: a
+// builder's App of spec 8's layout, sealed and current, its screen in its
+// sandboxed frame reading and writing the App's store through the session
+// client the platform mounts, with the generated `#grasp` references, an
+// operation-bound create form and a record editor with explicit Save.
+// What a lost answer, a cancelled save or a reused key does is core's
+// own test, through the same client (apps/core/test/screen-client.test.ts).
 
 /** A builder's new Notes App, released. */
 const notesApp = async (
@@ -33,7 +33,7 @@ const notesApp = async (
  * screen builds it before the frame can show anything, which on a loaded
  * machine takes longer than the default 5 seconds.
  */
-const openNotes = async (page: Page, app: string) => {
+const openNotes = async (page: Page, app: string): Promise<FrameLocator> => {
   await page.goto(`/engines/${app}/apps/notes/full`);
   const screen = page.frameLocator('iframe[title="notes app"]');
   await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
@@ -42,7 +42,19 @@ const openNotes = async (page: Page, app: string) => {
   return screen;
 };
 
-test("a person creates, loads and deletes notes through the App's own operations", async ({
+/** Creates a note in the screen's create form. */
+const createNote = async (
+  screen: FrameLocator,
+  title: string,
+  body = ""
+): Promise<void> => {
+  const form = screen.getByRole("form", { name: "New note" });
+  await form.getByLabel("Title").fill(title);
+  await form.getByLabel("Body").fill(body);
+  await form.getByRole("button", { name: "Create note" }).click();
+};
+
+test("a person creates, loads, edits and deletes notes, and a stale save keeps the draft", async ({
   browser,
 }) => {
   const { builder } = peopleIn("notesApp");
@@ -51,16 +63,23 @@ test("a person creates, loads and deletes notes through the App's own operations
   const screen = await openNotes(page, app);
   await expect(screen.getByText("No notes yet.")).toBeVisible();
 
-  // Each confirmed create refreshes the list the screen reads.
-  const title = screen.getByLabel("Title");
-  await title.fill("  Call Acme  ");
-  await screen.getByRole("button", { name: "Create note" }).click();
+  // A title of only spaces fails the operation's own check, in the
+  // browser: nothing is sent, the field says why and gets focus.
+  const create = screen.getByRole("form", { name: "New note" });
+  const title = create.getByLabel("Title");
+  await createNote(screen, "   ");
+  await expect(title).toHaveAttribute("aria-invalid", "true");
+  await expect(title).toBeFocused();
+  await expect(screen.getByText("No notes yet.")).toBeVisible();
+
+  // Created as the host normalized it, the form reset after the commit,
+  // and the list it reads refreshed.
+  await createNote(screen, "  Call Acme  ");
   const notes = screen.getByRole("list", { name: "Notes" });
-  // The host trimmed the title, as the operation's arguments declare.
   await expect(notes.getByText("Call Acme", { exact: true })).toBeVisible();
   await expect(title).toHaveValue("");
-  await title.fill("Send the invoice");
-  await screen.getByRole("button", { name: "Create note" }).click();
+  await expect(title).toHaveAttribute("aria-invalid", "false");
+  await createNote(screen, "Send the invoice", "Before Friday");
   await expect(notes.getByRole("listitem")).toHaveText([
     /Send the invoice/u,
     /Call Acme/u,
@@ -82,10 +101,49 @@ test("a person creates, loads and deletes notes through the App's own operations
   const list = reloaded.getByRole("list", { name: "Notes" });
   await expect(list.getByRole("listitem")).toHaveCount(2);
 
+  // Edited with explicit Save; the list follows the committed note.
+  await reloaded.getByRole("button", { name: "Edit Call Acme" }).click();
+  const editor = reloaded.getByRole("form", { name: "Edit note" });
+  await expect(editor.getByLabel("Title")).toHaveValue("Call Acme");
+  await editor.getByLabel("Title").fill("Call Acme back");
+  await editor.getByLabel("Body").fill("On Monday");
+  await editor.getByRole("button", { name: "Save changes" }).click();
+  await expect(list.getByText("Call Acme back", { exact: true })).toBeVisible();
+  await expect(editor.getByLabel("Body")).toHaveValue("On Monday");
+
+  // The same note open in a second tab, its draft started from the same
+  // revision. The first tab saves; the second's save is stale.
+  const other = await pageOf(browser, builder);
+  const second = await openNotes(other, app);
+  await second.getByRole("button", { name: "Edit Call Acme back" }).click();
+  const draft = second.getByRole("form", { name: "Edit note" });
+  await expect(draft.getByLabel("Title")).toHaveValue("Call Acme back");
+  await draft.getByLabel("Title").fill("Their title");
+
+  await editor.getByLabel("Title").fill("My title");
+  await editor.getByRole("button", { name: "Save changes" }).click();
+  await expect(list.getByText("My title", { exact: true })).toBeVisible();
+
+  await draft.getByRole("button", { name: "Save changes" }).click();
+  await expect(draft.getByRole("alert")).toContainText("changed since");
+  // The draft survived the refusal, unchanged.
+  await expect(draft.getByLabel("Title")).toHaveValue("Their title");
+
+  // Only a deliberate, confirmed reload gives it up for the latest version.
+  await draft.getByRole("button", { name: "Load the latest version" }).click();
+  const confirm = second.getByRole("alertdialog", {
+    name: "Discard your changes?",
+  });
+  await confirm.getByRole("button", { name: "Discard and load" }).click();
+  await expect(draft.getByLabel("Title")).toHaveValue("My title");
+  await expect(draft.getByRole("alert")).toHaveCount(0);
+
+  // Deleted, from the first tab.
+  await reloaded.getByRole("button", { name: "Delete My title" }).click();
+  await expect(list.getByRole("listitem")).toHaveText([/Send the invoice/u]);
+  await expect(reloaded.getByText("This note is gone.")).toBeVisible();
   await reloaded
     .getByRole("button", { name: "Delete Send the invoice" })
     .click();
-  await expect(list.getByRole("listitem")).toHaveText([/Call Acme/u]);
-  await reloaded.getByRole("button", { name: "Delete Call Acme" }).click();
   await expect(reloaded.getByText("No notes yet.")).toBeVisible();
 });

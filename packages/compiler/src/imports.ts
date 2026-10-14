@@ -4,6 +4,8 @@ import {
   kitModuleName,
   ownEntry,
   screenReferences,
+  screenRootNames,
+  sdkRoot,
 } from "./kit.ts";
 import type { Kit } from "./kit.ts";
 
@@ -245,6 +247,12 @@ export const importError = (
   }
   if (specifier === "lucide-react") {
     return iconError(names, kit);
+  }
+  if (
+    specifier === sdkRoot &&
+    (names === undefined || names.some((name) => !screenRootNames.has(name)))
+  ) {
+    return `Screens import only { v } from ${sdkRoot}, and its types: the rest is the App's server code.`;
   }
   return kit.imports.includes(specifier)
     ? undefined

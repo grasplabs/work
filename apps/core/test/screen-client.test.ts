@@ -565,4 +565,76 @@ export default function Notes() {
       expect.stringContaining("which this App doesn't have yet"),
     ]);
   });
+
+  it("builds forms of the operations, the record and a native schema, typed by what they bind", async () => {
+    const formScreen = `import { v } from "@grasp-os/sdk";
+import type { ReturnOf } from "@grasp-os/sdk";
+import { useForm } from "@grasp-os/sdk/react";
+import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
+import { api } from "#grasp";
+
+type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
+
+const searchSchema = v.object({ search: v.string().trim().min(1) });
+
+export function Editor({ note }: { note: Note }) {
+  const create = useForm(api.notes.create, { defaultValues: { title: "", body: "" }, resetOnSuccess: true });
+  const edit = useForm(api.notes.update, {
+    record: note,
+    fields: ["title", "body"],
+    args: (baseline) => ({ id: baseline._id, expectedRevision: baseline._rev }),
+  });
+  const search = useForm(searchSchema, { defaultValues: { search: "" }, onSubmit: (values) => values.search });
+  return (
+    <>
+      <Form form={create}>
+        <TextField form={create} label="Title" name="title" />
+        <TextareaField form={create} label="Body" name="body" />
+        <FormError form={create} />
+        <SubmitButton form={create}>Create note</SubmitButton>
+      </Form>
+      <Form form={edit}>
+        <TextField form={edit} label="Title" name="title" />
+        <SubmitButton form={edit}>Save changes</SubmitButton>
+      </Form>
+      <Form form={search}>
+        <TextField form={search} label="Search" name="search" />
+        <SubmitButton form={search}>Apply filter</SubmitButton>
+      </Form>
+    </>
+  );
+}
+
+export default function Notes() {
+  return null;
+}
+`;
+    await expect(
+      diagnosticsOf({ ...files, "screens/notes.tsx": formScreen })
+    ).resolves.toStrictEqual([]);
+    await expect(
+      diagnosticsOf({
+        ...files,
+        "screens/notes.tsx": formScreen.replace(
+          '<TextField form={create} label="Title" name="title" />',
+          '<TextField form={create} label="Owner" name="owner" />'
+        ),
+      })
+    ).resolves.toStrictEqual([expect.stringContaining('"owner"')]);
+  });
+
+  it("gives screens only the native values of the SDK's root", async () => {
+    await expect(
+      diagnosticsOf({
+        ...files,
+        "screens/notes.tsx": `import { app } from "@grasp-os/sdk";
+export default function Notes() {
+  return <p>{typeof app}</p>;
+}
+`,
+      })
+    ).resolves.toStrictEqual([
+      expect.stringContaining("Screens import only { v } from @grasp-os/sdk"),
+    ]);
+  });
 });
