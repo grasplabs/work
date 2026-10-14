@@ -1166,6 +1166,12 @@ export class GraspClient {
           // They are read again; the action itself never is.
           this.#changed(reference.resourceId);
         }
+        if (settled.kind === "failed" && settled.error.code === "data.conflict") {
+          // The records moved on since this client read them: what it
+          // shows is out of date, so a draft kept for the person to
+          // reload gets the record as it is now.
+          this.#changed(reference.resourceId);
+        }
         // An answer lost, or an outcome the host itself can't tell.
         const unknown =
           settled.kind === "lost" || settled.error.category === "uncertain";
