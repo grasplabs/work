@@ -254,9 +254,13 @@ export class DataStore extends DurableObject<Env> {
     const made = await this.#watches.watch(principal, readSet, watcher, () =>
       host.generations(storeId, Object.keys(readSet))
     );
-    // While it holds watches, the alarm sweeps the dead ones.
-    if ((await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(Date.now() + watchSweepMs);
+    // While it holds watches, the alarm sweeps the dead ones within
+    // `watchSweepMs`: one set later (a receipt's expiry) is brought
+    // forward, and runs whatever it was for then too.
+    const sweepAt = Date.now() + watchSweepMs;
+    const alarm = await this.ctx.storage.getAlarm();
+    if (alarm === null || alarm > sweepAt) {
+      await this.ctx.storage.setAlarm(sweepAt);
     }
     return made;
   }

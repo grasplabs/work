@@ -1,5 +1,5 @@
 import { querySubscriptionLimits } from "@grasp-os/shared/screens";
-import { runDurableObjectAlarm } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { storeMaxWatches } from "../src/store-watches.ts";
@@ -103,6 +103,25 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
     await expect(
       objectOf(store).watch(store.id, "newcomer", {}, watcherOf().watcher)
     ).resolves.toHaveProperty("id");
+  });
+
+  it("brings a later alarm forward so it sweeps soon after a watch", async () => {
+    const store = await newStore();
+    await store.defineTables(v1, consumer(1));
+    const hour = 60 * 60 * 1000;
+    await runInDurableObject(objectOf(store), async (_instance, state) => {
+      await state.storage.setAlarm(Date.now() + hour);
+    });
+
+    await objectOf(store).watch(store.id, "ada", {}, watcherOf().watcher);
+
+    const alarm = await runInDurableObject(
+      objectOf(store),
+      async (_instance, state) => await state.storage.getAlarm()
+    );
+    expect((alarm ?? Number.POSITIVE_INFINITY) - Date.now()).toBeLessThan(
+      10 * 60 * 1000
+    );
   });
 
   it("sweeps the watches whose screens are gone from its alarm", async () => {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { GraspClient } from "../src/client-core.ts";
+import { clientInternals, GraspClient } from "../src/client-core.ts";
 import type { ClientTransport } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
 import type { Id } from "../src/index.ts";
@@ -486,5 +486,38 @@ describe("the session client and a change it confirmed", () => {
       { title: "Before" },
       { title: "After" },
     ]);
+  });
+});
+
+describe("the session client following a query", () => {
+  it("waits as long as a refusal for the request budget says before following again", async () => {
+    let follows = 0;
+    const transport: ClientTransport = {
+      call: async () => await Promise.resolve(answered(null)),
+      watch: async () => {
+        follows += 1;
+        await Promise.resolve();
+        throw Object.assign(new Error("Too much at once."), {
+          code: "screen.rate_limited",
+          details: { retryAfterMs: 2000 },
+        });
+      },
+    };
+    const client = new GraspClient(transport);
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {
+      // A component reading it.
+    });
+    try {
+      const { promise, resolve } = Promise.withResolvers<null>();
+      setTimeout(() => {
+        resolve(null);
+      }, 1500);
+      await promise;
+      expect(follows).toBe(1);
+    } finally {
+      stop();
+    }
   });
 });

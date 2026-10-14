@@ -808,8 +808,10 @@ export class QuerySubscriptions {
       this.#unsent -= snapshot.bytes;
       listener.inFlight = false;
     }
-    // Released meanwhile (a refusal ended it): nothing more goes out.
+    // Released meanwhile (a refusal ended it): nothing more goes out to
+    // it, but the room it took is free for the others.
     if (listener.released) {
+      this.#catchUp();
       return;
     }
     const next = listener.pending;
@@ -947,5 +949,7 @@ export class QuerySubscriptions {
     } else {
       QuerySubscriptions.#forgetDelivered(evaluation);
     }
+    // What waited for it is dropped: room for those behind.
+    this.#catchUp();
   }
 }
