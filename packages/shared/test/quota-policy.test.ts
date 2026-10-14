@@ -16,6 +16,7 @@ describe("quota policy", () => {
         workflowAgeMs: 365 * 24 * 60 * 60 * 1000,
         lineageModelRequests: 100,
         lineageHostCalls: 10_000,
+        workflowResourcesPerPerson: 200,
       },
     });
   });

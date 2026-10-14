@@ -1021,9 +1021,16 @@ export const publishWorkflowVersion = async (
     if (
       notNullFailed(error, "workflow_resource_versions.workflow_resource_id")
     ) {
-      throw (await liveWorkflow(env, workflow.id)) === undefined
-        ? unavailable()
-        : workflowResourceErrors.create("workflow.version_conflict");
+      if ((await liveWorkflow(env, workflow.id)) === undefined) {
+        throw unavailable();
+      }
+      // The current version moved: to this very definition, if an
+      // identical publication won the race, which is then this one's.
+      const won = await sameVersion();
+      if (won === undefined) {
+        throw workflowResourceErrors.create("workflow.version_conflict");
+      }
+      return won;
     }
     if (notNullFailed(error, "sdk_resource_bindings.target_id")) {
       throw definitionInvalid([

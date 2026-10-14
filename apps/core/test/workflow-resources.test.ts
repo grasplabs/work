@@ -285,6 +285,21 @@ describe("publishing a version", () => {
     );
   });
 
+  it("answers two identical publications racing each other with the one version", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const definition = definitionOf({ name: workflow.name });
+    const [first, second] = await Promise.all([
+      publish(ada, workflow.id, definition),
+      publish(ada, workflow.id, definition),
+    ]);
+    const versions = await workflowVersions(env, ada, workflow.id);
+    expect({ same: first, versions: versions.length }).toStrictEqual({
+      same: second,
+      versions: 1,
+    });
+  });
+
   it("refuses a publication built on a version no longer current, also when two race", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
