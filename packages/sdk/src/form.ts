@@ -443,7 +443,11 @@ export class FormBinding {
       return target.fields.includes(field);
     }
     if (target.kind === "operation") {
-      return Object.hasOwn(this.initialValues, field);
+      // Every argument the operation declares is the person's to fill,
+      // given a default or not: the form sends nothing else.
+      return target.args.kind === "object"
+        ? Object.hasOwn(target.args.fields, field)
+        : Object.hasOwn(this.initialValues, field);
     }
     return true;
   }
@@ -563,18 +567,24 @@ export class FormBinding {
       next === undefined ||
       latest === undefined ||
       next.id !== latest.id ||
-      next.rev < latest.rev ||
-      (next.rev === latest.rev && same(record, this.#latest))
+      next.rev < latest.rev
     ) {
       return;
     }
-    this.#latest = record;
     const { phase, conflict } = this.#status;
     if (phase === "syncing") {
+      // The record read after the save: the commit's, even when it
+      // changed nothing (values saved as they were, or normalized back to
+      // what was stored), so its revision needn't have moved.
+      this.#latest = record;
       this.#set({ phase: "idle" });
       this.#adopt(record);
       return;
     }
+    if (next.rev === latest.rev && same(record, this.#latest)) {
+      return;
+    }
+    this.#latest = record;
     if (phase === "idle" && !conflict && !this.#dirty()) {
       this.#adopt(record);
       return;
@@ -691,8 +701,8 @@ export class FormBinding {
     try {
       result = await this.#send(submission);
     } catch (error) {
-      this.#failed(error, submission);
-      throw error;
+      const failure = this.#failed(error, submission);
+      throw failure;
     }
     this.#uncertain = undefined;
     this.#succeeded(result);
@@ -710,22 +720,25 @@ export class FormBinding {
     });
   }
 
-  /** A submission failed: the draft stays, its errors where they belong. */
-  #failed(error: unknown, submission: Submission): void {
+  /**
+   * A submission failed: the draft stays, its errors where they belong.
+   * Answers the structured error `submit` rejects with: the local
+   * callback's own failure as `form.failed`, with its message.
+   */
+  #failed(error: unknown, submission: Submission): GraspError {
     if (!(error instanceof GraspError)) {
-      // The local callback's own failure.
-      this.#set({
-        phase: "idle",
-        failure: {
-          code: "form.failed",
-          message:
-            error instanceof Error && error.message !== ""
-              ? error.message
-              : "This couldn't be submitted.",
-          category: "operational",
-        },
+      const failed = new GraspError({
+        code: "form.failed",
+        message:
+          error instanceof Error && error.message !== ""
+            ? error.message
+            : "This couldn't be submitted.",
+        category: "operational",
+        retryable: false,
+        requestId: null,
       });
-      return;
+      this.#set({ phase: "idle", failure: failureOf(failed) });
+      return failed;
     }
     // An outcome the host or the client can't tell (an action's lost
     // answer, an external effect's unknown result) keeps its identity: the
@@ -735,7 +748,7 @@ export class FormBinding {
     if (error.category === "uncertain" && this.#target.kind !== "schema") {
       this.#uncertain = submission;
       this.#set({ phase: "uncertain", failure: failureOf(error) });
-      return;
+      return error;
     }
     // A definite answer settles the submission whose outcome was unknown.
     this.#uncertain = undefined;
@@ -756,6 +769,7 @@ export class FormBinding {
       fieldIssues,
       conflict: error.code === "data.conflict",
     });
+    return error;
   }
 
   /** A submission committed: the new baseline, the reset and the callback. */

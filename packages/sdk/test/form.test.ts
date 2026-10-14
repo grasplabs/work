@@ -1,7 +1,7 @@
 import { FormApi } from "@tanstack/react-form";
 import { describe, expect, it } from "vite-plus/test";
 
-import { clientError } from "../src/client-error.ts";
+import { clientError, GraspError } from "../src/client-error.ts";
 import { FormBinding } from "../src/form.ts";
 import type { FormApiOf } from "../src/form.ts";
 import { api } from "./notes/.grasp/references.ts";
@@ -136,5 +136,96 @@ describe("a form whose values don't pass", () => {
       },
     });
     expect(sent).toBe(0);
+  });
+});
+
+describe("a record form whose save changed nothing", () => {
+  it("leaves syncing once the record is read again, though its revision didn't move", async () => {
+    const record = {
+      _id: "01890000-0000-7000-8000-000000000001",
+      _rev: 3,
+      title: "Same",
+      body: "",
+    };
+    const binding = new FormBinding(
+      {
+        kind: "record",
+        args: api.notes.update.args,
+        fields: ["title", "body"],
+        // A save that answers no record, of values the record holds.
+        send: async () => await Promise.resolve(null),
+      },
+      { title: record.title, body: record.body },
+      {
+        record,
+        args: () => ({ id: record._id, expectedRevision: record._rev }),
+      }
+    );
+    mounted(binding);
+    await binding.submit();
+    expect(binding.status().phase).toBe("syncing");
+    // The query reads the record again: the same revision, the same values.
+    binding.supply({ ...record });
+    expect(binding.status().phase).toBe("idle");
+  });
+});
+
+describe("a local form whose callback throws", () => {
+  it("rejects its submit with a structured error carrying the callback's message", async () => {
+    const schema = {
+      "~standard": {
+        version: 1,
+        vendor: "test",
+        validate: (value: unknown) => ({ value }),
+      },
+    } as const;
+    const binding = new FormBinding(
+      { kind: "schema", schema },
+      { name: "x" },
+      {
+        onSubmit: () => {
+          throw new Error("The printer is out of paper.");
+        },
+      }
+    );
+    mounted(binding);
+    const failure = await settle(binding.submit());
+    expect(failure).toMatchObject({
+      rejected: {
+        code: "form.failed",
+        category: "operational",
+        message: "The printer is out of paper.",
+      },
+    });
+  });
+});
+
+describe("an operation form's fields without a default", () => {
+  it("shows the server's issue beside an argument the defaults left out", async () => {
+    const binding = new FormBinding(
+      {
+        kind: "operation",
+        args: api.notes.create.args,
+        send: async () => {
+          await Promise.resolve();
+          throw new GraspError({
+            code: "contract.invalid_args",
+            message: "Invalid arguments.",
+            category: "contract",
+            retryable: false,
+            requestId: "r",
+            details: { issues: [{ message: "Too long.", path: ["body"] }] },
+          });
+        },
+      },
+      { title: "Only a title" },
+      {}
+    );
+    mounted(binding);
+    await settle(binding.submit());
+    expect(binding.status()).toMatchObject({
+      fieldIssues: { body: "Too long." },
+      failure: undefined,
+    });
   });
 });
