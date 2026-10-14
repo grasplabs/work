@@ -1182,6 +1182,44 @@ export const runMailStamps = sqliteTable(
 );
 
 /**
+ * What each mail call of a workflow run's step was sent with
+ * (src/workflows/mail-stamps.ts): its recipients that carry a token, as
+ * they were and as they went, none for a call that stamped nothing. Keyed
+ * by the SHA-256 of the step's key, the connection, the action and the
+ * call's input, so the same call made again under its key sends what it
+ * sent the first time, whatever core learned since. Removed with its
+ * run's details (src/workflows/retention.ts).
+ */
+export const runMailCalls = sqliteTable(
+  "run_mail_calls",
+  {
+    origin: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    replaced: text({ mode: "json" }).$type<Record<string, string>>().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("run_mail_calls_run_idx").on(table.runId)]
+);
+
+/**
+ * The children each run lineage admitted by a trigger's key
+ * (src/workflows/quotas.ts, `admitChild`): a delivery of the same message
+ * admitted again, at once or later, is the same child, in the same place,
+ * and takes no other slot of its lineage. Removed with its run's details
+ * (src/workflows/retention.ts).
+ */
+export const runLineageChildren = sqliteTable("run_lineage_children", {
+  triggerKey: text("trigger_key").primaryKey(),
+  rootRunId: text("root_run_id")
+    .notNull()
+    .references(() => runLineages.rootRunId),
+  depth: integer().notNull(),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
  * The domains Email Routing delivered mail for (src/workflows/
  * inbound-email.ts): the deployment's mail domain, learned from the
  * envelope recipient Email Routing sets, which no sender can choose. A

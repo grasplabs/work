@@ -5,6 +5,8 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
+  runLineageChildren,
+  runMailCalls,
   runMailStamps,
   runLineageAttempts,
   runLineages,
@@ -201,6 +203,18 @@ const receiptsPruned = (
     // The tokens of the runs' mail (mail-stamps.ts): mail to one this
     // late is mail to an address no one receives at.
     db.delete(runMailStamps).where(inArray(runMailStamps.runId, runs)),
+    db.delete(runMailCalls).where(inArray(runMailCalls.runId, runs)),
+    // The children their keys admitted (quotas.ts): what a delivery this
+    // late starts is admitted afresh, if its lineage has room.
+    db.delete(runLineageChildren).where(
+      inArray(
+        runLineageChildren.triggerKey,
+        db
+          .select({ key: sql<string>`${workflowRuns.triggerKey}` })
+          .from(workflowRuns)
+          .where(inArray(workflowRuns.id, runs))
+      )
+    ),
   ] as const;
 };
 

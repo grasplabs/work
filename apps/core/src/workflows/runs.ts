@@ -53,7 +53,7 @@ import { stepStatisticsForgotten } from "../statistic-steps.ts";
 import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
-import { admitChild, lineageCreated, releaseChild } from "./quotas.ts";
+import { admitChild, lineageCreated } from "./quotas.ts";
 import type { ChildPlace } from "./quotas.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
 import { tellScreens } from "./run-changes.ts";
@@ -531,12 +531,14 @@ const rootPlace = { rootRunId: null, depth: 0 } as const;
  * root (or the parent itself, when it is a root), one deeper than it. Read
  * from the parent's row, so a lineage holds however deep its runs nest,
  * and admitted against the lineage's quotas (quotas.ts, `admitChild`),
- * which takes one of its descendant runs. A run started by no other is a
+ * which takes one of its descendant runs, once for a `trigger`'s key
+ * however often its delivery is admitted. A run started by no other is a
  * root (`rootPlace`).
  */
 const placeUnder = async (
   env: Env,
-  parent: RunId | undefined
+  parent: RunId | undefined,
+  trigger: RunRequest["trigger"]
 ): Promise<ChildPlace | typeof rootPlace> => {
   if (parent === undefined) {
     return rootPlace;
@@ -545,7 +547,7 @@ const placeUnder = async (
   if (row === undefined) {
     throw new Error(`No run ${parent} to start a run under`);
   }
-  return await admitChild(env, row);
+  return await admitChild(env, row, trigger?.key);
 };
 
 /**
@@ -592,23 +594,6 @@ const deliveredUnder = async (
   return before === undefined
     ? undefined
     : await deliveredBefore(env, trigger.key, before.id);
-};
-
-/**
- * The run of `row`'s trigger key, which another delivery wrote first while
- * this one was admitted too: this one started nothing, so the slot it
- * took in its lineage (`rootRunId`, for a run started under another)
- * goes back (`releaseChild`), and no lineage pays twice for one run.
- */
-const lostToDelivery = async (
-  env: Env,
-  row: Pick<RunRow, "id" | "triggerKey">,
-  rootRunId: string | null
-): Promise<WorkflowRun> => {
-  if (rootRunId !== null) {
-    await releaseChild(env, rootRunId);
-  }
-  return await deliveredBefore(env, row.triggerKey ?? "", row.id);
 };
 
 /**
@@ -694,7 +679,7 @@ export const startRun = async (
   }
   // Admitted last, once nothing else refuses the start: the slot it takes
   // in its lineage is never given back.
-  const { rootRunId, depth } = await placeUnder(env, parent);
+  const { rootRunId, depth } = await placeUnder(env, parent, trigger);
   const row = {
     id: crypto.randomUUID(),
     appId: app,
@@ -737,7 +722,7 @@ export const startRun = async (
     ...(rootRunId === null ? [lineageCreated(db, row.id)] : []),
   ]);
   if (inserted.length === 0) {
-    return await lostToDelivery(env, row, rootRunId);
+    return await deliveredBefore(env, row.triggerKey ?? "", row.id);
   }
   try {
     await sendStart(env, row, input);

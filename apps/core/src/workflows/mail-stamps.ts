@@ -1,12 +1,13 @@
 import { connectErrors } from "@grasp-os/shared/connect";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
+import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { connectionOwnersOf } from "../connections.ts";
-import { mailDomains, runMailStamps } from "../db/core/schema.ts";
+import { mailDomains, runMailCalls, runMailStamps } from "../db/core/schema.ts";
 
 // The runs a run's own mail starts, as its descendants. A run that mails
 // an address of the deployment's mail domain, which an email trigger
@@ -53,6 +54,10 @@ import { mailDomains, runMailStamps } from "../db/core/schema.ts";
 //   bounced, never left to be retried without end.
 // - A provider's delay: a token outlives it, as long as its run's details
 //   are kept (retention.ts); a lineage grown too old refuses the run.
+// - A repeat after core learned more: a call's decision (which of its
+//   recipients carry which token, none at all included) is recorded the
+//   first time (`run_mail_calls`), and the same call made again under its
+//   key sends the same input, so connect answers it as that call.
 // - A call core can't read in full: there is no cap a call can hide
 //   recipients past. Recipients past the most core stamps in one call
 //   (`maxStampedAddresses`) refuse the call.
@@ -247,6 +252,73 @@ const tokensFor = async (
 };
 
 /**
+ * What `call`'s recipients (`recipients`) become, by each one that
+ * changes: each address at a domain Email Routing delivered for carrying
+ * the run's token (`local+<token>@domain`), any token core recorded on it
+ * before replaced. None for a call that isn't a native mail connector's,
+ * or mails no such address. Throws `connect.invalid` past
+ * {@link maxStampedAddresses}.
+ */
+const replacementsOf = async (
+  env: Env,
+  stamping: StampingRun,
+  { connectionId }: StampedCall,
+  input: Readonly<Record<string, Json | undefined>>,
+  recipients: readonly string[]
+): Promise<Record<string, string>> => {
+  const domains = await drizzle(env.DB)
+    .select({ domain: mailDomains.domain })
+    .from(mailDomains);
+  const ours = new Set(domains.map(({ domain }) => domain));
+  const stamped = recipients.flatMap((text) => {
+    const address = addressOf(text);
+    return address !== undefined && ours.has(address.domain)
+      ? [{ text, address }]
+      : [];
+  });
+  if (stamped.length === 0) {
+    return {};
+  }
+  if (
+    new Set(stamped.map(({ address }) => `${address.local}@${address.domain}`))
+      .size > maxStampedAddresses
+  ) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const senders = await sendersOf(env, connectionId, input.mailbox);
+  if (senders === undefined) {
+    return {};
+  }
+  const recorded = await recordedTokens(env, [
+    ...new Set(
+      stamped.flatMap(
+        ({ address }) => tokenedLocal.exec(address.local)?.groups?.token ?? []
+      )
+    ),
+  ]);
+  const bases = [
+    ...new Set(stamped.map(({ address }) => baseOf(address, recorded))),
+  ];
+  const tokens = await tokensFor(
+    env,
+    stamping,
+    { connectionId, mailbox: input.mailbox },
+    bases,
+    senders
+  );
+  return Object.fromEntries(
+    stamped.map(({ text, address }) => {
+      const base = baseOf(address, recorded);
+      const at = base.lastIndexOf("@");
+      return [
+        text,
+        `${base.slice(0, at)}+${tokens.get(base) ?? ""}${base.slice(at)}`,
+      ];
+    })
+  );
+};
+
+/**
  * `call`'s input as `run` sends it: for a native mail connector's send or
  * draft, each address of its `to`, `cc` and `bcc` at a domain Email
  * Routing delivered for carries the run's token (`local+<token>@domain`),
@@ -258,75 +330,76 @@ const tokensFor = async (
 export const stampedMail = async (
   env: Env,
   stamping: StampingRun,
-  { connectionId, action, input }: StampedCall
+  call: StampedCall
 ): Promise<Json> => {
-  if (!mailActions.has(action) || !isJsonObject(input)) {
+  const { input } = call;
+  if (!mailActions.has(call.action) || !isJsonObject(input)) {
     return input;
   }
   const recipients = recipientFields.flatMap((field) => {
     const value = input[field];
     return isJsonArray(value)
-      ? value.flatMap((item) => {
-          const address =
-            typeof item === "string" ? addressOf(item) : undefined;
-          return address === undefined ? [] : [address];
-        })
+      ? value.flatMap((item) => (typeof item === "string" ? [item] : []))
       : [];
   });
-  if (recipients.length === 0) {
+  if (recipients.every((item) => addressOf(item) === undefined)) {
     return input;
   }
-  const domains = await drizzle(env.DB)
-    .select({ domain: mailDomains.domain })
-    .from(mailDomains);
-  const ours = new Set(domains.map(({ domain }) => domain));
-  const stamped = recipients.filter(({ domain }) => ours.has(domain));
-  if (stamped.length === 0) {
-    return input;
-  }
-  if (
-    new Set(stamped.map(({ local, domain }) => `${local}@${domain}`)).size >
-    maxStampedAddresses
-  ) {
-    throw connectErrors.create("connect.invalid");
-  }
-  const senders = await sendersOf(env, connectionId, input.mailbox);
-  if (senders === undefined) {
-    return input;
-  }
-  const recorded = await recordedTokens(env, [
-    ...new Set(
-      stamped.flatMap(
-        ({ local }) => tokenedLocal.exec(local)?.groups?.token ?? []
-      )
-    ),
-  ]);
-  const bases = [
-    ...new Set(stamped.map((address) => baseOf(address, recorded))),
-  ];
-  const tokens = await tokensFor(
-    env,
-    stamping,
-    { connectionId, mailbox: input.mailbox },
-    bases,
-    senders
+  // The call's decision, the first time it was made: the same call made
+  // again under its key sends the same input, whatever core learned since
+  // (a mail domain it delivers for now), or connect refuses it as another
+  // call under the key.
+  const db = drizzle(env.DB);
+  const origin = await sha256Hex(
+    JSON.stringify([
+      stamping.stepKey,
+      call.connectionId,
+      call.action,
+      canonicalJson(input),
+    ])
   );
-  /** `item`, an address of ours, carrying the run's token. */
-  const tokened = (item: Json): Json => {
-    const address = typeof item === "string" ? addressOf(item) : undefined;
-    if (address === undefined || !ours.has(address.domain)) {
-      return item;
-    }
-    const base = baseOf(address, recorded);
-    const at = base.lastIndexOf("@");
-    return `${base.slice(0, at)}+${tokens.get(base) ?? ""}${base.slice(at)}`;
-  };
+  const decidedOf = async () =>
+    await db
+      .select({ replaced: runMailCalls.replaced })
+      .from(runMailCalls)
+      .where(eq(runMailCalls.origin, origin))
+      .get();
+  let decided = await decidedOf();
+  if (decided === undefined) {
+    const replaced = await replacementsOf(
+      env,
+      stamping,
+      call,
+      input,
+      recipients
+    );
+    await db
+      .insert(runMailCalls)
+      .values({ origin, runId: stamping.run, replaced, createdAt: new Date() })
+      .onConflictDoNothing();
+    decided = await decidedOf();
+  }
+  if (decided === undefined) {
+    throw new Error(`No mail decision of run ${stamping.run}`);
+  }
+  const { replaced } = decided;
   return {
     ...input,
     ...Object.fromEntries(
       recipientFields.flatMap((field) => {
         const value = input[field];
-        return isJsonArray(value) ? [[field, value.map(tokened)]] : [];
+        return isJsonArray(value)
+          ? [
+              [
+                field,
+                value.map((item) =>
+                  typeof item === "string" && Object.hasOwn(replaced, item)
+                    ? (replaced[item] ?? item)
+                    : item
+                ),
+              ],
+            ]
+          : [];
       })
     ),
   };

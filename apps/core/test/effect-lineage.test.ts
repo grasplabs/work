@@ -152,7 +152,7 @@ const input = { id: "m", stored: null, from: { name: "", address: "a@b.test" }, 
 
 export default workflowTests(definition, [{ name: "runs", input, mocks: { send: { sent: true } }, expect: {} }]);
 `,
-  ...(send === "app" ? { "app/server.ts": relayServer } : {}),
+  "app/server.ts": relayServer,
 });
 
 /** A shared Microsoft 365 account `admin` connects: its ID and mailbox. */
@@ -188,13 +188,18 @@ const connectShared = async (admin: Person) => {
 const loopApp = async (
   admin: Person,
   send: Sends = "direct",
-  { actions = ["mail.send"], listening = false } = {}
+  {
+    actions = ["mail.send"],
+    listening = false,
+    files = (_local: string, _mailbox: string): Record<string, string> => ({}),
+  } = {}
 ) => {
   const local = `loop-${crypto.randomUUID().slice(0, 8)}`;
   const connection = await connectShared(admin);
   const app = await appWith(admin, {
     ...loop(local, connection.mailbox, send),
     ...(listening ? listen(local) : {}),
+    ...files(local, connection.mailbox),
   });
   await requestGranted(idp, admin, {
     subject: { type: "app", appId: app },
@@ -512,6 +517,41 @@ const outcomeOf = async (
     return error instanceof Error ? error.message : String(error);
   }
 };
+
+/**
+ * The `fresh` workflow: from `mailbox`, it mails `to` with `subject`,
+ * then runs its step's first attempt out of time, so its retry, five
+ * seconds on, makes the same call again under its key.
+ */
+const fresh = (
+  mailbox: string,
+  to: string,
+  subject: string
+): Record<string, string> => ({
+  "workflows/fresh.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow("fresh", { params: {}, input: z.unknown() }, async (step, { env }) =>
+  await step.do(
+    "send",
+    { description: "Mail a new domain", sideEffect: true, timeout: "1 second", retries: { limit: 1, delay: "5 seconds" }, input: { mailbox: "${mailbox}", subject: "${subject}", body: "Hi.", to: ["${to}"] } },
+    async ({ idempotencyKey, input: mail }) => {
+      await env.MAIL.call("mail.send", mail, { idempotencyKey });
+      if ((await env.APP.call("hit", "${subject}")) === 1) {
+        // Runs out of time, so the step is tried again.
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+      return "sent";
+    }
+  )
+);
+`,
+  "workflows/fresh.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./fresh.ts";
+
+export default workflowTests(definition, [{ name: "runs", mocks: { send: "sent" }, expect: {} }]);
+`,
+});
 
 describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
   afterEach(endLiveRuns);
@@ -967,6 +1007,62 @@ export default workflowTests(definition, [{ name: "runs", mocks: { send: null },
         }).toStrictEqual({
           outcome: true,
           refused: [["lineage_limit", "nesting"]],
+        });
+      }
+    );
+  });
+
+  it("send the same input when their step calls again after core learned its mail domain", async () => {
+    const admin = await personApi("admin");
+    const domain = `fresh-${crypto.randomUUID().slice(0, 8)}.test`;
+    const subject = `Fresh ${crypto.randomUUID()}`;
+    const looping = await loopApp(admin, "direct", {
+      files: (local, mailbox) => fresh(mailbox, `${local}@${domain}`, subject),
+    });
+    const to = `${looping.local}@${domain}`;
+
+    const run = await admin.api.workflows.start(looping.app, "fresh");
+    // Its first attempt has sent, to a domain core doesn't know yet.
+    await sentTo(subject, 0);
+    // Mail for the domain arrives: core knows it now.
+    await deliver(to, message(to, { from: "ann@acme.test", subject: "Hi" }));
+    await finished(run.id);
+    const { status } = await admin.api.workflows.status(run.id);
+    const sent = await sentWith(subject);
+
+    expect({
+      status,
+      sent: sent.map(({ to: address }) => address),
+    }).toStrictEqual({
+      status: "completed",
+      sent: [[to]],
+    });
+  });
+
+  it("are one child for two deliveries at once with one slot left, and neither bounces", async () => {
+    await withQuotas(
+      { ...configuredLimits, workflowDescendantRuns: 1 },
+      async () => {
+        const admin = await personApi("admin");
+        const looping = await loopApp(admin);
+        const subject = `Ping ${crypto.randomUUID()}`;
+
+        await deliver(
+          looping.address,
+          message(looping.address, { from: "ann@acme.test", subject })
+        );
+        await runsEnded(admin, looping.app, 1);
+        const to = await sentTo(subject, 0);
+        const mail = message(to, { from: looping.mailbox, subject });
+        const atOnce = await Promise.all([
+          outcomeOf(deliver(to, mail, looping.mailbox)),
+          outcomeOf(deliver(to, mail, looping.mailbox)),
+        ]);
+        await runsEnded(admin, looping.app, 2);
+
+        expect({ atOnce, places: await placesOf(looping.app) }).toStrictEqual({
+          atOnce: ["ok", "ok"],
+          places: ["root", "child"],
         });
       }
     );
