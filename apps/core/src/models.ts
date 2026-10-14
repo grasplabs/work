@@ -41,7 +41,11 @@ import {
   modelRulesConfigSchema as rulesConfigSchema,
 } from "@grasp-os/shared/deployment-config";
 import type { ModelRules } from "@grasp-os/shared/deployment-config";
-import { connectionIdSchema, identifierSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  connectionIdSchema,
+  identifierSchema,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import {
@@ -49,11 +53,18 @@ import {
   permissionErrors,
   workContextSchema,
 } from "@grasp-os/shared/permissions";
+import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
-import { budgetMonth, hasBudget, scopesFor } from "./model-budgets.ts";
+import {
+  bindingRequestMicros,
+  bindingScopes,
+  budgetPeriods,
+  hasBudget,
+  scopesFor,
+} from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
   LedgerScope,
@@ -133,27 +144,32 @@ const workersAiMaxTokens = 32_768;
 const defaultMaxTokens = 16_384;
 
 /**
- * When the call doesn't say, an answer takes at most one in this many of
- * the model's window. Providers such as Workers AI count the answer's cap
- * against the window, so on a small one (Llama 3.3's 24,000 tokens)
- * {@link defaultMaxTokens} would leave too little for the request itself.
+ * An answer takes at most one in this many of the model's window.
+ * Providers such as Workers AI count the answer's cap against the window
+ * and refuse a request whose total is over it, so on a small one (Llama
+ * 3.3's 24,000 tokens) an answer of the whole window would leave nothing
+ * for the request itself.
  */
 const windowPerAnswer = 4;
+
+/**
+ * The longest answer `model` can usefully give one request: its own
+ * maximum, and no more than its share of the window. The one measure both
+ * a model binding's approval and every call go by.
+ */
+const usableAnswer = (model: Model<Api>): number =>
+  model.contextWindow > 0
+    ? Math.min(
+        model.maxTokens,
+        Math.floor(model.contextWindow / windowPerAnswer)
+      )
+    : model.maxTokens;
 
 /** The most tokens a request's answer may take, as the request says it. */
 const answerTokens = (
   call: { maxTokens?: number },
   model: Model<Api>
-): number => {
-  const fallback =
-    model.contextWindow > 0
-      ? Math.min(
-          defaultMaxTokens,
-          Math.floor(model.contextWindow / windowPerAnswer)
-        )
-      : defaultMaxTokens;
-  return Math.min(call.maxTokens ?? fallback, model.maxTokens);
-};
+): number => Math.min(call.maxTokens ?? defaultMaxTokens, usableAnswer(model));
 
 /**
  * How long a call may take, retries included, when it doesn't say; and the
@@ -304,7 +320,10 @@ const purposePattern = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/u;
 const sessionShape = {
   /** `<provider>/<model>`, one the deployment allows. */
   model: z.string().min(1),
-  /** The most tokens the answer may take; capped at the model's limit. */
+  /**
+   * The most tokens the answer may take: capped at what the model can
+   * usefully give (`usableAnswer`), or refused for a call through a binding.
+   */
   maxTokens: z.int().positive().optional(),
   /** How long a request may take, in milliseconds, retries included. */
   timeoutMs: z.int().positive().max(maxTimeoutMs).optional(),
@@ -346,6 +365,18 @@ const sessionShape = {
     ])
     .optional(),
   requestId: auditEventSchema.shape.requestId,
+  /**
+   * The App's model binding the call is made through, with its own caps
+   * (model-budgets.ts): set by core's model resource only, from the
+   * binding's row, never by App code.
+   */
+  binding: z
+    .strictObject({
+      app: appIdSchema,
+      alias: z.string().min(1).max(64),
+      budget: modelBindingBudgetSchema.nullable(),
+    })
+    .optional(),
 };
 
 const sessionSchema = z.strictObject(sessionShape);
@@ -386,6 +417,19 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    * the model asked once more when it doesn't match.
    */
   schema?: z.ZodType<Output>;
+  /**
+   * Whether an answer that doesn't fit `schema` is asked for once more
+   * (the default). False when the call's token bound must hold for the
+   * call as a whole rather than for each request (resource-model.ts).
+   */
+  askAgain?: boolean;
+  /**
+   * The caller's last check before each provider request is sent, after
+   * the ledger admitted it, with nothing awaited between: it throws to
+   * stop the request, which is then never sent (a workflow run's attempt
+   * let go of meanwhile, resource-model.ts).
+   */
+  beforeSend?: () => void;
 };
 
 /** What a call answered. */
@@ -402,6 +446,12 @@ export interface ModelAnswer<Output> {
   cost: number;
 }
 
+/** The most tokens `ref`'s answers may take, as the gateway sends them. */
+const maxTokensOf = (ref: ModelRef): number =>
+  ref.provider === "workers-ai"
+    ? Math.min(ref.catalog.maxTokens, workersAiMaxTokens)
+    : ref.catalog.maxTokens;
+
 /**
  * The model, pointed at the deployment's gateway over the AI binding: the
  * gateway's route for the provider's native API, the same path as over
@@ -410,11 +460,22 @@ export interface ModelAnswer<Output> {
 const gatewayModel = (gateway: string, ref: ModelRef): Model<Api> => ({
   ...ref.catalog,
   baseUrl: `https://workers-binding.ai/ai-gateway/gateways/${gateway}/${providers[ref.provider].path}`,
-  maxTokens:
-    ref.provider === "workers-ai"
-      ? Math.min(ref.catalog.maxTokens, workersAiMaxTokens)
-      : ref.catalog.maxTokens,
+  maxTokens: maxTokensOf(ref),
 });
+
+/**
+ * The longest answer model `<provider>/<model>` can usefully give one
+ * request (`usableAnswer`); undefined for a model the gateway doesn't
+ * offer. A model binding is approved only when its declaration's longest
+ * request fits (resource-model.ts), and a call through a binding that asks
+ * for more is refused, never cut short.
+ */
+export const usableAnswerTokens = (model: string): number | undefined => {
+  const ref = parseModelRef(model);
+  return ref === undefined
+    ? undefined
+    : usableAnswer({ ...ref.catalog, maxTokens: maxTokensOf(ref) });
+};
 
 const gatewayHeaders = (call: Session): ProviderHeaders => ({
   // The binding authenticates the request. pi still wants auth before it
@@ -569,8 +630,17 @@ interface Route extends Admitted {
   price: PinnedPrice | undefined;
   /** The scopes a provider request sent now counts against, in this month. */
   scopesNow: () => { period: string; scopes: LedgerScope[] };
+  /**
+   * What the call's provider requests may reserve together, under its
+   * binding's cap per request, and what they hold of it now: each one's
+   * reservation, less what settled below it. Its requests go one at a
+   * time, so nothing races it. None without a cap.
+   */
+  perRequest: { limitMicros: number; heldMicros: number } | undefined;
   /** Core's env, for the model ledger. */
   env: ModelsEnv;
+  /** The caller's last check before each provider request (`ModelCall.beforeSend`). */
+  beforeSend?: () => void;
 }
 
 interface Request extends Route {
@@ -806,6 +876,40 @@ const settleRequest = async (
 };
 
 /**
+ * Settles provider request `admission` of `route`'s call, as
+ * `settleRequest` does, and gives back to its cap per request what it
+ * settled below its reservation: everything, for one the ledger has no
+ * record of. One whose outcome is unknown keeps holding all of it.
+ */
+const settleAdmitted = async (
+  route: Route,
+  admission: Admission,
+  settlement: Settlement
+): Promise<RequestSettled> => {
+  const settled = await settleRequest(route.env, admission.id, settlement);
+  // Charged what it used, never clamped: that is what the provider bills.
+  // Above its reservation it means the bound was wrong, which budgets
+  // rely on.
+  if (
+    settled?.state === "settled" &&
+    settled.chargedMicros > admission.reservedMicros
+  ) {
+    log.warn("model.charge_over_reservation", {
+      model: route.call.model,
+      reservedMicros: admission.reservedMicros,
+      chargedMicros: settled.chargedMicros,
+    });
+  }
+  const { perRequest } = route;
+  if (perRequest !== undefined && settled?.state === "settled") {
+    perRequest.heldMicros -= admission.reservedMicros - settled.chargedMicros;
+  } else if (perRequest !== undefined && settled?.state === "missing") {
+    perRequest.heldMicros -= admission.reservedMicros;
+  }
+  return { reservedMicros: admission.reservedMicros, settled };
+};
+
+/**
  * Asks the model ledger to admit one provider request, with the body it
  * will send: reserves the most it can cost, its prompt bounded by the
  * body's size and its answer by the cap the body sets (or the model's,
@@ -817,9 +921,9 @@ const admitRequest = async (
   body: unknown,
   endsAt: number
 ): Promise<Admission | { held: Refusal }> => {
-  const { env, call, model, price } = route;
+  const { env, call, model, price, perRequest } = route;
   const { period, scopes } = route.scopesNow();
-  const budgeted = hasBudget(scopes);
+  const budgeted = hasBudget(scopes) || perRequest !== undefined;
   if (price === undefined && budgeted) {
     return { held: { code: "model.unpriced" } };
   }
@@ -848,6 +952,15 @@ const admitRequest = async (
     inputTokens: promptBound,
     outputTokens,
   });
+  // The binding's cap per request holds the App's request as a whole: a
+  // second attempt or a retry needs room beside what the earlier ones
+  // still hold, an unknown outcome all of its reservation.
+  if (
+    perRequest !== undefined &&
+    perRequest.heldMicros + reservedMicros > perRequest.limitMicros
+  ) {
+    return { held: { code: "model.over_budget", because: "binding_request" } };
+  }
   try {
     const admitted = await modelLedger(env).admit({
       id,
@@ -861,6 +974,9 @@ const admitRequest = async (
       reconcileAt: callDeadline + reconcileGraceMs,
     });
     if (admitted.ok) {
+      if (perRequest !== undefined) {
+        perRequest.heldMicros += reservedMicros;
+      }
       return { id, reservedMicros };
     }
     if ("unpriced" in admitted) {
@@ -934,7 +1050,7 @@ const open = (
   context: TranscriptContext,
   { signal, endsAt }: { signal: AbortSignal; endsAt: number }
 ) => {
-  const { model, ref, call, transport, env } = route;
+  const { model, ref, call, transport } = route;
   const response: GatewayResponse = {
     status: undefined,
     logId: undefined,
@@ -959,37 +1075,43 @@ const open = (
       response.held = admitted.held;
       return heldResponse();
     }
+    // The caller's last word, after the ledger's admission, with nothing
+    // awaited before the request is sent: refused, it is never sent, and
+    // its reservation goes back.
+    try {
+      route.beforeSend?.();
+    } catch (error) {
+      response.settled.push(
+        await settleAdmitted(route, admitted, { by: "unsent" })
+      );
+      throw error;
+    }
     response.sentChars = typeof init?.body === "string" ? init.body.length : 0;
     let answered;
     try {
       answered = await transport(input, withRequestId(init, admitted.id));
     } catch (error) {
-      response.settled.push({
-        reservedMicros: admitted.reservedMicros,
-        settled: await settleRequest(env, admitted.id, { by: "unknown" }),
-      });
+      response.settled.push(
+        await settleAdmitted(route, admitted, { by: "unknown" })
+      );
       throw error;
     }
     response.refusal = undefined;
     if (!answered.ok) {
       // A refusal before the provider took the request on costs nothing;
       // a server error may have come after it did.
-      response.settled.push({
-        reservedMicros: admitted.reservedMicros,
-        settled: await settleRequest(env, admitted.id, {
+      response.settled.push(
+        await settleAdmitted(route, admitted, {
           by: answered.status < 500 ? "refused" : "unknown",
-        }),
-      });
+        })
+      );
       response.refusal = refusalOf(await answered.clone().text());
       return answered;
     }
     if (response.pending !== undefined) {
-      response.settled.push({
-        reservedMicros: response.pending.reservedMicros,
-        settled: await settleRequest(env, response.pending.id, {
-          by: "unknown",
-        }),
-      });
+      response.settled.push(
+        await settleAdmitted(route, response.pending, { by: "unknown" })
+      );
     }
     response.pending = admitted;
     return answered;
@@ -1312,6 +1434,10 @@ const keepingProvenance = (
   return entryKeeping(kept);
 };
 
+/** The App's model binding a call is made through, for its audit events. */
+const bindingOf = ({ binding }: Session): { binding?: string } =>
+  binding === undefined ? {} : { binding: binding.alias };
+
 const auditEntry = (
   { call, ref, judged }: Admitted,
   recorded: Recorded
@@ -1353,6 +1479,7 @@ const auditEntry = (
       sensitive: judged.sensitive ?? null,
       provenanceDropped: dropped,
       chat: chatOf(call),
+      ...bindingOf(call),
     },
   }));
 };
@@ -1437,11 +1564,11 @@ const record = async (
     const tokens = hasFailed(sent.answer)
       ? undefined
       : countedTokens(sent.answer.usage);
-    settled = await settleRequest(
-      env,
-      pending.id,
+    ({ settled } = await settleAdmitted(
+      admitted,
+      pending,
       tokens === undefined ? { by: "unknown" } : { by: "usage", tokens }
-    );
+    ));
   }
   const used = usedBy(admitted, sent);
   await keepAuditEvent(
@@ -1489,6 +1616,7 @@ const refusedEntry = (
       model,
       provenanceDropped: dropped,
       chat: chatOf(call),
+      ...bindingOf(call),
     },
   }));
 };
@@ -1575,6 +1703,15 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     // field is bounded. Refused, so no request goes unrecorded.
     throw modelErrors.create("model.invalid_call");
   }
+  // A binding's bound is the App's to rely on: a request it can't fit is
+  // refused, as its approval would be now, never cut short.
+  if (
+    call.binding !== undefined &&
+    call.maxTokens !== undefined &&
+    call.maxTokens > usableAnswer(gatewayModel(config.gateway, ref))
+  ) {
+    return await refuse(env, call, { code: "model.answer_too_long" });
+  }
   const verdict = await judgeCall(env, rules, call);
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
@@ -1583,8 +1720,17 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   const price = await pinnedPrice(
     listPricesOf(ref.provider, ref.id, ref.catalog.cost)
   );
+  const { binding } = call;
   const scopes = scopesFor(rules.budgets, call);
-  if (price === undefined && hasBudget(scopes)) {
+  const scopesOn = (day: string): LedgerScope[] =>
+    binding === undefined
+      ? scopes
+      : [...scopes, ...bindingScopes(binding, day)];
+  const requestMicros = bindingRequestMicros(binding);
+  if (
+    price === undefined &&
+    (hasBudget(scopesOn(budgetPeriods(env).day)) || requestMicros !== undefined)
+  ) {
     return await refuse(env, call, { code: "model.unpriced" });
   }
   return {
@@ -1594,7 +1740,16 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     model: gatewayModel(config.gateway, ref),
     transport: createAiBindingFetch(env.AI),
     price,
-    scopesNow: () => ({ period: budgetMonth(env), scopes }),
+    scopesNow: () => {
+      // One clock for both, so a request at a month's last instant never
+      // counts its day in one month and its month in the next.
+      const { month, day } = budgetPeriods(env);
+      return { period: month, scopes: scopesOn(day) };
+    },
+    perRequest:
+      requestMicros === undefined
+        ? undefined
+        : { limitMicros: requestMicros, heldMicros: 0 },
     env,
   };
 };
@@ -1604,13 +1759,14 @@ const answerCall = async <Output>(
   env: ModelsEnv,
   request: Request,
   schema: z.ZodType<Output> | undefined,
-  limit: Deadline
+  limit: Deadline,
+  askAgain = true
 ): Promise<ModelAnswer<Output>> => {
   const { call } = request;
   const usage = { inputTokens: 0, outputTokens: 0 };
   let cost = 0;
   // A call with a schema asks once more when the answer doesn't fit it.
-  const attempts = schema === undefined ? 1 : 2;
+  const attempts = schema === undefined || !askAgain ? 1 : 2;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     // Each attempt follows up on the answer before it, and each of its
     // provider requests is admitted by the ledger, in the month it is
@@ -1674,10 +1830,13 @@ const answerCall = async <Output>(
 
 const callModel = async <Output>(
   env: ModelsEnv,
-  { schema, ...fields }: ModelCall<Output>
+  { schema, askAgain, beforeSend, ...fields }: ModelCall<Output>
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
-  const route = await admit(env, call);
+  const route: Route = {
+    ...(await admit(env, call)),
+    ...(beforeSend === undefined ? {} : { beforeSend }),
+  };
   const { model } = route;
   const limit = deadline(call.timeoutMs ?? defaultTimeoutMs);
   try {
@@ -1696,7 +1855,8 @@ const callModel = async <Output>(
         messages: toMessages(call, model),
       },
       schema,
-      limit
+      limit,
+      askAgain
     );
   } finally {
     limit.clear();

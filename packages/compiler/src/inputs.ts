@@ -3,7 +3,7 @@
  * Core uses these before it hashes and sends the files; the compiler again
  * on what it is sent.
  */
-import { appLimits } from "@grasp-os/shared/app-limits";
+import { appLimits, appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 
 import type { Diagnostic } from "./diagnostic.ts";
 
@@ -119,13 +119,17 @@ export const limitErrors = (files: Record<string, string>): Diagnostic[] => {
 /**
  * What a build takes of the modules the host generates for an App
  * (`.grasp/`), apart from the App's own files, so an App at its limits
- * still builds: the few generated modules, each derived from a manifest
- * that at most the App's own limits of source can make.
+ * still builds. The host writes them, never the App: each is derived from
+ * the App's manifest, which the host has already read and bounded
+ * (`appManifestMaxBytes`, whatever the size of the App's source), and
+ * restates its descriptors at most a few times over (as types and as
+ * values). So these bounds admit every manifest the platform accepts,
+ * and still cap what one build hands the compiler.
  */
 const generatedLimits = {
   files: 8,
-  fileLength: 2 * appLimits.totalLength,
-  totalLength: 4 * appLimits.totalLength,
+  fileLength: 4 * appManifestMaxBytes,
+  totalLength: 8 * appManifestMaxBytes,
 } as const;
 
 /** Whether `path` is where the host puts a module it generates. */

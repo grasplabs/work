@@ -314,6 +314,29 @@ const unionBody = (draft: DescriptorDraft): Body => {
   };
 };
 
+/**
+ * A record ID's table, and what deleting the record it names does: restrict,
+ * the default, is left out, so a schema that never says it keeps its hash.
+ */
+const idBody = (draft: DescriptorDraft): Body => {
+  const { tableName, onDelete } = draft;
+  if (typeof tableName !== "string" || !tableNamePattern.test(tableName)) {
+    return refuse(
+      "definition.invalid_name",
+      "A table's name starts with a letter and has only letters, digits and underscores."
+    );
+  }
+  if (onDelete === undefined || onDelete === "restrict") {
+    return { children: [], kind: { kind: "id", tableName } };
+  }
+  return onDelete === "cascade"
+    ? { children: [], kind: { kind: "id", tableName, onDelete } }
+    : refuse(
+        "definition.invalid_value",
+        "A record ID's onDelete is restrict or cascade."
+      );
+};
+
 /** What the draft's kind adds, checked; and the descriptors nested in it. */
 const kindBody = (draft: DescriptorDraft): Body => {
   const { kind } = draft;
@@ -353,13 +376,7 @@ const kindBody = (draft: DescriptorDraft): Body => {
       return enumBody(draft);
     }
     case "id": {
-      const { tableName } = draft;
-      return typeof tableName === "string" && tableNamePattern.test(tableName)
-        ? { children: [], kind: { kind, tableName } }
-        : refuse(
-            "definition.invalid_name",
-            "A table's name starts with a letter and has only letters, digits and underscores."
-          );
+      return idBody(draft);
     }
     case "object": {
       return objectBody(draft);

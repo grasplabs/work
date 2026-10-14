@@ -16,6 +16,7 @@ import type {
   Catalog,
   CatalogLogo,
   CatalogTool,
+  ConnectorContract,
   ConnectApi,
   ConnectCall,
   ConnectionOwner,
@@ -49,6 +50,7 @@ import {
   startToolkitConnection,
 } from "./composio-connections.ts";
 import { connectionOwners } from "./connections.ts";
+import { connectorContract } from "./contracts.ts";
 import {
   ackConnectorEvents,
   syncEventSources,
@@ -71,7 +73,9 @@ import {
   auditRefusedDecision,
   callOf,
   dropForEndedRun,
+  dropForBinding,
   dropForEndedRuns,
+  dropStaleBinding,
   heldFor,
   declineChatActions,
   heldCall,
@@ -130,9 +134,18 @@ const auditFailure = async (env: Env, record: CallRecord): Promise<void> => {
 };
 
 /** How a call that returned ended, for the audit log. */
-const callOutcome = ({ failed, replayed, pending }: CallDone): CallOutcome => {
+const callOutcome = ({
+  failed,
+  replayed,
+  pending,
+  reconciled,
+}: CallDone): CallOutcome => {
   if (pending !== undefined) {
     return "held";
+  }
+  // Recovered by finding the effect: the original's answer, not a send.
+  if (reconciled === true) {
+    return "reconciled";
   }
   if (replayed) {
     return "replayed";
@@ -301,6 +314,13 @@ export default class Connect
     return await catalogLogo(this.env, request);
   }
 
+  // Generated connector contracts (src/contracts.ts): what an App's
+  // connector resource is bound to and checked against.
+
+  async connectorContract(request: unknown): Promise<ConnectorContract> {
+    return await connectorContract(this.env, request);
+  }
+
   // Held actions (src/pending.ts). Core names the person from their
   // session; only they see and decide what waits for them.
 
@@ -363,6 +383,7 @@ export default class Connect
       await auditCall(this.env, {
         ...ended,
         outcome: "replayed",
+        replayed: true,
         provenance: outcome.result.provenance,
       });
     } else if (outcome.state === "waiting") {
@@ -376,6 +397,8 @@ export default class Connect
         outcome:
           reason === "connect.action_failed" ? "replayed" : outcomeOf(reason),
         reason,
+        // How it ended, read again: no send of its own.
+        replayed: true,
       });
     }
     return outcome;
@@ -387,6 +410,14 @@ export default class Connect
 
   async dropForEndedRuns(request: unknown): Promise<void> {
     await dropForEndedRuns(this.env, request);
+  }
+
+  async dropForBinding(request: unknown): Promise<void> {
+    await dropForBinding(this.env, request);
+  }
+
+  async dropStaleBinding(request: unknown): Promise<void> {
+    await dropStaleBinding(this.env, request);
   }
 
   async anyPending(request: unknown): Promise<boolean> {
@@ -528,16 +559,27 @@ export default class Connect
     try {
       done = await carryOut(this.env, claims, call, progress, held);
     } catch (error) {
-      const reason = codeOf(error);
+      let reason = codeOf(error);
+      // Once the key was claimed the call may have gone out: an error that
+      // is none of connect's own answers (spending or freeing the key
+      // failed, say) leaves its outcome unknown, never a plain failure.
+      const lost = progress.claimed === true && reason === undefined;
+      if (lost) {
+        log.error("connect.call_after_claim_failed", errorFields(error));
+        reason = "connect.outcome_unknown";
+      }
       await auditFailure(this.env, {
         call: stated,
         claims,
-        sideEffect: progress.sideEffect,
+        // A repeat refused as its earlier call ended is of a side effect.
+        sideEffect: progress.replayed === true ? true : progress.sideEffect,
         outcome: outcomeOf(reason),
         reason: reason ?? "internal",
+        replayed: progress.replayed,
+        recovery: progress.recovery,
         pendingActionId: held?.id,
       });
-      throw error;
+      throw lost ? connectErrors.create("connect.outcome_unknown") : error;
     }
     // Nothing is returned, or stored for a repeat, that the audit log
     // doesn't have: a side effect's answer is stored with its events. If
@@ -549,6 +591,8 @@ export default class Connect
       sideEffect: done.sideEffect,
       outcome: callOutcome(done),
       reason: done.failed ? "connect.action_failed" : undefined,
+      replayed: done.replayed,
+      recovery: done.recovery,
       provenance: done.result.provenance,
       pendingActionId: done.pending?.id ?? held?.id,
     };

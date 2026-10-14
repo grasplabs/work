@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
+import type { HeldBinding } from "./capability.ts";
 import { defineErrorFamily, isExpectedError } from "./errors.ts";
 import type { CodedError } from "./errors.ts";
 import {
@@ -678,6 +679,12 @@ export interface PendingAction {
   inputHash: string;
   /** ISO 8601. */
   requestedAt: string;
+  /**
+   * The App's approved resource binding it came through, as it served then
+   * (`HeldBinding`); null for any other call; `unreadable` when what connect
+   * stored no longer reads as one, which core never confirms.
+   */
+  binding: HeldBinding | "unreadable" | null;
 }
 
 const inputHashSchema = z.string().regex(/^[0-9a-f]{64}$/u);
@@ -754,13 +761,16 @@ export type HeldOutcomeRequest = z.input<typeof heldOutcomeRequestSchema>;
 /**
  * What became of a held action: it still waits for its person (or is being
  * carried out now); they declined it, or it was dropped; it ran and
- * answered (`done`); or it didn't end well (`failed`: `reason` is the
+ * answered (`done`); it was sent and nobody can tell whether it took
+ * effect (`unknown`: it may have been carried out, and is never sent
+ * again under its key); or it didn't end well (`failed`: `reason` is the
  * error's code, and `output` what the tool said, for a tool's own error).
  */
 export type HeldOutcome =
   | { state: "waiting" }
   | { state: "declined" }
   | { state: "done"; result: ConnectResult }
+  | { state: "unknown"; reason: "connect.outcome_unknown" }
   | { state: "failed"; reason: string; output: string | null };
 
 /** Workflow runs that have ended, each with its App: at most 50. */
@@ -958,6 +968,21 @@ export interface ConnectApi extends PackageRegistryApi {
    */
   catalogLogo: (request: CatalogLogoRequest) => Promise<CatalogLogo | null>;
   /**
+   * The generated contract `contract` names as the connection
+   * `connectionId` serves it now, each action with the JSON Schemas of its
+   * input and output. A native connection serves `<connector>.<family>@1`,
+   * its connector's actions of that family, read from the release's
+   * manifests: nothing is loaded and no token is read. A Composio
+   * connection serves `composio.<toolkit>@1`, its own toolkit's allowed
+   * tools, as its server lists them now. `connect.contract_not_found` for
+   * any other contract, or one with no actions it can serve;
+   * `connect.server_unavailable` when a Composio server can't be reached
+   * to read it.
+   */
+  connectorContract: (
+    request: ConnectorContractRequest
+  ) => Promise<ConnectorContract>;
+  /**
    * The held actions waiting for `person`, newest first (at most 200):
    * none for Grasp staff.
    */
@@ -988,6 +1013,18 @@ export interface ConnectApi extends PackageRegistryApi {
    * keep their inputs past it. Dropping again drops nothing.
    */
   dropForEndedRuns: (request: EndedRuns) => Promise<void>;
+  /**
+   * Drops every held action an App's calls made through resource binding
+   * `bindingId`, once core revoked or replaced it: none of them could run.
+   * Recorded as `connection.action.dropped`, reason `binding.revoked`.
+   */
+  dropForBinding: (request: BindingDropRequest) => Promise<void>;
+  /**
+   * Drops one held action of `person`'s that came through a resource
+   * binding core refused to confirm because the binding no longer serves
+   * it. Its key stays free. Recorded, reason `binding.stale`.
+   */
+  dropStaleBinding: (request: HeldRequest) => Promise<void>;
   /**
    * Runs a held action its person confirmed: only with the capability core
    * signed for confirming it, and only for that person.
@@ -1072,6 +1109,69 @@ export const connectionErrors = defineErrorFamily({
     "Your organization doesn't offer this connection. An admin can offer it.",
 });
 
+/** Which App's held actions of which binding to drop. */
+export const bindingDropRequestSchema = z.strictObject({
+  appId: identifierSchema,
+  bindingId: identifierSchema,
+});
+export type BindingDropRequest = z.input<typeof bindingDropRequestSchema>;
+
+// Generated connector contracts (spec 12): what an App's connector
+// resource is bound to. A native connector's actions of one family (its
+// tools named `<family>.<action>`, such as `mail.send`) make the contract
+// `<connector>.<family>@1`, whose shape is the tools' own input and output
+// schemas. A Composio connection's allowed tools make `composio.<toolkit>@1`
+// (a toolkit slug that starts with a letter), whose shape is what its
+// server lists now. Core fingerprints what it gets, so a connector release,
+// or Composio, changing any of it is a drifted contract an admin approves
+// again.
+
+/**
+ * A generated contract's ID: `<connector>.<family>@<major>`, or
+ * `composio.<toolkit>@1`.
+ */
+export const connectorContractIdSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{0,62}\.[a-z][a-z0-9_-]{0,62}@[1-9]\d{0,5}$/u);
+
+/** Which contract to read, and the connection that must serve it. */
+export const connectorContractRequestSchema = z.strictObject({
+  contract: connectorContractIdSchema,
+  connectionId: connectionIdSchema,
+});
+export type ConnectorContractRequest = z.input<
+  typeof connectorContractRequestSchema
+>;
+
+/** One action of a generated contract. */
+export interface ConnectorContractAction {
+  /** The tool a call of it names, e.g. `mail.send`. */
+  tool: string;
+  /**
+   * Whether it only reads: as a native connector declares, or as the
+   * admin's rule for a Composio tool says (never Composio's hint).
+   */
+  readOnly: boolean;
+  /**
+   * The JSON Schemas of its input and output, as the connector makes them
+   * or a Composio server lists them (closed, composio-contracts.ts), each
+   * as JSON text: a type for any JSON value is too deep for the RPC types
+   * to follow.
+   */
+  input: string;
+  output: string;
+}
+
+/** A generated contract, as connect serves it now. */
+export interface ConnectorContract {
+  contract: string;
+  /**
+   * Each action, by its name in the contract: `send`, not `mail.send`, for
+   * a native one; its tool, such as `HUBSPOT_LIST_CONTACTS`, for Composio.
+   */
+  actions: Record<string, ConnectorContractAction>;
+}
+
 /** Why connect refused or couldn't finish a call, other than its capability. */
 export const connectErrors = defineErrorFamily({
   "connect.invalid":
@@ -1082,6 +1182,8 @@ export const connectErrors = defineErrorFamily({
   "connect.not_owner":
     "This is someone's personal connection: only calls for its owner can use it.",
   "connect.action_not_found": "This connection has no such action.",
+  "connect.contract_not_found":
+    "This connection doesn't serve that contract: it isn't a connection of that connector or toolkit, or it has no such actions to serve.",
   "connect.input_too_large": "This call's input is too large.",
   "connect.resource_out_of_scope":
     "This call reaches beyond the one resource it may use.",
@@ -1096,7 +1198,7 @@ export const connectErrors = defineErrorFamily({
   "connect.call_in_progress":
     "A call with this idempotency key is still running. Try again shortly.",
   "connect.outcome_unknown":
-    "A call with this idempotency key was interrupted after it was sent, so it may or may not have taken effect, and it won't be sent again. Check the outside system to see whether it did.",
+    "A call with this idempotency key was interrupted after it was sent, so it may or may not have taken effect. It won't be sent again blindly: where its connector can find what it did, or can't do it twice, trying again later (after `retryAfterSeconds`, when given) recovers it; otherwise check the outside system to see whether it did.",
   "connect.action_failed": "The action reported an error.",
   "connect.pending_not_found":
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",

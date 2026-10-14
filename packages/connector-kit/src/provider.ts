@@ -62,8 +62,21 @@ const retryAfterOf = (response: Response): number | undefined => {
 /** Providers' error codes and reasons are identifiers, such as `notFound`. */
 const providerErrorCode = /^[A-Za-z][\w.]{0,63}$/u;
 
-/** The error connect's egress's own answer stands for. */
-const egressFailure = (kind: string, name: string): ToolError => {
+/** Whether a request may change something at the provider: not a GET or HEAD. */
+const isWrite = (method: string): boolean =>
+  method.toUpperCase() !== "GET" && method.toUpperCase() !== "HEAD";
+
+/**
+ * The error connect's egress's own answer stands for. A refused request
+ * never left; one whose answer the egress withheld (the provider was
+ * unreachable, timed out, or redirected) may have reached the provider, so
+ * a write's outcome is unknown.
+ */
+const egressFailure = (
+  kind: string,
+  name: string,
+  method: string
+): ToolError => {
   switch (kind) {
     case egressKind.refused: {
       return new ToolError("Connect's egress refused the request", {
@@ -73,6 +86,7 @@ const egressFailure = (kind: string, name: string): ToolError => {
     default: {
       return new ToolError(`Connect's egress withheld ${name}'s answer`, {
         code: "egress_failed",
+        outcomeUnknown: isWrite(method),
       });
     }
   }
@@ -87,7 +101,9 @@ const egressFailure = (kind: string, name: string): ToolError => {
  * is free again and the caller may try again. That holds for the whole
  * call because every tool sends at most one write, as its last request:
  * nothing of the call went through before it. A 503 to a write may come
- * after the provider acted, so it isn't marked.
+ * after the provider acted, so it isn't marked: like every 5xx to a write,
+ * it leaves the write's outcome unknown (`outcomeUnknown`), never a failure
+ * that says nothing happened. A 4xx refuses the request before acting.
  */
 const failureOf = async (
   { name, errorCodeOf, isThrottled, invalidStatuses }: ProviderDefinition,
@@ -99,7 +115,7 @@ const failureOf = async (
   const egress = response.headers.get(egressHeader);
   if (egress !== null) {
     await response.body?.cancel();
-    return egressFailure(egress, name);
+    return egressFailure(egress, name, method);
   }
   const retryAfterSeconds = retryAfterOf(response);
   let code: string | undefined;
@@ -127,7 +143,8 @@ const failureOf = async (
     return new ToolError(`${name} is unavailable. Try again later.`, {
       code: "unavailable",
       ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
-      notPerformed: method === "GET",
+      notPerformed: !isWrite(method),
+      outcomeUnknown: isWrite(method),
     });
   }
   if (status === 401 || status === 403) {
@@ -147,15 +164,29 @@ const failureOf = async (
   }
   return new ToolError(`${name} answered ${status}${named}`, {
     code: "failed",
+    outcomeUnknown: status >= 500 && isWrite(method),
   });
 };
 
 /** Sending requests to the provider `definition` describes. */
 export const providerFetch = (definition: ProviderDefinition): Provider => {
   const send = async (url: URL, init: RequestInit = {}): Promise<Response> => {
-    const response = await fetch(url, init);
+    const method = init.method ?? "GET";
+    let response: Response;
+    try {
+      response = await fetch(url, init);
+    } catch (error) {
+      if (!isWrite(method)) {
+        throw error;
+      }
+      // Sent, maybe taken, and its answer never came back.
+      throw new ToolError(
+        `${definition.name}'s answer was lost: whether it acted is unknown`,
+        { code: "egress_failed", outcomeUnknown: true }
+      );
+    }
     if (!response.ok) {
-      throw await failureOf(definition, response, init.method ?? "GET");
+      throw await failureOf(definition, response, method);
     }
     return response;
   };
@@ -163,13 +194,25 @@ export const providerFetch = (definition: ProviderDefinition): Provider => {
     fetch: send,
     json: async (url, schema, init) => {
       const response = await send(url, init);
-      const parsed = schema.safeParse(await response.json());
-      if (!parsed.success) {
-        throw new Error(
-          `${definition.name}'s answer isn't what the connector expects`
-        );
+      let body: unknown;
+      let read = true;
+      try {
+        body = await response.json();
+      } catch {
+        // Not JSON, or past connect's egress's size limit.
+        read = false;
       }
-      return parsed.data;
+      const parsed = read ? schema.safeParse(body) : undefined;
+      if (parsed?.success === true) {
+        return parsed.data;
+      }
+      const message = `${definition.name}'s answer isn't what the connector expects`;
+      // The provider took the write: it went through, and what it made
+      // can't be told.
+      if (isWrite(init?.method ?? "GET")) {
+        throw new ToolError(message, { code: "failed", outcomeUnknown: true });
+      }
+      throw new Error(message);
     },
   };
 };

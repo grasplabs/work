@@ -7,6 +7,7 @@ import {
 } from "@grasp-os/shared/stores";
 import type { StagedWrites } from "@grasp-os/shared/stores";
 
+import { queryMaxReruns } from "./call-limits.ts";
 import type { OpenStore } from "./data-stores.ts";
 import type { QueryAnswer } from "./store-queries.ts";
 
@@ -33,9 +34,6 @@ import type { QueryAnswer } from "./store-queries.ts";
 // refused once any of those tables moved on (operations.ts). A mutation's
 // reads see the writes it staged so far (`staged`), as its commit would
 // make them; the generations they answer are from before those writes.
-
-/** How many times a query operation runs again before it gives up. */
-export const queryMaxReruns = 3;
 
 /** A revision a `get` asserted, for a commit to check again. */
 export interface ReadGuard {

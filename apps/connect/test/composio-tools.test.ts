@@ -26,6 +26,9 @@ import type { Call } from "./connect.ts";
 // read-only, or naming a resource property of its own; an admin's rule
 // naming a property the tool doesn't take.
 
+/** An owner the HubSpot read fails for. */
+const brokenOwner = "owner-broken";
+
 const composio = fakeComposioApi(
   [
     {
@@ -48,7 +51,10 @@ const composio = fakeComposioApi(
       {
         name: "HUBSPOT_LIST_CONTACTS",
         inputs: ["owner_id", "limit"],
-        run: ({ owner_id: owner }) => ({ output: { owner, contacts: [] } }),
+        run: ({ owner_id: owner }) =>
+          owner === brokenOwner
+            ? { output: { error: "Owner not found" }, isError: true }
+            : { output: { owner, contacts: [] } },
       },
       {
         // The server says it only reads, and where its resource is.
@@ -169,6 +175,59 @@ describe("a Composio tool the admin marked as a read", () => {
       repeat: output,
       outcomes: ["refused", "held", "ok", "replayed"],
       ran: [{ tool: "HUBSPOT_LIST_CONTACTS", input: { owner_id: owner } }],
+    });
+  });
+
+  it("keeps its error as the failure in a restricted context, replayed to a repeat without running again", async () => {
+    const anna = someone();
+    const connectionId = await hubspot();
+    const run = agentFor(anna.userId);
+    const signed = { restricted: true, origin: runOrigin };
+    const call = {
+      ...read(connectionId, "HUBSPOT_LIST_CONTACTS", { owner_id: brokenOwner }),
+      idempotencyKey: "run-1:list-broken",
+    };
+    const withKey = await outcome(callAs(run, call, signed));
+    const [held, ...others] = await exports.default.listPendingActions(anna);
+    if (held === undefined || others.length > 0) {
+      throw new Error("Expected one held action");
+    }
+    // A side effect here, but a read the admin vouched for: it can't have
+    // acted, so its error is the action's failure, not an unknown outcome.
+    const confirmed = await outcome(
+      exports.default.confirmAction({
+        person: anna,
+        id: held.id,
+        inputHash: held.inputHash,
+        capability: await signCapability(env.CAPABILITY_SIGNING_KEY, run, {
+          connectionId,
+          action: held.action,
+          idempotencyKey: held.idempotencyKey,
+          ...signed,
+          confirms: held.id,
+        }),
+      })
+    );
+    const requestsBefore = composio.state.mcp.requests;
+    const repeat = await outcome(callAs(run, call, signed));
+    const recorded = await events();
+    const calls = recorded.filter(({ action }) => action === "connection.call");
+    expect({
+      withKey,
+      confirmed,
+      repeat,
+      repeatRequests: composio.state.mcp.requests - requestsBefore,
+      outcomes: calls.map(({ detail }) => detail.outcome),
+      ran: composio.state.mcp.ran,
+    }).toStrictEqual({
+      withKey: "connect.held",
+      confirmed: "connect.action_failed",
+      repeat: "connect.action_failed",
+      repeatRequests: 0,
+      outcomes: ["held", "failed", "replayed"],
+      ran: [
+        { tool: "HUBSPOT_LIST_CONTACTS", input: { owner_id: brokenOwner } },
+      ],
     });
   });
 

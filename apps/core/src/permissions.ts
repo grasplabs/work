@@ -33,6 +33,7 @@ import type {
 } from "@grasp-os/shared/permissions";
 import {
   isAdmin,
+  isMemberAdmin,
   requireAdmin,
   requireBuilder,
   roleErrors,
@@ -561,10 +562,17 @@ export const requestPermission = async (
     await requireAppRole(object.appId, "user");
   }
   if (object.type === "app") {
-    // Only an App calls another's exports.
-    if (subject.type !== "app") {
+    // An App calls another's exports; an agent calls an App's sealed
+    // functions (agent-apps.ts), reading with `read` and writing with
+    // `write`, never by an export's name.
+    if (
+      subject.type === "agent" &&
+      !actions.every((action) => action === "read" || action === "write")
+    ) {
       throw permissionErrors.create("permission.invalid", {
-        issues: ["subject: Only an App calls another App's exports."],
+        issues: [
+          "actions: An agent calls an App's functions with read or write.",
+        ],
       });
     }
     await requireAppRole(object.appId, "user");
@@ -889,7 +897,7 @@ const auditDetailSql = sql`json_patch(
  * of the organization, not Grasp staff, still an admin then.
  */
 const canGrantSql = (by: Identity): SQL =>
-  isAdmin(by.role) && !by.staff ? stillAdminSql(by) : sql`0`;
+  isMemberAdmin(by) ? stillAdminSql(by) : sql`0`;
 
 /**
  * That a permission lets an App change things for the person using it,
@@ -1313,7 +1321,7 @@ export const askedAgainBy = (
   keep: boolean
 ): boolean =>
   !keep &&
-  !(isAdmin(by.role) && !by.staff) &&
+  !isMemberAdmin(by) &&
   permission.actions.some((action) => changesThings(permission.object, action));
 
 /**

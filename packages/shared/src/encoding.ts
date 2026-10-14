@@ -23,6 +23,20 @@ export const fromBase64Url = (text: string): Uint8Array<ArrayBuffer> => {
 export const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
+/** SHA-256 of `bytes`, in lowercase hex. */
+export const sha256HexOfBytes = async (
+  bytes: ArrayBuffer | Uint8Array
+): Promise<string> =>
+  toHex(
+    new Uint8Array(
+      // A copy whose buffer is an ArrayBuffer, as `digest` takes it.
+      await crypto.subtle.digest(
+        "SHA-256",
+        bytes instanceof ArrayBuffer ? bytes : new Uint8Array(bytes)
+      )
+    )
+  );
+
 /** SHA-256 of `text` (UTF-8), in lowercase hex. */
 export const sha256Hex = async (text: string): Promise<string> =>
   toHex(

@@ -135,10 +135,9 @@
           "type": "durable_object_namespace"
         },
         {
-          "class_name": "WorkflowDispatcher",
-          "name": "WORKFLOWS",
-          "type": "workflow",
-          "workflow_name": "grasp-os-workflows"
+          "class_name": "WorkflowRuns",
+          "name": "WORKFLOW_RUNS",
+          "type": "durable_object_namespace"
         },
         {
           "name": "LOADER",
@@ -253,6 +252,12 @@
             "DataStore"
           ],
           "tag": "v5"
+        },
+        {
+          "new_sqlite_classes": [
+            "WorkflowRuns"
+          ],
+          "tag": "v6"
         }
       ],
       "keepVars": true,
