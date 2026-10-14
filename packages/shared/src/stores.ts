@@ -3,6 +3,7 @@ import { z } from "zod";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema, storeIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
+import { platformLimits } from "./platform-limits.ts";
 import {
   queryMaxResults,
   queryMaxScannedBytes,
@@ -33,11 +34,12 @@ const fieldNameSchema = tableNameSchema;
 
 /**
  * The most bytes of one record's fields, as UTF-8 JSON, as stored: the
- * document limit of spec 18.1. A patch is checked against the document it
- * leaves, not only its own fields. Larger content belongs in files,
+ * persisted row limit of spec 18.1. A patch is checked against the
+ * document it leaves, not only its own fields, and so are the defaults a
+ * migration or backfill fills in. Larger content belongs in files,
  * referenced from a record.
  */
-export const documentMaxBytes = 128 * 1024;
+export const documentMaxBytes = platformLimits.persistedRowBytes;
 
 /**
  * The most bytes of one commit's writes, guards and intents, as UTF-8 JSON: the
@@ -45,16 +47,18 @@ export const documentMaxBytes = 128 * 1024;
  * workflow step's input and result. A public operation's own input limit
  * is checked where operations are called, not here.
  */
-export const commitMaxInputBytes = 1024 * 1024;
+export const commitMaxInputBytes = platformLimits.stepPayloadBytes;
 
 /**
  * The most bytes of writes one mutation may stage, as UTF-8 JSON: what is
- * left of a commit's bound after its result (at most 256 KiB,
- * `mutationResultMaxBytes`) and its guards and read set (at most 100 and
- * 64, well within 64 KiB), so a mutation that stages within it always fits
- * its commit. The operation host refuses the write that passes it.
+ * left of a commit's bound after its result (at most a public operation's
+ * output, `operationResultMaxBytes`) and its guards and read set (at most
+ * 100 and 64, well within 64 KiB), so a mutation that stages within it
+ * always fits its commit. The operation host refuses the write that
+ * passes it.
  */
-export const stagedMaxBytes = commitMaxInputBytes - 256 * 1024 - 64 * 1024;
+export const stagedMaxBytes =
+  commitMaxInputBytes - platformLimits.operationOutputBytes - 64 * 1024;
 
 /**
  * How deeply a record's JSON may nest: a field's value gets `valueDepth`

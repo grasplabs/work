@@ -25,7 +25,6 @@ import {
   invocationMaxReads,
   isAppErrorCode,
   knowledgeSearchMaxLength,
-  mutationResultMaxBytes,
   operationInputMaxBytes,
   operationResultMaxBytes,
   stagedReadMaxBytes,
@@ -43,6 +42,7 @@ import type {
   AppErrorPayload,
   OperationResult,
 } from "@grasp-os/shared/operations";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
 import {
   readRequestSchema,
@@ -425,21 +425,23 @@ const admittedArgs = (
 
 /**
  * What a handler returned, if its contract allows it exactly: JSON within
- * `maxBytes`, valid, and already as the contract normalizes it (no default
- * left out, nothing to trim). The value is App code's: reading it can run
+ * the public operation output limit (`operationResultMaxBytes`), valid,
+ * and already as the contract normalizes it (no default left out,
+ * nothing to trim). The value is App code's: reading it can run
  * its getters, so anything reading it throws becomes `internal.unexpected`
  * (`fromApp`), never an error the caller would take for the host's.
  */
 const checkedReturn = (
   compiled: Compiled,
   operation: OperationManifest,
-  value: unknown,
-  maxBytes: number
+  value: unknown
 ): Json => {
-  const read = fromApp(() => jsonWithin(value, maxBytes));
+  const read = fromApp(() => jsonWithin(value, operationResultMaxBytes));
   if (read === "too_large") {
     throw hostError(
-      operationErrors.create("contract.result_too_large", { maxBytes })
+      operationErrors.create("contract.result_too_large", {
+        maxBytes: operationResultMaxBytes,
+      })
     );
   }
   if (read === undefined) {
@@ -1228,6 +1230,15 @@ const providerFailure = (error: unknown, requestId: string): Error => {
 };
 
 /**
+ * The most bytes of a resource's answer to one request, as UTF-8 JSON:
+ * what a workflow step may carry, not a public operation's output. It
+ * reaches App code, never the caller as it is: what the action returns is
+ * held to the output limit (`checkedReturn`), so a larger answer must be
+ * cut down or paginated first.
+ */
+const resourceResultMaxBytes = platformLimits.stepPayloadBytes;
+
+/**
  * One request of a resource an action declared and uses, as `alias`
  * names it: only a use its declaration allows (`allowedRequest`), its
  * arguments JSON within the operation input limit, through the binding
@@ -1297,7 +1308,7 @@ const resourceCall = async (
     throw providerFailure(error, run.invocation.requestId);
   }
   const result = jsonOf(answered);
-  if (result === undefined || bytesOf(result) > operationResultMaxBytes) {
+  if (result === undefined || bytesOf(result) > resourceResultMaxBytes) {
     throw operationErrors.create("contract.invalid_resource_result");
   }
   return checkedResourceResult(declaration, method, result);
@@ -1666,14 +1677,7 @@ const runHandler = async (
         operation.path
       );
     }
-    return checkedReturn(
-      run.compiled,
-      operation,
-      outcome.value,
-      operation.kind === "mutation"
-        ? mutationResultMaxBytes
-        : operationResultMaxBytes
-    );
+    return checkedReturn(run.compiled, operation, outcome.value);
   } catch (error) {
     if (error === staleRun) {
       throw error;
@@ -2088,18 +2092,33 @@ const execute = async (
 };
 
 /**
+ * The latest deadline a call may have: a server invocation's wall time
+ * (spec 18.1) from now. A caller may give less (a screen's call, an
+ * agent's, a step's attempt), never more: a later deadline is held to it.
+ */
+const invocationDeadline = (asked: number): number => {
+  const latest = Date.now() + platformLimits.serverInvocationWallMs;
+  // Not a time at all (NaN, or no end): the latest a call may have.
+  return Number.isFinite(asked) ? Math.min(asked, latest) : latest;
+};
+
+/**
  * Calls the public function `reference` names of `app` for `invocation`,
  * with `args`: what it returned, or why it failed, as its caller may see
  * it (see the header). Never throws.
  */
 export const callOperation = async (
   app: HostedApp,
-  invocation: Invocation,
+  asked: Invocation,
   reference: OperationReference,
   args: unknown,
   options: CallOptions = {}
 ): Promise<OperationResult> => {
   const path = typeof reference.path === "string" ? reference.path : "";
+  const invocation: Invocation = {
+    ...asked,
+    deadline: invocationDeadline(asked.deadline),
+  };
   try {
     const { compiled, operation, admitted, key } = await trusted(() => {
       const known = compiledOf(app.manifest);

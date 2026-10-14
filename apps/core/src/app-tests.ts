@@ -22,6 +22,7 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import type { OperationResult } from "@grasp-os/shared/operations";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { eq, lt } from "drizzle-orm";
@@ -406,7 +407,7 @@ class FixtureSession extends TestTarget {
         },
         store: await this.#storeOf(),
         requestId,
-        deadline: Date.now() + 60_000,
+        deadline: Date.now() + platformLimits.serverInvocationWallMs,
         runId: null,
         // The fixture's role, which nothing changes while the test runs.
         authorize: async () =>
