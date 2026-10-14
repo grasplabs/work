@@ -6,6 +6,7 @@ import {
   callReviewed,
   inboundEmailIndexSchema,
   isRetryable,
+  maxStepRetries,
   storedEmailSchema,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
@@ -369,23 +370,29 @@ export const createTestEngine = (options: TestEngineOptions = {}) => {
           stepsRunning += 1;
           const outer = running;
           try {
-            output = await attempt(retries?.limit ?? 0, async () => {
-              const current: { step: string; refused?: Error } = { step: name };
-              running = current;
-              // A refused call fails the step, caught or not.
-              let result: Awaited<ReturnType<typeof fn>>;
-              try {
-                result = await fn();
-              } catch (error) {
-                throw current.refused ?? error;
-              } finally {
-                running = outer;
+            // As the engine: the platform's attempts when it declares none.
+            output = await attempt(
+              retries?.limit ?? maxStepRetries,
+              async () => {
+                const current: { step: string; refused?: Error } = {
+                  step: name,
+                };
+                running = current;
+                // A refused call fails the step, caught or not.
+                let result: Awaited<ReturnType<typeof fn>>;
+                try {
+                  result = await fn();
+                } catch (error) {
+                  throw current.refused ?? error;
+                } finally {
+                  running = outer;
+                }
+                if (current.refused !== undefined) {
+                  throw current.refused;
+                }
+                return result;
               }
-              if (current.refused !== undefined) {
-                throw current.refused;
-              }
-              return result;
-            });
+            );
           } finally {
             stepsRunning -= 1;
           }

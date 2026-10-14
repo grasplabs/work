@@ -7,6 +7,7 @@ import type { AppId, RunId, WorkflowId } from "./ids.ts";
 import type { Json } from "./json.ts";
 import { isRetryableCode } from "./operations.ts";
 import { permissionActionSchema } from "./permissions.ts";
+import { platformLimits } from "./platform-limits.ts";
 
 // A workflow is code in an App (`workflows/<id>.ts`), written with the
 // workflow SDK. Each run is pinned to the App version it started on, and
@@ -126,16 +127,25 @@ const isTimeZone = (timeZone: string): boolean => {
   }
 };
 
-/** The time zone of a schedule trigger that names none. */
 /**
- * The longest a step's attempt may run (its `timeout`): all of a fresh
- * activation's budget on the owned engine, which gives up on an attempt
- * by then however long its timeout says. The SDK refuses a longer one
- * where the step is written, and the host refuses it at run time. Sleeps
- * and decisions wait durably, so their limits are far longer.
+ * The longest a step's attempt may run (its `timeout`), and what it gets
+ * when it declares none: an attempt's active wall time (spec 18.1, a
+ * minute), which a declaration may only shorten. The SDK refuses a longer
+ * one where the step is written, and the host refuses it at run time.
+ * Longer work is split into steps; sleeps and decisions wait durably, so
+ * their limits are far longer.
  */
-export const maxAttemptTimeoutMs = 14 * 60_000;
+export const maxAttemptTimeoutMs = platformLimits.workflowAttemptWallMs;
 
+/**
+ * The most retries a step may declare: its attempts (spec 18.1, five, its
+ * first included) less its first. The SDK refuses more where the step is
+ * written, and the host at run time; an operator's lower ceiling is held
+ * as each attempt is admitted (core's quotas.ts).
+ */
+export const maxStepRetries = platformLimits.workflowAttemptsPerStep - 1;
+
+/** The time zone of a schedule trigger that names none. */
 export const defaultTimeZone = "UTC";
 
 /** A schedule: a five-field cron expression, read in a time zone. */
