@@ -15,7 +15,14 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 /** Whose spend a scope counts. */
-const scopes = ["deployment", "workflow", "user", "run"] as const;
+const scopes = [
+  "deployment",
+  "workflow",
+  "user",
+  "run",
+  "binding",
+  "binding_day",
+] as const;
 
 /**
  * One provider request: its unique ID, the receipt that it was admitted,

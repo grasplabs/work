@@ -20,7 +20,7 @@ const kindKeys: Readonly<Record<string, readonly string[]>> = {
   duration: [],
   enum: ["values"],
   file: [],
-  id: ["tableName"],
+  id: ["tableName", "onDelete"],
   literal: ["value"],
   model: [],
   money: [],

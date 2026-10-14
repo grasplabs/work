@@ -26,6 +26,7 @@ import {
 } from "@grasp-os/shared/deployment-config";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { memoryLimitsSchema } from "@grasp-os/shared/memory";
+import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { z } from "zod";
 
 import { DeployError } from "./errors.ts";
@@ -258,6 +259,7 @@ const configSchemas: Readonly<Record<string, readonly z.ZodType[]>> = {
   AUDIT_RETENTION_DAYS: [auditRetentionSchema],
   AUDIT_ARCHIVE_RETENTION_DAYS: [auditArchiveRetentionSchema],
   RUN_RETENTION_DAYS: [runRetentionSchema],
+  QUOTA_LIMITS: [quotaLimitsSchema],
 };
 
 /**

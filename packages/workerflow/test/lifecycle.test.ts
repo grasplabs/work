@@ -179,6 +179,78 @@ describe("pause", () => {
     await expect(alarmOf("napper", id)).resolves.toBe(moved);
   });
 
+  it("leaves a sleeping run's deadline where it was when resumed with keepDeadlines, so one that passed while paused comes due at once", async () => {
+    const id = newId();
+    await workflow("napper").create({ id, params: { duration: 50 } });
+    const { deadline } = await suspendedOn("napper", id, "nap");
+    const run = await instance("napper", id);
+
+    await run.pause();
+    await pastTime(deadline + 20);
+    await run.resume({ keepDeadlines: true });
+    const status = await ended("napper", id);
+    const { steps } = await journalOf("napper", id);
+
+    expect({
+      status: status.status,
+      kept: steps.find(({ name }) => name === "nap")?.deadline,
+    }).toStrictEqual({ status: "complete", kept: deadline });
+  });
+
+  it("ignores a control older than the newest it took, so a late pause can't undo a newer resume", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    await suspendedOn("napper", id, "nap");
+    const object = runObject("napper", id);
+
+    const paused = await object.pause({ fence: 1 });
+    const resumed = await object.resume({ keepDeadlines: true, fence: 2 });
+    // The first pause, delivered again late: older than the resume.
+    const late = await object.pause({ fence: 1 });
+    // The resume sent again: its fence is the newest, and taken as before.
+    const again = await object.resume({ keepDeadlines: true, fence: 2 });
+    const state = await object.controlState();
+
+    expect({
+      paused,
+      resumed,
+      late,
+      again,
+      fence: state?.fence,
+      stillPaused: state?.status.status === "paused",
+    }).toStrictEqual({
+      paused: "paused",
+      resumed: "resumed",
+      late: "fenced",
+      again: "ignored",
+      fence: 2,
+      stillPaused: false,
+    });
+  });
+
+  it("refuses resume options it can't read", async () => {
+    const id = newId();
+    await workflow("napper").create({ id });
+    const run = await instance("napper", id);
+
+    await expect(
+      unchecked(
+        async (options) => {
+          await run.resume(options);
+        },
+        { keepDeadlines: "yes" }
+      )
+    ).rejects.toThrow(TypeError);
+    await expect(
+      unchecked(
+        async (options) => {
+          await run.resume(options);
+        },
+        { later: true }
+      )
+    ).rejects.toThrow(TypeError);
+  });
+
   it("keeps events sent while paused for the wait, which takes them once resumed", async () => {
     const id = newId();
     await workflow("approval").create({ id });

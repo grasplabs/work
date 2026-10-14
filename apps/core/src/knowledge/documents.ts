@@ -81,7 +81,7 @@ import type { DeclaredTypes } from "./record-types.ts";
  * Largest document text, in bytes of UTF-8. D1 keeps a row to 2 MB; the
  * version holds the whole text, with room to spare.
  */
-const documentMaxBytes = 1024 * 1024;
+const knowledgeTextMaxBytes = 1024 * 1024;
 
 /** Most sections one document has. */
 const documentMaxSections = 1000;
@@ -143,10 +143,10 @@ const prepare = (
   purge: boolean
 ): Prepared => {
   const bytes = new TextEncoder().encode(text).byteLength;
-  if (bytes > documentMaxBytes) {
+  if (bytes > knowledgeTextMaxBytes) {
     throw knowledgeErrors.create("knowledge.too_large", {
       bytes,
-      maxBytes: documentMaxBytes,
+      maxBytes: knowledgeTextMaxBytes,
     });
   }
   let parsed: ParsedRecord;

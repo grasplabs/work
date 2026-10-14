@@ -29,6 +29,7 @@ import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, readCollection } from "./knowledge.ts";
+import { runInstance } from "./runs.ts";
 import { signedInApi } from "./sign-in.ts";
 
 // A build a chat's code hands to a durable job (`env.build.submit`): it
@@ -536,7 +537,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
       );
       const committing = await chat.stub.buildJob(chat.chat.id, job.id);
       expect(committing?.status).toBe("running");
-      const instance = await env.WORKFLOWS.get(job.id);
+      const instance = runInstance(job.id);
       await instance.restart({ from: { name: "commit" } });
 
       const ended = await endedJob(chat.stub, chat.chat.id, job.id);
@@ -589,7 +590,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
         { timeout: 60_000, interval: 50 }
       );
       await admin.api.permissions.revoke(handbook);
-      const instance = await env.WORKFLOWS.get(job.id);
+      const instance = runInstance(job.id);
       await instance.restart({ from: { name: "commit" } });
 
       // Refused, but what it committed stays its receipt.
@@ -702,7 +703,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
         .parse(submitted)
         .find((job) => job !== exhausted);
       // Its instance ends behind the record's back: the record still runs.
-      const instance = await env.WORKFLOWS.get(started ?? "");
+      const instance = runInstance(started ?? "");
       await instance.terminate();
       waiting.release();
       await answering;
@@ -1109,7 +1110,7 @@ describe("build jobs", { timeout: 180_000 }, () => {
         },
         { timeout: 60_000, interval: 50 }
       );
-      const instance = await env.WORKFLOWS.get(job.id);
+      const instance = runInstance(job.id);
       await instance.terminate();
       await pointAtGateway(
         chat.stub,

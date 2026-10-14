@@ -6,6 +6,7 @@
  * workerd.
  */
 import { execFileSync, spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import {
   mkdirSync,
@@ -23,6 +24,8 @@ import { PassThrough } from "node:stream";
 import { routerSecretHeader } from "../packages/shared/src/router.ts";
 import { d1DatabasesOf, writeD1Service } from "./workerd-d1.ts";
 import { writeR2Service } from "./workerd-r2.ts";
+import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
+import type { SandboxSupervisor } from "./workerd-sandbox.ts";
 import { coreWranglerConfig, smokeConfig } from "./workerd-smoke-config.ts";
 import { coreStarted, installedOnWorkerd } from "./workerd-smoke-start.ts";
 import type { KnownGap } from "./workerd-smoke-start.ts";
@@ -84,27 +87,46 @@ writeR2Service(out);
 const storage = path.join(out, "storage");
 mkdirSync(storage);
 
-writeFileSync(
-  path.join(out, "config.capnp"),
-  smokeConfig({ port: PORT, routerSecret: ROUTER_SECRET, modules, storage })
-);
-
-const server = spawn("workerd", ["serve", path.join(out, "config.capnp")], {
-  stdio: ["ignore", "pipe", "pipe"],
-});
-
-// Everything workerd writes, line by line, both shown and checked.
-const output = new PassThrough();
-for (const stream of [server.stdout, server.stderr]) {
-  createInterface({ input: stream }).on("line", (line) => {
-    console.info(line);
-    output.write(`${line}\n`);
-  });
-}
-const lines = createInterface({ input: output })[Symbol.asyncIterator]();
-
+// Everything from here runs inside the scope that stops the sandbox
+// supervisor and core and removes `out`, however the run ends.
+let sandbox: SandboxSupervisor | undefined;
+let server: ChildProcess | undefined;
 try {
-  await coreStarted(server, {
+  // The sandbox supervisor core's SANDBOX_HOST reaches, with its pool of
+  // workerd processes, as on-prem runs it beside core.
+  sandbox = await startSandboxSupervisor({ workerd: nativeWorkerd });
+
+  writeFileSync(
+    path.join(out, "config.capnp"),
+    smokeConfig({
+      port: PORT,
+      sandboxSocket: sandbox.socket,
+      routerSecret: ROUTER_SECRET,
+      modules,
+      storage,
+    })
+  );
+
+  const coreProcess = spawn(
+    "workerd",
+    ["serve", path.join(out, "config.capnp")],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+    }
+  );
+  server = coreProcess;
+
+  // Everything workerd writes, line by line, both shown and checked.
+  const output = new PassThrough();
+  for (const stream of [coreProcess.stdout, coreProcess.stderr]) {
+    createInterface({ input: stream }).on("line", (line) => {
+      console.info(line);
+      output.write(`${line}\n`);
+    });
+  }
+  const lines = createInterface({ input: output })[Symbol.asyncIterator]();
+
+  await coreStarted(coreProcess, {
     url: `http://127.0.0.1:${PORT}/health`,
     headers: { [routerSecretHeader]: ROUTER_SECRET },
     fetch,
@@ -112,7 +134,7 @@ try {
     retryDelayMs: RETRY_DELAY_MS,
   });
   const excused = await installedOnWorkerd(
-    server,
+    coreProcess,
     { [Symbol.asyncIterator]: () => lines },
     knownGaps,
     INSTALL_TIMEOUT_MS
@@ -126,6 +148,7 @@ try {
       : "core runs on workerd, and its built-in content installed but for the known gaps above"
   );
 } finally {
-  server.kill();
+  server?.kill();
+  await sandbox?.stop();
   rmSync(out, { force: true, recursive: true });
 }

@@ -37,6 +37,9 @@ import type { HostedApp, Invocation, Runner } from "../src/operations.ts";
 // SDK's runner runs it; "malicious" runners stand for App code that talks
 // to its channel directly, as code in an isolate could.
 
+/** The public operation output limit of spec 18.1: 256 KiB of UTF-8 JSON. */
+const outputLimit = 256 * 1024;
+
 const noteFields = {
   title: v.string().trim().min(1).max(200),
   body: v.string().max(100_000).default(""),
@@ -194,6 +197,16 @@ const echo = mutation({
   handler: (_ctx, args) => "x".repeat(args.size),
 });
 
+/** Returns `count` copies of `unit`: one character, of one or more bytes. */
+const repeated = query({
+  args: {
+    unit: v.string().min(1).max(2),
+    count: v.number().integer().min(0).max(1_000_000),
+  },
+  returns: v.string(),
+  handler: (_ctx, args) => args.unit.repeat(args.count),
+});
+
 /**
  * Patches a note, reads it back (at the revision its staged change shows),
  * and patches it again at that revision: one commit, one revision more.
@@ -329,6 +342,7 @@ const notesApp = app({
       stress,
       insertThenGuard,
       echo,
+      repeated,
       editTwice,
       takeFirst,
       guardedOrFallback,
@@ -343,7 +357,7 @@ const notesApp = app({
     "notes.insertOnly": { tables: { notes: { insert: true } } },
     "notes.peek": { tables: { notes: { insert: true } } },
   },
-  screens: {},
+  screens: [],
   uses: [],
 });
 
@@ -1311,15 +1325,42 @@ describe("bounds on one mutation", () => {
     });
   });
 
-  it("refuses a result that wouldn't fit its commit, before committing anything", async () => {
+  it("holds what a query returns to the public operation output limit, in UTF-8 bytes", async () => {
+    const fixture = await notes();
+    const { owner } = fixture;
+    // A string's JSON is its characters and two quotes; "é" is two bytes
+    // of UTF-8 but one character, so a count of characters would let
+    // nearly twice the limit through.
+    const returned = async (unit: string, count: number) =>
+      codeOf(
+        await call(fixture, owner, "query", "notes.repeated", { unit, count })
+      );
+    expect({
+      atLimit: await returned("x", outputLimit - 2),
+      pastLimit: await returned("x", outputLimit - 1),
+      wideAtLimit: await returned("é", (outputLimit - 2) / 2),
+      widePastLimit: await returned("é", (outputLimit - 2) / 2 + 1),
+    }).toStrictEqual({
+      atLimit: "ok",
+      pastLimit: "contract.result_too_large",
+      wideAtLimit: "ok",
+      widePastLimit: "contract.result_too_large",
+    });
+  });
+
+  it("holds what a mutation returns to the same limit, before committing anything", async () => {
     const fixture = await notes();
     const { owner } = fixture;
     expect({
       large: failureOf(
-        await call(fixture, owner, "mutation", "notes.echo", { size: 300_000 })
+        await call(fixture, owner, "mutation", "notes.echo", {
+          size: outputLimit - 1,
+        })
       ),
       fits: codeOf(
-        await call(fixture, owner, "mutation", "notes.echo", { size: 200_000 })
+        await call(fixture, owner, "mutation", "notes.echo", {
+          size: outputLimit - 2,
+        })
       ),
     }).toStrictEqual({
       large: {

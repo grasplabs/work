@@ -1,5 +1,4 @@
 import { Type } from "@earendil-works/pi-ai";
-import { OPENAI_MODELS } from "@earendil-works/pi-ai/providers/openai.models";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
@@ -685,7 +684,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
     }
   });
 
-  it("caps the answer's length at the call's limit, or a default, never above the model's", async () => {
+  it("caps the answer's length at the call's limit, or a default, never above what the model can answer", async () => {
     const { gateway, gatewayEnv } = withGateway([
       answer("One"),
       answer("Two"),
@@ -709,11 +708,9 @@ describe("model gateway", { timeout: 30_000 }, () => {
         z.object({ max_output_tokens: z.number() }).parse(body)
           .max_output_tokens
     );
-    expect(sentLimits).toStrictEqual([
-      500,
-      16_384,
-      OPENAI_MODELS["gpt-5.4"].maxTokens,
-    ]);
+    // GPT-5.4 may write 128,000 tokens, but an answer takes at most a
+    // quarter of its 272,000-token window.
+    expect(sentLimits).toStrictEqual([500, 16_384, 68_000]);
   });
 
   it("keeps a small window's default answer to a quarter of it, so the request has room", async () => {
@@ -729,6 +726,39 @@ describe("model gateway", { timeout: 30_000 }, () => {
 
     // Llama 3.3's window is 24,000 tokens, which Workers AI counts the
     // answer's cap against.
+    expect(gateway.requests.map(({ body }) => body)).toMatchObject([
+      { max_completion_tokens: 6000 },
+    ]);
+  });
+
+  it("refuses a call through a binding that asks for more than the model can answer, never cutting it short", async () => {
+    const { gateway, gatewayEnv } = withGateway([answer("Hi.")]);
+    const working = work();
+    const appId =
+      "context" in working && working.context.type === "app"
+        ? working.context.appId
+        : undefined;
+    const call = async (maxTokens: number) =>
+      await models(gatewayEnv).call({
+        model: workersAi,
+        input: "Write something.",
+        maxTokens,
+        purpose: "app.resource",
+        trigger: newPerson(),
+        work: work(),
+        binding: {
+          app: appIdSchema.parse(appId),
+          alias: "writer",
+          budget: null,
+        },
+      });
+
+    // A quarter of Llama 3.3's 24,000-token window, and one token more.
+    await expect(call(6001)).rejects.toMatchObject({
+      code: "model.answer_too_long",
+    });
+    expect(gateway.requests).toStrictEqual([]);
+    await call(6000);
     expect(gateway.requests.map(({ body }) => body)).toMatchObject([
       { max_completion_tokens: 6000 },
     ]);

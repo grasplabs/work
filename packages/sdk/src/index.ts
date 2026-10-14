@@ -10,13 +10,27 @@ export type {
   AppDefinition,
   OperationAccess,
   OperationTree,
+  ScreenDefinition,
   TableVerbs,
 } from "./app.ts";
 export { AppError } from "./app-error.ts";
+export { migration } from "./migration.ts";
+export type {
+  Migration,
+  MigrationContext,
+  MigrationDefinition,
+} from "./migration.ts";
 export { resource } from "./resources.ts";
 export type {
   AnyResource,
+  BrowserResource,
+  ComposioCall,
+  ComposioContract,
+  ConnectorAction,
+  ConnectorContract,
   ConnectorResource,
+  FilesResource,
+  LinksResource,
   KnowledgeHit,
   KnowledgeOperation,
   KnowledgeResource,
@@ -24,3 +38,19 @@ export type {
   ResourceKind,
   TemplateResource,
 } from "./resources.ts";
+// References (spec 8, 32.1): what the generated `#grasp` modules hold.
+export type {
+  AnyOperationReference,
+  ArgsOf,
+  FilesOperation,
+  FilesReference,
+  LinksReference,
+  OperationReference,
+  PreferencesReference,
+  ProgressOf,
+  ReferenceKind,
+  ReferenceVisibility,
+  ReturnOf,
+  ScreenInputOf,
+  ScreenReference,
+} from "./references.ts";

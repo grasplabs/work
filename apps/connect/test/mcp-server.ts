@@ -6,7 +6,10 @@
  * what they return, and how the network between them fails, and read back
  * which tools actually ran.
  */
-import { notPerformedMetaKey } from "@grasp-os/connector-kit/manifest";
+import {
+  notPerformedMetaKey,
+  outcomeUnknownMetaKey,
+} from "@grasp-os/connector-kit/manifest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { afterEach, beforeEach, vi } from "vite-plus/test";
@@ -22,6 +25,23 @@ export interface FakeTool {
   resourceField?: string;
   /** The properties its input schema declares. */
   inputs?: string[];
+  /**
+   * The input schema it lists, as JSON, in place of the one `inputs`
+   * makes; it then takes any input. Changed between requests, it is a
+   * server whose tool changed.
+   */
+  inputSchema?: unknown;
+  /**
+   * The input schema it lists, as JSON text, for one too deep to be made
+   * with `JSON.stringify`; in place of `inputSchema`.
+   */
+  inputSchemaText?: string;
+  /** The output schema it lists, as JSON; by default it lists none. */
+  outputSchema?: unknown;
+  /** Other names it is listed under too, its own included for a duplicate. */
+  alsoListedAs?: string[];
+  /** It is listed a second time by its name alone, with no schema. */
+  alsoListedBare?: boolean;
   /** What running it with `input` returns. */
   run: (input: Record<string, unknown>) => FakeResult | Promise<FakeResult>;
 }
@@ -29,13 +49,18 @@ export interface FakeTool {
 export interface FakeResult {
   output: Record<string, unknown>;
   /** Content blocks to answer with instead of `output`, such as an image. */
-  content?: { type: "image"; data: string; mimeType: string }[];
+  content?: (
+    | { type: "image"; data: string; mimeType: string }
+    | { type: "text"; text: string }
+  )[];
   /** The IDs of the resources it read. */
   provenance?: string[];
   /** It failed, and says so in its result. */
   isError?: boolean;
   /** Its failed result says it did nothing (`notPerformedMetaKey`). */
   notPerformed?: boolean;
+  /** Its failed result says its outcome is unknown (`outcomeUnknownMetaKey`). */
+  outcomeUnknown?: boolean;
 }
 
 /**
@@ -95,6 +120,62 @@ const padded = (response: Response, padding: number): Response => {
   return new Response(stream, { headers: response.headers });
 };
 
+const isToolList = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  "method" in body &&
+  body.method === "tools/list";
+
+const listMessageSchema = z.looseObject({
+  result: z.looseObject({
+    tools: z.array(z.looseObject({ name: z.string() })),
+  }),
+});
+
+/**
+ * A `tools/list` answer (a JSON body) with each tool's schemas as `tools`
+ * list them, where they set their own.
+ */
+const listedAs = async (
+  response: Response,
+  tools: readonly FakeTool[]
+): Promise<Response> => {
+  const message = listMessageSchema.parse(await response.json());
+  // Schemas given as text go in by a placeholder, once the rest is text.
+  const raw = new Map<string, string>();
+  const listed = message.result.tools.flatMap((each) => {
+    const tool = tools.find(({ name }) => name === each.name);
+    let inputSchema: unknown = tool?.inputSchema;
+    if (tool?.inputSchemaText !== undefined) {
+      inputSchema = `raw-schema-${crypto.randomUUID()}`;
+      raw.set(JSON.stringify(inputSchema), tool.inputSchemaText);
+    }
+    const entry = {
+      ...each,
+      ...(inputSchema === undefined ? {} : { inputSchema }),
+      ...(tool?.outputSchema === undefined
+        ? {}
+        : { outputSchema: tool.outputSchema }),
+    };
+    return [
+      entry,
+      ...(tool?.alsoListedAs ?? []).map((name) => ({ ...entry, name })),
+      ...(tool?.alsoListedBare === true ? [{ name: entry.name }] : []),
+    ];
+  });
+  let text = JSON.stringify({
+    ...message,
+    result: { ...message.result, tools: listed },
+  });
+  for (const [placeholder, schema] of raw) {
+    text = text.replace(placeholder, () => schema);
+  }
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.set("content-type", "application/json");
+  return new Response(text, { headers });
+};
+
 interface Ran {
   tool: string;
   input: Record<string, unknown>;
@@ -113,9 +194,14 @@ const serverWith = (tools: readonly FakeTool[], ran: Ran[]): McpServer => {
       tool.name,
       {
         inputSchema: z.looseObject(
-          Object.fromEntries(
-            (tool.inputs ?? []).map((input) => [input, z.string().optional()])
-          )
+          tool.inputSchema === undefined && tool.inputSchemaText === undefined
+            ? Object.fromEntries(
+                (tool.inputs ?? []).map((input) => [
+                  input,
+                  z.string().optional(),
+                ])
+              )
+            : {}
         ),
         annotations: { readOnlyHint: tool.readOnly ?? false },
         _meta:
@@ -125,8 +211,14 @@ const serverWith = (tools: readonly FakeTool[], ran: Ran[]): McpServer => {
       },
       async (input: Record<string, unknown>) => {
         ran.push({ tool: tool.name, input });
-        const { output, content, provenance, isError, notPerformed } =
-          await tool.run(input);
+        const {
+          output,
+          content,
+          provenance,
+          isError,
+          notPerformed,
+          outcomeUnknown,
+        } = await tool.run(input);
         return {
           content: content ?? [
             { type: "text" as const, text: JSON.stringify(output) },
@@ -138,6 +230,9 @@ const serverWith = (tools: readonly FakeTool[], ran: Ran[]): McpServer => {
               ? {}
               : { "grasp-os/provenance": provenance }),
             ...(notPerformed === true ? { [notPerformedMetaKey]: true } : {}),
+            ...(outcomeUnknown === true
+              ? { [outcomeUnknownMetaKey]: true }
+              : {}),
           },
         };
       }
@@ -170,7 +265,21 @@ export const mcpServerWith = (
     unkeyed: number;
     /** How the next tool call fares; back to `ok` after it. */
     network: Network;
-  } = { ran: [], requests: 0, unkeyed: 0, network: "ok" };
+    /**
+     * Whether the next `tools/list` is turned away with a 401, as for a
+     * key the server refuses; back to `false` after it.
+     */
+    refuseList: boolean;
+    /** The `_meta` each tool call came with, in order. */
+    callMeta: unknown[];
+  } = {
+    ran: [],
+    requests: 0,
+    unkeyed: 0,
+    network: "ok",
+    refuseList: false,
+    callMeta: [],
+  };
 
   const answer = async (request: Request): Promise<Response> => {
     state.requests += 1;
@@ -181,6 +290,19 @@ export const mcpServerWith = (
     const network = isToolCall(body) ? state.network : "ok";
     if (isToolCall(body)) {
       state.network = "ok";
+      const params: unknown =
+        typeof body === "object" && body !== null && "params" in body
+          ? body.params
+          : undefined;
+      state.callMeta.push(
+        typeof params === "object" && params !== null && "_meta" in params
+          ? params._meta
+          : undefined
+      );
+    }
+    if (isToolList(body) && state.refuseList) {
+      state.refuseList = false;
+      return new Response("Unauthorized", { status: 401 });
     }
     if (network === "unauthorised") {
       return new Response("Unauthorized", { status: 401 });
@@ -206,6 +328,9 @@ export const mcpServerWith = (
       await response.text();
       return rpcError(body, -32_602);
     }
+    if (isToolList(body) && !stream) {
+      return await listedAs(response, tools);
+    }
     return padded(response, stream ? padding : 0);
   };
 
@@ -214,6 +339,8 @@ export const mcpServerWith = (
     state.requests = 0;
     state.unkeyed = 0;
     state.network = "ok";
+    state.refuseList = false;
+    state.callMeta = [];
   };
 
   return { state, answer, reset };

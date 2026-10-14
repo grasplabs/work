@@ -47,12 +47,37 @@ export class JournalSchemaError extends Error {
 }
 
 /**
- * The journal's own layout; a change to it is a new version. No journal
- * predates version 8 (nothing earlier was released), so a run of any other
- * version is refused when it is read; a later layout that changes it
- * brings its own upgrade.
+ * The journal's own layout; a change to it is a new version, with the
+ * upgrade from the one before it (`upgradedSchema`). No journal predates
+ * version 8 (nothing earlier was released), so a run of an older version,
+ * or a newer one, is refused when it is read.
+ *
+ * - 9: `run.control_fence`, the newest fence a control came with (run.ts,
+ *   `ControlFence`).
  */
-export const journalSchemaVersion = 8;
+export const journalSchemaVersion = 9;
+
+/**
+ * The journal's version, once upgraded to this engine's where it was the
+ * one before (`journalSchemaVersion`): each upgrade in one write, as the
+ * journal is first read by an engine that knows it. Of a version it
+ * doesn't upgrade, left as it was, for the caller to refuse.
+ */
+const upgradedSchema = (
+  sql: SqlStorage
+): number | string | null | undefined => {
+  const [stored] = sql
+    .exec<{ schema: number | string | null }>("SELECT schema FROM run")
+    .toArray();
+  if (stored?.schema === 8) {
+    // In one turn, so in one of the object's atomic writes: the column and
+    // the version move together.
+    sql.exec("ALTER TABLE run ADD COLUMN control_fence INTEGER");
+    sql.exec("UPDATE run SET schema = 9");
+    return 9;
+  }
+  return stored?.schema;
+};
 
 /**
  * The largest event payload a run accepts, as the encoded text it keeps:
@@ -204,6 +229,12 @@ export interface RunRow extends Record<string, SqlStorageValue> {
   notify_at: number | null;
   /** How many deliveries in a row the host failed: the backoff's count. */
   notify_failures: number;
+  /**
+   * The newest fence a pause, resume or terminate came with (run.ts,
+   * `ControlFence`), or null before any did: a control with an older one
+   * is ignored, so a late command can't undo a newer one.
+   */
+  control_fence: number | null;
 }
 
 /**
@@ -380,7 +411,8 @@ export const createJournal = (sql: SqlStorage): void => {
       purge_at INTEGER,
       executions INTEGER NOT NULL DEFAULT 1,
       notify_at INTEGER,
-      notify_failures INTEGER NOT NULL DEFAULT 0
+      notify_failures INTEGER NOT NULL DEFAULT 0,
+      control_fence INTEGER
     );
     CREATE TABLE IF NOT EXISTS activations (
       generation INTEGER PRIMARY KEY,
@@ -605,10 +637,7 @@ export const notifyDue = (sql: SqlStorage): number | null => {
   if (!hasJournal(sql)) {
     return null;
   }
-  const [run] = sql
-    .exec<{ schema: SqlStorageValue }>("SELECT schema FROM run")
-    .toArray();
-  if (run?.schema !== journalSchemaVersion) {
+  if (upgradedSchema(sql) !== journalSchemaVersion) {
     return null;
   }
   return sql
@@ -624,21 +653,19 @@ export const readRun = (sql: SqlStorage): RunRow | undefined => {
   }
   // The version first, on its own: another layout's columns may not be
   // the ones read below.
-  const [stored] = sql
-    .exec<{ schema: number | string | null }>("SELECT schema FROM run")
-    .toArray();
-  if (stored === undefined) {
+  const schema = upgradedSchema(sql);
+  if (schema === undefined) {
     return undefined;
   }
-  if (stored.schema !== journalSchemaVersion) {
-    // No journal predates this version; see journalSchemaVersion.
+  if (schema !== journalSchemaVersion) {
+    // No journal predates version 8; see journalSchemaVersion.
     throw new JournalSchemaError(
-      `This run's journal has schema ${String(stored.schema)}, where this engine reads only schema ${journalSchemaVersion}`
+      `This run's journal has schema ${String(schema)}, where this engine reads only schema ${journalSchemaVersion}`
     );
   }
   return sql
     .exec<RunRow>(
-      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures FROM run"
+      "SELECT schema, run_uid, definition, version, instance_id, start_key, params, created_at, status, generation, execution_uid, paused_at, lease_until, wake_at, event_count, event_bytes, stream_bytes, output, error, ended_at, rollback_trigger, rollback_end, rollback, rollback_replays, schedule, redeliverable, success_retention_ms, error_retention_ms, purge_at, executions, notify_at, notify_failures, control_fence FROM run"
     )
     .toArray()[0];
 };
@@ -675,6 +702,50 @@ export const readAttempt = (
       attempt
     )
     .toArray()[0];
+
+/**
+ * What holds a `do` step's attempt while it may still act: the generation
+ * of the activation that claimed it, and its deadline. Only the step's
+ * latest attempt, not yet ended, of an activation that still holds the
+ * run and hasn't ended, has one.
+ */
+export interface AttemptLease {
+  readonly generation: number;
+  readonly deadline: number;
+}
+
+/**
+ * The lease of attempt `attempt` at the `do` step whose idempotency key is
+ * `key`, if it still holds: none once the attempt has ended (its outcome
+ * journaled, timed out, or superseded), once a newer attempt was claimed,
+ * and once its activation is over or the run has been taken over (a
+ * command, a newer activation, its deletion).
+ */
+export const readAttemptLease = (
+  sql: SqlStorage,
+  key: string,
+  attempt: number
+): AttemptLease | undefined =>
+  sql
+    .exec<{ generation: number; deadline: number }>(
+      `SELECT attempts.generation AS generation, attempts.deadline AS deadline
+       FROM steps
+       JOIN attempts ON attempts.ordinal = steps.ordinal
+         AND attempts.attempt = steps.attempt
+       JOIN run ON run.generation = attempts.generation
+       JOIN activations ON activations.generation = attempts.generation
+       WHERE steps.idempotency_key = ? AND steps.type = 'do'
+         AND steps.state = 'running' AND steps.attempt = ?
+         AND attempts.ended_at IS NULL AND activations.ended_at IS NULL`,
+      key,
+      attempt
+    )
+    .toArray()[0];
+
+/** The run's generation now: the activation that holds it, if one does. */
+export const readGeneration = (sql: SqlStorage): number | undefined =>
+  sql.exec<{ generation: number }>("SELECT generation FROM run").toArray()[0]
+    ?.generation;
 
 const eventColumns = "seq, type, payload, key, accepted_at, consumed_by";
 

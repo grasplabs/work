@@ -3,8 +3,6 @@ import { appErrors } from "@grasp-os/shared/apps";
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { introspectWorkflow } from "cloudflare:test";
-import type { WorkflowInstanceIntrospector } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -22,6 +20,7 @@ import {
   finished,
   leave,
   liveStatus,
+  runObject,
   stepDone,
   stopped,
   woken,
@@ -29,18 +28,20 @@ import {
 import { refusal, signedInApi } from "./sign-in.ts";
 import {
   appWith,
+  bindModel,
   grantMail,
   invoiceMail,
   mailer,
+  modelRegistration,
   runEvents,
   server,
   workflowFiles,
 } from "./workflow-apps.ts";
 
 // Workflows are code the agent writes, run for real: committed to an App,
-// tested when their version is made current, and run on Cloudflare
-// Workflows by the dispatcher, each in an isolate of its own. Workflows'
-// test helpers skip sleeps; the outside systems faked
+// tested when their version is made current, and run on the engine
+// (Workerflow) by the dispatcher, each in an isolate of its own. Time is
+// moved on where a run sleeps (`woken`); the outside systems faked
 // here are the model provider behind AI Gateway, and a mail provider's MCP
 // server behind the real connect (test/mail-server.ts).
 //
@@ -65,7 +66,7 @@ const extractionModel = "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
  * and books the invoice, through its App's server code, typed by the
  * App's own class (`appServer`).
  */
-const invoiceWorkflow = `import { appServer, model, money, person, workflow, z } from "@grasp-os/sdk/workflow";
+const invoiceWorkflow = `import { appServer, money, person, workflow, z } from "@grasp-os/sdk/workflow";
 
 import type { App } from "../app/server.ts";
 
@@ -76,7 +77,6 @@ export default workflow(
     params: {
       threshold: money({ label: "Review invoices above", currency: "EUR", default: 500_000, sensitive: true }),
       reviewer: person({ label: "Reviewer", default: "role:admin" }),
-      extractionModel: model({ label: "Extraction model", default: "${extractionModel}", sensitive: true }),
     },
   },
   async (step, { input, params, env }) => {
@@ -90,7 +90,7 @@ export default workflow(
     }
     const extracted = await step.llm("extract", {
       description: "Read the total and currency from the invoice",
-      model: params.extractionModel,
+      binding: "extractor",
       instructions: "Read the invoice's total in cents and its ISO 4217 currency.",
       input: input.text,
       schema: z.object({ total: z.int(), currency: z.string() }),
@@ -163,21 +163,6 @@ const mailStep = (
     }
   });`;
 
-/** The run the introspector saw start, once it has. */
-const onlyRun = async (
-  introspector: Awaited<ReturnType<typeof introspectWorkflow>>
-): Promise<WorkflowInstanceIntrospector> =>
-  await vi.waitFor(
-    async () => {
-      const [instance] = await introspector.get();
-      if (!instance) {
-        throw new Error("No run yet");
-      }
-      return instance;
-    },
-    { timeout: 10_000 }
-  );
-
 /**
  * Where core's record has a run now, as the App's run list shows it: unlike
  * a run's status, the list never asks the engine.
@@ -226,16 +211,22 @@ describe("workflow runs", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const reviewer = await personApi("admin");
     const app = await appWith(builder, {
+      ...modelRegistration({ extractor: 6000 }),
       "workflows/invoice-approval.ts": invoiceWorkflow,
       "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
     });
-    await using introspector = await introspectWorkflow(env.WORKFLOWS);
-    await introspector.modifyAll(async (modifier) => {
-      await modifier.mockStepResult(
-        { name: "extract" },
-        { total: 800_000, currency: "EUR" }
-      );
+    // An admin binds the model its AI step goes through.
+    await bindModel(app, "extractor", extractionModel);
+    // The model reads the invoice's total.
+    const gateway = fakeGateway({
+      text: JSON.stringify({ total: 800_000, currency: "EUR" }),
+      inputTokens: 10,
+      outputTokens: 5,
     });
+    const ai: AiBinding = env.AI;
+    const answering = vi
+      .spyOn(ai, "fetch")
+      .mockImplementation(gateway.binding.fetch);
     const invoice = {
       number: "INV-7",
       purchaseOrder: "PO-1",
@@ -246,7 +237,6 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       "invoice-approval",
       invoice
     );
-    const instance = await onlyRun(introspector);
     // An admin, as the reviewer parameter says, approves.
     const decision = await vi.waitFor(
       async () => {
@@ -262,14 +252,17 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       },
       { timeout: 10_000 }
     );
+    answering.mockRestore();
     await reviewer.api.decisions.answer(decision, { approved: true });
-    await instance.waitForStatus("complete");
+    await finished(run.id);
     const logged = await allEvents();
     const audited = logged.filter(({ target }) => target?.id === run.id);
 
     expect({
-      output: await instance.getOutput(),
-      matched: await instance.waitForStepResult({ name: "match-po" }),
+      matched: await runObject(run.id).stepOutput({
+        name: "match-po",
+        count: 1,
+      }),
       status: await builder.api.workflows.status(run.id),
       runs: await builder.api.workflows.list(app),
       audited: audited
@@ -278,26 +271,50 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       auditedFor: new Set(
         audited.map(({ detail }) => `${detail.app}/${detail.version}`)
       ),
+      asked: gateway.requests.map(({ body }) => body),
     }).toMatchObject({
-      output: {
-        status: "booked",
-        entry: `ledger-INV-7-for-${builder.userId}`,
+      matched: { kind: "value", value: { amount: 800_000 } },
+      status: {
+        status: "completed",
+        version: 1,
+        workflow: "invoice-approval",
+        output: {
+          status: "booked",
+          entry: `ledger-INV-7-for-${builder.userId}`,
+        },
       },
-      matched: { amount: 800_000 },
-      status: { status: "completed", version: 1, workflow: "invoice-approval" },
       runs: [{ id: run.id, status: "completed" }],
-      // The extraction is mocked, so it ran no step of its own.
       audited: [
         "workflow.run.completed",
         "workflow.run.started",
         "workflow.step.completed $params",
         "workflow.step.completed book",
+        "workflow.step.completed extract",
         "workflow.step.completed match-po",
         "workflow.step.completed review",
         "workflow.step.completed review#ask",
         "workflow.step.completed review#asked",
       ],
       auditedFor: new Set([`${app}/1`]),
+      // Half the binding's 6,000 tokens, as the step may ask again. The
+      // binding holds the whole bound to what Llama 3.3 can answer, a
+      // quarter of its window, as an action would ask for all of it.
+      asked: [{ max_completion_tokens: 3000 }],
+    });
+  });
+
+  it("refuse binding a model that can't give the declared bound, though only an AI step uses it", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, {
+      ...modelRegistration({ extractor: 6001 }),
+      "workflows/invoice-approval.ts": invoiceWorkflow,
+      "workflows/invoice-approval.workflow-tests.ts": invoiceTests,
+    });
+    await expect(
+      bindModel(app, "extractor", extractionModel)
+    ).rejects.toMatchObject({
+      code: "resource.model_too_small",
+      details: { maxTokens: 6001, usableTokens: 6000 },
     });
   });
 
@@ -492,21 +509,22 @@ ${mailStep("after")}`,
 
   it("check a model's answer against the step's schema, formats included", async () => {
     const builder = await personApi("builder");
-    const app = await appWith(
-      builder,
-      workflowFiles(
+    const app = await appWith(builder, {
+      ...modelRegistration({ extractor: 6000 }),
+      ...workflowFiles(
         "reader",
         `  return await step.llm("extract", {
     description: "Read the total",
-    model: "${extractionModel}",
+    binding: "extractor",
     instructions: "Read the total in cents.",
     input: "Total 12.34 EUR",
     schema: z.object({ total: z.int(), from: z.email(), on: z.iso.date() }),
     retries: { limit: 0 },
   });`,
         { extract: { total: 1234, from: "anna@example.com", on: "2026-09-26" } }
-      )
-    );
+      ),
+    });
+    await bindModel(app, "extractor", extractionModel);
     const runWithAnswers = async (...texts: string[]) => {
       const gateway = fakeGateway(
         ...texts.map((text) => ({ text, inputTokens: 10, outputTokens: 5 }))
@@ -733,11 +751,8 @@ Object.hasOwn = (target, name) => {
   return "slept";`
       )
     );
-    await using introspector = await introspectWorkflow(env.WORKFLOWS);
-    await introspector.modifyAll(async (modifier) => {
-      await modifier.disableSleeps();
-    });
     const run = await builder.api.workflows.start(app, "sleeper");
+    await woken(run.id, "nap");
     await finished(run.id);
     const { status, output } = await builder.api.workflows.status(run.id);
     expect({ status, output }).toStrictEqual({
@@ -915,24 +930,30 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
       )
     );
 
-    // A cancel whose termination failed: the row says cancelled, and the
-    // instance goes on. Its next load does nothing more, and cancelling
-    // again terminates it.
+    // A cancel whose termination failed: the row has its tombstone, and
+    // the engine's run goes on. Its next activation does nothing more, and
+    // the row says cancelled once the engine has ended it.
     const leftOver = await builder.api.workflows.start(app, "cancellable");
-    // Stopped once it waits: a run the local engine pauses while its code
-    // still loads can go on in that execution after it resumes, with the
-    // row it read before this test marked it cancelled.
+    // Stopped once it waits, so its next activation reads the row this
+    // test marks cancelled.
     await stepDone(leftOver.id, "$params");
     await stopped(leftOver.id);
     await env.DB.prepare(
-      "UPDATE workflow_runs SET status = 'cancelled' WHERE id = ?"
+      "UPDATE workflow_runs SET cancel_requested_at = ? WHERE id = ?"
     )
-      .bind(leftOver.id)
+      .bind(Date.now(), leftOver.id)
       .run();
     await woken(leftOver.id);
     await finished(leftOver.id);
     const afterLoad = await liveStatus(leftOver.id);
-    await builder.api.workflows.cancel(leftOver.id);
+    const leftOverRow = await vi.waitFor(
+      async () => {
+        const { status } = await builder.api.workflows.status(leftOver.id);
+        expect(status).toBe("cancelled");
+        return status;
+      },
+      { timeout: 10_000, interval: 100 }
+    );
 
     // A cancel that raced a start that failed: the engine has no instance
     // to terminate. A cancel of the row still running marks and audits it,
@@ -971,6 +992,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
           (target?.id === waiting.id || target?.id === paused.id)
       ).length,
       afterLoad,
+      leftOverRow,
       after: await hitsOf(app, builder.userId, "after"),
       raced,
       racedAudited: events.filter(
@@ -982,6 +1004,7 @@ export default workflowTests(definition, [{ name: "fails", expect: { error: "bad
       live: ["terminated", "terminated"],
       audited: 2,
       afterLoad: "errored",
+      leftOverRow: "cancelled",
       after: 0,
       raced: ["cancelled", "cancelled"],
       racedAudited: 1,
@@ -1164,7 +1187,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
     });
   });
 
-  it("stop at a refused call without retrying it, with a report for the run's owner", async () => {
+  it("stop at a call the server answered with an error without retrying it, with a report for the run's owner", async () => {
     const admin = await personApi("admin");
     const owner = await personApi("builder");
     const starter = await personApi("builder");
@@ -1243,10 +1266,9 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
           step: "send",
           // What the step works on, without the values.
           input: { to: "string", subject: "string" },
-          error: {
-            code: "connect.action_failed",
-            message: "The action reported an error.",
-          },
+          // On Composio a tool's error can't be told from one after it
+          // acted: unknown, never sent again.
+          error: { code: "connect.outcome_unknown" },
         },
       },
       seen: {
@@ -1258,7 +1280,7 @@ describe("workflow side effects and failures", { timeout: 60_000 }, () => {
         starter: [started.id, byTrigger.id],
         owner: [null, null],
       },
-      audited: ["connect.action_failed"],
+      audited: ["connect.outcome_unknown"],
       unknownApp: "app.not_found",
     });
   });

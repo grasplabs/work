@@ -1,5 +1,4 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
-import { defaultGatewayModels } from "@grasp-os/shared/deployment-config";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
@@ -72,6 +71,9 @@ const call = async (
  * characters a token than this, so the estimate comes out high.
  */
 const estimatedCharactersPerToken = 3;
+
+/** How many claims the extract step's instructions ask for at most. */
+const listedAtMost = /List at most (?<count>\d+)/u;
 
 /**
  * A quote and a backslash: characters JSON writes escaped, two for each,
@@ -170,11 +172,13 @@ const interview = (title: string) => ({
 
 /**
  * An App created from the intake by `builder` (the admin, unless given),
- * its Playbook granted by `admin`.
+ * its Playbook granted by `admin`, and its `extractor` bound to the
+ * test's model unless `bind` is false.
  */
 const copyOf = async (
   admin: Awaited<ReturnType<typeof signedInApi>>,
-  builder = admin
+  builder = admin,
+  { bind = true }: { bind?: boolean } = {}
 ) => {
   const created = await builder.api.apps.blueprints.create(intake, {
     name: `Intake ${unique()}`,
@@ -184,6 +188,16 @@ const copyOf = async (
     await grantReviewed(admin.api, id);
   }
   await builder.api.apps.versions.setCurrent(created.app.id, 1);
+  // The model its reading goes through (app.ts), bound by an admin, as
+  // on the engine's Resources tab.
+  if (bind) {
+    await admin.api.resourceBindings.approve({
+      app: created.app.id,
+      alias: "extractor",
+      target: { kind: "model", model: testModel },
+      reviewed: { version: 1 },
+    });
+  }
   await ordinaryData(created.app.id);
   await serverBuilt(created.app.id, 1);
   return {
@@ -932,9 +946,62 @@ describe("reading notes", { timeout: 60_000 }, () => {
     ],
   };
 
+  it("reads no notes until an admin binds the model it reads with", async () => {
+    await builtins(env).ensureInstalled(await fingerprintOf(release));
+    const admin = await signedInApi(idp, "admin");
+    const { app } = await copyOf(admin, admin, { bind: false });
+    await revokeOtherCopies(admin.api, intake, app);
+    const gateway = fakeGateway();
+    const ai: AiBinding = env.AI;
+    const answering = vi
+      .spyOn(ai, "fetch")
+      .mockImplementation(gateway.binding.fetch);
+    let run: { id: string };
+    try {
+      run = await admin.api.screens.startRun(app, "extract", {
+        source: {
+          title: `Unbound ${unique()}`,
+          medium: "interview",
+          date: "2026-09-22",
+          from: "Anna",
+        },
+        notes,
+      });
+      await runEnded(run.id);
+    } finally {
+      answering.mockRestore();
+    }
+    const review = await admin.api.resourceBindings.review(app);
+    expect({
+      run: await admin.api.workflows.status(run.id),
+      asked: gateway.requests.length,
+      extractor: review.resources.map(({ alias, state, kind, usedBy }) => ({
+        alias,
+        state,
+        kind,
+        usedBy,
+      })),
+    }).toMatchObject({
+      run: {
+        status: "failed",
+        failure: { error: { code: "resource.unavailable" } },
+      },
+      asked: 0,
+      // Shown to its admin to bind, as any declared resource.
+      // Shown as used by the workflow step that reads with it.
+      extractor: [
+        {
+          alias: "extractor",
+          state: "unbound",
+          kind: "model",
+          usedBy: ["workflow:extract/extract"],
+        },
+      ],
+    });
+  });
+
   it("has a model take tagged statements out of pasted notes, as a draft reviewed before it is saved to the Playbook", async () => {
-    // No model set: the run reads with its default, which a new
-    // deployment allows.
+    // Read with the model an admin bound its extractor to.
     const { admin, app } = await setUp();
     const title = `Close ${unique()}`;
     const source = {
@@ -1003,14 +1070,10 @@ describe("reading notes", { timeout: 60_000 }, () => {
     const [request] = gateway.requests;
     const sent = JSON.stringify(request?.body);
     const { params } = await admin.api.workflows.get(app, "extract");
-    const model = params?.find(({ name }) => name === "model");
 
     expect({
-      model: {
-        value: model?.value,
-        default: model?.default,
-        allowed: defaultGatewayModels.some((ref) => ref === model?.default),
-      },
+      // Its model is the binding's: nothing to set on the workflow.
+      params: params?.map(({ name }) => name),
       output: draftId.statements,
       origin: opened.origin,
       draft: opened.draft,
@@ -1025,7 +1088,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
       ),
       tags: statementDocuments.map(({ text }) => text.includes("  - blocker")),
     }).toStrictEqual({
-      model: { value: null, default: testModel, allowed: true },
+      params: [],
       output: 2,
       origin: "notes",
       draft: {
@@ -1062,7 +1125,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
     });
   });
 
-  it("asks the default model for no more than it may answer, by a conservative estimate", async () => {
+  it("asks the default model for no more than it may answer, by a conservative estimate, and for as many claims as its schema takes", async () => {
     const { admin, app } = await setUp();
     const gateway = fakeGateway({
       text: JSON.stringify(found),
@@ -1109,11 +1172,29 @@ describe("reading notes", { timeout: 60_000 }, () => {
     const estimatedTokens = Math.ceil(
       largest.length / estimatedCharactersPerToken
     );
+    // The claims the instructions ask for at most, and the schema takes:
+    // more than it takes is an answer refused and asked for again.
+    const told =
+      typeof system === "string"
+        ? listedAtMost.exec(system)?.groups?.count
+        : undefined;
+    const { properties } = z
+      .object({
+        properties: z.object({
+          statements: z.object({ maxItems: z.number() }),
+        }),
+      })
+      .parse(JSON.parse(schemaLine ?? "null"));
 
     expect({
       answerCap,
       estimateFits: estimatedTokens <= answerCap,
-    }).toStrictEqual({ answerCap: 6000, estimateFits: true });
+      told: Number(told),
+    }).toStrictEqual({
+      answerCap: 3000,
+      estimateFits: true,
+      told: properties.statements.maxItems,
+    });
   });
 
   it("shows its steps as its code runs them, where its runs are reviewed", async () => {
@@ -1131,7 +1212,7 @@ describe("reading notes", { timeout: 60_000 }, () => {
             ],
             otherwise: [],
           },
-          { type: "step", name: "extract", kind: "ai", params: ["model"] },
+          { type: "step", name: "extract", kind: "ai", params: [] },
           { type: "step", name: "propose", kind: "exact", sideEffect: true },
         ],
       },
@@ -1140,7 +1221,6 @@ describe("reading notes", { timeout: 60_000 }, () => {
 
   it("refuses notes of a date that doesn't exist at the run's input, before any model reads them", async () => {
     const { admin, app } = await setUp();
-    await admin.api.workflows.params.set(app, "extract", "model", testModel);
     const gateway = fakeGateway();
     const ai: AiBinding = env.AI;
     const answering = vi
@@ -1231,7 +1311,6 @@ describe("stakeholder chats", { timeout: 90_000 }, () => {
 
   it("invites a stakeholder whose chat, once they finished it, a model takes statements out of, as a guest's draft reviewed before it is saved", async () => {
     const { admin, app } = await setUp();
-    await admin.api.workflows.params.set(app, "extract", "model", testModel);
     const name = `Ben ${unique()}`;
     const invited = z
       .object({ ok: z.object({ id: z.string(), link: z.string() }) })
