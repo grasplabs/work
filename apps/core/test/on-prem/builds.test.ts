@@ -109,7 +109,68 @@ describe("the screen compiler on-prem", () => {
     expect(took).toBeLessThan(DEADLINE_MS + 5000);
   });
 
-  it("builds the same screen again once the sandbox stopped it, as a stop isn't cached", async () => {
+  it("runs the compiler once for a screen it was stopped on for its own sake, however often it's viewed", async () => {
+    // Every build kept: one per time the compiler ran to an end it keeps.
+    let kept = 0;
+    const counting = {
+      ...onPrem,
+      FILES: {
+        get: env.FILES.get.bind(env.FILES),
+        put: async (...args: Parameters<R2Bucket["put"]>) => {
+          kept += 1;
+          return await env.FILES.put(...args);
+        },
+      },
+    };
+    const files = screen(`${recursiveTypes}\n// viewed`);
+    // Three views at once, then one more once they're done.
+    const views = await Promise.all(
+      [1, 2, 3].map(async () => await buildScreens(counting, files))
+    );
+    const started = Date.now();
+    const later = await buildScreens(counting, files);
+    const tookLater = Date.now() - started;
+
+    expect(
+      [...views, later].map((built) =>
+        built.ok ? "built" : built.diagnostics[0]?.message.slice(0, 44)
+      )
+    ).toStrictEqual(
+      Array.from(
+        { length: 4 },
+        () => "The compiler was stopped before it finished:"
+      )
+    );
+    expect(kept).toBe(1);
+    // Read from the cache: the compiler didn't run again.
+    expect(tookLater).toBeLessThan(1000);
+  }, 120_000);
+
+  it("reads the compiler's code from core's assets once, however many builds it runs", async () => {
+    let read = 0;
+    const counting = {
+      ...onPrem,
+      ASSETS: {
+        fetch: async (...args: Parameters<Fetcher["fetch"]>) => {
+          if (new Request(...args).url.endsWith("/compiler.js")) {
+            read += 1;
+          }
+          return await env.ASSETS.fetch(...args);
+        },
+        connect: env.ASSETS.connect.bind(env.ASSETS),
+      },
+    };
+    const first = await buildScreens(counting, screen("// first read"));
+    const second = await buildScreens(counting, screen("// second read"));
+
+    expect({ first: first.ok, second: second.ok, read }).toStrictEqual({
+      first: true,
+      second: true,
+      read: 1,
+    });
+  });
+
+  it("builds the same screen again once the sandbox stopped it at its deadline, as that stop isn't cached", async () => {
     const files = screen(`${recursiveTypes}\n// again`);
     const stopped = { ...onPrem, SANDBOX_DEADLINE_MS: "1500" };
     const first = await buildScreens(stopped, files);

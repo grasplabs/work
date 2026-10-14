@@ -146,8 +146,11 @@ const isBuildShaped = (value: unknown): boolean =>
 /**
  * A build on the on-prem sandbox host (platform-sandbox.ts): the
  * compiler's answer, or a failed build when the sandbox ended it at a
- * bound (a type built to recurse, say), which isn't cached, as a build
- * that throws isn't: a bound on wall-clock time can be the load's doing.
+ * bound (a type built to recurse, say). A stop the files reach whatever
+ * the load (CPU time, memory, a crash, an answer too large) is cached as
+ * the failed build it is, so an App whose screen holds the checker can't
+ * hold the builders' share of the sandbox on every view. A stop at the
+ * wall-clock deadline isn't: the load can be what made it reach it.
  */
 const builtOnHost = async (
   env: BuildEnv,
@@ -180,9 +183,17 @@ const builtOnHost = async (
         },
       ],
     };
-    return { built: failed, cache: false };
+    return { built: failed, cache: error.verdict !== "deadline" };
   }
 };
+
+/**
+ * The builds running now in this isolate, by their cache key: a build
+ * asked for while the same one runs waits for it rather than start the
+ * compiler again, so views of one App's screen take one place in the
+ * sandbox, not one each.
+ */
+const buildsRunning = new Map<string, Promise<unknown>>();
 
 /**
  * A build of the files `select` picks, the only ones it reads: limited
@@ -190,8 +201,9 @@ const builtOnHost = async (
  * EU), or built in the compiler's isolate and stored there. A failed build
  * is cached too: the same files fail the same way with the same compiler,
  * so an App that doesn't build can't start the compiler on every request.
- * A build that throws isn't cached. Two requests for a build that isn't
- * cached yet may both build it; they build the same thing.
+ * A build that throws isn't cached. Two requests in one isolate for a
+ * build that isn't cached yet share one (`buildsRunning`); in two
+ * isolates they may both build it, and build the same thing.
  */
 const cachedBuild = async <Build>(
   env: BuildEnv,
@@ -220,31 +232,52 @@ const cachedBuild = async <Build>(
   // where nothing compiles has nothing cached to serve.
   const host = sessionHost(env);
   const cacheKey = `${kind}-builds/${await buildKey(files)}.json`;
+  const isBuild = (value: unknown): value is Build | FailedBuild =>
+    isBuildShaped(value);
   const cached = await env.FILES.get(cacheKey);
   if (cached) {
     return await cached.json<Build>();
   }
-  if (host !== undefined) {
-    const isBuild = (value: unknown): value is Build | FailedBuild =>
-      isBuildShaped(value);
-    const { built, cache } = await builtOnHost(
-      env,
-      host,
-      compilerMethods[kind],
-      files
-    );
-    if (!isBuild(built)) {
-      throw new TypeError("The compiler answered something else than a build.");
+  // Taken in the same turn as the check: of the views that missed the
+  // cache together, the first starts the build and the others wait on it.
+  const running = buildsRunning.get(cacheKey);
+  if (running !== undefined) {
+    const shared = await running;
+    if (isBuild(shared)) {
+      return shared;
     }
-    if (cache) {
-      await env.FILES.put(cacheKey, JSON.stringify(built));
-    }
-    return built;
   }
-  const compiler = startScreenCompiler(env.LOADER, env.ASSETS);
-  const built = await build(compiler, files);
-  await env.FILES.put(cacheKey, JSON.stringify(built));
-  return built;
+  const building = (async (): Promise<Build | FailedBuild> => {
+    if (host !== undefined) {
+      const { built, cache } = await builtOnHost(
+        env,
+        host,
+        compilerMethods[kind],
+        files
+      );
+      if (!isBuild(built)) {
+        throw new TypeError(
+          "The compiler answered something else than a build."
+        );
+      }
+      if (cache) {
+        await env.FILES.put(cacheKey, JSON.stringify(built));
+      }
+      return built;
+    }
+    const compiler = startScreenCompiler(env.LOADER, env.ASSETS);
+    const built = await build(compiler, files);
+    await env.FILES.put(cacheKey, JSON.stringify(built));
+    return built;
+  })();
+  buildsRunning.set(cacheKey, building);
+  try {
+    return await building;
+  } finally {
+    if (buildsRunning.get(cacheKey) === building) {
+      buildsRunning.delete(cacheKey);
+    }
+  }
 };
 
 /**

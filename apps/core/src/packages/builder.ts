@@ -177,7 +177,10 @@ const boundedInCore = async (run: () => Promise<unknown>): Promise<unknown> => {
     return await run();
   } catch (error) {
     if (error instanceof Error && overLimit.test(error.message)) {
-      throw new PlatformBoundError(error.message, { cause: error });
+      throw new PlatformBoundError(error.message, {
+        cause: error,
+        verdict: "cpu",
+      });
     }
     throw error;
   }

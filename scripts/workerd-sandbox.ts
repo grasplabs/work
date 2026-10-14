@@ -19,7 +19,8 @@
  *   while it runs; past `memoryLimitBytes` it's killed and the App refused.
  *   Core's own platform code (the screen compiler, the package builder)
  *   may ask for more, up to `maxMemoryLimitBytes`, never App code: only
- *   core reaches this supervisor, and it asks only for those.
+ *   a top-level session of an owner in `platformOwners` may ask, and only
+ *   core reaches this supervisor.
  *   Should V8 reach its own heap limit first, it aborts the process: a
  *   process that dies during its one call is that call's doing, refused as
  *   the App's too, never an outage it could fake.
@@ -160,6 +161,12 @@ export interface SandboxSupervisorOptions {
    * (the screen compiler, the package builder) needs more than App code.
    */
   maxMemoryLimitBytes?: number;
+  /**
+   * The owners whose sessions may ask for more memory: core's platform
+   * code, `platform:builder` by default. Any other owner's ask, or a child
+   * session's, is ignored: it gets `memoryLimitBytes`.
+   */
+  platformOwners?: readonly string[];
   /** How often a busy process's memory is read. */
   memoryPollMs?: number;
   /** Where processes' memory and CPU time are read: `/proc` on Linux, `/bin/ps` on macOS. */
@@ -210,6 +217,9 @@ const MIB = 1024 * 1024;
  */
 const manifestMaxBytes = 4 * MIB;
 
+/** The owners whose sessions may ask for more memory: core's builds. */
+const defaultPlatformOwners: readonly string[] = ["platform:builder"];
+
 const defaults = {
   // One call per process: a session waiting on core holds its process,
   // which costs no CPU, so the pool is sized for the sessions that may
@@ -236,8 +246,12 @@ const defaults = {
    * The screen compiler type-checks with TypeScript, which on plain
    * workerd (no heap limit to collect against) grows well past what
    * Cloudflare's 128 MB isolate holds it to: about 400 MB for one screen.
+   * The builder's owner holds half the pool by default, so with four
+   * processes, builds may hold up to 2 GiB together, beside App code's
+   * 256 MiB each: what GRA-367's cgroup must leave room for.
    */
   maxMemoryLimitBytes: 1024 * MIB,
+  platformOwners: defaultPlatformOwners,
   memoryPollMs: 100,
   usageProbe: defaultUsageProbe,
   startupMs: 10_000,
@@ -1183,7 +1197,7 @@ class SandboxPool {
         callId,
         deadlineMs,
         cpuLimitMs,
-        memoryLimitBytes: this.#memoryOf(request),
+        memoryLimitBytes: this.#memoryOf(request, owner, parent),
         waitMs,
         refuse,
         parent,
@@ -1199,13 +1213,22 @@ class SandboxPool {
 
   /**
    * The resident memory a session may use: what it asks for in MiB
-   * (`memoryHeader`), at most `maxMemoryLimitBytes`; `memoryLimitBytes`
-   * when it asks for nothing.
+   * (`memoryHeader`), at most `maxMemoryLimitBytes`, for a top-level
+   * session of a platform owner; `memoryLimitBytes` for any other, or when
+   * it asks for nothing.
    */
-  #memoryOf(request: IncomingMessage): number {
-    const { memoryLimitBytes, maxMemoryLimitBytes } = this.#settings;
+  #memoryOf(
+    request: IncomingMessage,
+    owner: string,
+    parent: string | undefined
+  ): number {
+    const { memoryLimitBytes, maxMemoryLimitBytes, platformOwners } =
+      this.#settings;
     const mib = Number(request.headers[memoryHeader]);
-    return Number.isInteger(mib) && mib > 0
+    return parent === undefined &&
+      platformOwners.includes(owner) &&
+      Number.isInteger(mib) &&
+      mib > 0
       ? Math.min(mib * MIB, maxMemoryLimitBytes)
       : memoryLimitBytes;
   }

@@ -71,6 +71,18 @@ const boundVerdicts = new Set([
 /** The sandbox ended a build for what it was handed: its own bound, and why. */
 export class PlatformBoundError extends Error {
   override name = "PlatformBoundError";
+  /**
+   * Which bound: `deadline` (wall-clock time, which load can make it
+   * reach), or `cpu`, `memory`, `crashed` or `refused`, which the input
+   * reaches whatever the load. A stop at the runtime's own limit in core's
+   * Loader counts as `cpu`.
+   */
+  readonly verdict: string;
+
+  constructor(message: string, options: ErrorOptions & { verdict: string }) {
+    super(message, options);
+    this.verdict = options.verdict;
+  }
 }
 
 /**
@@ -119,7 +131,7 @@ export const runPlatformCode = async (
     const verdict = sandboxVerdictOf(error);
     const message = error instanceof Error ? error.message : String(error);
     if (verdict !== undefined && boundVerdicts.has(verdict)) {
-      throw new PlatformBoundError(message, { cause: error });
+      throw new PlatformBoundError(message, { cause: error, verdict });
     }
     if (verdict === "busy") {
       // Its owner holds as many sessions as it may: nothing the input did.

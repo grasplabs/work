@@ -6,6 +6,7 @@ import type { PackageTarball } from "@grasp-os/shared/packages";
 import { packageBuilder } from "../../src/packages/builder.ts";
 import type { PackageBuilderEnv } from "../../src/packages/builder.ts";
 import { PlatformBoundError } from "../../src/platform-sandbox.ts";
+import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 
 // The package builder on plain workerd
@@ -54,6 +55,24 @@ const hostile: Readonly<Record<string, string>> = {
     } catch {
       return [{ key: "refused" }];
     }
+  }`),
+  // Reads a tarball of several chunks: its second chunk, then its first
+  // again, then past its third, each refused or not.
+  rereadLater: takenOver(`async inspectRead(limits, headers, read) {
+    const { key } = headers[0];
+    const tried = async (offset) => {
+      try {
+        await read(key, offset);
+        return "read";
+      } catch {
+        return "refused";
+      }
+    };
+    const first = await read(key, 0);
+    const second = await tried(first.byteLength);
+    const again = await tried(0);
+    const skipped = await tried(3 * first.byteLength);
+    return [{ key: [second, again, skipped].join(" ") }];
   }`),
   // Writes back more of an artifact than it may be.
   overwrite: takenOver(`async buildRead(request, read, write) {
@@ -155,10 +174,15 @@ const packageOf = async (kind: string): Promise<PackageTarball> => {
 };
 
 /** Core's static assets as far as the builder reads them. */
-const assetsServing = (source: string, wasm: ArrayBuffer): Fetcher => ({
+const assetsServing = (
+  source: string,
+  wasm: ArrayBuffer,
+  reads: { builder: number }
+): Fetcher => ({
   fetch: async (input, init) => {
     const { pathname } = new URL(new Request(input, init).url);
     if (pathname.endsWith("/package-builder.js")) {
+      reads.builder += 1;
       return await Promise.resolve(
         new Response(source, { headers: { "content-type": "text/javascript" } })
       );
@@ -219,10 +243,34 @@ export default {
       return new Response("core answers");
     }
     const { pathname, searchParams } = new URL(request.url);
+    if (pathname === "/app") {
+      // An App's call, as core runs one in a session of the App's own.
+      return Response.json(
+        await outcomeOf(
+          async () =>
+            await runInSession(env.SANDBOX_HOST, {
+              mainModule: "m.js",
+              modules: {
+                "m.js":
+                  'import { WorkerEntrypoint } from "cloudflare:workers";\nexport class E extends WorkerEntrypoint { async go() { return 42; } }',
+              },
+              entrypoint: "E",
+              method: "go",
+              args: [],
+              cpuMs: 5000,
+              wallMs: 10_000,
+              owner: "app-stand-in",
+            })
+        )
+      );
+    }
+    // How often the builder's code was read from the assets.
+    const reads = { builder: 0 };
     const builderEnv = {
       ASSETS: assetsServing(
         hostile[searchParams.get("builder") ?? ""] ?? env.PACKAGE_BUILDER,
-        env.ESBUILD_WASM
+        env.ESBUILD_WASM,
+        reads
       ),
       LOADER: noLoader,
       RUNTIME_PROFILE: env.RUNTIME_PROFILE,
@@ -249,6 +297,20 @@ export default {
             target: "browser",
             packages: [pkg],
           });
+        })
+      );
+    }
+    if (pathname === "/inspect-twice") {
+      // Two resolves' inspections, each starting the builder afresh.
+      return Response.json(
+        await outcomeOf(async () => {
+          for (const _ of [1, 2]) {
+            // oxlint-disable-next-line no-await-in-loop -- one after the other
+            const builder = await packageBuilder(builderEnv);
+            // oxlint-disable-next-line no-await-in-loop -- one after the other
+            await builder.inspect(packageLimits, [pkg]);
+          }
+          return reads.builder;
         })
       );
     }

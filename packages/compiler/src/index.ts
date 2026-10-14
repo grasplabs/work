@@ -215,28 +215,61 @@ export interface PlatformCode {
 }
 
 /**
- * The screen compiler's code, read from core's static assets for each
- * build: the sandbox host runs one call per process, so nothing there
- * stays warm, and core keeps none of it once the call is over. The kit
- * goes as its JSON text, which core never parses.
+ * The platform code read so far, by assets binding and then by what it is
+ * and its release's version: read once per isolate, as it is the
+ * release's, so a build doesn't read 15 to 28 MB of it from the assets
+ * before the sandbox has even taken it. Only a read that worked is kept.
+ */
+const platformCodeRead = new WeakMap<
+  Fetcher,
+  Map<string, Promise<PlatformCode>>
+>();
+
+const memoisedCode = async (
+  assets: Fetcher,
+  key: string,
+  read: () => Promise<PlatformCode>
+): Promise<PlatformCode> => {
+  const reads =
+    platformCodeRead.get(assets) ?? new Map<string, Promise<PlatformCode>>();
+  platformCodeRead.set(assets, reads);
+  let code = reads.get(key);
+  if (code === undefined) {
+    code = read();
+    reads.set(key, code);
+  }
+  try {
+    return await code;
+  } catch (error) {
+    reads.delete(key);
+    throw error;
+  }
+};
+
+/**
+ * The screen compiler's code, read from core's static assets once per
+ * isolate (`memoisedCode`): the sandbox host runs one call per process,
+ * so nothing there stays warm. The kit goes as its JSON text, which core
+ * never parses.
  */
 export const screenCompilerCode = async (
   assets: Fetcher
-): Promise<PlatformCode> => {
-  const [source, kit] = await Promise.all([
-    readCompilerBytes(assets, compilerAssets.source, "javascript"),
-    readCompilerBytes(assets, compilerAssets.kit, "json"),
-  ]);
-  return {
-    mainModule: "compiler.js",
-    modules: {
-      "compiler.js": { type: "js", bytes: new Uint8Array(source) },
-      [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
-    },
-    nodejsCompat: true,
-    cpuMs: isolateSettings.limits.cpuMs,
-  };
-};
+): Promise<PlatformCode> =>
+  await memoisedCode(assets, `compiler:${version}`, async () => {
+    const [source, kit] = await Promise.all([
+      readCompilerBytes(assets, compilerAssets.source, "javascript"),
+      readCompilerBytes(assets, compilerAssets.kit, "json"),
+    ]);
+    return {
+      mainModule: "compiler.js",
+      modules: {
+        "compiler.js": { type: "js", bytes: new Uint8Array(source) },
+        [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
+      },
+      nodejsCompat: true,
+      cpuMs: isolateSettings.limits.cpuMs,
+    };
+  });
 
 /**
  * How the package builder's isolate runs: no bindings, no importable env,
@@ -285,18 +318,19 @@ export const startPackageBuilder = async (
  */
 export const packageBuilderCode = async (
   assets: Fetcher
-): Promise<PlatformCode> => {
-  const [source, wasm] = await Promise.all([
-    readCompilerBytes(assets, compilerAssets.packageBuilder, "javascript"),
-    readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
-  ]);
-  return {
-    mainModule: "package-builder.js",
-    modules: {
-      "package-builder.js": { type: "js", bytes: new Uint8Array(source) },
-      "esbuild.wasm": { type: "wasm", bytes: new Uint8Array(wasm) },
-    },
-    nodejsCompat: false,
-    cpuMs: packageBuilderSettings.limits.cpuMs,
-  };
-};
+): Promise<PlatformCode> =>
+  await memoisedCode(assets, `package-builder:${version}`, async () => {
+    const [source, wasm] = await Promise.all([
+      readCompilerBytes(assets, compilerAssets.packageBuilder, "javascript"),
+      readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+    ]);
+    return {
+      mainModule: "package-builder.js",
+      modules: {
+        "package-builder.js": { type: "js", bytes: new Uint8Array(source) },
+        "esbuild.wasm": { type: "wasm", bytes: new Uint8Array(wasm) },
+      },
+      nodejsCompat: false,
+      cpuMs: packageBuilderSettings.limits.cpuMs,
+    };
+  });

@@ -128,6 +128,12 @@ const cases: Record<string, Case> = {
     body: "await log('started'); return { a: await probe.ping(1), b: await probe.withCallback(async (n) => n * 2), c: await probe.ping(2), env: Object.keys(this.env) };",
   },
   busy: { body: "for (;;) {}", cpuMs: 500, wallMs: 20_000 },
+  // Allocates without end, until the supervisor's memory bound ends it.
+  hogs: {
+    body: "const held = []; for (;;) { held.push(new Uint8Array(16 * 1024 * 1024).fill(1)); const until = Date.now() + 10; while (Date.now() < until) {} }",
+    cpuMs: 20_000,
+    wallMs: 30_000,
+  },
   waits: {
     body: "return await probe.slow(1500);",
     cpuMs: 500,
@@ -275,7 +281,8 @@ const run = async (
   env: StandInEnv,
   name: string,
   owner: string,
-  parent?: string
+  parent?: string,
+  memoryMib?: number
 ) => {
   const chosen = cases[name];
   if (chosen === undefined) {
@@ -318,6 +325,7 @@ const run = async (
         ],
         owner,
         ...(parent === undefined ? {} : { parent }),
+        ...(memoryMib === undefined ? {} : { memoryMib }),
         cpuMs: chosen.cpuMs ?? 5000,
         wallMs: chosen.wallMs ?? 10_000,
         ...(chosen.lingerMs === undefined ? {} : { lingerMs: chosen.lingerMs }),
@@ -610,7 +618,10 @@ export default {
         env,
         searchParams.get("case") ?? "",
         searchParams.get("owner") ?? "app-stand-in",
-        searchParams.get("parent") ?? undefined
+        searchParams.get("parent") ?? undefined,
+        searchParams.has("memory")
+          ? Number(searchParams.get("memory"))
+          : undefined
       );
       // Long enough for what the isolate left behind to try its capability.
       await scheduler.wait(800);

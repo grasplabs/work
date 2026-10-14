@@ -143,6 +143,38 @@ describe("the package builder on the on-prem sandbox", () => {
     expect(outcome.value).toStrictEqual([{ key: "refused" }]);
   }, 60_000);
 
+  it("lets the builder read a tarball of several chunks only on, from where it left off", async () => {
+    const outcome = await call("builder=rereadLater&package=large");
+
+    expect(outcome.value).toStrictEqual([{ key: "read refused refused" }]);
+  }, 60_000);
+
+  it("reads the builder's code from core's assets once, however many calls it makes", async () => {
+    const outcome = await call("package=plain", "/inspect-twice");
+
+    expect({ status: outcome.status, read: outcome.value }).toStrictEqual({
+      status: "ok",
+      read: 1,
+    });
+  }, 60_000);
+
+  it("keeps running App code while builds hold the builders' share of the pool", async () => {
+    // One build holds its owner's share, and another waits for it: an App's
+    // call takes the pool's other process meanwhile, at once.
+    const first = call("builder=busy");
+    await sleep(500);
+    const second = call("builder=busy");
+    await sleep(200);
+    const app = await call("", "/app");
+    await Promise.all([first, second]);
+
+    expect({ status: app.status, value: app.value }).toStrictEqual({
+      status: "ok",
+      value: 42,
+    });
+    expect(app.ms).toBeLessThan(2000);
+  }, 60_000);
+
   it("takes no more of an artifact written back than it may be", async () => {
     const outcome = await call("builder=overwrite", "/build");
 

@@ -180,8 +180,9 @@ const platformOf = (
     return undefined;
   }
   if (Object.keys(chunkedModules).length === 0) {
-    return moduleReader === undefined
-      ? { nodejsCompat: nodejsCompat === true, chunkedModules, moduleReader }
+    // No platform code: no reader, and no flag, which is for it alone.
+    return moduleReader === undefined && nodejsCompat !== true
+      ? { nodejsCompat: false, chunkedModules, moduleReader }
       : undefined;
   }
   const reader =
@@ -197,7 +198,7 @@ const platformOf = (
 };
 
 /** `body` as a call, or undefined for anything else. */
-const sessionCallOf = (body: unknown): SessionCall | undefined => {
+export const sessionCallOf = (body: unknown): SessionCall | undefined => {
   if (!isRecord(body)) {
     return undefined;
   }
@@ -259,7 +260,7 @@ const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: false });
  * whole and in order, and made what the Loader takes. A chunk that isn't
  * bytes, is empty or runs past the module's size fails the call.
  */
-const readChunkedModules = async (
+export const readChunkedModules = async (
   chunked: Record<string, ChunkedModule>,
   read: (...args: unknown[]) => Promise<unknown>
 ): Promise<Record<string, LoadedModule>> => {
