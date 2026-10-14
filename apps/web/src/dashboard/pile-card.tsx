@@ -178,7 +178,7 @@ export const PileCard = ({
   return (
     <article
       aria-labelledby={nameId}
-      className="bg-card relative flex min-w-0 flex-col items-center gap-5 overflow-hidden rounded-xl border px-6 pt-14 pb-8 text-center text-sm"
+      className="bg-card relative flex min-w-0 flex-col items-center gap-5 overflow-hidden rounded-xl border px-6 pt-14 pb-8 text-center text-sm @3xl:pt-9"
     >
       {/* The brand's Columns pattern, in the app's greys: the card is never an empty white field. */}
       <span

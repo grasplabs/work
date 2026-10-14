@@ -24,6 +24,7 @@ import { readNotifications } from "./failed-workflows.tsx";
 import { defaultWidgets } from "./layout.ts";
 import { todayUtc } from "./programme.ts";
 import type { ReportReads } from "./report.ts";
+import { noReturns } from "./returns.ts";
 import { fullDays } from "./runs.ts";
 import type { Signals } from "./signals.tsx";
 import { decidesRequests } from "./to-do.tsx";
@@ -303,7 +304,9 @@ export const readDashboard = async (
   ]);
   return {
     waiting,
-    board: { layout, workflows, engines, runs, signals },
+    // Core keeps no hours, stages, goals or teams' work yet: the return,
+    // goals and teams widgets show they have nothing to count.
+    board: { layout, returns: noReturns, workflows, engines, runs, signals },
     programme: read,
     today: todayUtc(),
     report,

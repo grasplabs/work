@@ -7,8 +7,9 @@ import { apiOf, pageOf, peopleIn, release } from "./people.ts";
 import { pileOf, toCard } from "./pile.ts";
 
 // The dashboard, from the nav: what waits on the person; the widget
-// board under it, with where their workflows and engines stand, the runs
-// this week and what could be better, each block opening in full; and,
+// board under it, with the prototype's return, goals, teams and
+// workflows, then where their engines stand, the runs this week and what
+// could be better, each block opening in full; and,
 // for admins, the latest of the audit trail. Each person lays out their
 // own board: widgets taken off, added back and moved stay so over a
 // reload, until they put it back as it began. Without a plan for the
@@ -73,11 +74,22 @@ test("someone with nothing waiting sees no pile or activity, and a board with no
   await expect(
     page.getByRole("region", { name: "Waiting elsewhere" })
   ).toHaveCount(0);
-  // The board is there, with nothing on it yet.
-  await expect(page.getByRole("region", { name: "Workflows" })).toContainText(
-    "No workflows yet.",
+  // The board is there, with nothing on it yet: core counts no hours,
+  // goals or teams' work, and there are no workflows in their columns.
+  await expect(
+    page.getByRole("region", { name: "Return a month" })
+  ).toContainText("No workflow with counted hours here yet.");
+  await expect(page.getByRole("region", { name: "Board goals" })).toContainText(
+    "No goals yet."
+  );
+  await expect(
+    page.getByRole("region", { name: "Teams with AI" })
+  ).toContainText("No teams yet.");
+  const workflows = page.getByRole("region", { name: "Workflows" });
+  await expect(workflows.getByRole("list", { name: "Ran" })).toBeAttached(
     pageRead
   );
+  await expect(workflows.getByRole("link")).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Engines" })).toContainText(
     "No engines yet.",
     pageRead
@@ -144,7 +156,7 @@ test("a builder sees their workflows and engine on the board, and opens them in 
   ).toContainText("1 of 2 workflows ran");
 
   // In full, each engine with its workflows.
-  await engines.getByRole("button", { name: "Open Engines in full" }).click();
+  await engines.getByRole("button", { name: "Open in full" }).click();
   let dialog = page.getByRole("dialog", { name: "Engines" });
   await expect(
     dialog.getByRole("region", { name }).getByRole("link", { name: "later" })
@@ -163,9 +175,7 @@ test("a builder sees their workflows and engine on the board, and opens them in 
   await expect(today.getByRole("cell").nth(1)).toHaveText(/^[1-9]\d*$/u);
 
   // In full, the month, with each workflow's runs.
-  await runs
-    .getByRole("button", { name: "Open Runs this week in full" })
-    .click();
+  await runs.getByRole("button", { name: "Open in full" }).click();
   dialog = page.getByRole("dialog", { name: "Runs this week" });
   await expect(
     dialog
@@ -177,12 +187,10 @@ test("a builder sees their workflows and engine on the board, and opens them in 
   await expect(dialog).toHaveCount(0);
 
   // In full, each state with its workflows, each opening its own page.
-  await workflows
-    .getByRole("button", { name: "Open Workflows in full" })
-    .click();
+  await workflows.getByRole("button", { name: "Open in full" }).click();
   dialog = page.getByRole("dialog", { name: "Workflows" });
   const ran = dialog
-    .getByRole("region", { name: "Ran" })
+    .getByRole("list", { name: "Ran" })
     .getByRole("listitem")
     .filter({ hasText: name });
   await expect(ran).toContainText("tally");
@@ -194,7 +202,7 @@ test("a builder sees their workflows and engine on the board, and opens them in 
 const boardTitles = (page: Page) =>
   page.getByRole("heading", {
     level: 2,
-    name: /^(?:Workflows|Engines|Runs this week|Could be better)$/u,
+    name: /^(?:Return a month|Board goals|Teams with AI|Workflows|Engines|Runs this week|Could be better)$/u,
   });
 
 test("a person takes a widget off, adds it back and moves it, kept over a reload, and puts the board back as it began", async ({
@@ -212,92 +220,111 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   const reset = page.getByRole("button", { name: "Back to how it began" });
 
   // As it begins: every widget, and nothing to put back.
-  await expect(titles).toHaveText([
+  const begun = [
+    "Return a month",
+    "Board goals",
+    "Teams with AI",
     "Workflows",
     "Engines",
     "Runs this week",
     "Could be better",
-  ]);
+  ];
+  await expect(titles).toHaveText(begun);
   await expect(reset).toHaveCount(0);
+  // The empty card is always there, last; with every widget on the board
+  // there is nothing to add from it.
+  const add = page.getByRole("button", { name: "Add a widget" });
+  await expect(add).toBeDisabled();
 
   // Taken off, it stays off.
   await page
-    .getByRole("button", { name: "Remove Engines", exact: true })
+    .getByRole("region", { name: "Engines" })
+    .getByRole("button", { name: "Take off the dashboard" })
     .click();
-  await expect(titles).toHaveText([
-    "Workflows",
-    "Runs this week",
-    "Could be better",
-  ]);
-  await expect.poll(saved).toStrictEqual(["workflows", "runs", "signals"]);
+  const without = begun.filter((title) => title !== "Engines");
+  await expect(titles).toHaveText(without);
+  await expect
+    .poll(saved)
+    .toStrictEqual([
+      "return",
+      "goals",
+      "teams",
+      "workflows",
+      "runs",
+      "signals",
+    ]);
   await page.reload();
-  await expect(titles).toHaveText([
-    "Workflows",
-    "Runs this week",
-    "Could be better",
-  ]);
+  await expect(titles).toHaveText(without);
 
-  // Added back from the empty card, last; with every widget on the board,
-  // the card is gone.
-  await page.getByRole("button", { name: "Add a widget" }).click();
+  // Added back from the empty card, last.
+  await add.click();
   await page
     .getByRole("dialog", { name: "Add a widget" })
     .getByRole("button", { name: "Engines" })
     .click();
-  await expect(titles).toHaveText([
-    "Workflows",
-    "Runs this week",
-    "Could be better",
-    "Engines",
-  ]);
-  await expect(page.getByRole("button", { name: "Add a widget" })).toHaveCount(
-    0
-  );
+  await expect(titles).toHaveText([...without, "Engines"]);
+  await expect(add).toBeDisabled();
   await expect
     .poll(saved)
-    .toStrictEqual(["workflows", "runs", "signals", "engines"]);
+    .toStrictEqual([
+      "return",
+      "goals",
+      "teams",
+      "workflows",
+      "runs",
+      "signals",
+      "engines",
+    ]);
 
   // Moved a place back with the keys on its grip, which keeps them.
-  const grip = page.getByRole("button", { name: "Move Engines", exact: true });
+  const grip = page.getByRole("button", {
+    name: "Move Engines: drag it, or use the arrow keys",
+    exact: true,
+  });
   await grip.focus();
   await page.keyboard.press("ArrowLeft");
-  await expect(titles).toHaveText([
+  const moved = [
+    "Return a month",
+    "Board goals",
+    "Teams with AI",
     "Workflows",
     "Runs this week",
     "Engines",
     "Could be better",
-  ]);
+  ];
+  await expect(titles).toHaveText(moved);
   await expect(grip).toBeFocused();
   await expect
     .poll(saved)
-    .toStrictEqual(["workflows", "runs", "engines", "signals"]);
+    .toStrictEqual([
+      "return",
+      "goals",
+      "teams",
+      "workflows",
+      "runs",
+      "engines",
+      "signals",
+    ]);
   await page.reload();
-  await expect(titles).toHaveText([
-    "Workflows",
-    "Runs this week",
-    "Engines",
-    "Could be better",
-  ]);
+  await expect(titles).toHaveText(moved);
 
   // Back as it began, over a reload too.
   await reset.click();
-  await expect(titles).toHaveText([
-    "Workflows",
-    "Engines",
-    "Runs this week",
-    "Could be better",
-  ]);
+  await expect(titles).toHaveText(begun);
   await expect(reset).toHaveCount(0);
   await expect
     .poll(saved)
-    .toStrictEqual(["workflows", "engines", "runs", "signals"]);
+    .toStrictEqual([
+      "return",
+      "goals",
+      "teams",
+      "workflows",
+      "engines",
+      "runs",
+      "signals",
+    ]);
   await page.reload();
-  await expect(titles).toHaveText([
-    "Workflows",
-    "Engines",
-    "Runs this week",
-    "Could be better",
-  ]);
+  await expect(titles).toHaveText(begun);
   await expect(page.getByRole("alert")).toHaveCount(0);
   core[Symbol.dispose]();
 });

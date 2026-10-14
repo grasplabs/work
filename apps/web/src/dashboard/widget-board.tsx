@@ -42,25 +42,47 @@ import {
   slotAt,
 } from "./layout.ts";
 import type { GridShape } from "./layout.ts";
+import type { WorkReturns } from "./returns.ts";
 import { RunsWidget } from "./runs-widget.tsx";
 import { CouldBeBetter } from "./signals.tsx";
 import type { Signals } from "./signals.tsx";
-import { WidgetBlock, WidgetControls, WidgetLoading } from "./widget-block.tsx";
+import {
+  GoalListView,
+  ReturnChartView,
+  TeamListView,
+  fills,
+} from "./standard-widgets.tsx";
+import {
+  BlockButton,
+  WidgetBlock,
+  WidgetControls,
+  WidgetLoading,
+  useFull,
+} from "./widget-block.tsx";
 
 // The dashboard's widget board, under what waits on the person, as the
-// prototype lays it out (`components/dashboard/widget-board.tsx`,
-// `widget-add.tsx`): blocks of one size, one column, two side by side
+// prototype's (`components/dashboard/widget-board.tsx`, `widget-add.tsx`,
+// `widget-parts.tsx`): blocks of one size, one column, two side by side
 // where the board is wide enough. Each opens in full. Each person has
-// their own board: the widgets on it in their order (where the workflows
-// stand, each engine's workflows, the runs this week, and what could be
-// better, to begin with), saved in core whole with each change. There is
-// no mode for changing it: a block pointed at shows its grip, to drag it
-// (or by its title, with the mouse) or move it with the arrow keys, and
-// the button that takes it off; the last place is an empty card that adds
-// one back; and a quiet line under the board puts it back as it began.
-// Each comes as it is read, so a slow one holds back no other. The
-// prototype's widgets Grasp makes, and the hours and euros its widgets
-// count, aren't here: core keeps none of it.
+// their own board: the widgets on it in their order, saved in core whole
+// with each change. It begins with the prototype's four (what the work
+// returns a month, the board's goals, how far each team is with AI,
+// where the workflows stand), then each engine's workflows, the runs this
+// week and what could be better. There is no mode for changing it: a
+// block pointed at shows its grip, to drag it (or by its title, with the
+// mouse) or move it with the arrow keys, and the button that takes it
+// off; the last place is an empty card that adds one; and a quiet line
+// under the board puts it back as it began. Each comes as it is read, so
+// a slow one holds back no other.
+//
+// What the prototype's board has besides: Grasp makes a widget from what
+// someone asks, or changes one, from the empty card and a block's
+// sparkle, drawing it in dots meanwhile, and the blocks glide out of each
+// other's way. Making widgets needs the model gateway behind it, and
+// comes with it; until then the empty card puts back a widget that was
+// taken off. The return, goals and teams widgets count hours, stages and
+// goals core doesn't keep yet: they show what the prototype shows with
+// nothing to count (`returns.ts`).
 
 /** The engines the person can open, with the workflows. */
 export interface EnginesRead {
@@ -72,16 +94,26 @@ export interface EnginesRead {
 export interface Board {
   /** The widgets on the person's board, in order. */
   layout: readonly StandardWidgetId[];
+  /** What the return, goals and teams widgets count. */
+  returns: WorkReturns;
   workflows: Promise<Loaded<WorkflowSummary[]>>;
   engines: Promise<Loaded<EnginesRead>>;
   runs: Promise<Loaded<RunActivity>>;
   signals: Promise<Loaded<Signals>>;
 }
 
-/** Each state's dot: orange where a person is needed, green once it ran, grey before. */
-const dotTone: Record<WorkflowState, string> = {
+/** Each state's dot, as the prototype's workflow dots are painted: orange where a person is needed, green once it ran, grey before. */
+const dotFills: Record<WorkflowState, string> = {
+  attention: fills.attention,
+  waiting: "border-2 border-status-attention bg-card",
+  ran: fills.live,
+  notRun: fills.rest,
+};
+
+/** Each state's mark, as the prototype's marks: a little smaller than its dot. */
+const markFills: Record<WorkflowState, string> = {
   attention: "bg-status-attention",
-  waiting: "border-status-attention bg-card border-2",
+  waiting: "border border-status-attention bg-card",
   ran: "bg-status-agreed",
   notRun: "bg-input",
 };
@@ -94,21 +126,11 @@ const stateNames: Record<WorkflowState, MessageDescriptor> = {
   notRun: msg`Not run yet`,
 };
 
-/** A workflow's dot, in its state's tone. */
-const Dot = ({
-  state,
-  small = false,
-}: {
-  state: WorkflowState;
-  small?: boolean;
-}) => (
+/** A workflow's mark, in its state's tone. */
+const StateMark = ({ state }: { state: WorkflowState }) => (
   <span
     aria-hidden="true"
-    className={cn(
-      "flex-none rounded-full",
-      small ? "size-2" : "size-3",
-      dotTone[state]
-    )}
+    className={cn("size-2 flex-none rounded-full", markFills[state])}
   />
 );
 
@@ -129,12 +151,15 @@ const WorkflowDot = ({ workflow }: { workflow: WorkflowSummary }) => {
           />
         }
       >
-        <Dot state={stateOf(workflow)} />
+        <span
+          className={cn("size-3 rounded-full", dotFills[stateOf(workflow)])}
+        />
       </TooltipTrigger>
-      <TooltipContent>
-        <Trans>
-          {name} in {engine}
-        </Trans>
+      <TooltipContent side="right" variant="quiet">
+        <span className="flex flex-col text-left">
+          <span className="text-foreground font-medium">{name}</span>
+          <span>{engine}</span>
+        </span>
       </TooltipContent>
     </Tooltip>
   );
@@ -154,49 +179,6 @@ const NothingYet = ({ children }: { children: ReactNode }) => (
   </div>
 );
 
-/**
- * The block: a column for each state, the most pressing first, with a dot
- * for each workflow in it, so the picture is how many stand where, and
- * the count under it.
- */
-const StateColumns = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
-  const { i18n } = useLingui();
-  const states = byState(rows);
-  return (
-    <ol className="grid h-full grid-cols-4 gap-x-2 pt-2">
-      {workflowStates.map((state) => {
-        const here = states[state];
-        const name = i18n._(stateNames[state]);
-        return (
-          <li className="flex min-w-0 flex-col items-center gap-3" key={state}>
-            <ul
-              aria-label={name}
-              className="flex min-h-0 w-full flex-1 flex-wrap-reverse content-start justify-center gap-1.5 overflow-hidden"
-            >
-              {here.map((workflow) => (
-                <li
-                  className="flex"
-                  key={`${workflow.app}/${workflow.workflow}`}
-                >
-                  <WorkflowDot workflow={workflow} />
-                </li>
-              ))}
-            </ul>
-            <span className="flex w-full flex-col items-center border-t pt-2 text-center">
-              <span className="text-2xl font-medium tabular-nums">
-                {here.length}
-              </span>
-              <span className="text-muted-foreground line-clamp-2 min-h-8 w-full text-xs">
-                {name}
-              </span>
-            </span>
-          </li>
-        );
-      })}
-    </ol>
-  );
-};
-
 /** When a workflow last ran, or that it never did. */
 const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
   workflow.lastRun === null ? (
@@ -205,12 +187,62 @@ const LastRun = ({ workflow }: { workflow: WorkflowSummary }) =>
     formatDate(workflow.lastRun.createdAt)
   );
 
-/** In full: each state with its workflows, each with its engine and when it last ran, opening it. */
-const StateSections = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
+/**
+ * The workflows, as the prototype's (`WorkflowTabsView`), by where each
+ * stands in work: a column for each state, the most pressing first, with
+ * a dot for each workflow in it, so the picture is how many stand where,
+ * and the count under it. In full, every state as a row: its name and how
+ * many stand there on the left, its workflows on the right, one line
+ * each with its engine and when it last ran. The prototype's columns are
+ * the five steps on the way to live, which core doesn't keep.
+ */
+const WorkflowTabsView = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
   const { i18n } = useLingui();
+  const full = useFull();
   const states = byState(rows);
+  if (!full) {
+    return (
+      <ol className="grid h-full grid-cols-4 gap-x-2 pt-2">
+        {workflowStates.map((state) => {
+          const here = states[state];
+          const name = i18n._(stateNames[state]);
+          return (
+            <li
+              className="flex min-w-0 flex-col items-center gap-3"
+              key={state}
+            >
+              <ul
+                aria-label={name}
+                className="flex min-h-0 flex-1 flex-col-reverse items-center gap-1.5"
+              >
+                {here.map((workflow) => (
+                  <li
+                    className="flex"
+                    key={`${workflow.app}/${workflow.workflow}`}
+                  >
+                    <WorkflowDot workflow={workflow} />
+                  </li>
+                ))}
+              </ul>
+              <span className="flex w-full flex-col items-center border-t pt-2 text-center">
+                <span className="text-2xl font-medium tabular-nums">
+                  {here.length}
+                </span>
+                <span
+                  className="text-muted-foreground line-clamp-2 min-h-8 w-full text-xs wrap-anywhere hyphens-auto"
+                  lang={i18n.locale}
+                >
+                  {name}
+                </span>
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    );
+  }
   return (
-    <div className="flex flex-col">
+    <ol className="flex flex-col">
       {workflowStates.map((state) => {
         const here = states[state];
         if (here.length === 0) {
@@ -218,19 +250,18 @@ const StateSections = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
         }
         const name = i18n._(stateNames[state]);
         return (
-          <section
-            aria-label={name}
-            className="grid grid-cols-1 gap-x-6 gap-y-2 border-t py-4 first:border-t-0 first:pt-0 @lg:grid-cols-4"
+          <li
+            className="@lg:stage-columns grid grid-cols-1 gap-x-6 gap-y-2 border-t py-4 first:border-t-0 first:pt-0"
             key={state}
           >
-            <h3 className="flex items-center gap-2.5 self-start">
-              <Dot state={state} />
+            <span className="flex items-center gap-2.5 self-start">
+              <StateMark state={state} />
               <span className="font-medium">{name}</span>
               <span className="text-muted-foreground tabular-nums">
                 {here.length}
               </span>
-            </h3>
-            <ul className="flex min-w-0 flex-col gap-2 @lg:col-span-3">
+            </span>
+            <ul aria-label={name} className="flex min-w-0 flex-col gap-2">
               {here.map((workflow) => (
                 <li
                   className="flex items-baseline gap-4"
@@ -243,45 +274,28 @@ const StateSections = ({ rows }: { rows: readonly WorkflowSummary[] }) => {
                   >
                     {workflow.workflow}
                   </Link>
-                  <span className="text-muted-foreground hidden max-w-48 truncate @md:block">
+                  <span className="text-muted-foreground hidden max-w-48 flex-none truncate @md:block">
                     {workflow.appName}
                   </span>
-                  <span className="text-muted-foreground w-24 flex-none text-right tabular-nums">
+                  <span className="text-muted-foreground hidden flex-none tabular-nums @md:block">
                     <LastRun workflow={workflow} />
                   </span>
                 </li>
               ))}
             </ul>
-          </section>
+          </li>
         );
       })}
-    </div>
+    </ol>
   );
 };
 
 /** Where the workflows stand: the person's workflows by state. */
 const WorkflowsWidget = ({ rows }: { rows: WorkflowSummary[] }) => {
   const { t } = useLingui();
-  const title = t`Workflows`;
-  if (rows.length === 0) {
-    return (
-      <WidgetBlock title={title}>
-        <NothingYet>
-          <Trans>
-            No workflows yet. Describe in chat what should run on its own, and
-            Grasp builds it.
-          </Trans>
-        </NothingYet>
-      </WidgetBlock>
-    );
-  }
   return (
-    <WidgetBlock
-      count={rows.length}
-      full={<StateSections rows={rows} />}
-      title={title}
-    >
-      <StateColumns rows={rows} />
+    <WidgetBlock full={<WorkflowTabsView rows={rows} />} title={t`Workflows`}>
+      <WorkflowTabsView rows={rows} />
     </WidgetBlock>
   );
 };
@@ -342,7 +356,7 @@ const EngineSections = ({ engines, others }: Engines) => {
                   className="flex items-center gap-2.5"
                   key={workflow.workflow}
                 >
-                  <Dot small state={state} />
+                  <StateMark state={state} />
                   <Link
                     className="min-w-0 flex-1 truncate hover:underline"
                     params={{
@@ -389,7 +403,6 @@ const EnginesWidget = ({
   const { engines, others } = enginesOf(apps, rows);
   return (
     <WidgetBlock
-      count={engines.length}
       full={<EngineSections engines={engines} others={others} />}
       title={title}
     >
@@ -411,7 +424,7 @@ const EnginesWidget = ({
               className="flex max-w-24 flex-none gap-1 overflow-hidden"
             >
               {engine.workflows.map((workflow) => (
-                <Dot key={workflow.workflow} small state={stateOf(workflow)} />
+                <StateMark key={workflow.workflow} state={stateOf(workflow)} />
               ))}
             </span>
             <span className="text-muted-foreground flex-none text-xs tabular-nums">
@@ -425,7 +438,6 @@ const EnginesWidget = ({
   );
 };
 
-/** A widget whose read failed: its block, saying why. */
 const NotRead = ({
   title,
   loaded,
@@ -440,6 +452,15 @@ const NotRead = ({
 
 /** Each widget's name: its block's title, and how the add card lists it. */
 const widgetTitles: Record<StandardWidgetId, MessageDescriptor> = {
+  return: msg({
+    message: "Return a month",
+    context: "dashboard widget: what the work costs now and what returns",
+  }),
+  goals: msg({ message: "Board goals", context: "dashboard widget" }),
+  teams: msg({
+    message: "Teams with AI",
+    context: "dashboard widget: how far each team is with AI",
+  }),
   workflows: msg`Workflows`,
   engines: msg`Engines`,
   runs: msg`Runs this week`,
@@ -451,6 +472,24 @@ const widgetBlocks: Record<
   StandardWidgetId,
   (board: Board, title: string) => ReactNode
 > = {
+  return: ({ returns }, title) => (
+    <WidgetBlock full={<ReturnChartView rows={returns.rows} />} title={title}>
+      <ReturnChartView rows={returns.rows} />
+    </WidgetBlock>
+  ),
+  goals: ({ returns }, title) => (
+    <WidgetBlock full={<GoalListView goals={returns.goals} />} title={title}>
+      <GoalListView goals={returns.goals} />
+    </WidgetBlock>
+  ),
+  teams: ({ returns }, title) => (
+    <WidgetBlock
+      full={<TeamListView rows={returns.rows} teams={returns.teams} />}
+      title={title}
+    >
+      <TeamListView rows={returns.rows} teams={returns.teams} />
+    </WidgetBlock>
+  ),
   workflows: (board, title) => (
     <Await fallback={<WidgetLoading title={title} />} promise={board.workflows}>
       {(loaded) =>
@@ -552,9 +591,10 @@ interface Press {
 }
 
 /**
- * Where a widget is moved by: a grip to drag it by (with a finger, the
- * only place to take hold of it), and the arrow keys, one place with left
- * and right, a row with up and down.
+ * What a block is moved by: the place to take hold of it, though the
+ * mouse can drag it by its title too (with a finger, the only place), and
+ * the way to move it with the keys, one place with left and right, one
+ * row with up and down.
  */
 const Grip = ({
   id,
@@ -571,7 +611,7 @@ const Grip = ({
       <TooltipTrigger
         render={
           <Button
-            aria-label={t`Move ${title}`}
+            aria-label={t`Move ${title}: drag it, or use the arrow keys`}
             className="cursor-grab touch-none"
             data-grip={id}
             onKeyDown={onKeyDown}
@@ -582,48 +622,21 @@ const Grip = ({
       >
         <GripVerticalIcon />
       </TooltipTrigger>
-      <TooltipContent>
-        <Trans>Drag to move, or use the arrow keys</Trans>
-      </TooltipContent>
-    </Tooltip>
-  );
-};
-
-/** The button that takes a widget off the board. */
-const RemoveButton = ({
-  title,
-  onRemove,
-}: {
-  title: string;
-  onRemove: () => void;
-}) => {
-  const { t } = useLingui();
-  const label = t`Remove ${title}`;
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            aria-label={label}
-            onClick={onRemove}
-            size="icon-sm"
-            variant="ghost"
-          />
-        }
-      >
-        <XIcon />
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>{t`Move`}</TooltipContent>
     </Tooltip>
   );
 };
 
 /**
- * Where a widget is added: the last place on the board, an empty card as
- * large as a block with a plus in it. Pressed, it lists the widgets not on
- * the board, each going last. Not there while every one is on it.
+ * Where a widget is added, as the prototype's (`widget-add.tsx`): the last
+ * place on the board, always there, an empty card as large as a block with
+ * nothing in it but a plus. In the prototype a press asks Grasp, in the
+ * chat box, what the widget should be, and Grasp sketches it in dots
+ * meanwhile; that comes with making widgets. Until then a press lists the
+ * widgets that were taken off the board, each going last, and the card
+ * can't be pressed while every one is on it.
  */
-const AddCard = ({
+const AddTile = ({
   missing,
   onAdd,
 }: {
@@ -633,44 +646,64 @@ const AddCard = ({
   const { t, i18n } = useLingui();
   const [open, setOpen] = useState(false);
   return (
-    <Popover onOpenChange={setOpen} open={open}>
-      <PopoverTrigger
-        render={
-          <button
-            aria-label={t`Add a widget`}
-            className="border-input text-muted-foreground hover:border-ring hover:text-foreground focus-visible:ring-ring flex h-80 min-w-0 items-center justify-center rounded-xl border border-dashed transition-colors outline-none focus-visible:ring-2"
-            type="button"
+    <div className="relative h-80 min-w-0">
+      <div className="relative h-full">
+        <Popover onOpenChange={setOpen} open={open}>
+          <PopoverTrigger
+            render={
+              <button
+                aria-label={t`Add a widget`}
+                className="peer border-input hover:border-ring focus-visible:ring-ring size-full rounded-xl border border-dashed transition-colors outline-none focus-visible:ring-2 disabled:pointer-events-none"
+                disabled={missing.length === 0}
+                type="button"
+              />
+            }
           />
-        }
-      >
-        <PlusIcon aria-hidden="true" className="size-5" />
-      </PopoverTrigger>
-      <PopoverContent className="w-64">
-        <PopoverHeader>
-          <PopoverTitle>
-            <Trans>Add a widget</Trans>
-          </PopoverTitle>
-        </PopoverHeader>
-        <ul className="flex flex-col">
-          {missing.map((id) => (
-            <li key={id}>
-              <Button
-                className="w-full justify-start"
-                onClick={() => {
-                  setOpen(false);
-                  onAdd(id);
-                }}
-                variant="ghost"
-              >
-                {i18n._(widgetTitles[id])}
-              </Button>
-            </li>
-          ))}
-        </ul>
-      </PopoverContent>
-    </Popover>
+          <PopoverContent className="w-64">
+            <PopoverHeader>
+              <PopoverTitle>
+                <Trans>Add a widget</Trans>
+              </PopoverTitle>
+            </PopoverHeader>
+            <ul className="flex flex-col">
+              {missing.map((id) => (
+                <li key={id}>
+                  <Button
+                    className="w-full justify-start"
+                    onClick={() => {
+                      setOpen(false);
+                      onAdd(id);
+                    }}
+                    variant="ghost"
+                  >
+                    {i18n._(widgetTitles[id])}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </PopoverContent>
+        </Popover>
+        {/* The plus stands in the middle of the card, and is always seen. */}
+        <PlusIcon
+          aria-hidden="true"
+          className="text-muted-foreground peer-hover:text-foreground peer-focus-visible:text-foreground pointer-events-none absolute top-1/2 left-1/2 size-5 -translate-1/2 transition-colors"
+        />
+      </div>
+    </div>
   );
 };
+
+/**
+ * Putting the board back as it began: one quiet line under it, only when
+ * it is not as it began.
+ */
+const ResetLine = ({ onReset }: { onReset: () => void }) => (
+  <div className="flex justify-center pt-3 opacity-70 transition-opacity focus-within:opacity-100 hover:opacity-100">
+    <Button onClick={onReset} size="xs" variant="link">
+      <Trans>Back to how it began</Trans>
+    </Button>
+  </div>
+);
 
 /**
  * The page's saves of the layout, one queue for every board this page
@@ -915,21 +948,16 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
 
   const missing = missingWidgets(widgets);
   return (
-    <div className="@container flex flex-col gap-3">
-      <div
-        className={cn(
-          "grid grid-cols-1 gap-4 @4xl:grid-cols-2",
-          dragged !== null && "cursor-grabbing select-none"
-        )}
-        ref={grid}
-      >
+    <div className="@container">
+      <div className="grid grid-cols-1 gap-4 @4xl:grid-cols-2" ref={grid}>
         {widgets.map((id) => {
           const title = titleOf(id);
+          const dragging = dragged === id;
           return (
             <div
               className={cn(
-                "group/block min-w-0 rounded-xl",
-                dragged === id && "ring-ring opacity-80 shadow-lg ring-2"
+                "group/block relative h-80 min-w-0",
+                dragging && "z-30 cursor-grabbing select-none"
               )}
               data-widget={id}
               key={id}
@@ -937,45 +965,50 @@ export const WidgetBoard = ({ board }: { board: Board }) => {
                 startDrag(id, event);
               }}
             >
-              <WidgetControls
-                value={
-                  <span className={atHand}>
-                    <Grip
-                      id={id}
-                      onKeyDown={(event) => {
-                        moveByKey(id, event);
-                      }}
-                      title={title}
-                    />
-                    <RemoveButton
-                      onRemove={() => {
-                        remove(id);
-                      }}
-                      title={title}
-                    />
-                  </span>
-                }
+              <div
+                className={cn(
+                  "relative h-full rounded-xl transition duration-200",
+                  dragging && "scale-102 shadow-lg"
+                )}
               >
-                {widgetBlocks[id](board, title)}
-              </WidgetControls>
+                <WidgetControls
+                  value={{
+                    movable: true,
+                    actions: (
+                      <span className={atHand}>
+                        <Grip
+                          id={id}
+                          onKeyDown={(event) => {
+                            moveByKey(id, event);
+                          }}
+                          title={title}
+                        />
+                        <BlockButton
+                          label={t`Take off the dashboard`}
+                          onClick={() => {
+                            remove(id);
+                          }}
+                        >
+                          <XIcon />
+                        </BlockButton>
+                      </span>
+                    ),
+                  }}
+                >
+                  {widgetBlocks[id](board, title)}
+                </WidgetControls>
+              </div>
             </div>
           );
         })}
-        {missing.length === 0 ? null : (
-          <AddCard missing={missing} onAdd={add} />
-        )}
+        {/* Adding is on the board, always, in the place a new widget takes. */}
+        <AddTile missing={missing} onAdd={add} />
       </div>
       <p aria-live="polite" className="sr-only">
         {announcement}
       </p>
       <ErrorText>{failure}</ErrorText>
-      {differsFromDefault(widgets) ? (
-        <div className="flex justify-center">
-          <Button onClick={reset} size="xs" variant="link">
-            <Trans>Back to how it began</Trans>
-          </Button>
-        </div>
-      ) : null}
+      {differsFromDefault(widgets) ? <ResetLine onReset={reset} /> : null}
     </div>
   );
 };
