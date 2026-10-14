@@ -38,6 +38,7 @@ const failureOf = async (method = "GET") => {
         message: error.message,
         ...error.details,
         notPerformed: error.notPerformed,
+        outcomeUnknown: error.outcomeUnknown,
       };
     }
     throw error;
@@ -93,11 +94,72 @@ describe("a provider's failed answer", () => {
       code: "unavailable",
       retryAfterSeconds: 5,
       notPerformed: true,
+      outcomeUnknown: false,
     });
     answers(errorBody("down", 503));
     await expect(failureOf("POST")).resolves.toMatchObject({
       code: "unavailable",
       notPerformed: false,
+      outcomeUnknown: true,
+    });
+  });
+
+  it("says a write a server error answered is of unknown outcome, and one it refused failed", async () => {
+    const outcomes = await Promise.all(
+      [500, 502, 504, 400, 404, 409].map(async (status) => {
+        answers(errorBody("somethingWrong", status));
+        const { code, notPerformed, outcomeUnknown } = await failureOf("PATCH");
+        return { status, code, notPerformed, outcomeUnknown };
+      })
+    );
+    expect(outcomes).toStrictEqual([
+      {
+        status: 500,
+        code: "failed",
+        notPerformed: false,
+        outcomeUnknown: true,
+      },
+      {
+        status: 502,
+        code: "failed",
+        notPerformed: false,
+        outcomeUnknown: true,
+      },
+      {
+        status: 504,
+        code: "failed",
+        notPerformed: false,
+        outcomeUnknown: true,
+      },
+      {
+        status: 400,
+        code: "invalid",
+        notPerformed: false,
+        outcomeUnknown: false,
+      },
+      {
+        status: 404,
+        code: "not_found",
+        notPerformed: false,
+        outcomeUnknown: false,
+      },
+      {
+        status: 409,
+        code: "invalid",
+        notPerformed: false,
+        outcomeUnknown: false,
+      },
+    ]);
+  });
+
+  it("says a write whose answer was lost on its way back is of unknown outcome", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(
+      new TypeError("Network connection lost.")
+    );
+    await expect(failureOf("POST")).resolves.toMatchObject({
+      code: "egress_failed",
+      notPerformed: false,
+      outcomeUnknown: true,
     });
   });
 
@@ -187,6 +249,25 @@ describe("a provider's failed answer", () => {
       { code: "egress_failed", notPerformed: false },
     ]);
   });
+
+  it("says a write the egress refused never left, and one it withheld the answer of is of unknown outcome", async () => {
+    const outcomes = await Promise.all(
+      [egressKind.refused, egressKind.failed].map(async (kind) => {
+        answers(
+          new Response("Withheld", {
+            status: 502,
+            headers: { [egressHeader]: kind },
+          })
+        );
+        const { code, outcomeUnknown } = await failureOf("POST");
+        return { code, outcomeUnknown };
+      })
+    );
+    expect(outcomes).toStrictEqual([
+      { code: "egress_refused", outcomeUnknown: false },
+      { code: "egress_failed", outcomeUnknown: true },
+    ]);
+  });
 });
 
 describe("a provider's JSON answer", () => {
@@ -209,5 +290,24 @@ describe("a provider's JSON answer", () => {
     }
     expect(failure).toBeInstanceOf(Error);
     expect(failure).not.toBeInstanceOf(ToolError);
+  });
+
+  it("is, to a write, of unknown outcome when the tool can't read it: the write went through", async () => {
+    const itemSchema = z.object({ id: z.string() });
+    const unreadable = await Promise.all(
+      [
+        Response.json({ name: "item-1" }, { status: 201 }),
+        new Response("<html>", { status: 200 }),
+      ].map(async (response) => {
+        answers(response);
+        try {
+          await provider.json(url, itemSchema, { method: "POST" });
+        } catch (error) {
+          return error instanceof ToolError ? error.outcomeUnknown : error;
+        }
+        return "read";
+      })
+    );
+    expect(unreadable).toStrictEqual([true, true]);
   });
 });

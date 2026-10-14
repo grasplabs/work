@@ -1,6 +1,7 @@
 import {
   appCodeFiles,
   appCodeLimitErrors,
+  appTestFiles,
   appModuleName,
   buildFiles,
   compilerVersion,
@@ -28,6 +29,7 @@ import {
   screenPath,
 } from "@grasp-os/shared/screens";
 
+import { requireBoundedHere } from "./sandboxed.ts";
 import type { FrameCode } from "./screen-frame.ts";
 
 /**
@@ -102,7 +104,7 @@ interface FailedBuild {
  */
 const cachedBuild = async <Build>(
   env: Env,
-  kind: "screen" | "server" | "workflow" | "app",
+  kind: "screen" | "server" | "workflow" | "app" | "app-tests",
   appFiles: AppFiles,
   select: (files: AppFiles) => AppFiles,
   build: (
@@ -118,6 +120,17 @@ const cachedBuild = async <Build>(
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
+  // The compiler parses, transforms and type-checks App source in a
+  // Dynamic Worker of core's own, which plain workerd (on-prem) doesn't
+  // bound: TypeScript's checker alone can be held for good by a type built
+  // to recurse, whatever the source's size. It doesn't go to the sandbox
+  // host yet, which takes only JavaScript modules and no `nodejs_compat`
+  // (the compiler needs `nodejs_compat`, and a JSON module for its kit),
+  // and would load the whole compiler for every build; until it does, it
+  // runs only where
+  // `requireBoundedHere` allows. Refused before the cache is read: a
+  // deployment where nothing compiles has nothing cached to serve.
+  requireBoundedHere(env, "the screen compiler");
   const cacheKey = `${kind}-builds/${await buildKey(files)}.json`;
   const cached = await env.FILES.get(cacheKey);
   if (cached) {
@@ -180,6 +193,24 @@ export const buildAppCode = async (
     appFiles,
     appCodeFiles,
     async (compiler, files) => await compiler.buildAppCode(files)
+  );
+
+/**
+ * Builds an App's tests (`tests/**.ts`) into ES modules, in the
+ * compiler's isolate, each held to what a test may import. Only the test
+ * files become modules: what they import of the App comes from its
+ * release (app-tests.ts). Cached in R2 like the others.
+ */
+export const buildAppTests = async (
+  env: Env,
+  appFiles: AppFiles
+): Promise<AppCodeBuild> =>
+  await cachedBuild(
+    env,
+    "app-tests",
+    appFiles,
+    appTestFiles,
+    async (compiler, files) => await compiler.buildAppTests(files)
   );
 
 /**

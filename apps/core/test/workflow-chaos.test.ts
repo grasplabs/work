@@ -15,6 +15,7 @@ import {
   finished,
   liveStatus,
   resumed,
+  runInstance,
   sleeping,
   stepDone,
   stopped,
@@ -32,7 +33,7 @@ import {
 
 // Workflow runs under failure: crashes mid-step, restarts, long sleeps,
 // starts delivered twice, and failures that pass or last. Runs
-// are real, on the Workflows engine (Miniflare's). Their side effects go
+// are real, on the engine (Workerflow). Their side effects go
 // through the real connect to a fake mail server (test/mail-server.ts)
 // that counts every call that reached it, so a mail sent twice shows
 // there; the App's counters (`hitsOf`) show how often a step really ran.
@@ -93,6 +94,17 @@ const eventsOf = async (action: string, target: string) => {
   return events.filter(
     (event) => event.action === action && event.target?.id === target
   );
+};
+
+/**
+ * The calls of `run` refused as stale, as the audit log has them: made by
+ * an attempt the engine had given up on (host.ts, `#requireCurrent`).
+ */
+const staleCalls = async (run: string) => {
+  const refused = await eventsOf("workflow.call.refused", run);
+  return refused
+    .filter(({ detail }) => detail.errorCode === "execution.stale_attempt")
+    .map(({ detail }) => `${String(detail.step)} ${String(detail.call)}`);
 };
 
 /**
@@ -282,7 +294,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     await stepDone(run.id, "send");
     // Runs the step again from scratch, as if its result had never been
     // stored: only its idempotency key stands between it and a second mail.
-    const instance = await env.WORKFLOWS.get(run.id);
+    const instance = runInstance(run.id);
     await instance.restart({ from: { name: "send" } });
     await vi.waitFor(
       async () => {
@@ -425,7 +437,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     const once = await count("kept");
     // Runs the step again from scratch, as if its result had never been
     // stored, after its points were added up.
-    const instance = await env.WORKFLOWS.get(forgetful.id);
+    const instance = runInstance(forgetful.id);
     await instance.restart({ from: { name: "count" } });
     await vi.waitFor(
       async () => {
@@ -445,7 +457,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
 
     const silent = await builder.api.workflows.start(app, "silent");
     await stepDone(silent.id, "count");
-    const silentInstance = await env.WORKFLOWS.get(silent.id);
+    const silentInstance = runInstance(silent.id);
     await silentInstance.restart({ from: { name: "count" } });
     await vi.waitFor(
       async () => {
@@ -481,17 +493,19 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     );
     await builder.api.workflows.cancel(ended.id);
     await finished(ended.id);
-    // The run has ended: the call it left waiting goes on, its caller
-    // still live.
+    // The run has ended: the call it left waiting goes on, but its
+    // attempt holds no more, so the point it records is refused
+    // (attempt-fence.ts).
     await mail.release();
     await vi.waitFor(
       async () => {
         await expect(
-          hitsOf(app, builder.userId, "ended:recorded")
+          hitsOf(app, builder.userId, "ended:refused")
         ).resolves.toBe(1);
       },
       { timeout: 10_000, interval: 100 }
     );
+    const endedRecorded = await hitsOf(app, builder.userId, "ended:recorded");
     const { results: kept } = await env.DB.prepare(
       "SELECT step_key, measure FROM app_statistic_steps WHERE app_id = ?"
     )
@@ -537,7 +551,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       anew,
       silent: await count("anew"),
       outlived: { ...outlivedEnded, counted: await count("outlived"), kept },
-      ended: await count("ended"),
+      ended: { counted: await count("ended"), recorded: endedRecorded },
       bounded: {
         status: await builder.api.workflows.status(bounded.id),
         known: await count("known"),
@@ -568,13 +582,71 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         counted: 0,
         kept: [],
       },
-      // Recorded once its run had ended: taken, but neither counted nor
-      // kept (`kept` above holds no row of it either).
-      ended: 0,
+      // Asked for once its run had been cancelled: refused, as its
+      // attempt holds no more (`kept` above holds no row of it either).
+      ended: { counted: 0, recorded: 0 },
       // The point in a row the day has, and the first new row, which
       // fits; the next is left out, and the step completes all the same.
       bounded: { status: { status: "completed" }, known: 1, fits: 1, over: 0 },
     });
+  });
+
+  it("refuse what an App method a step's attempt started does once another activation ran the step again", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(
+      builder,
+      // The first attempt's App call waits at the mail server while the
+      // run is restarted from the step, which runs again and completes.
+      workflowFiles(
+        "restarted",
+        `  const attempt = await step.do("count", { description: "Count" }, async () => {
+    const attempt = await env.APP.call("hit", "restarted");
+    if (attempt === 1) {
+      await env.APP.call("pointAfter", "restarted");
+    }
+    return attempt;
+  });
+  await step.sleep("go", { description: "Wait", duration: "1 day" });
+  return attempt;`,
+        { count: 2 }
+      )
+    );
+    const mail = await mailConnection([], mailWithSearch);
+    await requestGranted(idp, builder, {
+      subject: { type: "app", appId: app },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.search"],
+      binding: "MAIL",
+    });
+    await serverBuilt(app, 1);
+    const run = await builder.api.workflows.start(app, "restarted");
+    await vi.waitFor(
+      async () => {
+        await expect(mail.searched()).resolves.toContain("hold restarted");
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    await runInstance(run.id).restart({ from: { name: "count" } });
+    // The step's new attempt waits for the App behind the held call: let
+    // go, the held call records its point, as the first attempt, which
+    // holds no more, then the new attempt runs.
+    await mail.release();
+    await vi.waitFor(
+      async () => {
+        await expect(
+          hitsOf(app, builder.userId, "restarted:refused")
+        ).resolves.toBe(1);
+        await expect(
+          hitsOf(app, builder.userId, "restarted")
+        ).resolves.toBeGreaterThan(1);
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+
+    expect({
+      recorded: await hitsOf(app, builder.userId, "restarted:recorded"),
+      counted: await pointsOf(app, builder.userId, "restarted"),
+    }).toStrictEqual({ recorded: 0, counted: 0 });
   });
 
   it("give up a step's App call that waits behind another past its attempt's time, never running it", async () => {
@@ -678,6 +750,10 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     const ranOut = {
       status: await statusOf(running.id),
       hits: await hitsOf(app, builder.userId, "running"),
+      // The first attempt's code went on past its time: the answer to its
+      // App call came after that, and was refused as it returned, as an
+      // attempt the engine had given up on, and so was what it called next.
+      stale: await staleCalls(running.id),
     };
 
     // Cut off waiting: the attempt timed out, and the next one, once the
@@ -699,11 +775,13 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         { timeout: 15_000, interval: 100 }
       );
       const waiting = await builder.api.workflows.start(app, "waiting");
+      // Once the first attempt was cut off: the answer to its App call,
+      // which came after its time, refused as it returned.
       await vi.waitFor(
         async () => {
-          await expect(mail.searched()).resolves.toContainEqual(
-            expect.stringMatching(/^seen waiting /u)
-          );
+          await expect(staleCalls(waiting.id)).resolves.toStrictEqual([
+            "count APP",
+          ]);
         },
         { timeout: 15_000, interval: 100 }
       );
@@ -714,6 +792,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       waited = {
         status: await statusOf(waiting.id),
         hits: await hitsOf(app, builder.userId, "waiting"),
+        stale: await staleCalls(waiting.id),
       };
     } finally {
       if (!released) {
@@ -740,13 +819,19 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       waited,
       cutShort,
     }).toStrictEqual({
-      seen: [
-        "seen running TimeoutError undefined",
-        "seen waiting TimeoutError undefined",
-        "seen limited Error app.timed_out",
-      ],
-      ranOut: { status: { status: "completed", output: 2 }, hits: 2 },
-      waited: { status: { status: "completed", output: 1 }, hits: 1 },
+      // Only the attempt cut off by the App's own time, within its own,
+      // still reached the mail server once it was cut off.
+      seen: ["seen limited Error app.timed_out"],
+      ranOut: {
+        status: { status: "completed", output: 2 },
+        hits: 2,
+        stale: ["count APP"],
+      },
+      waited: {
+        status: { status: "completed", output: 1 },
+        hits: 1,
+        stale: ["count APP"],
+      },
       cutShort: { status: "failed", hits: 1 },
     });
   });
@@ -786,17 +871,6 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     await stepDone(run.id, "before");
     await stopped(run.id);
     await woken(run.id);
-    // The local engine starts no execution while the one it stopped still
-    // winds down, and then leaves the run queued. Only an event makes it
-    // look again: one the run waits for nowhere, sent until it has.
-    const instance = await env.WORKFLOWS.get(run.id);
-    await vi.waitFor(
-      async () => {
-        await instance.sendEvent({ type: "look-again", payload: null });
-        await expect(liveStatus(run.id)).resolves.not.toBe("queued");
-      },
-      { timeout: 10_000, interval: 200 }
-    );
     await finished(run.id);
 
     expect({
@@ -855,14 +929,15 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       builder,
       workflowFiles(
         "blocking",
-        `  return await step.do("block", { description: "Block" }, async () => {
+        `  const blocked = await step.do("block", { description: "Block" }, async () => {
     await env.APP.call("hit", "entered");
     while ((await env.APP.call("hits", "gate")) === 0) {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     return "done";
-  });`,
-        { block: "done" }
+  });
+  return await step.do("after", { description: "After" }, async () => blocked);`,
+        { block: "done", after: "done" }
       )
     );
     const run = await builder.api.workflows.start(app, "blocking");
@@ -874,9 +949,9 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
       },
       { timeout: 10_000, interval: 100 }
     );
-    // Paused while the step runs: the engine lets it end, then stops the
-    // execution, which throws out of the step's call.
-    const instance = await env.WORKFLOWS.get(run.id);
+    // Paused while the step runs: the engine lets it end, then lets go of
+    // the run at that safe boundary, its activation's later calls fenced.
+    const instance = runInstance(run.id);
     await instance.pause();
     await callApp(
       env,
@@ -906,6 +981,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
         "workflow.run.completed",
         "workflow.run.started",
         "workflow.step.completed $params",
+        "workflow.step.completed after",
         "workflow.step.completed block",
       ],
     });
@@ -969,14 +1045,13 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     await grantMail(idp, admin, app, mail.id);
     const run = await admin.api.workflows.start(app, "started");
     await stepDone(run.id, "send");
-    // The same start again, under the run's ID. The local engine takes it
-    // as the run it already has; Cloudflare refuses an ID it has instead.
-    // Either way: no second run and no second mail.
+    // The same start again, under the run's ID: the engine takes it as the
+    // run it already has. No second run and no second mail.
     await expect(
       runEngine(env).create({
         id: run.id,
         pinned: { app: run.app, workflow: run.workflow, version: run.version },
-        input: null,
+        input: undefined,
       })
     ).resolves.toBeUndefined();
     await woken(run.id);

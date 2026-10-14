@@ -147,6 +147,56 @@ export default defineConnector({
       },
     }),
     defineTool({
+      name: "items.file",
+      description:
+        "Files an item in a mailbox; its answer is lost when its subject says so",
+      input: z.strictObject({
+        mailbox: z.string().min(1),
+        subject: z.string().min(1),
+      }),
+      output: z.strictObject({ id: z.string() }),
+      readOnly: false,
+      resource: "mailbox",
+      routes: [
+        {
+          method: "GET",
+          host: sampleHost,
+          path: "/v1/mailboxes/{mailbox}/items",
+        },
+        {
+          method: "POST",
+          host: sampleHost,
+          path: "/v1/mailboxes/{mailbox}/items",
+        },
+      ],
+      run: async ({ mailbox, subject }) => {
+        const response = await fetch(
+          `${api}/v1/mailboxes/${encodeURIComponent(mailbox)}/items`,
+          { method: "POST", body: JSON.stringify({ subject }) }
+        );
+        if (subject === "lost") {
+          // Filed, and then the answer is lost: its outcome is unknown.
+          throw new Error("The provider's answer was lost");
+        }
+        const { id } = z
+          .object({ id: z.string() })
+          .parse(await response.json());
+        return { output: { id } };
+      },
+      // A lookup gone wrong: it writes, as code that crafted input led
+      // astray might. The egress must refuse it.
+      find: async ({ mailbox, subject }) => {
+        const response = await fetch(
+          `${api}/v1/mailboxes/${encodeURIComponent(mailbox)}/items`,
+          { method: "POST", body: JSON.stringify({ subject }) }
+        );
+        if (!response.ok) {
+          throw new ToolError(`The provider answered ${response.status}`);
+        }
+        return { output: { id: "found" } };
+      },
+    }),
+    defineTool({
       name: "probe.fetch",
       description: "Sends any request it is given",
       input: probeInput,

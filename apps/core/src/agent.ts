@@ -258,8 +258,12 @@ const runOpen = async (
     scope,
     runs,
     loader,
+    sandbox,
     codeTimeoutMs,
-  }: Pick<Turn, "apis" | "scope" | "runs" | "loader" | "codeTimeoutMs">,
+  }: Pick<
+    Turn,
+    "apis" | "scope" | "runs" | "loader" | "sandbox" | "codeTimeoutMs"
+  >,
   toolCallId: string,
   code: string,
   signal: AbortSignal | undefined,
@@ -279,6 +283,9 @@ const runOpen = async (
   let run: CodeRun;
   try {
     run = await runCode(loader, code, env, {
+      ...(sandbox === undefined ? {} : { sandbox }),
+      owner: `person:${scope.personId}`,
+      sessionKey: runId,
       signal,
       timeoutMs: codeTimeoutMs,
       onOutput: (line) => {
@@ -335,10 +342,11 @@ const executeCode = ({
   scope,
   runs,
   loader,
+  sandbox,
   codeTimeoutMs,
 }: Pick<
   Turn,
-  "apis" | "scope" | "runs" | "loader" | "codeTimeoutMs"
+  "apis" | "scope" | "runs" | "loader" | "sandbox" | "codeTimeoutMs"
 >): AgentTool<typeof codeParameters, CodeStepDetails> => ({
   name: "executeCode",
   label: "Run code",
@@ -349,7 +357,7 @@ const executeCode = ({
   executionMode: "sequential",
   execute: async (toolCallId, { code }, signal, onUpdate) => {
     const { runId, run } = await runOpen(
-      { apis, scope, runs, loader, codeTimeoutMs },
+      { apis, scope, runs, loader, sandbox, codeTimeoutMs },
       toolCallId,
       code,
       signal,
@@ -396,6 +404,8 @@ export interface Turn {
   scope: Omit<AgentScope, "runId">;
   runs: CodeRuns;
   loader: WorkerLoader;
+  /** Where code runs on-prem, or nowhere but `loader` (`sessionHost`). */
+  sandbox?: () => Fetcher | undefined;
   /** Each code run's wall-clock limit (`codeTimeoutMs`). */
   codeTimeoutMs: number;
   /** Cancels the turn: the request or code run in flight stops. */
@@ -681,6 +691,7 @@ export const runTurn = async ({
   scope,
   runs,
   loader,
+  sandbox,
   codeTimeoutMs,
   signal: cancelled,
   keep,
@@ -696,7 +707,9 @@ export const runTurn = async ({
     { role: "user", content: question, timestamp: Date.now() },
   ];
   const progress: Progress = { steps: 0, runs: 0 };
-  const tools = [executeCode({ apis, scope, runs, loader, codeTimeoutMs })];
+  const tools = [
+    executeCode({ apis, scope, runs, loader, sandbox, codeTimeoutMs }),
+  ];
   const room = { chars: requestChars(model.inputTokens), tools };
   // A question that doesn't fit next to the rest of what the request
   // carries is refused here, before anything is kept or sent: the provider

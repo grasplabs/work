@@ -24,7 +24,7 @@ import {
   appErrorMessageMaxLength,
   invocationMaxReads,
   isAppErrorCode,
-  mutationResultMaxBytes,
+  knowledgeSearchMaxLength,
   operationInputMaxBytes,
   operationResultMaxBytes,
   stagedReadMaxBytes,
@@ -42,6 +42,7 @@ import type {
   AppErrorPayload,
   OperationResult,
 } from "@grasp-os/shared/operations";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
 import {
   readRequestSchema,
@@ -62,16 +63,18 @@ import {
   idempotencyKeySchema,
   submissionErrors,
 } from "@grasp-os/shared/submissions";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
+import { callMaxNested, queryMaxReruns } from "./call-limits.ts";
+import { CallTree } from "./call-tree.ts";
+import type { RunnerCall } from "./call-tree.ts";
 import type { OpenStore } from "./data-stores.ts";
 import { openChannel } from "./operation-channel.ts";
 import type { OpenChannel } from "./operation-channel.ts";
-import {
-  queryMaxReruns,
-  readConsistently,
-  StoreReader,
-} from "./store-reader.ts";
+import { sandboxVerdictOf } from "./sandbox-session.ts";
+import { SandboxUnavailableError } from "./sandboxed.ts";
+import { readConsistently, StoreReader } from "./store-reader.ts";
 
 // Core's operation host (spec 7.4, 7.5, 9.2, 9.5, 32.1): runs one of an
 // App's server functions for one caller, through the trusted host, and
@@ -127,6 +130,10 @@ import {
 //   read as JSON, measured, validated, and must already be in its
 //   normalized form (`contract.invalid_return`), so the caller gets
 //   exactly what the contract says.
+// - A caller who lost the right keeps reaching outside: every resource
+//   request is admitted by the same `authorize` a mutation's commit is
+//   (`admit`), whatever it checks (the release not revoked, the caller's
+//   roles, what admitted the caller), so the two gates can't drift apart.
 // - A failure leaks what it shouldn't: a caller gets an `AppErrorPayload`
 //   and nothing more. An `AppError` App code threw keeps its code (never
 //   a platform one), message and bounded details; a platform error
@@ -153,8 +160,9 @@ export interface Invocation {
   readonly runId: string | null;
   /**
    * The caller's roles in the App, read again on each call; throws when
-   * they may no longer use it. Called as the call starts and again just
-   * before a mutation commits.
+   * they may no longer use it. The one admission (`admit`): called as the
+   * call starts, just before each mutation commits and before each
+   * resource request, so whatever it checks holds before all three.
    */
   readonly authorize: () => Promise<WriterRoles>;
   /** How core binds the App's resources for this call; none bound without it. */
@@ -168,7 +176,19 @@ export interface Invocation {
 export type Runner = (
   path: string,
   args: Json,
-  channel: OperationChannel
+  channel: OperationChannel,
+  /**
+   * Aborted once the host stops waiting for the run (its deadline): a
+   * runner that can end the run then does, and frees what it held (an
+   * on-prem sandbox session's process, app-functions.ts).
+   */
+  signal?: AbortSignal,
+  /**
+   * The call it runs in: one object for every function one caller's call
+   * runs, nested or not, so a runner may run them together (on-prem, in
+   * the sandbox session of the function the caller named).
+   */
+  call?: RunnerCall
 ) => Promise<unknown>;
 
 /** An App as the host runs it: its inspected manifest and its runner. */
@@ -187,6 +207,12 @@ export interface OperationReference {
 export interface CallOptions {
   /** A mutation's submission key: one per logical submission, reused by retries. */
   readonly idempotencyKey?: string;
+  /**
+   * On-prem, the sandbox session (its call ID) of the call this one is
+   * made from (a Code Mode run's): its functions' session is that one's
+   * child (`CallTree.parentSession`).
+   */
+  readonly parentSession?: string;
 }
 
 /** A table of the App's schema, as staged writes are checked against it. */
@@ -310,6 +336,17 @@ const trusted = async <Answer>(
 };
 
 /**
+ * The admission every protected step of a call runs, and the only one:
+ * the call's start, each mutation's commit and each resource request all
+ * call this, so what must hold before one of them (the release not
+ * revoked, the caller's current roles, what admitted the caller) is the
+ * invocation's `authorize` alone and can't differ between them. Its
+ * refusal is the host's.
+ */
+const admit = async (invocation: Invocation): Promise<WriterRoles> =>
+  await trusted(invocation.authorize);
+
+/**
  * Runs `work`, which reads a value App code made: whatever it throws (a
  * getter's error among them) becomes an unexpected failure, logged.
  */
@@ -388,21 +425,23 @@ const admittedArgs = (
 
 /**
  * What a handler returned, if its contract allows it exactly: JSON within
- * `maxBytes`, valid, and already as the contract normalizes it (no default
- * left out, nothing to trim). The value is App code's: reading it can run
+ * the public operation output limit (`operationResultMaxBytes`), valid,
+ * and already as the contract normalizes it (no default left out,
+ * nothing to trim). The value is App code's: reading it can run
  * its getters, so anything reading it throws becomes `internal.unexpected`
  * (`fromApp`), never an error the caller would take for the host's.
  */
 const checkedReturn = (
   compiled: Compiled,
   operation: OperationManifest,
-  value: unknown,
-  maxBytes: number
+  value: unknown
 ): Json => {
-  const read = fromApp(() => jsonWithin(value, maxBytes));
+  const read = fromApp(() => jsonWithin(value, operationResultMaxBytes));
   if (read === "too_large") {
     throw hostError(
-      operationErrors.create("contract.result_too_large", { maxBytes })
+      operationErrors.create("contract.result_too_large", {
+        maxBytes: operationResultMaxBytes,
+      })
     );
   }
   if (read === undefined) {
@@ -581,6 +620,52 @@ const failureOf = (
     code: typeof code === "string" ? code : undefined,
   });
   return Object.assign(new Error("Unexpected failure"), { unexpected: true });
+};
+
+/** The error each verdict of the sandbox's becomes for a function's caller. */
+const sandboxCodes = {
+  cpu: "operation.cpu_exceeded",
+  memory: "operation.memory_exceeded",
+  deadline: "operation.deadline_exceeded",
+  refused: "operation.sandbox_refused",
+  busy: "operation.sandbox_busy",
+  call_limit: "operation.call_limit",
+  ended: "operation.ended",
+} as const;
+
+const isSandboxVerdict = (
+  verdict: string | undefined
+): verdict is keyof typeof sandboxCodes =>
+  verdict !== undefined && Object.hasOwn(sandboxCodes, verdict);
+
+/**
+ * What a function the on-prem sandbox ended fails with, or undefined for
+ * any other failure: the App's (CPU time, memory, deadline, what its code
+ * sent) or the platform's, to try again (its share of the sandbox in use,
+ * the sandbox down). A crash stays `internal.unexpected`. Only what core
+ * made: never a property App code may set on an error it throws.
+ */
+const sandboxFailureOf = (
+  thrown: unknown,
+  { requestId, path, depth }: { requestId: string; path: string; depth: number }
+): Error | undefined => {
+  if (thrown instanceof SandboxUnavailableError) {
+    log.error("operation.sandbox_unavailable", {
+      requestId,
+      path,
+      depth,
+      ...errorFields(thrown),
+    });
+    return hostError(operationErrors.create("operation.sandbox_unavailable"));
+  }
+  const verdict = sandboxVerdictOf(thrown);
+  if (!isSandboxVerdict(verdict)) {
+    return undefined;
+  }
+  // Every function of the call running in the process logs its own: the
+  // deepest of them was running when it was ended, its callers waiting.
+  log.warn("operation.sandbox_ended", { requestId, path, depth, verdict });
+  return hostError(operationErrors.create(sandboxCodes[verdict]));
 };
 
 /** A JSON object: `Array.isArray` doesn't narrow a readonly array type. */
@@ -944,7 +1029,7 @@ export type ResourceBindings = (
 
 /** A knowledge search's request, as the declaration's client sends it. */
 const knowledgeSearchSchema = z.strictObject({
-  text: z.string().min(1).max(1000),
+  text: z.string().min(1).max(knowledgeSearchMaxLength),
   limit: z.number().int().min(1).max(20).optional(),
 });
 
@@ -1010,8 +1095,12 @@ const allowedRequest = (
     allowed =
       schema !== undefined &&
       declaration.operations.some((operation) => operation === method) &&
-      args.length === 1 &&
-      schema.safeParse(first).success;
+      args.length === 1;
+    // A declared operation asked with a request outside its contract (a
+    // search text past Knowledge's limit, say): arguments that don't fit.
+    if (allowed && schema?.safeParse(first).success !== true) {
+      throw operationErrors.create("contract.invalid_args");
+    }
   } else if (kind === "model") {
     allowed =
       method === "generate" &&
@@ -1077,10 +1166,23 @@ const checkedResourceResult = (
  * provider couldn't confirm (`effect.outcome_unknown`, connect's
  * `connect.outcome_unknown` included) as that, kept so nobody repeats the
  * effect under a fresh key; a binding whose grant was revoked
- * (`permission.denied`) as `resource.unavailable`; anything else
+ * (`permission.denied`) as `resource.unavailable`; a refusal a binding's
+ * adapter made in the host's words (an unavailable resource, a budget used
+ * up, an effect held for its person, an item it doesn't have, arguments or
+ * an answer its contract doesn't allow) as that; anything else
  * `internal.unexpected`, its cause logged. Never the provider's own code,
  * message or details (a connection's ID, the provider's status).
  */
+const busyDetailsSchema = z.object({
+  retryAfterSeconds: z.int().positive().max(3600),
+});
+
+/** What a busy budget's refusal tells App code: when to ask again, if known. */
+const busyDetails = (
+  details: unknown
+): { retryAfterSeconds: number } | undefined =>
+  busyDetailsSchema.safeParse(details).data;
+
 const providerFailure = (error: unknown, requestId: string): Error => {
   const code = isExpectedError(error) ? error.code : undefined;
   if (code === "effect.outcome_unknown" || code === "connect.outcome_unknown") {
@@ -1089,6 +1191,36 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   if (code === "permission.denied") {
     return hostError(operationErrors.create("resource.unavailable"));
   }
+  // A workflow run's attempt let go of before the request left core
+  // (`BindingCaller.requireHolds`): nothing was sent.
+  if (code === "execution.stale_attempt") {
+    return hostError(executionErrors.create("execution.stale_attempt"));
+  }
+  // What a binding's adapter, core's own code, says of a request it
+  // refused or couldn't complete, each in the operation host's own words.
+  if (
+    code === "resource.unavailable" ||
+    code === "resource.not_allowed" ||
+    code === "resource.budget_exhausted" ||
+    code === "resource.awaiting_confirmation" ||
+    code === "resource.item_not_found" ||
+    code === "resource.invalid_args" ||
+    code === "resource.declined" ||
+    code === "resource.idempotency_conflict" ||
+    code === "contract.invalid_resource_result"
+  ) {
+    return hostError(operationErrors.create(code));
+  }
+  // A budget busy with requests under way: worth trying again, after the
+  // wait the gateway suggested, the only detail passed on.
+  if (code === "resource.budget_busy") {
+    return hostError(
+      operationErrors.create(
+        code,
+        busyDetails(isExpectedError(error) ? error.details : undefined)
+      )
+    );
+  }
   log.error("operation.resource_failed", {
     requestId,
     code,
@@ -1096,6 +1228,15 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   });
   return hostError(internalErrors.create("internal.unexpected", { requestId }));
 };
+
+/**
+ * The most bytes of a resource's answer to one request, as UTF-8 JSON:
+ * what a workflow step may carry, not a public operation's output. It
+ * reaches App code, never the caller as it is: what the action returns is
+ * held to the output limit (`checkedReturn`), so a larger answer must be
+ * cut down or paginated first.
+ */
+const resourceResultMaxBytes = platformLimits.stepPayloadBytes;
 
 /**
  * One request of a resource an action declared and uses, as `alias`
@@ -1137,7 +1278,13 @@ const resourceCall = async (
     });
   }
   allowedRequest(declaration, method, args);
-  const bound = await run.invocation.resources?.(declaration);
+  // The one gate (`admit`): the same admission a mutation's commit runs,
+  // so a request is made only while the caller may still act.
+  await admit(run.invocation);
+  // Core's own resolution: what it refuses with is the host's.
+  const bound = await trusted(
+    async () => await run.invocation.resources?.(declaration)
+  );
   const contract =
     declaration["~resource"] === "connector" ||
     declaration["~resource"] === "template"
@@ -1161,7 +1308,7 @@ const resourceCall = async (
     throw providerFailure(error, run.invocation.requestId);
   }
   const result = jsonOf(answered);
-  if (result === undefined || bytesOf(result) > operationResultMaxBytes) {
+  if (result === undefined || bytesOf(result) > resourceResultMaxBytes) {
     throw operationErrors.create("contract.invalid_resource_result");
   }
   return checkedResourceResult(declaration, method, result);
@@ -1229,14 +1376,9 @@ interface Run {
   readonly depth: number;
   /** What the whole call may still do, shared by every function in it. */
   readonly budget: CallBudget;
+  /** The caller's call, as its runner knows it: the same at any depth. */
+  readonly call: CallTree;
 }
-
-/**
- * The most functions one call may run nested in its own, at any depth:
- * past it, `operation.call_limit`. With `callMaxDepth`, it keeps one
- * action call from fanning out into thousands of invocations.
- */
-export const callMaxNested = 64;
 
 /** The most resource requests one call may make, at any depth. */
 export const callMaxResourceRequests = 32;
@@ -1388,7 +1530,9 @@ const trackedCalls = (
  * `work`, or "expired" once `deadline` (ms since the epoch) passes first:
  * the sandbox limits CPU, not time, so a handler awaiting a long timer
  * would otherwise hold its call and channel open. Nested calls share their
- * caller's invocation, so they run to the same deadline.
+ * caller's invocation, so they run to the same deadline. It stops waiting,
+ * not the isolate: a busy loop runs on until the runtime's CPU limit ends
+ * it, which plain workerd (on-prem) doesn't enforce (sandbox.ts, GRA-449).
  */
 const untilDeadline = async <Answer>(
   work: Promise<Answer>,
@@ -1443,6 +1587,19 @@ const refusalsOf = {
   },
 } as const;
 
+/** How long a run stopped at its deadline gets to let go of what it held. */
+const letGoMs = 1000;
+
+/**
+ * Waits, a little, for a run stopped at its deadline to let go of what it
+ * holds (an on-prem sandbox process, which its runner frees when the run's
+ * signal aborts): past the answer, the request that frees it may itself be
+ * cancelled.
+ */
+const letGo = async (ran: Promise<unknown>): Promise<void> => {
+  await Promise.race([ran, scheduler.wait(letGoMs)]);
+};
+
 /**
  * Runs `operation`'s handler with `args` over a channel of `capabilities`,
  * ended once it settles, and answers its checked return; a failure as the
@@ -1468,15 +1625,21 @@ const runHandler = async (
       : { refused: capabilities.onRefused }),
     refusals: refusalsOf[operation.kind],
   });
+  const stopped = new AbortController();
+  const ran = settle(
+    run.app.run(operation.path, fresh(args), open.channel, stopped.signal, {
+      tree: run.call,
+      nested: run.depth > 0,
+    })
+  );
+  let expired = false;
   try {
-    const outcome = await untilDeadline(
-      settle(run.app.run(operation.path, fresh(args), open.channel)),
-      run.invocation.deadline
-    );
+    const outcome = await untilDeadline(ran, run.invocation.deadline);
     if (outcome === "expired") {
-      // Stopped at its deadline: its channel ends here, so nothing it
-      // still does reaches the store, and what it staged never commits.
-      open.end();
+      expired = true;
+      // Stopped at its deadline: its channel ends as this returns (the
+      // `finally` below), so nothing it still does reaches the store, and
+      // what it staged never commits.
       throw hostError(operationErrors.create("operation.deadline_exceeded"));
     }
     // What it started and didn't wait for still runs: the run ends once
@@ -1485,6 +1648,14 @@ const runHandler = async (
     if ("thrown" in outcome) {
       if (stale !== undefined && (await stale())) {
         throw staleRun;
+      }
+      const sandboxed = sandboxFailureOf(outcome.thrown, {
+        requestId: run.invocation.requestId,
+        path: operation.path,
+        depth: run.depth,
+      });
+      if (sandboxed !== undefined) {
+        throw sandboxed;
       }
       throw failureOf(
         outcome.thrown,
@@ -1506,21 +1677,27 @@ const runHandler = async (
         operation.path
       );
     }
-    return checkedReturn(
-      run.compiled,
-      operation,
-      outcome.value,
-      operation.kind === "mutation"
-        ? mutationResultMaxBytes
-        : operationResultMaxBytes
-    );
+    return checkedReturn(run.compiled, operation, outcome.value);
   } catch (error) {
     if (error === staleRun) {
       throw error;
     }
     throw sealed(error);
   } finally {
+    // Past its deadline or done, the run is over: what still runs of it
+    // ends with its channel.
+    stopped.abort();
     open.end();
+    if (expired) {
+      await letGo(ran);
+    }
+    // Its session, on-prem, which the function its caller named opened and
+    // which went on after it answered: it ends now, as the run is over, and
+    // is waited for a little, so it asks the supervisor to free its process
+    // while this request still can.
+    if (run.depth === 0) {
+      await run.call.sessionEnded(letGoMs);
+    }
   }
 };
 
@@ -1599,7 +1776,7 @@ const forCaller = (error: unknown, requestId: string): Error => {
  * authorized again and each mutation committed on its own under a
  * receipt derived from the action's key (`derived`).
  */
-const nestedCall = async (
+const startNested = async (
   run: Run,
   operation: OperationManifest,
   request: { kind: unknown; path: unknown; args: unknown },
@@ -1664,6 +1841,19 @@ const nestedCall = async (
   }
 };
 
+/**
+ * A function nested in `run`'s, started: counted by the call it runs in
+ * from now (`CallTree`), so a session that call's functions share stays
+ * open for it while it's still authorized or claimed.
+ */
+const nestedCall = async (
+  ...args: Parameters<typeof startNested>
+): Promise<Json> => {
+  const work = startNested(...args);
+  args[0].call.track(work);
+  return await work;
+};
+
 /** Runs a query: its reads one state of the store (`readConsistently`). */
 const runQuery = async (
   run: Run,
@@ -1672,8 +1862,7 @@ const runQuery = async (
 ): Promise<Json> => {
   const { invocation, compiled } = run;
   const scope = await trusted(
-    async () =>
-      await scopeOf(compiled, invocation, await invocation.authorize())
+    async () => await scopeOf(compiled, invocation, await admit(invocation))
   );
   return await trusted(
     async () =>
@@ -1703,7 +1892,7 @@ const runMutation = async (
 ): Promise<Json> => {
   const { invocation, compiled } = run;
   const { store } = invocation;
-  let roles = await trusted(invocation.authorize);
+  let roles = await admit(invocation);
   const claimed = await trusted(
     async () =>
       await store.claim({
@@ -1780,7 +1969,7 @@ const runMutation = async (
       throw sealed(hostError(refusedWrite));
     }
     // oxlint-disable-next-line no-await-in-loop -- see above
-    const current = await trusted(invocation.authorize);
+    const current = await admit(invocation);
     // Its reads were scoped for roles the caller no longer has: run again
     // under the roles they have, so nothing read under the old ones is
     // committed or kept with the receipt.
@@ -1833,7 +2022,7 @@ const runAction = async (
   key: readonly string[]
 ): Promise<Json> => {
   const { invocation, compiled } = run;
-  await trusted(invocation.authorize);
+  await admit(invocation);
   // What every key this action derives is bound to: who calls it, through
   // which App, which action's contract with which input, under the call's
   // key. Two callers, Apps, actions or inputs with one key never share a
@@ -1903,18 +2092,33 @@ const execute = async (
 };
 
 /**
+ * The latest deadline a call may have: a server invocation's wall time
+ * (spec 18.1) from now. A caller may give less (a screen's call, an
+ * agent's, a step's attempt), never more: a later deadline is held to it.
+ */
+const invocationDeadline = (asked: number): number => {
+  const latest = Date.now() + platformLimits.serverInvocationWallMs;
+  // Not a time at all (NaN, or no end): the latest a call may have.
+  return Number.isFinite(asked) ? Math.min(asked, latest) : latest;
+};
+
+/**
  * Calls the public function `reference` names of `app` for `invocation`,
  * with `args`: what it returned, or why it failed, as its caller may see
  * it (see the header). Never throws.
  */
 export const callOperation = async (
   app: HostedApp,
-  invocation: Invocation,
+  asked: Invocation,
   reference: OperationReference,
   args: unknown,
   options: CallOptions = {}
 ): Promise<OperationResult> => {
   const path = typeof reference.path === "string" ? reference.path : "";
+  const invocation: Invocation = {
+    ...asked,
+    deadline: invocationDeadline(asked.deadline),
+  };
   try {
     const { compiled, operation, admitted, key } = await trusted(() => {
       const known = compiledOf(app.manifest);
@@ -1934,7 +2138,14 @@ export const callOperation = async (
       };
     });
     const value = await execute(
-      { app, compiled, invocation, depth: 0, budget: callBudget() },
+      {
+        app,
+        compiled,
+        invocation,
+        depth: 0,
+        budget: callBudget(),
+        call: new CallTree(options.parentSession),
+      },
       operation,
       admitted,
       ["call", key]

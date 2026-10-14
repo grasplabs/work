@@ -21,12 +21,14 @@ export const releaseFormatVersion = 1;
  * The version of the protocol between the host and an App's isolate. The
  * host's half (its run module, app-functions.ts) imports from a release's
  * sealed SDK only what this version pins: version 1 pins the runner's
- * `runFunction` (and `manifestOfApp`, for inspection). Anything else the
- * host's half needs in the isolate is a host module it loads itself. A new
- * import from the sealed SDK requires a new version, since releases sealed
- * before it don't have it.
+ * `runFunction` (and `manifestOfApp`, for inspection); version 2 adds
+ * `runMigration`, which runs an App's explicit migrations
+ * (apps/core/src/migration-transform.ts), and the App manifest's
+ * `migrations`. Anything else the host's half needs in the isolate is a
+ * host module it loads itself. A new import from the sealed SDK requires
+ * a new version, since releases sealed before it don't have it.
  */
-export const sdkProtocolVersion = 1;
+export const sdkProtocolVersion = 2;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 
@@ -67,6 +69,52 @@ export const resourceBindingSchema = z.strictObject({
   fingerprint: sha256Schema,
 });
 
+/** Why a migration's fixture failed as the host ran it (see below). */
+export const migrationFixtureReasons = [
+  "invalid_input",
+  "threw",
+  "invalid_output",
+  "too_large",
+  "invalid_answer",
+  "unexpected_output",
+] as const;
+
+/**
+ * What the host found running one of a release's explicit migrations on
+ * its fixtures as it sealed the release (spec 17.2): the release's own
+ * code, in the sandbox, every output validated against the target table
+ * and compared with what the fixture expects. The host's own record,
+ * sealed into the manifest, so its hash binds it to the source tree, the
+ * schemas and the release; nothing App code answers is taken for it. A
+ * failure names the fixture (by its index in the migration's `fixtures`,
+ * or null when none is to blame) and why; fixtures are the App's own
+ * data, never real records. Only a migration whose fixtures all passed
+ * runs on records or is made current (apps/core/src/migration-evidence.ts).
+ */
+export const migrationEvidenceSchema = z
+  .strictObject({
+    migration: z.string().min(1).max(64),
+    table: z.string().min(1).max(64),
+    fromSchema: sha256Schema,
+    toSchema: sha256Schema,
+    /** SHA-256 of the canonical JSON of its fixtures, as the App declares them. */
+    fixturesHash: sha256Schema,
+    fixtures: z.int().min(1).max(16),
+    passed: z.boolean(),
+    failure: z
+      .strictObject({
+        fixture: z.int().min(0).max(15).nullable(),
+        reason: z.enum(migrationFixtureReasons),
+        issues: z.array(z.string().max(500)).max(20),
+      })
+      .nullable(),
+  })
+  .refine(({ passed, failure }) => passed === (failure === null), {
+    message: "A migration's evidence fails exactly when it names a failure",
+  });
+
+export type MigrationEvidence = z.infer<typeof migrationEvidenceSchema>;
+
 /** A release's manifest (spec 16.1). */
 export const releaseManifestSchema = z.strictObject({
   formatVersion: z.literal(releaseFormatVersion),
@@ -85,6 +133,8 @@ export const releaseManifestSchema = z.strictObject({
   artifacts: z.array(releaseArtifactSchema).min(1).max(1024),
   bindings: z.array(resourceBindingSchema).max(64),
   verificationReportHash: sha256Schema,
+  /** One per explicit migration the App declares, in its order. */
+  migrationEvidence: z.array(migrationEvidenceSchema).max(16),
   // Always `unreviewed` as sealed: trust is never the manifest's to say
   // (approval and revocation are the host's records of its hash).
   artifactTrust: z.literal("unreviewed"),
@@ -114,6 +164,8 @@ export const versionErrors = defineErrorFamily({
   "version.seal_conflict":
     "This version was already sealed with a different manifest.",
   "version.not_sealed": "This version hasn't been sealed.",
+  "version.protocol_unsupported":
+    "This version was sealed for a protocol between the platform and App code that this platform doesn't run. Seal it again.",
   "version.manifest_corrupt":
     "This version's sealed manifest no longer matches its hash.",
   "version.artifact_corrupt":
@@ -121,4 +173,12 @@ export const versionErrors = defineErrorFamily({
   "version.revoked": "This version was revoked and no longer runs.",
   "version.mismatch":
     "That reference belongs to another version or contract than the one that runs.",
+  "version.tests_failed":
+    "This version's App tests fail, so it can't be made current.",
+  "version.tests_unavailable":
+    "This version has App tests, which run only where a sandbox bounds them: on this deployment they need the sandbox host, which doesn't run them yet. Until it does, a version with App tests can't be made current here.",
+  "version.invalid_migration":
+    "One of this version's migrations doesn't transform records to this version's schema: set its toSchema to the schema hash these details name.",
+  "version.migration_fixtures_failed":
+    "One of this version's migrations failed on its fixtures as the version was sealed, so it runs on no records and the version can't be made current. These details name the migration, the fixture and why.",
 });

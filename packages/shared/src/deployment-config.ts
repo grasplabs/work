@@ -10,7 +10,8 @@ import { loopbackHosts } from "./router.ts";
 // never sets a value core would refuse. Each var is deployment config,
 // never an in-product setting, so no admin session can change it. The
 // `MEMORY_LIMITS` var's schema is `memoryLimitsSchema` in
-// @grasp-os/shared/memory, and `PLATFORM_CHANGE`'s is in
+// @grasp-os/shared/memory, `QUOTA_LIMITS`'s is `quotaLimitsSchema` in
+// @grasp-os/shared/quota-policy, and `PLATFORM_CHANGE`'s is in
 // @grasp-os/shared/platform-change.
 
 // SIGN_IN (core's src/auth/config.ts)
@@ -310,4 +311,5 @@ export const deploymentConfigVars = [
   "AUDIT_RETENTION_DAYS",
   "AUDIT_ARCHIVE_RETENTION_DAYS",
   "RUN_RETENTION_DAYS",
+  "QUOTA_LIMITS",
 ] as const;

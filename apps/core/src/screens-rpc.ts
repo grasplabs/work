@@ -21,7 +21,11 @@ import type {
   ScreensApi,
 } from "@grasp-os/shared/screens";
 import { valueDepth } from "@grasp-os/shared/value-depth";
-import type { WorkflowRun } from "@grasp-os/shared/workflows";
+import type {
+  RunControl,
+  RunSummary,
+  WorkflowRun,
+} from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
 import { callApp, isPlainData, plainDataBounds } from "./app.ts";
@@ -46,6 +50,7 @@ import {
 import { screenCode } from "./screens.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { controlScreenRun } from "./workflows/controls.ts";
 import {
   decideScreenRun,
   screenRun,
@@ -53,6 +58,7 @@ import {
   screenWorkflow,
   startScreenRun,
 } from "./workflows/screen-runs.ts";
+import { runSummary } from "./workflows/summary.ts";
 
 // What the frontend's screen host reaches for the frames it runs (see
 // @grasp-os/sdk/screen-runtime): an App's screen to load, its server to
@@ -121,7 +127,7 @@ const admittedApp = async (
 };
 
 /** `admittedApp`, for its ID. */
-const admitted = async (
+export const admitted = async (
   env: Env,
   by: Identity,
   app: unknown
@@ -661,6 +667,19 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     );
   }
 
+  async summary(app: string, run: string): Promise<RunSummary> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await this.#delivered(
+          by,
+          app,
+          "summary",
+          async (id) => await runSummary(this.#env, by, id, run)
+        )
+    );
+  }
+
   async decide(
     app: string,
     run: string,
@@ -676,6 +695,23 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
           "decide",
           async (id) =>
             await decideScreenRun(this.#env, by, id, run, decision, answer)
+        )
+    );
+  }
+
+  async control(
+    app: string,
+    run: string,
+    kind: RunControl["kind"]
+  ): Promise<RunControl> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await this.#delivered(
+          by,
+          app,
+          "control",
+          async (id) => await controlScreenRun(this.#env, by, id, run, kind)
         )
     );
   }

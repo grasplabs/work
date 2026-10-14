@@ -10,17 +10,19 @@ import type {
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { z } from "zod";
 
-import { budgetMonth, budgetSpend } from "./model-budgets.ts";
+import { budgetPeriods, budgetSpend } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
 import { gatewaySettings } from "./models.ts";
+import { modelBindingSpend } from "./resource-bindings.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 // The model gateway's settings, for admins to read: the allowlist and the
 // client's rules (models.ts, model-rules.ts), and this month's spend
-// against each budget (model-budgets.ts). The settings are deployment
+// against each budget (model-budgets.ts), and each App's model binding
+// with its own caps and what it spent (resource-bindings.ts). The settings are deployment
 // config that the console sets, so nothing here changes them. Reads aren't
 // audited: the rules are the console's to record, and each call's cost is
 // in the audit log already, with its model call.
@@ -49,10 +51,22 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
     return await withPerson(this.#check, async (person) => {
       requireAdmin(person);
       const { models, rules } = gatewaySettings(this.#env);
-      const month = budgetMonth(this.#env);
-      const held = await this.#held();
+      // One clock for the month and the day, as a request reads them.
+      const periods = budgetPeriods(this.#env);
+      const { month, day } = periods;
+      const [held, bindings] = await Promise.all([
+        this.#held(),
+        modelBindingSpend(this.#env, periods),
+      ]);
       if (rules === undefined) {
-        return { models, rules: { state: "invalid" }, month, held };
+        return {
+          models,
+          rules: { state: "invalid" },
+          month,
+          day,
+          held,
+          bindings,
+        };
       }
       return {
         models,
@@ -63,7 +77,9 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
           budgets: await budgetSpend(this.#env, rules.budgets, month),
         },
         month,
+        day,
         held,
+        bindings,
       };
     });
   }

@@ -21,7 +21,17 @@ import { compile } from "tailwindcss";
 
 import kit from "#kit";
 
-import { appCodeFiles, appCodeImport, isAppLayout } from "./app-code.ts";
+import {
+  appCodeFiles,
+  appCodeImport,
+  appCodeKind,
+  appTestFiles,
+  isAppLayout,
+  isAppTestSuite,
+  maxAppTestSuites,
+  strayTestFileMessage,
+  strayTestFiles,
+} from "./app-code.ts";
 import { extractCandidates } from "./candidates.ts";
 import { compileModule, stripTypes, transformModule } from "./compile.ts";
 import { isError } from "./diagnostic.ts";
@@ -592,6 +602,60 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
     : { ok: true, modules };
 };
 
+/**
+ * Builds an App's tests (`tests/**`), each held to what a test may import
+ * (app-code.ts): only the test files become modules. The schema and
+ * values they import, and the `#grasp` references, are the release's own
+ * modules, which core loads with them. Types are stripped, not checked.
+ */
+export const buildAppTests = (files: Record<string, string>): AppCodeBuild => {
+  const code = appTestFiles(files);
+  const tooMuch = limitErrors(code);
+  if (tooMuch.length > 0) {
+    return { ok: false, diagnostics: tooMuch };
+  }
+  // Nothing under tests/ is passed over: what isn't a suite, a helper or a
+  // fixture is refused, by name.
+  const strays = strayTestFiles(code);
+  if (strays.length > 0) {
+    return {
+      ok: false,
+      diagnostics: strays.map((file) =>
+        problem("tests", strayTestFileMessage(file), { file })
+      ),
+    };
+  }
+  // The same suites core runs (`isAppTestSuite`).
+  const suites = Object.keys(code).filter(isAppTestSuite).length;
+  if (suites > maxAppTestSuites) {
+    return {
+      ok: false,
+      diagnostics: [
+        problem(
+          "tests",
+          `An App has at most ${maxAppTestSuites} test suites (tests/**.test.ts); this one has ${suites}. Put more tests in each suite.`
+        ),
+      ],
+    };
+  }
+  const known = new Set(Object.keys(code));
+  const modules: Record<string, string> = {};
+  const errors: Diagnostic[] = [];
+  for (const [path, source] of Object.entries(code)) {
+    if (appCodeKind(path) === "test") {
+      const result = compileAppCodeFile(path, source, known);
+      if ("code" in result) {
+        modules[appModuleName(path)] = result.code;
+      } else {
+        errors.push(...result.errors);
+      }
+    }
+  }
+  return errors.length > 0
+    ? { ok: false, diagnostics: errors }
+    : { ok: true, modules };
+};
+
 export default class ScreenCompiler extends WorkerEntrypoint {
   // RPC exposes prototype methods only, so these can't be static.
   // oxlint-disable-next-line class-methods-use-this
@@ -609,6 +673,12 @@ export default class ScreenCompiler extends WorkerEntrypoint {
   // oxlint-disable-next-line class-methods-use-this
   buildAppCode(files: Record<string, string>): AppCodeBuild {
     return buildAppCode(files);
+  }
+
+  /** Builds an App's tests (`buildAppTests`). */
+  // oxlint-disable-next-line class-methods-use-this
+  buildAppTests(files: Record<string, string>): AppCodeBuild {
+    return buildAppTests(files);
   }
 
   /** Builds the App's workflows (`buildWorkflows`). */

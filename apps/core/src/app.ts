@@ -17,6 +17,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { screenLimits } from "@grasp-os/shared/screens";
 import type {
   AppErrorLog,
@@ -31,6 +32,7 @@ import type { StatisticUse } from "@grasp-os/shared/statistics";
 import { TokenBuckets } from "@grasp-os/shared/token-bucket";
 import { passedBound } from "@grasp-os/shared/value-bounds";
 import type { ValueBounds } from "@grasp-os/shared/value-bounds";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import { DurableObject, exports } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -45,7 +47,10 @@ import { findApp, versionFiles } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import { appHost } from "./durable-objects.ts";
 import { sandbox } from "./sandbox.ts";
+import { requireBoundedHere } from "./sandboxed.ts";
 import { buildFailed, buildServer } from "./screens.ts";
+import { requireAttemptHolds } from "./workflows/attempt-fence.ts";
+import type { AttemptFence } from "./workflows/attempt-fence.ts";
 
 // An App's server code runs as a facet of the App's own Durable Object:
 // loaded through the Worker Loader from the App's current version, with a
@@ -81,12 +86,15 @@ const facetName = "server";
  * How long one call may take in all, starting the code and waiting
  * included, before the host gives up on it: its caller gets
  * `app.timed_out`, and its token stops working, so a call that never ends
- * can't keep acting for its caller. Tests shorten it with
- * `APP_CALL_TIMEOUT_MS`; it is never set in wrangler.jsonc.
+ * can't keep acting for its caller. A server invocation's wall time
+ * (spec 18.1); tests shorten it with `APP_CALL_TIMEOUT_MS`, which can
+ * only lower it, and it is never set in wrangler.jsonc.
  */
-const defaultCallTimeoutMs = 60_000;
+const defaultCallTimeoutMs = platformLimits.serverInvocationWallMs;
 
-export const callTimeoutMs = (env: Env): number => {
+export const callTimeoutMs = (
+  env: Pick<Env, "APP_CALL_TIMEOUT_MS">
+): number => {
   const set = Number(env.APP_CALL_TIMEOUT_MS);
   return Number.isInteger(set) && set > 0 && set < defaultCallTimeoutMs
     ? set
@@ -543,6 +551,12 @@ export type Admission =
  */
 export type AppCallerInput = Omit<AppCaller, "token"> & {
   attempt?: string;
+  /**
+   * For a workflow run's step: who its attempt is, which every stub call
+   * of the App's code checks still holds before it acts
+   * (attempt-fence.ts). Never shown to the App's code.
+   */
+  fence?: AttemptFence;
   admission?: Admission;
 };
 
@@ -643,6 +657,12 @@ interface Invocation {
   turn: string;
   /** When it must end: past it, it acts no more, whatever its code does. */
   deadline: number;
+  /**
+   * Set once the workflow run it acts for was cancelled, or the step's
+   * attempt it acts for let go of (`App.revokeRunCalls`,
+   * `App.revokeAttemptCalls`): it acts no more, whatever its code does.
+   */
+  revoked?: true;
 }
 
 /** Who a stub call acts for, as the host admits it (`App.admit`). */
@@ -650,6 +670,8 @@ export interface Admitted {
   authority: Authority;
   idempotencyKey: string | undefined;
   attempt: string | undefined;
+  /** For a workflow run's step: its attempt, to check before acting. */
+  fence: AttemptFence | undefined;
   path: CallPath;
   method: string;
   kind: InvocationKind;
@@ -680,12 +702,16 @@ const currentVersion = async (env: Env, app: AppId): Promise<number> => {
  * The App's server code at `version`, with an env for the permissions of
  * `generation` (see `#load`), as the class its facet runs.
  */
-const loadServer = async (
+export const loadServer = async (
   env: Env,
   app: AppId,
   version: number,
   generation: number
 ): Promise<DurableObjectClass> => {
+  // On-prem, nothing bounds an App's server object (a facet of core's own
+  // Loader, which the sandbox can't host): refused unless the deployment
+  // says that's fine, until GRA-500 moves Apps onto sealed functions.
+  requireBoundedHere(env, "an App's server object");
   const files = await versionFiles(env, app, version);
   const build = await buildServer(env, files);
   if (!build.ok) {
@@ -760,7 +786,6 @@ export class App extends DurableObject<Env> {
    * once it started, and where each runs within calls between Apps.
    */
   readonly #calls = new Map<string, Invocation>();
-
   /**
    * Lets one call at a time run in the App's code (`call`); a call from
    * another App's waits with the turns its chain holds (`waitingHolds`).
@@ -957,7 +982,12 @@ export class App extends DurableObject<Env> {
     }
   ): Promise<AppAnswer> {
     const token = crypto.randomUUID();
-    const { attempt: _attempt, admission: _admission, ...shown } = caller;
+    const {
+      attempt: _attempt,
+      fence: _fence,
+      admission: _admission,
+      ...shown
+    } = caller;
     const call: Invocation = {
       caller,
       method,
@@ -982,6 +1012,15 @@ export class App extends DurableObject<Env> {
       ({ version } = running);
       if (via !== undefined) {
         await this.#pinned(running.server, via);
+      }
+      // Last before the method starts, after every read: a workflow step's
+      // attempt the engine let go of meanwhile starts nothing, its App's
+      // own SQLite included (attempt-fence.ts).
+      await requireAttemptHolds(this.env, caller.fence, this.#app);
+      // Revoked while that was asked (`revokeRunCalls`): checked here, with
+      // nothing awaited before the method starts.
+      if (this.#calls.get(token)?.revoked === true) {
+        throw executionErrors.create("execution.stale_attempt");
       }
       // Timed out while the code started: its caller already has the
       // answer, so the method mustn't run (and write) after all.
@@ -1352,6 +1391,42 @@ export class App extends DurableObject<Env> {
   }
 
   /**
+   * Revokes the App's calls running now for workflow run `run`'s
+   * attempts of generations below `below`, or for every one (`null`):
+   * once its run was cancelled, or its earlier activations let go of.
+   * The App's own synchronous checks (`admit`, and a method's start)
+   * then refuse them, with nothing awaited between. A call that starts
+   * later is refused by its method's start, which asks the run's object
+   * (attempt-fence.ts). Repeating it changes nothing.
+   */
+  revokeRunCalls(run: string, below: number | null): void {
+    for (const call of this.#calls.values()) {
+      const { fence } = call.caller;
+      if (fence?.run === run && (below === null || fence.generation < below)) {
+        call.revoked = true;
+      }
+    }
+  }
+
+  /**
+   * Revokes the App's calls running now for one attempt of a run's step
+   * (`fence`), once its function has returned.
+   */
+  revokeAttemptCalls(fence: AttemptFence): void {
+    for (const call of this.#calls.values()) {
+      const of = call.caller.fence;
+      if (
+        of?.run === fence.run &&
+        of.key === fence.key &&
+        of.number === fence.number &&
+        of.generation === fence.generation
+      ) {
+        call.revoked = true;
+      }
+    }
+  }
+
+  /**
    * Admits one stub call of the App's code made with `token`, for `use`:
    * who it acts for (the caller of the running call `token` names), with
    * the version of the code the call runs, and, for a workflow run's step,
@@ -1377,10 +1452,14 @@ export class App extends DurableObject<Env> {
     // fire late, and the clock moves on only with I/O. Between the deadline
     // and that timer, nothing a test can bring about on purpose, this
     // still says no.
+    // A workflow run's call whose run was cancelled, or whose attempt was
+    // let go of, since: revoked here, in the same synchronous check, so
+    // nothing awaited after a check elsewhere can let it act.
     if (
       call?.version === undefined ||
       call.ranOn !== this.#server ||
-      Date.now() >= call.deadline
+      Date.now() >= call.deadline ||
+      call.revoked === true
     ) {
       throw appErrors.create("app.caller_invalid");
     }
@@ -1406,6 +1485,7 @@ export class App extends DurableObject<Env> {
       },
       idempotencyKey: caller.idempotencyKey,
       attempt: caller.attempt,
+      fence: caller.fence,
       path: {
         chain: [...above, this.#app],
         holding: [...aboveHolding, { app: this.#app, call: turn }],

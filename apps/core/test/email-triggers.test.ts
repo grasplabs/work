@@ -10,7 +10,7 @@ import { allEvents } from "./audit-events.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { racingDb } from "./racing-db.ts";
-import { endLiveRuns, finished } from "./runs.ts";
+import { aroundEngine, endLiveRuns, finished } from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith } from "./workflow-apps.ts";
 
@@ -76,6 +76,8 @@ const invoiceMail = ({
   to = "invoices@grasp.test",
   filename = "inv-7.pdf",
   text = "Please pay by Friday.",
+  from = "Ben <ben@acme.test>",
+  headers = [],
 }: {
   subject?: string;
   messageId?: string;
@@ -83,13 +85,16 @@ const invoiceMail = ({
   to?: string;
   filename?: string;
   text?: string;
+  from?: string;
+  headers?: string[];
 } = {}): string =>
   [
     ...(receivedBy === undefined
       ? []
       : [`Received: from ${receivedBy}; Mon, 28 Sep 2026 08:00:01 +0000`]),
     ...(messageId === undefined ? [] : [`Message-ID: <${messageId}>`]),
-    "From: Ben <ben@acme.test>",
+    ...headers,
+    `From: ${from}`,
     `To: ${to}`,
     `Subject: ${subject}`,
     "Date: Mon, 28 Sep 2026 08:00:00 +0000",
@@ -176,12 +181,16 @@ interface Delivery {
 const deliver = async (
   to: string,
   raw: string,
-  { changes = {}, rawSize }: { changes?: Partial<Env>; rawSize?: number } = {}
+  {
+    changes = {},
+    rawSize,
+    envelopeFrom = "bounces@acme.test",
+  }: { changes?: Partial<Env>; rawSize?: number; envelopeFrom?: string } = {}
 ): Promise<Delivery> => {
   const bytes = new TextEncoder().encode(raw);
   const delivery: Delivery = { rejected: undefined };
   const message: ForwardableEmailMessage = {
-    from: "bounces@acme.test",
+    from: envelopeFrom,
     to,
     raw: new ReadableStream<Uint8Array>({
       start: (controller) => {
@@ -292,6 +301,78 @@ describe("email triggers", () => {
     await expect(addedSince(before)).resolves.toStrictEqual([
       `inbound-email/${day}/${app}/${id}`,
     ]);
+  });
+
+  it("show with their workflow, by the address they receive at", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("shown"));
+
+    const { triggers } = await builder.api.workflows.get(app, "intake");
+
+    expect(triggers).toStrictEqual([
+      { type: "email", position: 0, address: "shown" },
+    ]);
+  });
+
+  it("start nothing for mail sent automatically or from the deployment's own domain, and audit each refusal, so a run's mail can't loop back into runs", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, intake("loops"));
+    const to = "loops@grasp.test";
+    const refused = [
+      // An auto-reply to a run's mail, in any of RFC 3834's kinds.
+      invoiceMail({
+        to,
+        subject: "A",
+        headers: ["Auto-Submitted: auto-replied"],
+      }),
+      invoiceMail({
+        to,
+        subject: "B",
+        headers: ["Auto-Submitted: Auto-Generated; owner-email=x@acme.test"],
+      }),
+      // A run's own mail, sent from the deployment's domain.
+      invoiceMail({ to, subject: "C", from: "Robot <robot@GRASP.test>" }),
+    ];
+    const deliveries = [];
+    for (const raw of refused) {
+      // oxlint-disable-next-line no-await-in-loop -- one delivery at a time
+      deliveries.push(await deliver(to, raw));
+    }
+    // Its envelope sender at the deployment's domain, whatever its From.
+    deliveries.push(
+      await deliver(to, invoiceMail({ to, subject: "D" }), {
+        envelopeFrom: "bounce-1@grasp.test",
+      })
+    );
+    // A person's mail, saying it wasn't sent automatically.
+    const allowed = await deliver(
+      to,
+      invoiceMail({ to, subject: "E", headers: ["Auto-Submitted: no"] })
+    );
+    const reads = await readByRuns(builder, app);
+    const events = await allEvents();
+
+    expect({
+      // Accepted, never bounced: a bounce is mail that can loop too.
+      rejected: [...deliveries, allowed].map(({ rejected }) => rejected),
+      started: reads.map(({ subject }) => subject),
+      refusals: events
+        .filter(
+          ({ action, target }) =>
+            action === "workflow.email.refused" && target?.id === app
+        )
+        // In the order they were delivered.
+        .map(({ detail }) => [detail.address, detail.reason]),
+    }).toStrictEqual({
+      rejected: [undefined, undefined, undefined, undefined, undefined],
+      started: ["E"],
+      refusals: [
+        ["loops", "auto_submitted"],
+        ["loops", "auto_submitted"],
+        ["loops", "own_domain"],
+        ["loops", "own_domain"],
+      ],
+    });
   });
 
   it("keep nothing of a message without attachments, or with inline ones only", async () => {
@@ -912,47 +993,53 @@ describe("attachments of mail", () => {
     ]);
   });
 
-  it("are read by a run whose start stopped, from the delivery that starts it again", async () => {
+  it("are read by a run whose first delivery stopped while starting it, started once by the delivery that comes again", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, reader("restarted"));
     const to = "restarted@grasp.test";
     const messageId = `${crypto.randomUUID()}@acme.test`;
-    // A first delivery whose run can't be created (an ID Workflows
-    // refuses): it says the message's key, and gives it up.
-    const unstartable: ReturnType<typeof crypto.randomUUID> =
-      `run-${"x".repeat(100)}-${crypto.randomUUID()}`;
-    const uuid = vi
-      .spyOn(crypto, "randomUUID")
-      .mockReturnValueOnce(unstartable);
-    try {
-      await outcome(
-        deliver(to, invoiceMail({ to, messageId, receivedBy: "mx1" }))
-      );
-    } finally {
-      uuid.mockRestore();
-    }
-    const events = await allEvents();
-    const key = events.find(
-      ({ action, target }) =>
-        action === "workflow.run.started" && target?.id === unstartable
-    )?.detail.key;
-    // A start under that key that stopped once its row was written, two
-    // minutes ago: no engine instance, and its input nowhere.
-    const orphan = crypto.randomUUID();
-    await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key) VALUES (?, ?, 'reader', 1, NULL, 'starting', ?, ?)"
-    )
-      .bind(orphan, app, Date.now() - 2 * 60_000, key)
-      .run();
+    // The first delivery stops with its run's row written and its start
+    // not yet at the engine, as when core goes down there.
+    const { promise: stuck, resolve: unstick } = Promise.withResolvers<null>();
+    const { promise: asked, resolve: startAsked } =
+      Promise.withResolvers<null>();
+    let held = false;
+    let first: Promise<string> | undefined;
+    await aroundEngine(
+      async (method, call) => {
+        if (method === "start" && !held) {
+          held = true;
+          startAsked(null);
+          await stuck;
+        }
+        return await call();
+      },
+      async () => {
+        first = outcome(
+          deliver(to, invoiceMail({ to, messageId, receivedBy: "mx1" }))
+        );
+        await asked;
+        // Delivered again, through another server: it sends that run's
+        // start again, and the run reads the message as the first
+        // delivery kept it.
+        await deliver(to, invoiceMail({ to, messageId, receivedBy: "mx2" }));
+      }
+    );
+    const [run] = await runsOf(builder, app);
+    await finished(run?.id ?? "");
+    unstick(null);
+    await first;
+    const { status, output } = await builder.api.workflows.status(
+      run?.id ?? ""
+    );
 
-    // Delivered again, through another server: it starts that run, which
-    // reads the message as it came this time.
-    await deliver(to, invoiceMail({ to, messageId, receivedBy: "mx2" }));
-    await finished(orphan);
-    const { status, output } = await builder.api.workflows.status(orphan);
-
-    expect({ key: typeof key, status, output }).toMatchObject({
-      key: "string",
+    const runs = await runsOf(builder, app);
+    expect({
+      runs: runs.length,
+      status,
+      output,
+    }).toMatchObject({
+      runs: 1,
       status: "completed",
       output: { content: "%PDF-" },
     });

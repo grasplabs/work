@@ -1,8 +1,7 @@
 import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
-import { workflowErrors } from "@grasp-os/shared/workflows";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { setCurrentVersion } from "../src/apps.ts";
 import { setParam } from "../src/workflows/params.ts";
@@ -13,7 +12,12 @@ import { allEvents } from "./audit-events.ts";
 import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { racingDb } from "./racing-db.ts";
-import { endLiveRuns, finished, liveStatus } from "./runs.ts";
+import {
+  endLiveRuns,
+  finished,
+  liveStatus,
+  whileEngineRefuses,
+} from "./runs.ts";
 import { outcome, signedInApi } from "./sign-in.ts";
 import { appWith } from "./workflow-apps.ts";
 
@@ -93,6 +97,40 @@ const committed = async (
 };
 
 /** The App's schedules as core has them: ID, version, cron and next time. */
+/**
+ * Core's database, losing the answer of the first batch after a statement
+ * that `writes` matches was prepared: the batch commits, and its caller is
+ * told D1 couldn't be reached.
+ */
+const answerLost = (writes: RegExp): D1Database => {
+  const real = env.DB;
+  let writing = false;
+  let lost = false;
+  return {
+    prepare: (query) => {
+      writing ||= writes.test(query);
+      return real.prepare(query);
+    },
+    batch: async <T>(statements: D1PreparedStatement[]) => {
+      const results = await real.batch<T>(statements);
+      if (writing && !lost) {
+        lost = true;
+        throw new Error("D1_ERROR: Network connection lost.");
+      }
+      return results;
+    },
+    exec: async (query) => await real.exec(query),
+    // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+    dump: async () => await real.dump(),
+    withSession: (constraint) => real.withSession(constraint),
+  };
+};
+
+const currentVersionOf = async (app: string): Promise<unknown> =>
+  await env.DB.prepare("SELECT current_version FROM apps WHERE id = ?")
+    .bind(app)
+    .first("current_version");
+
 const schedulesOf = async (app: string) => {
   const { results } = await env.DB.prepare(
     "SELECT id, version, cron, next_run_at, failed_starts FROM workflow_triggers WHERE app_id = ? ORDER BY id"
@@ -240,6 +278,40 @@ describe("schedule triggers", () => {
     await expect(nextRunOf(app)).rejects.toThrow("has no schedule");
   });
 
+  it("show with their workflow as its current version registered them, to anyone with a role in the App", async () => {
+    const builder = await personApi("builder");
+    const user = await personApi("user");
+    const app = await appWith(builder, weekly());
+    await builder.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const due = await nextRunOf(app);
+
+    const scheduled = await user.api.workflows.get(app, "weekly");
+    // A version that starts it only by hand registers nothing to show.
+    await release(builder, app, weekly(`[{ type: "manual" }]`));
+    const manual = await user.api.workflows.get(app, "weekly");
+
+    expect({
+      scheduled: scheduled.triggers,
+      manual: manual.triggers,
+    }).toStrictEqual({
+      scheduled: [
+        {
+          type: "schedule",
+          position: 0,
+          param: "every",
+          timeZone: "Europe/Amsterdam",
+          nextRunAt: due.toISOString(),
+          stopped: false,
+        },
+      ],
+      manual: [],
+    });
+  });
+
   it("start afresh when their version is made current again, whatever it left behind", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, weekly());
@@ -274,19 +346,11 @@ describe("schedule triggers", () => {
 });
 
 /**
- * Runs `run` while the engine takes no new run, as when Cloudflare
- * Workflows is down: every start fails once its run's row is written.
+ * Runs `run` while the engine takes no new run, as when its storage is
+ * down: every start fails once its run's row is written.
  */
-const whileEngineDown = async <T>(run: () => Promise<T>): Promise<T> => {
-  const down = vi
-    .spyOn(env.WORKFLOWS, "create")
-    .mockRejectedValue(new Error("Workflows unavailable"));
-  try {
-    return await run();
-  } finally {
-    down.mockRestore();
-  }
-};
+const whileEngineDown = async <T>(run: () => Promise<T>): Promise<T> =>
+  await whileEngineRefuses((method) => method === "start", run);
 
 /**
  * Runs the cron trigger for each of `minutes` after `due`, in order; how
@@ -314,10 +378,11 @@ const tries = [0, 1, 3, 7, 15, 31, 63, 127];
 /** Whether the Workflows page and the workflow's view say it stopped. */
 const shownStopped = async (builder: Person, app: string) => {
   const overview = await builder.api.workflows.overview();
-  const { summary } = await builder.api.workflows.get(app, "weekly");
+  const { summary, triggers } = await builder.api.workflows.get(app, "weekly");
   return [
     overview.find((workflow) => workflow.app === app)?.scheduleStopped,
     summary.scheduleStopped,
+    triggers.map((trigger) => trigger.type === "schedule" && trigger.stopped),
   ];
 };
 
@@ -354,6 +419,7 @@ describe("a schedule whose run keeps failing to start", () => {
     await expect(shownStopped(builder, app)).resolves.toStrictEqual([
       true,
       true,
+      [true],
     ]);
     const events = await allEvents();
     expect(
@@ -433,6 +499,7 @@ describe("a schedule whose run keeps failing to start", () => {
     await expect(shownStopped(builder, app)).resolves.toStrictEqual([
       false,
       false,
+      [false],
     ]);
     // A failed start then is its first: tried again the minute after.
     await expect(
@@ -473,6 +540,7 @@ describe("a schedule whose run keeps failing to start", () => {
     await expect(shownStopped(builder, app)).resolves.toStrictEqual([
       false,
       false,
+      [false],
     ]);
     const next = await nextRunOf(app);
     await expect(triedAt(builder, app, next, [0])).resolves.toStrictEqual([9]);
@@ -528,6 +596,32 @@ describe("activations racing", () => {
       refused: "app.conflict",
       schedules: [winner],
     });
+  });
+
+  it("make the version current once when the batch committed but its answer was lost", async () => {
+    const builder = await personApi("builder");
+    const app = await appWith(builder, weekly());
+    const next = await committed(builder, app, {
+      "workflows/weekly.ts":
+        weekly()["workflows/weekly.ts"]?.replace("0 8 * * 1", "0 9 * * 1") ??
+        "",
+    });
+
+    const answered = await outcome(
+      setCurrentVersion(
+        { ...env, DB: answerLost(/update "apps" set "current_version"/iu) },
+        await builder.api.whoami(),
+        app,
+        next
+      )
+    );
+    const after = await schedulesOf(app);
+
+    expect({
+      answered,
+      current: await currentVersionOf(app),
+      schedules: after.map(({ version }) => version),
+    }).toStrictEqual({ answered: "ok", current: next, schedules: [next] });
   });
 
   it("refuse, and write nothing, when a schedule parameter is set meanwhile", async () => {
@@ -604,29 +698,17 @@ describe("trigger deliveries", () => {
       },
     } as const;
 
-    // Two at once: the one that finds the other's run still starting is
-    // told to try again, rather than handed a run with no instance yet.
+    // Two at once: the one that finds the other's run still starting
+    // sends its start again, which the engine takes as the start it has.
     const atOnce = await Promise.all(
       [1, 2].map(async () => {
-        try {
-          const { id } = await startRun(env, delivery);
-          return id;
-        } catch (error) {
-          return workflowErrors.codeOf(error) ?? String(error);
-        }
+        const { id } = await startRun(env, delivery);
+        return id;
       })
     );
     const again = await startRun(env, delivery);
 
-    expect(
-      atOnce.map((got) => (got === again.id ? "the run" : got)).toSorted()
-    ).toSatisfy(
-      (got: string[]) =>
-        got.includes("the run") &&
-        got.every(
-          (one) => one === "the run" || one === "workflow.start_pending"
-        )
-    );
+    expect(atOnce).toStrictEqual([again.id, again.id]);
     await expect(runCount(builder, app)).resolves.toBe(1);
     const events = await allEvents();
 
@@ -643,10 +725,10 @@ describe("trigger deliveries", () => {
     const app = await appWith(builder, weekly());
     const key = `schedule:${crypto.randomUUID()}`;
     // What a start leaves when core stops between writing the run's row
-    // and creating its instance, two minutes ago.
+    // and sending its start, two minutes ago.
     const orphan = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key) VALUES (?, ?, 'weekly', 1, NULL, 'starting', ?, ?)"
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key, pending_start) VALUES (?, ?, 'weekly', 1, NULL, 'starting', ?, ?, '{}')"
     )
       .bind(orphan, app, Date.now() - 2 * minute, key)
       .run();
@@ -670,16 +752,16 @@ describe("trigger deliveries", () => {
     await expect(liveStatus(orphan)).resolves.toBe("complete");
   });
 
-  it("keep a schedule due while its run is left without an instance, and start that run once it's old enough", async () => {
+  it("start the run a crash left without its engine run as soon as its schedule is delivered again, and move the schedule on", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, weekly());
     const due = await nextRunOf(app);
     const [schedule] = await schedulesOf(app);
-    // A start for this time stopped between the run's row and its
-    // instance, just now: the next minute comes before it counts as stopped.
+    // A start for this time stopped between the run's row and its start,
+    // just now.
     const orphan = crypto.randomUUID();
     await env.DB.prepare(
-      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key) VALUES (?, ?, 'weekly', 1, NULL, 'starting', ?, ?)"
+      "INSERT INTO workflow_runs (id, app_id, workflow_id, version, started_by, status, created_at, trigger_key, pending_start) VALUES (?, ?, 'weekly', 1, NULL, 'starting', ?, ?, '{}')"
     )
       .bind(
         orphan,
@@ -690,17 +772,6 @@ describe("trigger deliveries", () => {
       .run();
 
     await runCron({}, due);
-
-    await expect(nextRunOf(app)).resolves.toStrictEqual(due);
-    await expect(outcome(liveStatus(orphan))).resolves.toBe(
-      "Error: instance.not_found"
-    );
-
-    // Two minutes on, as a stopped start would be by the next tries.
-    await env.DB.prepare("UPDATE workflow_runs SET created_at = ? WHERE id = ?")
-      .bind(Date.now() - 2 * minute, orphan)
-      .run();
-    await runCron({}, new Date(due.getTime() + minute));
     await finished(orphan);
 
     await expect(runCount(builder, app)).resolves.toBe(1);

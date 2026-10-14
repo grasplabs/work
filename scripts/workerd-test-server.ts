@@ -85,21 +85,26 @@ export interface Served {
   stop: () => Promise<void>;
   /** Kills workerd at once (SIGKILL), as a crash would, mid-request too. */
   kill: () => Promise<void>;
+  /** What workerd logged so far: its info lines too when served `--verbose`. */
+  logs: () => string;
 }
 
 /**
  * Serves the config `configFor` writes for a socket address, from `out`,
- * once its socket answers.
+ * once its socket answers, with `flags` for workerd: `--experimental` for a
+ * Worker loader, `--verbose` for what workerd only logs at info level, such
+ * as a request it aborted as hung.
  */
 export const serveOnWorkerd = async (
   out: string,
-  configFor: (address: string) => string
+  configFor: (address: string) => string,
+  flags: readonly string[] = []
 ): Promise<Served> => {
   const address = `127.0.0.1:${await freePort()}`;
   writeFileSync(path.join(out, "config.capnp"), configFor(address));
   const workerd = spawn(
     workerdBinary,
-    ["serve", path.join(out, "config.capnp")],
+    ["serve", ...flags, path.join(out, "config.capnp")],
     { stdio: ["ignore", "ignore", "pipe"] }
   );
   running.push(workerd);
@@ -120,5 +125,6 @@ export const serveOnWorkerd = async (
       workerd.kill("SIGKILL");
       await once(workerd, "exit");
     },
+    logs: () => stderr,
   };
 };

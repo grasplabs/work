@@ -7,7 +7,12 @@ import { sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { commitFiles, createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
-import { createStore } from "../src/data-stores.ts";
+import { createStore, shareStore } from "../src/data-stores.ts";
+import {
+  releaseGraceMs,
+  releaseRetentionMs,
+  sweepReleases,
+} from "../src/release-retention.ts";
 
 // Apps of spec 8's layout as the release tests build them: a builder's
 // App committed with given files, a store for it, and its seal.
@@ -43,14 +48,29 @@ export interface Fixture {
   readonly store: StoreId;
 }
 
-/** A builder's App with `files` as its first version, and a store for it. */
+/** A builder's App `name` with `files` as its first version, and a store for it. */
 export const appWith = async (
-  files: Record<string, string>
+  files: Record<string, string>,
+  name = "Notes"
 ): Promise<Fixture> => {
   const owner = await person("builder");
-  const { id } = await createApp(env, owner, { name: "Notes" });
+  const { id } = await createApp(env, owner, { name });
   await commitFiles(env, owner, id, files, "First version");
   return { owner, app: id, store: await createStore(env, owner) };
+};
+
+/**
+ * Shares `fixture`'s store with `other`'s owner, to manage: so `other`'s
+ * owner may bind it to a release too.
+ */
+export const shareStoreWith = async (
+  fixture: Fixture,
+  other: Fixture
+): Promise<void> => {
+  await shareStore(env, fixture.owner, fixture.store, {
+    type: "person",
+    id: other.owner.userId,
+  });
 };
 
 /** Seals the fixture's `version`, with its store. */
@@ -79,3 +99,31 @@ export const failure = async (
 /** Where an artifact's bytes are kept. */
 export const artifactKey = (sha256: string): string =>
   `release-artifacts/${sha256}`;
+
+/**
+ * Lets retention delete App `app`'s release `version`, kept by nothing
+ * but its 90 days: sweeps past them and the grace, as often as it takes,
+ * since one sweep deletes a bounded batch of the releases due.
+ */
+export const sweptAway = async (app: AppId, version: number): Promise<void> => {
+  const now = Date.now();
+  await sweepReleases(env, new Date(now + releaseRetentionMs + 60_000));
+  for (let sweep = 0; sweep < 50; sweep += 1) {
+    // One sweep after the other: each sees what the one before left.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    const kept = await env.DB.prepare(
+      "SELECT 1 FROM sdk_release_manifests WHERE app_id = ? AND version = ?"
+    )
+      .bind(app, version)
+      .first();
+    if (kept === null) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await sweepReleases(
+      env,
+      new Date(now + releaseRetentionMs + releaseGraceMs + 120_000)
+    );
+  }
+  throw new Error(`Retention kept version ${version} of App ${app}`);
+};

@@ -51,6 +51,7 @@ import {
   permissionActionSchema,
   permissionErrors,
 } from "@grasp-os/shared/permissions";
+import { redact } from "@grasp-os/shared/redact";
 import type { ScreenProblem, ServerLog } from "@grasp-os/shared/screens";
 import type { RunFailure } from "@grasp-os/shared/workflows";
 import { DurableObject } from "cloudflare:workers";
@@ -95,7 +96,6 @@ import {
   codeTimeoutMs,
   cutMarker,
   cutToBytes,
-  redact,
   utf8Bytes,
 } from "./code-mode.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
@@ -124,6 +124,7 @@ import { PreviewReports, serverProblem } from "./preview-reports.ts";
 import type { Reports } from "./preview-reports.ts";
 import { Previews } from "./preview.ts";
 import type { WorkContext } from "./restricted.ts";
+import { sessionHost } from "./sandboxed.ts";
 import { runEngine } from "./workflows/engine.ts";
 
 export type Chat = typeof chats.$inferSelect;
@@ -428,7 +429,7 @@ const interruptedMessage = (): AssistantMessage => ({
 });
 
 /** How a write a chat's agent had held for its person ended. */
-export type HeldOutcome = "confirmed" | "declined" | "failed";
+export type HeldOutcome = "confirmed" | "declined" | "unknown" | "failed";
 
 /** A held write, as its chat's agent knows it: the ID its call answered with. */
 const heldSchema = z.strictObject({
@@ -448,6 +449,8 @@ const heldOutcomes: Record<HeldOutcome, string> = {
     "The person confirmed it and it was carried out. Don't ask for it again.",
   declined:
     "The person declined it: it was not carried out and won't be. Don't ask for it again unless they say so.",
+  unknown:
+    "The person confirmed it and it was sent, but whether it took effect is unknown: it may have been carried out. It won't be sent again; check the outside system before asking for it again.",
   failed:
     "The person confirmed it, but carrying it out failed, so it may not have been done. It no longer waits for them; don't ask for it again unless they say so.",
 };
@@ -1046,6 +1049,7 @@ export class Workspace extends DurableObject<Env> {
           },
         },
         loader: this.env.LOADER,
+        sandbox: () => sessionHost(this.env),
         codeTimeoutMs: codeTimeoutMs(this.env),
         signal: cancel.signal,
         events: () => live.events.splice(0),

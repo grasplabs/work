@@ -1,3 +1,4 @@
+import { canonicalText } from "@grasp-os/shared/json";
 import {
   appMaxOperations,
   operationPathMaxLength,
@@ -5,6 +6,8 @@ import {
   operationSegmentPattern,
 } from "@grasp-os/shared/operation-limits";
 
+import { isMigration } from "./migration.ts";
+import type { Migration, MigrationManifest } from "./migration.ts";
 import { referenceData } from "./references.ts";
 import { isBrowserResource, isResource } from "./resources.ts";
 import type {
@@ -57,7 +60,10 @@ import type { AnySchema } from "./value-schema.ts";
 //   the route input its parameters are validated with, and `preferences`
 //   (spec 10.7.7), when declared, is a strict object; the top-level path
 //   segment `preferences` is the platform's, so no function registers
-//   under it and declaring preferences later never collides with one.
+//   under it and declaring preferences later never collides with one;
+// - migrations (spec 17.2, migration.ts) are `migration` declarations,
+//   each named once, one a table, of a table the schema has, whose
+//   `output` declares exactly that table's fields.
 //
 // What the host runs from is `inspectApp`: the registration as data
 // (descriptors, paths, the access each function may use), and the
@@ -128,6 +134,12 @@ export interface AppDefinition<
    * use, and those its screens use (files, links).
    */
   readonly uses: readonly (AnyResource | BrowserResource)[];
+  /**
+   * Its explicit migrations (spec 17.2), each a `migration` declared in
+   * `migrations/`: transforms of one of its tables' records to this
+   * schema, which only the host runs.
+   */
+  readonly migrations?: readonly Migration[];
 }
 
 /** A registered App, as `app` answers it. */
@@ -189,12 +201,16 @@ export interface AppManifest {
   readonly screens: Readonly<Record<string, ScreenManifest>>;
   /** Its preferences' strict object, or null when it declares none. */
   readonly preferences: ValueDescriptor | null;
+  /** Its migrations, by name, in the order declared. */
+  readonly migrations: Readonly<Record<string, MigrationManifest>>;
 }
 
 /** What the host runs an App from: its manifest and its handlers by path. */
 export interface AppInspection {
   readonly manifest: AppManifest;
   readonly functions: ReadonlyMap<string, AnyFunction>;
+  /** Its migrations, by name. */
+  readonly migrations: ReadonlyMap<string, Migration>;
 }
 
 /** Why an App's registration was refused. */
@@ -236,6 +252,7 @@ const appKeys: ReadonlySet<string> = new Set([
   "screens",
   "preferences",
   "uses",
+  "migrations",
 ]);
 
 /**
@@ -527,6 +544,79 @@ const preferencesOf = (preferences: unknown): ValueDescriptor | null => {
     return refuse("An App's `preferences` is a required `v.object`.");
   }
   return descriptor;
+};
+
+/** The most migrations an App registers. */
+export const appMaxMigrations = 16;
+
+/**
+ * The App's migrations, by name, in the order declared, each checked
+ * against `schema`: a table it has, and an `output` declaring exactly that
+ * table's fields, so what the host validates a transform's rows against
+ * is the table the reviewer reads.
+ */
+const migrationsOf = (
+  migrations: unknown,
+  schema: SchemaManifest
+): {
+  manifests: Record<string, MigrationManifest>;
+  byName: Map<string, Migration>;
+} => {
+  const listed: readonly unknown[] = Array.isArray(migrations)
+    ? migrations
+    : [];
+  if (
+    (migrations !== undefined && !Array.isArray(migrations)) ||
+    listed.length > appMaxMigrations
+  ) {
+    refuse(
+      `An App's \`migrations\` is a list of at most ${appMaxMigrations} \`migration\` declarations.`
+    );
+  }
+  const manifests: Record<string, MigrationManifest> = {};
+  const byName = new Map<string, Migration>();
+  for (const declared of listed) {
+    if (!isMigration(declared)) {
+      refuse("An App's `migrations` lists `migration` declarations only.");
+      continue;
+    }
+    const manifest = declared["~migration"];
+    if (byName.has(manifest.name)) {
+      refuse(`Two of the App's migrations are named \`${manifest.name}\`.`);
+    }
+    if (
+      [...byName.values()].some(
+        (other) => other["~migration"].table === manifest.table
+      )
+    ) {
+      refuse(
+        `Two of the App's migrations transform \`${manifest.table}\`: a table takes one migration a version.`
+      );
+    }
+    const table = Object.hasOwn(schema.tables, manifest.table)
+      ? schema.tables[manifest.table]
+      : undefined;
+    if (table === undefined) {
+      refuse(
+        `Migration \`${manifest.name}\` transforms \`${manifest.table}\`, a table the schema doesn't have.`
+      );
+      continue;
+    }
+    if (
+      manifest.output.kind !== "object" ||
+      canonicalText(manifest.output.fields) !== canonicalText(table.fields)
+    ) {
+      refuse(
+        `Migration \`${manifest.name}\`'s \`output\` doesn't declare exactly the fields of \`${manifest.table}\`: declare them as the schema does.`
+      );
+    }
+    byName.set(manifest.name, declared);
+    Object.defineProperty(manifests, manifest.name, {
+      enumerable: true,
+      value: manifest,
+    });
+  }
+  return { manifests, byName };
 };
 
 /** Whether `mode` lets anyone at all use the table. */
@@ -843,6 +933,11 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
     });
   }
 
+  const { manifests: migrations, byName: migrationsByName } = migrationsOf(
+    definition.migrations,
+    manifest
+  );
+
   const made: App<Tables> = Object.freeze({ name, schema });
   inspections.set(made, {
     manifest: deepFreeze({
@@ -853,8 +948,10 @@ export const app = <const Tables extends Readonly<Record<string, AnyTable>>>(
       browserResources: Object.fromEntries(browser),
       screens,
       preferences,
+      migrations,
     }),
     functions,
+    migrations: migrationsByName,
   });
   return made;
 };
@@ -875,5 +972,6 @@ export const inspectApp = (registered: unknown): AppInspection => {
   return Object.freeze({
     manifest: inspection.manifest,
     functions: new Map(inspection.functions),
+    migrations: new Map(inspection.migrations),
   });
 };

@@ -61,10 +61,34 @@ export const operationErrors = defineErrorFamily({
     "This call ran more nested functions, or made more resource requests, than one call may.",
   "operation.depth_exceeded":
     "Functions called each other deeper than one call may go.",
+  "operation.cpu_exceeded":
+    "The operation used more CPU time than one call may, so it was stopped.",
+  "operation.memory_exceeded":
+    "The operation used more memory than one call may, so it was stopped.",
+  "operation.sandbox_refused":
+    "The operation's code sent the host more than one call may.",
+  "operation.sandbox_busy":
+    "This App runs as many calls at once as it may. Try again shortly.",
+  "operation.sandbox_unavailable":
+    "The sandbox that runs the App's code isn't available. Try again shortly.",
   "resource.not_allowed":
     "The App didn't declare that use of this resource for this function.",
   "resource.unavailable":
     "This resource isn't bound to the App, or its binding doesn't serve the contract the App declared.",
+  "resource.budget_exhausted":
+    "The model budget this request counts against is used up, so it wasn't sent.",
+  "resource.budget_busy":
+    "Model requests still under way hold what's left of the budget this request counts against, so it wasn't sent. Try again shortly.",
+  "resource.awaiting_confirmation":
+    "This request waits for the person it acts for to confirm it. Make the same call again once they have.",
+  "resource.declined":
+    "The person this request waited for declined it: it didn't run, and won't under this call's key.",
+  "resource.idempotency_conflict":
+    "This call's key was already used for a request with other arguments: it wasn't run again.",
+  "resource.invalid_args":
+    "The arguments don't fit the contract of the resource's action.",
+  "resource.item_not_found":
+    "The resource has no such item, or none the App may read for this person.",
   "contract.invalid_resource_result":
     "A resource answered something its contract doesn't allow.",
   "contract.invalid_args": "The arguments don't fit the operation.",
@@ -110,8 +134,18 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "data.access_denied": "authorization",
   "resource.unavailable": "authorization",
   "resource.not_allowed": "contract",
+  "resource.budget_exhausted": "operational",
+  "resource.budget_busy": "operational",
+  "resource.awaiting_confirmation": "operational",
+  "resource.item_not_found": "domain",
+  "resource.invalid_args": "contract",
+  "resource.declined": "domain",
+  "resource.idempotency_conflict": "contract",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
+  "data.referenced": "domain",
+  "data.reference_invalid": "domain",
+  "data.cascade_limit": "domain",
   "data.not_unique": "domain",
   "data.result_limit": "domain",
   "data.aggregate_overflow": "domain",
@@ -121,6 +155,21 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "mutation.too_large": "contract",
   "effect.outcome_unknown": "uncertain",
   "operation.deadline_exceeded": "operational",
+  "operation.sandbox_busy": "operational",
+  "operation.sandbox_unavailable": "operational",
+  // The call ended (its caller went, or it was stopped): nothing the App's
+  // code or its caller did wrong.
+  "operation.ended": "operational",
+  // The App's own code went past a bound of one call: its source, not the
+  // caller's request or the platform.
+  "operation.cpu_exceeded": "source",
+  "operation.memory_exceeded": "source",
+  "operation.sandbox_refused": "source",
+  "operation.call_limit": "source",
+  "operation.depth_exceeded": "source",
+  // A call it started outlived the operation's deadline: the operation
+  // broke its contract to end with its calls.
+  "operation.unfinished_call": "contract",
 };
 
 /** The platform codes worth trying again, unchanged, a little later. */
@@ -130,6 +179,10 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "data.reads_changed",
   "submission.superseded",
   "submission.deadline_passed",
+  // Nothing was sent; room comes back as requests under way settle.
+  "resource.budget_busy",
+  "operation.sandbox_busy",
+  "operation.sandbox_unavailable",
 ]);
 
 /** The category of platform error `code`: its own, or by its family. */
