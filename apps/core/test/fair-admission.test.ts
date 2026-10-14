@@ -90,11 +90,30 @@ const withShares = async <Result>(
 };
 
 /** An App of `builder`'s with a workflow that does nothing, and a run of it. */
+/**
+ * A workflow whose runs wait a day: runs still going, whose attempts a
+ * test admits as their host would.
+ */
+const idle = workflowFiles(
+  "idle",
+  `  await step.sleep("idle", { description: "Wait", duration: "1 day" });
+  return 1;`
+);
+
+/** A run of `app`'s idle workflow, waiting. */
+const idleRun = async (builder: Builder, app: string): Promise<string> => {
+  const run = await builder.api.workflows.start(app, "idle");
+  await sleeping(run.id, "idle");
+  return run.id;
+};
+
 const ownerOf = async (builder: Builder): Promise<AttemptOwner> => {
-  const app = await appWith(builder, workflowFiles("noop", "  return 1;"));
-  const run = await builder.api.workflows.start(app, "noop");
-  await finished(run.id);
-  return { run: run.id, root: run.id, subject: builder.userId, resource: app };
+  const app = await appWith(builder, {
+    ...workflowFiles("noop", "  return 1;"),
+    ...idle,
+  });
+  const run = await idleRun(builder, app);
+  return { run, root: run, subject: builder.userId, resource: app };
 };
 
 /** Another run of `owner`'s App, for the same person. */
@@ -102,9 +121,8 @@ const anotherRun = async (
   builder: Builder,
   owner: AttemptOwner
 ): Promise<AttemptOwner> => {
-  const run = await builder.api.workflows.start(owner.resource, "noop");
-  await finished(run.id);
-  return { ...owner, run: run.id, root: run.id };
+  const run = await idleRun(builder, owner.resource);
+  return { ...owner, run, root: run };
 };
 
 /** A first attempt at step `step`, holding until `ms` from now. */
@@ -1220,5 +1238,108 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
     });
 
     expect(waits).toBe(2);
+  });
+
+  it("take no place in the queue for a run cancelled as its attempt was refused", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const holder = await ownerOf(builder);
+    const owner = await anotherRun(builder, holder);
+    // The run is cancelled just before its refusal's place is written.
+    const database = env.DB;
+    let queuing = false;
+    const cancelling = new Proxy(database, {
+      get: (target, property) => {
+        if (property === "prepare") {
+          return (query: string) => {
+            queuing ||= query.includes(
+              'insert into "workflow_admission_queue"'
+            );
+            return target.prepare(query);
+          };
+        }
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (queuing) {
+              queuing = false;
+              await target
+                .prepare(
+                  "UPDATE workflow_runs SET status = 'cancelled', cancel_requested_at = ? WHERE id = ?"
+                )
+                .bind(Date.now(), owner.run)
+                .run();
+            }
+            return await target.batch(statements);
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+
+    const result = await withShares(
+      { workflowClientAttempts: 2, workflowAppAttempts: 1 },
+      async () => {
+        await admit(holder, "holder");
+        const refused = codeOf(
+          await admitAttempt(
+            { ...env, DB: cancelling },
+            owner,
+            attemptOf("cancelled")
+          ).then(
+            () => null,
+            (error: unknown) => error
+          )
+        );
+        return { refused, places: await placesOf(owner.run) };
+      }
+    );
+
+    expect(result).toStrictEqual({
+      refused: "execution.stale_attempt",
+      places: 0,
+    });
+  });
+
+  it("stop a step that waited longer than the cap the operator lowered meanwhile, before any of its code runs", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, {
+      ...workflowFiles("noop", "  return 1;"),
+      ...idle,
+      ...workflowFiles(
+        "counted",
+        `  await step.do("work", { description: "Work" }, async () => {
+    await env.APP.call("hit", "work");
+    return 1;
+  });
+  return 1;`,
+        { work: 1 }
+      ),
+    });
+    const holderRun = await idleRun(builder, app);
+    const holder = {
+      run: holderRun,
+      root: holderRun,
+      subject: builder.userId,
+      resource: app,
+    };
+
+    const result = await withShares({ workflowClientAttempts: 2 }, async () => {
+      const held = await admit(holder, "holder");
+      const run = await builder.api.workflows.start(app, "counted");
+      // Ten seconds into its wait, the operator lowers the cap to eight,
+      // and its share comes free before it asks again.
+      await scheduler.wait(10_000);
+      policyWith({ workflowClientAttempts: 2, workflowQueuedStepMs: 8000 });
+      await settled(held);
+      await finished(run.id);
+      return {
+        failed: await failedWith(run.id),
+        hits: await hitsOf(app, builder.userId, "work"),
+      };
+    });
+
+    expect(result).toStrictEqual({ failed: "workflow.queue_timeout", hits: 0 });
   });
 });

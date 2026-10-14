@@ -797,6 +797,17 @@ const admitAttemptOnce = async (
   if (attempt.deadline <= now) {
     throw executionErrors.create("execution.stale_attempt");
   }
+  // Waited for load as long as a step may, by the policy as it is now,
+  // whatever cap the step waited under: it fails before taking a lease,
+  // so none of its code runs.
+  if (
+    attempt.waitingSince !== undefined &&
+    now - attempt.waitingSince >= policy.limits.workflowQueuedStepMs
+  ) {
+    throw workflowErrors.create("workflow.queue_timeout", {
+      maxWaitMs: policy.limits.workflowQueuedStepMs,
+    });
+  }
   const { run, root } = owner;
   const db = drizzle(env.DB);
   const shares = sharesOf(policy);

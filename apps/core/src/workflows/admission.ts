@@ -1,7 +1,7 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
-import { workflowErrors } from "@grasp-os/shared/workflows";
+import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -545,6 +545,14 @@ export const queuedRefusal = async (
     eq(queue.stepHash, place.stepHash)
   );
   const kept = db.select({ runId: queue.runId }).from(queue).where(mine);
+  // Still going as its place is written, in the same statement: a run
+  // paused, cancelled or ended meanwhile has given up its places
+  // (runs.ts, `projectStatus`), and takes none again.
+  const runActive = sql`${workflowRuns.status} IN ('starting', 'running') AND ${workflowRuns.cancelRequestedAt} IS NULL`;
+  const active = db
+    .select({ id: workflowRuns.id })
+    .from(workflowRuns)
+    .where(and(eq(workflowRuns.id, place.runId), runActive));
   const written = await db.batch([
     // A place that lapsed is lost: the step joins at the back.
     db
@@ -555,7 +563,7 @@ export const queuedRefusal = async (
     db
       .insert(queue)
       .select(
-        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(scope, now)} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${place.runId} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
+        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(scope, now)} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${place.runId} AND ${runActive} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
       )
       .onConflictDoNothing()
       .returning({ runId: queue.runId }),
@@ -570,10 +578,15 @@ export const queuedRefusal = async (
         )
       ),
     kept,
+    active,
   ]);
   // It joined the queue only if this refusal took it a place: the run
   // records that it waits then (host.ts), once each time it joins.
   const joined = written[2].length > 0;
+  // Paused, cancelled or ended: its attempt is over, not queued.
+  if (written[5].length === 0) {
+    return executionErrors.create("execution.stale_attempt");
+  }
   if (written[4].length === 0) {
     return workflowErrors.create("workflow.queue_full", {
       perPerson: shares.queuedPerPerson,
