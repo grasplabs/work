@@ -10,8 +10,9 @@ import type {
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { release } from "./apps.ts";
+import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { mailConnection } from "./mail-connection.ts";
 import { fullScan, recordedQueries } from "./query-plans.ts";
 import {
   auditedDuring,
@@ -22,7 +23,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
-import { workflowFiles } from "./workflow-apps.ts";
+import { mailer, workflowFiles } from "./workflow-apps.ts";
 
 // The Workflows page: every workflow of every App a person can open, the
 // runs across them, and one workflow's view. What could go wrong: a
@@ -124,6 +125,15 @@ const appOf = async (
   const { id } = await owner.api.apps.create({ name });
   await release(owner, id, files);
   return id;
+};
+
+/** The workflows `person` is told use `connection`, as App and workflow. */
+const workflowsUsing = async (
+  person: Person,
+  connection: string
+): Promise<string[][]> => {
+  const summaries = await person.api.workflows.ofConnection(connection);
+  return summaries.map(({ app, workflow }) => [app, workflow]);
 };
 
 /** Why `hidden`'s steps can't be listed, as the SDK's describer says. */
@@ -861,5 +871,46 @@ export default workflowTests(definition, [
     await expect(
       outcome(user.api.workflows.test(app, "approve"))
     ).resolves.toBe("role.forbidden");
+  });
+
+  it("lists the workflows that use a connection: those calling the binding of their App's active permission on it, of Apps the person can open", async () => {
+    const [owner, other, user] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    const [mail, otherMail] = await Promise.all([
+      mailConnection(),
+      mailConnection(),
+    ]);
+    // Its mailer calls MAIL; its idle workflow calls nothing.
+    const invoices = await appOf(owner, `Invoices ${unique()}`, {
+      ...mailer(""),
+      ...workflowFiles("idle", "  return 1;"),
+    });
+    // A mailer too, but with no permission on the connection.
+    await appOf(other, `Payroll ${unique()}`, mailer(""));
+    const granted = await requestGranted(idp, owner, {
+      subject: { type: "app", appId: invoices },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: "MAIL",
+    });
+
+    await expect(
+      Promise.all([
+        workflowsUsing(owner, mail.id),
+        workflowsUsing(other, mail.id),
+        workflowsUsing(user, mail.id),
+        workflowsUsing(owner, otherMail.id),
+      ])
+    ).resolves.toStrictEqual([[[invoices, "mailer"]], [], [], []]);
+    await expect(outcome(owner.api.workflows.ofConnection(""))).resolves.toBe(
+      "workflow.invalid"
+    );
+
+    const admin = await personApi("admin");
+    await admin.api.permissions.revoke(granted);
+    await expect(workflowsUsing(owner, mail.id)).resolves.toStrictEqual([]);
   });
 });
