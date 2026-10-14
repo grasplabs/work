@@ -1,9 +1,9 @@
+import { appErrors } from "@grasp-os/shared/apps";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { OperationResult } from "@grasp-os/shared/operations";
-import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   jsonBytes,
@@ -13,6 +13,7 @@ import {
 } from "@grasp-os/shared/screens";
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 
+import { operationRoles } from "./app-access.ts";
 import { evaluateAppQuery, refusalOf } from "./app-functions.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
 import type { PageCallback } from "./page-callbacks.ts";
@@ -81,7 +82,7 @@ const evaluationMs = 30_000;
 
 /**
  * How long one look at the person's role and the build's trust clears
- * pushes of an App's data on a connection (`#refusal`).
+ * pushes of an App's data on a connection (`#gate`).
  */
 const accessCacheMs = 1000;
 
@@ -114,7 +115,28 @@ type Result = OperationResult;
 interface Snapshot {
   readonly push: QuerySnapshotPush;
   readonly bytes: number;
+  /** The roles it was read under (`rolesOf`): it goes out under those only. */
+  readonly roles: string;
 }
+
+/**
+ * The roles `by` reads App `app`'s tables with (`operationRoles`), as a
+ * key: what decides which records a read sees, so a result read under
+ * one is never pushed under another.
+ */
+const rolesOf = async (
+  env: Env,
+  by: Identity,
+  app: AppId
+): Promise<string | undefined> => {
+  try {
+    const { appMember, appBuilder } = await operationRoles(env, by, app);
+    return canonicalJson({ appMember, appBuilder });
+  } catch {
+    // No role in the App any more, or no answer: no roles to push under.
+    return undefined;
+  }
+};
 
 /** One screen's subscription to a query. */
 interface Listener {
@@ -226,13 +248,14 @@ export class QuerySubscriptions {
   #count = 0;
   /** Bytes of snapshots handed to the page and not yet taken. */
   #unsent = 0;
-  /** The latest look at access, per App and build (`#refusal`). */
+  /** The latest look at access, per App and build (`#gate`). */
   readonly #cleared = new Map<
     string,
     {
       readonly by: Identity;
       readonly until: number;
       readonly access: ReturnType<AccessCheck>;
+      readonly roles: Promise<string | undefined>;
     }
   >();
 
@@ -416,6 +439,14 @@ export class QuerySubscriptions {
       return;
     }
     evaluation.budgetWaitMs = 0;
+    // The roles it is read under, looked at first: the read sees records
+    // by roles at least as new, and a result whose roles changed since is
+    // read again rather than pushed (`#send`).
+    const before = await this.#gate(evaluation);
+    if ("refusal" in before) {
+      await this.#end(evaluation, before.refusal);
+      return;
+    }
     let evaluated: Awaited<ReturnType<typeof evaluateAppQuery>>;
     try {
       evaluated = await delivering(
@@ -445,15 +476,17 @@ export class QuerySubscriptions {
       await this.#end(evaluation, result);
       return;
     }
+    // A failure the host would answer differently later (the sandbox
+    // busy or away, a concurrent change) is not pushed as though it were
+    // final, nor watched: what it read, if anything, isn't what an answer
+    // would read. The screen keeps what it shows and follows again.
+    if (!result.ok && result.error.retryable) {
+      await this.#lose(evaluation);
+      return;
+    }
     const { reads } = evaluated;
     if (reads === undefined) {
-      // Nothing read that could be watched. A failure the host would
-      // answer differently later is not pushed as though it were final:
-      // the screen keeps what it shows and follows again.
-      if (!result.ok && result.error.retryable) {
-        await this.#lose(evaluation);
-        return;
-      }
+      // Nothing read that could be watched.
       await this.#unwatch(evaluation);
     } else if (!(await this.#keepWatched(evaluation, by, reads))) {
       await this.#lose(evaluation);
@@ -461,31 +494,38 @@ export class QuerySubscriptions {
     }
     // The person and the build, checked again before any data goes out
     // (and again before each push of it, `#send`).
-    const refusal = await this.#refusal(evaluation);
-    if (refusal !== undefined) {
-      await this.#end(evaluation, refusal);
+    const after = await this.#gate(evaluation);
+    if ("refusal" in after) {
+      await this.#end(evaluation, after.refusal);
       return;
     }
-    this.#publish(evaluation, result);
+    if (after.roles !== before.roles) {
+      evaluation.dirty = true;
+      return;
+    }
+    this.#publish(evaluation, result, before.roles);
   }
 
   /**
    * The gate every push of data passes, just before it goes out: the
    * connection's session read now (`check`), then the person's role in
-   * the App and the build's trust, as a refusal to end with; none while
-   * all three hold. The role and trust are kept for `accessCacheMs` per
-   * App and build, and only for the same reading of the session (a new
-   * reading, after the session's recheck interval, asks again), so a
-   * burst of pushes costs one look, and a revocation is seen within that
-   * second at most.
+   * the App and the build's trust, as a refusal to end with; while all
+   * three hold, the roles the person reads the App's tables with now
+   * (member, builder), which a result read under other roles must not go
+   * out with (`#send`). Kept for `accessCacheMs` per App and build, and
+   * only for the same reading of the session (a new reading, after the
+   * session's recheck interval, asks again), so a burst of pushes costs
+   * one look, and a change is seen within that second at most.
    */
-  async #refusal(evaluation: Evaluation): Promise<Result | undefined> {
+  async #gate(
+    evaluation: Evaluation
+  ): Promise<{ refusal: Result } | { roles: string }> {
     const { app, artifact } = evaluation;
     let by: Identity;
     try {
       by = await this.#check();
     } catch (error) {
-      return refusalResult(error);
+      return { refusal: refusalResult(error) };
     }
     const key = canonicalJson([app, artifact ?? null]);
     const now = Date.now();
@@ -495,24 +535,31 @@ export class QuerySubscriptions {
         by,
         until: now + accessCacheMs,
         access: this.#access(by, app, artifact),
+        roles: rolesOf(this.#env, by, app),
       };
       this.#cleared.set(key, cached);
     }
     let access: Awaited<ReturnType<AccessCheck>>;
+    let roles: string | undefined;
     try {
       access = await cached.access;
+      roles = access === "open" ? await cached.roles : undefined;
     } catch {
       access = "role";
     }
-    if (access === "open") {
-      return undefined;
+    if (access === "open" && roles !== undefined) {
+      return { roles };
     }
     this.#cleared.delete(key);
-    return refusalResult(
-      access === "role"
-        ? roleErrors.create("role.forbidden")
-        : screenErrors.create("screen.revoked")
-    );
+    // Someone without a role is refused as a read refuses them: nothing
+    // of the App disclosed.
+    return {
+      refusal: refusalResult(
+        access === "build"
+          ? screenErrors.create("screen.revoked")
+          : appErrors.create("app.not_found")
+      ),
+    };
   }
 
   /**
@@ -669,7 +716,7 @@ export class QuerySubscriptions {
   }
 
   /** Numbers `result` and offers it to every subscription of `evaluation`. */
-  #publish(evaluation: Evaluation, result: Result): void {
+  #publish(evaluation: Evaluation, result: Result, roles: string): void {
     if (evaluation.closed) {
       return;
     }
@@ -683,7 +730,7 @@ export class QuerySubscriptions {
       };
       bytes = jsonBytes(push, screenLimits.answerBytes);
     }
-    const snapshot: Snapshot = { push, bytes };
+    const snapshot: Snapshot = { push, bytes, roles };
     evaluation.latest = snapshot;
     for (const listener of evaluation.listeners) {
       this.#offer(evaluation, listener, snapshot);
@@ -741,9 +788,16 @@ export class QuerySubscriptions {
     this.#unsent += snapshot.bytes;
     try {
       // Every push of data passes the gate first, however long it waited.
-      const refusal = await this.#refusal(evaluation);
-      if (refusal !== undefined) {
-        void this.#end(evaluation, refusal);
+      const gate = await this.#gate(evaluation);
+      if ("refusal" in gate) {
+        void this.#end(evaluation, gate.refusal);
+      } else if (gate.roles !== snapshot.roles) {
+        // Read under roles the person no longer has: dropped, and read
+        // again as they are now.
+        if (evaluation.latest === snapshot) {
+          evaluation.latest = undefined;
+        }
+        listener.behind = true;
       } else if (!listener.released) {
         await listener.toPage(snapshot.push);
       }
