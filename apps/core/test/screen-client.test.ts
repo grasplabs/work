@@ -1,3 +1,4 @@
+import type { OperationReference, ReferenceKind } from "@grasp-os/sdk";
 import { GraspError } from "@grasp-os/sdk/client";
 import { clientInternals, GraspClient } from "@grasp-os/sdk/host";
 import type { ClientTransport } from "@grasp-os/sdk/host";
@@ -747,8 +748,8 @@ const countingTransport = (transport: ClientTransport) => {
   let gate: Promise<unknown> | undefined;
   return {
     transport: {
-      call: async (request: string) => {
-        const answer = await transport.call(request);
+      call: async (request: string, app: string) => {
+        const answer = await transport.call(request, app);
         await gate;
         return answer;
       },

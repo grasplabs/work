@@ -107,10 +107,10 @@ export interface ClientTransport {
    * Follows the query `request` names (spec 11): `onSnapshot` gets each
    * push of core's (`{ revision, result }`), and `onLost` is called once
    * core, or the connection to it, let go of the subscription. Resolves
-   * with what releases it, or rejects as `call` does. The platform's
-   * frame has it; without it, queries are read again after changes.
+   * with what releases it, or rejects as `call` does. A portable host
+   * has no transport, and reads its queries again after changes.
    */
-  watch?: (
+  watch: (
     request: string,
     onSnapshot: (push: unknown) => void,
     onLost: () => void
@@ -949,7 +949,7 @@ export class GraspClient {
     if (!this.#queries.has(entry.key)) {
       this.#queries.set(entry.key, entry);
     }
-    if (this.#transport?.watch === undefined) {
+    if (this.#transport === undefined) {
       const current = entry.snapshot.value !== undefined && !entry.stale;
       if (
         entry.reading === undefined &&
@@ -958,10 +958,8 @@ export class GraspClient {
       ) {
         this.#refresh(entry);
       }
-    } else {
-      if (entry.live === undefined && entry.snapshot.error === undefined) {
-        this.#follow(entry, 0);
-      }
+    } else if (entry.live === undefined && entry.snapshot.error === undefined) {
+      this.#follow(entry, 0);
     }
     return () => {
       entry.listeners.delete(onChange);
@@ -985,7 +983,7 @@ export class GraspClient {
         if (entry.listeners.size === 0) {
           continue;
         }
-        if (this.#transport?.watch === undefined) {
+        if (this.#transport === undefined) {
           this.#refresh(entry);
         } else if (entry.live === undefined) {
           this.#follow(entry, 0);
@@ -1252,7 +1250,7 @@ export class GraspClient {
           entry.stale &&
           entry.listeners.size > 0 &&
           entry.live === undefined &&
-          this.#transport?.watch === undefined &&
+          this.#transport === undefined &&
           generation === this.#generation
         ) {
           this.#refresh(entry);
@@ -1390,7 +1388,7 @@ export class GraspClient {
     // marks above only keep a later imperative read from joining an
     // older one (`#readCurrent`). Elsewhere, changes in quick succession
     // share one round of re-reads.
-    if (this.#transport?.watch !== undefined) {
+    if (this.#transport !== undefined) {
       return;
     }
     this.#changedApps.add(resourceId);
