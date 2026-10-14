@@ -29,7 +29,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { organizationId } from "./auth/auth.ts";
-import { offeredEntries, personOf } from "./connections.ts";
+import { catalogEntries, personOf } from "./connections.ts";
 import { organizations } from "./db/core/schema.ts";
 import type { Reader } from "./knowledge/access.ts";
 import { getRecord, listRecords } from "./knowledge/records.ts";
@@ -173,21 +173,26 @@ const sourceOf = (
   step: 2,
 });
 
-/** Every record of `type` in the Playbook `reader` may read, up to the cap. */
+/**
+ * Every record of `type` in the Playbook `reader` may read, up to the cap.
+ * The cap counts the rows read, so records that no longer fit their type
+ * don't let a read go on past it.
+ */
 const playbookRecords = async (
   env: Env,
   reader: Reader,
   type: string
 ): Promise<RecordSummary[]> => {
   const all: RecordSummary[] = [];
+  let scanned = 0;
   let after: string | undefined;
-  while (all.length < brainRecordsMax) {
+  while (scanned < brainRecordsMax) {
     let page: Awaited<ReturnType<typeof listRecords>>;
     try {
       // oxlint-disable-next-line no-await-in-loop -- each page starts after the last
       page = await listRecords(env, reader, playbook, {
         ...(after === undefined ? {} : { after }),
-        limit: Math.min(recordPageMaxLimit, brainRecordsMax - all.length),
+        limit: Math.min(recordPageMaxLimit, brainRecordsMax - scanned),
         type,
       });
     } catch (error) {
@@ -199,6 +204,7 @@ const playbookRecords = async (
       throw error;
     }
     all.push(...page.records);
+    scanned += page.records.length + page.unreadable.length;
     if (page.next === null) {
       break;
     }
@@ -232,12 +238,15 @@ const onboardingFacts = async (
   return { view, kickoff, rosterSavedAt, sentLinks };
 };
 
-/** What the kickoff said about `field`, or the sponsor answered; empty if neither. */
+/** What the kickoff said about `field` and what the sponsor answered, each on its own line; empty if neither. */
 const kickoffSaid = (
   kickoff: KickoffView,
   field: "business" | "goals" | "pain"
 ): string =>
-  kickoff.reading?.fields[field]?.text ?? kickoff.answers[field] ?? "";
+  [kickoff.reading?.fields[field]?.text, kickoff.answers[field]]
+    .map((each) => each?.trim() ?? "")
+    .filter((each) => each !== "")
+    .join("\n");
 
 /** The onboarding's sources: the kickoff, and who works where. */
 const onboardingSources = (facts: OnboardingFacts | null): Source[] => {
@@ -409,7 +418,7 @@ const viaOf = (source: string): Connection["via"] =>
 /**
  * The catalog's offered entries, each connected when the person has an
  * active connection to it (their own, or a shared one), and the active
- * connections to entries the catalog doesn't list (a toolkit it no longer
+ * connections to entries an admin hid or the catalog doesn't list (a toolkit it no longer
  * lists, say). A native provider is connected directly; a toolkit through
  * Composio. A connection matches the tool names that are its name.
  */
@@ -418,7 +427,7 @@ const connectionsOf = async (
   person: Identity
 ): Promise<Connection[]> => {
   const [entries, listed] = await Promise.all([
-    offeredEntries(env),
+    catalogEntries(env),
     personOf(env, person).then(
       async (connecting) => await env.CONNECT.listConnections(connecting)
     ),
@@ -428,7 +437,12 @@ const connectionsOf = async (
       .filter(({ status }) => status === "active")
       .map(({ source, provider }) => entryKey(source, provider))
   );
-  const offered = entries.map(({ source, id, name }): Connection => ({
+  // A hidden entry isn't offered, but a connection to it still runs:
+  // it stays, by its catalog name.
+  const shown = entries.filter(
+    ({ source, id, hidden }) => !hidden || active.has(entryKey(source, id))
+  );
+  const offered = shown.map(({ source, id, name }): Connection => ({
     name,
     status: active.has(entryKey(source, id)) ? "connected" : "available",
     via: viaOf(source),

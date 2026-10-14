@@ -2,6 +2,8 @@ import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding"
 import type { Workspace } from "@grasp-os/shared/brain";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
+import { visionFields } from "@grasp-os/shared/kickoff";
+import type { VisionField } from "@grasp-os/shared/kickoff";
 import type { RosterInput } from "@grasp-os/shared/onboarding";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
@@ -25,6 +27,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // The company brain's workspace (`brain.read`, brain-rpc.ts), assembled
 // from what core holds: the onboarding (the kickoff, who works where),
@@ -96,8 +99,13 @@ const kickoffReading = {
   ],
 };
 
-/** Staff bring the kickoff in, read by the fake gateway. */
-const bringInKickoff = async (): Promise<void> => {
+/**
+ * Staff bring the kickoff in, read by the fake gateway, and keep the
+ * sponsor's `answers`.
+ */
+const bringInKickoff = async (
+  answers: Partial<Record<VisionField, string>> = {}
+): Promise<void> => {
   const session = await signedIn(idp, "grasp-staff", staffPerson());
   const { core } = await openRpc(session);
   const staff = await core.authenticate();
@@ -115,6 +123,13 @@ const bringInKickoff = async (): Promise<void> => {
     });
   } finally {
     spy.mockRestore();
+  }
+  for (const field of visionFields) {
+    const text = answers[field];
+    if (text !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one answer after another
+      await staff.onboardingStaff.answerKickoff(field, text);
+    }
   }
 };
 
@@ -262,6 +277,14 @@ const idAt = (
 };
 
 /** The parts of a workspace that come from the Playbook. */
+/** HubSpot, the catalog's one toolkit, as the brain lists it. */
+const hubspotAs = (status: string) => ({
+  name: "HubSpot",
+  status,
+  via: "composio",
+  matches: ["HubSpot"],
+});
+
 const fromPlaybook = (workspace: Workspace) => ({
   sources: workspace.sources.filter(
     ({ id }) => id !== "src-kickoff" && id !== "src-roster"
@@ -308,7 +331,9 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
   it("maps the kickoff, the roster, the Playbook's records and the connections, and shows the onboarding to admins alone", async () => {
     await builtins(env).ensureInstalled(await fingerprintOf(release));
     const admin = await signedInApi(idp, "admin");
-    await bringInKickoff();
+    // The sponsor answers what the kickoff already said something about:
+    // the brain keeps both.
+    await bringInKickoff({ pain: "Clients wait weeks for their numbers." });
     await admin.api.onboarding.saveRoster(roster);
     await saveInterview(admin);
     await drawWorkflow(admin);
@@ -345,7 +370,8 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
       },
       vision: {
         ambition: "Every client gets their numbers within a week.",
-        whyNow: "Copying invoices by hand.",
+        whyNow:
+          "Copying invoices by hand.\nClients wait weeks for their numbers.",
         inviteTeamIds: ["team-finance"],
         budget: [],
         toolApproval: [],
@@ -537,6 +563,38 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
         statements: before.statements.length,
         workflows: before.workflows.length,
       },
+    });
+  });
+
+  it("keeps a connection to an entry an admin hid, by its catalog name, and offers the entry no more", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const hubspot = async () => {
+      const { connections } = await member.api.brain.read();
+      return connections.filter(({ matches }) =>
+        matches.some((each) => each.toLowerCase() === "hubspot")
+      );
+    };
+    const offered = await hubspot();
+
+    await admin.api.connections.setOffered("composio", "hubspot", false);
+    const hidden = await hubspot();
+
+    // A shared HubSpot connection, as connect keeps one, made before it was hidden.
+    const now = Date.now();
+    await connectDb()
+      .prepare(
+        "INSERT INTO connections (id, provider, scope, status, server_kind, server, tools, created_at, updated_at) VALUES (?, 'hubspot', 'shared', 'active', 'composio', 'https://hubspot.invalid/mcp', '[]', ?, ?)"
+      )
+      .bind(`connection-${crypto.randomUUID()}`, now, now)
+      .run();
+    const connected = await hubspot();
+    await admin.api.connections.setOffered("composio", "hubspot", true);
+
+    expect({ offered, hidden, connected }).toStrictEqual({
+      offered: [hubspotAs("available")],
+      hidden: [],
+      connected: [hubspotAs("connected")],
     });
   });
 });

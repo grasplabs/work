@@ -193,17 +193,21 @@ const hiddenEntries = async (env: Env): Promise<Set<string>> => {
 };
 
 /**
- * The catalog's entries an admin hasn't hidden: what can be connected
- * here, as everyone but an admin sees the catalog.
+ * The catalog's entries, each with whether an admin hid it: what isn't
+ * hidden is what can be connected here, as everyone but an admin sees the
+ * catalog.
  */
-export const offeredEntries = async (env: Env): Promise<CatalogEntry[]> => {
+export const catalogEntries = async (
+  env: Env
+): Promise<(CatalogEntry & { hidden: boolean })[]> => {
   const [catalog, hidden] = await Promise.all([
     env.CONNECT.catalog(),
     hiddenEntries(env),
   ]);
-  return catalog.entries.filter(
-    ({ source, id }) => !hidden.has(entryKey(source, id))
-  );
+  return catalog.entries.map((entry) => ({
+    ...entry,
+    hidden: hidden.has(entryKey(entry.source, entry.id)),
+  }));
 };
 
 /** Whether an admin hid the entry `source` `id`. */
