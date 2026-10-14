@@ -1,8 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["es2024", "esnext.disposable", "dom", "dom.iterable"],
-    "jsx": "react-jsx"
+    "lib": ["es2024", "esnext.disposable", "dom", "dom.iterable"]
   },
   "include": ["src", "test"]
 }

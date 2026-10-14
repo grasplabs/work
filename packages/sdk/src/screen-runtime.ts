@@ -15,7 +15,6 @@ import {
  */
 import { portTransport } from "@grasp-os/shared/screen-port";
 import type { ScreenMounted, ScreenProblem } from "@grasp-os/shared/screens";
-import { Button } from "@grasp-os/ui/components/button";
 import { RpcSession } from "capnweb";
 import type { RpcStub } from "capnweb";
 import { Component, createElement, useEffect } from "react";
@@ -197,9 +196,16 @@ const fallbackOf = (error: unknown, tryAgain: () => void): ReactNode =>
         ? error.message
         : "Something went wrong showing this screen."
     ),
+    // A plain button, not @grasp-os/ui's Button: the UI kit depends on
+    // the SDK, so the SDK can't depend on it back. Styled with theme
+    // utilities only, nothing arbitrary.
     createElement(
-      Button,
-      { type: "button", variant: "outline", size: "sm", onClick: tryAgain },
+      "button",
+      {
+        type: "button",
+        className: "rounded-md border px-3 py-1.5 text-sm",
+        onClick: tryAgain,
+      },
       "Try again"
     )
   );
