@@ -290,6 +290,22 @@ export interface DoOptions<Input extends StepInput = StepInput>
   input?: Input;
 }
 
+/**
+ * The code a connector call's error has when its answer was lost, and the
+ * person the run acts for has since said it took effect. The run waited
+ * for them, then ran the step again under the same key: the call isn't
+ * sent again, and what it returned isn't known. Catch it as success with
+ * no output:
+ *
+ *   try {
+ *     return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);
+ *   } catch (error) {
+ *     if (error.code === resolvedDone) return { sent: true };
+ *     throw error;
+ *   }
+ */
+export const resolvedDone = "connect.resolved_done";
+
 /** Passed to a side-effect step: hand `idempotencyKey` to connector calls. */
 export interface SideEffectContext {
   /**

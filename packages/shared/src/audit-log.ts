@@ -46,6 +46,10 @@ const typeRules: readonly {
   sideEffect?: boolean;
   access?: "read" | "write";
 }[] = [
+  // A person saying what became of a call of unknown outcome (or being
+  // refused that): their word, never a send.
+  { action: "connection.call.resolved", type: "decision" },
+  { action: "connection.call.resolve_refused", type: "decision" },
   // A connector call that changed something at the provider, or only read.
   { action: "connection.call", sideEffect: true, type: "action" },
   { action: "connection.call", type: "read" },

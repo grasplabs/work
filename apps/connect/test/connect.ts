@@ -144,7 +144,10 @@ export const capabilityFor = async (
  * is `originOf` the authority unless it says another.
  */
 export type Signed = Partial<
-  Pick<CapabilityScope, "restricted" | "readOnly" | "origin" | "confirms">
+  Pick<
+    CapabilityScope,
+    "restricted" | "readOnly" | "origin" | "confirms" | "resolves"
+  >
 >;
 
 /**
