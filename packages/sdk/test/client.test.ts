@@ -134,6 +134,19 @@ describe("the session client and an outcome it can't tell", () => {
     }
   });
 
+  it("answers an action whose sandbox was lost mid-call with the key the client chose", async () => {
+    const { client } = network(async () => {
+      await Promise.resolve();
+      return failedWith("operation.sandbox_lost", "uncertain");
+    });
+    const failure = await failureOf(client.action(api.notes.tally));
+    expect(failure).toMatchObject({
+      code: "operation.sandbox_lost",
+      category: "uncertain",
+    });
+    expect(failure.details).toHaveProperty("idempotencyKey");
+  });
+
   it("sends a mutation lost mid-call again under its key, which recovers its receipt", async () => {
     const keys = new Set<unknown>();
     const { client, calls } = network(async (call, request) => {

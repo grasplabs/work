@@ -5,12 +5,13 @@ import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   clientError,
   fencingCodes,
+  GraspError,
   nothingRanCodes,
   readAnswer,
   refusedBeforeCallCodes,
   readRejection,
 } from "./client-error.ts";
-import type { GraspError, Settled } from "./client-error.ts";
+import type { Settled } from "./client-error.ts";
 import type {
   ArgsOf,
   OperationReference,
@@ -515,6 +516,24 @@ let internalsOf: (client: GraspClient) => ClientInternals;
  * person using it. One per App session, made and mounted by the
  * platform; App code gets it from `useClient()`.
  */
+/**
+ * `error`, an outcome the host can't tell, with the key it was sent
+ * under among its details: a caller that let the client pick the key
+ * can still recover the outcome by it, and not run the call afresh.
+ */
+const withKey = (error: GraspError, key: string): GraspError =>
+  new GraspError({
+    code: error.code,
+    message: error.message,
+    category: error.category,
+    retryable: error.retryable,
+    requestId: error.requestId,
+    details: {
+      ...(isPlainObject(error.details) ? error.details : {}),
+      idempotencyKey: key,
+    },
+  });
+
 export class GraspClient {
   readonly #transport: ClientTransport;
   readonly #queries = new Map<string, QueryEntry>();
@@ -1008,7 +1027,7 @@ export class GraspClient {
         if (unknown && isAction) {
           throw settled.kind === "lost"
             ? clientError("submission.outcome_unknown", { idempotencyKey: key })
-            : settled.error;
+            : withKey(settled.error, key);
         }
         if (unknown) {
           // A mutation is sent again under its key, which recovers its
