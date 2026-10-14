@@ -164,11 +164,14 @@ const activityPages = 5;
 /**
  * The latest events of the audit trail, without its own searches: core
  * records every search, the dashboard's too, and those alone can fill a
- * page. It reads older pages until it has enough to show, or the trail
+ * page. It reads older pages until it has `enough` to show, or the trail
  * ends, or it has read as many as it reads; only a first page records a
  * search. `older` says the trail goes on past what was read.
  */
-const readActivity = async (session: Session): Promise<LatestActivity> => {
+export const readActivity = async (
+  session: Session,
+  enough: number = activityShown
+): Promise<LatestActivity> => {
   const records: AuditRecord[] = [];
   let before: number | undefined;
   for (let page = 0; page < activityPages; page += 1) {
@@ -177,7 +180,7 @@ const readActivity = async (session: Session): Promise<LatestActivity> => {
     records.push(
       ...read.records.filter(({ event }) => event?.action !== "audit.searched")
     );
-    if (records.length >= activityShown || read.next === null) {
+    if (records.length >= enough || read.next === null) {
       return { records, older: false };
     }
     before = read.next;
@@ -280,7 +283,7 @@ export const readDashboard = async (
     async (session) => await session.workflows.activity({ days: fullDays })
   );
   const activity = isAdmin(identity.role)
-    ? loadFromCore(core, readActivity)
+    ? loadFromCore(core, async (session) => await readActivity(session))
     : undefined;
   const programme = loadFromCore(
     core,

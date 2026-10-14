@@ -14,6 +14,13 @@ export const formatDateTime = (value: string | number | Date): string =>
     timeStyle: "short",
   }).format(new Date(value));
 
+/** A day without its year, for where the year is plain, such as "3 Oct". */
+export const formatDay = (value: string | number | Date): string =>
+  new Intl.DateTimeFormat(i18n.locale, {
+    day: "numeric",
+    month: "short",
+  }).format(new Date(value));
+
 /** A date as the page's language writes it, such as "3 Oct 2026". */
 export const formatDate = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(

@@ -192,6 +192,7 @@ const cast = {
   dashboard: { user: "user", admin: "admin" },
   dashboardBoard: { builder: "builder" },
   dashboardLayout: { user: "user" },
+  inbox: { admin: "admin", builder: "builder", approver: "user", user: "user" },
   dependencyApproval: { admin: "admin", builder: "builder", approver: "user" },
   enginePackages: { admin: "admin", builder: "builder", approver: "user" },
   enginePackagesTab: { admin: "admin", builder: "builder", approver: "user" },

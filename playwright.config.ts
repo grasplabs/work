@@ -24,7 +24,7 @@ const onboardingTests = /onboarding\.e2e\.ts$/u;
  * uses, so a decision another worker's browser already shows is refused as
  * stale. They run in a project of their own, one test at a time.
  */
-const packageApprovalTests = /(?:dashboard|engine-packages)\.e2e\.ts$/u;
+const packageApprovalTests = /(?:dashboard|engine-packages|inbox)\.e2e\.ts$/u;
 const ci = process.env.CI === "true";
 
 /**

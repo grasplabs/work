@@ -6,20 +6,33 @@ import { cn } from "@grasp-os/ui/lib/utils";
 import { cva } from "class-variance-authority";
 import type { VariantProps } from "class-variance-authority";
 
+// The room between the tabs and what they show: `none` where the row of
+// tabs sits in a bar of its own, ruled off from the panel under it.
+const tabsVariants = cva("group/tabs flex data-horizontal:flex-col", {
+  variants: {
+    spacing: {
+      default: "gap-2",
+      none: "gap-0",
+    },
+  },
+  defaultVariants: {
+    spacing: "default",
+  },
+});
+
 function Tabs({
   className,
   orientation = "horizontal",
+  spacing = "default",
   ...props
-}: TabsPrimitive.Root.Props) {
+}: TabsPrimitive.Root.Props & VariantProps<typeof tabsVariants>) {
   return (
     <TabsPrimitive.Root
       data-slot="tabs"
       data-orientation={orientation}
+      data-spacing={spacing}
       orientation={orientation}
-      className={cn(
-        "group/tabs flex gap-2 data-horizontal:flex-col",
-        className
-      )}
+      className={cn(tabsVariants({ spacing }), className)}
       {...props}
     />
   );

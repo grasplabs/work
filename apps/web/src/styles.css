@@ -591,6 +591,17 @@
   }
 }
 
+/* The inbox fills the window under the site header, inside the inset frame's margins, so its
+   list and its item each scroll on their own. */
+@utility h-inbox {
+  height: calc(100svh - var(--header-height) - 1rem);
+}
+
+/* The inbox's columns: a wide list, the item beside it narrower. */
+@utility grid-cols-inbox {
+  grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+}
+
 /* Room at the foot of whatever scrolls up and down into the bottom right corner, where the chat
    box floats over the page: what is last on a page can then always be moved clear of it. */
 @utility pb-chat {
