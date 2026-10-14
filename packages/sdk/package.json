@@ -38,6 +38,7 @@
   "devDependencies": {
     "@babel/types": "catalog:",
     "@cloudflare/vitest-pool-workers": "catalog:",
+    "@grasp-os/ui": "workspace:*",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "react": "catalog:",

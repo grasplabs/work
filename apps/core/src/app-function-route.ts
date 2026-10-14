@@ -231,9 +231,6 @@ const boundedCall = async (
 ): Promise<Response> => {
   try {
     const id = await admitted(env, person, app);
-    if (portableSession !== undefined) {
-      await recordPortableUse(env, person, id, portableSession);
-    }
     // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
     // chunks; its type says `any` only for streams in general.
     const stream = request.body as ReadableStream<Uint8Array> | null;
@@ -248,6 +245,11 @@ const boundedCall = async (
         requestErrors.create("request.too_large"),
         requestId
       );
+    }
+    // Recorded once the call is one it reads: a body past the bound costs
+    // the audit log nothing.
+    if (portableSession !== undefined) {
+      await recordPortableUse(env, person, id, portableSession);
     }
     const artifact =
       lease === undefined

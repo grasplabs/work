@@ -804,6 +804,9 @@ importers:
       '@cloudflare/vitest-pool-workers':
         specifier: 'catalog:'
         version: 0.22.0(@cloudflare/workers-types@5.20260921.1)(@types/node@26.6.2)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11)
+      '@grasp-os/ui':
+        specifier: workspace:*
+        version: link:../ui
       '@types/react':
         specifier: 'catalog:'
         version: 19.3.0

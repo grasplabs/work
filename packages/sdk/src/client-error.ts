@@ -1,4 +1,5 @@
 import type { Json } from "@grasp-os/shared/json";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { isPlainObject } from "./value-descriptor.ts";
 
@@ -99,6 +100,10 @@ const clientErrors = {
       "Someone else signed in, so what was shown for the person before was cleared.",
     category: "authorization",
   },
+  "form.failed": {
+    message: "This couldn't be submitted.",
+    category: "operational",
+  },
 } as const satisfies Record<
   string,
   { message: string; category: ErrorCategory }
@@ -107,25 +112,78 @@ const clientErrors = {
 /** A failure the client itself decides on. */
 export type ClientErrorCode = keyof typeof clientErrors;
 
-/** The client's own failure `code`, with its `details`. */
+/**
+ * The client's own failure `code`, with its `details`; and `message` in
+ * place of its own, for a failure whose words are someone else's (a local
+ * form's callback).
+ */
 export const clientError = (
   code: ClientErrorCode,
-  details?: Json
+  details?: Json,
+  message?: string
 ): GraspError =>
   new GraspError({
     code,
     ...clientErrors[code],
+    ...(message === undefined ? {} : { message }),
     retryable: code === "operation.unreachable",
     requestId: null,
     ...(details === undefined ? {} : { details }),
   });
 
 /**
- * Refusals that mean the person, or the build they run, no longer gets
- * the App's data: the client clears every cached result on one.
+ * `issues` as a refusal's details carry them: each one's message, its
+ * path as keys and indexes, and its code when it has one.
  */
-export const fencingCodes: ReadonlySet<string> = new Set([
-  "auth.unauthenticated",
+export const issueDetails = (
+  issues: readonly (StandardSchemaV1.Issue & { readonly code?: string })[]
+): Json[] =>
+  issues.map(({ code, message, path }) => ({
+    ...(code === undefined ? {} : { code }),
+    message,
+    path: (path ?? []).map((segment) => {
+      const key = typeof segment === "object" ? segment.key : segment;
+      return typeof key === "number" ? key : String(key);
+    }),
+  }));
+
+/** The issues a refusal's `details` carry (`issueDetails`), as read back. */
+export const detailIssues = (
+  details: Json | undefined
+): StandardSchemaV1.Issue[] => {
+  const issues = isPlainObject(details) ? details.issues : undefined;
+  if (!Array.isArray(issues)) {
+    return [];
+  }
+  return issues.flatMap((issue) => {
+    if (!isPlainObject(issue) || typeof issue.message !== "string") {
+      return [];
+    }
+    const path = Array.isArray(issue.path)
+      ? issue.path.filter(
+          (segment): segment is string | number =>
+            typeof segment === "string" || typeof segment === "number"
+        )
+      : [];
+    return [{ message: issue.message, path }];
+  });
+};
+
+/**
+ * Sign-in refusals that don't mean the person lost access: the host had
+ * no token to give yet, or the client itself refused a call because
+ * someone else signed in, which fenced already.
+ */
+const nonFencingAuthCodes: ReadonlySet<string> = new Set([
+  "auth.token_unavailable",
+  "auth.principal_changed",
+]);
+
+/**
+ * Refusals, besides sign-in's (`fences`), that mean the person or the
+ * build they run no longer gets the App's data.
+ */
+const fencingCodes: ReadonlySet<string> = new Set([
   "role.forbidden",
   "app.not_found",
   "app.unreadable",
@@ -135,6 +193,15 @@ export const fencingCodes: ReadonlySet<string> = new Set([
   "permission.person_inactive",
   "app.not_running",
 ]);
+
+/**
+ * Whether a refusal means the person, or the build they run, no longer
+ * gets the App's data: the client clears every cached result on one.
+ * Every sign-in refusal does (`auth.*`), but for `nonFencingAuthCodes`.
+ */
+export const fences = (code: string): boolean =>
+  fencingCodes.has(code) ||
+  (code.startsWith("auth.") && !nonFencingAuthCodes.has(code));
 
 /**
  * Host failures of a query or a mutation that changed nothing and may be
@@ -159,7 +226,7 @@ export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([
 
 /** The category of a refusal the page or core sent before any call ran. */
 const refusalCategory = (code: string): ErrorCategory => {
-  if (fencingCodes.has(code) || code.startsWith("auth.")) {
+  if (fences(code) || code.startsWith("auth.")) {
     return "authorization";
   }
   if (code.startsWith("request.") || code.startsWith("contract.")) {

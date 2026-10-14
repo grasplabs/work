@@ -2,6 +2,7 @@ import { GraspClient, GraspError } from "@grasp-os/sdk/client";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { appTokenPath, portableFunctionPath } from "@grasp-os/shared/portable";
 import type { Role } from "@grasp-os/shared/roles";
 import { appFunctionPath } from "@grasp-os/shared/screens";
@@ -71,24 +72,32 @@ const notesApp = async ({ sensitive = false } = {}) => {
 
 type NotesApp = Awaited<ReturnType<typeof notesApp>>;
 
-/** Asks core for a token for `app`, from `origin` with `cookie`. */
+/**
+ * Asks core for a token for `app`, from `origin` with `cookie`; through
+ * `coreEnv`, as an isolate of its own would, when given.
+ */
 const requestToken = async (
   app: string,
   {
     cookie,
     origin = clientOrigin,
     contentType = "application/json",
-  }: { cookie?: string; origin?: string; contentType?: string }
+    coreEnv = env,
+  }: { cookie?: string; origin?: string; contentType?: string; coreEnv?: Env }
 ): Promise<Response> =>
-  await routed(`${appTokenPath}/${app}`, {
-    method: "POST",
-    headers: {
-      origin,
-      "content-type": contentType,
-      ...(cookie === undefined ? {} : { cookie }),
+  await routed(
+    `${appTokenPath}/${app}`,
+    {
+      method: "POST",
+      headers: {
+        origin,
+        "content-type": contentType,
+        ...(cookie === undefined ? {} : { cookie }),
+      },
+      body: "{}",
     },
-    body: "{}",
-  });
+    coreEnv
+  );
 
 const issuedSchema = z.object({
   token: z.string(),
@@ -96,8 +105,12 @@ const issuedSchema = z.object({
 });
 
 /** A token for `cookie`'s person to call `app`'s functions. */
-const tokenFor = async (cookie: string, app: string): Promise<string> => {
-  const response = await requestToken(app, { cookie });
+const tokenFor = async (
+  cookie: string,
+  app: string,
+  coreEnv: Env = env
+): Promise<string> => {
+  const response = await requestToken(app, { cookie, coreEnv });
   expect(response.status).toBe(200);
   return issuedSchema.parse(await response.json()).token;
 };
@@ -135,17 +148,22 @@ const requestFor = (
     input,
   });
 
-/** Posts `body` to `app`'s portable function route with `headers`. */
+/** Posts `body` to `app`'s portable function route with `headers`, through `coreEnv`. */
 const postPortable = async (
   app: string,
   body: string,
-  headers: Record<string, string>
+  headers: Record<string, string>,
+  coreEnv: Env = env
 ): Promise<Response> =>
-  await routed(`${portableFunctionPath}/${app}`, {
-    method: "POST",
-    headers: { "content-type": "application/json", ...headers },
-    body,
-  });
+  await routed(
+    `${portableFunctionPath}/${app}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body,
+    },
+    coreEnv
+  );
 
 /** The status `response` answers with. */
 const statusOf = async (response: Promise<Response>): Promise<number> => {
@@ -153,13 +171,38 @@ const statusOf = async (response: Promise<Response>): Promise<number> => {
   return status;
 };
 
-/** A list of the App's notes, posted with `token`. */
-const listWith = async (notes: NotesApp, token: string): Promise<Response> =>
+/** A list of the App's notes, posted with `token` through `coreEnv`. */
+const listWith = async (
+  notes: NotesApp,
+  token: string,
+  coreEnv: Env = env
+): Promise<Response> =>
   await postPortable(
     notes.app,
     requestFor(notes, "notes.list", { pagination: {} }),
-    { authorization: `Bearer ${token}` }
+    { authorization: `Bearer ${token}` },
+    coreEnv
   );
+
+/**
+ * `env` with its D1 counting the reads of the token keys' table: an
+ * isolate of its own, which holds no keys yet.
+ */
+const countingKeyReads = () => {
+  let reads = 0;
+  const db = new Proxy(env.DB, {
+    get: (target, property): unknown =>
+      property === "prepare"
+        ? (query: string) => {
+            if (query.includes('"jwks"')) {
+              reads += 1;
+            }
+            return target.prepare(query);
+          }
+        : Reflect.get(target, property),
+  });
+  return { coreEnv: { ...env, DB: db }, reads: () => reads };
+};
 
 /** What a portable host's browser sent: what core reads, and how it sent it. */
 interface Sent {
@@ -567,11 +610,12 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
   it("verifies only with keys that could still have signed a current token, and deletes the rest", async () => {
     const notes = await notesApp();
     const token = await tokenFor(notes.builder.session, notes.app);
+    // Each step as a fresh isolate sees it: one holding no keys yet.
     const stopped = async (agoMs: number) => {
       await env.DB.prepare("UPDATE jwks SET expires_at = ?")
         .bind(Date.now() - agoMs)
         .run();
-      return await statusOf(listWith(notes, token));
+      return await statusOf(listWith(notes, token, { ...env }));
     };
     // Stopped signing a minute ago: a token it signed may still be current.
     const recently = await stopped(60_000);
@@ -595,8 +639,62 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
       after: after?.keys,
     }).toStrictEqual({ recently: 200, long: 401, before: 1, after: 0 });
     // A fresh token signs with a fresh key.
-    const fresh = await tokenFor(notes.builder.session, notes.app);
-    await expect(statusOf(listWith(notes, fresh))).resolves.toBe(200);
+    const fresh = await tokenFor(notes.builder.session, notes.app, {
+      ...env,
+    });
+    await expect(statusOf(listWith(notes, fresh, { ...env }))).resolves.toBe(
+      200
+    );
+  });
+
+  it("reads the token keys once a minute an isolate, not once a token, however many are forged", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const [header, claims] = token.split(".");
+    const isolate = countingKeyReads();
+    // All within the few seconds an unknown key waits to be read again.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    const statuses: number[] = [];
+    // Tokens under a real key's header, signed by nobody; then ones
+    // naming keys nobody made.
+    for (let forged = 0; forged < 10; forged += 1) {
+      const madeUp = toBase64Url(
+        new TextEncoder().encode(
+          JSON.stringify({ alg: "EdDSA", kid: `made-up-${forged}` })
+        )
+      );
+      for (const sent of [
+        `${header}.${claims}.c2lnbmVk`,
+        `${madeUp}.${claims}.c2lnbmVk`,
+      ]) {
+        // oxlint-disable-next-line no-await-in-loop -- one request after another
+        statuses.push(await statusOf(listWith(notes, sent, isolate.coreEnv)));
+      }
+    }
+    // A genuine token verifies all the same, with the keys held.
+    statuses.push(await statusOf(listWith(notes, token, isolate.coreEnv)));
+    expect({
+      refused: statuses.slice(0, -1).every((status) => status === 401),
+      genuine: statuses.at(-1),
+      reads: isolate.reads(),
+    }).toStrictEqual({ refused: true, genuine: 200, reads: 1 });
+  });
+
+  it("records portable use only for a call it reads, never one past the size a call may be", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const head = await logHead();
+    const tooLarge = requestFor(notes, "notes.create", {
+      title: "x".repeat(functionRequestMaxBytes),
+    });
+    const status = await statusOf(
+      postPortable(notes.app, tooLarge, { authorization: `Bearer ${token}` })
+    );
+    const events = await eventsAfter(head);
+    expect({
+      status,
+      used: events.filter(({ action }) => action === "app.portable.called"),
+    }).toStrictEqual({ status: 413, used: [] });
   });
 
   it("refuses a token the same keys signed that isn't typed as an App token", async () => {

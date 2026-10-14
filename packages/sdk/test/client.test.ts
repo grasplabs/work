@@ -188,25 +188,81 @@ describe("the session client and an outcome it can't tell", () => {
 });
 
 describe("the session client and lost access", () => {
-  it.each(["version.revoked", "permission.person_inactive", "app.not_running"])(
-    "drops a read under way when a call is refused with %s",
-    async (code) => {
-      const { promise: held, resolve: release } = Promise.withResolvers<null>();
-      const { client } = network(async (_call, request) => {
-        if (request.includes("notes.get")) {
-          await held;
-          return answered({ title: "Kept from before" });
-        }
-        await Promise.resolve();
-        return failedWith(code, "authorization");
-      });
-      const reading = failureOf(client.query(api.notes.get, { id: noteId }));
-      await expect(
-        failureOf(client.mutation(api.notes.create, { title: "After" }))
-      ).resolves.toMatchObject({ code });
-      release(null);
-      // The answer to a read sent before the refusal never shows.
-      await expect(reading).resolves.toMatchObject({ code });
-    }
-  );
+  it.each([
+    "version.revoked",
+    "permission.person_inactive",
+    "app.not_running",
+    "auth.session_ended",
+  ])("drops a read under way when a call is refused with %s", async (code) => {
+    const { promise: held, resolve: release } = Promise.withResolvers<null>();
+    const { client } = network(async (_call, request) => {
+      if (request.includes("notes.get")) {
+        await held;
+        return answered({ title: "Kept from before" });
+      }
+      await Promise.resolve();
+      return failedWith(code, "authorization");
+    });
+    const reading = failureOf(client.query(api.notes.get, { id: noteId }));
+    await expect(
+      failureOf(client.mutation(api.notes.create, { title: "After" }))
+    ).resolves.toMatchObject({ code });
+    release(null);
+    // The answer to a read sent before the refusal never shows.
+    await expect(reading).resolves.toMatchObject({ code });
+  });
+
+  it("keeps what it read when the host only couldn't give a token yet", async () => {
+    let refuse = false;
+    const { client } = network(async () => {
+      await Promise.resolve();
+      if (refuse) {
+        throw Object.assign(new Error("No token yet."), {
+          code: "auth.token_unavailable",
+        });
+      }
+      return answered({ title: "Kept" });
+    });
+    await client.query(api.notes.get, { id: noteId });
+    refuse = true;
+    await failureOf(client.mutation(api.notes.create, { title: "Later" }));
+    refuse = false;
+    // Not fenced: the query it read is still there to read again.
+    await expect(
+      client.query(api.notes.get, { id: noteId })
+    ).resolves.toStrictEqual({ title: "Kept" });
+  });
+
+  it("never sends a key left unknown again once access was lost since", async () => {
+    let signedOut = false;
+    const { client, calls } = network(async (call, request) => {
+      await Promise.resolve();
+      if (request.includes("notes.get")) {
+        return signedOut
+          ? failedWith("auth.unauthenticated", "authorization")
+          : answered(null);
+      }
+      if (call === 1) {
+        throw new Error("The connection was reset.");
+      }
+      return answered(3);
+    });
+    const lost = await failureOf(client.action(api.notes.tally));
+    const { details } = lost;
+    const key: unknown =
+      typeof details === "object" && details !== null
+        ? Reflect.get(details, "idempotencyKey")
+        : undefined;
+    expect(key).toBeTypeOf("string");
+    signedOut = true;
+    await failureOf(client.query(api.notes.get, { id: noteId }));
+    signedOut = false;
+    const sentBefore = calls();
+    await expect(
+      failureOf(
+        client.action(api.notes.tally, {}, { idempotencyKey: String(key) })
+      )
+    ).resolves.toMatchObject({ code: "auth.principal_changed" });
+    expect(calls()).toBe(sentBefore);
+  });
 });

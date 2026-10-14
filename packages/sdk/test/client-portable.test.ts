@@ -596,7 +596,7 @@ describe("a portable host's client", () => {
     expect(failure.code).toBe("submission.outcome_unknown");
   });
 
-  it("asks the host again after core refuses a token, whatever the refusal's body", async () => {
+  it("takes any refusal of a token as one, whatever its body, and asks the host again", async () => {
     const later = Math.floor(Date.now() / 1000) + 300;
     let asked = 0;
     let refuse = true;
@@ -615,9 +615,16 @@ describe("a portable host's client", () => {
         return await Promise.resolve(tokenOf("ann", later));
       },
     });
-    // The refusal isn't core's answer, so the read is tried again: with a
-    // token asked for afresh, not the one refused.
-    await client.query(api.notes.get, { id: idOf(1) });
-    expect(asked).toBe(2);
+    // Refused, though not in core's words: never a lost answer to send
+    // again after. The next call asks for a token afresh.
+    const refused = await failureOf(
+      client.query(api.notes.get, { id: idOf(1) })
+    );
+    const next = await client.query(api.notes.get, { id: idOf(2) });
+    expect({ refused: refused.code, next, asked }).toStrictEqual({
+      refused: "auth.unauthenticated",
+      next: null,
+      asked: 2,
+    });
   });
 });

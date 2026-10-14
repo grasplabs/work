@@ -4,8 +4,9 @@ import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 
 import {
   clientError,
-  fencingCodes,
+  fences,
   GraspError,
+  issueDetails,
   nothingRanCodes,
   readAnswer,
   refusedBeforeCallCodes,
@@ -64,8 +65,12 @@ import { readDescriptor } from "./value-read.ts";
 // - A delayed answer overwrites a newer one: each read of a query is
 //   numbered, and an answer older than the one shown is dropped.
 // - Data outlives the access it was read under: a refusal of the person
-//   or the build (`fencingCodes`) clears every cached result, and every
-//   answer to a request sent before it is dropped.
+//   or the build (`fences`) clears every cached result, and every answer
+//   to a request sent before it is dropped.
+// - One person's submission is sent as another's: a key whose outcome was
+//   left unknown is sent again only within the generation it was sent
+//   under; after someone else signed in, or access was lost, it is
+//   refused unsent as `auth.principal_changed`.
 // - Invocation options travel as arguments: options are read on their
 //   own, strictly, and only the normalized input is sent.
 // - A malformed reference or argument reaches the host: references are
@@ -153,7 +158,7 @@ export type CallArguments<Reference, Options> =
     : [args: ArgsOf<Reference>, options?: Options];
 
 /** A reference as the client read it: what it sends, and its input's descriptor. */
-interface ReadReference {
+export interface ReadReference {
   readonly kind: ReferenceKind;
   readonly resourceId: string;
   readonly resourceVersion: number;
@@ -238,11 +243,7 @@ const normalized = (reference: ReadReference, args: unknown): Json => {
   const checked = validateValue(reference.args, args ?? {});
   if (checked.issues !== undefined) {
     throw clientError("contract.invalid_args", {
-      issues: checked.issues.map(({ code, message, path }) => ({
-        code,
-        message,
-        path: [...path],
-      })),
+      issues: issueDetails(checked.issues),
     });
   }
   // SAFETY: the interpreter answers a fresh JSON copy of what it accepted.
@@ -528,6 +529,17 @@ export interface ClientInternals {
   subscribe: (entry: QueryEntry, onChange: () => void) => () => void;
   /** Reads again every query that failed and is still read. */
   retryFailed: () => void;
+  /**
+   * `value` as a public, single-answer reference of `kind`, read as data,
+   * its descriptor checked; or `contract.invalid_request`.
+   */
+  readReference: (value: unknown, kind: ReferenceKind) => ReadReference;
+  /**
+   * Which person and fence the client sends for now: it moves on whenever
+   * someone else signs in or access is lost, and what was sent before
+   * stays the person's before.
+   */
+  generation: () => number;
 }
 
 /** A submission in flight, by its scoped key. */
@@ -667,6 +679,13 @@ export class GraspClient {
   #gathering: ReturnType<typeof setTimeout> | undefined;
   /** What the latest fence was for. */
   #fencedBy: GraspError | undefined;
+  /**
+   * The keys of submissions whose outcome was left unknown, by the
+   * generation they were sent under: one is sent again only within it,
+   * never for someone who signed in since, as the host scopes keys by
+   * person.
+   */
+  readonly #uncertainKeys = new Map<string, number>();
 
   /**
    * A portable host's client (`{ url, getToken }`, spec 10.7.1): its
@@ -696,6 +715,8 @@ export class GraspClient {
       retryFailed: () => {
         client.#retryFailed();
       },
+      readReference,
+      generation: () => client.#generation,
     });
   }
 
@@ -927,7 +948,7 @@ export class GraspClient {
         } finally {
           release();
         }
-        if (settled.kind === "failed" && fencingCodes.has(settled.error.code)) {
+        if (settled.kind === "failed" && fences(settled.error.code)) {
           // The fence showed it to every reader already.
           throw settled.error;
         }
@@ -994,11 +1015,7 @@ export class GraspClient {
     // what that fence already cleared: it doesn't fence whoever came after.
     const current =
       bound.generation === undefined || bound.generation === this.#generation;
-    if (
-      current &&
-      settled.kind === "failed" &&
-      fencingCodes.has(settled.error.code)
-    ) {
+    if (current && settled.kind === "failed" && fences(settled.error.code)) {
       this.#fence(settled.error);
     }
     return settled;
@@ -1156,6 +1173,16 @@ export class GraspClient {
   ): Promise<unknown> {
     const { signal, idempotencyKey } = readOptions(options, submitOptionKeys);
     const input = normalized(reference, args);
+    // A key an unknown outcome was left under is the person's it was sent
+    // for: sent again for someone who signed in since, the host would take
+    // it as theirs, and commit the first person's change as them.
+    const sentUnder =
+      idempotencyKey === undefined
+        ? undefined
+        : this.#uncertainKeys.get(idempotencyKey);
+    if (sentUnder !== undefined && sentUnder !== this.#generation) {
+      throw clientError("auth.principal_changed");
+    }
     const key = idempotencyKey ?? freshKey();
     const request = JSON.stringify({
       reference: wireReference(reference),
@@ -1234,9 +1261,15 @@ export class GraspClient {
           now,
         });
         if (verdict.next === "settle") {
+          this.#uncertainKeys.delete(key);
           return verdict.value;
         }
         if (verdict.next === "fail") {
+          if (verdict.error.category === "uncertain") {
+            this.#uncertainKeys.set(key, bound.generation ?? this.#generation);
+          } else {
+            this.#uncertainKeys.delete(key);
+          }
           throw verdict.error;
         }
         if (verdict.unknown) {
