@@ -48,6 +48,7 @@ import {
 } from "./permissions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { recordBuilds } from "./screen-builds.ts";
+import { withScreenReferences } from "./screen-references.ts";
 import {
   advanceGeneration,
   generationSql,
@@ -94,7 +95,12 @@ const builtScreens = async (
   app: AppId,
   version: number
 ): Promise<{ screen: string; artifact: string }[]> => {
-  const files = await versionFiles(env, app, version);
+  const files = await withScreenReferences(
+    env,
+    app,
+    version,
+    await versionFiles(env, app, version)
+  );
   const codeOf = await versionScreens(env, files, version);
   const built = await Promise.all(
     screensIn(new Map(Object.entries(files))).map(async (name) => {
@@ -129,7 +135,12 @@ const reviewedBuilds = async (
   app: AppId,
   version: number
 ): Promise<{ screen: string; artifact: string | null }[]> => {
-  const files = await versionFiles(env, app, version);
+  const files = await withScreenReferences(
+    env,
+    app,
+    version,
+    await versionFiles(env, app, version)
+  );
   const noted = (error: unknown): null => {
     if (!isExpectedError(error)) {
       log.warn("screen.review_build_failed", {

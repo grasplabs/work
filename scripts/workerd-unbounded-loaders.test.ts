@@ -1,11 +1,11 @@
 /**
  * On plain workerd, where no sandbox bounds them and the deployment hasn't
  * set `SANDBOX_IN_PROCESS=unbounded`, core refuses to load an App's server
- * object or a draft's preview, or to start the screen compiler or the
- * package builder (apps/core/test/workerd/unbounded-worker.ts):
+ * object or a draft's preview (apps/core/test/workerd/unbounded-worker.ts):
  * a bound `SANDBOX_HOST` doesn't allow them, as nothing runs them there.
- * A workflow's code (its runs, metadata, tests and dry runs) runs on the
- * sandbox host where one is bound, and is refused where none is.
+ * A workflow's code (its runs, metadata, tests and dry runs), the screen
+ * compiler and the package builder run on the sandbox host where one is
+ * bound, and are refused where none is.
  */
 import path from "node:path";
 
@@ -65,20 +65,20 @@ describe("App code no sandbox bounds, on plain workerd", () => {
     expect(refused).toContain("No sandbox bounds a draft's preview here yet");
   });
 
-  it("refuses to compile an App's screens", async () => {
+  it("refuses to compile an App's screens where no sandbox host is bound", async () => {
     const refused = await refusal("screens");
     expect(refused).toContain("SandboxUnavailableError");
-    expect(refused).toContain("No sandbox bounds the screen compiler here yet");
+    expect(refused).toContain("No sandbox bounds App code here");
   });
 
-  it("refuses to resolve or build an App's packages", async () => {
+  it("refuses to resolve or build an App's packages where no sandbox host is bound", async () => {
     const refused = [await refusal("resolve"), await refusal("build")];
     expect(refused).toStrictEqual([
       expect.stringContaining(
-        "SandboxUnavailableError: No sandbox bounds the package builder here yet"
+        "SandboxUnavailableError: No sandbox bounds App code here"
       ),
       expect.stringContaining(
-        "SandboxUnavailableError: No sandbox bounds the package builder here yet"
+        "SandboxUnavailableError: No sandbox bounds App code here"
       ),
     ]);
   });

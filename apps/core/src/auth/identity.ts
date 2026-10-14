@@ -116,36 +116,28 @@ export const staffRole = async (
 };
 
 /**
- * Who a request comes from: the person behind its session cookie, with their
- * role and teams read now, from the database. Called on every request that
- * needs a person, so a revoked or expired session, a changed role, a
- * removal or a closed staff window takes effect on the next one; an open
- * RPC connection reads it again every few seconds (rpc.ts).
- * `undefined` means nobody is signed in.
+ * Who a current session's person is, read now: a staff session's role
+ * from the sign-in config, anyone else's from their membership.
+ * `undefined` once they have neither.
  */
-export const identify = async (
+export const sessionIdentity = async (
   env: Env,
-  headers: Headers
+  session: {
+    userId: string;
+    email: string;
+    name: string;
+    expiresAt: Date;
+    staff: boolean;
+  }
 ): Promise<Identity | undefined> => {
-  const config = signInConfig(env);
-  const auth = authFor(env, config);
-  if (!(auth && config)) {
-    return undefined;
-  }
-  const found = await auth.api.getSession({ headers });
-  if (!found) {
-    return undefined;
-  }
-  const { session, user } = found;
   const person = {
-    userId: user.id,
-    email: user.email,
-    name: user.name,
+    userId: session.userId,
+    email: session.email,
+    name: session.name,
     expiresAt: session.expiresAt.toISOString(),
   };
-
   if (session.staff) {
-    const access = await staffRole(env, user.id);
+    const access = await staffRole(env, session.userId);
     if (access === undefined) {
       return undefined;
     }
@@ -158,11 +150,65 @@ export const identify = async (
     };
   }
 
-  const member = await memberOf(env.DB, user.id);
+  const member = await memberOf(env.DB, session.userId);
   if (member === undefined) {
     return undefined;
   }
   return { ...person, ...member, staff: false };
+};
+
+/** A signed-in session, as Better Auth and core's records have it now. */
+export interface SignedInSession {
+  /** Its ID: never its token, which only its cookie carries. */
+  sessionId: string;
+  expiresAt: Date;
+  person: Identity;
+}
+
+/**
+ * The session behind a request's cookie and who it is, as `identify`
+ * reads them; `undefined` as there.
+ */
+export const signedInSession = async (
+  env: Env,
+  headers: Headers
+): Promise<SignedInSession | undefined> => {
+  const config = signInConfig(env);
+  const auth = authFor(env, config);
+  if (!(auth && config)) {
+    return undefined;
+  }
+  const found = await auth.api.getSession({ headers });
+  if (!found) {
+    return undefined;
+  }
+  const { session, user } = found;
+  const person = await sessionIdentity(env, {
+    userId: user.id,
+    email: user.email,
+    name: user.name,
+    expiresAt: session.expiresAt,
+    staff: session.staff,
+  });
+  return person === undefined
+    ? undefined
+    : { sessionId: session.id, expiresAt: session.expiresAt, person };
+};
+
+/**
+ * Who a request comes from: the person behind its session cookie, with their
+ * role and teams read now, from the database. Called on every request that
+ * needs a person, so a revoked or expired session, a changed role, a
+ * removal or a closed staff window takes effect on the next one; an open
+ * RPC connection reads it again every few seconds (rpc.ts).
+ * `undefined` means nobody is signed in.
+ */
+export const identify = async (
+  env: Env,
+  headers: Headers
+): Promise<Identity | undefined> => {
+  const signedIn = await signedInSession(env, headers);
+  return signedIn?.person;
 };
 
 /**
