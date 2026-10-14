@@ -72,6 +72,12 @@ export const platformLimits = {
   /** A run lineage's age, from its root's start: its deadline and retention agree. */
   workflowAgeMs: 365 * day,
 
+  /**
+   * Independent workflows one person creates, deleted ones included: their
+   * names are never released (core's workflow-resources.ts).
+   */
+  workflowResourcesPerPerson: 200,
+
   // Calls a run lineage makes.
   /** Provider requests of one run lineage, retries included. */
   lineageModelRequests: 100,
