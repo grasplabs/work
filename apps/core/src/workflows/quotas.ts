@@ -1,6 +1,5 @@
 import { deploymentConfig } from "@grasp-os/shared/config";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
@@ -560,6 +559,13 @@ const settleAttempt = async (
   }
 };
 
+/**
+ * Refusals of host calls made under the policy still current as they were
+ * made: only these an attempt keeps giving (`hostCallsOf`), as a later
+ * policy may allow what an older one refused.
+ */
+const spentUnderCurrent = new WeakSet<Error>();
+
 /** The most host calls an attempt reserves of its lineage at once. */
 const hostCallBlockMax = 32;
 
@@ -623,10 +629,10 @@ const reserveHostCallsOnce = async (
   if (granted.length > 0) {
     return Math.min(block, limit - had);
   }
-  if (had >= limit) {
-    throw limitReached("hostCalls", policy);
-  }
-  if (!retried && !(await policyStill(db, policy))) {
+  // Refused: by the policy as it is now, never by one an operator has
+  // changed since it was read (a limit raised meanwhile admits the call).
+  const still = await policyStill(db, policy);
+  if (!still && !retried) {
     return await reserveHostCallsOnce(
       env,
       lineage,
@@ -634,6 +640,13 @@ const reserveHostCallsOnce = async (
       await quotaPolicy(env),
       true
     );
+  }
+  if (had >= limit) {
+    const refusal = limitReached("hostCalls", policy);
+    if (still) {
+      spentUnderCurrent.add(refusal);
+    }
+    throw refusal;
   }
   throw executionErrors.create("execution.stale_attempt");
 };
@@ -684,7 +697,7 @@ const hostCallsOf = (
       }
       reserved += granted;
     } catch (error) {
-      if (isExpectedError(error) && error.code === "workflow.lineage_limit") {
+      if (error instanceof Error && spentUnderCurrent.has(error)) {
         exhausted = error;
       }
       throw error;

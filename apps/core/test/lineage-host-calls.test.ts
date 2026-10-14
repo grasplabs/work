@@ -479,4 +479,46 @@ ${calling("over", 1)}
       calls: 4,
     });
   });
+
+  it("admit a call by a limit an operator raised between the policy's read and the block's write, and keep admitting after it", async () => {
+    const lineage = await lineageOf();
+
+    const result = await withQuotas({ lineageHostCalls: 2 }, async () => {
+      // The third call's block reads the policy allowing two, then one
+      // allowing 50 is recorded just before its write.
+      let raised = false;
+      const arm = { armed: false };
+      const racing = {
+        ...env,
+        DB: racingDb(async () => {
+          if (arm.armed && !raised) {
+            raised = true;
+            await quotaPolicy({
+              ...env,
+              QUOTA_LIMITS: nextPolicy({ lineageHostCalls: 50 }),
+            });
+          }
+        }),
+      };
+      const admission = await admitAttempt(racing, lineage, attemptOf("a"));
+      const spent = [
+        await outcome(admission.hostCall()),
+        await outcome(admission.hostCall()),
+      ];
+      arm.armed = true;
+      const third = await outcome(admission.hostCall());
+      const later = [
+        await outcome(admission.hostCall()),
+        await outcome(admission.hostCall()),
+      ];
+      return { spent, third, later, raised };
+    });
+
+    expect(result).toStrictEqual({
+      spent: ["ok", "ok"],
+      third: "ok",
+      later: ["ok", "ok"],
+      raised: true,
+    });
+  });
 });
