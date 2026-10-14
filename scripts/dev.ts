@@ -6,7 +6,8 @@
  * compiler is built again when the kit or the compiler changes
  * (packages/compiler/watch.ts), into the assets core serves, so App screens
  * follow `@grasp-os/ui` as the frontend does. When one of them stops, or
- * this script is stopped, all of them stop.
+ * this script is stopped, all of them stop. `vp run seed` (scripts/seed.ts)
+ * fills the stack with a demo company.
  */
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";

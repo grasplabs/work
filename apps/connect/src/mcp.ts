@@ -1,6 +1,8 @@
 import {
+  effectAbsentMetaKey,
   mcpProtocolVersion,
   notPerformedMetaKey,
+  outcomeUnknownMetaKey,
   provenanceMetaKey,
   provenanceSchema,
 } from "@grasp-os/connector-kit/manifest";
@@ -55,6 +57,20 @@ export interface McpTool {
  */
 export type McpServerTool = Pick<McpTool, "name" | "inputProperties">;
 
+/**
+ * A tool as a server lists it, with its schemas as it declares them, for a
+ * contract to be made of (composio-contracts.ts): untrusted values, not
+ * yet read at all, so nothing here recurses into them however deep they
+ * nest.
+ */
+export interface McpListedTool {
+  name: string;
+  /** Its input's schema; undefined if it lists none, which MCP requires. */
+  inputSchema: unknown;
+  /** Its output's schema, if it declares one. */
+  outputSchema: unknown;
+}
+
 /** What a tool call returned. */
 export interface McpToolResult {
   /**
@@ -71,37 +87,35 @@ export interface McpToolResult {
    * word on this (policy.ts).
    */
   notPerformed: boolean;
+  /**
+   * The tool says it can't tell whether its write took effect
+   * (`outcomeUnknownMetaKey`). Taken from any server: it can only stop a
+   * repeat.
+   */
+  outcomeUnknown: boolean;
+  /**
+   * A lookup says the call's effect certainly isn't there
+   * (`effectAbsentMetaKey`). Only a native connector is taken at its word
+   * on this (call.ts).
+   */
+  effectAbsent: boolean;
 }
 
 /**
- * A request to the server failed. `declined` is true only when the request
- * provably never reached a tool: the server refused it as unauthorised
- * (401, 403), couldn't parse it, or has no such method. Anything else, a
- * dropped connection, an unreadable reply, a 429 (a server of its own
- * making may send one for its provider's, after a write), or a JSON-RPC
- * error a tool may throw after acting (such as invalid params), leaves
- * open whether the call ran.
+ * A request to the server failed. Whether the server acted on it is never
+ * read from how it failed: a dropped connection, an unreadable reply, an
+ * HTTP error status (a 401 or 429 a server of its own making may pass on
+ * from its provider, after a write) or a JSON-RPC error (a tool may throw
+ * one after acting) all leave open whether the call ran. Before a side
+ * effect's key is claimed that costs nothing; after it, connect spends the
+ * key (call.ts).
  */
 export class McpError extends Error {
-  readonly declined: boolean;
-
-  constructor(message: string, declined = false, cause?: unknown) {
+  constructor(message: string, cause?: unknown) {
     super(message, { cause });
     this.name = "McpError";
-    this.declined = declined;
   }
 }
-
-/** JSON-RPC errors raised before any tool runs: parse error, no such method. */
-const refusedRequestCodes: ReadonlySet<number> = new Set([-32_700, -32_601]);
-
-/**
- * HTTP statuses that mean the server didn't act on the request. This
- * assumes a server sends them only before any tool runs, as its transport
- * does: a tool's own answer, error or not, comes in a 200.
- */
-const isDeclinedStatus = (status: number): boolean =>
-  status === 401 || status === 403;
 
 const rpcResponseSchema = z.object({
   jsonrpc: z.literal("2.0"),
@@ -125,6 +139,25 @@ const toolsPageSchema = z.object({
     })
   ),
   nextCursor: z.string().optional(),
+});
+
+/** A page of tools, each read on its own (`listedToolSchema`). */
+const listedPageSchema = z.object({
+  tools: z.array(z.unknown()),
+  nextCursor: z.string().optional(),
+});
+
+/**
+ * A tool with its schemas, which are taken as they are: read with
+ * `z.json()`, a schema nested deep enough would overflow the stack. One
+ * without a name is left out of the list, as nothing can call it; one
+ * without an input schema stays in it, so a name it shares with another
+ * entry is still seen to be listed twice.
+ */
+const listedToolSchema = z.object({
+  name: z.string(),
+  inputSchema: z.unknown().optional(),
+  outputSchema: z.unknown().optional(),
 });
 
 const callResultSchema = z.object({
@@ -282,16 +315,44 @@ const resultOf = (result: unknown): McpToolResult => {
     output: JSON.stringify(structuredContent ?? text ?? content),
     provenance: provenance.data,
     isError,
-    notPerformed: isError && meta?.[notPerformedMetaKey] === true,
+    notPerformed:
+      isError &&
+      meta?.[notPerformedMetaKey] === true &&
+      meta[outcomeUnknownMetaKey] !== true,
+    outcomeUnknown: isError && meta?.[outcomeUnknownMetaKey] === true,
+    effectAbsent:
+      isError &&
+      meta?.[effectAbsentMetaKey] === true &&
+      meta[outcomeUnknownMetaKey] !== true,
   };
 };
 
 /** The one MCP server a connection's calls go to. */
 export interface McpServer {
-  /** The tool named exactly `name`, or undefined if the server has none. */
+  /**
+   * The tool named exactly `name`, or undefined if the server has none.
+   * Throws {@link McpError} if it lists the name more than once.
+   */
   tool: (name: string) => Promise<McpServerTool | undefined>;
-  /** Calls the tool once. Throws {@link McpError} if it didn't answer. */
-  call: (name: string, input: Record<string, Json>) => Promise<McpToolResult>;
+  /**
+   * Every tool the server lists with its schemas, as far as `maxToolPages`
+   * goes and at most `maxTools` of them; a tool listed without a name is
+   * left out, one without schemas isn't (`listedToolSchema`). Throws
+   * {@link McpError} if it didn't answer, lists more than
+   * that (half a list would look like all of it), or anything else goes
+   * wrong reading the list.
+   */
+  tools: (maxTools: number) => Promise<McpListedTool[]>;
+  /**
+   * Calls the tool once, with `meta` as the call's `_meta` when given (an
+   * effect key, a lookup: native connectors only). Throws
+   * {@link McpError} if it didn't answer.
+   */
+  call: (
+    name: string,
+    input: Record<string, Json>,
+    meta?: Record<string, Json>
+  ) => Promise<McpToolResult>;
 }
 
 /**
@@ -331,10 +392,7 @@ export const mcpServer = (
     );
     if (!response.ok) {
       await response.body?.cancel();
-      throw new McpError(
-        `The server answered ${response.status}`,
-        isDeclinedStatus(response.status)
-      );
+      throw new McpError(`The server answered ${response.status}`);
     }
     return response;
   };
@@ -353,15 +411,14 @@ export const mcpServer = (
       // A connection that failed or timed out may have delivered the request.
       throw error instanceof McpError
         ? error
-        : new McpError(`${method} failed`, false, error);
+        : new McpError(`${method} failed`, error);
     }
     if (message === undefined) {
       throw new McpError(`No readable answer to ${method}`);
     }
     if (message.error !== undefined) {
       throw new McpError(
-        `The server refused ${method} (${message.error.code})`,
-        refusedRequestCodes.has(message.error.code)
+        `The server refused ${method} (${message.error.code})`
       );
     }
     return message.result;
@@ -388,7 +445,7 @@ export const mcpServer = (
     } catch (error) {
       throw error instanceof McpError
         ? error
-        : new McpError("notifications/initialized failed", false, error);
+        : new McpError("notifications/initialized failed", error);
     }
   };
 
@@ -403,6 +460,9 @@ export const mcpServer = (
       let found: McpServerTool | undefined;
       let cursor: string | undefined;
       let pages = 0;
+      // The whole list is read: a name listed twice is ambiguous, so which
+      // of the two a call would reach is unknown, and it reaches neither
+      // (as no contract serves it; composio-contracts.ts).
       do {
         const tools = toolsPageSchema.safeParse(
           // oxlint-disable-next-line no-await-in-loop -- pages come one after another
@@ -412,20 +472,69 @@ export const mcpServer = (
           throw new McpError("The server's tool list isn't readable");
         }
         // Names match exactly: no case folding, no normalising.
-        const tool = tools.data.tools.find((each) => each.name === name);
-        found = tool === undefined ? undefined : toolOf(tool);
+        for (const tool of tools.data.tools) {
+          if (tool.name === name) {
+            if (found !== undefined) {
+              throw new McpError(`The server lists ${name} more than once`);
+            }
+            found = toolOf(tool);
+          }
+        }
         cursor = tools.data.nextCursor;
         pages += 1;
-      } while (
-        found === undefined &&
-        cursor !== undefined &&
-        pages < maxToolPages
-      );
+      } while (cursor !== undefined && pages < maxToolPages);
       return found;
     },
-    call: async (name, input) => {
+    tools: async (maxTools) => {
+      try {
+        await started();
+        const listed: McpListedTool[] = [];
+        let count = 0;
+        let cursor: string | undefined;
+        for (let page = 0; page < maxToolPages; page += 1) {
+          const tools = listedPageSchema.safeParse(
+            // oxlint-disable-next-line no-await-in-loop -- pages come one after another
+            await request("tools/list", cursor === undefined ? {} : { cursor })
+          );
+          if (!tools.success) {
+            throw new McpError("The server's tool list isn't readable");
+          }
+          count += tools.data.tools.length;
+          if (count > maxTools) {
+            throw new McpError(
+              "The server lists more tools than connect reads"
+            );
+          }
+          for (const item of tools.data.tools) {
+            const tool = listedToolSchema.safeParse(item);
+            if (tool.success) {
+              const { name, inputSchema, outputSchema } = tool.data;
+              listed.push({ name, inputSchema, outputSchema });
+            }
+          }
+          cursor = tools.data.nextCursor;
+          if (cursor === undefined) {
+            return listed;
+          }
+        }
+        throw new McpError("The server lists more pages than connect reads");
+      } catch (error) {
+        // Whatever a crafted list makes go wrong is the server's failure,
+        // never an unexpected one of connect's.
+        throw error instanceof McpError
+          ? error
+          : new McpError("The server's tool list isn't readable", error);
+      }
+    },
+    call: async (name, input, meta) => {
       await started();
-      return resultOf(await request("tools/call", { name, arguments: input }));
+      return resultOf(
+        await request("tools/call", {
+          name,
+          arguments: input,
+          ...(meta === undefined ? {} : { _meta: meta }),
+        })
+      );
     },
   };
 };

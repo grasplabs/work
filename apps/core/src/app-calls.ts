@@ -12,7 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { callerOf, tokenOf } from "./app-bindings.ts";
+import { afterEffect, callerOf, tokenOf } from "./app-bindings.ts";
 import type { AppAnswer, CallPath } from "./app.ts";
 import { auditedBatch, keepAuditEvent, outboxed } from "./audit-outbox.ts";
 import { forSandbox } from "./bindings.ts";
@@ -21,6 +21,7 @@ import { apps, appVersions } from "./db/core/schema.ts";
 import { appHost } from "./durable-objects.ts";
 import { authorizeExport } from "./permissions.ts";
 import { isRestricted, restrict } from "./restricted.ts";
+import type { AttemptFence } from "./workflows/attempt-fence.ts";
 
 // Calls between Apps. An App calls another's exports (the server methods
 // its `app/exports.json` declares, app-exports.ts) under a permission an
@@ -40,7 +41,9 @@ import { isRestricted, restrict } from "./restricted.ts";
 // - The Apps whose calls are under way (`CallPath.chain`, kept by each
 //   host) never include the called App, so no call comes back round, and
 //   are at most `appCallLimits.depth` long. Each call ends by the time the
-//   first must (`CallPath.deadline`).
+//   first must (`CallPath.deadline`). One that would wait for an App
+//   whose turn waits, through other Apps' queues, on an App its own chain
+//   holds is refused at once with `app.call_deadlock` (`App.call`).
 // - The export exists in the called App's current version, and the call
 //   runs only on that version (`ExportCall.version`): an export removed or
 //   changed since is `app.export_not_found` or `app.conflict`, never a call
@@ -93,6 +96,12 @@ export interface ExportCaller {
   idempotencyKey: string | undefined;
   /** For a workflow run's step: its attempt, handed on with the key. */
   attempt?: string | undefined;
+  /**
+   * For a workflow run's step: who its attempt is, handed on with the key,
+   * so the called App's stub calls stop once it holds no more
+   * (attempt-fence.ts).
+   */
+  fence?: AttemptFence | undefined;
   /** Where the call is: the calling App last in its chain. */
   path: CallPath;
   /**
@@ -383,6 +392,7 @@ export const callExport = async (
           ? {}
           : { idempotencyKey: caller.idempotencyKey }),
         ...(caller.attempt === undefined ? {} : { attempt: caller.attempt }),
+        ...(caller.fence === undefined ? {} : { fence: caller.fence }),
         app: { id: calling, version: callingVersion },
         // In on the calling App's permission: each stub call of the
         // called App's code checks it again (app-bindings.ts).
@@ -400,6 +410,7 @@ export const callExport = async (
       {
         version,
         chain: caller.path.chain,
+        holding: caller.path.holding,
         deadline: caller.path.deadline,
         readOnly: caller.path.readOnly || access === "read",
         onPinned: recordCalled,
@@ -425,13 +436,30 @@ export const callExport = async (
     throw error;
   }
   await carryRestricted();
-  // The host ran exactly `version` (or refused), so its schema holds.
-  return checkedJson(
-    answer,
-    appCallLimits.answerBytes,
-    compiledSchema(`${grant.app}:${version}:${name}:output`, output),
-    () => appErrors.create("app.answer_invalid", { version, method: name })
-  );
+  try {
+    // The host ran exactly `version` (or refused), so its schema holds.
+    return checkedJson(
+      answer,
+      appCallLimits.answerBytes,
+      compiledSchema(`${grant.app}:${version}:${name}:output`, output),
+      () => appErrors.create("app.answer_invalid", { version, method: name })
+    );
+  } catch (error) {
+    // The method ran, and may have written, but its answer never reached
+    // the caller: the log says so beside the record that it was called,
+    // which an append-only log can't take back.
+    await keepAuditEvent(
+      env,
+      db,
+      callEntry(record, {
+        access,
+        calledVersion: version,
+        outcome: "answer_refused",
+        reason: isExpectedError(error) ? error.code : "internal.unexpected",
+      })
+    );
+    throw error;
+  }
 };
 
 /**
@@ -481,20 +509,25 @@ export class AppExportBinding extends WorkerEntrypoint<
         });
         throw error;
       }
-      const { authority, idempotencyKey, attempt, path } = known;
-      return await callExport(
+      const { authority, idempotencyKey, attempt, fence, path } = known;
+      return await afterEffect(
         this.env,
-        {
-          authority,
-          idempotencyKey,
-          attempt,
-          path,
-          from: { app, token },
-          actor: delegateActorOf(authority),
-        },
-        grant,
-        method,
-        input
+        () => fence,
+        callExport(
+          this.env,
+          {
+            authority,
+            idempotencyKey,
+            attempt,
+            fence,
+            path,
+            from: { app, token },
+            actor: delegateActorOf(authority),
+          },
+          grant,
+          method,
+          input
+        )
       );
     } catch (error) {
       throw forSandbox(error);

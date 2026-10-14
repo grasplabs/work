@@ -6,7 +6,6 @@ import { testRun } from "../src/testing.ts";
 import {
   appExports,
   appServer,
-  model,
   money,
   number,
   person,
@@ -67,6 +66,17 @@ const scheduledOn = (every: string, timeZone?: string) =>
     },
     async () => null
   );
+
+/** What `work` came to: its answer, or its error's message. */
+const settledOutcome = async (
+  work: () => Promise<unknown>
+): Promise<unknown> => {
+  try {
+    return await work();
+  } catch (error) {
+    return error instanceof Error ? error.message : error;
+  }
+};
 
 describe("workflow definitions", () => {
   it("rejects an empty ID and a default that doesn't fit its kind", () => {
@@ -223,6 +233,8 @@ describe("step calls", () => {
       ["go", { description: "Go", retries: { limit: -1 } }],
       ["go", { description: "Go", retries: { limit: 1, delay: 1.5 } }],
       ["go", { description: "Go", timeout: "400 days" }],
+      // Past what an attempt may run on the engine, though a sleep may wait it.
+      ["go", { description: "Go", timeout: "15 minutes" }],
     ];
 
     for (const [name, options] of calls) {
@@ -234,6 +246,23 @@ describe("step calls", () => {
         definition.run(createFakeEngine().engine)
       ).rejects.toMatchObject({ code: "workflow.invalid_step_call" });
     }
+  });
+
+  it("take an attempt timeout of up to 14 minutes, and longer sleeps", async () => {
+    const { engine, steps } = createFakeEngine();
+    await withStep(async (step) => {
+      await step.do(
+        "go",
+        { description: "Go", timeout: "14 minutes" },
+        async () => 1
+      );
+      await step.sleep("pause", {
+        description: "Pause",
+        duration: "15 minutes",
+      });
+    }).run(engine);
+
+    expect(steps.map(({ type }) => type)).toStrictEqual(["step", "sleep"]);
   });
 
   it("reject options of the wrong type before anything runs", async () => {
@@ -379,7 +408,7 @@ describe("step.do", () => {
   });
 
   it("retries a step that fails for a passing cause as often as asked, and any other failure never", async () => {
-    const failingWith = (error: () => Error) => {
+    const failingWith = (error: () => unknown) => {
       let attempts = 0;
       return withStep(
         async (step) =>
@@ -400,19 +429,64 @@ describe("step.do", () => {
     const rateLimited = failingWith(() =>
       Object.assign(new Error("Busy"), { code: "connect.server_unavailable" })
     );
+    // As the model gateway answers while calls under way hold the budget:
+    // nothing sent, and room comes back once they finish.
+    const budgetHeld = failingWith(() =>
+      Object.assign(new Error("Held"), { code: "model.budget_busy" })
+    );
+    // As an App's model binding answers while its budget is held so.
+    const bindingHeld = failingWith(() =>
+      Object.assign(new Error("Binding held"), {
+        code: "resource.budget_busy",
+      })
+    );
+    // A function's failed answer as `env.APP.callFunction` gives it, thrown
+    // as it is (`throw answered.error`): plain data, its code kept.
+    const answerHeld = failingWith((): unknown => ({
+      code: "resource.budget_busy",
+      message: "Answer held",
+      category: "operational",
+      retryable: true,
+      requestId: "request-1",
+    }));
+    // As the model gateway answers once the budget is spent: it stays so.
+    const budgetSpent = failingWith(() =>
+      Object.assign(new Error("Spent"), { code: "model.over_budget" })
+    );
+    const bindingSpent = failingWith(() =>
+      Object.assign(new Error("Binding spent"), {
+        code: "resource.budget_exhausted",
+      })
+    );
     // As a tool reports bad input: trying again changes nothing.
     const refused = failingWith(() =>
       Object.assign(new Error("Refused"), { code: "connect.action_failed" })
     );
     const thrown = failingWith(() => new Error("No such customer"));
 
-    await expect(rateLimited.run(createFakeEngine().engine)).resolves.toBe(3);
-    await expect(refused.run(createFakeEngine().engine)).rejects.toThrow(
-      "Refused"
-    );
-    await expect(thrown.run(createFakeEngine().engine)).rejects.toThrow(
-      "No such customer"
-    );
+    const outcomeOf = async (definition: typeof thrown) =>
+      await settledOutcome(
+        async () => await definition.run(createFakeEngine().engine)
+      );
+    expect({
+      rateLimited: await outcomeOf(rateLimited),
+      budgetHeld: await outcomeOf(budgetHeld),
+      bindingHeld: await outcomeOf(bindingHeld),
+      answerHeld: await outcomeOf(answerHeld),
+      budgetSpent: await outcomeOf(budgetSpent),
+      bindingSpent: await outcomeOf(bindingSpent),
+      refused: await outcomeOf(refused),
+      thrown: await outcomeOf(thrown),
+    }).toStrictEqual({
+      rateLimited: 3,
+      budgetHeld: 3,
+      bindingHeld: 3,
+      answerHeld: 3,
+      budgetSpent: "Spent",
+      bindingSpent: "Binding spent",
+      refused: "Refused",
+      thrown: "No such customer",
+    });
   });
 
   it("fails a step whose result isn't JSON, which an engine can't store", async () => {
@@ -451,17 +525,14 @@ describe("step.do", () => {
 });
 
 const extraction = z.object({ total: z.number() });
-const modelParams = {
-  reader: model({ label: "Model", default: "small-model" }),
-};
 
 const llmWorkflow = workflow(
   "llm",
-  { params: modelParams },
-  async (step, { params }) =>
+  { params: {} },
+  async (step) =>
     await step.llm("read", {
       description: "Read the total",
-      model: params.reader,
+      binding: "reader",
       instructions: "Read the total.",
       input: "Total: 12",
       schema: extraction,
@@ -480,7 +551,7 @@ describe("step.llm", () => {
     });
     expect(modelRequests[0]).toMatchObject({
       step: "read",
-      model: "small-model",
+      binding: "reader",
       instructions: "Read the total.",
       input: "Total: 12",
       outputSchema: { type: "object", required: ["total"] },
@@ -522,11 +593,11 @@ describe("step.llm", () => {
   it("asks for what the schema accepts and returns what it makes of it", async () => {
     const dueDate = workflow(
       "due-date",
-      { params: modelParams },
-      async (step, { params }) =>
+      { params: {} },
+      async (step) =>
         await step.llm("read", {
           description: "Read the due date",
-          model: params.reader,
+          binding: "reader",
           instructions: "Read the due date.",
           input: "Due on 1 March 2026",
           schema: z.object({
@@ -554,7 +625,7 @@ describe("step.llm", () => {
     });
     const options = {
       description: "Read",
-      model: "small-model",
+      binding: "reader",
       instructions: "Read the total.",
       input: "",
       schema: extraction,

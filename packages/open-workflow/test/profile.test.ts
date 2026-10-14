@@ -1256,7 +1256,47 @@ describe("control flow", () => {
   });
 });
 
+// An input field that is an object or null (`anyOf` with `const: null`)
+// is the object, nullable: a path into it is checked against the
+// object's fields, as a path into any nullable object is.
+const nullableObject = (path: string) =>
+  documentAround(
+    {
+      name: "nullable-object",
+      input: {
+        meta: {
+          anyOf: [
+            {
+              type: "object",
+              properties: { source: { type: "string" } },
+              required: ["source"],
+              additionalProperties: false,
+            },
+            { const: null },
+          ],
+        },
+      },
+      required: ["meta"],
+    },
+    [{ read: { set: { status: `\${ ${path} }` } } }]
+  );
+
 describe("expressions", () => {
+  it("checks a path into an object-or-null input against the object's fields", async () => {
+    await expect(
+      refusals(nullableObject("$workflow.input.meta.source"))
+    ).resolves.toStrictEqual([]);
+    await expect(
+      refusals(nullableObject("$workflow.input.meta.missing"))
+    ).resolves.toMatchObject([
+      {
+        code: "expression.unknown_reference",
+        pointer: "/do/0/read/set/status",
+        taskId: "read",
+      },
+    ]);
+  });
+
   it.each([
     [
       "a variable its stage doesn't have",

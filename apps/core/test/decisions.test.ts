@@ -18,7 +18,13 @@ import {
 import type { Ask, Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
-import { endLiveRuns, finished, resumed, stopped } from "./runs.ts";
+import {
+  endLiveRuns,
+  finished,
+  resumed,
+  runInstance,
+  stopped,
+} from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   callAuth,
@@ -580,16 +586,17 @@ describe("decisions", { timeout: 60_000 }, () => {
       from: `person:${decider.userId}`,
       timeout: 3000,
     });
-    const instance = await env.WORKFLOWS.get(run.id);
+    const instance = runInstance(run.id);
     await vi.waitFor(
       async () => {
-        await instance.sendEvent({
-          type: `grasp-decision-${decision}`,
-          payload: { answered: true, approved: true, by: builder.userId },
-        });
-        await expect(instance.status()).resolves.toMatchObject({
-          status: "complete",
-        });
+        const { status } = await instance.status();
+        if (status !== "complete") {
+          await instance.sendEvent({
+            type: `grasp-decision-${decision}`,
+            payload: { answered: true, approved: true, by: builder.userId },
+          });
+        }
+        expect(status).toBe("complete");
       },
       { timeout: 20_000, interval: 200 }
     );

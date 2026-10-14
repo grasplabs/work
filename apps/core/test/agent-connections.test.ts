@@ -78,7 +78,7 @@ const pendingOf = (id: string | undefined) =>
 /** The model reads how the held call `id` ended, or why it can't. */
 const outcomeOf = (id: string) =>
   codeStep(
-    `export default async (env) => { try { return await env.connections.outcome(${JSON.stringify(id)}); } catch (error) { return error.message; } };`
+    `export default async (self, env) => { try { return await env.connections.outcome(${JSON.stringify(id)}); } catch (error) { return error.message; } };`
   );
 
 /** What the chat's code steps returned, as the model read them. */
@@ -103,7 +103,7 @@ describe("a chat's connections", setUpTime, () => {
   it("hold a write, with no key of the model's, for the person to confirm, and send it once when they do", async () => {
     const { person, mail, chat, grant } = await setUp(
       codeStep(
-        `export default async (env) => await env.connections.call("MAIL", "mail.send", ${JSON.stringify(invoiceMail)});`
+        `export default async (self, env) => await env.connections.call("MAIL", "mail.send", ${JSON.stringify(invoiceMail)});`
       ),
       says("It waits for you to confirm it.")
     );
@@ -151,7 +151,7 @@ describe("a chat's connections", setUpTime, () => {
   it("list and call only the connections the agent was granted that its person may use", async () => {
     const { person, admin, mail, chat, grant } = await setUp(
       codeStep(
-        `export default async (env) => {
+        `export default async (self, env) => {
           const tried = async (name) => { try { return (await env.connections.call(name, "mail.search", { query: "invoice" })).output; } catch (error) { return error.message; } };
           const listed = await env.connections.list();
           return {
@@ -279,7 +279,7 @@ describe("a chat's connections", setUpTime, () => {
   it("audit a call refused before connect once, by core, and one connect took by connect alone", async () => {
     const { mail, chat, grant } = await setUp(
       codeStep(
-        `export default async (env) => {
+        `export default async (self, env) => {
           const tried = async (action) => { try { await env.connections.call("MAIL", action, { query: "invoice" }); return "ok"; } catch (error) { return error.message; } };
           return {
             search: await tried("mail.search"),
@@ -332,7 +332,7 @@ describe("a chat's connections", setUpTime, () => {
     // keys don't make two actions.
     const send = (key: string) =>
       codeStep(
-        `export default async (env) => await env.connections.call("MAIL", "mail.send", ${JSON.stringify(invoiceMail)}, { idempotencyKey: "${key}" });`
+        `export default async (self, env) => await env.connections.call("MAIL", "mail.send", ${JSON.stringify(invoiceMail)}, { idempotencyKey: "${key}" });`
       );
     const { person, mail, chat, grant } = await setUp(
       send("first"),
@@ -375,7 +375,7 @@ describe("a chat's connections", setUpTime, () => {
   it("read how a held call ended by its ID: a read held in a restricted chat, once its person confirmed it, and only in the chat that asked", async () => {
     const { person, mail, chat, grant } = await setUp(
       codeStep(
-        `export default async (env) => {
+        `export default async (self, env) => {
           const held = await env.connections.call("MAIL", "mail.search", { query: "invoice" });
           return { held: held.output, now: await env.connections.outcome(held.pending.id) };
         };`
@@ -457,7 +457,7 @@ describe("a chat's connections", setUpTime, () => {
     const chat = await chatOf(
       person.userId,
       codeStep(
-        `export default async (env) => await env.connections.call("INVOICES", "mail.search", { query: "invoice" });`
+        `export default async (self, env) => await env.connections.call("INVOICES", "mail.search", { query: "invoice" });`
       ),
       says("It waits for you.")
     );
@@ -491,7 +491,7 @@ describe("a chat's connections", setUpTime, () => {
   it("keep a chat that read an EU-only connection to EU models, in every later turn", async () => {
     const { mail, chat, grant } = await setUp(
       codeStep(
-        `export default async (env) => (await env.connections.call("MAIL", "mail.search", { query: "invoice" })).output;`
+        `export default async (self, env) => (await env.connections.call("MAIL", "mail.search", { query: "invoice" })).output;`
       ),
       says("Never sent.")
     );

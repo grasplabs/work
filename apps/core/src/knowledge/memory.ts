@@ -545,7 +545,9 @@ export const saveUserMemory = async (
   authority: Authority,
   work: WorkContext,
   context: unknown,
-  input: unknown
+  input: unknown,
+  /** Admits the save, checked last, right before its batch: throws to refuse. */
+  admit?: () => Promise<void>
 ): Promise<DocumentSummary> => {
   const { type } = knowledgeErrors.parse(
     "knowledge.invalid",
@@ -581,6 +583,7 @@ export const saveUserMemory = async (
       ifVersion,
       message: message === undefined || message === "" ? null : message,
       restoredFrom: null,
+      ...(admit === undefined ? {} : { lastCheck: admit }),
     }
   );
 };

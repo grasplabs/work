@@ -1,3 +1,8 @@
+import {
+  cursorMaxLength,
+  queryDefaultPageSize,
+  queryMaxResults,
+} from "@grasp-os/shared/store-limits";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { descriptorVersion } from "./value-descriptor.ts";
@@ -25,6 +30,13 @@ import type { AnySchema, DescriptorDraft } from "./value-schema.ts";
 // Baseflare's value validators (MIT, © 2026 Baseflare contributors:
 // packages/baseflare/src/values/types.ts), as is the record ID format.
 
+export { defineSchema, defineTable } from "./schema.ts";
+export type {
+  IndexDefinition,
+  IndexField,
+  SchemaDefinition,
+  TableDefinition,
+} from "./schema.ts";
 export { ValueDefinitionError } from "./value-descriptor.ts";
 export type {
   JsonValue,
@@ -273,11 +285,23 @@ export const v = Object.freeze({
     schema({ ...required, kind: "enum", values }),
   /** A file, as `{ id }`. Holding the reference grants no access. */
   file: semantic<FileValue>("file"),
-  /** The ID of a record in the named table. */
+  /**
+   * The ID of a record in the named table. In a table's field, deleting the
+   * record it names is refused while this record holds it, unless
+   * `onDelete` is `cascade`: then this record is deleted with it, within
+   * the bound of one commit (a larger deletion is a workflow's, in
+   * batches).
+   */
   id: <const TableName extends string>(
-    tableName: TableName
+    tableName: TableName,
+    options?: { readonly onDelete?: "restrict" | "cascade" }
   ): SimpleSchema<Id<TableName>, Id<TableName>> =>
-    schema({ ...required, kind: "id", tableName }),
+    schema({
+      ...required,
+      kind: "id",
+      tableName,
+      onDelete: options?.onDelete,
+    }),
   literal: <const Value extends null | boolean | number | string>(
     value: Value
   ): SimpleSchema<Value, Value> =>
@@ -315,3 +339,35 @@ export const v = Object.freeze({
   ): SimpleSchema<InferInput<Members[number]>, Infer<Members[number]>> =>
     schema({ ...required, kind: "union", members: members.map(descriptorOf) }),
 });
+
+// The page contract of spec 9.2, as schemas an operation declares for its
+// arguments and return: `{ pageSize, cursor }` in, `{ items, nextCursor,
+// hasMore }` out. A page's two shapes are two strict objects, so a page
+// with a cursor always says there is more, and the last page never carries
+// a cursor, empty or not.
+
+/** A page request: `pageSize` 1 to 100 (50 unless set), and a cursor or null. */
+export const paginationOptionsValidator = v.object({
+  pageSize: v
+    .number()
+    .integer()
+    .min(1)
+    .max(queryMaxResults)
+    .default(queryDefaultPageSize),
+  cursor: v.string().min(1).max(cursorMaxLength).nullable().default(null),
+});
+
+/** One page of `item`s: the last one without a cursor, any other with one. */
+export const paginationResultValidator = <Item extends AnySchema>(item: Item) =>
+  v.union(
+    v.object({
+      items: v.array(item).max(queryMaxResults),
+      nextCursor: v.null(),
+      hasMore: v.literal(false),
+    }),
+    v.object({
+      items: v.array(item).min(1).max(queryMaxResults),
+      nextCursor: v.string().min(1).max(cursorMaxLength),
+      hasMore: v.literal(true),
+    })
+  );

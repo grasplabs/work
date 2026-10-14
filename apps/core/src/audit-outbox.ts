@@ -137,7 +137,7 @@ const connectOutbox = (env: Pick<Env, "CONNECT">): Outbox => ({
  * A UUID (version 5's layout: name-based) made from a SHA-256 hex digest,
  * for an event whose ID must come out the same each time it is made.
  */
-const uuidFromHash = (hash: string): string => {
+export const uuidFromHash = (hash: string): string => {
   const variant = ((Number.parseInt(hash.charAt(16), 16) % 4) + 8).toString(16);
   return [
     hash.slice(0, 8),

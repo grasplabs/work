@@ -1,10 +1,10 @@
 import type { Identity, SessionApi } from "@grasp-os/shared/rpc";
-import { RpcTarget } from "capnweb";
 
 import { AppsRpc } from "./apps-rpc.ts";
 import { AuditRpc } from "./audit-rpc.ts";
 import { ChatsRpc } from "./chats-rpc.ts";
 import { ConnectionsRpc } from "./connections.ts";
+import { DashboardRpc } from "./dashboard-rpc.ts";
 import { DecisionsRpc } from "./decisions/rpc.ts";
 import { DependenciesRpc } from "./dependencies/rpc.ts";
 import { MemoryRpc } from "./knowledge/memory-rpc.ts";
@@ -19,11 +19,15 @@ import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OnboardingStaffRpc } from "./onboarding/staff-rpc.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
+import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { ScreenTrustRpc } from "./screen-trust-rpc.ts";
 import { ScreensRpc } from "./screens-rpc.ts";
 import { fullAccess, withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
+import { StoresRpc } from "./stores-rpc.ts";
+import { TemplatesRpc } from "./templates-rpc.ts";
 import { WorkflowsRpc } from "./workflows/rpc.ts";
 
 /**
@@ -37,7 +41,7 @@ import { WorkflowsRpc } from "./workflows/rpc.ts";
  * class: an RpcTarget's methods, protected ones too, can be called over
  * RPC, so each keeps its env and check in private fields.
  */
-export class SessionRpc extends RpcTarget implements SessionApi {
+export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #check: SessionCheck;
   readonly #apps: AppsRpc;
   readonly #knowledge: KnowledgeRpc;
@@ -45,6 +49,8 @@ export class SessionRpc extends RpcTarget implements SessionApi {
   readonly #memory: MemoryRpc;
   readonly #uploads: UploadsRpc;
   readonly #permissions: PermissionsRpc;
+  readonly #resourceBindings: ResourceBindingsRpc;
+  readonly #templates: TemplatesRpc;
   readonly #connections: ConnectionsRpc;
   readonly #workflows: WorkflowsRpc;
   readonly #decisions: DecisionsRpc;
@@ -54,9 +60,11 @@ export class SessionRpc extends RpcTarget implements SessionApi {
   readonly #members: MembersRpc;
   readonly #audit: AuditRpc;
   readonly #models: ModelsRpc;
+  readonly #stores: StoresRpc;
   readonly #pendingActions: PendingActionsRpc;
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
+  readonly #dashboard: DashboardRpc;
   readonly #notifications: NotificationsRpc;
   readonly #onboarding: OnboardingRpc;
   readonly #onboardingStaff: OnboardingStaffRpc;
@@ -73,6 +81,8 @@ export class SessionRpc extends RpcTarget implements SessionApi {
     this.#memory = new MemoryRpc(env, full);
     this.#uploads = new UploadsRpc(env, full);
     this.#permissions = new PermissionsRpc(env, full);
+    this.#resourceBindings = new ResourceBindingsRpc(env, full);
+    this.#templates = new TemplatesRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
@@ -82,9 +92,11 @@ export class SessionRpc extends RpcTarget implements SessionApi {
     this.#members = new MembersRpc(env, full);
     this.#audit = new AuditRpc(env, full);
     this.#models = new ModelsRpc(env, full);
+    this.#stores = new StoresRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
+    this.#dashboard = new DashboardRpc(env, full);
     this.#notifications = new NotificationsRpc(env, full);
     this.#onboarding = new OnboardingRpc(env, check);
     this.#onboardingStaff = new OnboardingStaffRpc(env, check);
@@ -111,6 +123,10 @@ export class SessionRpc extends RpcTarget implements SessionApi {
     return this.#chats;
   }
 
+  get dashboard(): DashboardRpc {
+    return this.#dashboard;
+  }
+
   get apps(): AppsRpc {
     return this.#apps;
   }
@@ -133,6 +149,14 @@ export class SessionRpc extends RpcTarget implements SessionApi {
 
   get permissions(): PermissionsRpc {
     return this.#permissions;
+  }
+
+  get resourceBindings(): ResourceBindingsRpc {
+    return this.#resourceBindings;
+  }
+
+  get templates(): TemplatesRpc {
+    return this.#templates;
   }
 
   get connections(): ConnectionsRpc {
@@ -169,6 +193,10 @@ export class SessionRpc extends RpcTarget implements SessionApi {
 
   get models(): ModelsRpc {
     return this.#models;
+  }
+
+  get stores(): StoresRpc {
+    return this.#stores;
   }
 
   get pendingActions(): PendingActionsRpc {

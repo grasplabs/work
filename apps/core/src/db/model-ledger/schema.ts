@@ -15,7 +15,14 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 /** Whose spend a scope counts. */
-const scopes = ["deployment", "workflow", "user", "run"] as const;
+const scopes = [
+  "deployment",
+  "workflow",
+  "user",
+  "run",
+  "binding",
+  "binding_day",
+] as const;
 
 /**
  * One provider request: its unique ID, the receipt that it was admitted,
@@ -53,13 +60,22 @@ export const requests = sqliteTable(
     state: text({
       enum: ["dispatched", "unknown", "settled", "quarantined"],
     }).notNull(),
-    /** How it settled: by its usage, refused, never sent, or in full. */
+    /**
+     * How it settled: by its usage, refused, never sent, or in full; or as
+     * a person decided a held request, released or charged.
+     */
     settledBy: text("settled_by", {
-      enum: ["usage", "refused", "unsent", "reconciled", "decided"],
+      enum: ["usage", "refused", "unsent", "reconciled", "released", "charged"],
     }),
     /** Who or what asked, as JSON, for the alerts it causes. */
     actor: text().notNull(),
     dispatchedAt: integer("dispatched_at").notNull(),
+    /**
+     * When the call is cut off at the latest. Past it, its reservation
+     * counts as spent when deciding whether the budget is busy, though it
+     * may still settle at what it used until it comes due.
+     */
+    deadline: integer().notNull().default(0),
     /** When it is charged its whole reservation, unless settled before. */
     reconcileAt: integer("reconcile_at").notNull(),
     /** How often reconciling it failed; quarantined once it reaches three. */
@@ -95,16 +111,32 @@ export const requestScopes = sqliteTable(
     alertMicros: integer("alert_micros"),
     /** What its alerts name, as JSON. */
     names: text().notNull().default("{}"),
+    /**
+     * The spend period it reserved against: the request's month, or
+     * `lineage` for a run lineage (model-ledger.ts). The request settles,
+     * is rebuilt and is summed against exactly this, never one worked out
+     * again later. Null for a request admitted before it was recorded,
+     * which reserved every scope under its own month (`requests.period`).
+     */
+    period: text(),
+    /** The most requests its scope may admit, when admitted; null for none. */
+    limitRequests: integer("limit_requests"),
   },
   (table) => [
     primaryKey({ columns: [table.requestId, table.scope, table.key] }),
+    // The requests that reserved against one scope: what holds a run
+    // lineage's spend when its rows are pruned, what the requests under way
+    // in a full scope hold, and what a damaged scope is rebuilt from
+    // (model-ledger.ts).
+    index("request_scopes_scope_key").on(table.scope, table.key),
   ]
 );
 
 /**
  * What a scope reserved and spent in a month: the deployment, a workflow,
- * a person or a run. A request reserves against all of its scopes at
- * once, and moves its reservation to the spend when it settles.
+ * a person; or a run lineage, for its whole life, under the period
+ * `lineage` (model-ledger.ts). A request reserves against all of its
+ * scopes at once, and moves its reservation to the spend when it settles.
  */
 export const spend = sqliteTable(
   "spend",
@@ -114,6 +146,11 @@ export const spend = sqliteTable(
     period: text().notNull(),
     reservedMicros: integer("reserved_micros").notNull().default(0),
     spentMicros: integer("spent_micros").notNull().default(0),
+    /**
+     * How many provider requests it admitted, retries too: one never sent
+     * gives its count back. A run lineage's are limited.
+     */
+    requests: integer().notNull().default(0),
   },
   (table) => [
     primaryKey({ columns: [table.scope, table.key, table.period] }),

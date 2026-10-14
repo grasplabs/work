@@ -1,8 +1,7 @@
 // grasp-os-staging deployment. Client deployments are provisioned by the console,
 // which creates the D1 databases and R2 buckets below in the EU jurisdiction;
-// Durable Objects run in it through `jurisdiction("eu")` (src/durable-objects.ts).
-// One resource can't be pinned to the EU: Workflows takes only a location
-// hint (`weur`, set on each run).
+// Durable Objects run in it through `jurisdiction("eu")` (src/durable-objects.ts),
+// workflow runs included: each is a Durable Object of its own.
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
   "name": "grasp-os-core",
@@ -81,6 +80,13 @@
   // `RUN_RETENTION_DAYS` var (src/workflows/retention.ts), 30 days unless
   // set, from 1 to 30: the engine keeps an ended run's record no longer.
   //
+  // And the runtime profile, `RUNTIME_PROFILE` (src/code-mode.ts): only
+  // `cloudflare` makes Code Mode's run record claim the CPU limit as
+  // enforced. Not a var here, which local dev and tests read too: staging's
+  // deploy script passes it (package.json), and the console sets it on every
+  // client deploy (apps/console/src/deploy/core-config.ts). Plain workerd
+  // and on-prem say `workerd` (scripts/workerd-smoke-config.ts).
+  //
   // Local dev reads none of these from .dev.vars (Wrangler loads only the
   // required secrets and declared vars from it): pass them with
   // `wrangler dev --var NAME:<value>`, as core's dev script does for its own
@@ -105,6 +111,14 @@
       // The one ledger of what model requests reserve and spend
       // (src/model-ledger.ts).
       { "name": "MODEL_LEDGER", "class_name": "ModelLedger" },
+      // One object per business store, named by the store's ID
+      // (src/data-store.ts, src/data-stores.ts).
+      { "name": "DATA_STORES", "class_name": "DataStore" },
+      // One object per workflow run, App's and core's own alike: the
+      // engine (src/workflows/engine.ts, run-object.ts). Its definition is
+      // loaded per activation by App and pinned version, with an env
+      // rebuilt from permissions every time (src/workflows/dispatcher.ts).
+      { "name": "WORKFLOW_RUNS", "class_name": "WorkflowRuns" },
     ],
   },
   "migrations": [
@@ -112,17 +126,8 @@
     { "tag": "v2", "new_sqlite_classes": ["Builtins"] },
     { "tag": "v3", "new_sqlite_classes": ["Onboarding"] },
     { "tag": "v4", "new_sqlite_classes": ["ModelLedger"] },
-  ],
-  // The one dispatcher of every App's workflow runs (src/workflows/): it
-  // loads each run's code by App and pinned version, with an env rebuilt
-  // from permissions on every start and resume. Runs are created with the
-  // `weur` location hint, a preference Cloudflare may not follow.
-  "workflows": [
-    {
-      "name": "grasp-os-workflows",
-      "binding": "WORKFLOWS",
-      "class_name": "WorkflowDispatcher",
-    },
+    { "tag": "v5", "new_sqlite_classes": ["DataStore"] },
+    { "tag": "v6", "new_sqlite_classes": ["WorkflowRuns"] },
   ],
   // Runs App sandboxes and the screen compiler.
   "worker_loaders": [{ "binding": "LOADER" }],

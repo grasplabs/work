@@ -117,7 +117,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     const { stub, chat, gateway, ask, agent } = await chatOf(
       person.userId,
       codeStep(
-        "export default async (env) => { const { hits } = await env.knowledge.search('parental leave'); const doc = await env.knowledge.read(hits[0].documentId, { section: hits[0].section }); return { title: doc.title, path: doc.path, text: doc.text }; };"
+        "export default async (self, env) => { const { hits } = await env.knowledge.search('parental leave'); const doc = await env.knowledge.read(hits[0].documentId, { section: hits[0].section }); return { title: doc.title, path: doc.path, text: doc.text }; };"
       ),
       says("Sixteen weeks (Handbook, leave.md).")
     );
@@ -203,7 +203,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     const { stub, chat, ask, agent } = await chatOf(
       person.userId,
       codeStep(
-        `export default async (env) => {
+        `export default async (self, env) => {
           const tried = async (read) => { try { await read(); return "ok"; } catch (error) { return error.message; } };
           const catalog = await env.knowledge.catalog();
           const found = await env.knowledge.search("note");
@@ -274,7 +274,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     const { stub, chat, ask, agent } = await chatOf(
       person.userId,
       codeStep(
-        `export default async (env) => (await env.knowledge.read(${JSON.stringify(noteId)})).title;`
+        `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(noteId)})).title;`
       ),
       says("Note."),
       says("Still here.")
@@ -309,7 +309,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     const { stub, chat, gateway, ask, agent } = await chatOf(
       person.userId,
       codeStep(
-        `export default async (env) => (await env.knowledge.read(${JSON.stringify(payroll.noteId)})).title;`
+        `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(payroll.noteId)})).title;`
       ),
       says("Never sent.")
     );
@@ -359,7 +359,7 @@ describe("a chat's Knowledge", setUpTime, () => {
       access: "everyone",
     });
     const read = codeStep(
-      `export default async (env) => (await env.knowledge.read(${JSON.stringify(noteId)})).title;`
+      `export default async (self, env) => (await env.knowledge.read(${JSON.stringify(noteId)})).title;`
     );
     const { stub, chat, ask, agent } = await chatOf(
       person.userId,
@@ -450,7 +450,7 @@ describe("a chat's Knowledge", setUpTime, () => {
     const { stub, chat, ask, agent } = await chatOf(
       owner.userId,
       codeStep(
-        "export default async (env) => { const { signals } = await env.knowledge.signals(); return signals.map(({ kind, collection }) => [kind, collection.id]); };"
+        "export default async (self, env) => { const { signals } = await env.knowledge.signals(); return signals.map(({ kind, collection }) => [kind, collection.id]); };"
       ),
       says("One document is past its review date.")
     );
@@ -497,7 +497,7 @@ describe("a chat's Knowledge", setUpTime, () => {
 
     await expect(
       stub.recordSources(chat.id, crypto.randomUUID(), ["collection-1"])
-    ).resolves.toBeFalsy();
+    ).resolves.toBe("ended");
     await ask("Hi.");
 
     const events = await eventsOf(

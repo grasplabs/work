@@ -1,5 +1,8 @@
 import type { ScreenBridge } from "@grasp-os/sdk/screen-runtime";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { screenLimits } from "@grasp-os/shared/screen-limits";
 import { portTransport } from "@grasp-os/shared/screen-port";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import { RpcSession, RpcTarget } from "capnweb";
 import type { RpcStub } from "capnweb";
 import {
@@ -11,7 +14,7 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { openBridge } from "./screen-bridge.ts";
+import { frameBridge, FrameRpcTarget, openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
 
 // The page's bridge, from the frame's end of a real `MessagePort`: a
@@ -32,15 +35,23 @@ class Subscription extends RpcTarget {
   }
 }
 
-/** What reached core, and what it handed out. */
-const coreStandIn = () => {
+/** What core answers a function call unless a test says otherwise. */
+const nullAnswer = { result: { ok: true, value: null } };
+
+/** What reached core, and what it handed out: `answer` to a function call. */
+const coreStandIn = (answer: unknown = nullAnswer) => {
   const calls: { method: string; args: unknown[] }[] = [];
+  const functionCalls: string[] = [];
   const reports: string[] = [];
   const subscriptions: Subscription[] = [];
   const target: FrameTarget = {
     call: async (method, args) => {
       calls.push({ method, args });
       return await Promise.resolve("answered");
+    },
+    callFunction: async (request) => {
+      functionCalls.push(request);
+      return await Promise.resolve(answer);
     },
     report: async (problem) => {
       reports.push(problem.message);
@@ -50,18 +61,20 @@ const coreStandIn = () => {
     runs: async () => await Promise.resolve([]),
     run: async () => await Promise.resolve("a run"),
     decide: async () => await Promise.resolve("decided"),
+    control: async () => await Promise.resolve("controlled"),
+    summary: async () => await Promise.resolve("summarised"),
     watchRuns: async () => {
       const subscription = new Subscription();
       subscriptions.push(subscription);
       return await Promise.resolve(subscription);
     },
   };
-  return { calls, reports, subscriptions, target };
+  return { calls, functionCalls, reports, subscriptions, target };
 };
 
 /** A frame on its port, talking to the page's bridge as the runtime does. */
-const framed = () => {
-  const core = coreStandIn();
+const framed = (answer?: unknown) => {
+  const core = coreStandIn(answer);
   const { port1, port2 } = new MessageChannel();
   const broken = { times: 0 };
   const close = openBridge(port1, core.target, () => {
@@ -71,6 +84,85 @@ const framed = () => {
     portTransport(port2)
   ).getRemoteMain();
   return { ...core, broken, close, page, port: port2 };
+};
+
+/** `nested(depth)` as Cap'n Web writes it: each array as `[[...]]`. */
+const wireNested = (depth: number): unknown => {
+  let value: unknown = "bottom";
+  for (let level = 1; level < depth; level += 1) {
+    value = [[value]];
+  }
+  return value;
+};
+
+/** Whether `value` is an object with a `code`, as an error's own properties travel. */
+const isCoded = (value: unknown): value is { code: unknown } =>
+  typeof value === "object" && value !== null && "code" in value;
+
+/**
+ * A frame that speaks Cap'n Web's messages by hand on its port, as a
+ * screen's code can: `push` sends an expression and gives the ID it gets
+ * (1, 2, ... in order), `pull` what one settled as: its answer, or the
+ * code of its error (written `["error", name, message, stack?, own]`).
+ */
+const rawFramed = () => {
+  const core = coreStandIn();
+  const { port1, port2 } = new MessageChannel();
+  const broken = { times: 0 };
+  const close = openBridge(port1, core.target, () => {
+    broken.times += 1;
+  });
+  const waiting = new Map<number, (outcome: unknown) => void>();
+  port2.addEventListener("message", (event: MessageEvent<unknown>) => {
+    const message: unknown =
+      typeof event.data === "string" ? JSON.parse(event.data) : undefined;
+    if (!Array.isArray(message)) {
+      return;
+    }
+    const kind: unknown = message[0];
+    const id: unknown = message[1];
+    const value: unknown = message[2];
+    if (typeof id !== "number") {
+      return;
+    }
+    if (kind === "resolve") {
+      waiting.get(id)?.({ answered: value });
+    } else if (kind === "reject") {
+      const own = Array.isArray(value) ? value.find(isCoded) : undefined;
+      waiting.get(id)?.(own?.code ?? value);
+    }
+  });
+  port2.start();
+  let pushed = 0;
+  const push = (expression: unknown): number => {
+    port2.postMessage(JSON.stringify(["push", expression]));
+    pushed += 1;
+    return pushed;
+  };
+  const pull = async (id: number): Promise<unknown> => {
+    const settled = Promise.withResolvers<unknown>();
+    waiting.set(id, settled.resolve);
+    port2.postMessage(JSON.stringify(["pull", id]));
+    return await settled.promise;
+  };
+  return { ...core, broken, close, push, pull };
+};
+
+/** A call of `notes` with one string, as Cap'n Web writes it. */
+const notesCall = (text: string): unknown => [
+  "pipeline",
+  0,
+  ["call"],
+  ["notes", [[text]]],
+];
+
+/**
+ * `notesCall` padded so the message that pushes it (`["push", ...]` as
+ * `rawFramed` sends it) is exactly `length` code units.
+ */
+const paddedCall = (length: number): unknown => {
+  const bare = JSON.stringify(["push", notesCall("")]).length;
+  return notesCall("x".repeat(length - bare));
 };
 
 /** How a call of the frame's ended: its answer, or why not. */
@@ -90,10 +182,10 @@ const unchecked = (value: unknown): never =>
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   value as never;
 
-/** A value nested `depth` arrays deep. */
+/** A value `depth` levels deep: arrays around a leaf, which is a level too. */
 const nested = (depth: number): unknown => {
   let value: unknown = "bottom";
-  for (let level = 0; level < depth; level += 1) {
+  for (let level = 1; level < depth; level += 1) {
     value = [value];
   }
   return value;
@@ -118,6 +210,17 @@ describe("the page's bridge to a screen", () => {
     vi.useRealTimers();
   });
 
+  it("serves the frame only an object that holds each call to the frame's bounds", () => {
+    // What `openBridge` serves, and what every call of a frame's lands on
+    // first. Its answers are its target's: `watchRuns` passes on core's
+    // stub of the subscription, whose calls go back to core over the
+    // page's own connection, to a target core bounds (RunSubscription, a
+    // CoreRpcTarget: core's rpc-targets.test.ts).
+    expect(frameBridge(coreStandIn().target, [])).toBeInstanceOf(
+      FrameRpcTarget
+    );
+  });
+
   it("passes a call on to the screen's own target, named by a string", async () => {
     const frame = framed();
     const results = {
@@ -137,6 +240,25 @@ describe("the page's bridge to a screen", () => {
       },
       reached: [{ method: "notes", args: ["a"] }],
     });
+  });
+
+  it("passes a function call's request on as the text the frame sent, and nothing else", async () => {
+    const frame = framed();
+    const request = JSON.stringify({ reference: {}, input: { title: "é" } });
+    const results = {
+      text: await outcome(frame.page.callFunction(request)),
+      object: await outcome(frame.page.callFunction(unchecked({ request }))),
+      tooLong: await outcome(
+        frame.page.callFunction("x".repeat(functionRequestMaxBytes + 1))
+      ),
+    };
+    expect(results).toStrictEqual({
+      text: { result: { ok: true, value: null } },
+      object: "screen.invalid",
+      tooLong: "screen.invalid",
+    });
+    expect(frame.functionCalls).toStrictEqual([request]);
+    frame.close();
   });
 
   it("lets a burst of requests through, refuses the rest, and fills again with time", async () => {
@@ -192,7 +314,45 @@ describe("the page's bridge to a screen", () => {
     );
   });
 
-  it("ends the session over a message longer than 262,144 code units", async () => {
+  it("takes a message exactly as long as a message may be, and ends the session over one code unit more", async () => {
+    const atLimit = rawFramed();
+    const exact = atLimit.pull(
+      atLimit.push(paddedCall(screenLimits.rpc.maxMessageSize))
+    );
+    await expect(exact).resolves.toStrictEqual({ answered: "answered" });
+    atLimit.close();
+
+    const pastLimit = rawFramed();
+    pastLimit.push(paddedCall(screenLimits.rpc.maxMessageSize + 1));
+    await vi.waitFor(() => {
+      expect(pastLimit.broken.times).toBe(1);
+    });
+    pastLimit.close();
+    expect({
+      exactReached: atLimit.calls.length,
+      pastReached: pastLimit.calls.length,
+    }).toStrictEqual({ exactReached: 1, pastReached: 0 });
+  });
+
+  it("hands the frame an answer as large as a public operation's output", async () => {
+    const value = "x".repeat(screenLimits.answerBytes - 2);
+    const frame = framed({ result: { ok: true, value } });
+    const answered = await outcome(frame.page.callFunction("{}"));
+    frame.close();
+    expect({
+      bytes: new TextEncoder().encode(JSON.stringify(value)).byteLength,
+      whole:
+        JSON.stringify(answered) ===
+        JSON.stringify({ result: { ok: true, value } }),
+      broken: frame.broken.times,
+    }).toStrictEqual({
+      bytes: screenLimits.answerBytes,
+      whole: true,
+      broken: 0,
+    });
+  });
+
+  it("counts a message's length in code units, not signs", async () => {
     const frame = framed();
     const fits = await outcome(frame.page.call("notes", ["x".repeat(200_000)]));
     // Half as many signs, each two code units: counted as units, not signs.
@@ -218,22 +378,171 @@ describe("the page's bridge to a screen", () => {
     });
   });
 
-  it("ends the session over a value nested deeper than 32", async () => {
+  it("passes on a value as deep as values may be, and ends the session over one level more", async () => {
     const frame = framed();
-    const shallow = await outcome(frame.page.call("notes", [nested(20)]));
-    const deep = await outcome(frame.page.call("notes", [nested(40)]));
+    const deepest = await outcome(
+      frame.page.call("notes", [nested(valueDepth)])
+    );
+    const tooDeep = await outcome(
+      frame.page.call("notes", [nested(valueDepth + 1)])
+    );
     frame.close();
 
     expect({
-      shallow,
-      deep,
-      reached: frame.calls.length,
+      deepest,
+      tooDeep,
+      reached: frame.calls,
       broken: frame.broken.times,
     }).toStrictEqual({
-      shallow: "answered",
-      deep: "refused",
-      reached: 1,
+      deepest: "answered",
+      tooDeep: "refused",
+      // Whole, every level of it.
+      reached: [{ method: "notes", args: [nested(valueDepth)] }],
       broken: 1,
+    });
+  });
+
+  it("refuses a value built from many messages deeper than values may be, before it reaches core, and passes one as deep", async () => {
+    const frame = rawFramed();
+    // A value `base` levels deep, then `levels` more pushes, each an array
+    // around the push before: no message is deeper than `base`.
+    const built = (base: number, levels: number): number => {
+      let pushed = frame.push(wireNested(base));
+      for (let level = 0; level < levels; level += 1) {
+        pushed = frame.push([[["pipeline", pushed]]]);
+      }
+      return pushed;
+    };
+    const called = async (pushed: number): Promise<unknown> =>
+      await frame.pull(
+        frame.push([
+          "pipeline",
+          0,
+          ["call"],
+          ["notes", [[["pipeline", pushed]]]],
+        ])
+      );
+
+    const deepest = await called(built(valueDepth - 8, 8));
+    const oneMore = await called(built(valueDepth - 8, 9));
+    // Thousands of levels: refused as such, not by running out of stack.
+    const farDeeper = await called(built(30, 100));
+    // Passed as a run's input, straight.
+    const asInput = await frame.pull(
+      frame.push([
+        "pipeline",
+        0,
+        ["startRun"],
+        ["invoices", ["pipeline", built(30, 100)]],
+      ])
+    );
+    const after = await called(built(1, 0));
+    frame.close();
+
+    expect({
+      deepest,
+      oneMore,
+      farDeeper,
+      asInput,
+      after,
+      reached: frame.calls,
+      broken: frame.broken.times,
+    }).toStrictEqual({
+      deepest: { answered: "answered" },
+      oneMore: "request.too_deep",
+      farDeeper: "request.too_deep",
+      asInput: "request.too_deep",
+      after: { answered: "answered" },
+      reached: [
+        { method: "notes", args: [nested(valueDepth)] },
+        { method: "notes", args: ["bottom"] },
+      ],
+      // The session goes on.
+      broken: 0,
+    });
+  });
+
+  it("refuses a value a key every object has carries in, a prototype and an error's own among them", async () => {
+    const frame = rawFramed();
+    let deep = frame.push(wireNested(30));
+    for (let level = 0; level < 100; level += 1) {
+      deep = frame.push([[["pipeline", deep]]]);
+    }
+    const shallow = frame.push({ approved: true });
+    const called = async (key: string, pushed: number): Promise<unknown> =>
+      await frame.pull(
+        frame.push([
+          "pipeline",
+          0,
+          ["call"],
+          ["notes", [[{ [key]: ["pipeline", pushed] }]]],
+        ])
+      );
+
+    const outcomes = {
+      protoDeep: await called("__proto__", deep),
+      protoShallow: await called("__proto__", shallow),
+      constructorDeep: await called("constructor", deep),
+      toJSONDeep: await called("toJSON", deep),
+      // Cap'n Web gives it `errors` as a property `Object.keys` skips.
+      aggregateDeep: await frame.pull(
+        frame.push([
+          "pipeline",
+          0,
+          ["call"],
+          [
+            "notes",
+            [
+              [
+                [
+                  "error",
+                  "AggregateError",
+                  "m",
+                  null,
+                  { errors: ["pipeline", deep] },
+                ],
+              ],
+            ],
+          ],
+        ])
+      ),
+    };
+    frame.close();
+
+    expect({ outcomes, reached: frame.calls }).toStrictEqual({
+      outcomes: {
+        protoDeep: "request.unsupported_value",
+        protoShallow: "request.unsupported_value",
+        constructorDeep: "request.too_deep",
+        toJSONDeep: "request.too_deep",
+        aggregateDeep: "request.too_deep",
+      },
+      reached: [],
+    });
+  });
+
+  it("refuses a value held so many times over it is more than a message may hold", async () => {
+    const frame = rawFramed();
+    // Each push holds the one before twice: 2^10 copies of 1,000 signs, far
+    // past the bridge's message size. Cap'n Web copies every reference before
+    // the check runs (GRA-424), so more copies only make the test slow.
+    let pushed = frame.push("x".repeat(1000));
+    for (let level = 0; level < 10; level += 1) {
+      pushed = frame.push([
+        [
+          ["pipeline", pushed],
+          ["pipeline", pushed],
+        ],
+      ]);
+    }
+    const held = await frame.pull(
+      frame.push(["pipeline", 0, ["call"], ["notes", [[["pipeline", pushed]]]]])
+    );
+    frame.close();
+
+    expect({ held, reached: frame.calls }).toStrictEqual({
+      held: "request.too_large",
+      reached: [],
     });
   });
 
@@ -293,6 +602,71 @@ describe("the page's bridge to a screen", () => {
       before: [false, false],
       after: "refused",
       reached: [],
+      broken: 0,
+    });
+  });
+
+  it("ends the session over references that would copy without end, and a fresh screen still works", async () => {
+    const frame = rawFramed();
+    // Push "x", then each message an array of two references to the one
+    // before: a copy that doubles each step, as GRA-424's probe does.
+    frame.push("x");
+    for (let level = 1; level <= 16; level += 1) {
+      frame.push([
+        [
+          ["pipeline", level],
+          ["pipeline", level],
+        ],
+      ]);
+    }
+    await vi.waitFor(() => {
+      expect(frame.broken.times).toBe(1);
+    });
+    frame.close();
+
+    // The tab lives: a fresh bridge still answers a call.
+    const fresh = framed();
+    const answered = await outcome(fresh.page.call("notes", []));
+    fresh.close();
+    expect(answered).toBe("answered");
+  });
+
+  it("ends the session when what the frame never releases holds too much, and a fresh screen still works", async () => {
+    const frame = rawFramed();
+    // Forty values of four thousand small numbers each, never released:
+    // little text (well within what the port holds unread), but a lot of
+    // heap once parsed and kept, which the session's bytes don't allow.
+    const dense = [Array.from({ length: 4000 }, (_value, index) => index % 10)];
+    for (let count = 0; count < 40; count += 1) {
+      frame.push(dense);
+    }
+    await vi.waitFor(() => {
+      expect(frame.broken.times).toBe(1);
+    });
+    frame.close();
+
+    const fresh = framed();
+    const answered = await outcome(fresh.page.call("notes", []));
+    fresh.close();
+    expect(answered).toBe("answered");
+  });
+
+  it("passes a call with the largest input a screen may send, again and again", async () => {
+    const frame = framed();
+    // About 128 KiB of small numbers, each call answered and let go.
+    const largest = Array.from(
+      { length: 40_000 },
+      (_value, index) => index % 10
+    );
+    // One after another: each answered, and let go, before the next.
+    const answers: unknown[] = [];
+    for (let count = 0; count < 5; count += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- in turn on purpose: each call must be answered before the next is sent
+      answers.push(await outcome(frame.page.call("notes", [largest])));
+    }
+    frame.close();
+    expect({ answers, broken: frame.broken.times }).toStrictEqual({
+      answers: ["answered", "answered", "answered", "answered", "answered"],
       broken: 0,
     });
   });

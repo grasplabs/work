@@ -1,6 +1,11 @@
 import { WorkerEntrypoint, exports } from "cloudflare:workers";
 
-import { chatAuthority, chatContext, requireOpenRun } from "./agent-scope.ts";
+import {
+  admitEffect,
+  chatAuthority,
+  chatContext,
+  requireOpenRun,
+} from "./agent-scope.ts";
 import type { AgentApi, AgentScope } from "./agent-scope.ts";
 import { forSandbox } from "./bindings.ts";
 import { saveUserMemory } from "./knowledge/memory.ts";
@@ -20,12 +25,18 @@ export class MemoryApi extends WorkerEntrypoint<Env, AgentScope> {
     const scope = this.ctx.props;
     await requireOpenRun(this.env, scope, "memory.saveUser");
     try {
+      // Recorded here when refused: knowledge records only a save.
+      await admitEffect(this.env, scope, "memory.saveUser");
       const saved = await saveUserMemory(
         this.env,
         chatAuthority(scope),
         chatContext(scope),
         { type: "own" },
-        input
+        input,
+        // Again right before the save commits, after it was prepared.
+        async () => {
+          await admitEffect(this.env, scope, "memory.saveUser");
+        }
       );
       return { version: saved.currentVersion };
     } catch (error) {

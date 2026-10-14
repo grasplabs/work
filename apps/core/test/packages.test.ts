@@ -890,7 +890,7 @@ describe("a chat's agent", () => {
     await publish(plain(dates, "1.0.0"));
     const chat = await chatOf(
       builder.userId,
-      codeStep(`export default async (env) => {
+      codeStep(`export default async (self, env) => {
         const { request, lock } = await env.build.resolveDependencies(${JSON.stringify(app)}, ${JSON.stringify(
           intentFor(app, { [dates]: "^1.0.0" })
         )});

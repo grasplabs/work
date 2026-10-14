@@ -6,7 +6,6 @@ import type {
   PermissionStatus,
   PermissionSubjectInput,
 } from "@grasp-os/shared/permissions";
-import { RpcTarget } from "capnweb";
 
 import { appFor } from "./apps.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
@@ -15,6 +14,7 @@ import {
   requestPermission,
   revokePermission,
 } from "./permissions.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
@@ -23,7 +23,7 @@ import type { SessionCheck } from "./session-check.ts";
  * sent as it is: the permission functions validate it, and check the
  * person's role, on every call.
  */
-export class PermissionsRpc extends RpcTarget implements PermissionsApi {
+export class PermissionsRpc extends CoreRpcTarget implements PermissionsApi {
   readonly #env: Env;
   readonly #check: SessionCheck;
 

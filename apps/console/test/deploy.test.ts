@@ -388,6 +388,8 @@ describe("deploying a release's Workers", () => {
     expect({
       db: bindings.get("DB"),
       change: bindings.get("PLATFORM_CHANGE"),
+      runtime: bindings.get("RUNTIME_PROFILE"),
+      connectRuntime: bindingsOf(connect).get("RUNTIME_PROFILE"),
       compatibilityDate: core?.metadata.compatibility_date,
       tag: account.scripts.get("grasp-os-core")?.migrationTag,
     }).toStrictEqual({
@@ -403,6 +405,10 @@ describe("deploying a release's Workers", () => {
           at: started?.createdAt.toISOString(),
         },
       },
+      // Every client runs on Cloudflare, which enforces Code Mode's CPU
+      // limit; only core reads it.
+      runtime: { type: "json", name: "RUNTIME_PROFILE", json: "cloudflare" },
+      connectRuntime: undefined,
       compatibilityDate: release.manifest.compatibilityDate,
       tag: "v1",
     });
@@ -796,6 +802,11 @@ describe("deploying safely", () => {
       // Longer than the engine keeps an ended run.
       ["RUN_RETENTION_DAYS", "31"],
       ["MEMORY_LIMITS", "{not json"],
+      // A quota above the platform's: only a release raises one.
+      [
+        "QUOTA_LIMITS",
+        JSON.stringify({ generation: 1, limits: { workflowSteps: 1001 } }),
+      ],
     ];
     const outcomes: unknown[] = [];
     for (const [key, value] of refusedSettings) {

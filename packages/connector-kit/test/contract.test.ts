@@ -4,6 +4,11 @@ import { z } from "zod";
 import { defineConnector, defineTool, ToolError } from "../src/connector.ts";
 import {
   connectorManifestSchema,
+  effectAbsentMetaKey,
+  effectKeyMetaKey,
+  findMetaKey,
+  generatedContracts,
+  outcomeUnknownMetaKey,
   pathMatches,
   redirectHostMatches,
 } from "../src/manifest.ts";
@@ -168,6 +173,174 @@ describe("a tool", () => {
       isError: true,
     });
   });
+
+  it("says a write whose outcome it can't tell is of unknown outcome, never that it failed", async () => {
+    const writing = (error: Error) =>
+      defineTool({
+        name: "items.create",
+        description: "Creates an item",
+        input: z.strictObject({}),
+        output: z.strictObject({}),
+        readOnly: false,
+        routes: [{ ...route, method: "POST" }],
+        run: () => {
+          throw error;
+        },
+      });
+    await expect(
+      writing(
+        new ToolError("Example answered 502", {
+          code: "failed",
+          outcomeUnknown: true,
+        })
+      ).call({})
+    ).resolves.toStrictEqual({
+      content: [{ type: "text", text: "Example answered 502" }],
+      structuredContent: {
+        error: { message: "Example answered 502", code: "failed" },
+      },
+      isError: true,
+      _meta: { [outcomeUnknownMetaKey]: true },
+    });
+    // An error the tool didn't foresee may have come after its write.
+    await expect(
+      writing(new Error("token=abc")).call({})
+    ).resolves.toStrictEqual({
+      content: [{ type: "text", text: "The action's outcome is unknown" }],
+      isError: true,
+      _meta: { [outcomeUnknownMetaKey]: true },
+    });
+    // What it refused itself, before sending anything, failed.
+    await expect(
+      writing(new ToolError("Name a label", { code: "invalid" })).call({})
+    ).resolves.toStrictEqual({
+      content: [{ type: "text", text: "Name a label" }],
+      structuredContent: {
+        error: { message: "Name a label", code: "invalid" },
+      },
+      isError: true,
+    });
+  });
+
+  it("can't say both that it did nothing and that its outcome is unknown", () => {
+    expect(
+      () =>
+        new ToolError("Throttled", { notPerformed: true, outcomeUnknown: true })
+    ).toThrow(Error);
+  });
+});
+
+describe("a tool's recovery", () => {
+  const key = "a".repeat(64);
+  const writeRoute: Route = { ...route, method: "POST" };
+
+  /** A writing tool, recording the effect keys its run and find were given. */
+  const writer = (
+    recovery: { repeatable?: true; find?: "found" | "absent" | "throttled" },
+    seen: (string | null)[] = []
+  ) =>
+    defineTool({
+      name: "items.create",
+      description: "Creates an item",
+      input: z.strictObject({}),
+      output: z.strictObject({ id: z.string() }),
+      readOnly: false,
+      routes: [route, writeRoute],
+      run: async (_input, effect) => {
+        seen.push(effect.key);
+        return await Promise.resolve({ output: { id: "made" } });
+      },
+      ...(recovery.repeatable === true ? { repeatable: true } : {}),
+      ...(recovery.find === undefined
+        ? {}
+        : {
+            find: async (_input: object, effect: { key: string }) => {
+              seen.push(`find:${effect.key}`);
+              if (recovery.find === "throttled") {
+                // As `providerFetch` reports a 429 to the lookup's GET.
+                throw new ToolError("Rate limited", {
+                  code: "throttled",
+                  notPerformed: true,
+                });
+              }
+              return await Promise.resolve(
+                recovery.find === "found" ? { output: { id: "found" } } : null
+              );
+            },
+          }),
+    });
+
+  it("is declared in the manifest: none, repeat or find, and nothing for a read", () => {
+    expect(
+      [writer({}), writer({ repeatable: true }), writer({ find: "found" })].map(
+        ({ action }) => action.recovery
+      )
+    ).toStrictEqual(["none", "repeat", "find"]);
+    expect(toolWith(z.strictObject({})).action.recovery).toBe("none");
+    expect(() =>
+      defineTool({
+        name: "items.list",
+        description: "Lists items",
+        input: z.strictObject({}),
+        output: z.strictObject({}),
+        readOnly: true,
+        repeatable: true,
+        routes: [route],
+        run: async () => await Promise.resolve({ output: {} }),
+      })
+    ).toThrow(Error);
+  });
+
+  it("finds its effect only by a GET of its own", () => {
+    const finder = writer({ find: "found" });
+    expect(() =>
+      connectorWith({
+        tools: [
+          { ...finder, action: { ...finder.action, routes: [writeRoute] } },
+        ],
+      })
+    ).toThrow(Error);
+  });
+
+  it("gives run the call's effect key, and nothing that isn't one", async () => {
+    const seen: (string | null)[] = [];
+    const tool = writer({}, seen);
+    await tool.call({}, { [effectKeyMetaKey]: key });
+    await tool.call({}, { [effectKeyMetaKey]: "not-a-key" });
+    await tool.call({});
+    expect(seen).toStrictEqual([key, null, null]);
+  });
+
+  it("looks the effect up instead of running when asked: found, or certainly absent", async () => {
+    const seen: (string | null)[] = [];
+    const asked = { [effectKeyMetaKey]: key, [findMetaKey]: true };
+    const found = await writer({ find: "found" }, seen).call({}, asked);
+    const absent = await writer({ find: "absent" }, seen).call({}, asked);
+    // A tool that can't find, or a lookup without a key: it can't tell.
+    const cannot = await writer({}, seen).call({}, asked);
+    const keyless = await writer({ find: "found" }, seen).call(
+      {},
+      {
+        [findMetaKey]: true,
+      }
+    );
+    // A lookup that failed says nothing of the effect, even when the GET
+    // did nothing: never "absent", nor "did nothing" for the call.
+    const throttled = await writer({ find: "throttled" }, seen).call({}, asked);
+    expect({ found, absent, cannot, keyless, throttled, seen }).toMatchObject({
+      found: { structuredContent: { id: "found" } },
+      absent: { isError: true, _meta: { [effectAbsentMetaKey]: true } },
+      cannot: { isError: true },
+      keyless: { isError: true },
+      throttled: { isError: true },
+      seen: [`find:${key}`, `find:${key}`, `find:${key}`],
+    });
+    expect([cannot._meta, keyless._meta, throttled._meta]).toStrictEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
 });
 
 describe("a connector", () => {
@@ -241,8 +414,10 @@ describe("a connector", () => {
           "items.list": {
             routes: [{ ...route, ...extra }],
             readOnly: true,
+            recovery: "none",
             resource: null,
             input: [],
+            contract: { input: { type: "object" }, output: { type: "object" } },
           },
         },
       });
@@ -479,5 +654,45 @@ describe("a route's path", () => {
     ]) {
       expect(pathMatches(custom, path)).toBeFalsy();
     }
+  });
+});
+
+describe("generated contracts", () => {
+  const toolNamed = (name: string) =>
+    defineTool({
+      name,
+      description: "A tool",
+      input: z.strictObject({}),
+      output: z.strictObject({}),
+      readOnly: true,
+      routes: [route],
+      run: async () => await Promise.resolve({ output: {} }),
+    });
+
+  it("group a connector's tools by family, each action named after it", () => {
+    const { manifest } = connectorWith({
+      tools: [
+        toolNamed("items.list"),
+        toolNamed("items.get"),
+        toolNamed("people.find"),
+        // No family, or an action name a declaration can't list: in no
+        // contract, so neither served by connect nor in the SDK's catalog.
+        toolNamed("ping"),
+        toolNamed("items.archive.all"),
+      ],
+    });
+    expect(
+      Object.fromEntries(
+        [...generatedContracts(manifest)].map(([contract, actions]) => [
+          contract,
+          Object.fromEntries(
+            [...actions].map(([action, { tool }]) => [action, tool])
+          ),
+        ])
+      )
+    ).toStrictEqual({
+      "example.items@1": { list: "items.list", get: "items.get" },
+      "example.people@1": { find: "people.find" },
+    });
   });
 });

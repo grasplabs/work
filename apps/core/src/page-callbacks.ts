@@ -65,7 +65,8 @@ export const callbackFor = (
       }
       if (
         refusals.tooLarge !== undefined &&
-        jsonBytes(value) > refusals.tooLarge.maxBytes
+        jsonBytes(value, refusals.tooLarge.maxBytes) >
+          refusals.tooLarge.maxBytes
       ) {
         throw refusals.tooLarge.refuse();
       }

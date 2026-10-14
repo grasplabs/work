@@ -156,7 +156,9 @@ describe("asking the agent to fix a failed run", slow, () => {
     const run = await endedRun(owner, app, "careless");
     const gateway = await answering(
       owner,
-      codeStep("export default async (env) => await env.chat.attachments();"),
+      codeStep(
+        "export default async (self, env) => await env.chat.attachments();"
+      ),
       says("The check throws for blocked customers."),
       says("Hello.")
     );

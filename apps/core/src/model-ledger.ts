@@ -1,14 +1,30 @@
-import { auditActorSchema, createAuditEvent } from "@grasp-os/shared/audit";
+import {
+  auditActorSchema,
+  auditDetailMaxKeys,
+  auditIdentifierMaxLength,
+  createAuditEvent,
+} from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { DurableObject } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  lte,
+  sql,
+} from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
 import { drainObjectOutbox } from "./audit-outbox.ts";
+import { inList } from "./db/d1.ts";
 import { migrateOnWake } from "./db/migrate.ts";
 import migrations from "./db/model-ledger/migrations/migrations.js";
 import {
@@ -21,6 +37,7 @@ import {
 import { inJurisdiction } from "./durable-objects.ts";
 import { costMicros, microsPerDollar } from "./model-prices.ts";
 import type { PinnedPrice } from "./model-prices.ts";
+import { endedLineages, lineagesAsked } from "./run-lineage-ends.ts";
 
 // The model ledger: the one authority for what the deployment's model
 // requests may spend and have spent, a Durable Object per deployment,
@@ -32,11 +49,26 @@ import type { PinnedPrice } from "./model-prices.ts";
 //
 // - Concurrent requests overspend a budget: an admission reserves the
 //   request's most possible cost (its bound) against every one of its
-//   scopes (the deployment, the workflow, the person, the run) in one
-//   synchronous transaction that first checks each scope's spend plus
-//   what is reserved plus the bound against its limit. Nothing else runs
-//   in between, so reservations never oversubscribe a limit, and a scope
-//   without room refuses the whole request: no partial reservation.
+//   scopes (the deployment, the workflow, the person, the run lineage, a
+//   model binding's month and day) in one synchronous transaction that
+//   first checks each scope's spend plus what is reserved plus the bound
+//   against its limit, and its requests against its request limit.
+//   Nothing else runs in between, so
+//   reservations never oversubscribe a limit, and a scope without room
+//   refuses the whole request: no partial reservation.
+// - A run lineage escapes its limits: its scope is keyed by the lineage's
+//   root run, so a child run, a run beside it, a retry or a restart counts
+//   against the same spend and requests as the rest of the lineage, and
+//   its spend and alerts are kept under one period (`lineagePeriod`), so
+//   a new month doesn't start it afresh either. Each request records, per
+//   scope, the period it reserved against (`request_scopes.period`), and
+//   settles, is rebuilt and is summed against exactly that, never one
+//   worked out again later: so a request settles against what it
+//   reserved, whatever later releases change. One admitted before periods
+//   were recorded reserved every scope under its own month, a run's on
+//   the run's monthly row, and settles there, never on a lineage's row. A
+//   lineage whose spend row was lost lost its request count too: rebuilt,
+//   it is used up.
 // - The ledger fails or can't be reached: the gateway sends nothing
 //   unless its admission answered yes. An admission whose answer was lost
 //   may have committed: the gateway releases it only if it knows the
@@ -52,11 +84,24 @@ import type { PinnedPrice } from "./model-prices.ts";
 // - A retry releases an unknown earlier cost: every provider request has
 //   its own ID and reservation; a retry is admitted, reserved and settled
 //   on its own, and nothing settles one request by another's outcome.
+// - A lineage's rows pruned while it can still spend, or told early that
+//   it ended: the alarm prunes a lineage's spend and alerts only once
+//   core's own records of its runs (`workflow_runs`, which only core
+//   writes) say every run of it ended a retention ago, and no open
+//   request reserves against it; nothing an App or a run passes says so
+//   (run-lineage-ends.ts).
 // - A request is settled twice, or an ID reused: a request settles once
 //   (`state`), later settlements answer the first; an admission repeated
 //   with the same input under its ID answers the first, and other input
 //   under it is refused. A release that would leave a scope's
 //   reservations below nothing is refused by the database (`CHECK`).
+// - A request is held because its spend is damaged (that `CHECK` failed,
+//   or a scope's spend is gone): a person can still release it, which
+//   rebuilds what a damaged scope holds from the open requests on it, so
+//   theirs isn't lost with it, audited with each damaged scope; it is
+//   never charged (`resolveQuarantined`).
+// - A person decides a request someone already decided: the first
+//   decision stands, and the second is answered with it, never as done.
 // - A model with no safe price or output bound: the gateway admits no
 //   such request against a budget (model-prices.ts); its price and bound
 //   are pinned here when admitted, so a later catalog never reprices it.
@@ -66,6 +111,15 @@ import type { PinnedPrice } from "./model-prices.ts";
 //   transaction as the spend that reached it.
 // - Spend crosses clients: each deployment's core has its own namespace
 //   of this object, so no other client's requests reach this ledger.
+// - A refusal tells a caller about other people's requests: a scope held
+//   only by requests under way answers which scopes are full and when the
+//   soonest request under way in each reaches its deadline, and nothing
+//   else of them (whose, which model, how much, how many). The gateway
+//   passes on a wait derived from that time only when every full scope
+//   is the caller's own (their user scope, their run); for a shared scope
+//   it passes on a fixed wait, and to a guest, whose user scope is the
+//   member who invited them, it says only that the budget is used up
+//   (models.ts).
 
 /** The object's name: one ledger for the deployment. */
 const ledgerName = "deployment";
@@ -85,10 +139,57 @@ const reconcileRetryMs = 60 * 60 * 1000;
 /** How many failed tries at reconciling a request set it aside for a person. */
 const maxReconcileFailures = 3;
 
+/**
+ * The members a decision's audit event has besides its damaged scopes:
+ * `request`, `model`, `period`, `charged` and `damaged`.
+ */
+const decisionMembers = 5;
+
+/**
+ * The detail members a decision's audit event may spend on its damaged
+ * scopes, four or five each (`damaged.N.requests` only for a lineage
+ * recreated used up): whole scopes are listed while they fit, so the event
+ * stays within its limit however many scopes stored data names, and
+ * `damaged` counts all.
+ */
+const damagedMembers = auditDetailMaxKeys - decisionMembers;
+
 /** How often the alarm looks again for receipts to sweep, while any are kept. */
 const sweepEveryMs = 24 * 60 * 60 * 1000;
 
-const scopeNames = ["deployment", "workflow", "user", "run"] as const;
+const scopeNames = [
+  "deployment",
+  "workflow",
+  "user",
+  "run",
+  "binding",
+  "binding_day",
+] as const;
+
+/**
+ * The period a run lineage's spend, requests and alerts are kept under,
+ * whatever month its requests count in for the other scopes: a lineage
+ * is counted for its whole life.
+ */
+const lineagePeriod = "lineage";
+
+/** The period `scope`'s spend counts in, for a request of `period`. */
+const periodOf = (scope: LedgerScopeName, period: string): string =>
+  scope === "run" ? lineagePeriod : period;
+
+/**
+ * The period a request reserved against for one of its scopes: the one
+ * its admission recorded, or, for a request admitted before periods were
+ * recorded, its own month, which is what every one of its scopes then
+ * reserved under (a run's too, on the run's monthly row).
+ */
+const reservedPeriod = (
+  kept: { period: string | null },
+  row: { period: string }
+): string => kept.period ?? row.period;
+
+/** `reservedPeriod` in SQL, over a request joined to its scopes. */
+const reservedPeriodSql = sql`coalesce(${requestScopes.period}, ${requests.period})`;
 
 /** Whose spend a scope counts. */
 export type LedgerScopeName = (typeof scopeNames)[number];
@@ -102,12 +203,14 @@ const scopeSchema = z.strictObject({
   limitMicros: microsSchema.nullable(),
   /** Where admins are alerted; `null` without a budget. */
   alertMicros: microsSchema.nullable(),
+  /** The most requests it may admit; `null` for no limit. */
+  limitRequests: z.int().positive().nullable().default(null),
   /** What its alerts name, as audit detail: the workflow or the person. */
   names: z.record(z.string(), z.string()),
 });
 
 /** One scope a request counts against, with its budget when admitted. */
-export type LedgerScope = z.infer<typeof scopeSchema>;
+export type LedgerScope = z.input<typeof scopeSchema>;
 
 const ratesShape = {
   input: microsSchema,
@@ -128,37 +231,66 @@ const priceSchema = z.strictObject({
 
 const periodPattern = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 
-const admissionSchema = z.strictObject({
-  /** The provider request's ID: one per HTTP request. */
-  id: z.uuid(),
-  /** The UTC month it counts in. */
-  period: z.string().regex(periodPattern),
-  /** Each scope once. */
-  scopes: z
-    .array(scopeSchema)
-    .min(1)
-    .refine(
-      (all) =>
-        new Set(all.map(({ scope, key }) => `${scope}\n${key}`)).size ===
-        all.length,
-      { message: "Each scope once" }
-    ),
-  model: z.string().min(1).max(256),
-  price: priceSchema,
-  /** The most the request can cost at its price. */
-  reservedMicros: microsSchema,
-  actor: auditActorSchema,
-  /** When it is charged in full unless settled before, in ms since the epoch. */
-  reconcileAt: z.int().positive(),
-});
+const admissionSchema = z
+  .strictObject({
+    /** The provider request's ID: one per HTTP request. */
+    id: z.uuid(),
+    /** The UTC month it counts in. */
+    period: z.string().regex(periodPattern),
+    /**
+     * Each scope once, at most one of each kind the gateway counts (the
+     * deployment, the workflow, the person, the run, a model binding's
+     * month and day): a bound that also keeps a decision's audit event
+     * within its detail limit.
+     */
+    scopes: z
+      .array(scopeSchema)
+      .min(1)
+      .max(scopeNames.length)
+      .refine(
+        (all) =>
+          new Set(all.map(({ scope, key }) => `${scope}\n${key}`)).size ===
+          all.length,
+        { message: "Each scope once" }
+      ),
+    model: z.string().min(1).max(256),
+    price: priceSchema,
+    /** The most the request can cost at its price. */
+    reservedMicros: microsSchema,
+    actor: auditActorSchema,
+    /**
+     * When the call is cut off at the latest, in ms since the epoch: until
+     * then it may settle for less than it reserved.
+     */
+    deadline: z.int().positive(),
+    /** When it is charged in full unless settled before, in ms since the epoch. */
+    reconcileAt: z.int().positive(),
+  })
+  .refine(({ deadline, reconcileAt }) => deadline <= reconcileAt, {
+    message: "A request comes due no sooner than its deadline",
+  });
 
 /** A provider request to admit. */
 export type Admission = z.input<typeof admissionSchema>;
 
-/** Whether it was admitted, or which scope has no room. */
+/**
+ * Whether it was admitted, or which scope has no room. A refusal with
+ * `heldUntil` is one whose room is held only by requests still under way,
+ * which may settle for less than they reserved: `heldBy` names every
+ * scope without room, and `heldUntil` is when room is hoped back, in ms
+ * since the epoch (`#refusal`). Without it, spend leaves no room.
+ */
 export type Admitted =
   | { ok: true }
   | { ok: false; scope: LedgerScopeName }
+  | {
+      ok: false;
+      scope: LedgerScopeName;
+      heldBy: LedgerScopeName[];
+      heldUntil: number;
+    }
+  /** It admitted as many requests as it may: refused, for good. */
+  | { ok: false; scope: LedgerScopeName; requests: true }
   /**
    * Its ID was admitted before, for another request or one no longer
    * open: refused, reserving nothing.
@@ -196,16 +328,27 @@ export type Settled =
   | { state: "quarantined" }
   | { state: "missing" };
 
+/** What a person decides about a held request. */
+export type HeldHow = "release" | "charge";
+
 /**
- * What a person's decision on a held request came to: settled at what it
- * charged; `not_held` for a request that exists but isn't held (settled
- * since, or never set aside); `missing` for none.
+ * What a person's decision on a held request came to: `decided` now, at
+ * what it charged; `already_decided` by an earlier decision, someone
+ * else's maybe, which stands, with what it decided and when; and
+ * `release_only` for a charge refused on a request whose spend is damaged,
+ * still held. `not_held` for a request that exists but was never set aside
+ * (the gateway settled it); `missing` for none.
  */
 export type Decided =
-  | { state: "settled"; chargedMicros: number }
+  | { state: "decided"; how: HeldHow; chargedMicros: number }
+  | {
+      state: "already_decided";
+      how: HeldHow;
+      chargedMicros: number;
+      decidedAt: number;
+    }
+  | { state: "release_only" }
   | { state: "not_held" }
-  /** One of its scopes has no spend to count the decision against. */
-  | { state: "spend_missing" }
   | { state: "missing" };
 
 const namesSchema = z.record(z.string(), z.string());
@@ -217,6 +360,8 @@ export interface QuarantinedRequest {
   period: string;
   reservedMicros: number;
   dispatchedAt: number;
+  /** Its spend is damaged: it can only be released (`resolveQuarantined`). */
+  releaseOnly: boolean;
 }
 
 /** What a scope spent and holds in a month, for admins to read. */
@@ -261,6 +406,26 @@ const scopesOf = (row: RequestRow): LedgerScope[] | undefined =>
 const actorOf = (row: RequestRow): AuditActor =>
   auditActorSchema.safeParse(jsonOf(row.actor)).data ?? { type: "system" };
 
+/**
+ * What an earlier decision on `row` came to, for a later one: the decision
+ * that stands when a person settled it, and `not_held` when it was never
+ * held for one (still under way, or settled by the gateway).
+ */
+const decidedBefore = (row: RequestRow): Decided => {
+  if (
+    row.state !== "settled" ||
+    (row.settledBy !== "released" && row.settledBy !== "charged")
+  ) {
+    return { state: "not_held" };
+  }
+  return {
+    state: "already_decided",
+    how: row.settledBy === "charged" ? "charge" : "release",
+    chargedMicros: row.chargedMicros ?? 0,
+    decidedAt: row.settledAt ?? 0,
+  };
+};
+
 /** The deployment's model ledger, in the EU unless turned off. */
 export const modelLedger = (
   env: Pick<Env, "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">
@@ -284,6 +449,12 @@ export class ModelLedger extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     migrateOnWake(ctx, migrations);
+    // On waking, the alarm is set for whatever waits on it: requests to
+    // reconcile, receipts or ended lineages to sweep. A ledger whose last
+    // alarm ended, and that no admission woke since, still prunes.
+    void ctx.blockConcurrencyWhile(async () => {
+      await this.#alarmForNext();
+    });
   }
 
   /**
@@ -331,6 +502,22 @@ export class ModelLedger extends DurableObject<Env> {
         scope,
         row: this.#spendOf(scope, admission.period),
       }));
+      // No request comes back but one never sent: a scope out of requests
+      // is refused whatever its spend.
+      const counted = rows.find(
+        ({ scope, row }) =>
+          scope.limitRequests !== null && row.requests >= scope.limitRequests
+      );
+      if (counted !== undefined) {
+        return {
+          admitted: {
+            ok: false,
+            scope: counted.scope.scope,
+            requests: true,
+          } as const,
+          alerted: 0,
+        };
+      }
       let alertedNow = 0;
       for (const { scope, row } of rows) {
         alertedNow += this.#alert(
@@ -340,15 +527,20 @@ export class ModelLedger extends DurableObject<Env> {
           admission.actor
         );
       }
-      const full = rows.find(
+      const full = rows.filter(
         ({ scope, row }) =>
           scope.limitMicros !== null &&
           row.spentMicros + row.reservedMicros + admission.reservedMicros >
             scope.limitMicros
       );
-      if (full !== undefined) {
+      if (full.length > 0) {
         return {
-          admitted: { ok: false, scope: full.scope.scope } as const,
+          admitted: this.#refusal(
+            full,
+            admission.period,
+            admission.reservedMicros,
+            now
+          ),
           alerted: alertedNow,
         };
       }
@@ -366,6 +558,7 @@ export class ModelLedger extends DurableObject<Env> {
           state: "dispatched",
           actor,
           dispatchedAt: now,
+          deadline: admission.deadline,
           reconcileAt: admission.reconcileAt,
         })
         .run();
@@ -374,6 +567,7 @@ export class ModelLedger extends DurableObject<Env> {
         key,
         limitMicros,
         alertMicros,
+        limitRequests,
         names,
       } of admission.scopes) {
         this.#db
@@ -385,6 +579,8 @@ export class ModelLedger extends DurableObject<Env> {
             limitMicros,
             alertMicros,
             names: JSON.stringify(names),
+            period: periodOf(scope, admission.period),
+            limitRequests: limitRequests ?? null,
           })
           .run();
         this.#db
@@ -392,13 +588,15 @@ export class ModelLedger extends DurableObject<Env> {
           .values({
             scope,
             key,
-            period: admission.period,
+            period: periodOf(scope, admission.period),
             reservedMicros: admission.reservedMicros,
+            requests: 1,
           })
           .onConflictDoUpdate({
             target: [spend.scope, spend.key, spend.period],
             set: {
               reservedMicros: sql`${spend.reservedMicros} + excluded.reserved_micros`,
+              requests: sql`${spend.requests} + 1`,
             },
           })
           .run();
@@ -512,20 +710,38 @@ export class ModelLedger extends DurableObject<Env> {
       .orderBy(asc(requests.dispatchedAt))
       .limit(limit)
       .all();
+    const listed = rows.map((row) => ({
+      ...row,
+      releaseOnly: this.#heldScopes(row).some(({ damaged }) => damaged),
+    }));
     await Promise.resolve();
-    return rows;
+    return listed;
   }
 
   /**
    * Settles a quarantined request as a person decided: releases what it
    * holds, or charges all of it, against the scopes its admission
    * recorded apart from its JSON (`request_scopes`), and audits who did,
-   * in one transaction. A request that isn't quarantined (settled since,
-   * say) is left as it is, and answered as it stands.
+   * in one transaction. A request already decided is left as it is, and
+   * answered with that decision.
+   *
+   * A request can be held because its spend is damaged: a scope's spend
+   * row missing, or holding less than the request reserved, which only
+   * the ledger's own data going wrong leaves behind. Settling it as usual
+   * would take that spend below nothing, which the `CHECK` refuses, so it
+   * would stay held until the month rolled over. Such a request can only
+   * be released. Each damaged scope's reservation is then rebuilt from the
+   * ledger's own records, what the other open requests on it reserve, so
+   * they still settle and are counted: never cleared to nothing, which
+   * would take theirs with it. A missing row is recreated only when other
+   * requests hold against it. The audit event names each damaged scope,
+   * what it held and what it was rebuilt to. Never charged: a charge would
+   * count money against a spend row that is already wrong, so it is
+   * refused, the request still held.
    */
   async resolveQuarantined(
     id: string,
-    how: "release" | "charge",
+    how: HeldHow,
     by: AuditActor
   ): Promise<Decided> {
     const actor = auditActorSchema.parse(by);
@@ -539,33 +755,15 @@ export class ModelLedger extends DurableObject<Env> {
         return { state: "missing" };
       }
       if (row.state !== "quarantined") {
-        return { state: "not_held" };
+        return decidedBefore(row);
       }
-      const keys = this.#db
-        .select()
-        .from(requestScopes)
-        .where(eq(requestScopes.requestId, id))
-        .all();
-      // Each scope it holds against must have its spend to release from or
-      // charge to: without one, the decision couldn't be counted, so it is
-      // refused, the request still held, and nothing audited.
-      const counted = keys.every(
-        (kept) =>
-          this.#db
-            .select({ key: spend.key })
-            .from(spend)
-            .where(
-              and(
-                eq(spend.scope, kept.scope),
-                eq(spend.key, kept.key),
-                eq(spend.period, row.period)
-              )
-            )
-            .get() !== undefined
-      );
-      if (!counted) {
-        log.error("model.held_spend_missing", { request: id });
-        return { state: "spend_missing" };
+      const counted = this.#heldScopes(row);
+      const damaged = counted.some((one) => one.damaged);
+      if (damaged) {
+        log.error("model.held_spend_damaged", { request: id, how });
+        if (how === "charge") {
+          return { state: "release_only" };
+        }
       }
       const charged = how === "charge" ? row.reservedMicros : 0;
       this.#db
@@ -573,41 +771,40 @@ export class ModelLedger extends DurableObject<Env> {
         .set({
           state: "settled",
           chargedMicros: charged,
-          settledBy: "decided",
+          settledBy: how === "charge" ? "charged" : "released",
           settledAt: Date.now(),
         })
         .where(eq(requests.id, id))
         .run();
-      for (const kept of keys) {
-        const after = this.#db
-          .update(spend)
-          .set({
-            reservedMicros: sql`${spend.reservedMicros} - ${row.reservedMicros}`,
-            spentMicros: sql`${spend.spentMicros} + ${charged}`,
-          })
-          .where(
-            and(
-              eq(spend.scope, kept.scope),
-              eq(spend.key, kept.key),
-              eq(spend.period, row.period)
-            )
-          )
-          .returning({ spentMicros: spend.spentMicros })
-          .get();
-        // A charge counts towards its budgets' alerts, as any spend does.
-        if (after !== undefined && charged > 0) {
-          this.#alert(
-            {
-              scope: kept.scope,
-              key: kept.key,
-              limitMicros: kept.limitMicros,
-              alertMicros: kept.alertMicros,
-              names: namesSchema.safeParse(jsonOf(kept.names)).data ?? {},
-            },
-            row.period,
-            after.spentMicros,
-            actor
-          );
+      // Each damaged scope, flat as audit detail is: `damaged.0.scope`, …
+      const rebuilt: Record<string, string | number | null> = {};
+      let rebuiltScopes = 0;
+      let listing = true;
+      for (const { kept, holds, damaged: isDamaged } of counted) {
+        if (!isDamaged) {
+          this.#settleHeldScope(kept, row, charged, actor);
+          continue;
+        }
+        const after = this.#rebuildScope(kept, row, holds);
+        const at = `damaged.${rebuiltScopes}`;
+        rebuiltScopes += 1;
+        const members: Record<string, string | number | null> = {
+          [`${at}.scope`]: kept.scope,
+          [`${at}.key`]: kept.key.slice(0, auditIdentifierMaxLength),
+          [`${at}.held`]: holds === undefined ? null : holds / microsPerDollar,
+          [`${at}.rebuilt`]:
+            after.micros === null ? null : after.micros / microsPerDollar,
+          ...(after.requests === undefined
+            ? {}
+            : { [`${at}.requests`]: after.requests }),
+        };
+        // Listed in order while whole scopes fit: none after the first
+        // left out.
+        listing &&=
+          Object.keys(rebuilt).length + Object.keys(members).length <=
+          damagedMembers;
+        if (listing) {
+          Object.assign(rebuilt, members);
         }
       }
       this.#outbox({
@@ -619,9 +816,11 @@ export class ModelLedger extends DurableObject<Env> {
           model: row.model,
           period: row.period,
           charged: charged / microsPerDollar,
+          damaged: rebuiltScopes,
+          ...rebuilt,
         },
       });
-      return { state: "settled", chargedMicros: charged };
+      return { state: "decided", how, chargedMicros: charged };
     });
     this.#deliverIfStored();
     await Promise.resolve();
@@ -629,8 +828,168 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /**
-   * What each of `scopes` spent and holds in `period`, most spent first,
-   * at most `limit` each; ties by key, descending.
+   * Releases, or charges, what `row` holds against the healthy scope
+   * `kept`, in the period it reserved against, and alerts admins to
+   * any threshold a charge takes it past. Inside a transaction.
+   */
+  #settleHeldScope(
+    kept: typeof requestScopes.$inferSelect,
+    row: RequestRow,
+    charged: number,
+    actor: AuditActor
+  ): void {
+    const after = this.#db
+      .update(spend)
+      .set({
+        reservedMicros: sql`${spend.reservedMicros} - ${row.reservedMicros}`,
+        spentMicros: sql`${spend.spentMicros} + ${charged}`,
+      })
+      .where(
+        and(
+          eq(spend.scope, kept.scope),
+          eq(spend.key, kept.key),
+          eq(spend.period, reservedPeriod(kept, row))
+        )
+      )
+      .returning({ spentMicros: spend.spentMicros })
+      .get();
+    // A charge counts towards its budgets' alerts, as any spend does.
+    if (after !== undefined && charged > 0) {
+      this.#alert(
+        {
+          scope: kept.scope,
+          key: kept.key,
+          limitMicros: kept.limitMicros,
+          alertMicros: kept.alertMicros,
+          names: namesSchema.safeParse(jsonOf(kept.names)).data ?? {},
+        },
+        row.period,
+        after.spentMicros,
+        actor
+      );
+    }
+  }
+
+  /**
+   * Rebuilds the damaged spend of `kept`, which holds `holds` (none when
+   * its row is missing), in the period `row` reserved against: its
+   * reservation becomes what the other open requests on it reserve. A
+   * missing row is recreated only when they reserve something, or when it
+   * is a run lineage's: the row took the lineage's count with it, so it
+   * comes back used up (`requests` at its limit), and the lineage makes no
+   * more requests. What it rebuilt to, none when nothing was written, and
+   * the count it set. Inside a transaction.
+   */
+  #rebuildScope(
+    kept: typeof requestScopes.$inferSelect,
+    row: { period: string },
+    holds: number | undefined
+  ): { micros: number | null; requests?: number } {
+    const period = reservedPeriod(kept, row);
+    const micros = this.#openReservations({ ...kept, period });
+    if (holds !== undefined) {
+      this.#db
+        .update(spend)
+        .set({ reservedMicros: micros })
+        .where(
+          and(
+            eq(spend.scope, kept.scope),
+            eq(spend.key, kept.key),
+            eq(spend.period, period)
+          )
+        )
+        .run();
+      return { micros };
+    }
+    const exhausted =
+      period === lineagePeriod ? (kept.limitRequests ?? undefined) : undefined;
+    if (micros === 0 && exhausted === undefined) {
+      return { micros: null };
+    }
+    this.#db
+      .insert(spend)
+      .values({
+        scope: kept.scope,
+        key: kept.key,
+        period,
+        reservedMicros: micros,
+        requests: exhausted ?? 0,
+      })
+      .run();
+    return exhausted === undefined
+      ? { micros }
+      : { micros, requests: exhausted };
+  }
+
+  /**
+   * The scopes `row` reserved against (`request_scopes`), each with what
+   * its spend holds in the period it reserved against, and whether that
+   * spend is damaged: missing, or holding less than `row` alone reserved.
+   */
+  #heldScopes(row: { id: string; period: string; reservedMicros: number }): {
+    kept: typeof requestScopes.$inferSelect;
+    holds: number | undefined;
+    damaged: boolean;
+  }[] {
+    return this.#db
+      .select()
+      .from(requestScopes)
+      .where(eq(requestScopes.requestId, row.id))
+      .all()
+      .map((kept) => {
+        const holds = this.#db
+          .select({ reservedMicros: spend.reservedMicros })
+          .from(spend)
+          .where(
+            and(
+              eq(spend.scope, kept.scope),
+              eq(spend.key, kept.key),
+              eq(spend.period, reservedPeriod(kept, row))
+            )
+          )
+          .get()?.reservedMicros;
+        return {
+          kept,
+          holds,
+          damaged: holds === undefined || holds < row.reservedMicros,
+        };
+      });
+  }
+
+  /**
+   * What the open requests (under way, lost or held) reserve against
+   * `kept`'s scope in `period`, each by the period it reserved against
+   * (`reservedPeriod`): what that spend should hold, by the ledger's own
+   * records. Inside a transaction.
+   */
+  #openReservations(kept: {
+    scope: LedgerScopeName;
+    key: string;
+    period: string;
+  }): number {
+    return (
+      this.#db
+        .select({
+          reserved: sql<number>`coalesce(sum(${requests.reservedMicros}), 0)`,
+        })
+        .from(requests)
+        .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
+        .where(
+          and(
+            inArray(requests.state, ["dispatched", "unknown", "quarantined"]),
+            eq(requestScopes.scope, kept.scope),
+            eq(requestScopes.key, kept.key),
+            sql`${reservedPeriodSql} = ${kept.period}`
+          )
+        )
+        .get()?.reserved ?? 0
+    );
+  }
+
+  /**
+   * What each of `scopes` spent and holds in `period` (a run lineage: in
+   * its whole life), most spent first, at most `limit` each; ties by key,
+   * descending.
    */
   async spendOf(
     period: string,
@@ -646,13 +1005,46 @@ export class ModelLedger extends DurableObject<Env> {
           reservedMicros: spend.reservedMicros,
         })
         .from(spend)
-        .where(and(eq(spend.scope, scope), eq(spend.period, period)))
+        .where(
+          and(eq(spend.scope, scope), eq(spend.period, periodOf(scope, period)))
+        )
         .orderBy(desc(spend.spentMicros), desc(spend.key))
         .limit(limit)
         .all();
     }
     await Promise.resolve();
     return read;
+  }
+
+  /**
+   * What `scope` spent and holds in `period` under each of `keys`, for the
+   * keys that spent or hold anything: the named ones only, however many
+   * the scope has. The keys go to SQLite as one parameter (`inList`).
+   */
+  async spendOfKeys(
+    period: string,
+    scope: LedgerScopeName,
+    keys: readonly string[]
+  ): Promise<ScopeSpend[]> {
+    await Promise.resolve();
+    if (keys.length === 0) {
+      return [];
+    }
+    return this.#db
+      .select({
+        key: spend.key,
+        spentMicros: spend.spentMicros,
+        reservedMicros: spend.reservedMicros,
+      })
+      .from(spend)
+      .where(
+        and(
+          eq(spend.scope, scope),
+          eq(spend.period, periodOf(scope, period)),
+          inList(spend.key, keys)
+        )
+      )
+      .all();
   }
 
   /**
@@ -720,8 +1112,102 @@ export class ModelLedger extends DurableObject<Env> {
       log.warn("model.spend_reconciled", { requests: reconciled });
     }
     this.#sweep(now);
+    try {
+      await this.#pruneLineages(now);
+    } catch (error) {
+      // Tried again on the next sweep: nothing is lost by keeping them.
+      log.error("model.lineage_prune_failed", errorFields(error));
+    }
     await this.#drainAudit();
     await this.#alarmForNext();
+  }
+
+  /**
+   * Deletes the spend and alerts of run lineages that have ended, every
+   * run of each, at least {@link settledRetentionMs} ago, as core's own
+   * records of the runs say (`endedLineages`): nothing an App or a run
+   * passes, so no lineage is ended early. A lineage any open request
+   * (under way, lost or held for a person) still reserves against keeps
+   * its rows, checked again as they are deleted. A page of lineages at a
+   * time, in key order, so a page of live ones holds up none after it.
+   */
+  async #pruneLineages(now: number): Promise<void> {
+    let after = "";
+    for (;;) {
+      const page = this.#prunable(after);
+      if (page.length === 0) {
+        return;
+      }
+      after = page.at(-1) ?? after;
+      // oxlint-disable-next-line no-await-in-loop -- a page at a time
+      const ended = await endedLineages(
+        this.env,
+        page,
+        now - settledRetentionMs
+      );
+      if (ended.size > 0) {
+        this.ctx.storage.transactionSync(() => {
+          for (const key of this.#prunable("", [...ended])) {
+            this.#db
+              .delete(spend)
+              .where(
+                and(
+                  eq(spend.scope, "run"),
+                  eq(spend.key, key),
+                  eq(spend.period, lineagePeriod)
+                )
+              )
+              .run();
+            this.#db
+              .delete(alerts)
+              .where(
+                and(
+                  eq(alerts.scope, "run"),
+                  eq(alerts.key, key),
+                  eq(alerts.period, lineagePeriod)
+                )
+              )
+              .run();
+          }
+        });
+        log.info("model.lineages_pruned", { lineages: ended.size });
+      }
+      if (page.length < lineagesAsked) {
+        return;
+      }
+    }
+  }
+
+  /**
+   * Run lineages past `after` in key order, at most {@link lineagesAsked}
+   * (or those of `only`), whose spend holds nothing and that no open
+   * request reserves against: the ones that may be pruned once ended.
+   */
+  #prunable(after: string, only?: readonly string[]): string[] {
+    return this.#db
+      .select({ key: spend.key })
+      .from(spend)
+      .where(
+        and(
+          eq(spend.scope, "run"),
+          eq(spend.period, lineagePeriod),
+          gt(spend.key, after),
+          only === undefined ? undefined : inArray(spend.key, [...only]),
+          eq(spend.reservedMicros, 0),
+          sql`not exists (
+            select 1 from ${requestScopes}
+            join ${requests} on ${requests.id} = ${requestScopes.requestId}
+            where ${requestScopes.scope} = 'run'
+              and ${requestScopes.key} = ${spend.key}
+              and ${reservedPeriodSql} = ${lineagePeriod}
+              and ${requests.state} in ('dispatched', 'unknown', 'quarantined')
+          )`
+        )
+      )
+      .orderBy(asc(spend.key))
+      .limit(lineagesAsked)
+      .all()
+      .map(({ key }) => key);
   }
 
   /** Deletes settled receipts past their retention, a page at a time. */
@@ -771,35 +1257,114 @@ export class ModelLedger extends DurableObject<Env> {
       .where(eq(requests.state, "settled"))
       .limit(1)
       .get();
+    // A lineage's spend is pruned on a sweep, receipts or not.
+    const lineage = this.#db
+      .select({ key: spend.key })
+      .from(spend)
+      .where(and(eq(spend.scope, "run"), eq(spend.period, lineagePeriod)))
+      .limit(1)
+      .get();
     const times = [
       next?.at,
-      kept === undefined ? undefined : Date.now() + sweepEveryMs,
+      kept === undefined && lineage === undefined
+        ? undefined
+        : Date.now() + sweepEveryMs,
     ].filter((time) => time !== undefined);
     if (times.length > 0) {
       await this.#alarmBy(Math.min(...times));
     }
   }
 
-  /** The spend row of `scope` in `period`, or none spent yet. */
+  /**
+   * Why a request of `bound` is refused by the scopes in `full`, each
+   * without room for it. Room comes back only from requests still under
+   * way (`dispatched`, before their deadline): they settle at what they
+   * used, often far less than they hold. Every other reservation is as
+   * good as spent: a request whose usage was lost, or past its deadline
+   * (in the grace before it comes due, or due), is charged in full, and a
+   * quarantined one waits for a person. A scope that has no room even
+   * once all those under way release theirs is out of budget, whatever
+   * the other scopes say. When every full scope would have room, the
+   * refusal says when: the soonest deadline of the requests under way in
+   * each scope, the latest of those across scopes. Optimistic, as the
+   * soonest may not free enough on its own; the gateway bounds the wait
+   * it passes on. Only scope names and a time: nothing of whose requests
+   * they are, or what they hold. Inside a transaction.
+   */
+  #refusal(
+    full: readonly {
+      scope: LedgerScope;
+      row: { spentMicros: number; reservedMicros: number };
+    }[],
+    period: string,
+    bound: number,
+    now: number
+  ): Admitted & { ok: false } {
+    let heldUntil = 0;
+    for (const { scope, row } of full) {
+      const underWay = this.#db
+        .select({
+          releasable: sql<number>`coalesce(sum(${requests.reservedMicros}), 0)`,
+          soonest: sql<number | null>`min(${requests.deadline})`,
+        })
+        .from(requests)
+        .innerJoin(requestScopes, eq(requestScopes.requestId, requests.id))
+        .where(
+          and(
+            eq(requests.state, "dispatched"),
+            // Those that reserved against this very spend: a lineage's in
+            // whatever month they count in.
+            sql`${reservedPeriodSql} = ${periodOf(scope.scope, period)}`,
+            gt(requests.deadline, now),
+            eq(requestScopes.scope, scope.scope),
+            eq(requestScopes.key, scope.key)
+          )
+        )
+        .get();
+      const releasable = underWay?.releasable ?? 0;
+      const held = row.reservedMicros - releasable;
+      if (
+        underWay?.soonest === null ||
+        underWay?.soonest === undefined ||
+        row.spentMicros + held + bound > (scope.limitMicros ?? 0)
+      ) {
+        return { ok: false, scope: scope.scope };
+      }
+      heldUntil = Math.max(heldUntil, underWay.soonest);
+    }
+    const [first] = full;
+    if (first === undefined) {
+      throw new Error("A refusal needs a scope without room");
+    }
+    return {
+      ok: false,
+      scope: first.scope.scope,
+      heldBy: full.map(({ scope }) => scope.scope),
+      heldUntil,
+    };
+  }
+
+  /** The spend row of `scope` for a request of `period`, or none spent yet. */
   #spendOf(
     { scope, key }: LedgerScope,
     period: string
-  ): { spentMicros: number; reservedMicros: number } {
+  ): { spentMicros: number; reservedMicros: number; requests: number } {
     return (
       this.#db
         .select({
           spentMicros: spend.spentMicros,
           reservedMicros: spend.reservedMicros,
+          requests: spend.requests,
         })
         .from(spend)
         .where(
           and(
             eq(spend.scope, scope),
             eq(spend.key, key),
-            eq(spend.period, period)
+            eq(spend.period, periodOf(scope, period))
           )
         )
-        .get() ?? { spentMicros: 0, reservedMicros: 0 }
+        .get() ?? { spentMicros: 0, reservedMicros: 0, requests: 0 }
     );
   }
 
@@ -814,8 +1379,16 @@ export class ModelLedger extends DurableObject<Env> {
     charged: number,
     by: "usage" | "refused" | "unsent" | "reconciled"
   ): number | "quarantined" {
-    const scopes = scopesOf(row);
-    if (scopes === undefined) {
+    // What it reserved against, as its admission recorded it apart from
+    // its JSON: the one record a person's decision on it walks too, so a
+    // scope settles here exactly when it would there. Stored data that
+    // can't be read, its JSON or no scope at all, is held for a person.
+    const kept = this.#db
+      .select()
+      .from(requestScopes)
+      .where(eq(requestScopes.requestId, row.id))
+      .all();
+    if (scopesOf(row) === undefined || kept.length === 0) {
       this.#quarantine(row);
       return "quarantined";
     }
@@ -840,18 +1413,22 @@ export class ModelLedger extends DurableObject<Env> {
     }
     const actor = actorOf(row);
     let alerted = 0;
-    for (const scope of scopes) {
+    for (const scope of kept) {
       const after = this.#db
         .update(spend)
         .set({
           reservedMicros: sql`${spend.reservedMicros} - ${row.reservedMicros}`,
           spentMicros: sql`${spend.spentMicros} + ${charged}`,
+          // A request never sent wasn't made: its count comes back.
+          ...(by === "unsent"
+            ? { requests: sql`max(${spend.requests} - 1, 0)` }
+            : {}),
         })
         .where(
           and(
             eq(spend.scope, scope.scope),
             eq(spend.key, scope.key),
-            eq(spend.period, row.period)
+            eq(spend.period, reservedPeriod(scope, row))
           )
         )
         .returning({ spentMicros: spend.spentMicros })
@@ -859,7 +1436,18 @@ export class ModelLedger extends DurableObject<Env> {
       if (after === undefined) {
         throw new Error("A request's scope has no spend to settle against");
       }
-      alerted += this.#alert(scope, row.period, after.spentMicros, actor);
+      alerted += this.#alert(
+        {
+          scope: scope.scope,
+          key: scope.key,
+          limitMicros: scope.limitMicros,
+          alertMicros: scope.alertMicros,
+          names: namesSchema.safeParse(jsonOf(scope.names)).data ?? {},
+        },
+        row.period,
+        after.spentMicros,
+        actor
+      );
     }
     return alerted;
   }
@@ -877,6 +1465,7 @@ export class ModelLedger extends DurableObject<Env> {
     actor: AuditActor
   ): number {
     let stored = 0;
+    const counted = periodOf(scope.scope, period);
     for (const threshold of thresholds) {
       const value = threshold.of(scope);
       if (value === null || spentMicros < value) {
@@ -887,7 +1476,7 @@ export class ModelLedger extends DurableObject<Env> {
         .values({
           scope: scope.scope,
           key: scope.key,
-          period,
+          period: counted,
           kind: threshold.kind,
           thresholdMicros: value,
         })
@@ -902,7 +1491,7 @@ export class ModelLedger extends DurableObject<Env> {
         action: `model.budget.${threshold.kind}`,
         detail: {
           scope: scope.scope,
-          period,
+          period: counted,
           limit: (scope.limitMicros ?? 0) / microsPerDollar,
           threshold: value / microsPerDollar,
           ...scope.names,
@@ -910,7 +1499,7 @@ export class ModelLedger extends DurableObject<Env> {
       });
       log.warn(`model.budget_${threshold.kind}`, {
         scope: scope.scope,
-        period,
+        period: counted,
       });
       stored += 1;
     }

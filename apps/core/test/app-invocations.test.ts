@@ -515,6 +515,7 @@ const heldAtSearch = async (mail: { holding: () => Promise<boolean> }) => {
 const exportCall = (ms: number): ExportCall => ({
   version: 1,
   chain: [],
+  holding: [],
   deadline: Date.now() + ms,
   readOnly: false,
   onPinned: async () => {},

@@ -163,7 +163,7 @@ const failuresById = (text: string | undefined) =>
 
 /** Code that makes each call in turn: what it returned, or its message. */
 const tryEach = (calls: Record<string, string>): string =>
-  `export default async (env) => {
+  `export default async (self, env) => {
     const tried = async (call) => { try { return await call(); } catch (error) { return error.message; } };
     const results = {};
     ${Object.entries(calls)
@@ -309,7 +309,7 @@ describe("a chat's Apps and workflows", () => {
 
   it("show where a run failed, but of a restricted App's only a platform code", async () => {
     const { app, chat, grant } = await setUp(({ app: made }) => {
-      const runsOf = `export default async (env) => (await env.workflows.runs(${JSON.stringify(made)}, "report")).filter(({ failure }) => failure !== null).map(({ id, failure }) => ({ id, failure }));`;
+      const runsOf = `export default async (self, env) => (await env.workflows.runs(${JSON.stringify(made)}, "report")).filter(({ failure }) => failure !== null).map(({ id, failure }) => ({ id, failure }));`;
       return [
         codeStep(runsOf),
         says("Before."),
