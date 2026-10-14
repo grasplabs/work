@@ -1327,7 +1327,9 @@ const readBudget = (): ReadBudget => ({ reads: 0, shipped: 0 });
  * Spends one read of `budget`, sending `staged` bytes of staged writes
  * with it: `operation.read_limit` past `invocationMaxReads` reads or
  * `stagedReadMaxBytes` sent, so one call can't make the store apply its
- * staged writes without end.
+ * staged writes without end. The budget is the whole call's, its nested
+ * functions' reads with the one it named (`runReads`): each invocation
+ * alone is held to its host calls first (operation-channel.ts).
  */
 const spendRead = (budget: ReadBudget, staged: number): void => {
   budget.reads += 1;

@@ -1131,7 +1131,8 @@ describe("one call's budget", () => {
     expect({
       allowed: await fan(callMaxNested, 0),
       tooMany: await fan(callMaxNested + 1, 0),
-      readsTogether: await fan(2, 200),
+      // 270 reads together, each query's 90 within its own host calls.
+      readsTogether: await fan(3, 90),
     }).toStrictEqual({
       allowed: "ok",
       tooMany: "operation.call_limit",

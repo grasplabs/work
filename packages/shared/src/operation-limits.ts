@@ -33,9 +33,11 @@ export const functionRequestMaxBytes = operationInputMaxBytes + 4 * 1024;
 export const operationResultMaxBytes = platformLimits.operationOutputBytes;
 
 /**
- * The most times one function reads the store in one call: reads past it
- * are refused (`operation.read_limit`). Longer work pages, or is a
- * workflow's.
+ * The most times one caller's call reads the store, the function it named
+ * and every function nested in it together: reads past it are refused
+ * (`operation.read_limit`). One invocation alone reaches its host calls
+ * first (`platformLimits.invocationHostCalls`, 100); this bounds what its
+ * nested calls read with it. Longer work pages, or is a workflow's.
  */
 export const invocationMaxReads = 256;
 
