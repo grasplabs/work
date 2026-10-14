@@ -226,7 +226,7 @@ export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([
 
 /** The category of a refusal the page or core sent before any call ran. */
 const refusalCategory = (code: string): ErrorCategory => {
-  if (fences(code) || code.startsWith("auth.")) {
+  if (fencingCodes.has(code) || code.startsWith("auth.")) {
     return "authorization";
   }
   if (code.startsWith("request.") || code.startsWith("contract.")) {

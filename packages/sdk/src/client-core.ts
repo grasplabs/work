@@ -534,12 +534,6 @@ export interface ClientInternals {
    * its descriptor checked; or `contract.invalid_request`.
    */
   readReference: (value: unknown, kind: ReferenceKind) => ReadReference;
-  /**
-   * Which person and fence the client sends for now: it moves on whenever
-   * someone else signs in or access is lost, and what was sent before
-   * stays the person's before.
-   */
-  generation: () => number;
 }
 
 /** A submission in flight, by its scoped key. */
@@ -609,6 +603,23 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
   settled.kind === "value" ||
   (isAction && !ranNothing(settled, isAction)) ||
   (settled.kind === "failed" && settled.error.code === "data.conflict");
+
+/**
+ * Whether `failure`, what `settled` came to, tells a submission's outcome:
+ * the host's own definite answer about it. Not a refusal of the person
+ * (a sign-out, someone else signed in, refused unsent), nor one that ran
+ * nothing: the outcome a key was left unknown under stays unknown, and the
+ * key stays the person's it was sent for.
+ */
+const settlesOutcome = (
+  settled: Settled,
+  failure: GraspError,
+  isAction: boolean
+): boolean =>
+  settled.kind === "failed" &&
+  settled.error === failure &&
+  failure.category !== "authorization" &&
+  !ranNothing(settled, isAction);
 
 /** What a submission does next after `settled` (see `#send`). */
 const submissionVerdict = (
@@ -716,7 +727,6 @@ export class GraspClient {
         client.#retryFailed();
       },
       readReference,
-      generation: () => client.#generation,
     });
   }
 
@@ -1028,6 +1038,9 @@ export class GraspClient {
    * (`#switchPrincipal`), and a call bound to before is refused unsent.
    */
   async #through(request: string, app: string, bound: Bound): Promise<unknown> {
+    // Fenced since the call began (a retry of a lost answer among them):
+    // refused unsent, as the fence was, whichever way the host is reached.
+    this.#refuseIfFenced(bound);
     const portable = this.#portable;
     if (portable === undefined) {
       return await this.#transport?.call(request, app);
@@ -1040,15 +1053,20 @@ export class GraspClient {
     if (bound.principal !== undefined && bound.principal !== token.principal) {
       throw unsent(clientError("auth.principal_changed"));
     }
+    // Asking for the token may itself have found someone else signed in.
+    this.#refuseIfFenced(bound);
+    bound.principal = token.principal;
+    return await portable.send(request, app, token.text);
+  }
+
+  /** Refuses, unsent, a call bound to a generation before the latest fence. */
+  #refuseIfFenced(bound: Bound): void {
     if (
       bound.generation !== undefined &&
       bound.generation !== this.#generation
     ) {
-      // Fenced since the call began: refused unsent, as the fence was.
       throw unsent(this.#fencedBy ?? clientError("auth.principal_changed"));
     }
-    bound.principal = token.principal;
-    return await portable.send(request, app, token.text);
   }
 
   /**
@@ -1267,7 +1285,7 @@ export class GraspClient {
         if (verdict.next === "fail") {
           if (verdict.error.category === "uncertain") {
             this.#uncertainKeys.set(key, bound.generation ?? this.#generation);
-          } else {
+          } else if (settlesOutcome(settled, verdict.error, isAction)) {
             this.#uncertainKeys.delete(key);
           }
           throw verdict.error;

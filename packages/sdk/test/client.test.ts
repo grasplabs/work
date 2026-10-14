@@ -233,19 +233,23 @@ describe("the session client and lost access", () => {
     ).resolves.toStrictEqual({ title: "Kept" });
   });
 
-  it("never sends a key left unknown again once access was lost since", async () => {
+  it("never sends a key left unknown again once access was lost since, though a resend found it out", async () => {
     let signedOut = false;
-    const { client, calls } = network(async (call, request) => {
+    const sent: string[] = [];
+    const { client } = network(async (_call, request) => {
       await Promise.resolve();
       if (request.includes("notes.get")) {
         return signedOut
           ? failedWith("auth.unauthenticated", "authorization")
           : answered(null);
       }
-      if (call === 1) {
+      sent.push(request);
+      if (sent.length === 1) {
         throw new Error("The connection was reset.");
       }
-      return answered(3);
+      return signedOut
+        ? failedWith("auth.unauthenticated", "authorization")
+        : answered(3);
     });
     const lost = await failureOf(client.action(api.notes.tally));
     const { details } = lost;
@@ -254,15 +258,47 @@ describe("the session client and lost access", () => {
         ? Reflect.get(details, "idempotencyKey")
         : undefined;
     expect(key).toBeTypeOf("string");
+    const keyed = { idempotencyKey: String(key) };
+    // The person's session ended: the resend is what finds it out.
+    signedOut = true;
+    const found = await failureOf(client.action(api.notes.tally, {}, keyed));
+    // Someone signs in, and the key is sent again: never as them.
+    signedOut = false;
+    const after = await failureOf(client.action(api.notes.tally, {}, keyed));
+    expect({
+      found: found.code,
+      after: after.code,
+      sent: sent.length,
+    }).toStrictEqual({
+      found: "auth.unauthenticated",
+      after: "auth.principal_changed",
+      sent: 2,
+    });
+  });
+
+  it("never sends a lost save again once access was lost while it waited to", async () => {
+    let signedOut = false;
+    const creates: string[] = [];
+    const { client } = network(async (_call, request) => {
+      await Promise.resolve();
+      if (request.includes("notes.get")) {
+        return signedOut
+          ? failedWith("auth.unauthenticated", "authorization")
+          : answered(null);
+      }
+      creates.push(request);
+      throw new Error("The connection was reset.");
+    });
+    const saving = failureOf(
+      client.mutation(api.notes.create, { title: "A's" })
+    );
+    // Its first answer is lost; before it is sent again, access is lost.
+    await expect.poll(() => creates.length).toBe(1);
     signedOut = true;
     await failureOf(client.query(api.notes.get, { id: noteId }));
-    signedOut = false;
-    const sentBefore = calls();
-    await expect(
-      failureOf(
-        client.action(api.notes.tally, {}, { idempotencyKey: String(key) })
-      )
-    ).resolves.toMatchObject({ code: "auth.principal_changed" });
-    expect(calls()).toBe(sentBefore);
+    await expect(saving).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+    });
+    expect(creates).toHaveLength(1);
   });
 });

@@ -204,6 +204,61 @@ describe("a form whose submission's outcome is unknown", () => {
     expect(sent.at(-1)?.idempotencyKey).not.toBe(sent[0]?.idempotencyKey);
   });
 
+  it("never sends it as whoever signs in after the resend that found the sign-out", async () => {
+    let signedOut = false;
+    const { client, sent } = host(() => {
+      if (sent.length === 1) {
+        return "lost";
+      }
+      return signedOut ? { refused: "auth.unauthenticated" } : { value: 3 };
+    });
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    await settle(binding.submit());
+    // The resend finds the session ended: refused before it ran, so the
+    // form keeps it, unknown as it was.
+    signedOut = true;
+    await settle(binding.submit());
+    const found = binding.status();
+    // Someone signs in: what the form kept is never sent as them.
+    signedOut = false;
+    const refused = await settle(binding.submit());
+    expect({
+      found: { phase: found.phase, locked: found.locked },
+      refused,
+      sent: sent.length,
+      after: binding.status().phase,
+    }).toMatchObject({
+      found: { phase: "uncertain", locked: true },
+      refused: { rejected: { code: "auth.principal_changed" } },
+      sent: 2,
+      after: "idle",
+    });
+  });
+
+  it("sends it again under its key after a resend refused before it ran, never anew", async () => {
+    const { client, sent } = host(() => {
+      if (sent.length === 1) {
+        return "lost";
+      }
+      // The host has no token to give for a moment: nothing ran.
+      return sent.length === 2
+        ? { refused: "auth.token_unavailable" }
+        : { value: 3 };
+    });
+    const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
+    await settle(binding.submit());
+    await settle(binding.submit());
+    const refused = binding.status();
+    await expect(binding.submit()).resolves.toBe(3);
+    expect({
+      refused: { phase: refused.phase, locked: refused.locked },
+      keys: new Set(sent.map(({ idempotencyKey }) => idempotencyKey)).size,
+    }).toStrictEqual({
+      refused: { phase: "uncertain", locked: true },
+      keys: 1,
+    });
+  });
+
   it("never discards a submission still in flight", async () => {
     const { promise: held, resolve } = Promise.withResolvers<null>();
     const { client } = host(async () => {

@@ -426,6 +426,41 @@ describe("a portable host's client", () => {
     ).toStrictEqual([false, false]);
   });
 
+  it("never sends a key left unknown as the next person, though the resend that found them was refused", async () => {
+    let token = tokenOf("ann");
+    const seen = network(async ({ authorization }) => {
+      await Promise.resolve();
+      if (authorization === `Bearer ${tokenOf("ann")}`) {
+        throw new TypeError("The connection was reset.");
+      }
+      return 3;
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const lost = await failureOf(client.action(api.notes.tally));
+    const { details } = lost;
+    const key: unknown =
+      typeof details === "object" && details !== null
+        ? Reflect.get(details, "idempotencyKey")
+        : undefined;
+    const keyed = { idempotencyKey: String(key) };
+    // Bo signs in: the resend that asks for the token finds him, unsent.
+    token = tokenOf("bo");
+    const found = await failureOf(client.action(api.notes.tally, {}, keyed));
+    const again = await failureOf(client.action(api.notes.tally, {}, keyed));
+    expect({
+      found: found.code,
+      again: again.code,
+      sent: seen.map(({ authorization }) => authorization),
+    }).toStrictEqual({
+      found: "auth.principal_changed",
+      again: "auth.principal_changed",
+      sent: [`Bearer ${tokenOf("ann")}`],
+    });
+  });
+
   it("never joins one person's save to the next person's, however the first one left", async () => {
     let token = tokenOf("ann");
     const held = Promise.withResolvers<null>();

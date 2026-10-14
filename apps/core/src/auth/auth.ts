@@ -50,6 +50,7 @@ import { checkClaims } from "./claims.ts";
 import { devIdpOrigin, oidcProviders, providerIds } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
 import { keyIdOf, keyRing } from "./token-keys.ts";
+import type { KeyRing, KeyUse } from "./token-keys.ts";
 
 /** Better Auth's routes, under core's API. */
 export const authBasePath = "/api/auth";
@@ -410,13 +411,41 @@ const auditedChanges: Record<
   }),
 };
 
+/** Each env's token keys, as its isolate holds them, whatever its providers. */
+const tokenRings = new WeakMap<Env, KeyRing<Jwk>>();
+
+/** The token keys `env`'s isolate holds (token-keys.ts). */
+export const tokenKeysOf = (env: Env): KeyRing<Jwk> => {
+  const ring = tokenRings.get(env) ?? keyRing<Jwk>();
+  tokenRings.set(env, ring);
+  return ring;
+};
+
+/**
+ * What the JWT plugin asks its keys for, by the call that asks: only
+ * `signJWT` sends a `payload`; every other call checks a token, naming
+ * the key its header does, if that can be read at all.
+ */
+const keyUseOf = (body: unknown): KeyUse => {
+  if (typeof body === "object" && body !== null && "payload" in body) {
+    return { sign: true };
+  }
+  return {
+    kid: keyIdOf(
+      typeof body === "object" && body !== null
+        ? Reflect.get(body, "token")
+        : undefined
+    ),
+  };
+};
+
 const createAuth = (
   env: Env,
   config: SignInConfig,
   providers: OidcProvider[]
 ) => {
   const db = drizzle(env.DB);
-  const tokenKeys = keyRing<Jwk>();
+  const tokenKeys = tokenKeysOf(env);
   return betterAuth({
     appName: "Grasp",
     // The deployment's own address from its config, never the request's:
@@ -639,11 +668,7 @@ const createAuth = (
             await tokenKeys.keys(
               async () =>
                 await context.context.adapter.findMany<Jwk>({ model: "jwks" }),
-              keyIdOf(
-                typeof context.body === "object" && context.body !== null
-                  ? Reflect.get(context.body, "token")
-                  : undefined
-              ),
+              keyUseOf(context.body),
               Date.now()
             ),
           createJwk: async (key, context) => {

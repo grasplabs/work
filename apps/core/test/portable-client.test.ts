@@ -184,6 +184,27 @@ const listWith = async (
     coreEnv
   );
 
+/** A token header of `fields`, base64url. */
+const headerOf = (fields: unknown): string =>
+  toBase64Url(new TextEncoder().encode(JSON.stringify(fields)));
+
+/**
+ * A token header whose base64url is a multiple of 4 long, so one more
+ * character makes it a length a strict decoder refuses and a lenient one
+ * reads the same.
+ */
+const lenientHeader = (forged: number): string => {
+  let padding = "";
+  for (;;) {
+    const text = JSON.stringify({ alg: "EdDSA", kid: `k${forged}${padding}` });
+    const encoded = toBase64Url(new TextEncoder().encode(text));
+    if (encoded.length % 4 === 0) {
+      return encoded;
+    }
+    padding += "x";
+  }
+};
+
 /**
  * `env` with its D1 counting the reads of the token keys' table: an
  * isolate of its own, which holds no keys yet.
@@ -655,17 +676,18 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     // All within the few seconds an unknown key waits to be read again.
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
     const statuses: number[] = [];
-    // Tokens under a real key's header, signed by nobody; then ones
-    // naming keys nobody made.
+    // Tokens under a real key's header, signed by nobody; ones naming
+    // keys nobody made; ones whose key isn't a string; and ones whose
+    // header only a lenient decoder reads (a length of 1 mod 4).
     for (let forged = 0; forged < 10; forged += 1) {
-      const madeUp = toBase64Url(
-        new TextEncoder().encode(
-          JSON.stringify({ alg: "EdDSA", kid: `made-up-${forged}` })
-        )
-      );
+      const madeUp = headerOf({ alg: "EdDSA", kid: `made-up-${forged}` });
+      const numeric = headerOf({ alg: "EdDSA", kid: forged + 1 });
+      const lenient = `${lenientHeader(forged)}A`;
       for (const sent of [
         `${header}.${claims}.c2lnbmVk`,
         `${madeUp}.${claims}.c2lnbmVk`,
+        `${numeric}.${claims}.c2lnbmVk`,
+        `${lenient}.${claims}.c2lnbmVk`,
       ]) {
         // oxlint-disable-next-line no-await-in-loop -- one request after another
         statuses.push(await statusOf(listWith(notes, sent, isolate.coreEnv)));
@@ -674,10 +696,37 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     // A genuine token verifies all the same, with the keys held.
     statuses.push(await statusOf(listWith(notes, token, isolate.coreEnv)));
     expect({
-      refused: statuses.slice(0, -1).every((status) => status === 401),
+      // Refused, or told to try again for a key it may not hold yet.
+      refused: statuses
+        .slice(0, -1)
+        .every((status) => status === 401 || status === 503),
       genuine: statuses.at(-1),
       reads: isolate.reads(),
     }).toStrictEqual({ refused: true, genuine: 200, reads: 1 });
+  });
+
+  it("tells a token's holder to try again, not to sign in, when its key was made seconds ago in another isolate", async () => {
+    const notes = await notesApp();
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    const first = await tokenFor(notes.builder.session, notes.app);
+    // An isolate that read the keys just now.
+    const isolate = { ...env };
+    const before = await statusOf(listWith(notes, first, isolate));
+    // The key stops signing, and another isolate signs with a new one.
+    await env.DB.prepare("UPDATE jwks SET expires_at = ?")
+      .bind(Date.now() - 1000)
+      .run();
+    const second = await tokenFor(notes.builder.session, notes.app, {
+      ...env,
+    });
+    const soon = await refusalOf(await listWith(notes, second, isolate));
+    vi.setSystemTime(Date.now() + 5000);
+    const later = await statusOf(listWith(notes, second, isolate));
+    expect({ before, soon, later }).toStrictEqual({
+      before: 200,
+      soon: { status: 503, code: "auth.token_unavailable" },
+      later: 200,
+    });
   });
 
   it("records portable use only for a call it reads, never one past the size a call may be", async () => {

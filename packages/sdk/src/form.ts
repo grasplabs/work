@@ -21,6 +21,7 @@ import {
   detailIssues,
   GraspError,
   issueDetails,
+  nothingRanCodes,
 } from "./client-error.ts";
 import type { ArgsOf, ReturnOf } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
@@ -56,10 +57,12 @@ import { validateValue } from "./value-interpreter.ts";
 //   again, which gets a change's outcome. An action has no receipt, so it
 //   runs again, its completed steps not repeated; the person can
 //   `discard` it instead, knowingly.
-// - One person's draft is sent as another's: the submission is kept with
-//   the client's generation it went under; once someone else signed in or
-//   access was lost, it is dropped, refused as `auth.principal_changed`,
-//   never sent.
+// - One person's draft is sent as another's: the session client sends a
+//   key left unknown only for the person it was sent for, and refuses it
+//   unsent as `auth.principal_changed` once someone else signed in or
+//   access was lost; the form then drops what it kept. A resend refused
+//   before it ran (a sign-out, the request budget) keeps it, key and all:
+//   the next submit sends it again, never anew.
 // - A remote change overwrites a draft: while the editable values differ
 //   from the baseline, newer records are only remembered; they replace
 //   the draft only on a deliberate `reload()`.
@@ -261,8 +264,6 @@ interface Submission {
   readonly input: unknown;
   /** The key the session client said it went under, its outcome unknown. */
   readonly key?: string;
-  /** The client's generation it went under (`ClientInternals.generation`). */
-  readonly generation?: number;
 }
 
 /** A document's identity and revision, as the SDK binds records by them. */
@@ -342,14 +343,11 @@ type Target =
       readonly kind: "operation";
       readonly send: Send;
       readonly args: ValueDescriptor;
-      /** The session client's generation now (`ClientInternals.generation`). */
-      readonly generation: () => number;
     }
   | {
       readonly kind: "record";
       readonly send: Send;
       readonly args: ValueDescriptor;
-      readonly generation: () => number;
       readonly fields: readonly string[];
     }
   | { readonly kind: "schema"; readonly schema: StandardSchemaV1 };
@@ -708,23 +706,8 @@ export class FormBinding {
     return { input: checked.value };
   }
 
-  /** The session client's generation now; none for a local form. */
-  #generation(): number | undefined {
-    const target = this.#target;
-    return target.kind === "schema" ? undefined : target.generation();
-  }
-
   async #submitOnce(): Promise<unknown> {
     this.#started += 1;
-    const kept = this.#uncertain;
-    if (kept !== undefined && kept.generation !== this.#generation()) {
-      // Someone else signed in, or access was lost, since it went: it is
-      // the person's before, never sent as whoever is signed in now.
-      this.#uncertain = undefined;
-      const moved = clientError("auth.principal_changed");
-      this.#set({ phase: "idle", failure: failureOf(moved) });
-      throw moved;
-    }
     const submission = await this.#prepare();
     if ("issues" in submission) {
       throw clientError("contract.invalid_args", {
@@ -737,12 +720,11 @@ export class FormBinding {
       fieldIssues: {},
       applicationError: undefined,
     });
-    const sentUnder = this.#generation();
     let result: unknown;
     try {
       result = await this.#send(submission);
     } catch (error) {
-      throw this.#failed(error, { ...submission, generation: sentUnder });
+      throw this.#failed(error, submission);
     }
     this.#uncertain = undefined;
     const refused = this.#succeeded(result);
@@ -796,6 +778,18 @@ export class FormBinding {
       typeof key === "string"
     ) {
       this.#uncertain = { ...submission, key };
+      this.#set({ phase: "uncertain", failure: failureOf(error) });
+      return error;
+    }
+    // A resend refused before it ran (a sign-out, the request budget, the
+    // host without a token) leaves its outcome as unknown as it was: kept,
+    // key and all, so the next submit sends it again rather than anew. Not
+    // once someone else signed in: then it was the person's before.
+    if (
+      submission.key !== undefined &&
+      error.code !== "auth.principal_changed" &&
+      (error.category === "authorization" || nothingRanCodes.has(error.code))
+    ) {
       this.#set({ phase: "uncertain", failure: failureOf(error) });
       return error;
     }
@@ -925,13 +919,12 @@ const targetOf = (
     throw clientError("contract.invalid_request");
   }
   const { args } = internals.readReference(target, kind);
-  const { generation } = internals;
   if (kind === "action") {
     const send: Send = async (input, submit) =>
       // SAFETY: read as an action reference just above.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       await client.action(target as ActionReference, input, submit);
-    return { kind: "operation", send, args, generation };
+    return { kind: "operation", send, args };
   }
   const send: Send = async (input, submit) =>
     // SAFETY: read as a mutation reference just above.
@@ -941,9 +934,9 @@ const targetOf = (
     const fields = (options.fields ?? []).filter(
       (field) => typeof field === "string"
     );
-    return { kind: "record", send, args, generation, fields };
+    return { kind: "record", send, args, fields };
   }
-  return { kind: "operation", send, args, generation };
+  return { kind: "operation", send, args };
 };
 
 /** The values a form starts from, by the way it is made. */

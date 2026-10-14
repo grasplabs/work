@@ -26,13 +26,17 @@ export const liveKeys = <Key extends KeyRow>(
 /**
  * How long an isolate uses the key rows it read without reading them
  * again: a key signs for a month (auth.ts), so a minute's copy is current.
+ * A key row deleted meanwhile (`sweepTokenKeys`) may verify in another
+ * isolate for as long; only keys no current token was signed with are
+ * deleted, and every check reads the token's session afresh anyway.
  */
 const keysKeptMs = 60_000;
 
 /**
  * How soon after reading the keys an isolate reads them again for a token
- * that names a key it doesn't hold: one another isolate just made. Bounds
- * what tokens naming made-up keys cost to one read in this long.
+ * that names a key it doesn't hold (one another isolate just made, or
+ * one nobody did), or whose key it can't read: what such tokens cost is
+ * one read in this long.
  */
 const unknownKeyRereadMs = 5000;
 
@@ -42,45 +46,100 @@ interface IdentifiedKeyRow extends KeyRow {
 }
 
 /**
+ * Why the keys are asked for, by the call that asks: to sign a token, for a
+ * person signed in; or to check one, naming `kid` in its header (`undefined`
+ * when it can't be read: a token checked all the same, and refused).
+ */
+export type KeyUse =
+  | { readonly sign: true }
+  | { readonly kid: string | undefined };
+
+/**
  * The token-signing keys as one isolate holds them (the JWT plugin's key
- * source, auth.ts): to check a token, read from D1 at most once a minute,
+ * source, auth.ts). To check a token, read from D1 at most once a minute,
  * not once a request, so a token costs no D1 read before anyone is known;
- * again sooner for a key made since (`unknownKeyRereadMs`). To sign one,
- * for a person signed in, always read afresh: it signs with the key D1
- * holds now, and what it read is held for the checks after. Each answer
- * is `liveKeys` of them, at the time asked.
+ * again sooner for a key it doesn't hold (`unknownKeyRereadMs`). To sign
+ * one, always read afresh: it signs with the key D1 holds now, and what it
+ * read is held for the checks after. Requests meanwhile share one read.
+ * Each answer is `liveKeys` of them, at the time asked.
  */
 export const keyRing = <Key extends IdentifiedKeyRow>() => {
   let held: { readonly keys: Key[]; readonly readAt: number } | undefined;
+  /** The read under way, which every request meanwhile joins. */
+  let reading: Promise<Key[]> | undefined;
+  /** Moves on with `forget`: a read begun before it is never held. */
+  let version = 0;
+  /** How many reads began: the one under way is the latest. */
+  let begunReads = 0;
+  /** Whether a token naming `kid` is checked with what is held, unread. */
+  const fresh = (kid: string | undefined, now: number): boolean => {
+    if (held === undefined) {
+      return false;
+    }
+    const age = now - held.readAt;
+    const known = kid !== undefined && held.keys.some(({ id }) => id === kid);
+    return age < keysKeptMs && (known || age < unknownKeyRereadMs);
+  };
+  const readOnce = async (
+    read: () => Promise<Key[]>,
+    now: number
+  ): Promise<Key[]> => {
+    if (reading === undefined) {
+      const begun = version;
+      begunReads += 1;
+      const number = begunReads;
+      reading = (async () => {
+        try {
+          const keys = await read();
+          if (begun === version) {
+            held = { keys, readAt: now };
+          }
+          return keys;
+        } finally {
+          if (number === begunReads) {
+            reading = undefined;
+          }
+        }
+      })();
+    }
+    return await reading;
+  };
   return {
-    /**
-     * The live keys, read with `read`: to check a token naming `wanted`,
-     * only unless held fresh enough, a held copy without it read again
-     * once it is `unknownKeyRereadMs` old; to sign (`wanted` undefined),
-     * always.
-     */
+    /** The live keys for `use`, read with `read` unless held fresh enough. */
     keys: async (
       read: () => Promise<Key[]>,
-      wanted: string | undefined,
+      use: KeyUse,
       now: number
     ): Promise<Key[]> => {
-      if (held !== undefined && wanted !== undefined) {
-        const age = now - held.readAt;
-        const known = held.keys.some(({ id }) => id === wanted);
-        if (age < keysKeptMs && (known || age < unknownKeyRereadMs)) {
-          return liveKeys(held.keys, now);
-        }
+      if (!("sign" in use) && held !== undefined && fresh(use.kid, now)) {
+        return liveKeys(held.keys, now);
       }
-      const keys = await read();
-      held = { keys, readAt: now };
-      return liveKeys(keys, now);
+      return liveKeys(await readOnce(read, now), now);
     },
+    /**
+     * Whether a token naming `kid` was refused only because its key is one
+     * this isolate doesn't hold yet and won't read for a few seconds: a
+     * key another isolate made since. Its holder is told to try again
+     * (`auth.token_unavailable`), not to sign in.
+     */
+    pending: (kid: string | undefined, now: number): boolean =>
+      kid !== undefined &&
+      held !== undefined &&
+      !held.keys.some(({ id }) => id === kid) &&
+      fresh(kid, now),
     /** Drops the held copy: a key was made, or removed. */
     forget: (): void => {
       held = undefined;
+      reading = undefined;
+      version += 1;
     },
   };
 };
+
+/** One isolate's token keys (`keyRing`). */
+export type KeyRing<Key extends IdentifiedKeyRow> = ReturnType<
+  typeof keyRing<Key>
+>;
 
 /** The key `token`'s header names (`kid`), read without checking it. */
 export const keyIdOf = (token: unknown): string | undefined => {

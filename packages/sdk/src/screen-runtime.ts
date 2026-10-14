@@ -203,7 +203,8 @@ const fallbackOf = (error: unknown, tryAgain: () => void): ReactNode =>
       "button",
       {
         type: "button",
-        className: "rounded-md border px-3 py-1.5 text-sm",
+        className:
+          "rounded-md border px-3 py-1.5 text-sm outline-none transition-colors hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
         onClick: tryAgain,
       },
       "Try again"

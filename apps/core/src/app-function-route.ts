@@ -408,6 +408,9 @@ export const portableFunctionResponse = async (
       refusalResponse(error, requestId, "app_token.check_failed")
     );
   }
+  if (!checked.ok && checked.reason === "keys_pending") {
+    return refused(503, authErrors.create("auth.token_unavailable"), requestId);
+  }
   if (!checked.ok) {
     if (checked.reason !== "invalid") {
       logRefusedToken({
