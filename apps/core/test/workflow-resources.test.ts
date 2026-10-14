@@ -1,9 +1,12 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { canonicalJson } from "@grasp-os/shared/json";
+import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
 import {
@@ -26,6 +29,10 @@ import { outcome, refusal, unique } from "./sign-in.ts";
 // published version never changes, an App neither gains nor removes a
 // workflow, and a workflow another one runs can't be deleted. Each test
 // makes its own people and workflows.
+
+/** The SHA-256 of a definition's canonical JSON. */
+const canonicalHash = async (definition: string): Promise<string> =>
+  await sha256Hex(canonicalJson(z.json().parse(JSON.parse(definition))));
 
 /** A problem reported at the `greeting` binding's declaration. */
 const bindingProblem = /^\S+ \/document\/metadata\/grasp\/bindings\/greeting/u;
@@ -217,7 +224,9 @@ describe("publishing a version", () => {
       profile: "grasp-open-workflow/1",
       bindings: [],
       author: ada.userId,
-      definitionHash: await sha256Hex(definitionOf({ name: workflow.name })),
+      definitionHash: await canonicalHash(
+        definitionOf({ name: workflow.name })
+      ),
     });
     const second = await publish(
       ada,
@@ -684,5 +693,369 @@ describe("deleting a workflow", () => {
         ? { wins: 1, bound: [], child: "workflow.resource_unavailable" }
         : { wins: 1, bound: [[child.id]], child: "ok" }
     );
+  });
+});
+
+/** A definition of workflow `name` that runs `child` 1.0.0 as `greeting`. */
+const bindingDefinition = (name: string, child: string, version = "1.0.0") =>
+  definitionOf({
+    name,
+    version,
+    bindings: {
+      greeting: {
+        kind: "workflow",
+        contract: `${workflowNamespace}/${child}/1.0.0`,
+      },
+    },
+    tasks: [runTask("greeting", child, "1.0.0")],
+  });
+
+/** The details a refusal carried, or what was thrown instead. */
+const detailsOf = async (promise: Promise<unknown>): Promise<unknown> => {
+  const error = await refusal(promise);
+  return typeof error === "object" && error !== null && "details" in error
+    ? error.details
+    : error;
+};
+
+/** How many versions of `id` are stored, deleted workflow or not. */
+const storedVersions = async (id: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS n FROM workflow_resource_versions WHERE workflow_resource_id = ?"
+  )
+    .bind(id)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+};
+
+describe("what keeps a workflow from being deleted", () => {
+  it("is only another workflow's current version, named to the owner as far as they may see it", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const child = await workflowOf(ada, "child");
+    await publish(ada, child.id, definitionOf({ name: child.name }));
+    await shareWorkflowResource(env, ada, child.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const bobs = await workflowOf(bob, "binder");
+    await publish(bob, bobs.id, bindingDefinition(bobs.name, child.name));
+    await unshareWorkflowResource(env, ada, child.id, {
+      type: "person",
+      id: bob.userId,
+    });
+    // Ada can't see Bob's workflow: she learns there is one, not which.
+    await expect(
+      detailsOf(deleteWorkflowResource(env, ada, child.id))
+    ).resolves.toStrictEqual({ binders: [], hidden: 1 });
+    const events = await allEvents();
+    const refused = events.find(
+      ({ action, target }) =>
+        action === "workflow.delete_refused" && target?.id === child.id
+    );
+    expect(refused?.detail).toMatchObject({ binders: 1, binder1: bobs.id });
+    // Bob's next version binds nothing: his old one keeps nothing alive.
+    await publish(
+      bob,
+      bobs.id,
+      definitionOf({ name: bobs.name, version: "2.0.0" }),
+      1
+    );
+    await expect(
+      outcome(deleteWorkflowResource(env, ada, child.id))
+    ).resolves.toBe("ok");
+  });
+
+  it("names the binders the owner may see", async () => {
+    const ada = await person("builder");
+    const child = await workflowOf(ada, "child");
+    await publish(ada, child.id, definitionOf({ name: child.name }));
+    const parent = await workflowOf(ada, "parent");
+    await publish(ada, parent.id, bindingDefinition(parent.name, child.name));
+    await expect(
+      detailsOf(deleteWorkflowResource(env, ada, child.id))
+    ).resolves.toStrictEqual({
+      binders: [{ id: parent.id, name: parent.name }],
+      hidden: 0,
+    });
+  });
+
+  it("can't be dodged by publishing while it is deleted", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const [published, deleted] = await Promise.all([
+      outcome(publish(ada, workflow.id, definitionOf({ name: workflow.name }))),
+      outcome(deleteWorkflowResource(env, ada, workflow.id)),
+    ]);
+    // The deletion commits while the publication still validates: the
+    // version then has no live workflow to land in.
+    expect({
+      published,
+      deleted,
+      versions: await storedVersions(workflow.id),
+    }).toStrictEqual({
+      published: "workflow.resource_unavailable",
+      deleted: "ok",
+      versions: 0,
+    });
+  });
+
+  it("isn't undone by a share racing it", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const workflow = await workflowOf(ada);
+    const [deleted, shared] = await Promise.all([
+      outcome(deleteWorkflowResource(env, ada, workflow.id)),
+      outcome(
+        shareWorkflowResource(env, ada, workflow.id, {
+          type: "person",
+          id: bob.userId,
+          role: "user",
+        })
+      ),
+    ]);
+    const rows = await env.DB.prepare(
+      "SELECT count(*) AS n FROM workflow_resource_members WHERE workflow_resource_id = ?"
+    )
+      .bind(workflow.id)
+      .first<{ n: number }>();
+    expect({ deleted, shared, rows: rows?.n }).toStrictEqual({
+      deleted: "ok",
+      shared: "workflow.resource_unavailable",
+      rows: 0,
+    });
+  });
+});
+
+describe("role ceilings", () => {
+  it("caps a team's builders at their own organization role", async () => {
+    const ada = await person("builder");
+    const team = await newTeam();
+    const plain = await person("user", [team]);
+    const workflow = await workflowOf(ada);
+    await publish(ada, workflow.id, definitionOf({ name: workflow.name }));
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "team",
+      id: team,
+      role: "builder",
+    });
+    const seen = await getWorkflowResource(env, plain, workflow.id);
+    expect({
+      role: seen.role,
+      publish: await outcome(
+        publish(
+          plain,
+          workflow.id,
+          definitionOf({ name: workflow.name, version: "2.0.0" }),
+          1
+        )
+      ),
+    }).toStrictEqual({ role: "user", publish: "role.forbidden" });
+  });
+
+  it("caps an owner demoted to user", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const demoted: Acting = { ...ada, role: "user" };
+    const seen = await getWorkflowResource(env, demoted, workflow.id);
+    expect({
+      role: seen.role,
+      publish: await outcome(
+        publish(demoted, workflow.id, definitionOf({ name: workflow.name }))
+      ),
+    }).toStrictEqual({ role: "user", publish: "role.forbidden" });
+  });
+
+  it("shows whom it is shared with to nobody without a role in it", async () => {
+    const ada = await person("builder");
+    const stranger = await person("builder");
+    const workflow = await workflowOf(ada);
+    await expect(
+      outcome(workflowMembers(env, stranger, workflow.id))
+    ).resolves.toBe("workflow.resource_unavailable");
+  });
+
+  it("names a bound workflow only to its builders", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const child = await workflowOf(ada, "child");
+    const first = await publish(
+      ada,
+      child.id,
+      definitionOf({ name: child.name })
+    );
+    const parent = await workflowOf(ada, "parent");
+    await publish(ada, parent.id, bindingDefinition(parent.name, child.name));
+    await shareWorkflowResource(env, ada, parent.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    const [asBob] = await workflowVersions(env, bob, parent.id);
+    const [asAda] = await workflowVersions(env, ada, parent.id);
+    expect({
+      bob: asBob?.bindings,
+      ada: asAda?.bindings[0]?.resourceId,
+    }).toStrictEqual({
+      bob: [
+        {
+          alias: "greeting",
+          kind: "workflow",
+          resourceId: null,
+          resourceVersion: null,
+          contractId: null,
+          fingerprint: first.contractHash,
+        },
+      ],
+      ada: child.id,
+    });
+  });
+});
+
+describe("Grasp staff", () => {
+  it("never unshare, nor publish bindings the current version doesn't have", async () => {
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const staff = await person("admin", [], true);
+    const child = await workflowOf(ada, "child");
+    await publish(ada, child.id, definitionOf({ name: child.name }));
+    const workflow = await workflowOf(ada);
+    await publish(ada, workflow.id, definitionOf({ name: workflow.name }));
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    expect({
+      unshare: await outcome(
+        unshareWorkflowResource(env, staff, workflow.id, {
+          type: "person",
+          id: bob.userId,
+        })
+      ),
+      bind: await outcome(
+        publish(
+          staff,
+          workflow.id,
+          bindingDefinition(workflow.name, child.name, "2.0.0"),
+          1
+        )
+      ),
+    }).toStrictEqual({ unshare: "role.forbidden", bind: "role.forbidden" });
+    // Reading, and a version that binds nothing new, as for Apps.
+    const plain = await publish(
+      staff,
+      workflow.id,
+      definitionOf({ name: workflow.name, version: "2.0.0", status: "ok" }),
+      1
+    );
+    expect({
+      version: plain.version,
+      definition: await workflowDefinition(env, staff, workflow.id, 2),
+    }).toStrictEqual({
+      version: 2,
+      definition: definitionOf({
+        name: workflow.name,
+        version: "2.0.0",
+        status: "ok",
+      }),
+    });
+  });
+});
+
+describe("stored versions", () => {
+  it("are the same version for a retry that only formats the definition differently", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const definition = definitionOf({ name: workflow.name });
+    const first = await publish(ada, workflow.id, definition);
+    const reformatted = JSON.stringify(JSON.parse(definition), null, 2);
+    await expect(publish(ada, workflow.id, reformatted)).resolves.toStrictEqual(
+      first
+    );
+  });
+
+  it("are refused, never served, once their record no longer matches its hashes", async () => {
+    const ada = await person("builder");
+    const child = await workflowOf(ada, "child");
+    await publish(ada, child.id, definitionOf({ name: child.name }));
+    await env.DB.prepare(
+      'UPDATE workflow_resource_versions SET definition = ?, contract = replace(contract, \'"label":"Instructions"\', \'"label":"Changed"\') WHERE workflow_resource_id = ?'
+    )
+      .bind(definitionOf({ name: child.name, status: "tampered" }), child.id)
+      .run();
+    const parent = await workflowOf(ada, "parent");
+    expect({
+      definition: await outcome(workflowDefinition(env, ada, child.id, 1)),
+      binding: await outcome(
+        publish(ada, parent.id, bindingDefinition(parent.name, child.name))
+      ),
+    }).toStrictEqual({
+      definition: "workflow.version_corrupt",
+      binding: "workflow.version_corrupt",
+    });
+  });
+
+  it("are bounded so a version's row fits", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const oversized = `${definitionOf({ name: workflow.name })}${" ".repeat(1024 * 1024)}`;
+    // A schema whose constants make the contract larger than a version holds.
+    const values = Array.from(
+      { length: 4000 },
+      (_, index) => `${String(index).padStart(4, "0")}-${"v".repeat(100)}`
+    );
+    const big = definitionOf({ name: workflow.name }).replace(
+      '"who":{"type":"string"}',
+      JSON.stringify({ who: { type: "string", enum: values } }).slice(1, -1)
+    );
+    expect({
+      definition: await outcome(publish(ada, workflow.id, oversized)),
+      contract: await problemCodes(publish(ada, workflow.id, big)),
+    }).toStrictEqual({
+      definition: "workflow.resource_invalid",
+      contract: ["contract.too_large /input/schema"],
+    });
+  });
+});
+
+describe("creating workflows", () => {
+  it("audits a refused name", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    await outcome(createWorkflowResource(env, ada, workflow.name));
+    const events = await allEvents();
+    expect(
+      events.some(
+        ({ action, actor, detail }) =>
+          action === "workflow.create_refused" &&
+          actor.type === "person" &&
+          actor.userId === ada.userId &&
+          detail.reason === "workflow.name_taken"
+      )
+    ).toBeTruthy();
+  });
+
+  it("stops at the quota policy's cap per person, deleted ones included", async () => {
+    const configured = quotaLimitsSchema.parse(env.QUOTA_LIMITS);
+    const ada = await person("builder");
+    env.QUOTA_LIMITS = {
+      generation: configured.generation + 100,
+      limits: { ...configured.limits, workflowResourcesPerPerson: 2 },
+    };
+    try {
+      const first = await workflowOf(ada);
+      await workflowOf(ada);
+      await deleteWorkflowResource(env, ada, first.id);
+      await expect(outcome(workflowOf(ada))).resolves.toBe(
+        "workflow.resource_limit"
+      );
+    } finally {
+      env.QUOTA_LIMITS = {
+        generation: configured.generation + 101,
+        limits: configured.limits,
+      };
+    }
   });
 });

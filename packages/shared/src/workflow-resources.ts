@@ -73,7 +73,11 @@ export const workflowResourceErrors = defineErrorFamily({
     "Someone published another version since you started from this one. Start again from the current version.",
   "workflow.version_not_found": "This workflow has no such version.",
   "workflow.resource_bound":
-    "A version of another workflow calls this one, so it can't be deleted.",
+    "The current version of another workflow calls this one, so it can't be deleted.",
+  "workflow.resource_limit":
+    "You have created as many workflows as one person may, deleted ones included.",
+  "workflow.version_corrupt":
+    "This version's stored record doesn't match what was published, so it isn't used. Report it to Grasp.",
 });
 
 /** A workflow resource, as its members see it. */
@@ -89,16 +93,31 @@ export interface WorkflowResource {
   createdAt: string;
 }
 
-/** A binding a version resolved, by the host: exact IDs and fingerprints. */
+/**
+ * A binding a version resolved, by the host: exact IDs and fingerprints.
+ * Which workflow it binds (its ID, version and contract key, which names
+ * it) only for a builder of that workflow: anyone else gets null there,
+ * and only the alias and the contract's fingerprint.
+ */
 export interface WorkflowVersionBinding {
   alias: string;
   kind: "workflow";
-  resourceId: string;
-  resourceVersion: number;
+  resourceId: string | null;
+  resourceVersion: number | null;
   /** The contract key the definition named. */
-  contractId: string;
+  contractId: string | null;
   /** The target version's contract hash. */
   fingerprint: string;
+}
+
+/**
+ * Why a deletion was refused with `workflow.resource_bound`, in its
+ * details: the workflows whose current version binds it that the caller
+ * may see, and how many more there are that they may not.
+ */
+export interface WorkflowBinders {
+  binders: { id: string; name: string }[];
+  hidden: number;
 }
 
 /** One published version of a workflow. */
