@@ -107,7 +107,7 @@ const Workspace = () => {
           </Badge>
         </SettingsRow>
         <SettingsRow
-          description={t`The time workflows are scheduled in.`}
+          description={t`The time zone a schedule uses when it names none of its own.`}
           htmlFor="workspace-timezone"
           label={t`Time zone`}
         >

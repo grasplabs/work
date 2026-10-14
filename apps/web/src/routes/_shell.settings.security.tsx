@@ -37,7 +37,7 @@ const Security = () => {
         title={t`Sign-in`}
       >
         <SettingsRow
-          description={t`Your company account, so leaving the company ends access too.`}
+          description={t`Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles.`}
           label={t`Signed in with`}
         >
           <SignedInWith labels={labels} />

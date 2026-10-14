@@ -5313,8 +5313,8 @@ msgid "The teams"
 msgstr "Les équipes"
 
 #: src/routes/_shell.settings.workspace.tsx
-msgid "The time workflows are scheduled in."
-msgstr "L’heure dans laquelle les workflows sont planifiés."
+msgid "The time zone a schedule uses when it names none of its own."
+msgstr "Le fuseau horaire qu’utilise une planification qui n’en indique aucun."
 
 #: src/onboarding/staff-words.ts
 msgctxt "what Grasp knows, by source"
@@ -6273,8 +6273,8 @@ msgid "Your chats show up here."
 msgstr "Vos discussions apparaissent ici."
 
 #: src/routes/_shell.settings.security.tsx
-msgid "Your company account, so leaving the company ends access too."
-msgstr "Votre compte professionnel : quitter l’entreprise met aussi fin à l’accès."
+msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
+msgstr "Votre compte professionnel. Quitter l’entreprise empêche toute nouvelle connexion ; un administrateur peut mettre fin plus tôt à une session dans Membres et rôles."
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp."
