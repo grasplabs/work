@@ -331,6 +331,12 @@ describe("publishing a version", () => {
       unshared,
       deleted,
       versions: versions.length,
+      // Bob only uses the child: even the publication that made the
+      // version names it no more than the listing does.
+      first: first.bindings.map(({ resourceId, contractId }) => ({
+        resourceId,
+        contractId,
+      })),
       binds: seen?.bindings.map(({ resourceId, contractId }) => ({
         resourceId,
         contractId,
@@ -339,6 +345,7 @@ describe("publishing a version", () => {
       unshared: seen,
       deleted: seen,
       versions: 2,
+      first: [{ resourceId: null, contractId: null }],
       binds: [{ resourceId: null, contractId: null }],
     });
   });
@@ -543,14 +550,17 @@ describe("authority from source text", () => {
     const hidden = await problemCodes(probe(adasChild.name));
     const missing = await problemCodes(probe(`missing-${unique()}`));
     expect(hidden).toStrictEqual(missing);
-    // Shared with Bob as a user, it resolves for him.
+    // Shared with Bob as a user, it resolves for him; which workflow it
+    // pins stays a builder's to see, as in the version's listing.
     await shareWorkflowResource(env, ada, adasChild.id, {
       type: "person",
       id: bob.userId,
       role: "user",
     });
     const shared = await probe(adasChild.name);
-    expect(shared.bindings[0]?.resourceId).toBe(adasChild.id);
+    expect(shared.bindings).toMatchObject([
+      { alias: "greeting", resourceId: null },
+    ]);
   });
 });
 

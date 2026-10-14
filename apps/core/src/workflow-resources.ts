@@ -797,13 +797,11 @@ const statedVersionSchema = z.object({
  * from the same definition (`definitionHashOf`, so whitespace and key
  * order aside). Read off the text alone: a saved version passed
  * validation as it was published, and nothing is written for it again.
- * Its bindings are answered as `by` may see them (`visibleTo`): a builder
- * of this workflow can read its definition and submit it again, but that
- * doesn't let them learn which workflow it binds where they don't build it.
+ * Its bindings are answered as pinned; `publishWorkflowVersion` answers
+ * them as its caller may see them.
  */
 const savedPublication = async (
   env: Env,
-  by: Acting,
   id: string,
   definition: string
 ): Promise<WorkflowResourceVersion | undefined> => {
@@ -824,11 +822,24 @@ const savedPublication = async (
   ) {
     return undefined;
   }
-  const byVersion = await bindingsOf(env, id);
-  const pinned = byVersion.get(existing.version) ?? [];
+  return existing;
+};
+
+/**
+ * `version` of workflow `id` as `by` may see it (`visibleTo`): every
+ * answer to a publication, new, raced or retried, tells no more of what
+ * it binds than the version's listing does.
+ */
+const seenBy = async (
+  env: Env,
+  by: Acting,
+  version: WorkflowResourceVersion
+): Promise<WorkflowResourceVersion> => {
+  const byVersion = await bindingsOf(env, version.resourceId);
+  const pinned = byVersion.get(version.version) ?? [];
   const visible = await visibleTo(env, by, pinned);
   return {
-    ...existing,
+    ...version,
     bindings: pinned.map((binding) => visible.get(binding) ?? binding),
   };
 };
@@ -1004,17 +1015,8 @@ const requireStaffKeepsBindings = async (
   }
 };
 
-/**
- * Publishes a version of workflow `id` for `by`, who must build it, from
- * `input`: the definition's text and the current version it built on.
- * The definition must pass grasp-open-workflow/1 against the host's
- * catalog (refused with its diagnostics, `workflow.definition_invalid`)
- * and name this workflow. Its version is the next publication number; it
- * becomes the current version. Publishing a semantic version already
- * published answers that version if the definition is the same, and is
- * refused otherwise.
- */
-export const publishWorkflowVersion = async (
+/** `publishWorkflowVersion`, answering bindings as pinned. */
+const publish = async (
   env: Env,
   by: Acting,
   id: unknown,
@@ -1030,7 +1032,7 @@ export const publishWorkflowVersion = async (
   // before its bindings are resolved again: the builder may have lost
   // their role in a workflow it binds since, or that workflow been
   // deleted, and the version still binds what it pinned then.
-  const saved = await savedPublication(env, by, workflow.id, definition);
+  const saved = await savedPublication(env, workflow.id, definition);
   if (saved !== undefined) {
     return saved;
   }
@@ -1108,6 +1110,24 @@ export const publishWorkflowVersion = async (
     return won;
   }
 };
+
+/**
+ * Publishes a version of workflow `id` for `by`, who must build it, from
+ * `input`: the definition's text and the current version it built on.
+ * The definition must pass grasp-open-workflow/1 against the host's
+ * catalog (refused with its diagnostics, `workflow.definition_invalid`)
+ * and name this workflow. Its version is the next publication number; it
+ * becomes the current version. Publishing a semantic version already
+ * published answers that version if the definition is the same, and is
+ * refused otherwise.
+ */
+export const publishWorkflowVersion = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  input: unknown
+): Promise<WorkflowResourceVersion> =>
+  await seenBy(env, by, await publish(env, by, id, input));
 
 /** Every version of workflow `id`, newest first, for anyone with a role. */
 export const workflowVersions = async (
