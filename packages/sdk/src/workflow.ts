@@ -244,9 +244,9 @@ interface StepOptions {
  * failed or ran out of time, a model budget held by other calls still
  * under way. Any other error (a refusal, a tool's own error, one the
  * workflow throws) fails the step at once, and stops the run unless the
- * workflow catches it. Missing, the engine's defaults apply
- * (Cloudflare Workflows: 5 retries, 10 seconds apart, backing off
- * exponentially).
+ * workflow catches it. At most 4 retries, five attempts in all (a
+ * deployment may allow fewer); missing, 4 retries, 10 seconds apart,
+ * backing off exponentially.
  */
 export interface Retries {
   limit: number;
@@ -260,8 +260,8 @@ export interface Retries {
 interface AttemptOptions {
   retries?: Retries;
   /**
-   * How long one attempt may take; the engine's default when missing
-   * (Cloudflare Workflows: 10 minutes).
+   * How long one attempt may take: at most a minute, and a minute when
+   * missing. Longer work is split into steps.
    */
   timeout?: Duration;
 }

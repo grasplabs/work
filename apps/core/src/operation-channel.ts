@@ -5,6 +5,7 @@ import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAppErrorCode } from "@grasp-os/shared/operation-limits";
 import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
 import { commitMaxInputBytes } from "@grasp-os/shared/stores";
@@ -20,6 +21,15 @@ import { commitMaxInputBytes } from "@grasp-os/shared/stores";
 //   `operation.no_resources`, ...);
 // - it stops working once its invocation ends (`operation.ended`), so a
 //   channel kept from an earlier call acts for no one;
+// - it answers at most `platformLimits.invocationHostCalls` reads, calls
+//   and resource requests (100), counted as each reaches it, refused or
+//   not, and none after that (`operation.call_limit`): a loop of them ends
+//   there, and a function's nested calls, each an invocation of its own
+//   with its own channel, are bounded by the call's budget (operations.ts).
+//   Staged writes aren't counted: a commit bounds them
+//   (`commitMaxWrites`), and counting them would leave a mutation that
+//   reads anything short of a whole commit. This holds an App's functions
+//   (queries, mutations, actions); Code Mode counts its own;
 // - its methods take only what a request is (no scope, principal, role,
 //   schema hash or receipt): who the invocation is for was resolved by
 //   core before the channel existed;
@@ -112,6 +122,8 @@ const isAppFailure = (error: unknown): boolean =>
 /** What a channel and the host that made it share. */
 interface ChannelState {
   ended: boolean;
+  /** Its reads, calls and resource requests so far, refused ones included. */
+  uses: number;
   readonly raised: Map<string, CodedError>;
 }
 
@@ -166,8 +178,18 @@ class Channel extends ChannelTarget implements OperationChannel {
   ): Promise<unknown> {
     const capability = this.#capabilities[name];
     try {
+      const counted = name !== "write";
+      if (counted) {
+        this.#state.uses += 1;
+      }
       if (this.#state.ended) {
         throw operationErrors.create("operation.ended");
+      }
+      // A write is never refused for the reads and calls before it.
+      if (counted && this.#state.uses > platformLimits.invocationHostCalls) {
+        throw operationErrors.create("operation.call_limit", {
+          maxHostCalls: platformLimits.invocationHostCalls,
+        });
       }
       if (capability === undefined) {
         throw operationErrors.create(
@@ -231,7 +253,7 @@ export interface OpenChannel {
 
 /** A new channel with `capabilities`, for one invocation. */
 export const openChannel = (capabilities: ChannelCapabilities): OpenChannel => {
-  const state: ChannelState = { ended: false, raised: new Map() };
+  const state: ChannelState = { ended: false, uses: 0, raised: new Map() };
   return {
     channel: new Channel(capabilities, state),
     end: () => {
