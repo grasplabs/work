@@ -63,6 +63,25 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
     });
   });
 
+  it("answers that a write moved past a new watch's read with its ID, not through a watcher core can't match yet", async () => {
+    const { store } = await pendingStore(1);
+    const { told, watcher } = watcherOf();
+    const generation = await notesGeneration(store);
+
+    const made = await objectOf(store).watch(
+      store.id,
+      "ada",
+      { notes: generation - 1 },
+      watcher
+    );
+    await scheduler.wait(100);
+
+    expect({ moved: made.moved, told }).toStrictEqual({
+      moved: true,
+      told: [],
+    });
+  });
+
   it("lets go of everyone's dead watches when the store is full, so a newcomer still gets one", async () => {
     const store = await newStore();
     await store.defineTables(v1, consumer(1));
@@ -83,7 +102,7 @@ describe("a store's live queries", { timeout: 120_000 }, () => {
 
     await expect(
       objectOf(store).watch(store.id, "newcomer", {}, watcherOf().watcher)
-    ).resolves.toStrictEqual(expect.any(String));
+    ).resolves.toHaveProperty("id");
   });
 
   it("sweeps the watches whose screens are gone from its alarm", async () => {

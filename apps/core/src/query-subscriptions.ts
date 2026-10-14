@@ -80,6 +80,18 @@ import type { SessionCheck } from "./session-check.ts";
 const evaluationMs = 30_000;
 
 /**
+ * How long one look at the person's role and the build's trust clears
+ * pushes of an App's data on a connection (`#refusal`).
+ */
+const accessCacheMs = 1000;
+
+/**
+ * How long core waits for a page to take a subscription's last result (a
+ * refusal) before it lets go of the page's callback anyway.
+ */
+const finalPushMs = 10_000;
+
+/**
  * Refusals that end a subscription: the person, the session or the build
  * lost access, or the reference no longer names the App's current
  * version. Pushed as the last result; reading again would only repeat
@@ -193,9 +205,11 @@ const refusalResult = (error: unknown): Result => ({
 const allHaveLatest = (evaluation: Evaluation): boolean =>
   [...evaluation.listeners].every(
     (listener) =>
-      !listener.behind &&
-      listener.pending === undefined &&
-      listener.sent >= (evaluation.latest?.push.revision ?? 0)
+      // One behind the connection's bound reads afresh once the page has
+      // room (`#catchUp`), so nothing is kept for it meanwhile.
+      listener.behind ||
+      (listener.pending === undefined &&
+        listener.sent >= (evaluation.latest?.push.revision ?? 0))
   );
 
 /** One connection's live queries. */
@@ -212,6 +226,15 @@ export class QuerySubscriptions {
   #count = 0;
   /** Bytes of snapshots handed to the page and not yet taken. */
   #unsent = 0;
+  /** The latest look at access, per App and build (`#refusal`). */
+  readonly #cleared = new Map<
+    string,
+    {
+      readonly by: Identity;
+      readonly until: number;
+      readonly access: ReturnType<AccessCheck>;
+    }
+  >();
 
   constructor(env: Env, check: SessionCheck, access: AccessCheck) {
     this.#env = env;
@@ -436,20 +459,60 @@ export class QuerySubscriptions {
       await this.#lose(evaluation);
       return;
     }
-    // The person and the build, checked again before any data goes out.
-    const access = await this.#access(by, app, artifact);
-    if (access !== "open") {
-      await this.#end(
-        evaluation,
-        refusalResult(
-          access === "role"
-            ? roleErrors.create("role.forbidden")
-            : screenErrors.create("screen.revoked")
-        )
-      );
+    // The person and the build, checked again before any data goes out
+    // (and again before each push of it, `#send`).
+    const refusal = await this.#refusal(evaluation);
+    if (refusal !== undefined) {
+      await this.#end(evaluation, refusal);
       return;
     }
     this.#publish(evaluation, result);
+  }
+
+  /**
+   * The gate every push of data passes, just before it goes out: the
+   * connection's session read now (`check`), then the person's role in
+   * the App and the build's trust, as a refusal to end with; none while
+   * all three hold. The role and trust are kept for `accessCacheMs` per
+   * App and build, and only for the same reading of the session (a new
+   * reading, after the session's recheck interval, asks again), so a
+   * burst of pushes costs one look, and a revocation is seen within that
+   * second at most.
+   */
+  async #refusal(evaluation: Evaluation): Promise<Result | undefined> {
+    const { app, artifact } = evaluation;
+    let by: Identity;
+    try {
+      by = await this.#check();
+    } catch (error) {
+      return refusalResult(error);
+    }
+    const key = canonicalJson([app, artifact ?? null]);
+    const now = Date.now();
+    let cached = this.#cleared.get(key);
+    if (cached === undefined || cached.by !== by || cached.until <= now) {
+      cached = {
+        by,
+        until: now + accessCacheMs,
+        access: this.#access(by, app, artifact),
+      };
+      this.#cleared.set(key, cached);
+    }
+    let access: Awaited<ReturnType<AccessCheck>>;
+    try {
+      access = await cached.access;
+    } catch {
+      access = "role";
+    }
+    if (access === "open") {
+      return undefined;
+    }
+    this.#cleared.delete(key);
+    return refusalResult(
+      access === "role"
+        ? roleErrors.create("role.forbidden")
+        : screenErrors.create("screen.revoked")
+    );
   }
 
   /**
@@ -459,7 +522,7 @@ export class QuerySubscriptions {
    */
   #watcherFor(
     evaluation: Evaluation,
-    made: { id: string | undefined }
+    made: { id: string | undefined; early: boolean }
   ): ((tables: string[]) => void) & Disposable {
     const current = (): boolean =>
       !evaluation.closed &&
@@ -468,13 +531,22 @@ export class QuerySubscriptions {
     return Object.assign(
       (tables: string[]): void => {
         // Called with none to see whether it is still here.
-        if (tables.length > 0 && current()) {
+        if (tables.length === 0) {
+          return;
+        }
+        if (made.id === undefined) {
+          // Told before `watch` answered (a write landed after the read):
+          // kept until the watch is installed (`#keepWatched`).
+          made.early = true;
+        } else if (current()) {
           this.#changed(evaluation);
         }
       },
       {
         [Symbol.dispose]: (): void => {
-          if (current()) {
+          if (made.id === undefined) {
+            made.early = true;
+          } else if (current()) {
             evaluation.watch = undefined;
             this.#changed(evaluation);
           }
@@ -510,8 +582,11 @@ export class QuerySubscriptions {
       } else if (watch !== undefined) {
         await this.#unwatch(evaluation);
       }
-      const made: { id: string | undefined } = { id: undefined };
-      const id = await storeOf(this.#env, storeId).watch(
+      const made: { id: string | undefined; early: boolean } = {
+        id: undefined,
+        early: false,
+      };
+      const { id, moved } = await storeOf(this.#env, storeId).watch(
         storeId,
         by.userId,
         readSet,
@@ -524,6 +599,12 @@ export class QuerySubscriptions {
       }
       evaluation.watch = { storeId, id, readSet };
       this.#checkLater(evaluation);
+      if (moved || made.early) {
+        // A write moved past what this read saw, as the store answered,
+        // or told before the watch was installed: read again once this
+        // read is pushed.
+        evaluation.dirty = true;
+      }
       return true;
     } catch (error) {
       log.warn("query.watch_failed", errorFields(error));
@@ -638,6 +719,7 @@ export class QuerySubscriptions {
       this.#unsent + snapshot.bytes > querySubscriptionLimits.unsentBytes
     ) {
       listener.behind = true;
+      QuerySubscriptions.#forgetDelivered(evaluation);
       return;
     }
     listener.behind = false;
@@ -658,7 +740,13 @@ export class QuerySubscriptions {
     listener.sent = snapshot.push.revision;
     this.#unsent += snapshot.bytes;
     try {
-      await listener.toPage(snapshot.push);
+      // Every push of data passes the gate first, however long it waited.
+      const refusal = await this.#refusal(evaluation);
+      if (refusal !== undefined) {
+        void this.#end(evaluation, refusal);
+      } else if (!listener.released) {
+        await listener.toPage(snapshot.push);
+      }
     } catch {
       // The page is gone, or stopped following.
       this.#release(evaluation, listener);
@@ -680,15 +768,20 @@ export class QuerySubscriptions {
     QuerySubscriptions.#forgetDelivered(evaluation);
   }
 
-  /** Offers the latest result to every subscription owed it. */
+  /**
+   * Gives every subscription behind the connection's bound its latest
+   * result, now the page took something: the one kept, if another
+   * subscription still waits for it, or a fresh read.
+   */
   #catchUp(): void {
     for (const evaluation of this.#evaluations.values()) {
       for (const listener of evaluation.listeners) {
-        if (
-          listener.behind &&
-          !listener.inFlight &&
-          evaluation.latest !== undefined
-        ) {
+        if (!listener.behind || listener.inFlight) {
+          continue;
+        }
+        if (evaluation.latest === undefined) {
+          this.#enqueue(evaluation, true);
+        } else {
           this.#offer(evaluation, listener, evaluation.latest);
         }
       }
@@ -739,17 +832,38 @@ export class QuerySubscriptions {
     const callbacks = this.#close(evaluation);
     evaluation.revision += 1;
     const push: QuerySnapshotPush = { revision: evaluation.revision, result };
-    await Promise.all([
-      this.#unwatch(evaluation),
-      ...callbacks.map(async (toPage) => {
-        try {
-          await toPage(push);
-        } catch {
-          // Gone already.
-        }
-        toPage[Symbol.dispose]();
-      }),
-    ]);
+    // Not awaited: a page that never takes it holds no read's turn, and
+    // its callback is let go of after `finalPushMs` anyway.
+    for (const toPage of callbacks) {
+      void QuerySubscriptions.#pushLast(toPage, push);
+    }
+    await this.#unwatch(evaluation);
+  }
+
+  /** Pushes `push` to `toPage`, then lets go of it, waiting `finalPushMs` at most. */
+  static async #pushLast(
+    toPage: PageCallback,
+    push: QuerySnapshotPush
+  ): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<null>();
+    const timer = setTimeout(() => {
+      resolve(null);
+    }, finalPushMs);
+    const pushing = async (): Promise<void> => {
+      try {
+        await toPage(push);
+      } catch {
+        // Gone already.
+      }
+      resolve(null);
+    };
+    void pushing();
+    try {
+      await promise;
+    } finally {
+      clearTimeout(timer);
+      toPage[Symbol.dispose]();
+    }
   }
 
   /**

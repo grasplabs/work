@@ -457,3 +457,34 @@ describe("the session client and lost access", () => {
     expect(creates).toHaveLength(1);
   });
 });
+
+describe("the session client and a change it confirmed", () => {
+  it("answers a query asked after a confirmed change with a read sent after it, not one under way since before", async () => {
+    const { promise: held, resolve: release } = Promise.withResolvers<null>();
+    let saved = false;
+    let reads = 0;
+    const { client } = network(async (_call, request) => {
+      if (request.includes("notes.create")) {
+        saved = true;
+        return answered(noteId);
+      }
+      reads += 1;
+      // The first read was sent before the save; its answer comes late.
+      if (reads === 1) {
+        await held;
+        return answered({ title: "Before" });
+      }
+      await Promise.resolve();
+      return answered({ title: saved ? "After" : "Before" });
+    });
+    const early = client.query(api.notes.get, { id: noteId });
+    await client.mutation(api.notes.create, { title: "After" });
+    const later = client.query(api.notes.get, { id: noteId });
+    release(null);
+
+    await expect(Promise.all([early, later])).resolves.toStrictEqual([
+      { title: "Before" },
+      { title: "After" },
+    ]);
+  });
+});

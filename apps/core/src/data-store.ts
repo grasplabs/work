@@ -241,24 +241,24 @@ export class DataStore extends DurableObject<Env> {
   /**
    * Keeps `watcher` for a live query of `principal`'s that read the
    * tables of `readSet` at those generations (`StoreWatches.watch`):
-   * told of every commit that changes one of them, at once if one did
-   * since. Answers the watch's ID.
+   * told of every write that changes one of them. Answers the watch's ID,
+   * and whether a write moved past what it read already.
    */
   async watch(
     storeId: StoreId,
     principal: string,
     readSet: Record<string, number>,
     watcher: StoreWatcher
-  ): Promise<string> {
+  ): Promise<{ id: string; moved: boolean }> {
     const host = this.#live();
-    const id = await this.#watches.watch(principal, readSet, watcher, () =>
+    const made = await this.#watches.watch(principal, readSet, watcher, () =>
       host.generations(storeId, Object.keys(readSet))
     );
     // While it holds watches, the alarm sweeps the dead ones.
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(Date.now() + watchSweepMs);
     }
-    return id;
+    return made;
   }
 
   /**

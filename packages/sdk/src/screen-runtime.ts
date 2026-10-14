@@ -95,37 +95,75 @@ export const bridge = (): RpcStub<ScreenBridge> => {
   return connected;
 };
 
-/** Releases `subscription`; core lets go of it anyway once the page does. */
-const releaseQuietly = async (subscription: {
-  release: () => Promise<void>;
-}): Promise<void> => {
+/** A subscription the page answered: released, and let go of, once. */
+type HeldSubscription = Awaited<
+  ReturnType<RpcStub<ScreenBridge>["watchQuery"]>
+>;
+
+/**
+ * Releases `subscription` and lets go of its stub: Cap'n Web keeps what a
+ * session was handed until its stub is disposed of, so a released
+ * subscription must be both.
+ */
+const releaseQuietly = async (
+  subscription: HeldSubscription
+): Promise<void> => {
   try {
     await subscription.release();
   } catch {
-    // As above.
+    // Core lets go of it anyway once the page's connection does.
+  } finally {
+    subscription[Symbol.dispose]();
   }
 };
 
 /**
- * The session client's transport over the page's bridge: calls as
+ * The session client's transport over the page's bridge `page`: calls as
  * function calls, queries followed with `watchQuery`. Core's letting go
  * of a callback reaches it as the callback's disposal (Cap'n Web
  * disposes a callback once nothing can call it any more), which the
- * client reads as a lost subscription.
+ * client reads as a lost subscription; the subscription's stub is let go
+ * of then too.
  */
-const bridgeTransport = (): ClientTransport => ({
-  call: async (request) => await bridge().callFunction(request),
+export const bridgeTransport = (
+  page: () => RpcStub<ScreenBridge>
+): ClientTransport => ({
+  call: async (request) => await page().callFunction(request),
   watch: async (request, onSnapshot, onLost) => {
+    // The subscription's stub, once the page answered, and whether core
+    // let go of it first; its stub is let go of once, whichever comes.
+    const state: { held?: HeldSubscription; lost: boolean; gone: boolean } = {
+      lost: false,
+      gone: false,
+    };
+    const letGo = (): void => {
+      if (state.held !== undefined && !state.gone) {
+        state.gone = true;
+        state.held[Symbol.dispose]();
+      }
+    };
     const callback = Object.assign(
       (snapshot: unknown): void => {
         onSnapshot(snapshot);
       },
-      { [Symbol.dispose]: onLost }
+      {
+        [Symbol.dispose]: (): void => {
+          state.lost = true;
+          letGo();
+          onLost();
+        },
+      }
     );
-    const subscription = await bridge().watchQuery(request, callback);
+    state.held = await page().watchQuery(request, callback);
+    if (state.lost) {
+      letGo();
+    }
     return {
       release: () => {
-        void releaseQuietly(subscription);
+        if (state.held !== undefined && !state.gone) {
+          state.gone = true;
+          void releaseQuietly(state.held);
+        }
       },
     };
   },
@@ -329,7 +367,7 @@ export const runScreen = async (
     // One client for the App session this frame runs, over the page's
     // bridge: every screen in it reads through the same queries and
     // submissions, and none makes its own (spec 10.7.1).
-    const client = new GraspClient(bridgeTransport());
+    const client = new GraspClient(bridgeTransport(bridge));
     createRoot(root, {
       onUncaughtError: (error) => {
         report({ kind: "error", ...describe(error) });

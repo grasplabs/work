@@ -105,9 +105,9 @@ export class StoreWatches {
   /**
    * Keeps `watcher` (dup'd: the call's own stub ends with the call) for
    * `principal`'s query, which read the tables of `readSet` at those
-   * generations; tells it at once when `current` (the store's
-   * generations now, read with nothing awaited since) has moved past
-   * any. Answers the watch's ID, or refuses with
+   * generations. Answers the watch's ID, and whether `current` (the
+   * store's generations now, read with nothing awaited since) has moved
+   * past any of them already; or refuses with
    * `screen.too_many_queries`, for core to try again later.
    */
   async watch(
@@ -115,7 +115,7 @@ export class StoreWatches {
     readSet: Record<string, number>,
     watcher: StoreWatcher,
     current: () => Record<string, number>
-  ): Promise<string> {
+  ): Promise<{ id: string; moved: boolean }> {
     if (this.#countOf(principal) >= querySubscriptionLimits.perPerson) {
       await this.#sweepOnce(principal);
     }
@@ -131,8 +131,11 @@ export class StoreWatches {
     const id = crypto.randomUUID();
     this.#watches.set(id, { principal, watcher: watcher.dup(), readSet });
     this.#counts.set(principal, this.#countOf(principal) + 1);
-    this.#check(id, current());
-    return id;
+    // Whether a write moved what it read since: answered with its ID
+    // rather than told through the watcher, which core can only match to
+    // the watch once it has the ID.
+    const moved = StoreWatches.#moved(readSet, current()).length > 0;
+    return { id, moved };
   }
 
   /**
@@ -191,15 +194,23 @@ export class StoreWatches {
     if (watch === undefined) {
       return;
     }
-    const moved = Object.entries(watch.readSet).flatMap(([table, read]) => {
+    const moved = StoreWatches.#moved(watch.readSet, generations);
+    if (moved.length > 0) {
+      void this.#tell(id, watch, moved);
+    }
+  }
+
+  /** The tables of `readSet` that `generations` moved past. */
+  static #moved(
+    readSet: Readonly<Record<string, number>>,
+    generations: Readonly<Record<string, number>>
+  ): string[] {
+    return Object.entries(readSet).flatMap(([table, read]) => {
       const now = Object.hasOwn(generations, table)
         ? generations[table]
         : undefined;
       return now !== undefined && now > read ? [table] : [];
     });
-    if (moved.length > 0) {
-      void this.#tell(id, watch, moved);
-    }
   }
 
   async #tell(id: string, watch: Watch, tables: string[]): Promise<void> {
@@ -229,6 +240,13 @@ export class StoreWatches {
       sweepGapMs
     ) {
       return;
+    }
+    // Only sweeps within the gap matter: older ones are forgotten, so
+    // this holds at most the people swept in the last `sweepGapMs`.
+    for (const [who, at] of this.#swept) {
+      if (now - at >= sweepGapMs) {
+        this.#swept.delete(who);
+      }
     }
     this.#swept.set(principal, now);
     await this.#sweepOf(
