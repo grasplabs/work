@@ -146,7 +146,10 @@ export const StatementLine = ({
 }) => {
   const { statement, place } = row;
   return (
-    <li className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-4 border-t py-2.5 text-sm first:border-t-0">
+    <li
+      className="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-4 border-t py-2.5 text-sm first:border-t-0"
+      data-statement={statement.id}
+    >
       <span className="flex min-w-0 flex-col gap-1">
         <Link
           className="hover:underline"

@@ -349,7 +349,7 @@ const mergeRows = (rows: DetailRow[]): DetailRow[] => {
  * A note's details: its properties and its links as one list, nothing said twice, each under its
  * own heading with its names below it, the whole width of the side: first what the note is, then
  * its work, then where it comes from and what is open. What the article already shows goes: how
- * many of each kind were said, and a team's roles, which stand on its banner. Every tool it is
+ * many of each kind were said; a team keeps its roles. Every tool it is
  * linked to joins the property that already names tools. The other links follow: the open
  * questions about it; its sources, its own first (for a team its interview, its employees' chats,
  * the directory) and then the conversations that name it; and any other page that names it, under
@@ -366,10 +366,10 @@ const DetailRows = ({
   workspace: Workspace;
 }) => {
   const { t } = useLingui();
-  // What the article already shows: how many of each kind were said (the tabs over the statements), and a team's roles (its banner).
+  // What the article already shows: how many of each kind were said (the tabs over the statements).
+  // A team's roles stay: its banner shows its interviewees or its drawing, not the roster's roles.
   // A tool's AI, as Grasp sees it, belongs with the Landscape, which is parked: it is left out for now.
   const shown = new Set([
-    t`Roles`,
     t`They told us`,
     t`What was said`,
     t`AI`,
@@ -717,6 +717,7 @@ const NoteBody = ({
       {article}
       {statements.length > 0 ? (
         <StatementsByKind
+          activeId={activeId}
           kern={kernOf(note.id, statements)}
           rows={statements}
         />
