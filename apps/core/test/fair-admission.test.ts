@@ -761,6 +761,37 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
     });
   });
 
+  it("leave the place a step's later attempt holds when an earlier attempt's call fails late", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const hot = await ownerOf(builder);
+    const holder = asPerson(await anotherRun(builder, hot), "p1");
+    const waiter = asPerson(hot, "p2");
+    const first = attemptOf("w1");
+
+    const result = await withShares({ workflowClientAttempts: 2 }, async () => {
+      const held = await admit(holder, "h1");
+      const waiting = await admitExactly(waiter, first);
+      // The engine gave up on the first attempt and retries the step: the
+      // retry keeps its place.
+      const retried = await admitExactly(waiter, { ...first, number: 2 });
+      // The first attempt's call, past its deadline, fails only now.
+      const late = await admitExactly(waiter, {
+        ...first,
+        deadline: Date.now() - 1000,
+      });
+      const places = await placesOf(waiter.run);
+      await settled(held);
+      return { waiting, retried, late, places };
+    });
+
+    expect(result).toStrictEqual({
+      waiting: "workflow.queued:app",
+      retried: "workflow.queued:app",
+      late: "execution.stale_attempt",
+      places: 1,
+    });
+  });
+
   it("put a place that stopped asking at the back when it asks again", async () => {
     const builder = await signedInApi(idp, "builder");
     const owner = await ownerOf(builder);

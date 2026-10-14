@@ -1231,6 +1231,12 @@ export const workflowAdmissionQueue = sqliteTable(
     /** When it asks again at the latest: the run's summary shows it. */
     retryAt: timestamp("retry_at").notNull(),
     turn: integer().notNull(),
+    /**
+     * New with each write of the place (a refusal that queued it, or kept
+     * it): a step that gives its place up gives up only the one it saw,
+     * never one a later attempt of the step wrote since.
+     */
+    writeToken: text("write_token").notNull(),
   },
   (table) => [
     primaryKey({ columns: [table.runId, table.stepHash] }),

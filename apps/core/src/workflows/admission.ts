@@ -70,7 +70,11 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 //   a wait for a share. Refused for anything else (its lineage's time held
 //   by a sibling, a lineage limit, a timeout), it gives its place up
 //   (quotas.ts, `admitAttempt`) and joins at the back when it next waits
-//   for a share; past an admission it holds none (`dequeued`). So the
+//   for a share; past an admission it holds none (`dequeued`). It gives
+//   up only the place as its call found it (`writeToken`, new with each
+//   write): a call that outlasted its attempt's deadline, failing after
+//   the engine's retry of the step queued, never erases the retry's
+//   place, and a stale attempt gives up nothing. So the
 //   queue holds back shares only for steps waiting on shares alone, and
 //   `servedInOrder` never models a lineage, a hold or anything else a
 //   step may wait for: such a wait is the run's own, and it keeps no one
@@ -483,6 +487,57 @@ export const dequeued = (
 };
 
 /**
+ * Which write of `place` is there now (its `writeToken`), if it is held:
+ * read as an admission starts, so it can give up that place and no other
+ * (`givenUp`).
+ */
+export const placeWritten = async (
+  db: DrizzleD1Database,
+  place: QueuePlace
+): Promise<string | undefined> => {
+  const [held] = await db
+    .select({ writeToken: workflowAdmissionQueue.writeToken })
+    .from(workflowAdmissionQueue)
+    .where(
+      and(
+        eq(workflowAdmissionQueue.runId, place.runId),
+        eq(workflowAdmissionQueue.stepHash, place.stepHash)
+      )
+    );
+  return held?.writeToken;
+};
+
+/**
+ * The statements that give up `place` as its write `writeToken` left it,
+ * its run's summary taking its next revision: a place written since, by a
+ * later attempt of the step, is not the one given up, and stays.
+ */
+export const givenUp = (
+  db: DrizzleD1Database,
+  place: QueuePlace,
+  writeToken: string
+) => {
+  const queue = workflowAdmissionQueue;
+  const seen = and(
+    eq(queue.runId, place.runId),
+    eq(queue.stepHash, place.stepHash),
+    eq(queue.writeToken, writeToken)
+  );
+  return [
+    db
+      .update(workflowRuns)
+      .set({ summaryRevision: sql`${workflowRuns.summaryRevision} + 1` })
+      .where(
+        and(
+          eq(workflowRuns.id, place.runId),
+          sql`EXISTS (SELECT 1 FROM ${queue} WHERE ${seen})`
+        )
+      ),
+    db.delete(queue).where(seen),
+  ] as const;
+};
+
+/**
  * The statement that reads, for `scope`'s attempt at `place`, the counts
  * its shares were checked against at `now`, and the first end of each
  * share's leases, unless `admitted` (as SQL): run in the batch that tries
@@ -601,6 +656,8 @@ export const queuedRefusal = async (
   const rows = z.array(sharesRowSchema).safeParse(read).data;
   const { waitingFor, retryAfterSeconds } = waitOf(rows?.[0], shares, now);
   const at = new Date(now);
+  // This write of the place: what a later give-up of it must match.
+  const writeToken = crypto.randomUUID();
   // When it asks again at the latest, as the host waits (`askAgainMs`):
   // never after it would time out.
   const retryAt = new Date(
@@ -625,12 +682,15 @@ export const queuedRefusal = async (
     db
       .delete(queue)
       .where(and(mine, lte(queue.seenAt, new Date(now - queueLiveMs)))),
-    db.update(queue).set({ seenAt: at, waitingFor, retryAt }).where(mine),
+    db
+      .update(queue)
+      .set({ seenAt: at, waitingFor, retryAt, writeToken })
+      .where(mine),
     // A new place, within its person's and its App's.
     db
       .insert(queue)
       .select(
-        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(scope, now)} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${place.runId} AND ${runActive} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
+        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(scope, now)}, ${writeToken} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${place.runId} AND ${runActive} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
       )
       .onConflictDoNothing()
       .returning({ runId: queue.runId }),

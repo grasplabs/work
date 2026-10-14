@@ -27,6 +27,8 @@ import {
 } from "../db/core/schema.ts";
 import {
   dequeued,
+  givenUp,
+  placeWritten,
   queuedRefusal,
   queuePlaceOf,
   queuePruned,
@@ -35,7 +37,7 @@ import {
   sharesRead,
   standingOf,
 } from "./admission.ts";
-import type { AdmissionScope } from "./admission.ts";
+import type { AdmissionScope, QueuePlace } from "./admission.ts";
 
 // A run lineage's quotas: how deep its runs nest, how many runs it starts,
 // how long its steps' attempts run in all and how old it may grow, each
@@ -971,21 +973,24 @@ const admitAttemptOnce = async (
 };
 
 /**
- * Gives up the place of step `step` of `owner`'s run, if it holds one: it
- * waits for something other than a share now. What it was refused for is
- * thrown whether or not this lands: a place left behind lapses
- * (`queueLiveMs`).
+ * Gives up the place of step `step` of `owner`'s run as the refused call
+ * found it (`seen`, its write as the call started), if it held one: the
+ * step waits for something other than a share now. A place a later
+ * attempt of the step wrote since is another write, and stays. What the
+ * call was refused for is thrown whether or not this lands: a place left
+ * behind lapses (`queueLiveMs`).
  */
 const placeGivenUp = async (
-  env: Pick<Env, "DB">,
+  db: DrizzleD1Database,
   owner: AttemptOwner,
-  step: string
+  place: QueuePlace,
+  seen: string | undefined
 ): Promise<void> => {
+  if (seen === undefined) {
+    return;
+  }
   try {
-    const db = drizzle(env.DB);
-    await db.batch(
-      dequeued(db, await queuePlaceOf(owner.run, step), sql`1 = 1`)
-    );
+    await db.batch(givenUp(db, place, seen));
   } catch (error) {
     log.warn("workflow.queue.give_up_failed", {
       runId: owner.run,
@@ -1010,14 +1015,19 @@ const placeGivenUp = async (
  * `workflow.lineage_busy` with the seconds after which an attempt under
  * way will have given back its hold, or `workflow.queued`, having queued
  * it, with the share it waits for and the seconds after which it asks
- * again at the latest. Any refusal but `workflow.queued` gives up the
- * step's place in the queue (`placeGivenUp`).
+ * again at the latest. Any other refusal of an attempt not yet stale
+ * gives up the step's place in the queue as this call found it
+ * (`placeGivenUp`).
  */
 export const admitAttempt = async (
   env: Pick<Env, "DB" | "QUOTA_LIMITS">,
   owner: AttemptOwner,
   attempt: QuotaAttempt
 ): Promise<AttemptAdmission> => {
+  const db = drizzle(env.DB);
+  const place = await queuePlaceOf(owner.run, attempt.step);
+  // The step's place as this call found it: the only one it may give up.
+  const seen = await placeWritten(db, place);
   try {
     return await admitAttemptOnce(
       env,
@@ -1027,8 +1037,13 @@ export const admitAttempt = async (
       false
     );
   } catch (error) {
-    if (workflowErrors.codeOf(error) !== "workflow.queued") {
-      await placeGivenUp(env, owner, attempt.step);
+    // Queued, it keeps its place. A stale attempt is over, and its step
+    // may have gone on under a later attempt that owns the place now.
+    const keeps =
+      workflowErrors.codeOf(error) === "workflow.queued" ||
+      executionErrors.codeOf(error) === "execution.stale_attempt";
+    if (!keeps) {
+      await placeGivenUp(db, owner, place, seen);
     }
     throw error;
   }
