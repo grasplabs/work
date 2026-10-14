@@ -681,7 +681,12 @@ export const queueOrphanedReservations = async (
     ),
     sql`NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS manifests
       WHERE manifests.app_id = ${sdkReleaseArtifacts.appId}
-        AND manifests.version = ${sdkReleaseArtifacts.version})`
+        AND manifests.version = ${sdkReleaseArtifacts.version})`,
+    // Nor a JSON workflow version's sealed build (workflow-builds.ts):
+    // versions are never deleted, so neither are the bytes they run.
+    sql`NOT EXISTS (SELECT 1 FROM workflow_resource_versions AS versions
+      WHERE versions.workflow_resource_id = ${sdkReleaseArtifacts.appId}
+        AND versions.version = ${sdkReleaseArtifacts.version})`
   );
   await db.batch([
     queueReserved(db, orphaned),

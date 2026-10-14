@@ -1,5 +1,6 @@
 import type { CatalogContract } from "@grasp-os/open-workflow/catalog";
 import type { Diagnostic } from "@grasp-os/open-workflow/diagnostics";
+import { generatedPath } from "@grasp-os/open-workflow/generate";
 import { profileLimits } from "@grasp-os/open-workflow/limits";
 import { validateWorkflow } from "@grasp-os/open-workflow/validate";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
@@ -33,6 +34,7 @@ import type {
   WorkflowRole,
   WorkflowBinders,
   WorkflowVersionBinding,
+  WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
 import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
 import {
@@ -68,6 +70,14 @@ import {
   stillMembers,
 } from "./sharing.ts";
 import type { MemberRef } from "./sharing.ts";
+import {
+  buildOf,
+  buildSummary,
+  compileWorkflow,
+  loadWorkflowBuild,
+  storeBuild,
+} from "./workflow-builds.ts";
+import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
@@ -116,6 +126,10 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   other content is refused (`workflow.version_exists`), and with the
 //   same content answers the version already published, so a retried
 //   publication is the same publication.
+// - A version running other code than its definition's. Publication
+//   generates SDK TypeScript from the checked definition, compiles it and
+//   seals it into the version's manifest, by hash (workflow-builds.ts):
+//   what a version runs is fixed with it, and nothing compiles later.
 // - Two publications racing. A publication names the current version it
 //   built on; its batch inserts the version only while that is still the
 //   current one and the workflow is live, and moves the current version in
@@ -763,6 +777,22 @@ const checkDefinition = async (
   return { checked, bindings };
 };
 
+/**
+ * The build version `version` of workflow `id` seals, from its manifest
+ * text (`workflow.version_corrupt` for one that seals none it can read).
+ */
+const sealedBuildOf = (
+  id: string,
+  version: number,
+  manifest: string
+): SealedBuild => {
+  try {
+    return buildOf(manifest);
+  } catch {
+    throw corrupt(id, version);
+  }
+};
+
 /** A version's row, as the registry answers it. */
 const versionOf = (
   row: typeof workflowResourceVersions.$inferSelect,
@@ -776,6 +806,9 @@ const versionOf = (
   contractHash: row.contractHash,
   manifestHash: row.manifestHash,
   bindings,
+  build: buildSummary(
+    sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
+  ),
   author: row.authorId,
   createdAt: row.createdAt.toISOString(),
 });
@@ -988,6 +1021,8 @@ interface Publication {
   definition: string;
   definitionHash: string;
   bindings: PinnedBinding[];
+  /** What it runs: the code generated from it, compiled (workflow-builds.ts). */
+  compiled: CompiledBuild;
 }
 
 /**
@@ -1001,7 +1036,7 @@ const writeVersion = async (
   by: Acting,
   publication: Publication
 ): Promise<WorkflowResourceVersion> => {
-  const { workflow, checked, definition, definitionHash, bindings } =
+  const { workflow, checked, definition, definitionHash, bindings, compiled } =
     publication;
   const contract = contractOf(checked);
   const contractText = canonicalJson(contract);
@@ -1032,6 +1067,9 @@ const writeVersion = async (
     evaluatorHash: jqProvenance.sha256,
     contractHash,
     bindings: bindings.map((binding) => ({ ...binding })),
+    // What the version runs, sealed with it: its build's artifacts by
+    // hash, and its executable identity (workflow-builds.ts).
+    build: compiled.build,
     artifactTrust: "unreviewed",
   });
   if (bytesOf(manifest) > manifestMaxBytes) {
@@ -1045,6 +1083,9 @@ const writeVersion = async (
     ]);
   }
   const manifestHash = await sha256Hex(manifest);
+  // Its build's bytes, reserved for this version and stored, before the
+  // row that names them.
+  await storeBuild(env, { id: workflow.id, version }, compiled);
   const createdAt = new Date();
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
@@ -1063,7 +1104,15 @@ const writeVersion = async (
       contract: contractText,
       contractHash,
       manifest,
-      manifestHash,
+      // The hash only while every artifact its build names is reserved for
+      // this version: otherwise NULL, which the column refuses, and the
+      // whole publication with it. So no sweep deletes bytes a version
+      // names (release-retention.ts).
+      manifestHash: sql`(SELECT ${manifestHash} WHERE NOT EXISTS (
+        SELECT 1 FROM json_each(${manifest}, '$.build.artifacts') AS named
+        WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts AS reserved
+          WHERE reserved.app_id = ${workflow.id} AND reserved.version = ${version}
+            AND reserved.sha256 = json_extract(named.value, '$.sha256'))))`,
       authorId: by.userId,
       createdAt,
     }),
@@ -1121,6 +1170,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
+    build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
   };
@@ -1217,6 +1267,8 @@ const publish = async (
   if (basedOn !== workflow.currentVersion) {
     throw workflowResourceErrors.create("workflow.version_conflict");
   }
+  // Generated and built once, here: no start or resume compiles anything.
+  const compiled = await compileWorkflow(env, checked, definition);
   try {
     return await writeVersion(env, by, {
       workflow,
@@ -1224,8 +1276,15 @@ const publish = async (
       definition,
       definitionHash,
       bindings,
+      compiled,
     });
   } catch (error) {
+    if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
+      // A reservation of its build went before the row could name it,
+      // which only a publication stalled past the sweep's grace sees:
+      // publishing again reserves afresh.
+      throw workflowResourceErrors.create("workflow.version_conflict");
+    }
     if (
       notNullFailed(error, "workflow_resource_versions.workflow_resource_id")
     ) {
@@ -1346,6 +1405,46 @@ export const workflowDefinition = async (
     throw corrupt(workflow.id, version);
   }
   return row.definition;
+};
+
+/**
+ * The portable source of version `version` of workflow `id`, for its
+ * builders: its definition exactly as published (`workflowDefinition`'s
+ * checks) and, for an executable version, the SDK TypeScript generated
+ * from it, read back from its sealed build with every hash checked. It
+ * goes one way: a version is only ever published from a definition, so
+ * edited generated code never comes back as one.
+ */
+export const workflowSource = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  version: unknown
+): Promise<WorkflowVersionSource> => {
+  const definition = await workflowDefinition(env, by, id, version);
+  // Both checked by `workflowDefinition`: a workflow `by` builds, and a
+  // version it published.
+  const workflowId = String(id);
+  const number = Number(version);
+  const row = await drizzle(env.DB)
+    .select({ manifest: workflowResourceVersions.manifest })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, workflowId),
+        eq(workflowResourceVersions.version, number)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  const files: Record<string, string> = { "workflow.json": definition };
+  if (sealedBuildOf(workflowId, number, row.manifest).executable) {
+    const build = await loadWorkflowBuild(env, workflowId, number);
+    files[generatedPath] = build.source;
+  }
+  return { files };
 };
 
 /**
