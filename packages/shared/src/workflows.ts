@@ -496,10 +496,12 @@ export interface RunFailure {
 }
 
 /**
- * Where a run is: running (a step, or a sleep), waiting for a decision,
- * paused (its engine instance is), or ended.
+ * Where a run is: running (a step, or a sleep), queued for a share of the
+ * attempts that run at once (`RunQueue`), waiting for a decision, paused
+ * (its engine instance is), or ended.
  */
 export type RunStatus =
+  | "queued"
   | "running"
   | "waiting"
   | "paused"
@@ -723,6 +725,18 @@ export interface RunControl {
   state: "admitted" | "applied" | "superseded";
 }
 
+/**
+ * What a `queued` run waits for: a share of the attempts that run at once
+ * of its App (`app`), of the person it counts for (`person`) or of the
+ * whole organization (`client`), and when it asks again at the latest
+ * (ISO 8601). Throttling, not a fault of the workflow. It names the share
+ * only: never who else holds it, nor their runs.
+ */
+export interface RunQueue {
+  waitingFor: "client" | "person" | "app";
+  retryAt: string;
+}
+
 /** One run of a workflow. */
 export interface WorkflowRun {
   id: RunId;
@@ -733,6 +747,8 @@ export interface WorkflowRun {
   /** A person started it (and it acts for them), or a trigger did. */
   startedBy: { type: "person"; userId: string } | { type: "trigger" };
   status: RunStatus;
+  /** While it is `queued`: the share it waits for, and when it asks again. */
+  queued?: RunQueue;
   createdAt: string;
   endedAt: string | null;
   /**
@@ -991,7 +1007,13 @@ export interface WorkflowSummary {
    * Its latest run, of any version, `waiting` while it waits for a
    * decision; null before its first.
    */
-  lastRun: { id: RunId; status: RunStatus; createdAt: string } | null;
+  lastRun: {
+    id: RunId;
+    status: RunStatus;
+    /** While it is `queued`: the share it waits for. */
+    queued?: RunQueue;
+    createdAt: string;
+  } | null;
   /** Its runs waiting for a decision now. */
   waiting: number;
   /** Its runs that failed in the last {@link failedRunDays} days. */
