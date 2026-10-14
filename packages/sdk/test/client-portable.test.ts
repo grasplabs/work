@@ -104,6 +104,15 @@ const expiry = (): number => Math.floor(Date.now() / 1000) + 40;
 /** Core's answer to a read that found nothing. */
 const ok = (): Response => Response.json({ result: { ok: true, value: null } });
 
+/** Resolves after the turns of the loop queued now have run. */
+const scheduler = async (): Promise<void> => {
+  const { promise, resolve } = Promise.withResolvers<null>();
+  setTimeout(() => {
+    resolve(null);
+  }, 1);
+  await promise;
+};
+
 /** Resolves once `ready()` holds, checking between turns of the loop. */
 const until = async (ready: () => boolean): Promise<void> => {
   for (let turn = 0; turn < 200 && !ready(); turn += 1) {
@@ -120,6 +129,7 @@ const until = async (ready: () => boolean): Promise<void> => {
 describe("a portable host's client", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("sends each call to the App's portable route with the token asked for then, and nothing of the browser's", async () => {
@@ -414,5 +424,177 @@ describe("a portable host's client", () => {
     expect(
       seen.map(({ authorization }) => authorization === `Bearer ${stale}`)
     ).toStrictEqual([false, false]);
+  });
+
+  it("never joins one person's save to the next person's, however the first one left", async () => {
+    let token = tokenOf("ann");
+    const held = Promise.withResolvers<null>();
+    const seen = network(async ({ body }) => {
+      const contract = contractIdPattern.exec(body)?.groups?.contractId;
+      if (contract === "notes.create" && token === tokenOf("ann")) {
+        await held.promise;
+        return noteId;
+      }
+      if (contract === "notes.get") {
+        // Ann signed out: core refuses her token.
+        return Response.json(
+          { code: "auth.unauthenticated", message: "Sign in to continue." },
+          { status: 401 }
+        );
+      }
+      return idOf(2);
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const keyed = { idempotencyKey: "weekly-report" };
+    const anns = client.mutation(api.notes.create, { title: "Report" }, keyed);
+    await until(() => seen.length === 1);
+    await failureOf(client.query(api.notes.get, { id: noteId }));
+    token = tokenOf("bo");
+    const bos = await client.mutation(
+      api.notes.create,
+      { title: "Report" },
+      keyed
+    );
+    held.resolve(null);
+    expect({
+      bos,
+      anns: await anns,
+      creates: seen
+        .filter(({ body }) => body.includes("notes.create"))
+        .map(({ authorization }) => authorization),
+    }).toStrictEqual({
+      bos: idOf(2),
+      anns: noteId,
+      creates: [`Bearer ${tokenOf("ann")}`, `Bearer ${tokenOf("bo")}`],
+    });
+  });
+
+  it("lets a late refusal of the last person's request clear nothing of the next person's", async () => {
+    let token = tokenOf("ann");
+    const late = Promise.withResolvers<null>();
+    network(async ({ authorization, body }) => {
+      const contract = contractIdPattern.exec(body)?.groups?.contractId;
+      if (
+        authorization === `Bearer ${tokenOf("ann")}` &&
+        contract === "notes.list"
+      ) {
+        await late.promise;
+        return Response.json(
+          { code: "auth.unauthenticated", message: "Sign in to continue." },
+          { status: 401 }
+        );
+      }
+      return {
+        title: authorization === `Bearer ${tokenOf("ann")}` ? "Ann's" : "Bo's",
+      };
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await until(() => entry.snapshot.value !== undefined);
+    const annsList = failureOf(
+      client.query(api.notes.list, { pagination: {} })
+    );
+    await scheduler();
+    token = tokenOf("bo");
+    await failureOf(client.query(api.notes.get, { id: idOf(5) }));
+    await until(() => entry.snapshot.value !== undefined);
+    late.resolve(null);
+    await annsList;
+    expect(entry.snapshot).toStrictEqual({
+      value: { title: "Bo's" },
+      error: undefined,
+    });
+    stop();
+  });
+
+  it("gives up on a host that never answers for a token, and never keeps its late answer", async () => {
+    vi.useFakeTimers();
+    const requests: PromiseWithResolvers<string>[] = [];
+    const seen = network(async () => await Promise.resolve(null));
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        const request = Promise.withResolvers<string>();
+        requests.push(request);
+        return await request.promise;
+      },
+    });
+    const first = failureOf(client.query(api.notes.get, { id: noteId }));
+    await vi.advanceTimersByTimeAsync(30_000);
+    const gaveUp = await first;
+    requests[0]?.resolve(tokenOf("ann", Math.floor(Date.now() / 1000) + 300));
+    const second = client.query(api.notes.get, { id: idOf(2) });
+    await vi.advanceTimersByTimeAsync(0);
+    requests[1]?.resolve(tokenOf("bo", Math.floor(Date.now() / 1000) + 300));
+    await second;
+    expect({
+      gaveUp: gaveUp.code,
+      asked: requests.length,
+      sent: seen.map(
+        ({ authorization }) => authorization?.includes(".") ?? false
+      ),
+    }).toStrictEqual({
+      gaveUp: "auth.token_unavailable",
+      asked: 2,
+      sent: [true],
+    });
+    expect(seen[0]?.authorization).toBe(
+      `Bearer ${tokenOf("bo", Math.floor(Date.now() / 1000) + 300)}`
+    );
+  });
+
+  it("takes an answer that never comes as lost: an action's outcome is then unknown", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      async (_input: string, init: RequestInit): Promise<Response> => {
+        const { promise, reject } = Promise.withResolvers<Response>();
+        init.signal?.addEventListener("abort", () => {
+          reject(new DOMException("Aborted", "AbortError"));
+        });
+        return await promise;
+      }
+    );
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(tokenOf("ann")),
+    });
+    const outcome = failureOf(client.action(api.notes.tally));
+    await vi.advanceTimersByTimeAsync(60_000);
+    const failure = await outcome;
+    expect(failure.code).toBe("submission.outcome_unknown");
+  });
+
+  it("asks the host again after core refuses a token, whatever the refusal's body", async () => {
+    const later = Math.floor(Date.now() / 1000) + 300;
+    let asked = 0;
+    let refuse = true;
+    network(async () => {
+      await Promise.resolve();
+      if (refuse) {
+        refuse = false;
+        return new Response("<html>Unauthorized</html>", { status: 401 });
+      }
+      return null;
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        asked += 1;
+        return await Promise.resolve(tokenOf("ann", later));
+      },
+    });
+    // The refusal isn't core's answer, so the read is tried again: with a
+    // token asked for afresh, not the one refused.
+    await client.query(api.notes.get, { id: idOf(1) });
+    expect(asked).toBe(2);
   });
 });

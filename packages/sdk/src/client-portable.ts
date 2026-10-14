@@ -45,6 +45,18 @@ export interface PortableClientOptions {
 /** Core's status for a token it refused. */
 const unauthorized = 401;
 
+/** The refusals of calls that gave up waiting for the host's token. */
+const gaveUp = new WeakSet<object>();
+
+/** How long the host may take to give a token before the call gives up. */
+const tokenWaitMs = 30_000;
+
+/**
+ * How long a call waits for core's answer before taking it as lost: core
+ * gives an App's function 30 seconds, and the rest is the network's.
+ */
+const sendWaitMs = 60_000;
+
 /** A refusal before anything was sent, coded as core codes its own. */
 const refusal = (
   code: string,
@@ -183,9 +195,12 @@ export class PortableTransport {
       let token: PortableToken;
       try {
         // oxlint-disable-next-line no-await-in-loop -- one request after another
-        token = await asking.done;
+        token = await this.#within(asking);
       } catch (error) {
-        if (asking.number >= this.#current) {
+        if (
+          asking.number >= this.#current ||
+          (error instanceof Error && gaveUp.has(error))
+        ) {
           throw error;
         }
         continue;
@@ -197,6 +212,32 @@ export class PortableTransport {
       if (asking.number >= this.#current) {
         return token;
       }
+    }
+  }
+
+  /**
+   * `asking`'s token, or `auth.token_unavailable` once the host has taken
+   * `tokenWaitMs` to say: that request is then given up, its answer never
+   * used if it comes, and the next call asks again.
+   */
+  async #within(asking: Asking): Promise<PortableToken> {
+    const { promise: late, reject } = Promise.withResolvers<never>();
+    const timer = setTimeout(() => {
+      if (this.#asking === asking) {
+        this.#asking = undefined;
+      }
+      this.#current = Math.max(this.#current, asking.number + 1);
+      const tooLong = refusal(
+        "auth.token_unavailable",
+        "The host took too long to provide a sign-in token. Try again."
+      );
+      gaveUp.add(tooLong);
+      reject(tooLong);
+    }, tokenWaitMs);
+    try {
+      return await Promise.race([asking.done, late]);
+    } finally {
+      clearTimeout(timer);
     }
   }
 
@@ -244,30 +285,44 @@ export class PortableTransport {
    * answer, or a coded refusal; a plain error for a lost response.
    */
   async send(request: string, app: string, token: string): Promise<unknown> {
-    const response = await fetch(
-      `${this.#origin}${portableFunctionPath}/${encodeURIComponent(app)}`,
-      {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${token}`,
-          "content-type": "application/json",
-        },
-        body: request,
-        credentials: "omit",
-        redirect: "error",
-      }
-    );
+    // An answer that never comes is a lost one: the caller's own retries
+    // and uncertainty then apply, rather than waiting forever.
+    const stop = new AbortController();
+    const timer = setTimeout(() => {
+      stop.abort();
+    }, sendWaitMs);
+    let response: Response;
     let answer: unknown;
     try {
-      answer = await response.json();
-    } catch {
-      throw new Error("The answer wasn't core's.");
+      response = await fetch(
+        `${this.#origin}${portableFunctionPath}/${encodeURIComponent(app)}`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/json",
+          },
+          body: request,
+          credentials: "omit",
+          redirect: "error",
+          signal: stop.signal,
+        }
+      );
+      // Refused, whatever its body says (a proxy's page, nothing at all):
+      // the next call asks the host again.
+      if (response.status === unauthorized) {
+        this.forget();
+      }
+      try {
+        answer = await response.json();
+      } catch {
+        throw new Error("The answer wasn't core's.");
+      }
+    } finally {
+      clearTimeout(timer);
     }
     if (response.ok) {
       return answer;
-    }
-    if (response.status === unauthorized) {
-      this.forget();
     }
     const code = isPlainObject(answer) ? answer.code : undefined;
     const message = isPlainObject(answer) ? answer.message : undefined;

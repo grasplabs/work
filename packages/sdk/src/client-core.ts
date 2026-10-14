@@ -903,7 +903,15 @@ export class GraspClient {
       }
       settled = readRejection(error);
     }
-    if (settled.kind === "failed" && fencingCodes.has(settled.error.code)) {
+    // A refusal of a request sent before the latest fence is of who or
+    // what that fence already cleared: it doesn't fence whoever came after.
+    const current =
+      bound.generation === undefined || bound.generation === this.#generation;
+    if (
+      current &&
+      settled.kind === "failed" &&
+      fencingCodes.has(settled.error.code)
+    ) {
       this.#fence(settled.error);
     }
     return settled;
@@ -971,8 +979,10 @@ export class GraspClient {
     this.#generation += 1;
     this.#fencedBy = refusal;
     // Nothing of anyone's is held now: whoever's token comes next starts
-    // afresh, without a switch to refuse calls over.
+    // afresh, without a switch to refuse calls over, and joins no save
+    // made before.
     this.#principal = undefined;
+    this.#submissions.clear();
     for (const entry of this.#queries.values()) {
       entry.reading?.stop.abort();
       entry.reading = undefined;
@@ -1075,7 +1085,9 @@ export class GraspClient {
     if (signal?.aborted === true) {
       throw clientError("submission.cancelled", { sent: false });
     }
+    // Joined only by a call for the same person, as the host scopes keys.
     const scoped = canonicalJson([
+      this.#principal ?? null,
       reference.resourceId,
       reference.resourceVersion,
       reference.contractId,
