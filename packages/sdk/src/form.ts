@@ -1,3 +1,4 @@
+import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { useForm as useTanStackForm } from "@tanstack/react-form";
@@ -40,9 +41,11 @@ import { readDescriptor } from "./value-read.ts";
 //   the arguments is taken per submission; the field helpers lock while
 //   it is active.
 // - A lost answer turns into a second save: the session client recovers
-//   a mutation under its key; an action whose outcome is unknown keeps
-//   its key and its arguments, and the next submit asks again with both,
-//   so it reconciles rather than runs anew.
+//   a mutation under its key. A submission whose outcome is unknown keeps
+//   its key and its arguments, and the fields stay locked: the next submit
+//   sends both again, which gets a change's outcome. An action has no
+//   receipt, so it runs again, its completed steps not repeated; the
+//   person can `discard` it instead, knowingly.
 // - A remote change overwrites a draft: while the editable values differ
 //   from the baseline, newer records are only remembered; they replace
 //   the draft only on a deliberate `reload()`.
@@ -81,8 +84,10 @@ export type SubmitPhase =
   /** A submission is in flight; fields are locked. */
   | "submitting"
   /**
-   * An action's outcome is unknown: fields stay locked and the next
-   * submit asks again under the same identity.
+   * Whether the submission ran is unknown: fields stay locked. The next
+   * submit sends it again under the same key, which gets a change's
+   * outcome; an action has no receipt, so it runs again (steps it already
+   * completed aren't repeated). `discard` gives it up instead.
    */
   | "uncertain"
   /**
@@ -139,6 +144,13 @@ export interface GraspForm<Values, Result> {
   readonly submit: () => Promise<Result>;
   /** Discards unsaved edits: back to the initial values, or the record's baseline. */
   readonly reset: () => void;
+  /**
+   * Gives up a submission whose outcome is unknown, once the person
+   * confirmed it: the fields unlock with what they hold, and the next
+   * submit is a new submission. Whether the one given up ran stays
+   * unknown; nothing is sent to find out.
+   */
+  readonly discard: () => void;
 }
 
 /** A record form: a Grasp form that can adopt the latest record. */
@@ -241,9 +253,9 @@ const pick = (
     ])
   );
 
-/** Whether two plain values are the same, as JSON reads them. */
+/** Whether two plain values are the same, as JSON reads them, whatever their keys' order. */
 const same = (a: unknown, b: unknown): boolean =>
-  JSON.stringify(a) === JSON.stringify(b);
+  canonicalText(a) === canonicalText(b);
 
 /** A fresh logical submission key: 128 random bits, in hex. */
 const freshKey = (): string =>
@@ -355,7 +367,7 @@ export class FormBinding {
   #form: FormApiOf<Record<string, unknown>> | undefined;
   #options: FormOptionsInput;
   #pending: Promise<unknown> | undefined;
-  /** An action's submission whose outcome is unknown, asked again as it was. */
+  /** A submission whose outcome is unknown, asked again as it was until discarded. */
   #uncertain: Submission | undefined;
   /** The record the draft started from, and the latest supplied. */
   #baseline: unknown;
@@ -581,6 +593,15 @@ export class FormBinding {
     });
   }
 
+  /** See `GraspForm.discard`. */
+  discard(): void {
+    if (this.#status.phase !== "uncertain") {
+      return;
+    }
+    this.#uncertain = undefined;
+    this.#set({ phase: "idle", failure: undefined });
+  }
+
   /** See `RecordForm.reload`. */
   reload(): void {
     if (
@@ -692,8 +713,9 @@ export class FormBinding {
     }
     // An outcome the host or the client can't tell (an action's lost
     // answer, an external effect's unknown result) keeps its identity: the
-    // next submit asks again under it, never runs anew. A local form's
-    // callback has no identity to keep, so its failure is a plain one.
+    // next submit sends it again under it (see `SubmitPhase`), or the
+    // person discards it. A local form's callback has no identity to
+    // keep, so its failure is a plain one.
     if (error.category === "uncertain" && this.#target.kind !== "schema") {
       this.#uncertain = submission;
       this.#set({ phase: "uncertain", failure: failureOf(error) });
@@ -896,6 +918,9 @@ export const useGraspForm = (
       submit: async () => await binding.submit(),
       reset: () => {
         binding.reset();
+      },
+      discard: () => {
+        binding.discard();
       },
       reload: () => {
         binding.reload();

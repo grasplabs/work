@@ -12,7 +12,7 @@ import { Input } from "@grasp-os/ui/components/input";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { cn } from "@grasp-os/ui/lib/utils";
-import { useId, useSyncExternalStore } from "react";
+import { useId, useState, useSyncExternalStore } from "react";
 import type * as React from "react";
 
 // The fields and parts of a form the SDK's `useForm` made (spec 10.2.2):
@@ -73,6 +73,7 @@ const Form = ({
   form: AnyForm;
 }): React.JSX.Element => (
   <form
+    {...props}
     className={cn("flex flex-col gap-6", className)}
     data-slot="form"
     noValidate
@@ -80,7 +81,6 @@ const Form = ({
       event.preventDefault();
       void submitFrom(form, event.currentTarget);
     }}
-    {...props}
   />
 );
 
@@ -258,14 +258,87 @@ const TextareaField = <Values,>({
 /**
  * What `form`'s last submission came to, when there is something to say:
  * why it failed or was refused (a conflict among them), that its outcome
- * is unknown and submitting asks again, that a save committed and waits
+ * is unknown (submitting sends it again; discarding it, once confirmed,
+ * unlocks the fields), that a save committed and waits
  * for its record, or that what came after a save failed. Each message is
  * the platform's or the App's own, safe to show.
  */
+/**
+ * A submission whose outcome is unknown: what is known of it, and a way to
+ * give it up that asks first, since whether it ran stays unknown.
+ */
+const UncertainSubmission = ({
+  form,
+  message,
+  code,
+  discardLabel,
+  keepLabel,
+  confirmDiscard,
+  className,
+}: {
+  form: AnyForm;
+  message: string;
+  code: string;
+  discardLabel: string;
+  keepLabel: string;
+  confirmDiscard: string;
+  className?: string;
+}): React.JSX.Element => {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <Alert className={className} data-code={code} live="polite">
+      <AlertDescription>
+        <p>{message}</p>
+        {confirming ? (
+          <p className="flex flex-wrap items-center gap-2">
+            <span>{confirmDiscard}</span>
+            <Button
+              onClick={() => {
+                bindingOf(form).discard();
+              }}
+              size="sm"
+              type="button"
+              variant="destructive"
+            >
+              {discardLabel}
+            </Button>
+            <Button
+              onClick={() => {
+                setConfirming(false);
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {keepLabel}
+            </Button>
+          </p>
+        ) : (
+          <p>
+            <Button
+              onClick={() => {
+                setConfirming(true);
+              }}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {discardLabel}
+            </Button>
+          </p>
+        )}
+      </AlertDescription>
+    </Alert>
+  );
+};
+
 const FormError = ({
   form,
   syncing = "Saved. Waiting for the saved version to arrive.",
   savedButFailed = "Saved, but what should happen next failed:",
+  discardLabel = "Discard",
+  keepLabel = "Keep it",
+  confirmDiscard = "Whether it went through stays unknown. Discard it and edit again?",
   className,
 }: {
   form: AnyForm;
@@ -273,6 +346,12 @@ const FormError = ({
   syncing?: string;
   /** What leads the message of a failed `onSuccess`. */
   savedButFailed?: string;
+  /** The button that gives up a submission whose outcome is unknown. */
+  discardLabel?: string;
+  /** What asks the person to confirm giving it up. */
+  confirmDiscard?: string;
+  /** The button that keeps it, waiting to be sent again. */
+  keepLabel?: string;
   className?: string;
 }): React.JSX.Element | null => {
   const status = useFormStatus(form);
@@ -283,14 +362,26 @@ const FormError = ({
       </Alert>
     );
   }
+  if (status.failure !== undefined && status.phase === "uncertain") {
+    return (
+      <UncertainSubmission
+        className={className}
+        code={status.failure.code}
+        confirmDiscard={confirmDiscard}
+        discardLabel={discardLabel}
+        form={form}
+        keepLabel={keepLabel}
+        message={status.failure.message}
+      />
+    );
+  }
   if (status.failure !== undefined) {
-    const uncertain = status.phase === "uncertain";
     return (
       <Alert
         className={className}
         data-code={status.failure.code}
-        live={uncertain ? "polite" : "assertive"}
-        variant={uncertain ? "default" : "destructive"}
+        live="assertive"
+        variant="destructive"
       >
         <AlertDescription>{status.failure.message}</AlertDescription>
       </Alert>
