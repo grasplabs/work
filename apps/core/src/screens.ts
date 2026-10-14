@@ -90,7 +90,7 @@ type AppFiles = Record<string, string>;
  * a version that changed only its screens, takes the server build it
  * already has.
  */
-const buildKey = async (files: AppFiles): Promise<string> =>
+export const buildKey = async (files: AppFiles): Promise<string> =>
   `${compilerVersion}/${await hashOf(files)}`;
 
 /** A build refused before it started, or one that failed. */

@@ -39,6 +39,8 @@ import {
   kitStylesheet,
   screenHooks,
   screenRuntime,
+  screenSdk,
+  sdkRoot,
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
 import { platformModules } from "./src/packages/platform.ts";
@@ -114,11 +116,13 @@ const uiEntries = (): Entry[] =>
   });
 
 /**
- * `@grasp-os/sdk`'s screen modules: the hooks App code imports and the
- * runtime that renders a screen in its frame (see kit.ts).
+ * `@grasp-os/sdk`'s screen modules: the React SDK and the legacy hooks
+ * App code imports, and the runtime that renders a screen in its frame
+ * and mounts the session client (see kit.ts). They share the client's
+ * module, so the provider the runtime mounts is the one the hooks read.
  */
 const sdkEntries = (): Entry[] =>
-  [screenHooks, screenRuntime].map((specifier) => {
+  [screenHooks, screenSdk, screenRuntime].map((specifier) => {
     const target =
       exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
     if (typeof target !== "string") {
@@ -863,6 +867,7 @@ const buildScreenCompiler = async (
     ...reactImports,
     ...components.map(({ specifier }) => specifier),
     screenHooks,
+    screenSdk,
   ];
   const stylesheets = collectStylesheets();
   const kit: Kit = {
@@ -871,7 +876,7 @@ const buildScreenCompiler = async (
     stylesheets,
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
-    types: collectTypes([...imports, "lucide-react"]),
+    types: collectTypes([...imports, sdkRoot, "lucide-react"]),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.
     lintRules: rulesSchema.parse(shadcnPreset.rules),

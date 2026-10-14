@@ -222,8 +222,12 @@ export const callFunction = async (
   if (!payload.success) {
     throw callFailed();
   }
+  // Of the details, only how long to wait before asking again: what the
+  // screen's client needs to wait for its budget.
+  const retryAfterMs = payload.data.details?.retryAfterMs;
   throw Object.assign(new Error(payload.data.message), {
     code: payload.data.code,
+    ...(typeof retryAfterMs === "number" ? { details: { retryAfterMs } } : {}),
   });
 };
 

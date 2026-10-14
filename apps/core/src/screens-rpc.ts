@@ -8,6 +8,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenDelivery } from "@grasp-os/shared/screen-trust";
 import {
   jsonBytes,
+  rateLimited,
   screenErrors,
   screenLimits,
   screenNameSchema,
@@ -38,6 +39,7 @@ import { CoreRpcTarget } from "./rpc-target.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
 import { frameAccess, stageFrame } from "./screen-frame.ts";
+import { withScreenReferences } from "./screen-references.ts";
 import {
   deliveryOf,
   deliveryOpen,
@@ -121,7 +123,7 @@ const admittedApp = async (
 ): Promise<App> => {
   const found = await getApp(env, by, app);
   if (!(await appHost(env, found.id).admitRequest(by.userId))) {
-    throw screenErrors.create("screen.rate_limited");
+    throw rateLimited();
   }
   return found;
 };
@@ -146,7 +148,7 @@ export const admitPreviewCall = async (
   app: AppId
 ): Promise<void> => {
   if (!(await appHost(env, app).admitRequest(by.userId))) {
-    throw screenErrors.create("screen.rate_limited");
+    throw rateLimited();
   }
 };
 
@@ -181,7 +183,12 @@ const openScreen = async (
   if (version === null) {
     throw appErrors.create("app.not_running");
   }
-  const files = await versionFiles(env, id, version);
+  const files = await withScreenReferences(
+    env,
+    id,
+    version,
+    await versionFiles(env, id, version)
+  );
   const built = await screenCode(env, files, screen, version);
   const { artifact } = built;
   // What it builds to now, refused or not: a fact about the version, for
@@ -463,7 +470,7 @@ const reportProblem = async (
   // Counted before it is read: a report that says nothing valid, or more
   // than is kept, costs the App's log one number at most.
   if (!(await appHost(env, id).admitReport(by.userId))) {
-    throw screenErrors.create("screen.rate_limited");
+    throw rateLimited();
   }
   const where = screenErrors.parse("screen.invalid", reportedAtSchema, at);
   const reported = screenErrors.parse(
