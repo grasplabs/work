@@ -194,7 +194,7 @@ test("a builder sees their workflows and domain on the board, and opens them in 
 const boardTitles = (page: Page) =>
   page.getByRole("heading", {
     level: 2,
-    name: /^(?:Workflows|Engines|Runs this week|Could be better)$/u,
+    name: /^(?:Workflows|Domains|Runs this week|Could be better)$/u,
   });
 
 test("a person takes a widget off, adds it back and moves it, kept over a reload, and puts the board back as it began", async ({
@@ -214,7 +214,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   // As it begins: every widget, and nothing to put back.
   await expect(titles).toHaveText([
     "Workflows",
-    "Engines",
+    "Domains",
     "Runs this week",
     "Could be better",
   ]);
@@ -222,7 +222,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
 
   // Taken off, it stays off.
   await page
-    .getByRole("button", { name: "Remove Engines", exact: true })
+    .getByRole("button", { name: "Remove Domains", exact: true })
     .click();
   await expect(titles).toHaveText([
     "Workflows",
@@ -242,13 +242,13 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await page.getByRole("button", { name: "Add a widget" }).click();
   await page
     .getByRole("dialog", { name: "Add a widget" })
-    .getByRole("button", { name: "Engines" })
+    .getByRole("button", { name: "Domains" })
     .click();
   await expect(titles).toHaveText([
     "Workflows",
     "Runs this week",
     "Could be better",
-    "Engines",
+    "Domains",
   ]);
   await expect(page.getByRole("button", { name: "Add a widget" })).toHaveCount(
     0
@@ -258,13 +258,13 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
     .toStrictEqual(["workflows", "runs", "signals", "engines"]);
 
   // Moved a place back with the keys on its grip, which keeps them.
-  const grip = page.getByRole("button", { name: "Move Engines", exact: true });
+  const grip = page.getByRole("button", { name: "Move Domains", exact: true });
   await grip.focus();
   await page.keyboard.press("ArrowLeft");
   await expect(titles).toHaveText([
     "Workflows",
     "Runs this week",
-    "Engines",
+    "Domains",
     "Could be better",
   ]);
   await expect(grip).toBeFocused();
@@ -275,7 +275,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await expect(titles).toHaveText([
     "Workflows",
     "Runs this week",
-    "Engines",
+    "Domains",
     "Could be better",
   ]);
 
@@ -283,7 +283,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await reset.click();
   await expect(titles).toHaveText([
     "Workflows",
-    "Engines",
+    "Domains",
     "Runs this week",
     "Could be better",
   ]);
@@ -294,7 +294,7 @@ test("a person takes a widget off, adds it back and moves it, kept over a reload
   await page.reload();
   await expect(titles).toHaveText([
     "Workflows",
-    "Engines",
+    "Domains",
     "Runs this week",
     "Could be better",
   ]);
