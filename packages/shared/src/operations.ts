@@ -71,6 +71,8 @@ export const operationErrors = defineErrorFamily({
     "This App runs as many calls at once as it may. Try again shortly.",
   "operation.sandbox_unavailable":
     "The sandbox that runs the App's code isn't available. Try again shortly.",
+  "operation.sandbox_lost":
+    "The sandbox stopped answering after the call started, so whether it changed anything is unknown.",
   "resource.not_allowed":
     "The App didn't declare that use of this resource for this function.",
   "resource.unavailable":
@@ -157,6 +159,8 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "operation.deadline_exceeded": "operational",
   "operation.sandbox_busy": "operational",
   "operation.sandbox_unavailable": "operational",
+  // The call may have started, and changed something.
+  "operation.sandbox_lost": "uncertain",
   // The call ended (its caller went, or it was stopped): nothing the App's
   // code or its caller did wrong.
   "operation.ended": "operational",

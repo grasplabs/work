@@ -1,10 +1,16 @@
+import { heldBindingSchema } from "@grasp-os/shared/capability";
+import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
-import type { ConnectResult } from "@grasp-os/shared/connect";
+import type {
+  ConnectResult,
+  UnknownOutcomeOrigin,
+} from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { workContextSchema } from "@grasp-os/shared/permissions";
 import type { PermissionSubject } from "@grasp-os/shared/permissions";
-import { and, eq, inArray, isNotNull, lt } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -118,6 +124,33 @@ import { idempotentCalls } from "./db/schema.ts";
 //   call's whole scope, so it differs between any two calls and names
 //   nobody (`effectKeyOf`).
 
+// Resolution by a person (spec 14.3): a call of unknown outcome is an
+// open obligation of the person it acted for, who may say what became of
+// it once they looked (outcomes.ts). Threat model, and how each is closed:
+// - Someone else resolves it (another person, staff, an App or agent):
+//   connect resolves only with the capability core signs from the
+//   person's own session, for exactly this call, naming the person the
+//   call acted for, and marked as a resolution (`resolves`); no other call
+//   path takes such a capability, and a resolution takes no other.
+// - A caller whose permission is gone frees its key: core signs the
+//   resolution only after checking the call's permission and context
+//   again, as for confirming a held action, and refuses otherwise,
+//   recorded.
+// - A resolution races a recovery, or another resolution: it applies only
+//   while the row is still as read (state, last claim, input) and still of
+//   unknown outcome, in one statement with its audit event, and takes a
+//   claim time of its own, so a recovery that read the row before can't
+//   retake it, and of two resolutions one is recorded.
+// - "It didn't happen" lets the call go twice: the key is freed for one
+//   send of the same input (`freed`), which a call takes only by turning
+//   that row back to running in one statement (`claim`), so of calls
+//   racing for it one goes out; another input under the key is refused.
+// - "It happened" is taken as an answer: the key stays spent for good,
+//   every repeat is `connect.resolved_done`, with no output, never a send.
+// - A cancelled run or one that ended: the obligation stays, as the effect
+//   may have happened; only the run's wait goes. Nothing ever records that
+//   an effect was undone.
+
 /**
  * How long a claim holds before connect stops waiting for its call: well
  * past the longest an MCP request may take. A claim older than this was
@@ -185,6 +218,74 @@ const keyOf = (scope: IdempotencyScope) => {
   );
 };
 
+/** The key of the stored row `row`, as a condition. */
+export const rowKey = (row: Row) =>
+  and(
+    eq(idempotentCalls.subjectType, row.subjectType),
+    eq(idempotentCalls.subjectId, row.subjectId),
+    eq(idempotentCalls.onBehalfOf, row.onBehalfOf),
+    eq(idempotentCalls.connectionId, row.connectionId),
+    eq(idempotentCalls.action, row.action),
+    eq(idempotentCalls.idempotencyKey, row.idempotencyKey)
+  );
+
+/**
+ * What a call keeps under its key while it may be of unknown outcome: its
+ * exact input and where it came from, both as JSON (`input`, `origin`).
+ */
+export interface Kept {
+  input: string;
+  origin: string;
+}
+
+/** Where a call came from, as connect keeps it (`Kept.origin`). */
+const storedOriginSchema = z.strictObject({
+  mode: z.enum(["interactive", "workflow"]),
+  appVersion: z.int().positive().nullable(),
+  permissionId: z.string().min(1),
+  context: workContextSchema,
+  /** Its context had read restricted data: every side effect of it waits. */
+  restricted: z.boolean(),
+  /**
+   * The App's approved resource binding the call came through, if it
+   * did: core checks it would still serve the call before it signs a
+   * resolution, as for confirming a held call.
+   */
+  binding: heldBindingSchema.optional(),
+});
+
+/** What a call whose capability says `claims` keeps under its key. */
+export const keptOf = (claims: CapabilityClaims, input: Json): Kept => ({
+  input: JSON.stringify(input),
+  origin: JSON.stringify({
+    mode: claims.authority.mode,
+    appVersion: claims.authority.appVersion ?? null,
+    permissionId: claims.origin.permissionId,
+    context: claims.origin.context,
+    restricted: claims.restricted,
+    ...(claims.origin.binding === undefined
+      ? {}
+      : { binding: claims.origin.binding }),
+  } satisfies z.input<typeof storedOriginSchema>),
+});
+
+/**
+ * Where the call `row` records came from, as kept, or null when nothing
+ * readable is: such a call can't be resolved.
+ */
+export const originOf = (
+  row: Row
+): (UnknownOutcomeOrigin & { restricted: boolean }) | null => {
+  if (row.origin === null) {
+    return null;
+  }
+  try {
+    return storedOriginSchema.parse(JSON.parse(row.origin));
+  } catch {
+    return null;
+  }
+};
+
 /** SHA-256 over the call's resource and input, in canonical JSON. */
 export const hashCall = async (
   resource: string | null,
@@ -198,6 +299,24 @@ export const hashCall = async (
 const lastClaimOf = (row: Row): number =>
   Math.max(row.claimedAt.getTime(), row.createdAt.getTime());
 
+/**
+ * Whether the call `row` records is of unknown outcome now: spent, or
+ * claimed by a call past the claim timeout, which died mid-way.
+ */
+export const isUnknown = (row: Row, now: number): boolean =>
+  row.state === "unknown" ||
+  (row.state === "running" && now - lastClaimOf(row) >= claimTimeoutMs);
+
+/** `isUnknown`, as a condition on stored rows. */
+export const unknownNow = (now: number) =>
+  or(
+    eq(idempotentCalls.state, "unknown"),
+    and(
+      eq(idempotentCalls.state, "running"),
+      sql`max(${idempotentCalls.claimedAt}, ${idempotentCalls.createdAt}) <= ${now - claimTimeoutMs}`
+    )
+  );
+
 /** What a stored row means for a repeat of the call: its answer, or why not. */
 export const replay = (
   row: Row,
@@ -206,6 +325,14 @@ export const replay = (
 ): StoredAnswer => {
   if (row.inputHash !== inputHash) {
     throw connectErrors.create("connect.idempotency_conflict");
+  }
+  // Its person said it happened: no answer, and never sent again.
+  if (row.state === "resolved") {
+    throw connectErrors.create("connect.resolved_done");
+  }
+  // Its person said it didn't: a call takes the key again (`claim`).
+  if (row.state === "freed") {
+    throw connectErrors.create("connect.resolved_not_done");
   }
   if (row.state === "declined") {
     throw connectErrors.create("connect.declined", {
@@ -323,7 +450,12 @@ export const idempotencyStore = (
      */
     replay: async (seen: Repeat = {}): Promise<StoredAnswer | undefined> => {
       const row = await find();
-      if (row === undefined) {
+      // Freed by its person for one more send: a first call, as far as
+      // this one is concerned, which `claim` takes over.
+      if (
+        row === undefined ||
+        (row.state === "freed" && row.inputHash === inputHash)
+      ) {
         return undefined;
       }
       seen.replayed = true;
@@ -346,22 +478,11 @@ export const idempotencyStore = (
      */
     claim: async (
       seen: Repeat = {},
-      connectorVersion: string | null = null
+      connectorVersion: string | null = null,
+      kept: Kept | null = null
     ): Promise<StoredAnswer | undefined> => {
       const now = Date.now();
-      const [, claimed] = await db.batch([
-        // Expired answers are dropped; the index on created_at keeps it
-        // cheap. Their keys stay used: their effect happened.
-        db
-          .update(idempotentCalls)
-          .set({ output: null, provenance: null })
-          .where(
-            and(
-              lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
-              inArray(idempotentCalls.state, ["done", "failed"]),
-              isNotNull(idempotentCalls.output)
-            )
-          ),
+      const [claimed] = await db.batch([
         db
           .insert(idempotentCalls)
           .values({
@@ -376,12 +497,63 @@ export const idempotencyStore = (
             createdAt: new Date(now),
             claimedAt: new Date(now),
             connectorVersion,
+            input: kept?.input ?? null,
+            origin: kept?.origin ?? null,
           })
           .onConflictDoNothing()
           .returning({ state: idempotentCalls.state }),
+        // Expired answers are dropped; the index on created_at keeps it
+        // cheap. Their keys stay used: their effect happened.
+        db
+          .update(idempotentCalls)
+          .set({ output: null, provenance: null })
+          .where(
+            and(
+              lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
+              inArray(idempotentCalls.state, ["done", "failed"]),
+              isNotNull(idempotentCalls.output)
+            )
+          ),
+        // So is the input a call of unknown outcome kept for its person,
+        // whoever made it: its obligation stays, listed without it.
+        db
+          .update(idempotentCalls)
+          .set({ input: null })
+          .where(
+            and(
+              lt(idempotentCalls.createdAt, new Date(now - retentionMs)),
+              isNotNull(idempotentCalls.input)
+            )
+          ),
       ]);
       if (claimed.length > 0) {
         mine = new Date(now);
+        return undefined;
+      }
+      // Freed by its person for one more send of this input: taken in one
+      // statement, so of calls racing for it one goes out. A first send
+      // again: its horizon, retention and connector build start afresh,
+      // under a claim later than the resolution's.
+      const [retaken] = await db
+        .update(idempotentCalls)
+        .set({
+          state: "running",
+          createdAt: new Date(now),
+          claimedAt: sql`max(${now}, ${idempotentCalls.claimedAt} + 1)`,
+          connectorVersion,
+          input: kept?.input ?? null,
+          origin: kept?.origin ?? null,
+        })
+        .where(
+          and(
+            key,
+            eq(idempotentCalls.state, "freed"),
+            eq(idempotentCalls.inputHash, inputHash)
+          )
+        )
+        .returning({ claimedAt: idempotentCalls.claimedAt });
+      if (retaken !== undefined) {
+        mine = retaken.claimedAt;
         return undefined;
       }
       const row = await find();
@@ -425,6 +597,20 @@ export const idempotencyStore = (
     },
 
     /**
+     * Records on the row that recovering its call needs its person to
+     * confirm it now (a call of a restricted context): `recoverableNow`
+     * then reads it as never recoverable.
+     */
+    requireConfirmation: async (): Promise<void> => {
+      await db
+        .update(idempotentCalls)
+        .set({
+          origin: sql`json_set(${idempotentCalls.origin}, '$.restricted', json('true'))`,
+        })
+        .where(and(key, isNotNull(idempotentCalls.origin)));
+    },
+
+    /**
      * Claims the key anew, right before the call goes out after a lookup
      * found its effect absent: only while this call still holds it, so a
      * lookup that ran long can't send under a claim another took since.
@@ -457,6 +643,9 @@ export const idempotencyStore = (
           state: failed ? "failed" : "done",
           output: retainable(result.output),
           provenance: JSON.stringify(result.provenance),
+          // Answered: nobody resolves it, so nothing of its input stays.
+          input: null,
+          origin: null,
         })
         .where(held()),
 
@@ -469,5 +658,48 @@ export const idempotencyStore = (
     spend: async (): Promise<void> => {
       await db.update(idempotentCalls).set({ state: "unknown" }).where(held());
     },
+  };
+};
+
+/**
+ * Resolves the call of unknown outcome `row` records, as read, by its
+ * person's word: the condition it applies under (still as read, and still
+ * of unknown outcome), for its audit event to be recorded under the same,
+ * and the write. "It happened" keeps the key spent for good, answering
+ * `connect.resolved_done`; "it didn't" frees it for one send of the same
+ * input (`freed`). Either takes a claim time of its own, so a recovery
+ * that read the row before can't retake it, and drops what was kept of
+ * the call.
+ */
+export const resolution = (
+  database: D1Database,
+  row: Row,
+  choice: "happened" | "not_happened",
+  now: number
+) => {
+  const db = drizzle(database);
+  const where = and(
+    rowKey(row),
+    eq(idempotentCalls.state, row.state),
+    eq(idempotentCalls.claimedAt, row.claimedAt),
+    eq(idempotentCalls.inputHash, row.inputHash),
+    unknownNow(now)
+  );
+  if (where === undefined) {
+    throw new Error("Expected a condition");
+  }
+  return {
+    where,
+    write: db
+      .update(idempotentCalls)
+      .set({
+        state: choice === "happened" ? "resolved" : "freed",
+        claimedAt: claimTime(row.claimedAt.getTime()),
+        output: null,
+        provenance: null,
+        input: null,
+        origin: null,
+      })
+      .where(where),
   };
 };

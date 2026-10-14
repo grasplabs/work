@@ -391,7 +391,7 @@ export default function Desk() {
     // On plain workerd with no sandbox and no opt-in (src/screens.ts).
     await expect(
       buildScreens({ ...env, SANDBOX_IN_PROCESS: undefined }, files)
-    ).rejects.toThrow("No sandbox bounds the screen compiler here yet");
+    ).rejects.toThrow("No sandbox bounds App code here");
   });
 
   it("builds other files on their own", async () => {
