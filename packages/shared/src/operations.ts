@@ -187,6 +187,8 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "resource.budget_busy",
   "operation.sandbox_busy",
   "operation.sandbox_unavailable",
+  // Nothing was published; the build runs on, cached for the next try.
+  "workflow.build_slow",
 ]);
 
 /** The category of platform error `code`: its own, or by its family. */

@@ -81,6 +81,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "This version's stored record doesn't match what was published, so it isn't used. Report it to Grasp.",
   "workflow.build_failed":
     "The code generated from this definition didn't build, so it wasn't published. Report it to Grasp.",
+  "workflow.build_slow":
+    "Building the code generated from this definition took longer than a publication waits, so nothing was published. Publish it again in a moment.",
   "workflow.protocol_unsupported":
     "This version was built for a protocol between the platform and workflow code that this platform doesn't run. Publish it again as a new version.",
   "workflow.start_invalid":

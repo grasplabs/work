@@ -22,7 +22,7 @@ import { literalDurationMs } from "./values.ts";
  *   is a JavaScript literal of exactly that value (quotes, backslashes,
  *   line separators, `${`, backticks and `*\/` included), and every key a
  *   computed property, so not even `__proto__` can mean anything but a key.
- *   Comments hold task IDs only, which the profile holds to kebab-case.
+ *   The module's only comment is a fixed header: no definition text.
  * - Expressions becoming code. An expression's source never enters the
  *   module: the module names it by its number in the expression table
  *   sealed beside it, and the host evaluates that table's entry with the
@@ -35,7 +35,22 @@ import { literalDurationMs } from "./values.ts";
  *   transitions, transformations, limits, reusable definitions) is
  *   reported as unsupported, with its pointer, and nothing is generated.
  *   Nothing is approximated, skipped or left to run time.
+ * - A task that makes core spend without bound. A run evaluates each
+ *   expression in core, so a `set` task holds at most
+ *   {@link maxTaskExpressions} of them; one with more isn't lowered.
+ * - Sensitive parameters leaving through a run's output. No expression may
+ *   read one (`sensitiveReads`): publication refuses it. They are for the
+ *   bindings that need them, which named calls bring later (GRA-566).
  */
+
+/**
+ * The most expressions one lowered task holds. Each is evaluated in core
+ * within the evaluator's fuel (about 100 ms of CPU at most), and an
+ * attempt has a fuel budget of its own across them (core's
+ * resource-host.ts); 64 is many times what a task's data needs, and keeps
+ * a task's table small enough to check at a glance.
+ */
+export const maxTaskExpressions = 64;
 
 /** The generator's identity: part of every build it makes. */
 export const generatorVersion = "grasp-open-workflow-ts/1";
@@ -275,6 +290,10 @@ const lowerTask = (
   const setPointer = pointerJoin(pointer, "set");
   const before = emitter.expressions.length;
   const value = valueCode(emitter, task.set ?? null, setPointer, id);
+  if (emitter.expressions.length - before > maxTaskExpressions) {
+    refusals.add(setPointer, "set:expressions", id);
+    return;
+  }
   const scope = emitter.expressions.length > before ? "task" : "";
   // An object literal as an arrow's body needs parentheses.
   const body = value.startsWith("{") ? `(${value})` : value;
@@ -289,6 +308,55 @@ const lowerTask = (
  * the same definition always makes the same module and table, and labels
  * or layout never reach either.
  */
+/** Reads `$params` as a whole value: its source names it, its paths don't. */
+const paramsName = /\$params\b/u;
+
+/**
+ * The expressions of `checked` that read a sensitive parameter: by name,
+ * or `$params` as a whole (with a computed key, say), which could reach
+ * any. A parameter that doesn't say counts as sensitive, as its contract
+ * does. A run's output goes back to whoever started it, who needn't build
+ * the workflow, so no expression may read one until bindings use them.
+ */
+export const sensitiveReads = (
+  checked: CheckedWorkflow
+): readonly Unsupported[] => {
+  const { definition } = checked;
+  const document = isObject(definition) ? definition.document : undefined;
+  const metadata = isObject(document) ? document.metadata : undefined;
+  const grasp = isObject(metadata) ? metadata.grasp : undefined;
+  const params = isObject(grasp) ? grasp.params : undefined;
+  const sensitive = new Set(
+    Object.entries(isObject(params) ? params : {}).flatMap(([name, entry]) =>
+      isObject(entry) && entry.sensitive === false ? [] : [name]
+    )
+  );
+  if (sensitive.size === 0) {
+    return [];
+  }
+  const reads: Unsupported[] = [];
+  for (const [pointer, compiled] of checked.expressions) {
+    const paths = compiled.paths.filter(
+      ({ variable }) => variable === "params"
+    );
+    const whole =
+      paths.some(({ fields }) => fields.length === 0) ||
+      (paths.length === 0 && paramsName.test(compiled.source));
+    const named = paths
+      .map(({ fields }) => fields[0])
+      .find((name) => name !== undefined && sensitive.has(name));
+    if (whole || named !== undefined) {
+      const { taskId } = compiled.site;
+      reads.push({
+        pointer,
+        feature: named === undefined ? "params" : `params.${named}`,
+        ...(taskId === undefined ? {} : { taskId }),
+      });
+    }
+  }
+  return reads.slice(0, maxUnsupported);
+};
+
 export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
   const { definition } = checked;
   if (!isObject(definition) || !Array.isArray(definition.do)) {

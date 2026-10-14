@@ -13,20 +13,25 @@ import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
 import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   openWorkflowProtocol,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowVersionBuild } from "@grasp-os/shared/workflow-resources";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { artifactKey, reserveArtifacts } from "./app-releases.ts";
-import { workflowResourceVersions } from "./db/core/schema.ts";
-import { buildOpenWorkflow } from "./screens.ts";
+import {
+  sdkReleaseArtifacts,
+  workflowResourceVersions,
+} from "./db/core/schema.ts";
+import { releaseReservations } from "./release-retention.ts";
+import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
 
 // What a JSON workflow's version runs (platform specification 13.1, 19.1):
 // its definition, validated at publication, lowered into SDK TypeScript
@@ -211,9 +216,28 @@ export const compileWorkflow = async (
       bytes: new Map(),
     };
   }
-  const built = await buildOpenWorkflow(env, {
-    [openWorkflowEntry]: generated.source,
-  });
+  // A build that runs past the build wait, or whose isolate gave up (its
+  // CPU on a large module), is the platform's to finish, never the
+  // definition's fault: the publication is refused as one to try again
+  // (`workflow.build_slow`), and a late build runs on and is cached for it.
+  let built: Awaited<ReturnType<typeof buildOpenWorkflow>> | "late";
+  try {
+    built = await withinBuildWait(
+      env,
+      async () =>
+        await buildOpenWorkflow(env, { [openWorkflowEntry]: generated.source })
+    );
+  } catch (error) {
+    // A refusal of the platform's own (no bounded compiler here) stays one.
+    if (isExpectedError(error)) {
+      throw error;
+    }
+    log.warn("workflow.build_unfinished", errorFields(error));
+    built = "late";
+  }
+  if (built === "late") {
+    throw workflowResourceErrors.create("workflow.build_slow");
+  }
   if (!built.ok) {
     const [first] = built.diagnostics;
     log.error("workflow.build_failed", {
@@ -306,6 +330,35 @@ export const storeBuild = async (
     [...compiled.bytes].map(async ([sha256, bytes]) => {
       await env.FILES.put(artifactKey(sha256), bytes, { sha256 });
     })
+  );
+};
+
+/**
+ * Gives back what `storeBuild` reserved for version `version` of workflow
+ * `id` once its row wasn't written (another publication won the number,
+ * or the workflow went): every reservation of the build but those a
+ * version row of that number names, so a winner's shared bytes (the SDK
+ * modules, an identical module) stay reserved for it.
+ */
+export const releaseBuild = async (
+  env: Env,
+  key: { id: string; version: number },
+  compiled: CompiledBuild
+): Promise<void> => {
+  if (!compiled.build.executable) {
+    return;
+  }
+  const reserved = sdkReleaseArtifacts;
+  await releaseReservations(
+    env,
+    sql`${reserved.appId} = ${key.id} AND ${reserved.version} = ${key.version}
+      AND ${reserved.sha256} IN (SELECT value FROM json_each(${JSON.stringify(
+        compiled.build.artifacts.map(({ sha256 }) => sha256)
+      )}))
+      AND NOT EXISTS (SELECT 1 FROM workflow_resource_versions AS kept,
+          json_each(kept.manifest, '$.build.artifacts') AS named
+        WHERE kept.workflow_resource_id = ${key.id} AND kept.version = ${key.version}
+          AND json_extract(named.value, '$.sha256') = ${reserved.sha256})`
   );
 };
 

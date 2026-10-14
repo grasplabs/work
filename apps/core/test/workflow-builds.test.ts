@@ -1,4 +1,5 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { isRetryableCode } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceVersion } from "@grasp-os/shared/workflow-resources";
@@ -13,8 +14,9 @@ import {
   publishWorkflowVersion,
   workflowSource,
 } from "../src/workflow-resources.ts";
+import { racingDb } from "./apps.ts";
 import { artifactKey } from "./sealed-apps.ts";
-import { outcome, unique } from "./sign-in.ts";
+import { outcome, refusal, unique } from "./sign-in.ts";
 
 // Compiling JSON workflows into SDK TypeScript and sealed JavaScript
 // (workflow-builds.ts, @grasp-os/open-workflow's generate.ts), from the
@@ -73,6 +75,12 @@ const definitionOf = (
               default: "Hello",
               sensitive: false,
             },
+            token: {
+              schema: { type: "string", maxLength: 64 },
+              label: "Token",
+              default: "none",
+              sensitive: true,
+            },
           },
           bindings: {},
         },
@@ -126,6 +134,18 @@ const identityOf = (version: WorkflowResourceVersion): string =>
 
 /** U+2028 and U+2029, which end a line in source but not in a string. */
 const lineSeparators = String.fromCodePoint(0x20_28, 0x20_29);
+
+/**
+ * Core, with the compiler's isolate as it is when a build takes too long,
+ * or its CPU runs out (`build`): the outside system here.
+ */
+const compilerThat = (build: () => Promise<never>): Env => {
+  const compiler = { getEntrypoint: () => ({ buildOpenWorkflow: build }) };
+  // SAFETY: only what the compiler's start reads of a Loader.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const loader = { get: () => compiler, load: () => compiler } as never;
+  return { ...env, BUILD_WAIT_MS: "50", LOADER: loader };
+};
 
 describe("JSON workflow builds", () => {
   it("seals SDK TypeScript that runs each task in the definition's order, and exports it", async () => {
@@ -342,5 +362,155 @@ describe("JSON workflow builds", () => {
     expect(heads.every((head) => head !== null)).toBeTruthy();
     const { files } = await workflowSource(env, by, workflow.id, 1);
     expect(files[generatedPath]).toContain('flow.task("finish"');
+  });
+
+  it("doesn't lower a task with more expressions than core evaluates in one", async () => {
+    const by = await builder();
+    const wide = Object.fromEntries(
+      Array.from({ length: 65 }, (_, index) => [
+        `field${index}`,
+        "${ $params.greeting }",
+      ])
+    );
+    const { version } = await published(by, (name) =>
+      definitionOf(name, [{ finish: { set: { status: "done", ...wide } } }])
+    );
+    expect(
+      version.build.executable ? [] : version.build.unsupported
+    ).toStrictEqual([
+      {
+        pointer: "/do/0/finish/set",
+        taskId: "finish",
+        feature: "set:expressions",
+      },
+    ]);
+  });
+
+  it("refuses an expression that reads a sensitive parameter, or all of them", async () => {
+    const by = await builder();
+    const problemsOf = async (status: string) => {
+      const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
+      const error = await refusal(
+        publishWorkflowVersion(env, by, workflow.id, {
+          definition: definitionOf(workflow.name, [
+            { finish: { set: { status } } },
+          ]),
+          basedOn: null,
+        })
+      );
+      return z
+        .object({
+          code: z.string(),
+          details: z.object({
+            problems: z.array(
+              z.object({ code: z.string(), pointer: z.string() })
+            ),
+          }),
+        })
+        .parse(error);
+    };
+    const expected = {
+      code: "workflow.definition_invalid",
+      details: {
+        problems: [
+          {
+            code: "expression.sensitive_param",
+            pointer: "/do/0/finish/set/status",
+          },
+        ],
+      },
+    };
+    await expect(problemsOf("${ $params.token }")).resolves.toMatchObject(
+      expected
+    );
+    await expect(
+      problemsOf('${ $params["to" + "ken"] }')
+    ).resolves.toMatchObject(expected);
+  });
+
+  it("refuses a publication whose build outlasts the build wait, or dies, as one to try again", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
+    const request = (version: string) => ({
+      definition: definitionOf(
+        workflow.name,
+        [{ finish: { set: { status: `late ${unique()}` } } }],
+        { version }
+      ),
+      basedOn: null,
+    });
+    const hung = compilerThat(
+      async () =>
+        // oxlint-disable-next-line promise/avoid-new -- a build that never answers
+        await new Promise<never>(() => {
+          // Never answers.
+        })
+    );
+    const died = compilerThat(async () => {
+      await Promise.resolve();
+      throw new Error("Worker exceeded CPU time limit.");
+    });
+    const late = await outcome(
+      publishWorkflowVersion(hung, by, workflow.id, request("1.0.0"))
+    );
+    const killed = await outcome(
+      publishWorkflowVersion(died, by, workflow.id, request("1.0.0"))
+    );
+    const saved = await publishWorkflowVersion(
+      env,
+      by,
+      workflow.id,
+      request("1.0.0")
+    );
+    expect({
+      late,
+      killed,
+      retryable: isRetryableCode("workflow.build_slow"),
+      published: saved.version,
+    }).toStrictEqual({
+      late: "workflow.build_slow",
+      killed: "workflow.build_slow",
+      retryable: true,
+      published: 1,
+    });
+  });
+
+  it("gives back what a publication that lost its race reserved, but what the winner names", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
+    const raced: Env = {
+      ...env,
+      DB: racingDb(async () => {
+        await publishWorkflowVersion(env, by, workflow.id, {
+          definition: definitionOf(
+            workflow.name,
+            [{ finish: { set: { status: "winner" } } }],
+            { version: "1.0.1" }
+          ),
+          basedOn: null,
+        });
+      }, /insert into "workflow_resource_versions"/iu),
+    };
+    const lost = await outcome(
+      publishWorkflowVersion(raced, by, workflow.id, {
+        definition: definitionOf(workflow.name, [
+          { finish: { set: { status: "loser" } } },
+        ]),
+        basedOn: null,
+      })
+    );
+    const reserved = await env.DB.prepare(
+      "SELECT sha256 FROM sdk_release_artifacts WHERE app_id = ? ORDER BY sha256"
+    )
+      .bind(workflow.id)
+      .all<{ sha256: string }>();
+    const named = await sealedArtifacts(workflow.id, 1);
+    expect({
+      lost,
+      reserved: reserved.results.map(({ sha256 }) => sha256),
+    }).toStrictEqual({
+      lost: "workflow.version_conflict",
+      reserved: [...new Set(named.map(({ sha256 }) => sha256))].toSorted(),
+    });
   });
 });

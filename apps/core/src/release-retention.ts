@@ -581,6 +581,23 @@ const queueReserved = (
       set: { queuedAt: sql`excluded.queued_at` },
     });
 
+/**
+ * Removes the reservations `where` matches and queues their bytes, in one
+ * transaction, for a seal that won't name them after all (a JSON
+ * workflow's publication that lost its race, workflow-builds.ts): the
+ * sweep deletes bytes no other reservation names.
+ */
+export const releaseReservations = async (
+  env: Env,
+  where: SQL
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await db.batch([
+    queueReserved(db, where),
+    db.delete(sdkReleaseArtifacts).where(where),
+  ]);
+};
+
 /** Deletes one release found unreferenced a grace ago, if it still is. */
 const deleteRelease = async (
   env: Env,
