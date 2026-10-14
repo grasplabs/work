@@ -129,10 +129,10 @@ const noActivity = (first: number, last: number): RunActivity => ({
 });
 
 /**
- * The runs of the Apps `by` can open started over the last `days` UTC
- * days before `now`, today included (`runActivityQuerySchema`, as
- * `input`), by day and how they stand, the decisions they asked for, and
- * each workflow's.
+ * The runs of the Apps `by` can open started over `days` UTC days up to
+ * `to` (today unless given), both included (`runActivityQuerySchema`, as
+ * `input`), by day and how they stand at `now`, the decisions they asked
+ * for, and each workflow's. A `to` after today is refused.
  */
 export const runActivity = async (
   env: Env,
@@ -144,8 +144,15 @@ export const runActivity = async (
   if (!parsed.success) {
     throw workflowErrors.create("workflow.invalid");
   }
-  const last = Math.floor(now.getTime() / dayMs);
+  const today = Math.floor(now.getTime() / dayMs);
+  const { to } = parsed.data;
+  const last = to === undefined ? today : Date.parse(`${to}T00:00:00Z`) / dayMs;
+  if (last > today) {
+    throw workflowErrors.create("workflow.invalid");
+  }
   const first = last - parsed.data.days + 1;
+  // Up to now on today, or to the end of an earlier last day.
+  const until = last === today ? now : new Date((last + 1) * dayMs - 1);
   const apps = await visibleApps(env, by);
   if (apps.length === 0) {
     return noActivity(first, last);
@@ -154,7 +161,7 @@ export const runActivity = async (
   const inWindow = and(
     inList(workflowRuns.appId, ids),
     gte(workflowRuns.createdAt, new Date(first * dayMs)),
-    lte(workflowRuns.createdAt, now)
+    lte(workflowRuns.createdAt, until)
   );
   const db = drizzle(env.DB);
   const bucket = bucketOf(now);
