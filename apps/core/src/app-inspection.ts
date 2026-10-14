@@ -1,4 +1,5 @@
 import {
+  appCodeFiles,
   appModuleName,
   kitModuleName,
   serverSdkModules,
@@ -16,7 +17,7 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 
 import { callSandboxed, SandboxUnavailableError } from "./sandboxed.ts";
 import type { SandboxedEnv } from "./sandboxed.ts";
-import { buildAppCode } from "./screens.ts";
+import { buildAppCode, buildKey } from "./screens.ts";
 
 // Inspecting an App's code of spec 8's layout (spec 8, 16): building it
 // and reading its registration in an isolate of its own, never in core.
@@ -157,10 +158,23 @@ export const filesManifest = async (
   files: Readonly<Record<string, string>>
 ): Promise<AppManifest> => {
   const sdk = await serverSdkModules(env.ASSETS);
-  const symbolic = await builtCode(env, {
-    ...files,
+  const code = {
+    ...appCodeFiles(files),
     ...symbolicModules(),
     [generatedPaths.server]: serverModuleSource,
-  });
-  return readManifest(await inspected(env, symbolic, sdk.modules));
+  };
+  // The same code, compiler and SDK register the same: inspected once, its
+  // manifest kept in R2 (in the EU) as the builds are, so saving or
+  // checking the same server code again runs nothing in the sandbox. Only
+  // a manifest that read is kept; a failure inspects again next time.
+  const cacheKey = `inspections/${await buildKey(code)}/${sdk.version}.json`;
+  const cached = await env.FILES.get(cacheKey);
+  if (cached) {
+    return readManifest(await cached.text());
+  }
+  const symbolic = await builtCode(env, code);
+  const text = await inspected(env, symbolic, sdk.modules);
+  const manifest = readManifest(text);
+  await env.FILES.put(cacheKey, text);
+  return manifest;
 };

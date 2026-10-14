@@ -82,7 +82,7 @@ const clientErrors = {
   },
   "submission.outcome_unknown": {
     message:
-      "Whether the action finished is unknown, so it wasn't run again. Call it again with the same idempotency key to get its outcome.",
+      "Whether this finished is unknown, so it wasn't sent again. Sending it again with the same idempotency key gets a change's outcome; an action runs again, though steps it already completed aren't repeated.",
     category: "uncertain",
   },
   "operation.unreachable": {
@@ -121,11 +121,17 @@ export const fencingCodes: ReadonlySet<string> = new Set([
   "app.unreadable",
   "screen.unreviewed",
   "screen.revoked",
+  "version.revoked",
+  "permission.person_inactive",
+  "app.not_running",
 ]);
 
 /**
- * Host failures that changed nothing and may be sent again unchanged:
- * the host ran nothing, or committed nothing (spec 32.1).
+ * Host failures of a query or a mutation that changed nothing and may be
+ * sent again unchanged: the host ran nothing, or committed nothing (spec
+ * 32.1); a mutation commits all of itself or nothing. An action commits
+ * what it runs step by step, so of these only a refusal before it reached
+ * the App (`refusedBeforeCallCodes`) means it ran nothing.
  */
 export const nothingRanCodes: ReadonlySet<string> = new Set([
   "screen.rate_limited",
@@ -134,6 +140,11 @@ export const nothingRanCodes: ReadonlySet<string> = new Set([
   "mutation.concurrent_change",
   "query.concurrent_change",
   "submission.superseded",
+]);
+
+/** Refusals sent before a call reached the App's code: nothing of it ran. */
+export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([
+  "screen.rate_limited",
 ]);
 
 /** The category of a refusal the page or core sent before any call ran. */
@@ -220,6 +231,14 @@ export const readRejection = (error: unknown): Settled => {
   if (typeof code !== "string" || code === "internal.unexpected") {
     return { kind: "lost" };
   }
+  // Of a refusal's details, only how long to wait before asking again.
+  const details =
+    typeof error === "object" && error !== null && "details" in error
+      ? error.details
+      : undefined;
+  const retryAfterMs = isPlainObject(details)
+    ? details.retryAfterMs
+    : undefined;
   return {
     kind: "failed",
     error: new GraspError({
@@ -228,6 +247,9 @@ export const readRejection = (error: unknown): Settled => {
       category: refusalCategory(code),
       retryable: nothingRanCodes.has(code),
       requestId: null,
+      ...(typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)
+        ? { details: { retryAfterMs } }
+        : {}),
     }),
   };
 };

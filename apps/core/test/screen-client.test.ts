@@ -257,7 +257,14 @@ const pageTransport = ({ app, lease, cookie }: Opened): ClientTransport => ({
       return answer;
     }
     const payload = errorPayloadSchema.parse(answer);
-    throw Object.assign(new Error(payload.message), { code: payload.code });
+    // As the page does: of a refusal's details, how long to wait.
+    const retryAfterMs = payload.details?.retryAfterMs;
+    throw Object.assign(new Error(payload.message), {
+      code: payload.code,
+      ...(typeof retryAfterMs === "number"
+        ? { details: { retryAfterMs } }
+        : {}),
+    });
   },
 });
 
@@ -517,6 +524,36 @@ describe("the session client", { timeout: 120_000 }, () => {
     ).resolves.toBe("once");
   });
 
+  it("saves from two tabs that read more at once than the person's request budget holds", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const tabs = [clientFor(opened).client, clientFor(opened).client];
+    // Each tab reads a dozen queries at once and saves meanwhile: more
+    // than the budget's burst between them, so some are refused, and the
+    // saves wait for it to give requests back rather than fail.
+    const saved = await Promise.all(
+      tabs.map(async (client, tab) => {
+        const reads = Array.from(
+          { length: 12 },
+          async (_, index) =>
+            await client.query(api.list, {
+              pagination: { pageSize: index + 1 },
+            })
+        );
+        const id = await client.mutation(api.create, {
+          title: `From tab ${tab + 1}`,
+        });
+        await Promise.all(reads);
+        return id;
+      })
+    );
+    expect(new Set(saved).size).toBe(2);
+    const { client } = clientFor(opened);
+    await expect(titles(client, api)).resolves.toStrictEqual(
+      expect.arrayContaining(["From tab 1", "From tab 2"])
+    );
+  });
+
   it("refuses arguments and options the call can't take before sending anything", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
@@ -560,6 +597,12 @@ ${body}
 }
 `;
 
+/** How many inspected manifests core keeps. */
+const inspections = async (): Promise<number> => {
+  const { objects } = await env.FILES.list({ prefix: "inspections/" });
+  return objects.length;
+};
+
 describe("a screen's build", { timeout: 120_000 }, () => {
   it("builds a saved or drafted version's screens with the references its own code generates", async () => {
     // A save and a draft's check build alike (save-builds.ts): nothing of
@@ -579,6 +622,36 @@ describe("a screen's build", { timeout: 120_000 }, () => {
       "Second"
     );
     expect(broken.builds.screens.status).toBe("failed");
+  });
+
+  it("inspects the same server code once, however often a save brings it", async () => {
+    const builder = await personApi("builder");
+    // Server code of its own, so no other test inspected it already.
+    const operations = `${files["operations/notes.ts"] ?? ""}\n// ${crypto.randomUUID()}\n`;
+    const own = { ...files, "operations/notes.ts": operations };
+    const before = await inspections();
+    const { id } = await builder.api.apps.create({ name: "Notes" });
+    await builder.api.apps.files.commit(id, own, "First");
+    // A screen changed, the server code not: what was inspected is kept.
+    await builder.api.apps.files.commit(
+      id,
+      { ...own, "screens/notes.tsx": screen("") },
+      "Second"
+    );
+    await expect(inspections()).resolves.toBe(before + 1);
+    // Other server code is inspected for itself.
+    await builder.api.apps.files.commit(
+      id,
+      {
+        ...own,
+        "operations/notes.ts": operations.replace(
+          '.default("hello")',
+          '.default("hi")'
+        ),
+      },
+      "Third"
+    );
+    await expect(inspections()).resolves.toBe(before + 2);
   });
 
   /** The diagnostics of version 1 of an App holding `files`, as core builds its screens. */

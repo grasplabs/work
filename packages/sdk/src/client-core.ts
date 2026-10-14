@@ -7,6 +7,7 @@ import {
   fencingCodes,
   nothingRanCodes,
   readAnswer,
+  refusedBeforeCallCodes,
   readRejection,
 } from "./client-error.ts";
 import type { GraspError, Settled } from "./client-error.ts";
@@ -42,12 +43,18 @@ import { readDescriptor } from "./value-read.ts";
 //   one, and a retry after a lost response sends the very same request,
 //   so the host answers its receipt instead of saving again.
 // - An uncertain outcome passes for success or failure: a mutation whose
-//   response was lost is retried under its key until the host answers;
+//   response was lost is retried under its key until the host answers,
+//   for `lostBudgetMs` at most, then rejects as uncertain with its key;
 //   it resolves only on the host's committed answer. An action's lost
 //   response is never sent again (it may have reached outside):
-//   `submission.outcome_unknown`, with the key, so a deliberate call
-//   with that key recovers what it did (operations.ts derives every
-//   nested key from it).
+//   `submission.outcome_unknown`, with the key. The host keeps no
+//   receipt of a whole action: a deliberate call with that key runs it
+//   again, its completed steps reconciled by the keys operations.ts
+//   derives from it, not repeated.
+// - Retries spend the person's request budget: re-reads after changes are
+//   gathered and at most `maxReadsInFlight` run at once, a refusal for
+//   the budget waits as long as it says, and a save is sent again for
+//   `submissionBudgetMs` rather than a few quick tries.
 // - Cancelling unlocks a duplicate: aborting stops the caller waiting,
 //   never the submission, which keeps reconciling under its key; a call
 //   with the same key and input joins it rather than send it again.
@@ -268,6 +275,33 @@ const retryDelay = (attempt: number): number => {
   return base / 2 + Math.random() * (base / 2);
 };
 
+/**
+ * How long to wait for a request budget to give back a request, when a
+ * refusal as `screen.rate_limited` didn't say.
+ */
+const rateLimitedWaitMs = 1000;
+
+/**
+ * How long to wait before attempt `attempt` + 1 after `settled`: a
+ * refusal for the request budget waits at least as long as it said (or
+ * `rateLimitedWaitMs`), so retries never spend a budget that is empty.
+ */
+const waitAfter = (settled: Settled, attempt: number): number => {
+  const backoff = retryDelay(attempt);
+  if (
+    settled.kind !== "failed" ||
+    settled.error.code !== "screen.rate_limited"
+  ) {
+    return backoff;
+  }
+  const { details } = settled.error;
+  const hinted = isPlainObject(details) ? details.retryAfterMs : undefined;
+  const said = typeof hinted === "number" ? hinted : rateLimitedWaitMs;
+  // As long as the budget takes to give one back, and a little more, so
+  // calls refused together don't all ask again at the same moment.
+  return said + Math.random() * said;
+};
+
 /** Resolves after `ms`, or as soon as `signal` aborts. */
 const sleep = async (ms: number, signal?: AbortSignal): Promise<void> => {
   const { promise, resolve } = Promise.withResolvers<null>();
@@ -420,11 +454,30 @@ const settleRead = (
 /** How long a query no one reads stays cached: across a quick remount. */
 const keepMs = 30_000;
 
-/** How often an imperative read tries before it gives up. */
+/**
+ * How often an imperative read tries before it gives up; one refused for
+ * the request budget tries for as long as a submission would
+ * (`submissionBudgetMs`), waiting as each refusal says.
+ */
 const imperativeAttempts = 5;
 
-/** How often a submission refused with a nothing-ran code is sent. */
-const nothingRanAttempts = 3;
+/**
+ * How long a submission refused with a nothing-ran code (its budget used
+ * up, the sandbox busy) is sent again, waiting as each refusal says.
+ */
+const submissionBudgetMs = 15_000;
+
+/**
+ * How long a mutation whose answers are lost is sent again under its key;
+ * then it rejects as `submission.outcome_unknown`, its key recovering it.
+ */
+const lostBudgetMs = 5 * 60_000;
+
+/** How many queries read at once: the rest wait, keeping room for saves. */
+const maxReadsInFlight = 4;
+
+/** How long confirmed changes are gathered into one round of re-reads. */
+const changeGatherMs = 50;
 
 /**
  * What the React hooks and the platform reach of a client, and App code
@@ -468,10 +521,20 @@ export class GraspClient {
   readonly #submissions = new Map<string, Submission>();
   /** Moves on at every fence: answers to older requests are dropped. */
   #generation = 0;
+  /** Reads under way, and the reads waiting for room (`maxReadsInFlight`). */
+  #readsInFlight = 0;
+  readonly #readWaiters: (() => void)[] = [];
+  /** The Apps whose queries a gathered round of re-reads refreshes. */
+  readonly #changedApps = new Set<string>();
+  #gathering: ReturnType<typeof setTimeout> | undefined;
   /** What the latest fence was for. */
   #fencedBy: GraspError | undefined;
 
-  /** For the platform only (screen-runtime.ts); App code never makes one. */
+  /**
+   * For the platform only (screen-runtime.ts). By design, not isolation:
+   * screen code shares the frame and could make one (`constructor`), but
+   * gets nothing from it that `bridge()` doesn't already give it.
+   */
   constructor(transport: ClientTransport) {
     this.#transport = transport;
   }
@@ -557,6 +620,15 @@ export class GraspClient {
   #entry(reference: unknown, args: unknown): QueryEntry {
     const read = readReference(reference, "query");
     const input = normalized(read, args);
+    // A query's request is bounded as a submission's is, before it is sent.
+    const request = JSON.stringify({ reference: wireReference(read), input });
+    if (
+      new TextEncoder().encode(request).byteLength > functionRequestMaxBytes
+    ) {
+      throw clientError("contract.input_too_large", {
+        maxBytes: functionRequestMaxBytes,
+      });
+    }
     const key = canonicalJson([
       read.resourceId,
       read.resourceVersion,
@@ -685,9 +757,21 @@ export class GraspClient {
       return stop.signal.aborted ? clientError("query.cancelled") : undefined;
     };
     const attempt = async (): Promise<unknown> => {
+      const started = Date.now();
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-        const settled = await this.#call(request);
+        const release = await this.#readRoom(stop.signal);
+        let settled: Settled;
+        try {
+          const early = interrupted();
+          if (early !== undefined) {
+            throw early;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one attempt after another
+          settled = await this.#call(request);
+        } finally {
+          release();
+        }
         if (settled.kind === "failed" && fencingCodes.has(settled.error.code)) {
           // The fence showed it to every reader already.
           throw settled.error;
@@ -696,13 +780,19 @@ export class GraspClient {
         if (stopped !== undefined) {
           throw stopped;
         }
+        const waitingForBudget =
+          settled.kind === "failed" &&
+          settled.error.code === "screen.rate_limited" &&
+          Date.now() - started < submissionBudgetMs;
         const keepTrying =
-          entry.listeners.size > 0 || tries < imperativeAttempts;
+          entry.listeners.size > 0 ||
+          tries < imperativeAttempts ||
+          waitingForBudget;
         if (!worthRetrying(settled) || !keepTrying || !wanted(entry)) {
           return settleRead(entry, { number, changes }, settled);
         }
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-        await sleep(retryDelay(tries), stop.signal);
+        await sleep(waitAfter(settled, tries), stop.signal);
         const late = interrupted();
         if (late !== undefined) {
           throw late;
@@ -773,11 +863,62 @@ export class GraspClient {
       if (entry.reference.resourceId === resourceId) {
         entry.stale = true;
         entry.changes += 1;
-        if (entry.listeners.size > 0 && entry.reading === undefined) {
+      }
+    }
+    // Changes in quick succession share one round of re-reads.
+    this.#changedApps.add(resourceId);
+    if (this.#gathering !== undefined) {
+      return;
+    }
+    this.#gathering = setTimeout(() => {
+      this.#gathering = undefined;
+      const changed = new Set(this.#changedApps);
+      this.#changedApps.clear();
+      for (const entry of this.#queries.values()) {
+        if (
+          changed.has(entry.reference.resourceId) &&
+          entry.stale &&
+          entry.listeners.size > 0 &&
+          entry.reading === undefined
+        ) {
           this.#refresh(entry);
         }
       }
+    }, changeGatherMs);
+  }
+
+  /**
+   * Waits for room among the reads under way (`maxReadsInFlight`), or
+   * until `signal` aborts: what it answers gives the room back.
+   */
+  async #readRoom(signal: AbortSignal): Promise<() => void> {
+    while (this.#readsInFlight >= maxReadsInFlight && !signal.aborted) {
+      const { promise, resolve } = Promise.withResolvers<null>();
+      const wake = (): void => {
+        resolve(null);
+      };
+      this.#readWaiters.push(wake);
+      signal.addEventListener("abort", wake, { once: true });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one wait after another
+        await promise;
+      } finally {
+        signal.removeEventListener("abort", wake);
+        const waiting = this.#readWaiters.indexOf(wake);
+        if (waiting !== -1) {
+          this.#readWaiters.splice(waiting, 1);
+        }
+      }
     }
+    this.#readsInFlight += 1;
+    let given = false;
+    return () => {
+      if (!given) {
+        given = true;
+        this.#readsInFlight -= 1;
+        this.#readWaiters.shift()?.();
+      }
+    };
   }
 
   /** Sends one submission (see the header), and waits as its caller asked. */
@@ -836,8 +977,10 @@ export class GraspClient {
     key: string,
     held: { readonly scoped: string; readonly input: string }
   ): Promise<unknown> {
+    const isAction = reference.kind === "action";
     const run = async (): Promise<unknown> => {
-      let refused = 0;
+      const started = Date.now();
+      let lostSince: number | undefined;
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
         const settled = await this.#call(request);
@@ -845,31 +988,45 @@ export class GraspClient {
           this.#changed(reference.resourceId);
           return settled.value;
         }
-        const mayHaveRun =
-          settled.kind === "lost" || !nothingRanCodes.has(settled.error.code);
-        if (reference.kind === "action" && mayHaveRun) {
-          // An action commits each mutation it runs on its own, and a
-          // failure after one, or a lost answer, undoes none of them: what
-          // the App's queries show may be out of date. They are read
-          // again; the action itself never is.
+        // A mutation commits all of itself or nothing; an action commits
+        // step by step, so only a refusal before it reached the App ran
+        // nothing of it.
+        const nothingRan =
+          settled.kind === "failed" &&
+          (isAction ? refusedBeforeCallCodes : nothingRanCodes).has(
+            settled.error.code
+          );
+        if (isAction && !nothingRan) {
+          // A failure after a step, or a lost answer, undoes none of what
+          // it committed: what the App's queries show may be out of date.
+          // They are read again; the action itself never is.
           this.#changed(reference.resourceId);
         }
-        if (settled.kind === "lost" && reference.kind === "action") {
-          throw clientError("submission.outcome_unknown", {
-            idempotencyKey: key,
-          });
+        // An answer lost, or an outcome the host itself can't tell.
+        const unknown =
+          settled.kind === "lost" || settled.error.category === "uncertain";
+        if (unknown && isAction) {
+          throw settled.kind === "lost"
+            ? clientError("submission.outcome_unknown", { idempotencyKey: key })
+            : settled.error;
         }
-        if (settled.kind === "failed") {
-          refused += 1;
-          if (
-            !nothingRanCodes.has(settled.error.code) ||
-            refused >= nothingRanAttempts
-          ) {
-            throw settled.error;
+        if (unknown) {
+          // A mutation is sent again under its key, which recovers its
+          // receipt, for as long as `lostBudgetMs`: never forever.
+          lostSince ??= Date.now();
+          if (Date.now() - lostSince >= lostBudgetMs) {
+            throw clientError("submission.outcome_unknown", {
+              idempotencyKey: key,
+            });
           }
+        } else if (
+          settled.kind === "failed" &&
+          (!nothingRan || Date.now() - started >= submissionBudgetMs)
+        ) {
+          throw settled.error;
         }
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-        await sleep(retryDelay(tries));
+        await sleep(waitAfter(settled, tries));
       }
     };
     const done = run();

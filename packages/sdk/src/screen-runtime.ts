@@ -180,9 +180,10 @@ const reportProblems = (): void => {
 
 /**
  * What a screen shows in place of what failed to render: the failure's
- * own message when it is a structured SDK error (core and the client
- * word those for people, and never put a cause or stack in them), a plain
- * sentence otherwise, and a way to try again.
+ * own message when it is a structured SDK error (worded for people, and
+ * never with a cause or stack, though App code can make one with any
+ * message: this box is the App's, not the platform's), a plain sentence
+ * otherwise, and a way to try again.
  */
 const fallbackOf = (error: unknown, tryAgain: () => void): ReactNode =>
   createElement(
@@ -283,8 +284,17 @@ export const runScreen = async (
       onUncaughtError: (error) => {
         report({ kind: "error", ...describe(error) });
       },
+      // What the boundary caught: of a structured SDK error only its code
+      // and request ID, never the domain message it may carry.
       onCaughtError: (error) => {
-        report({ kind: "error", ...describe(error) });
+        report({
+          kind: "error",
+          ...(error instanceof GraspError
+            ? {
+                message: `${error.code}${error.requestId === null ? "" : ` (request ${error.requestId})`}`,
+              }
+            : describe(error)),
+        });
       },
     }).render(
       createElement(
