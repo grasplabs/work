@@ -12,6 +12,7 @@ import {
 } from "@grasp-os/sdk/host";
 import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
+import type { RunHandle } from "@grasp-os/sdk/server";
 import { appCallLimits } from "@grasp-os/shared/apps";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -53,11 +54,13 @@ import {
 } from "@grasp-os/shared/store-queries";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import {
+  commitMaxIntents,
   commitMaxWrites,
   dataErrors,
   stagedMaxBytes,
 } from "@grasp-os/shared/stores";
 import type {
+  Commit,
   StagedWrites,
   StoreFields,
   WriterRoles,
@@ -66,6 +69,7 @@ import {
   idempotencyKeySchema,
   submissionErrors,
 } from "@grasp-os/shared/submissions";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
@@ -165,6 +169,44 @@ import { readConsistently, StoreReader } from "./store-reader.ts";
 //   counts only if this invocation's channel raised it (App code can't
 //   pass a made-up `data.conflict` off as the store's); anything else is
 //   `internal.unexpected` with the request ID, its cause logged.
+// - App code starts a workflow it didn't declare, or one some other App
+//   binds: a start names an alias the function lists in its `uses` and
+//   the App declares as a workflow (`resource.not_allowed` otherwise);
+//   core starts only what the App binds under that alias, through the
+//   App's own `start` permission, for the call's principal
+//   (`WorkflowStarts`). App code names neither the workflow, its version,
+//   the person nor the key.
+// - A mutation's start outlives a mutation that didn't commit: a mutation
+//   only stages its starts, which commit as outbox entries in the same
+//   transaction as its records, or not at all (a rerun for stale reads
+//   stages them again from nothing), and are dispatched from there once
+//   each (workflow-start-intents.ts).
+// - A start is made twice: an action's start takes a key derived from
+//   the action's call key and its place among the action's starts, and a
+//   mutation's from its receipt and its place among the commit's starts,
+//   so the same start made again answers the receipt it already has.
+
+/**
+ * How core starts the workflows an App binds, for one invocation: the
+ * App, its version and the person come from the invocation, never from
+ * App code, which names only the alias and the input.
+ */
+export interface WorkflowStarts {
+  /**
+   * Starts the workflow the App binds under `alias` with `input`, under
+   * `key`: its handle once the start is admitted, durably.
+   */
+  readonly start: (
+    alias: string,
+    input: Json,
+    key: string
+  ) => Promise<RunHandle>;
+  /**
+   * What a mutation's commit stages in its outbox to start that workflow
+   * once it has committed (`workflowStartIntentSchema`).
+   */
+  readonly intent: (alias: string, input: Json, key: string) => Json;
+}
 
 /** Who an invocation is for, as core resolved it: never App code. */
 export interface Invocation {
@@ -207,6 +249,12 @@ export interface Invocation {
    * it read, which a live query watches (query-subscriptions.ts).
    */
   readonly observeReads?: (readSet: Record<string, number>) => void;
+  /**
+   * How core starts the workflows the App binds, for this call; none
+   * started without it (a workflow run's call: a run starting another is
+   * a child run of its own, which isn't this).
+   */
+  readonly workflows?: WorkflowStarts;
 }
 
 /**
@@ -1631,6 +1679,132 @@ const resourceCall = async (
   return checkedResourceResult(declaration, method, args, result);
 };
 
+/**
+ * The start of workflow `alias` that `operation` asks for with `method`
+ * and `args`, if it lists the alias in its `uses` and the App declares a
+ * workflow under it: its alias and its input, as the declaration
+ * normalizes it, within the operation input limit. `resource.not_allowed`
+ * for anything else, `contract.invalid_args` for input the declaration
+ * doesn't take.
+ */
+const workflowStart = (
+  run: Run,
+  operation: OperationManifest,
+  request: { alias: unknown; method: unknown; args: unknown }
+): { alias: string; input: Json } => {
+  const { alias, method } = request;
+  const declared = operation.uses.some(
+    (use) => use.type === "workflow" && use.alias === alias
+  );
+  const declaration =
+    declared &&
+    typeof alias === "string" &&
+    Object.hasOwn(run.app.manifest.workflows, alias)
+      ? run.app.manifest.workflows[alias]
+      : undefined;
+  const args = jsonOf(request.args);
+  if (
+    declaration === undefined ||
+    method !== "start" ||
+    args === undefined ||
+    !isJsonArray(args) ||
+    args.length !== 1
+  ) {
+    throw operationErrors.create("resource.not_allowed");
+  }
+  const [given = null] = args;
+  if (bytesOf(given) > operationInputMaxBytes) {
+    throw operationErrors.create("contract.input_too_large", {
+      maxBytes: operationInputMaxBytes,
+    });
+  }
+  const checked = schemaOfDescriptor(declaration.input)["~standard"].validate(
+    given
+  );
+  if ("then" in checked) {
+    throw new Error("A workflow's input schema validated asynchronously");
+  }
+  if (checked.issues !== undefined) {
+    throw operationErrors.create("contract.invalid_args", {
+      issues: issuesOf(checked.issues),
+    });
+  }
+  const input = jsonOf(checked.value);
+  if (input === undefined) {
+    throw new Error("A validated value isn't JSON");
+  }
+  return { alias: declaration.alias, input };
+};
+
+/**
+ * What a start's refusal becomes for App code, from an allow-list: the
+ * workflow or its binding unavailable to the App, however (no binding,
+ * no grant, a person who can't use the App now, a version gone) as
+ * `resource.unavailable`, never saying which; input the bound version
+ * doesn't take as `resource.invalid_args`; the person's live runs at
+ * their limit as the retryable `resource.budget_busy`; anything else
+ * `internal.unexpected`, its cause logged.
+ */
+const startFailure = (error: unknown, requestId: string): Error => {
+  const code = workflowResourceErrors.codeOf(error);
+  if (code === "workflow.start_invalid") {
+    return hostError(operationErrors.create("resource.invalid_args"));
+  }
+  if (code === "workflow.run_limit") {
+    return hostError(operationErrors.create("resource.budget_busy"));
+  }
+  if (code === "workflow.start_conflict") {
+    return hostError(operationErrors.create("resource.idempotency_conflict"));
+  }
+  if (code !== undefined) {
+    return hostError(operationErrors.create("resource.unavailable"));
+  }
+  log.error("operation.workflow_start_failed", {
+    requestId,
+    ...errorFields(error),
+  });
+  return hostError(internalErrors.create("internal.unexpected", { requestId }));
+};
+
+/**
+ * An action's start of a workflow it lists (`workflowStart`), under `key`
+ * (derived from the action's call key and its place among its starts),
+ * through core's `WorkflowStarts` for the invocation, after the one gate
+ * (`admit`): its handle once admitted. `resource.unavailable` where core
+ * starts no workflow for the call.
+ */
+const startCall = async (
+  run: Run,
+  operation: OperationManifest,
+  request: { alias: unknown; method: unknown; args: unknown },
+  key: readonly string[]
+): Promise<Json> => {
+  const { alias, input } = workflowStart(run, operation, request);
+  await admit(run.invocation);
+  const starts = run.invocation.workflows;
+  if (starts === undefined) {
+    throw operationErrors.create("resource.unavailable");
+  }
+  let handle: RunHandle;
+  try {
+    handle = await starts.start(alias, input, key.join(":"));
+  } catch (error) {
+    throw startFailure(error, run.invocation.requestId);
+  }
+  return {
+    startId: handle.startId,
+    runId: handle.runId,
+    version: handle.version,
+  };
+};
+
+/** Whether `operation` lists a workflow under `alias`. */
+const startsWorkflow = (
+  operation: OperationManifest,
+  alias: unknown
+): boolean =>
+  operation.uses.some((use) => use.type === "workflow" && use.alias === alias);
+
 /** What one run of a function may still read: its reads, and staged bytes sent. */
 interface ReadBudget {
   reads: number;
@@ -2350,10 +2524,14 @@ const runMutation = async (
   if ("outcome" in claimed) {
     return claimed.outcome.result;
   }
+  const { receiptId } = claimed.held;
   for (let attempt = 0; attempt <= queryMaxReruns; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one run after the other
     const scope = await scopeOf(compiled, invocation, roles);
     const staging = stagingFor(compiled, operation, Date.now());
+    // The workflows it starts once it commits, staged by this run alone: a
+    // run again for stale reads stages its own from nothing.
+    const intents: NonNullable<Commit["intents"]> = [];
     const reader = new StoreReader(store, scope, staging.preview);
     const budget = runReads(run);
     const spend = () => {
@@ -2389,6 +2567,45 @@ const runMutation = async (
               { kind, path, args: callArgs },
               { type: "mutation", reader, spend }
             ),
+          // Its only reach past the store: starts of the workflows it
+          // lists, staged for its commit and made from its outbox after.
+          // Any other resource is refused as a mutation's always is.
+          resource: async (alias, method, callArgs) => {
+            if (!startsWorkflow(operation, alias)) {
+              throw operationErrors.create("operation.no_resources");
+            }
+            const start = workflowStart(run, operation, {
+              alias,
+              method,
+              args: callArgs,
+            });
+            const starts = invocation.workflows;
+            if (starts === undefined) {
+              throw operationErrors.create("resource.unavailable");
+            }
+            // The one gate, as for a resource request: staged only while
+            // the caller may still act. Its commit is admitted again, and
+            // the start itself once more as it is dispatched.
+            await admit(invocation);
+            // Counted once admitted, with nothing awaited before the push:
+            // starts staged at once can't pass the bound together.
+            if (intents.length >= commitMaxIntents) {
+              throw operationErrors.create("operation.call_limit", {
+                maxStarts: commitMaxIntents,
+              });
+            }
+            // Its key: the receipt's, and its place among the commit's
+            // starts, so every dispatch of it is the same start.
+            intents.push({
+              kind: "workflow.start",
+              data: starts.intent(
+                start.alias,
+                start.input,
+                `after-commit:${receiptId}:${intents.length}`
+              ),
+            });
+            return null;
+          },
         },
         // A failure torn reads may have caused is a stale run too.
         async () => !(await trusted(async () => await reader.isCurrent()))
@@ -2435,6 +2652,7 @@ const runMutation = async (
             guards: [...reader.guards()],
             readSet: reader.readSet(),
             writes: staging.writes(),
+            intents,
             result: value,
             ...(invocation.writer === undefined
               ? {}
@@ -2541,8 +2759,9 @@ const runAction = async (
       inFlight -= 1;
     }
   };
+  let starts = 0;
   const derived = async (
-    what: "call" | "resource",
+    what: "call" | "resource" | "start",
     count: number
   ): Promise<readonly string[]> => [
     "derived",
@@ -2573,6 +2792,21 @@ const runAction = async (
         : await effect(async () => await callNested(kind, path, callArgs)),
     resource: async (alias, method, callArgs) => {
       spendCall(run.budget, "requests");
+      // A workflow it starts: its own place among its starts.
+      if (startsWorkflow(operation, alias)) {
+        starts += 1;
+        const startKey = await derived("start", starts);
+        // A start is an effect under way like any other.
+        return await effect(
+          async () =>
+            await startCall(
+              run,
+              operation,
+              { alias, method, args: callArgs },
+              startKey
+            )
+        );
+      }
       requests += 1;
       const resourceKey = await derived("resource", requests);
       return await effect(

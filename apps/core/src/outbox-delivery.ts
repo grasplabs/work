@@ -55,7 +55,10 @@ export const consumerFor = (
   return typeof consumer === "function" ? consumer : undefined;
 };
 
-/** The consumers of this deployment's outbox: none yet. */
+/**
+ * The consumers of Knowledge's outbox of record saves: none yet. Each
+ * business store's are its own (`storeOutboxConsumers`).
+ */
 export const outboxConsumers: OutboxConsumers = {};
 
 /** How a drain goes. */

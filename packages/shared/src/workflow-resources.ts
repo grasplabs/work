@@ -392,6 +392,27 @@ export interface WorkflowStart {
 }
 
 /**
+ * A start a committed mutation staged in its store's outbox
+ * (`ctx.afterCommit.start`), which its dispatch admits after the commit:
+ * who starts it, as core resolved them as the mutation ran (the App, the
+ * version of it whose code staged it, the person its call acted for),
+ * the alias the App binds the workflow under, its input as checked
+ * against the App's declaration, and its key, derived from the
+ * mutation's receipt and the start's place among the commit's starts, so
+ * every dispatch of it is the same start. Never anything App code chose
+ * but the alias and the input.
+ */
+export const workflowStartIntentSchema = z.strictObject({
+  app: identifierSchema,
+  appVersion: z.int().min(1),
+  principal: identifierSchema,
+  alias: appWorkflowBindingSchema.shape.alias,
+  key: identifierSchema,
+  input: z.json(),
+});
+export type WorkflowStartIntent = z.infer<typeof workflowStartIntentSchema>;
+
+/**
  * The most runs of one workflow that haven't ended a person may have
  * started (or had started for them) at once: a start past it is refused
  * (`workflow.run_limit`). An interim bound on what one person's starts

@@ -47,6 +47,7 @@ import type {
   InvocationSources,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
+import { appWorkflowStarts } from "./workflow-start-intents.ts";
 
 // Calling an App's server functions (spec 6, 8, 16, 32.6): who a call is
 // for, which release it runs and what it may reach, resolved by core and
@@ -129,6 +130,10 @@ export const invocationFor = async (
     // operation host admits each request through `authorize` first, as it
     // admits each commit, so nothing else is checked here.
     resources: bindings,
+    // The workflows the App binds, started as the App for the person
+    // calling: each start admitted on the App's own grant and the
+    // person's role in the App, read again as it is admitted.
+    workflows: appWorkflowStarts(env, authority),
   };
 };
 

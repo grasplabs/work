@@ -1,7 +1,8 @@
+import { canonicalText } from "@grasp-os/shared/json";
 import { describe, expect, test } from "vite-plus/test";
 
 import { databaseWriter } from "../src/database.ts";
-import { inspectApp } from "../src/host.ts";
+import { inspectApp, readAppManifest } from "../src/host.ts";
 import { AppError, app, resource } from "../src/index.ts";
 import type { AppDefinition } from "../src/index.ts";
 import { readResourceDeclaration } from "../src/resources.ts";
@@ -582,6 +583,122 @@ describe("uses", () => {
     expect(refusal(() => notes({ operations: { caller } }))).toContain(
       "doesn't register"
     );
+  });
+
+  test("a workflow is started by an action or staged by a mutation, only one the App lists, and reads back as declared", () => {
+    const followUp = resource.workflow("followUp", {
+      input: v.object({ title: v.string().trim() }),
+    });
+    const start = server.action({
+      args: {},
+      returns: v.null(),
+      uses: [followUp],
+      handler: () => null,
+    });
+    const stage = server.mutation({
+      args: {},
+      returns: v.null(),
+      uses: [list, followUp],
+      handler: () => null,
+    });
+    const registered = notes({
+      operations: { notes: { list, start, stage } },
+      uses: [followUp],
+    });
+    const { manifest } = inspectApp(registered);
+    const lookalike = resource.workflow("followUp", {
+      input: v.object({ title: v.string().trim() }),
+    });
+    expect({
+      start: manifest.operations["notes.start"]?.uses,
+      stage: manifest.operations["notes.stage"]?.uses,
+      declared: manifest.workflows.followUp?.input,
+      // A workflow is neither an action's resource nor a screen's.
+      resources: Object.keys(manifest.resources),
+      readBack:
+        canonicalText(readAppManifest(JSON.stringify(manifest))) ===
+        canonicalText(manifest),
+      unlisted: refusal(() =>
+        notes({ operations: { notes: { list, start } } })
+      ).includes("doesn't list"),
+      // The same alias declared again is another requirement, not this one.
+      lookalike: refusal(() =>
+        notes({ operations: { notes: { list, start } }, uses: [lookalike] })
+      ).includes("doesn't list"),
+      sameAlias: refusal(() =>
+        notes({
+          operations: { notes: { list } },
+          uses: [followUp, resource.template("followUp", { contract: "a@1" })],
+        })
+      ).includes("alias `followUp`"),
+    }).toStrictEqual({
+      start: [{ type: "workflow", alias: "followUp" }],
+      stage: [
+        { type: "function", path: "notes.list", kind: "query" },
+        { type: "workflow", alias: "followUp" },
+      ],
+      declared: v.object({ title: v.string().trim() }).descriptor,
+      resources: [],
+      readBack: true,
+      unlisted: true,
+      lookalike: true,
+      sameAlias: true,
+    });
+  });
+
+  test("a manifest can't make a workflow out of something else", () => {
+    const followUp = resource.workflow("followUp", { input: v.object({}) });
+    const start = server.action({
+      args: {},
+      returns: v.null(),
+      uses: [followUp],
+      handler: () => null,
+    });
+    const { manifest } = inspectApp(
+      notes({ operations: { notes: { list, start } }, uses: [followUp] })
+    );
+    // A mutable copy, as JSON: what a manifest read back is.
+    const operations: Record<string, { uses: unknown[] }> = {};
+    for (const [path, operation] of Object.entries(manifest.operations)) {
+      operations[path] = { ...operation, uses: [...operation.uses] };
+    }
+    const data: {
+      operations: Record<string, { uses: unknown[] }>;
+      workflows: Record<string, unknown>;
+      resources: Record<string, unknown>;
+    } = {
+      ...manifest,
+      operations,
+      workflows: { ...manifest.workflows },
+      resources: { ...manifest.resources },
+    };
+    const altered = (change: (copy: typeof data) => void): string => {
+      const copy = structuredClone(data);
+      change(copy);
+      return refusal(() => readAppManifest(JSON.stringify(copy)));
+    };
+    expect({
+      // A use of a workflow the manifest doesn't declare.
+      undeclared: altered((copy) => {
+        copy.workflows = {};
+      }).includes("doesn't declare"),
+      // A workflow filed among an action's resources.
+      asResource: altered((copy) => {
+        copy.resources = copy.workflows;
+        copy.workflows = {};
+      }).includes("isn't an action's resource"),
+      // A query that starts one.
+      byQuery: altered((copy) => {
+        copy.operations["notes.list"]?.uses.push({
+          type: "workflow",
+          alias: "followUp",
+        });
+      }).includes("A query uses nothing"),
+    }).toStrictEqual({
+      undeclared: true,
+      asResource: true,
+      byQuery: true,
+    });
   });
 
   test("uses lists declarations, never names or IDs", () => {
