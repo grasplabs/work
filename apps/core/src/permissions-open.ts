@@ -26,48 +26,74 @@ const lets = async (check: () => Promise<unknown>): Promise<boolean> => {
   }
 };
 
+/** Each resource's answer, by its kind and ID, for one listing. */
+type Answers = Map<string, Promise<boolean>>;
+
 /**
  * Whether `by` may see the independent resources `permission` names (its
  * workflow, store or trigger subject; its workflow object): an admin sees
  * every one; anyone else those they have a role in or manage, each as its
- * own registry decides it.
+ * own registry decides it. Each resource is asked once per listing
+ * (`answers`), however many of its permissions are listed, revoked ones
+ * included.
  */
 const resourcesOpen = async (
   env: Env,
   by: Member,
-  { subject, object }: Permission
+  { subject, object }: Permission,
+  answers: Answers
 ): Promise<boolean> => {
   if (isAdmin(by.role)) {
     return true;
   }
-  const checks: (() => Promise<unknown>)[] = [];
+  const asked = async (
+    key: string,
+    check: () => Promise<unknown>
+  ): Promise<boolean> => {
+    let answer = answers.get(key);
+    if (answer === undefined) {
+      answer = lets(check);
+      answers.set(key, answer);
+    }
+    return await answer;
+  };
+  const checks: Promise<boolean>[] = [];
   if (subject.type === "workflow") {
     checks.push(
-      async () => await requireWorkflowRole(env, by, subject.workflowId, "user")
+      asked(
+        `workflow:${subject.workflowId}`,
+        async () =>
+          await requireWorkflowRole(env, by, subject.workflowId, "user")
+      )
     );
   }
   if (subject.type === "store") {
     checks.push(
-      async () => await requireStoreManager(env, by, subject.storeId)
+      asked(
+        `store:${subject.storeId}`,
+        async () => await requireStoreManager(env, by, subject.storeId)
+      )
     );
   }
   if (subject.type === "trigger") {
     checks.push(
-      async () => await requireTriggerManager(env, by, subject.triggerId)
+      asked(
+        `trigger:${subject.triggerId}`,
+        async () => await requireTriggerManager(env, by, subject.triggerId)
+      )
     );
   }
   if (object.type === "workflow") {
     checks.push(
-      async () => await requireWorkflowRole(env, by, object.workflowId, "user")
+      asked(
+        `workflow:${object.workflowId}`,
+        async () =>
+          await requireWorkflowRole(env, by, object.workflowId, "user")
+      )
     );
   }
-  for (const check of checks) {
-    // oxlint-disable-next-line no-await-in-loop -- at most two, each a point lookup
-    if (!(await lets(check))) {
-      return false;
-    }
-  }
-  return true;
+  const open = await Promise.all(checks);
+  return open.every(Boolean);
 };
 
 /**
@@ -97,13 +123,14 @@ export const permissionsOpenTo = async (
   ]);
   const readable = await appsReadableBy(env, by, [...new Set(named)]);
   const open: Permission[] = [];
+  const answers: Answers = new Map();
   for (const permission of listed) {
     const { subject: of, object } = permission;
     const appsOpen =
       (of.type !== "app" || readable.has(of.appId)) &&
       (object.type !== "app" || readable.has(object.appId));
     // oxlint-disable-next-line no-await-in-loop -- each listed permission's own resources
-    if (appsOpen && (await resourcesOpen(env, by, permission))) {
+    if (appsOpen && (await resourcesOpen(env, by, permission, answers))) {
       open.push(permission);
     }
   }

@@ -1070,6 +1070,46 @@ describe("permissions of independent resources", () => {
       detail: grantEvent?.detail.workflowId,
     }).toStrictEqual({ ada: true, bob: false, detail: workflow.id });
   });
+
+  it("are listed with each workflow's role asked once, however many of its permissions there are", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const agentGrant = async () =>
+      await granted(
+        ada,
+        admin,
+        startsOn(
+          { type: "agent", agentId: agentIdSchema.parse(`agent-${unique()}`) },
+          workflow.id
+        )
+      );
+    // How many statements one listing of Ada's sends to the database.
+    const readsOfListing = async () => {
+      let reads = 0;
+      const counting: D1Database = new Proxy(env.DB, {
+        get: (target, name): unknown => {
+          const value: unknown = Reflect.get(target, name);
+          if (name === "prepare" && typeof value === "function") {
+            return (query: string): unknown => {
+              reads += 1;
+              return Reflect.apply(value, target, [query]);
+            };
+          }
+          return typeof value === "function"
+            ? (...args: unknown[]): unknown =>
+                Reflect.apply(value, target, args)
+            : value;
+        },
+      });
+      await permissionsOpenTo({ ...env, DB: counting }, ada);
+      return reads;
+    };
+    await agentGrant();
+    const few = await readsOfListing();
+    await Promise.all(Array.from({ length: 12 }, agentGrant));
+    await expect(readsOfListing()).resolves.toBe(few);
+  });
 });
 
 /** Workflow `id`'s policy generation, as stored. */
