@@ -253,7 +253,9 @@ export const startAppBinding = async (
   env: Env,
   authority: Authority,
   alias: unknown,
-  request: unknown
+  request: unknown,
+  /** What else the start's audit event names (the agent that had it made). */
+  noted?: Readonly<Record<string, string>>
 ): Promise<WorkflowStart> => {
   if (authority.subject.type !== "app" || typeof alias !== "string") {
     throw workflowResourceErrors.create("workflow.app_binding_unavailable");
@@ -283,6 +285,7 @@ export const startAppBinding = async (
     row.workflowResourceId,
     { version: row.workflowResourceVersion, input, key },
     sql`EXISTS (SELECT 1 FROM app_workflow_bindings
-      WHERE id = ${row.id} AND status = 'active')`
+      WHERE id = ${row.id} AND status = 'active')`,
+    noted
   );
 };

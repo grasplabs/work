@@ -252,7 +252,9 @@ export interface ActionCtx<Uses extends readonly Use[] = readonly []> {
    * has admitted the start durably, not once the run ends. Called again
    * under the same idempotency key, the action gets the same start back,
    * matched by its place among the action's starts, as its mutations and
-   * resource requests are by theirs.
+   * resource requests are by theirs. Keep that order a function of the
+   * input: starts made at once, in whichever order they happen to land
+   * (`Promise.race`), can swap places on the second call.
    */
   readonly startWorkflow: StartWorkflow<Uses>;
 }

@@ -1,22 +1,35 @@
 import { delegateActorOf } from "@grasp-os/shared/audit";
+import type { AuditActor } from "@grasp-os/shared/audit";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
+import type { AppId, ChatId, WorkspaceId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import {
+  coreStartKeyPrefix,
   workflowResourceErrors,
   workflowStartIntentSchema,
 } from "@grasp-os/shared/workflow-resources";
+import type {
+  WorkflowStart,
+  WorkflowStartIntent,
+} from "@grasp-os/shared/workflow-resources";
 import { drizzle } from "drizzle-orm/d1";
 
+import { chatAuthority, chatContext } from "./agent-scope.ts";
 import { startAppBinding } from "./app-workflow-bindings.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { appHost } from "./durable-objects.ts";
 import type { WorkflowStarts } from "./operations.ts";
+import { defaultMaxAttempts } from "./outbox-delivery.ts";
 import type {
   OutboxConsumer,
   OutboxConsumers,
   OutboxEntry,
 } from "./outbox-delivery.ts";
+import { grantedPermissions } from "./permissions.ts";
+import { receiptOf } from "./workflow-starts.ts";
 
 // Starting workflows from an App's server functions (spec 7.4, 9.5): an
 // action's `ctx.startWorkflow`, made as it runs, and a mutation's
@@ -32,12 +45,23 @@ import type {
 //   or anyone else; the intent carries the principal core resolved as the
 //   mutation ran, and App code can't set it.
 // - A start on authority that changed: the App's own `start` grant, from
-//   the App version whose code made or staged the start, the person's
-//   role in the App, the binding, and everything the workflow's version
-//   needs are all read again as each start is admitted, by the one
-//   admitting statement. A mutation's start, dispatched later, is decided
-//   then: a grant revoked or a person removed since the commit starts
-//   nothing, and the refusal is audited.
+//   the App version whose code made or staged the start, that version's
+//   release not revoked, the person's role in the App, the binding, and
+//   everything the workflow's version needs are all read again as each
+//   start is admitted, by the one admitting statement. A start an agent's
+//   call staged needs the agent's permission on the App again too. A
+//   mutation's start, dispatched later, is decided then: authority lost
+//   since the commit starts nothing, and the refusal is audited.
+// - Restricted data carried into a run: an App that read restricted data
+//   starts no workflow (`workflow.start_restricted`), now or from its
+//   outbox, until independent runs carry the flag themselves (GRA-570).
+//   An agent in a restricted chat restricts the App before it writes
+//   there (agent-apps.ts), so the same holds for its calls.
+// - A benign change racing a dispatch (a parameter edit, a member added):
+//   the admitting statement refuses a start whose decision went stale as
+//   `workflow.start_denied`, so the dispatch decides again before it
+//   takes that for an answer; only a refusal a fresh decision repeats
+//   settles the entry.
 // - An undeclared workflow: the operation host starts only an alias the
 //   function lists and the App declares (operations.ts); an alias the App
 //   doesn't bind is `workflow.app_binding_unavailable`.
@@ -46,36 +70,85 @@ import type {
 //   commit the store refuses (a stale fence, a deadline, a revision guard,
 //   stale reads) writes none (store-host.ts).
 // - A dispatch that dies after the start, before its entry is settled:
-//   the entry is handed over again, under the same ID and with the same
-//   intent, and its start's key, derived from the mutation's receipt and
-//   its place among the commit's starts, makes the same start again,
-//   which answers the receipt already admitted and the run under it,
-//   sending that run to the engine if it never got there
-//   (`startResourceRun`). Two dispatches at once land one receipt (the
-//   receipts' key is unique).
-// - An intent that doesn't read as one (a store's row damaged, a kind
-//   staged by something else): settled as `outbox.unreadable`, never
-//   guessed at.
+//   the entry is handed over again, under the same ID, and its start's key
+//   is that ID (which names the commit, so a mutation key the store lets
+//   commit again long after never meets an earlier start): the same start
+//   again, which answers the receipt already admitted and the run under
+//   it, sending that run to the engine if it never got there. Two
+//   dispatches at once land one receipt (the receipts' key is unique). A
+//   dispatch refused after an earlier one admitted the start (a grant
+//   revoked in between) finds the receipt and settles as delivered.
+// - A hand-over that timed out: the dispatch stops at its signal before it
+//   starts or audits anything, so the one handed over again decides.
+// - A start dropped unrecorded: an intent that doesn't read as one, a
+//   refused one, and one whose last attempt failed are each audited.
+
+/** The agent whose call of the App a start comes from (agent-apps.ts). */
+export interface CallingAgent {
+  readonly agentId: string;
+  readonly workspaceId: WorkspaceId;
+  readonly chatId: ChatId;
+}
 
 /** The handle of an App start, as App code gets it. */
-const handleOf = (start: {
-  id: string;
-  runId: string | null;
-  version: number;
-}) => ({ startId: start.id, runId: start.runId, version: start.version });
+const handleOf = (start: WorkflowStart) => ({
+  startId: start.id,
+  runId: start.runId,
+  version: start.version,
+});
+
+/** The start key core derives, for an action's start or a commit's. */
+export const coreStartKey = (
+  kind: "action" | "after-commit",
+  key: string
+): string => `${coreStartKeyPrefix}${kind}:${key}`;
+
+/** What a start's audit events say of the agent behind it, if any. */
+const notedOf = (agent: CallingAgent | null): Record<string, string> =>
+  agent === null ? {} : { agent: agent.agentId };
+
+/**
+ * Starts the workflow App `authority` binds under `alias`: refused while
+ * the App is restricted (see the header), audited naming `agent`.
+ */
+const startAsApp = async (
+  env: Env,
+  authority: Authority,
+  alias: string,
+  request: { input: Json; key: string },
+  agent: CallingAgent | null
+): Promise<WorkflowStart> => {
+  if (authority.subject.type !== "app") {
+    throw workflowResourceErrors.create("workflow.start_denied");
+  }
+  if (await appHost(env, authority.subject.appId).isRestricted()) {
+    throw workflowResourceErrors.create("workflow.start_restricted");
+  }
+  return await startAppBinding(env, authority, alias, request, notedOf(agent));
+};
 
 /**
  * How core starts the workflows App code binds, for an invocation acting
- * as `authority` (the App, its version, the person): each through the
- * App's binding of the alias, with the key the operation host derived.
+ * as `authority` (the App, its version, the person), made by `agent`'s
+ * call when an agent made it: each through the App's binding of the
+ * alias, with the key the operation host derived.
  */
 export const appWorkflowStarts = (
   env: Env,
-  authority: Authority
+  authority: Authority,
+  agent: CallingAgent | null = null
 ): WorkflowStarts => ({
   start: async (alias, input, key) =>
-    handleOf(await startAppBinding(env, authority, alias, { input, key })),
-  intent: (alias, input, key): Json => {
+    handleOf(
+      await startAsApp(
+        env,
+        authority,
+        alias,
+        { input, key: coreStartKey("action", key) },
+        agent
+      )
+    ),
+  intent: (alias, input): Json => {
     if (
       authority.subject.type !== "app" ||
       authority.appVersion === undefined
@@ -87,8 +160,15 @@ export const appWorkflowStarts = (
       appVersion: authority.appVersion,
       principal: authority.onBehalfOf,
       alias,
-      key,
       input,
+      agent:
+        agent === null
+          ? null
+          : {
+              agentId: agent.agentId,
+              workspaceId: agent.workspaceId,
+              chatId: agent.chatId,
+            },
     };
     // As its dispatch will read it, or not staged at all.
     workflowStartIntentSchema.parse(intent);
@@ -100,15 +180,75 @@ export const appWorkflowStarts = (
 const undeliverable = (code: string) => ({ undeliverable: code });
 
 /**
+ * How many times a dispatch decides a start that a decision gone stale
+ * refused, before it takes the refusal as the answer.
+ */
+const decisions = 3;
+
+/** Throws once the hand-over's time is up: another has it now. */
+const requireLive = (signal: AbortSignal): void => {
+  if (signal.aborted) {
+    throw new Error("The hand-over's time ran out");
+  }
+};
+
+/**
+ * Refuses (`workflow.start_denied`) a start an agent's call staged, once
+ * the agent no longer holds `write` on App `app` for the person, as it
+ * needed to make the call.
+ */
+const requireAgentAllowed = async (
+  env: Env,
+  app: AppId,
+  principal: string,
+  agent: WorkflowStartIntent["agent"]
+): Promise<void> => {
+  if (agent === null) {
+    return;
+  }
+  const permissions = await grantedPermissions(
+    env,
+    chatAuthority({ agentId: agent.agentId, personId: principal }),
+    chatContext(agent)
+  );
+  const allowed = permissions.some(
+    ({ object, actions }) =>
+      object.type === "app" && object.appId === app && actions.includes("write")
+  );
+  if (!allowed) {
+    throw workflowResourceErrors.create("workflow.start_denied");
+  }
+};
+
+/** Records what became of an intent its dispatch didn't deliver. */
+const audited = async (
+  env: Env,
+  actor: AuditActor,
+  action: string,
+  target: { type: string; id: string },
+  detail: Record<string, string | number | null>
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, { actor, action, target, detail }),
+  ]);
+};
+
+/** Whether a refusal is one a later attempt may not repeat. */
+const isTransient = (error: unknown): boolean =>
+  !isExpectedError(error) ||
+  workflowResourceErrors.codeOf(error) === "workflow.run_limit";
+
+/**
  * Makes the start a committed mutation staged (see the header): delivered
  * once its start is admitted, or was already; settled undeliverable for a
- * start the workflow's configuration or the App's authority refuses now,
- * with its code, and that refusal audited; handed over again later for
- * anything else, the person's live runs at their limit included.
+ * start refused now, with its code, and that refusal audited; handed over
+ * again later for anything else, the person's live runs at their limit
+ * included, audited once its last attempt fails.
  */
 export const dispatchStartIntent = async (
   env: Env,
-  entry: Pick<OutboxEntry, "id" | "intent">
+  entry: Pick<OutboxEntry, "id" | "intent" | "attempts" | "signal">
 ): Promise<"delivered" | { undeliverable: string }> => {
   const read =
     entry.intent.kind === "workflow.start"
@@ -117,46 +257,92 @@ export const dispatchStartIntent = async (
   const app = appIdSchema.safeParse(read?.data?.app);
   if (read?.success !== true || !app.success) {
     log.error("workflow.start_intent_unreadable", { entry: entry.id });
+    requireLive(entry.signal);
+    await audited(
+      env,
+      { type: "system" },
+      "workflow.start_intent.unreadable",
+      { type: "outbox_entry", id: entry.id },
+      { entry: entry.id }
+    );
     return undeliverable("outbox.unreadable");
   }
-  const { appVersion, principal, alias, key, input } = read.data;
+  const { appVersion, principal, alias, input, agent } = read.data;
   const authority: Authority = {
     subject: { type: "app", appId: app.data },
     onBehalfOf: principal,
     mode: "interactive",
     appVersion,
   };
-  try {
-    await startAppBinding(env, authority, alias, { input, key });
-    return "delivered";
-  } catch (error) {
-    const code = workflowResourceErrors.codeOf(error);
-    if (code === undefined || code === "workflow.run_limit") {
-      if (code === undefined) {
-        log.error("workflow.start_intent_failed", {
-          entry: entry.id,
-          ...errorFields(error),
-        });
+  const key = coreStartKey("after-commit", entry.id);
+  const detail = {
+    entry: entry.id,
+    appVersion,
+    principal,
+    alias,
+    ...notedOf(agent),
+  };
+  const target = { type: "app", id: app.data };
+  let refusal: unknown;
+  for (let decision = 1; decision <= decisions; decision += 1) {
+    requireLive(entry.signal);
+    try {
+      // One decision after the other: each only once the last went stale.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await requireAgentAllowed(env, app.data, principal, agent);
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await startAsApp(env, authority, alias, { input, key }, agent);
+      return "delivered";
+    } catch (error) {
+      refusal = error;
+      if (
+        isTransient(error) ||
+        workflowResourceErrors.codeOf(error) !== "workflow.start_denied"
+      ) {
+        break;
       }
-      throw error;
     }
-    const db = drizzle(env.DB);
-    await auditedBatch(env, db, [
-      outboxed(db, {
-        actor: delegateActorOf(authority),
-        action: "workflow.start_intent.refused",
-        target: { type: "app", id: app.data },
-        detail: {
-          entry: entry.id,
-          appVersion,
-          principal,
-          alias,
-          reason: code,
-        },
-      }),
-    ]);
-    return undeliverable(code);
   }
+  if (isTransient(refusal)) {
+    if (!isExpectedError(refusal)) {
+      log.error("workflow.start_intent_failed", {
+        entry: entry.id,
+        ...errorFields(refusal),
+      });
+    }
+    // Its last attempt: recorded before the outbox gives it up.
+    if (entry.attempts + 1 >= defaultMaxAttempts) {
+      requireLive(entry.signal);
+      await audited(
+        env,
+        delegateActorOf(authority),
+        "workflow.start_intent.abandoned",
+        target,
+        detail
+      );
+    }
+    throw refusal;
+  }
+  // Admitted by an earlier dispatch that died before settling: delivered.
+  const admitted = await receiptOf(
+    env,
+    { type: "app", id: app.data },
+    principal,
+    key
+  );
+  if (admitted !== undefined) {
+    return "delivered";
+  }
+  const code = isExpectedError(refusal) ? refusal.code : "internal.unexpected";
+  requireLive(entry.signal);
+  await audited(
+    env,
+    delegateActorOf(authority),
+    "workflow.start_intent.refused",
+    target,
+    { ...detail, reason: code }
+  );
+  return undeliverable(code);
 };
 
 /** The consumer of a store outbox's workflow starts. */

@@ -183,8 +183,11 @@ import { readConsistently, StoreReader } from "./store-reader.ts";
 //   each (workflow-start-intents.ts).
 // - A start is made twice: an action's start takes a key derived from
 //   the action's call key and its place among the action's starts, and a
-//   mutation's from its receipt and its place among the commit's starts,
-//   so the same start made again answers the receipt it already has.
+//   mutation's is its outbox entry's ID, so the same start made again
+//   answers the receipt it already has.
+// - A mutation spins on starts to make core read without end: a start
+//   takes its place among the commit's starts before it is admitted, so
+//   one past the bound is refused before anything is read.
 
 /**
  * How core starts the workflows an App binds, for one invocation: the
@@ -205,7 +208,7 @@ export interface WorkflowStarts {
    * What a mutation's commit stages in its outbox to start that workflow
    * once it has committed (`workflowStartIntentSchema`).
    */
-  readonly intent: (alias: string, input: Json, key: string) => Json;
+  readonly intent: (alias: string, input: Json) => Json;
 }
 
 /** Who an invocation is for, as core resolved it: never App code. */
@@ -1696,11 +1699,10 @@ const workflowStart = (
   const declared = operation.uses.some(
     (use) => use.type === "workflow" && use.alias === alias
   );
+  const workflows = run.app.manifest.workflows ?? {};
   const declaration =
-    declared &&
-    typeof alias === "string" &&
-    Object.hasOwn(run.app.manifest.workflows, alias)
-      ? run.app.manifest.workflows[alias]
+    declared && typeof alias === "string" && Object.hasOwn(workflows, alias)
+      ? workflows[alias]
       : undefined;
   const args = jsonOf(request.args);
   if (
@@ -1755,6 +1757,10 @@ const startFailure = (error: unknown, requestId: string): Error => {
   }
   if (code === "workflow.start_conflict") {
     return hostError(operationErrors.create("resource.idempotency_conflict"));
+  }
+  // The App read restricted data: said as it is, so its builders know why.
+  if (code === "workflow.start_restricted") {
+    return hostError(workflowResourceErrors.create(code));
   }
   if (code !== undefined) {
     return hostError(operationErrors.create("resource.unavailable"));
@@ -2524,14 +2530,15 @@ const runMutation = async (
   if ("outcome" in claimed) {
     return claimed.outcome.result;
   }
-  const { receiptId } = claimed.held;
   for (let attempt = 0; attempt <= queryMaxReruns; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one run after the other
     const scope = await scopeOf(compiled, invocation, roles);
     const staging = stagingFor(compiled, operation, Date.now());
     // The workflows it starts once it commits, staged by this run alone: a
-    // run again for stale reads stages its own from nothing.
+    // run again for stale reads stages its own from nothing. A start holds
+    // its place from before it is admitted (`placed`).
     const intents: NonNullable<Commit["intents"]> = [];
+    let placed = 0;
     const reader = new StoreReader(store, scope, staging.preview);
     const budget = runReads(run);
     const spend = () => {
@@ -2583,26 +2590,27 @@ const runMutation = async (
             if (starts === undefined) {
               throw operationErrors.create("resource.unavailable");
             }
-            // The one gate, as for a resource request: staged only while
-            // the caller may still act. Its commit is admitted again, and
-            // the start itself once more as it is dispatched.
-            await admit(invocation);
-            // Counted once admitted, with nothing awaited before the push:
-            // starts staged at once can't pass the bound together.
-            if (intents.length >= commitMaxIntents) {
+            // Its place first, synchronously, so a start past the bound is
+            // refused before the gate reads anything.
+            if (placed >= commitMaxIntents) {
               throw operationErrors.create("operation.call_limit", {
                 maxStarts: commitMaxIntents,
               });
             }
-            // Its key: the receipt's, and its place among the commit's
-            // starts, so every dispatch of it is the same start.
+            placed += 1;
+            try {
+              // The one gate, as for a resource request: staged only while
+              // the caller may still act. Its commit is admitted again, and
+              // the start itself once more as it is dispatched.
+              await admit(invocation);
+            } catch (error) {
+              placed -= 1;
+              throw error;
+            }
+            // Its key is its outbox entry's ID, given as it commits.
             intents.push({
               kind: "workflow.start",
-              data: starts.intent(
-                start.alias,
-                start.input,
-                `after-commit:${receiptId}:${intents.length}`
-              ),
+              data: starts.intent(start.alias, start.input),
             });
             return null;
           },

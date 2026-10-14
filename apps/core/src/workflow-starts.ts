@@ -11,6 +11,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
+  coreStartKeyPrefix,
   maxLiveRunsPerPrincipal,
   workflowResourceErrors,
   workflowStartSchema,
@@ -75,6 +76,12 @@ import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 //   then (and, for an App, the version approved then); a revoked grant, or
 //   one asked for again when an unapproved App version was made current,
 //   admits nothing (`workflow.start_denied`).
+// - A revoked App release: an App's start requires its version's release
+//   not revoked, read in the admitting statement, so the kill switch stops
+//   starts its code made, or staged before, as it stops its calls.
+// - A caller taking one of core's keys: keys core derives (an App
+//   action's starts, a committed mutation's) begin with
+//   `coreStartKeyPrefix`, which a person's or an agent's key may not.
 // - Revocation racing a start: the check and the receipt are one
 //   statement, so of a revocation and a start, the start lands only if it
 //   was admitted before the revocation committed. A start decided before
@@ -510,10 +517,14 @@ const ruleOf = async (
         principal: onBehalfOf,
         actor: delegateActorOf(invoker.authority),
         // The App's own grant, from a version the App has (one no admin
-        // approved changes nothing), for someone who may use the App now.
+        // approved changes nothing) whose release isn't revoked, for
+        // someone who may use the App now.
         holds: sql`(${appRoleSql(onBehalfOf, subject.appId)}
           AND EXISTS (SELECT 1 FROM app_versions AS code
             WHERE code.app_id = ${subject.appId} AND code.version = ${appVersion})
+          AND NOT EXISTS (SELECT 1 FROM sdk_release_manifests AS sealed
+            WHERE sealed.app_id = ${subject.appId} AND sealed.version = ${appVersion}
+              AND sealed.revoked_at IS NOT NULL)
           AND ${grantSql(
             allowingPermissionSql(subject, appVersion, object, "start")
           )})`,
@@ -640,7 +651,7 @@ const startOf = (
  * is one: keys are an invoker's for each person it acts for, so one person
  * never gets another's start through the same App, agent or trigger.
  */
-const receiptOf = async (
+export const receiptOf = async (
   env: Env,
   invoker: WorkflowStart["invoker"],
   principal: string,
@@ -713,6 +724,15 @@ export const decideWorkflowStart = async (
   );
   if (typeof id !== "string" || id.length === 0 || id.length > 128) {
     throw workflowResourceErrors.create("workflow.resource_unavailable");
+  }
+  // A key a person or an agent chose never takes one core derives.
+  if (
+    (invoker.type === "person" || invoker.type === "agent") &&
+    key.startsWith(coreStartKeyPrefix)
+  ) {
+    throw workflowResourceErrors.create("workflow.start_invalid", {
+      issues: [`key: Keys beginning with "${coreStartKeyPrefix}" are core's.`],
+    });
   }
   const rule = await ruleOf(env, invoker, id, version);
   if (invoker.type !== "person") {
@@ -872,7 +892,9 @@ const underRunLimit = (authorization: StartAuthorization): SQL =>
 export const admitWorkflowStart = async (
   env: Env,
   authorization: StartAuthorization,
-  also: SQL = sql`1`
+  also: SQL = sql`1`,
+  /** What else its audit events name (the agent that had it made, say). */
+  noted: Readonly<Record<string, string>> = {}
 ): Promise<WorkflowStart> => {
   const id = crypto.randomUUID();
   const createdAt = new Date();
@@ -900,11 +922,13 @@ export const admitWorkflowStart = async (
     null,
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
   const detail = {
+    ...noted,
     receipt: id,
     version: authorization.version,
     manifestHash: authorization.manifestHash,
     invokerType: authorization.invoker.type,
     invoker: authorization.invoker.id,
+    originAppVersion: authorization.originAppVersion,
     principal: authorization.principal,
     generation: authorization.generation,
     inputHash: authorization.inputHash,
@@ -1008,13 +1032,14 @@ export const startWorkflow = async (
   invoker: StartInvoker,
   id: unknown,
   request: unknown,
-  also?: SQL
+  also?: SQL,
+  noted?: Readonly<Record<string, string>>
 ): Promise<WorkflowStart> => {
   const decision = await decideWorkflowStart(env, invoker, id, request);
   const start =
     "start" in decision
       ? decision.start
-      : await admitWorkflowStart(env, decision.authorization, also);
+      : await admitWorkflowStart(env, decision.authorization, also, noted);
   // Its run, sent to the engine while it is still starting: a start sent
   // again finishes one core stopped in the middle of (resource-runs.ts).
   return { ...start, runId: await startResourceRun(env, start.id) };
