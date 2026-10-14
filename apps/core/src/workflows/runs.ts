@@ -531,12 +531,14 @@ const rootPlace = { rootRunId: null, depth: 0 } as const;
  * root (or the parent itself, when it is a root), one deeper than it. Read
  * from the parent's row, so a lineage holds however deep its runs nest,
  * and admitted against the lineage's quotas (quotas.ts, `admitChild`),
- * which takes one of its descendant runs. A run started by no other is a
+ * which takes one of its descendant runs, once for a `trigger`'s key
+ * however often its delivery is admitted. A run started by no other is a
  * root (`rootPlace`).
  */
 const placeUnder = async (
   env: Env,
-  parent: RunId | undefined
+  parent: RunId | undefined,
+  trigger: RunRequest["trigger"]
 ): Promise<ChildPlace | typeof rootPlace> => {
   if (parent === undefined) {
     return rootPlace;
@@ -545,7 +547,7 @@ const placeUnder = async (
   if (row === undefined) {
     throw new Error(`No run ${parent} to start a run under`);
   }
-  return await admitChild(env, row);
+  return await admitChild(env, row, trigger?.key);
 };
 
 /**
@@ -568,6 +570,30 @@ const deliveredBefore = async (
   }
   await resendStart(env, started);
   return toRun(env, started);
+};
+
+/**
+ * The run a trigger's key already started, for a delivery tried again of
+ * a run started under another (mail-stamps.ts): found before the start
+ * is admitted, so it takes no other slot of the lineage, which a delivery
+ * tried again until it fits could use up. None for any other start.
+ */
+const deliveredUnder = async (
+  env: Env,
+  trigger: RunRequest["trigger"],
+  parent: RunId | undefined
+): Promise<WorkflowRun | undefined> => {
+  if (trigger === undefined || parent === undefined) {
+    return undefined;
+  }
+  const before = await drizzle(env.DB)
+    .select({ id: workflowRuns.id })
+    .from(workflowRuns)
+    .where(eq(workflowRuns.triggerKey, trigger.key))
+    .get();
+  return before === undefined
+    ? undefined
+    : await deliveredBefore(env, trigger.key, before.id);
 };
 
 /**
@@ -647,9 +673,13 @@ export const startRun = async (
   if (!hasWorkflow(await versionFiles(env, app, version), workflow)) {
     throw workflowErrors.create("workflow.not_found", { workflow, version });
   }
+  const again = await deliveredUnder(env, trigger, parent);
+  if (again !== undefined) {
+    return again;
+  }
   // Admitted last, once nothing else refuses the start: the slot it takes
   // in its lineage is never given back.
-  const { rootRunId, depth } = await placeUnder(env, parent);
+  const { rootRunId, depth } = await placeUnder(env, parent, trigger);
   const row = {
     id: crypto.randomUUID(),
     appId: app,

@@ -28,6 +28,7 @@ import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
 import { StoresRpc } from "./stores-rpc.ts";
 import { TemplatesRpc } from "./templates-rpc.ts";
+import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
 import { WorkflowsRpc } from "./workflows/rpc.ts";
 
 /**
@@ -62,6 +63,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #models: ModelsRpc;
   readonly #stores: StoresRpc;
   readonly #pendingActions: PendingActionsRpc;
+  readonly #unknownOutcomes: UnknownOutcomesRpc;
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
   readonly #dashboard: DashboardRpc;
@@ -94,6 +96,7 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#models = new ModelsRpc(env, full);
     this.#stores = new StoresRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
+    this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
     this.#dashboard = new DashboardRpc(env, full);
@@ -201,6 +204,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get pendingActions(): PendingActionsRpc {
     return this.#pendingActions;
+  }
+
+  get unknownOutcomes(): UnknownOutcomesRpc {
+    return this.#unknownOutcomes;
   }
 
   get signals(): SignalsRpc {

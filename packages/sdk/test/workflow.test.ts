@@ -232,8 +232,11 @@ describe("step calls", () => {
       ["go", { description: "Go", key: "\uD800" }],
       ["go", { description: "Go", retries: { limit: -1 } }],
       ["go", { description: "Go", retries: { limit: 1, delay: 1.5 } }],
+      // More attempts than the platform's five, its first included.
+      ["go", { description: "Go", retries: { limit: 5 } }],
       ["go", { description: "Go", timeout: "400 days" }],
-      // Past what an attempt may run on the engine, though a sleep may wait it.
+      // Past an attempt's minute, though a sleep may wait it.
+      ["go", { description: "Go", timeout: "61 seconds" }],
       ["go", { description: "Go", timeout: "15 minutes" }],
     ];
 
@@ -248,12 +251,12 @@ describe("step calls", () => {
     }
   });
 
-  it("take an attempt timeout of up to 14 minutes, and longer sleeps", async () => {
+  it("take an attempt timeout of up to a minute, up to four retries, and longer sleeps", async () => {
     const { engine, steps } = createFakeEngine();
     await withStep(async (step) => {
       await step.do(
         "go",
-        { description: "Go", timeout: "14 minutes" },
+        { description: "Go", timeout: "1 minute", retries: { limit: 4 } },
         async () => 1
       );
       await step.sleep("pause", {

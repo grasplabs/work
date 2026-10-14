@@ -62,6 +62,7 @@ import {
   kitModuleName,
   kitStylesheet,
   ownEntry,
+  screenReferences,
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
@@ -301,11 +302,15 @@ const buildCss = async (
  */
 export const checkScreens = (files: Record<string, string>): Diagnostic[] => {
   const app = buildFiles(files);
-  const tooMuch = limitErrors(app);
+  const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
     return tooMuch;
   }
-  return [...typeCheck(app, kit.types), ...lint(app, kit)];
+  // The host wrote the references; the design system is the App's to keep.
+  const own = Object.fromEntries(
+    Object.entries(app).filter(([path]) => path !== screenReferences.path)
+  );
+  return [...typeCheck(app, kit.types), ...lint(own, kit)];
 };
 
 /**
@@ -316,7 +321,7 @@ export const buildScreens = async (
   files: Record<string, string>
 ): Promise<ScreenBuild> => {
   const app = buildFiles(files);
-  const tooMuch = limitErrors(app);
+  const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
@@ -364,7 +369,9 @@ export const buildScreens = async (
     [...imports.values()].flatMap(({ kit: imported }) => [...imported])
   );
   const css = await buildCss(
-    sources.map(([, source]) => source),
+    sources
+      .filter(([path]) => path !== screenReferences.path)
+      .map(([, source]) => source),
     kitModules
   );
   return {

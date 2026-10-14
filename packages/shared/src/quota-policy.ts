@@ -12,14 +12,17 @@ import { platformLimits } from "./platform-limits.ts";
 // Only the limits core reads through the policy are listed: setting one
 // that nothing enforces would claim a limit that doesn't hold. Each is
 // read at the moment of each admission (a run's step, a step's attempt,
-// a child run's start), never kept with what was admitted before, so a
-// changed policy applies to every admission after it, and to none before.
+// a child run's start, a provider request to a model), never kept with
+// what was admitted before, so a changed policy applies to every admission
+// after it, and to none before.
 
 /**
  * The limits a deployment's operator may lower. Each is a ceiling core
  * checks as it admits work: a run's steps, a step's attempts (its first
- * included), the levels and descendant runs of a run lineage, and the
- * lineage's active execution and age.
+ * included), the levels and descendant runs of a run lineage, the
+ * lineage's active execution and age, the provider requests it sends to
+ * models (core's model ledger, model-budgets.ts), and the host calls its
+ * attempts make.
  */
 export const lowerableLimits = [
   "workflowSteps",
@@ -28,6 +31,8 @@ export const lowerableLimits = [
   "workflowDescendantRuns",
   "workflowActiveMs",
   "workflowAgeMs",
+  "lineageModelRequests",
+  "lineageHostCalls",
 ] as const;
 
 export type LowerableLimit = (typeof lowerableLimits)[number];
@@ -56,6 +61,8 @@ export const quotaLimitsSchema = z.strictObject({
     workflowDescendantRuns: lowered("workflowDescendantRuns"),
     workflowActiveMs: lowered("workflowActiveMs"),
     workflowAgeMs: lowered("workflowAgeMs"),
+    lineageModelRequests: lowered("lineageModelRequests"),
+    lineageHostCalls: lowered("lineageHostCalls"),
   } satisfies Record<LowerableLimit, z.ZodType>),
 });
 
@@ -82,6 +89,8 @@ export const quotaPolicyOf = (
     workflowDescendantRuns: platformLimits.workflowDescendantRuns,
     workflowActiveMs: platformLimits.workflowActiveMs,
     workflowAgeMs: platformLimits.workflowAgeMs,
+    lineageModelRequests: platformLimits.lineageModelRequests,
+    lineageHostCalls: platformLimits.lineageHostCalls,
   };
   if (configured === undefined) {
     return { generation: 0, limits };

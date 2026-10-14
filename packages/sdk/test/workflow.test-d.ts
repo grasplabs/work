@@ -91,7 +91,7 @@ await step.do(
   {
     description: "Match",
     retries: { limit: 2, delay: "30 seconds", backoff: "exponential" },
-    timeout: "5 minutes",
+    timeout: "30 seconds",
   },
   async () => 1
 );

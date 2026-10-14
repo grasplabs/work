@@ -134,3 +134,9 @@ export type { ScreenManifest } from "./app.ts";
 // told its answer's shape); values are still checked by the descriptor.
 export { jsonSchemaOf } from "./json-schema.ts";
 export type { JsonSchema, JsonSchemaOptions } from "./json-schema.ts";
+
+// The session client as a host makes it (spec 10.7.1): over the host's own
+// transport, one per App session, mounted for the screens it serves. App
+// code never makes one; it gets the platform's from `useClient()`.
+export { GraspClient } from "./client-core.ts";
+export type { ClientTransport } from "./client-core.ts";

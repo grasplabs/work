@@ -6,6 +6,7 @@
 import { appLimits, appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 
 import type { Diagnostic } from "./diagnostic.ts";
+import { screenReferences } from "./kit.ts";
 
 export const screenFile = /^screens\/[\w-]+\.tsx$/u;
 // Folders are plain names, so a path can't step out of `components/`.
@@ -13,7 +14,11 @@ export const componentFile = /^components\/(?:[\w-]+\/)*[\w.-]+\.tsx?$/u;
 /** Types the App's code can use but that aren't code, e.g. its server's. */
 export const declarationFile = /^[\w-]+\.d\.ts$/u;
 
-/** The files a build reads: screens, components and declarations. */
+/**
+ * The files a build reads: screens, components and declarations, and the
+ * references the host generated for the App's server code, which screens
+ * import as `#grasp`.
+ */
 export const buildFiles = (
   files: Record<string, string>
 ): Record<string, string> =>
@@ -22,7 +27,8 @@ export const buildFiles = (
       ([path]) =>
         screenFile.test(path) ||
         componentFile.test(path) ||
-        declarationFile.test(path)
+        declarationFile.test(path) ||
+        path === screenReferences.path
     )
   );
 
@@ -136,9 +142,9 @@ const generatedLimits = {
 const isGenerated = (path: string): boolean => path.startsWith(".grasp/");
 
 /**
- * Why a build of an App's server code (`appCodeFiles`) is more than it
- * takes: the App's own files held to the App's limits (`limitErrors`),
- * the host's generated modules to their own.
+ * Why a build of an App's server code (`appCodeFiles`) or screens
+ * (`buildFiles`) is more than it takes: the App's own files held to the
+ * App's limits (`limitErrors`), the host's generated modules to their own.
  */
 export const appCodeLimitErrors = (
   files: Record<string, string>
