@@ -327,7 +327,27 @@ const deletion = (
           )
         )
     )
-    .onConflictDoNothing();
+    // A key its person freed for one more send (it didn't happen), held
+    // since: spent as this decision says, for that same input only, so
+    // the call made again is told so rather than asked again.
+    .onConflictDoUpdate({
+      target: [
+        idempotentCalls.subjectType,
+        idempotentCalls.subjectId,
+        idempotentCalls.onBehalfOf,
+        idempotentCalls.connectionId,
+        idempotentCalls.action,
+        idempotentCalls.idempotencyKey,
+      ],
+      set: {
+        state: sql`excluded.state`,
+        output: sql`excluded.output`,
+        claimedAt: sql`excluded.claimed_at`,
+        input: null,
+        origin: null,
+      },
+      setWhere: sql`${idempotentCalls.state} = 'freed' AND ${idempotentCalls.inputHash} = excluded.input_hash`,
+    });
   const remove = db.delete(pendingActions).where(still);
   return {
     entry,

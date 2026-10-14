@@ -431,6 +431,43 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     }
   });
 
+  it("fails the step as declined, sending nothing, when its one more send is held for its person and they decline it", async () => {
+    const admin = await personApi("admin");
+    const { mailbox, app, run, unknown } = await waitingRun(admin);
+    // Restricted meanwhile: the send its person lets go waits for them.
+    await appHost(env, appIdSchema.parse(app)).restrict();
+    await admin.api.unknownOutcomes.resolve(
+      unknown.key,
+      "not_happened",
+      unknown.claim
+    );
+    const held = await vi.waitFor(
+      async () => {
+        const [waiting] = await admin.api.pendingActions.list();
+        if (waiting === undefined) {
+          throw new Error("Nothing held yet");
+        }
+        return waiting;
+      },
+      { timeout: 15_000, interval: 100 }
+    );
+    await admin.api.pendingActions.decline(held.id);
+    await finished(run.id);
+    expect({
+      run: await admin.api.workflows.status(run.id),
+      waiting: await admin.api.pendingActions.list(),
+      sent: await sentFrom(mailbox),
+    }).toMatchObject({
+      run: {
+        status: "failed",
+        failure: { error: { code: "connect.declined" } },
+      },
+      waiting: [],
+      // The lost send only.
+      sent: 1,
+    });
+  });
+
   it("runs the step again as its person said, when they resolve it during the last wait before its deadline", async () => {
     const admin = await personApi("admin");
     const { WORKFLOW_UNKNOWN_HOLD_MS: deadline, WORKFLOW_OFF_WAIT_MS: wait } =
