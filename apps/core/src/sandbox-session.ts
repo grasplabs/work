@@ -672,6 +672,9 @@ export const runInSession = async (
 ): Promise<unknown> => {
   signal?.throwIfAborted();
   const id = crypto.randomUUID();
+  // Until its socket is open, a stop (the supervisor's, or its process
+  // waited for) leaves the call unsent: `started: false`. From here on its
+  // call may reach the sandbox, so every failure is one that may have run.
   const socket = await openSession(host, call, id, signal);
   // Every capability by a name of the session's own: the isolate never
   // sees these, only what the sandbox host makes of them.
