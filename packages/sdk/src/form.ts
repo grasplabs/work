@@ -226,6 +226,19 @@ export type TextFieldName<Values> = {
 }[DeepKeys<Values>];
 
 /** What a submission resolves with: the operation's result, or the callback's. */
+/**
+ * `issues` as a refusal's details carry them: each message, and its path
+ * as keys and indexes, as the session client's own refusals do.
+ */
+const issuesOf = (issues: readonly StandardSchemaV1.Issue[]): Json[] =>
+  issues.map(({ message, path }) => ({
+    message,
+    path: (path ?? []).map((segment) => {
+      const key = typeof segment === "object" ? segment.key : segment;
+      return typeof key === "number" ? key : String(key);
+    }),
+  }));
+
 interface Submission {
   /** The normalized arguments, or the schema's output, to send. */
   readonly input: unknown;
@@ -628,8 +641,11 @@ export class FormBinding {
     }
   }
 
-  /** The submission to send: the one whose outcome is unknown, or a new one. */
-  async #prepare(): Promise<Submission | undefined> {
+  /**
+   * The submission to send: the one whose outcome is unknown, or a new
+   * one; or why the values don't pass, as the schema's issues.
+   */
+  async #prepare(): Promise<Submission | { readonly issues: Json[] }> {
     if (this.#uncertain !== undefined) {
       return this.#uncertain;
     }
@@ -650,7 +666,7 @@ export class FormBinding {
                 category: "contract",
               },
       });
-      return undefined;
+      return { issues: issuesOf(checked.issues) };
     }
     return { input: checked.value, key: freshKey() };
   }
@@ -661,9 +677,9 @@ export class FormBinding {
       throw clientError("submission.syncing");
     }
     const submission = await this.#prepare();
-    if (submission === undefined) {
+    if ("issues" in submission) {
       throw clientError("contract.invalid_args", {
-        issues: [],
+        issues: submission.issues,
       });
     }
     this.#set({

@@ -141,4 +141,9 @@ export const useChecks = (): void => {
     defaultValues: { query: "" },
     onSubmit: () => {},
   });
+  // @ts-expect-error -- a local form's values are named fields, not a list
+  void useForm(v.array(v.string()), {
+    defaultValues: ["first"],
+    onSubmit: () => {},
+  });
 };

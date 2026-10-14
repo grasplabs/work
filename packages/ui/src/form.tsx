@@ -145,7 +145,12 @@ const TextFieldShell = <Values,>({
   const id = useId();
   const descriptionId = `${id}-description`;
   const errorId = `${id}-error`;
-  const locked = status.phase === "submitting" || status.phase === "uncertain";
+  // Locked until the saved record arrives too: an edit made while it syncs
+  // would be replaced by the record it adopts.
+  const locked =
+    status.phase === "submitting" ||
+    status.phase === "uncertain" ||
+    status.phase === "syncing";
   return (
     // SAFETY: a text field's name is one of the form's keys (TextFieldName).
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

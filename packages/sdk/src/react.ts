@@ -165,7 +165,9 @@ interface UseForm {
     reference: Reference,
     options: OperationFormOptions<Reference>
   ): GraspForm<ArgsOf<Reference>, ReturnOf<Reference>>;
-  <Schema extends StandardSchemaV1, Result>(
+  // A form's values are named fields: an array or a single value has none
+  // to render or edit, so a local form's schema takes an object.
+  <Schema extends StandardSchemaV1<Readonly<Record<string, unknown>>>, Result>(
     schema: Schema,
     options: SchemaFormOptions<Schema, Result>
   ): GraspForm<StandardSchemaV1.InferInput<Schema>, Result>;

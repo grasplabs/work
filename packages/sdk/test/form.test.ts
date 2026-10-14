@@ -110,3 +110,31 @@ describe("a record form and the records it is supplied", () => {
     expect(form.state.values).toMatchObject({ title: "Second" });
   });
 });
+
+describe("a form whose values don't pass", () => {
+  it("rejects its submit with the issues it found, sending nothing", async () => {
+    let sent = 0;
+    const binding = new FormBinding(
+      {
+        kind: "operation",
+        args: api.notes.create.args,
+        send: async () => {
+          await Promise.resolve();
+          sent += 1;
+          return "saved";
+        },
+      },
+      { title: 5, body: "" },
+      {}
+    );
+    mounted(binding);
+    const failure = await settle(binding.submit());
+    expect(failure).toMatchObject({
+      rejected: {
+        code: "contract.invalid_args",
+        details: { issues: [{ path: ["title"] }] },
+      },
+    });
+    expect(sent).toBe(0);
+  });
+});
