@@ -63,8 +63,6 @@ export interface GatewayRequest {
   url: string;
   headers: Headers;
   body: unknown;
-  /** When it reached the gateway, in milliseconds since the epoch. */
-  at: number;
 }
 
 const encoder = new TextEncoder();
@@ -583,12 +581,7 @@ export const answeringGateway = (
   ): Promise<Response> => {
     const request = new Request(input, init);
     const body: unknown = await request.json();
-    requests.push({
-      url: request.url,
-      headers: request.headers,
-      body,
-      at: Date.now(),
-    });
+    requests.push({ url: request.url, headers: request.headers, body });
     const badInput = workersAiBadInput(request.url, body);
     if (badInput !== undefined) {
       return badInput;

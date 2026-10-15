@@ -108,11 +108,6 @@ export interface TranscriptPart {
    */
   by: "source" | "tool" | "model";
   text: string;
-  /**
-   * For a tool result: what the Knowledge reads made while its code ran
-   * returned, the only text that can back evidence in it.
-   */
-  backing?: readonly string[];
 }
 
 /**

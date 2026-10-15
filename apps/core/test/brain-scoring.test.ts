@@ -40,6 +40,7 @@ const observed = (changes: Partial<TrialObservation>): TrialObservation => {
     answer: "ANSWER: Marta Ruiz\nFrom [handbook/contracts.md#Lease]",
     modelInput,
     transcript: [{ by: "source", text: modelInput }],
+    corpus: ["# Contract register\n## Lease\nOwner: Marta Ruiz."],
     forbidden: ["CANARY-1"],
     stateChanged: false,
     latencyMs: 10,
@@ -94,82 +95,44 @@ describe("scoring a trial", () => {
     });
   });
 
-  it("credits evidence a source gave first, or a Knowledge read returned, never what the model made", () => {
+  it("credits evidence a source gave first, or a tool returned in its stored line, never what the model wrote", () => {
     const marker = "Owner: Marta Ruiz";
+    const line = `${marker}.`;
     expect({
-      // Its code returned what it wrote itself: no source gave it.
+      // Its code returned the line it wrote itself.
       laundered: verdict(contract, {
         transcript: [
           { by: "source", text: "Who owns the lease?" },
-          { by: "model", text: `return "${marker}";` },
-          { by: "tool", text: `Returned: ${marker}` },
+          { by: "model", text: `return "${line}";` },
+          { by: "tool", text: `Returned: ${line}` },
         ],
       }),
-      // Its code made the marker from pieces, reading nothing.
-      constructed: verdict(contract, {
-        transcript: [
-          { by: "model", text: 'return ["Owner:", "Marta Ruiz"].join(" ");' },
-          { by: "tool", text: `Returned: ${marker}` },
-        ],
-      }).evidenceRecall,
-      // Its code read the section through Knowledge and returned it.
+      // Its code returned the section it read.
       read: verdict(contract, {
-        transcript: [
-          {
-            by: "tool",
-            text: `Returned: ## Lease\n${marker}.`,
-            backing: [`## Lease\n${marker}.`],
-          },
-        ],
+        transcript: [{ by: "tool", text: `Returned: ## Lease\n${line}` }],
       }).evidenceRecall,
-      // It made the marker in one step and read the section in a later
-      // one, returning nothing: the later read backs only its own step.
-      readLater: verdict(contract, {
-        transcript: [
-          { by: "tool", text: `Returned: ${marker}.`, backing: [] },
-          {
-            by: "tool",
-            text: "Returned: done",
-            backing: [`## Lease\n${marker}.`],
-          },
-        ],
-      }).evidenceRecall,
-      // It guessed in its code, then read the section that says it.
+      // It guessed the words in its code, then read the line that says them.
       guessedThenRead: verdict(contract, {
         transcript: [
           { by: "model", text: `search("${marker}")` },
-          {
-            by: "tool",
-            text: `Returned: ${marker}.`,
-            backing: [`## Lease\n${marker}.`],
-          },
+          { by: "tool", text: `Returned: ${line}` },
         ],
       }).evidenceRecall,
-      // It read another section of the document, then made the marker.
-      readElsewhere: verdict(contract, {
-        transcript: [
-          {
-            by: "tool",
-            text: `Returned: ${marker}`,
-            backing: ["## Renewals\nRenewed yearly."],
-          },
-        ],
+      // Its code returned the words but not the line they stand in.
+      wordsOnly: verdict(contract, {
+        transcript: [{ by: "tool", text: `Returned: ${marker} (probably)` }],
       }).evidenceRecall,
       // It read it, then quoted it in its next code: still the source's.
       quoted: verdict(contract, {
         transcript: [
-          { by: "source", text: `Contract register. ${marker}.` },
-          { by: "model", text: `const owner = "${marker}";` },
+          { by: "source", text: `Contract register. ${line}` },
+          { by: "model", text: `const owner = "${line}";` },
         ],
       }).evidenceRecall,
       // Read in an earlier request, left out of the last one.
       dropped: verdict(contract, {
         transcript: [
-          {
-            by: "tool",
-            text: `Returned: ${marker}.`,
-            backing: [`## Lease\n${marker}.`],
-          },
+          { by: "tool", text: `Returned: ${line}` },
           { by: "source", text: "[earlier results left out]" },
         ],
       }).completed,
@@ -184,11 +147,9 @@ describe("scoring a trial", () => {
         evidenceRecall: 0,
         citationSupport: 1,
       },
-      constructed: 0,
       read: 1,
-      readLater: 0,
       guessedThenRead: 1,
-      readElsewhere: 0,
+      wordsOnly: 0,
       quoted: 1,
       dropped: true,
       citationOnly: false,

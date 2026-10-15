@@ -37,7 +37,6 @@ import { gatewayConfig, model, pointAtGateway } from "./agent-chat.ts";
 import { answeringGateway } from "./ai-gateway.ts";
 import type { GatewayRequest } from "./ai-gateway.ts";
 import { grantReviewed } from "./apps.ts";
-import { eventsAfter, logHead } from "./audit-events.ts";
 import {
   compareArms,
   gateViolations,
@@ -59,7 +58,7 @@ import {
   transcriptOf,
   stubReader,
 } from "./brain-stub-model.ts";
-import type { StubTurn, TranscriptPart } from "./brain-stub-model.ts";
+import type { StubTurn } from "./brain-stub-model.ts";
 import {
   brainCollections,
   brainDocuments,
@@ -387,8 +386,13 @@ const userMemoryOf = async (person: Person): Promise<string> => {
   return version.text;
 };
 
-/** The current text of every corpus document, as stored: the source snapshot. */
-const sourceDigest = async (company: BrainCompany): Promise<string> => {
+/**
+ * The current text of every corpus document and memory, as stored: the
+ * source snapshot, and its digest.
+ */
+const sourceSnapshot = async (
+  company: BrainCompany
+): Promise<{ texts: string[]; digest: string }> => {
   const texts: Record<string, string> = {};
   for (const [key, { path }] of Object.entries(brainDocuments)) {
     // oxlint-disable-next-line no-await-in-loop -- one document at a time
@@ -401,7 +405,7 @@ const sourceDigest = async (company: BrainCompany): Promise<string> => {
     // oxlint-disable-next-line no-await-in-loop -- one person at a time
     texts[`${persona}/USER.md`] = await userMemoryOf(company.people[persona]);
   }
-  return await digestOf(texts);
+  return { texts: Object.values(texts), digest: await digestOf(texts) };
 };
 
 /** A section's place, as `path#heading`, the way answers cite it. */
@@ -610,99 +614,12 @@ const changeState = async (
   });
 };
 
-/**
- * The reads that return a document's text: one section, or the whole
- * document. Following links, listing and history return none of it.
- */
-const contentRead = z.union([
-  z.object({ read: z.literal("section"), section: z.int().min(0) }),
-  z.object({ read: z.literal("document") }),
-]);
-
-/**
- * What the persona's agent read through Knowledge since audit position
- * `after`, as the audit log records each read (a document, or one of its
- * sections) and as the document holds it, read again as the person it
- * acted for: where a tool result's evidence must come from. Read after
- * the trial's state is taken, as the reads are recorded too.
- */
-const readTextsOf = async (
-  person: Person,
-  place: Workspace,
-  after: number
-): Promise<{ at: number; text: string }[]> => {
-  const events = await eventsAfter(after);
-  // Explicit reads only: a search's snippets aren't recorded, so nothing
-  // shows what it returned, and the evidence an answer needs is a whole
-  // section, which the agent reads.
-  const reads = events.flatMap(({ action, actor, target, detail, at }) => {
-    const read = contentRead.safeParse(detail).data;
-    return action === "knowledge.read" &&
-      actor.type === "agent" &&
-      actor.agentId === place.agent.agentId &&
-      target?.type === "document" &&
-      read !== undefined
-      ? [
-          {
-            id: target.id,
-            section: "section" in read ? read.section : undefined,
-            at: Date.parse(at),
-          },
-        ]
-      : [];
-  });
-  // A read the log recorded but Knowledge refused (a section that isn't
-  // there) returned nothing: it backs no evidence.
-  const texts = await Promise.all(
-    reads.map(async ({ id, section, at }) => {
-      try {
-        const read = await person.api.knowledge.read(
-          id,
-          section === undefined ? {} : { section }
-        );
-        return [{ at, text: read.text }];
-      } catch {
-        return [];
-      }
-    })
-  );
-  return texts.flat();
-};
-
-/**
- * Every request's parts, in order, each tool result backed by the reads
- * its own code made: those after the request whose answer ran the code,
- * and before the request that first carried its result back.
- */
-const transcriptWithReads = (
-  requests: readonly GatewayRequest[],
-  reads: readonly { at: number; text: string }[]
-): TranscriptPart[] => {
-  const backings: string[][] = [];
-  return requests.flatMap(({ body, at }, index) => {
-    const since = requests[index - 1]?.at ?? Number.NEGATIVE_INFINITY;
-    let tool = 0;
-    return transcriptOf(body).map((part) => {
-      if (part.by !== "tool") {
-        return part;
-      }
-      // Each request carries the earlier results again: a result first
-      // seen here is the code's since the request before.
-      backings[tool] ??= reads
-        .filter((read) => read.at >= since && read.at < at)
-        .map(({ text }) => text);
-      const backing = backings[tool] ?? [];
-      tool += 1;
-      return { ...part, backing };
-    });
-  });
-};
-
 const runTrial = async (
   company: BrainCompany,
   place: Workspace,
   provider: Provider,
-  plan: TrialPlan
+  plan: TrialPlan,
+  corpus: readonly string[]
 ): Promise<TrialObservation> => {
   const { task, arm, repeat, cold } = plan;
   const person = company.people[task.persona];
@@ -727,7 +644,6 @@ const runTrial = async (
     return state;
   };
   const stateBefore = await stateNow();
-  const auditBefore = await logHead();
   const firstRequest = gateway.requests.length;
   let spentBefore = await charged(company);
   let answer = "";
@@ -780,10 +696,10 @@ const runTrial = async (
     modelInput: requests.flatMap(({ body }) => modelStrings(body)).join("\n"),
     // Every request in order: a long turn's last request may leave out
     // earlier results, which the model still read.
-    transcript: transcriptWithReads(
-      requests,
-      await readTextsOf(person, place, auditBefore)
-    ),
+    // Every request in order: a long turn's last request may leave out
+    // earlier results, which the model still read.
+    transcript: requests.flatMap(({ body }) => transcriptOf(body)),
+    corpus,
     forbidden: forbiddenIn(task),
     stateChanged,
     ...(failure === undefined ? {} : { error: failure }),
@@ -943,6 +859,7 @@ export const runBrainBaseline = async (
   }
   const observations: TrialObservation[] = [];
   const sources: RunIdentity["sources"] = {};
+  let corpus: string[] = [];
   const updates: BrainReport["costs"]["updates"] = [];
   for (const window of brainWindows) {
     if (window !== "t0") {
@@ -959,7 +876,9 @@ export const runBrainBaseline = async (
       });
     }
     // oxlint-disable-next-line no-await-in-loop -- windows in order
-    sources[window] = await sourceDigest(company);
+    const snapshot = await sourceSnapshot(company);
+    sources[window] = snapshot.digest;
+    corpus = snapshot.texts;
     const inWindow = tasks.filter((task) => task.window === window);
     const plans: TrialPlan[] = [];
     for (let repeat = 1; repeat <= repeats; repeat += 1) {
@@ -973,7 +892,13 @@ export const runBrainBaseline = async (
     for (const plan of plans) {
       observations.push(
         // oxlint-disable-next-line no-await-in-loop -- trials one at a time, so latency and state are each trial's own
-        await runTrial(company, held(places, plan.task.persona), provider, plan)
+        await runTrial(
+          company,
+          held(places, plan.task.persona),
+          provider,
+          plan,
+          corpus
+        )
       );
     }
   }
@@ -983,12 +908,13 @@ export const runBrainBaseline = async (
     for (const arm of controls) {
       observations.push(
         // oxlint-disable-next-line no-await-in-loop -- trials one at a time
-        await runTrial(company, held(places, task.persona), provider, {
-          arm,
-          task,
-          repeat: 1,
-          cold: true,
-        })
+        await runTrial(
+          company,
+          held(places, task.persona),
+          provider,
+          { arm, task, repeat: 1, cold: true },
+          corpus
+        )
       );
     }
   }
