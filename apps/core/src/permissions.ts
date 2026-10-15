@@ -29,6 +29,7 @@ import type {
   PermissionObject,
   PermissionStatus,
   PermissionSubject,
+  PermissionSubjectType,
   WorkContext,
 } from "@grasp-os/shared/permissions";
 import {
@@ -48,7 +49,6 @@ import {
   getTableColumns,
   isNull,
   ne,
-  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -72,6 +72,9 @@ import {
   appVersions,
   auditOutbox,
   permissions,
+  triggerResources,
+  triggerResourceVersions,
+  workflowResources,
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { collections } from "./db/knowledge/schema.ts";
@@ -99,11 +102,40 @@ type Row = typeof permissions.$inferSelect;
 
 const stringListSchema = z.array(z.string());
 
-/** How a subject is stored. */
-const subjectColumns = (subject: PermissionSubject) =>
-  subject.type === "app"
-    ? { subjectType: subject.type, subjectId: subject.appId }
-    : { subjectType: subject.type, subjectId: subject.agentId };
+/** How a subject is stored: its type, and its ID by that type. */
+const subjectColumns = (
+  subject: PermissionSubject
+): { subjectType: PermissionSubjectType; subjectId: string } => {
+  switch (subject.type) {
+    case "app": {
+      return { subjectType: subject.type, subjectId: subject.appId };
+    }
+    case "agent": {
+      return { subjectType: subject.type, subjectId: subject.agentId };
+    }
+    case "workflow": {
+      return { subjectType: subject.type, subjectId: subject.workflowId };
+    }
+    case "store": {
+      return { subjectType: subject.type, subjectId: subject.storeId };
+    }
+    case "trigger": {
+      return { subjectType: subject.type, subjectId: subject.triggerId };
+    }
+    default: {
+      return subject satisfies never;
+    }
+  }
+};
+
+/** The key of a stored subject's ID, by its type. */
+const subjectIdKeys = {
+  app: "appId",
+  agent: "agentId",
+  workflow: "workflowId",
+  store: "storeId",
+  trigger: "triggerId",
+} as const satisfies Record<PermissionSubjectType, string>;
 
 /** How an object is stored (see the `permissions` table). */
 const objectColumns = (object: PermissionObject) => {
@@ -125,8 +157,8 @@ const objectColumns = (object: PermissionObject) => {
     case "workflow": {
       return {
         objectType: object.type,
-        objectId: object.appId,
-        resource: object.workflowId,
+        objectId: object.workflowId,
+        resource: null,
       };
     }
     case "app": {
@@ -170,8 +202,7 @@ const objectOf = (row: Row): PermissionObject => {
     case "workflow": {
       return permissionObjectSchema.parse({
         type: row.objectType,
-        appId: row.objectId,
-        workflowId: resource,
+        workflowId: row.objectId,
       });
     }
     case "app": {
@@ -190,11 +221,10 @@ const objectOf = (row: Row): PermissionObject => {
 };
 
 const subjectOf = (row: Row): PermissionSubject =>
-  permissionSubjectSchema.parse(
-    row.subjectType === "app"
-      ? { type: row.subjectType, appId: row.subjectId }
-      : { type: row.subjectType, agentId: row.subjectId }
-  );
+  permissionSubjectSchema.parse({
+    type: row.subjectType,
+    [subjectIdKeys[row.subjectType]]: row.subjectId,
+  });
 
 export const toPermission = (row: Row): Permission => ({
   id: permissionIdSchema.parse(row.id),
@@ -279,7 +309,7 @@ const auditDetail = ({
   chat,
 }: Permission): Record<string, AuditDetailValue> => {
   // The object's IDs by name: connectionId and resource, collectionId,
-  // appId and workflowId, or appId.
+  // workflowId, or appId.
   const { type: objectType, ...ids } = object;
   const { subjectType, subjectId } = subjectColumns(subject);
   return {
@@ -416,7 +446,7 @@ const requireApps = async (
   if (subject.type === "app") {
     named.set("subject.appId", subject.appId);
   }
-  if (object.type === "workflow" || object.type === "app") {
+  if (object.type === "app") {
     named.set("object.appId", object.appId);
   }
   if (named.size === 0) {
@@ -490,12 +520,156 @@ const requireCollection = async (
       ],
     });
   }
-  if (found.source === "apps" && subject.type === "app") {
+  // Code that keeps what it reads (an App, an independent workflow, store
+  // or trigger) never gets it: only an agent, acting for its person.
+  if (found.source === "apps" && subject.type !== "agent") {
     throw permissionErrors.create("permission.invalid", {
       issues: [
-        "object.collectionId: The Apps collection can't be given to an App.",
+        "object.collectionId: The Apps collection is given to agents alone.",
       ],
     });
+  }
+};
+
+/**
+ * Who may name what in a permission, handed in by the caller: an App's
+ * roles (`appFor` in apps.ts) and an independent resource's
+ * (`requireResourceRole` in permission-resources.ts), passed in because
+ * those modules depend on this one. Each refuses as for a resource that
+ * doesn't exist.
+ */
+export interface PermissionRoles {
+  app: (app: AppId, role: AppRole) => Promise<unknown>;
+  resource: (
+    ref: { type: "workflow" | "store" | "trigger"; id: string },
+    needed: "user" | "builder"
+  ) => Promise<unknown>;
+}
+
+/**
+ * Refuses `by` unless they build `subject`: an App's builders, a
+ * workflow's builders, a store's managers, a trigger's manager (`roles`).
+ * An agent is the organization's own: any builder asks for it.
+ */
+const requireSubjectBuilder = async (
+  subject: PermissionSubject,
+  roles: PermissionRoles
+): Promise<void> => {
+  switch (subject.type) {
+    case "app": {
+      await roles.app(subject.appId, "builder");
+      break;
+    }
+    case "agent": {
+      break;
+    }
+    case "workflow": {
+      await roles.resource(
+        { type: "workflow", id: subject.workflowId },
+        "builder"
+      );
+      break;
+    }
+    case "store": {
+      await roles.resource({ type: "store", id: subject.storeId }, "builder");
+      break;
+    }
+    case "trigger": {
+      await roles.resource(
+        { type: "trigger", id: subject.triggerId },
+        "builder"
+      );
+      break;
+    }
+    default: {
+      subject satisfies never;
+    }
+  }
+};
+
+/** Refuses a request with `issue`. */
+const refuseRequest = (issue: string): never => {
+  throw permissionErrors.create("permission.invalid", { issues: [issue] });
+};
+
+/**
+ * Moves workflow `id`'s policy generation on, for the batch of a grant or
+ * revocation on it, only when `landed` says the batch changed it: who may
+ * start or follow it changed, so a start decided before is refused
+ * (workflow-starts.ts). One that changed nothing refuses nothing.
+ */
+const workflowGenerationMoved = (
+  db: ReturnType<typeof drizzle>,
+  id: string,
+  landed: SQL
+) =>
+  db
+    .update(workflowResources)
+    .set({ policyGeneration: sql`${workflowResources.policyGeneration} + 1` })
+    .where(and(eq(workflowResources.id, id), landed));
+
+/**
+ * Refuses an object `subject` has no use for: what the platform offers is
+ * for an App's code; a trigger only starts, so it holds `start` on a
+ * workflow and nothing else; a store's own code reaches connections and
+ * collections alone.
+ */
+const requireObjectFits = (
+  subject: PermissionSubject,
+  object: PermissionObject,
+  actions: readonly string[]
+): void => {
+  if (object.type === "platform" && subject.type !== "app") {
+    refuseRequest("subject: Only an App uses what the platform offers.");
+  }
+  if (
+    subject.type === "trigger" &&
+    (object.type !== "workflow" ||
+      !actions.every((action) => action === "start"))
+  ) {
+    refuseRequest("object: A trigger only starts a workflow.");
+  }
+  if (
+    subject.type === "store" &&
+    object.type !== "connection" &&
+    object.type !== "collection"
+  ) {
+    refuseRequest("object: A store reaches connections and collections only.");
+  }
+};
+
+/**
+ * Refuses a trigger's grant on any workflow but the one the trigger's
+ * current version starts: a trigger starts one workflow, and its grant
+ * names it. A trigger that isn't live names none.
+ */
+const requireTriggerPins = async (
+  env: Env,
+  subject: PermissionSubject,
+  object: PermissionObject
+): Promise<void> => {
+  if (subject.type !== "trigger" || object.type !== "workflow") {
+    return;
+  }
+  const pinned = await drizzle(env.DB)
+    .select({ workflowId: triggerResourceVersions.workflowResourceId })
+    .from(triggerResources)
+    .innerJoin(
+      triggerResourceVersions,
+      and(
+        eq(triggerResourceVersions.triggerId, triggerResources.id),
+        eq(triggerResourceVersions.version, triggerResources.currentVersion)
+      )
+    )
+    .where(
+      and(
+        eq(triggerResources.id, subject.triggerId),
+        isNull(triggerResources.deletedAt)
+      )
+    )
+    .get();
+  if (pinned?.workflowId !== object.workflowId) {
+    refuseRequest("object: A trigger's grant names the workflow it starts.");
   }
 };
 
@@ -525,19 +699,17 @@ export const insertWhere = (
 };
 
 /**
- * Asks for a permission for an App or agent. It allows nothing until an
- * admin grants it. For an App, only its builders ask, and a workflow or
- * the exports of another App only someone with a role in that App:
- * `requireAppRole` refuses anyone else, before anything says whether the
- * App exists
- * (`appFor` in apps.ts, passed in because apps.ts depends on this module,
- * through workflow code and its bindings).
+ * Asks for a permission for an App, an agent, or an independent workflow,
+ * store or trigger. It allows nothing until an admin grants it. Only the
+ * subject's builders ask; a workflow only someone with a role in it names,
+ * and another App's exports only someone with a role in that App
+ * (`roles`), before anything says whether it exists.
  */
 export const requestPermission = async (
   env: Env,
   by: Acting,
   input: unknown,
-  requireAppRole: (app: AppId, role: AppRole) => Promise<unknown>,
+  roles: PermissionRoles,
   /** Admits the write, called right before it is committed: throws to refuse it. */
   admit?: () => Promise<void>
 ): Promise<Permission> => {
@@ -551,15 +723,13 @@ export const requestPermission = async (
     permissionRequestSchema,
     input
   );
-  if (subject.type === "app") {
-    await requireAppRole(subject.appId, "builder");
-  }
-  const ownWorkflow =
-    subject.type === "app" &&
-    object.type === "workflow" &&
-    object.appId === subject.appId;
-  if (object.type === "workflow" && !ownWorkflow) {
-    await requireAppRole(object.appId, "user");
+  await requireSubjectBuilder(subject, roles);
+  requireObjectFits(subject, object, actions);
+  await requireTriggerPins(env, subject, object);
+  if (object.type === "workflow") {
+    // Only someone with a role in the workflow names it: anyone else is
+    // told it doesn't exist, as for one that doesn't.
+    await roles.resource({ type: "workflow", id: object.workflowId }, "user");
   }
   if (object.type === "app") {
     // An App calls another's exports; an agent calls an App's sealed
@@ -575,13 +745,7 @@ export const requestPermission = async (
         ],
       });
     }
-    await requireAppRole(object.appId, "user");
-  }
-  // Only an App's code reads the platform's statistics or invites guests.
-  if (object.type === "platform" && subject.type !== "app") {
-    throw permissionErrors.create("permission.invalid", {
-      issues: ["subject: Only an App uses what the platform offers."],
-    });
+    await roles.app(object.appId, "user");
   }
   await requireApps(env, subject, object);
   await requireCollection(env, subject, object);
@@ -793,8 +957,10 @@ export const grantPermission = async (
   );
   const isApp = found.subjectType === "app";
   if (!isApp && version !== null) {
+    // An agent has no versions; an independent resource's versions are
+    // immutable and pinned, so none is reviewed here.
     throw permissionErrors.create("permission.invalid", {
-      issues: ["version: an agent has no versions to review"],
+      issues: ["version: only an App's version is reviewed"],
     });
   }
   // The version reviewed is still the one current (an agent has none).
@@ -830,6 +996,11 @@ export const grantPermission = async (
           stillReviewed
         )
       ),
+    // Who may start or follow a workflow changed: starts decided before
+    // are refused (workflow-starts.ts).
+    ...(found.objectType === "workflow"
+      ? [workflowGenerationMoved(db, found.objectId, storedEvent(event.id))]
+      : []),
     // More access for an App is more for every App that reaches it
     // through exports or workflows: their data, if an admin had said it
     // may go to code nobody approved, is sensitive again, and their
@@ -876,8 +1047,8 @@ const eventIdSql = (fresh: string): SQL =>
 
 /**
  * What `auditDetail` records of a permission row, as SQL: its IDs by name
- * (connectionId and resource; collectionId; appId and workflowId;
- * appId), its actions and its binding.
+ * (connectionId and resource; collectionId; workflowId; appId), its
+ * actions and its binding.
  */
 const auditDetailSql = sql`json_patch(
   json_object('subjectType', ${permissions.subjectType}, 'subjectId', ${permissions.subjectId}, 'objectType', ${permissions.objectType}),
@@ -888,7 +1059,8 @@ const auditDetailSql = sql`json_patch(
     )
     WHEN 'collection' THEN json_object('collectionId', ${permissions.objectId})
     WHEN 'app' THEN json_object('appId', ${permissions.objectId})
-    ELSE json_object('appId', ${permissions.objectId}, 'workflowId', ${permissions.resource})
+    WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
+    ELSE '{}'
   END
 )`;
 
@@ -923,7 +1095,9 @@ const changesThings = (object: PermissionObject, action: string): boolean =>
 /**
  * That `version` of `app` is one no admin approved (`madeCurrent`), as
  * SQL; each a value, or a column of the query it runs in. A version from
- * before approvals (null) counts as approved.
+ * before approvals (null) counts as approved. The host always names a
+ * version the App has; an independent workflow's start also requires the
+ * version to exist (workflow-starts.ts).
  */
 const unapprovedSql = (
   app: string | SQLWrapper,
@@ -950,7 +1124,7 @@ const unapprovedSql = (
  * asked for it there (`where`, `holdsIn`).
  */
 export const allowingPermissionSql = (
-  subject: PermissionSubject | { type: "app"; appId: SQLWrapper },
+  subject: PermissionSubject | { type: "app"; appId: SQLWrapper | AppId },
   appVersion: number | SQLWrapper | undefined,
   object: PermissionObject,
   action: string,
@@ -970,7 +1144,9 @@ export const allowingPermissionSql = (
       eq(permissions.subjectType, subject.type),
       eq(
         permissions.subjectId,
-        subject.type === "app" ? subject.appId : subject.agentId
+        subject.type === "app"
+          ? subject.appId
+          : subjectColumns(subject).subjectId
       ),
       eq(permissions.status, "active"),
       eq(permissions.objectType, objectType),
@@ -1151,10 +1327,11 @@ export const revokePermission = async (
     throw permissionErrors.create("permission.not_found");
   }
   const db = drizzle(env.DB);
+  const revokedAt = new Date();
   const [[revoked]] = await auditedBatch(env, db, [
     db
       .update(permissions)
-      .set({ status: "revoked", revokedBy: by.userId, revokedAt: new Date() })
+      .set({ status: "revoked", revokedBy: by.userId, revokedAt })
       .where(
         and(
           eq(permissions.id, found.id),
@@ -1167,6 +1344,18 @@ export const revokePermission = async (
       db,
       changeEntry(by, "permission.revoked", toPermission(found))
     ),
+    ...(found.objectType === "workflow"
+      ? [
+          workflowGenerationMoved(
+            db,
+            found.objectId,
+            sql`EXISTS (SELECT 1 FROM ${permissions}
+              WHERE ${eq(permissions.id, found.id)}
+                AND ${eq(permissions.status, "revoked")}
+                AND ${eq(permissions.revokedAt, revokedAt)})`
+          ),
+        ]
+      : []),
   ]);
   if (!revoked) {
     await requireStillAdmin(env, by);
@@ -1270,9 +1459,10 @@ export const listPermissions = async (
         );
   const db = drizzle(env.DB);
   const open = db.select({ id: apps.id }).from(apps).where(openApps);
-  // Both Apps a permission names, its subject and a workflow's or
-  // exports' App, must be open to the person: an agent's permission for a
-  // hidden App's workflow would name that App otherwise.
+  // Both Apps a permission names, its subject and an exports' App, must
+  // be open to the person: an agent's permission for a hidden App's
+  // exports would name that App otherwise. Workflows a permission names
+  // are filtered by the person's roles in them (permissions-open.ts).
   const ofOpenApp =
     openApps === undefined
       ? undefined
@@ -1282,7 +1472,7 @@ export const listPermissions = async (
             inArray(permissions.subjectId, open)
           ),
           or(
-            notInArray(permissions.objectType, ["workflow", "app"]),
+            ne(permissions.objectType, "app"),
             inArray(permissions.objectId, open)
           )
         );
