@@ -233,17 +233,19 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
   });
 
   it("fail a test that leaves more snapshots unread than a live query keeps", async () => {
-    // A write at a time, each read and pushed on its own (past the
-    // manager's gathering window): never a `next` to take them.
+    // A write at a time, the next only once the last was pushed: both
+    // live queries share each read (the same principal and call), so the
+    // one never read is pushed a snapshot per write, never fewer.
     const built = await appWith({
       ...appFiles,
       "tests/unread.test.ts": suiteOf({
         "never reads what it follows": `
       const owner = await t.as("note-owner");
       await owner.subscribe(api.notes.list, page);
+      const paced = await owner.subscribe(api.notes.list, page);
       for (let round = 0; round < 110; round += 1) {
-        await owner.mutation(api.notes.create, { title: \`Note \${round}\` });
-        await new Promise((resolve) => { setTimeout(resolve, 100); });
+        const id = await owner.mutation(api.notes.create, { title: \`Note \${round}\` });
+        await paced.next((p) => p.items.some((note) => note._id === id));
       }`,
       }),
     });
@@ -289,6 +291,15 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       const live = await owner.subscribe(api.notes.list, page);
       await owner.mutation(api.notes.create, { title: "Kept" });
       await live.next((p) => p.items.length === 1);`,
+        // Never asks for a snapshot: core giving up on the query must
+        // still fail it.
+        "follows a query it never reads": `
+      const owner = await t.as("note-owner");
+      await owner.subscribe(api.notes.list, page);
+      for (let round = 0; round < 15; round += 1) {
+        await owner.mutation(api.notes.create, { title: \`Note \${round}\` });
+        await new Promise((resolve) => { setTimeout(resolve, 200); });
+      }`,
       }),
     });
     // Every store object answers as it does, but refuses its first
@@ -325,6 +336,7 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       failuresOf(built, refusingWatches(Number.POSITIVE_INFINITY))
     ).resolves.toStrictEqual([
       'tests/lost.test.ts, "follows the note it makes": core stopped following the live query of notes.list 5 times in a row',
+      'tests/lost.test.ts, "follows a query it never reads": core stopped following the live query of notes.list 5 times in a row',
     ]);
     await expect(failuresOf(built, refusingWatches(2))).resolves.toStrictEqual(
       []

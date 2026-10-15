@@ -383,7 +383,8 @@ interface TestRun {
   readonly waiting: Set<{ readonly describe: () => string }>;
   /**
    * What failed the test outside its own calls, such as a live query that
-   * left too many snapshots unread: it fails even if the test never asks.
+   * left too many snapshots unread or that core stopped following for good:
+   * it fails even if the test never asks.
    */
   readonly faults: Set<Error>;
 }
@@ -561,11 +562,13 @@ const followed = async (
     }
     lostInARow += 1;
     if (lostInARow >= maxLostInARow) {
-      fail(
-        new TestAssertionError(
-          `core stopped following the live query of ${contract} ${lostInARow} times in a row`
-        )
+      // A fault of the run's, as an overflow is: the test fails even if it
+      // never asks this live query for a snapshot again.
+      const gone = new TestAssertionError(
+        `core stopped following the live query of ${contract} ${lostInARow} times in a row`
       );
+      run.faults.add(gone);
+      fail(gone);
       return;
     }
     const again = async (): Promise<void> => {
