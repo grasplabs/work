@@ -251,21 +251,31 @@ test("a run's lost answer shows up for its person, and saying it happened comple
   ).toHaveAccessibleDescription(removedNote);
   // A press within moments of the card coming up is taken for a double
   // press and ignored (todo-pile.tsx), so it is pressed again until taken.
+  // Only pressed again while nothing is on its way: the card's buttons
+  // stay off from a taken press until the card goes, and a dialog left
+  // open is confirmed rather than opened again.
+  const removedCard = page.getByRole("article", {
+    name: `Did this happen? ${removedName}`,
+    exact: true,
+  });
+  const happened = removed.getByRole("button", {
+    name: `It happened: ${removedName}`,
+  });
+  const sayHappened = page.getByRole("dialog", { name: "Say it happened?" });
   await expect(async () => {
-    await removed
-      .getByRole("button", { name: `It happened: ${removedName}` })
-      .click({ timeout: 1000 });
-    await page
-      .getByRole("dialog", { name: "Say it happened?" })
+    if ((await removedCard.count()) === 0) {
+      return;
+    }
+    if (!(await sayHappened.isVisible())) {
+      await expect(happened).toBeEnabled({ timeout: 1000 });
+      await happened.click({ timeout: 1000 });
+    }
+    await sayHappened
       .getByRole("button", { name: "It happened" })
       .click({ timeout: 1000 });
-    await expect(
-      page.getByRole("article", {
-        name: `Did this happen? ${removedName}`,
-        exact: true,
-      })
-    ).toHaveCount(0, { timeout: 5000 });
+    await expect(removedCard).toHaveCount(0, { timeout: 5000 });
   }).toPass({ timeout: 30_000 });
+  await expect(removedCard).toHaveCount(0);
 
   // On the pile, with what was sent.
   const name = `Did this happen? Send an email on Microsoft 365 (${account})`;
