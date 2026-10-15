@@ -296,6 +296,36 @@ describe("a run's history", () => {
     });
   });
 
+  it("tells a wait on an unknown outcome as one wait however often it checked, and a wait after the step ran again as another", () => {
+    const lost =
+      "A change by notify was sent but its answer was lost: it waits for the person the run acts for to say whether it happened";
+    const checking = textOf(
+      render([
+        step("step-10", "started", 1, 0, "notify"),
+        step("step-10", "completed", 1, 1, "notify"),
+        wait("outcome_unknown", "step-10", "opened", 1, "notify"),
+        wait("outcome_unknown", "step-10", "closed", 3, "notify"),
+        wait("outcome_unknown", "step-10", "opened", 3, "notify"),
+        wait("outcome_unknown", "step-10", "closed", 7, "notify"),
+        wait("outcome_unknown", "step-10", "opened", 7, "notify"),
+      ])
+    );
+    const ranAgain = textOf(
+      render([
+        wait("outcome_unknown", "step-10", "opened", 1, "notify"),
+        wait("outcome_unknown", "step-10", "closed", 3, "notify"),
+        step("step-10", "started", 2, 3, "notify"),
+        step("step-10", "completed", 2, 4, "notify"),
+        wait("outcome_unknown", "step-10", "opened", 4, "notify"),
+      ])
+    );
+    expect({
+      checking: occurrences(checking, lost),
+      stillOpen: checking.includes(`${lost} Open`),
+      ranAgain: occurrences(ranAgain, lost),
+    }).toStrictEqual({ checking: 1, stillOpen: true, ranAgain: 2 });
+  });
+
   it("names a step the review doesn't show by its number in the run", () => {
     const text = textOf(
       render([
