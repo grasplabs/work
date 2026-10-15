@@ -105,7 +105,7 @@ const appsSharedWithPeople = async (
 };
 
 /** Every App shared with someone: whom a change of unknown people may reach. */
-const appsSharedWithAnyone = async (env: Env): Promise<AppId[]> => {
+export const appsSharedWithAnyone = async (env: Env): Promise<AppId[]> => {
   const rows = await drizzle(env.DB)
     .selectDistinct({ appId: appMembers.appId })
     .from(appMembers);

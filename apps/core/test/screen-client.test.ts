@@ -2660,9 +2660,16 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     }).catch(() => {
       // Aborting fails the call that aborted: that is the restart.
     });
-    // Room for the host to let go of the connection, and for it to follow
-    // the new host: the event below must reach it there.
-    await scheduler.wait(2000);
+    // Once the connection follows the new host: the event below must reach
+    // it there. (Telling it, while its access holds, changes nothing.)
+    await vi.waitFor(
+      async () => {
+        await expect(
+          appHost(env, opened.app).accessRevoked([demoted.userId])
+        ).resolves.toBeGreaterThan(0);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
 
     // A demotion tells the host and restarts nothing.
     await admin.api.members.setRole(demoted.userId, "user");
@@ -2853,6 +2860,33 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       removed: await outcome(session.members.remove(removed.userId)),
       lowered: await outcome(session.members.setRole(lowered.userId, "user")),
     }).toStrictEqual({ removed: "ok", lowered: "ok" });
+  });
+
+  it("clears the screen of someone removed who reached the App through a team, even when looking up their Apps fails", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const member = await personApi("user");
+    const team = await newTeam(admin, [member]);
+    await admin.api.apps.members.add(opened.app, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, member.api.screens, lease);
+    // The admin's own connection, whose look at the Apps someone reaches
+    // fails, before the removal and after it.
+    const flaky = flakyDb(appsLookup);
+    const { core } = await openRpc(admin.session, { coreEnv: flaky.env });
+    flaky.fail();
+
+    await core.authenticate().members.remove(member.userId);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual({
+      last: "auth.unauthenticated",
+      released: true,
+    });
   });
 
   it("reads again for someone who is now only a user, rather than keep showing what builders read", async () => {

@@ -1540,15 +1540,18 @@ export class App extends DurableObject<Env> {
    * Tells the connections of `userIds` (of everyone, when `null`) that
    * follow the App's live queries that their role in it may have dropped
    * (access-revocations.ts): each checks again now, and clears what its
-   * screens show if it has. Returns at once; a connection that is gone is
-   * dropped.
+   * screens show if it has. Returns at once, with how many connections it
+   * told; a connection that is gone is dropped.
    */
-  accessRevoked(userIds: readonly string[] | null): void {
+  accessRevoked(userIds: readonly string[] | null): number {
+    let told = 0;
     for (const [id, { userId, onRevoked }] of this.#accessFollowers) {
       if (userIds === null || userIds.includes(userId)) {
+        told += 1;
         void this.#tellRevoked(id, onRevoked);
       }
     }
+    return told;
   }
 
   async #tellRevoked(id: string, onRevoked: AccessWatcher): Promise<void> {

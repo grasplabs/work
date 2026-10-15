@@ -23,7 +23,10 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { accessMayHaveDropped } from "./access-revocations.ts";
+import {
+  accessMayHaveDropped,
+  appsSharedWithAnyone,
+} from "./access-revocations.ts";
 import { appsFoundBy } from "./app-access.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
@@ -146,20 +149,20 @@ const appsReachedBy = async (
 };
 
 /**
- * `appsReachedBy`, read before a change, or none when that read fails:
- * the change goes ahead all the same, and the look after it
- * (`tellReached`) finds what it reaches still.
+ * `appsReachedBy`, read before a change, or `undefined` when that read
+ * fails: the change goes ahead all the same, and `tellReached` makes up
+ * for it.
  */
 const appsReachedBefore = async (
   env: Env,
   userId: string,
   role: string
-): Promise<AppId[]> => {
+): Promise<AppId[] | undefined> => {
   try {
     return await appsReachedBy(env, userId, role);
   } catch (error) {
     log.error("app.access_revocation_failed", errorFields(error));
-    return [];
+    return undefined;
   }
 };
 
@@ -168,21 +171,30 @@ const appsReachedBefore = async (
  * in role `role` now (an App shared with them while it ran), that their
  * role there may have dropped. Never throws: the change has committed,
  * and what follows it must still run; a second look that fails tells
- * the first look's Apps all the same.
+ * the first look's Apps all the same. When the first look failed
+ * (`undefined`), every App shared with anyone is told too: a removal
+ * deletes the person's teams, so the look after it can't find the Apps
+ * they reached through them.
  */
 const tellReached = async (
   env: Env,
-  reached: readonly AppId[],
+  reached: readonly AppId[] | undefined,
   userId: string,
   role: string
 ): Promise<void> => {
-  let since: AppId[] = [];
-  try {
-    since = await appsReachedBy(env, userId, role);
-  } catch (error) {
-    log.error("app.access_revocation_failed", errorFields(error));
+  const looks = await Promise.allSettled([
+    appsReachedBy(env, userId, role),
+    reached === undefined ? appsSharedWithAnyone(env) : Promise.resolve([]),
+  ]);
+  const found: AppId[] = [...(reached ?? [])];
+  for (const look of looks) {
+    if (look.status === "fulfilled") {
+      found.push(...look.value);
+    } else {
+      log.error("app.access_revocation_failed", errorFields(look.reason));
+    }
   }
-  await accessMayHaveDropped(env, [...reached, ...since], [userId]);
+  await accessMayHaveDropped(env, found, [userId]);
 };
 
 /** Whether going from role `from` to `to` can take a role in an App away. */
