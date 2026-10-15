@@ -240,8 +240,7 @@ test("a run's lost answer shows up for its person, and saying it happened comple
   // nobody can read what saying it didn't would let go out again.
   const removedName = `mail.send on Microsoft 365 (${account})`;
   const removed = await toCard(page, `Did this happen? ${removedName}`);
-  const removedNote =
-    "What was sent is no longer kept: its run's details were removed.";
+  const removedNote = "What was sent is no longer kept.";
   await expect(removed).toContainText(removedNote);
   await expect(
     removed.getByRole("button", { name: `It didn't happen: ${removedName}` })

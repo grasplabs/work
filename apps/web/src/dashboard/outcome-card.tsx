@@ -91,10 +91,7 @@ const OutcomeDetails = ({
       )}
       {input === null ? (
         <p id={removedId} role="note">
-          <Trans>
-            What was sent is no longer kept: its run&apos;s details were
-            removed.
-          </Trans>
+          <Trans>What was sent is no longer kept.</Trans>
         </p>
       ) : (
         <>

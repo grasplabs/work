@@ -6921,8 +6921,8 @@ msgid "What was said"
 msgstr "Ce qui a été dit"
 
 #: src/dashboard/outcome-card.tsx
-msgid "What was sent is no longer kept: its run's details were removed."
-msgstr "Ce qui a été envoyé n'est plus conservé : les détails de son exécution ont été supprimés."
+msgid "What was sent is no longer kept."
+msgstr "Ce qui a été envoyé n'est plus conservé."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "What was spent this month is under <0>AI spend</0>."
