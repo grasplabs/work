@@ -730,6 +730,24 @@ export const decideWorkflowStart = async (
     throw error;
   }
   const inputHash = await sha256Hex(text);
+  if (invoker.type === "person") {
+    // Their access as it is now, before even a start already admitted is
+    // answered: the role check above goes by the session's teams, which
+    // may still list one they left.
+    const live = await drizzle(env.DB).get<{ holds: number }>(
+      sql`SELECT ${rule.holds} AS holds`
+    );
+    if (live.holds === 0) {
+      await refusedStart(
+        env,
+        rule.actor,
+        id,
+        { ...base, inputHash },
+        "workflow.start_denied"
+      );
+      throw denied();
+    }
+  }
   const existing = await receiptOf(env, rule.invoker, rule.principal, key);
   if (existing !== undefined) {
     try {

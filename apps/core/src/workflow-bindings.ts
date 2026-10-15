@@ -431,8 +431,18 @@ export const approveWorkflowBinding = async (
   // Only while `by` is still an admin and the workflow is live, read in
   // the batch. Versions never change, so the one reviewed stays the one
   // served, whichever is current.
+  // An operation's release must still be there to pin: retention may
+  // remove one no pin holds after it was checked, and an approval without
+  // its pin would leave every start on a release that's gone.
+  const releaseHeld =
+    target.kind === "operation"
+      ? sql`EXISTS (SELECT 1 FROM sdk_release_manifests AS manifest
+          JOIN permissions AS held ON held.id = ${target.permissionId}
+          WHERE manifest.app_id = held.object_id
+            AND manifest.version = ${target.appVersion})`
+      : sql`1`;
   const holds = sql`${stillAdminSql(by)} AND EXISTS (SELECT 1 FROM workflow_resources
-    WHERE id = ${workflow.id} AND deleted_at IS NULL)`;
+    WHERE id = ${workflow.id} AND deleted_at IS NULL) AND ${releaseHeld}`;
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
@@ -498,6 +508,13 @@ export const approveWorkflowBinding = async (
     .where(eq(workflowBindingApprovals.id, row.id))
     .get();
   if (stored === undefined) {
+    const release = await drizzle(env.DB).get<{ held: number }>(
+      sql`SELECT ${releaseHeld} AS held`
+    );
+    if (release.held === 0) {
+      // The release went as it ran: nothing approved, nothing pinned.
+      throw workflowResourceErrors.create("workflow.binding_invalid");
+    }
     // `by` stopped being an admin, or the workflow was deleted, as it ran.
     throw workflowResourceErrors.create("workflow.resource_unavailable");
   }

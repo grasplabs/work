@@ -451,6 +451,52 @@ describe("authority changing under a start", () => {
     ).toBeTruthy();
   });
 
+  it("answers a retried key only while the person still has access, whatever their session lists", async () => {
+    const ada = await person("builder");
+    const team = await newTeam();
+    const inTeam = await person("builder", [team]);
+    const workflow = await workflowOf(ada);
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const key = `key-${unique()}`;
+    const started = await startWorkflow(env, personOf(inTeam), workflow.id, {
+      version: 1,
+      input: { who: "Ada" },
+      key,
+    });
+    // Better Auth removes them from the team; their session still lists it.
+    await env.DB.prepare(
+      "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
+    )
+      .bind(team, inTeam.userId)
+      .run();
+    const retried = await outcome(
+      startWorkflow(env, personOf(inTeam), workflow.id, {
+        version: 1,
+        input: { who: "Ada" },
+        key,
+      })
+    );
+    const events = await allEvents();
+    expect({
+      started: started.id.length > 0,
+      retried,
+      audited: events.some(
+        ({ action, target, detail }) =>
+          action === "workflow.start.refused" &&
+          target?.id === workflow.id &&
+          detail.reason === "workflow.start_denied"
+      ),
+    }).toStrictEqual({
+      started: true,
+      retried: "workflow.start_denied",
+      audited: true,
+    });
+  });
+
   it("refuses a start decided before its workflow's members changed, or it was deleted, and keeps one a share changed nothing for", async () => {
     const ada = await person("builder");
     const bob = await person("builder");
