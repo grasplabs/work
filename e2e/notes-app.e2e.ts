@@ -320,3 +320,33 @@ test("a screen whose person signed out is emptied, so nothing of theirs stays on
     /./u
   );
 });
+
+test("a note saved in one session appears on another session's open screen without reloading", async ({
+  browser,
+}) => {
+  const { builder } = peopleIn("notesLive");
+  const app = await notesApp(builder);
+  const watching = await openNotes(await pageOf(browser, builder), app);
+  await expect(watching.getByText("No notes yet.")).toBeVisible();
+  const saving = await openNotes(await pageOf(browser, builder), app);
+
+  // Saved in the second session: the first, which asks nothing, shows it.
+  await createNote(saving, "Pushed to the other screen");
+  const notes = watching.getByRole("list", { name: "Notes" });
+  await expect(
+    notes.getByText("Pushed to the other screen", { exact: true })
+  ).toBeVisible();
+
+  // An edit follows the same way, and so does a delete.
+  await saving
+    .getByRole("button", { name: "Edit Pushed to the other screen" })
+    .click();
+  const editor = saving.getByRole("form", { name: "Edit note" });
+  await editor.getByLabel("Title").fill("Edited elsewhere");
+  await editor.getByRole("button", { name: "Save changes" }).click();
+  await expect(
+    notes.getByText("Edited elsewhere", { exact: true })
+  ).toBeVisible();
+  await saving.getByRole("button", { name: "Delete Edited elsewhere" }).click();
+  await expect(watching.getByText("No notes yet.")).toBeVisible();
+});

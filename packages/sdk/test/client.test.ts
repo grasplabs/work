@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { GraspClient } from "../src/client-core.ts";
+import { clientInternals, GraspClient } from "../src/client-core.ts";
 import type { ClientTransport } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
 import type { Id } from "../src/index.ts";
@@ -54,6 +54,12 @@ const network = (
       } finally {
         atOnce -= 1;
       }
+    },
+    // Live queries are core's own test (screen-client.test.ts): these
+    // cases only make calls.
+    watch: async () => {
+      await Promise.resolve();
+      throw new Error("Nothing here follows a query.");
     },
   };
   return {
@@ -449,5 +455,69 @@ describe("the session client and lost access", () => {
       code: "submission.outcome_unknown",
     });
     expect(creates).toHaveLength(1);
+  });
+});
+
+describe("the session client and a change it confirmed", () => {
+  it("answers a query asked after a confirmed change with a read sent after it, not one under way since before", async () => {
+    const { promise: held, resolve: release } = Promise.withResolvers<null>();
+    let saved = false;
+    let reads = 0;
+    const { client } = network(async (_call, request) => {
+      if (request.includes("notes.create")) {
+        saved = true;
+        return answered(noteId);
+      }
+      reads += 1;
+      // The first read was sent before the save; its answer comes late.
+      if (reads === 1) {
+        await held;
+        return answered({ title: "Before" });
+      }
+      await Promise.resolve();
+      return answered({ title: saved ? "After" : "Before" });
+    });
+    const early = client.query(api.notes.get, { id: noteId });
+    await client.mutation(api.notes.create, { title: "After" });
+    const later = client.query(api.notes.get, { id: noteId });
+    release(null);
+
+    await expect(Promise.all([early, later])).resolves.toStrictEqual([
+      { title: "Before" },
+      { title: "After" },
+    ]);
+  });
+});
+
+describe("the session client following a query", () => {
+  it("waits as long as a refusal for the request budget says before following again", async () => {
+    let follows = 0;
+    const transport: ClientTransport = {
+      call: async () => await Promise.resolve(answered(null)),
+      watch: async () => {
+        follows += 1;
+        await Promise.resolve();
+        throw Object.assign(new Error("Too much at once."), {
+          code: "screen.rate_limited",
+          details: { retryAfterMs: 2000 },
+        });
+      },
+    };
+    const client = new GraspClient(transport);
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {
+      // A component reading it.
+    });
+    try {
+      const { promise, resolve } = Promise.withResolvers<null>();
+      setTimeout(() => {
+        resolve(null);
+      }, 1500);
+      await promise;
+      expect(follows).toBe(1);
+    } finally {
+      stop();
+    }
   });
 });

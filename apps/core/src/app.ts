@@ -18,7 +18,10 @@ import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { screenLimits } from "@grasp-os/shared/screens";
+import {
+  querySubscriptionLimits,
+  screenLimits,
+} from "@grasp-os/shared/screens";
 import type {
   AppErrorLog,
   RunChange,
@@ -807,6 +810,12 @@ export class App extends DurableObject<Env> {
   /** Each person's requests of the App's screens. */
   readonly #requests = new TokenBuckets(screenLimits.requests);
 
+  /**
+   * Each person's reads of their live queries that writes caused
+   * (`querySubscriptionLimits.liveReads`, query-subscriptions.ts).
+   */
+  readonly #liveReads = new TokenBuckets(querySubscriptionLimits.liveReads);
+
   /** The reports kept of each person's screens, and of all of them. */
   readonly #callerReports = new TokenBuckets(screenLimits.callerReports);
   readonly #appReports = new TokenBuckets(screenLimits.appReports);
@@ -1226,6 +1235,15 @@ export class App extends DurableObject<Env> {
       }
       this.#refusalsAudited.delete(oldest);
     }
+  }
+
+  /**
+   * Whether core may read one more of `userId`'s live queries of the App
+   * now because a write changed what it read
+   * (`querySubscriptionLimits.liveReads`). One that may not waits.
+   */
+  admitLiveRead(userId: string): boolean {
+    return this.#liveReads.take(userId);
   }
 
   /**

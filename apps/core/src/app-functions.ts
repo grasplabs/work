@@ -4,7 +4,8 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
-import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
+import { storeIdSchema } from "@grasp-os/shared/ids";
+import type { AppId, RunId, StoreId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import {
   appErrorDetailsMaxBytes,
@@ -911,24 +912,30 @@ export const refusalOf = (
   };
 };
 
-/**
- * Calls a public function of App `app` for `by` (spec 32.6): `request`
- * is the call as its caller sent it, as text, bounded before it is read.
- * It runs only against the release of the App's current version, and
- * only if its reference names exactly a public function there (see the
- * header); then through the operation host, which decides the rest.
- * Never throws.
- */
-export const callAppFunction = async (
+/** How a call of an App's function is made, beyond who and what. */
+interface FunctionCallOptions {
+  readonly deadline: number;
+  readonly stillAllowed?: () => Promise<void>;
+  /** The sandbox session (its call ID) of the Code Mode run that calls. */
+  readonly parentSession?: string;
+  /** Only this kind of function may be called (a live query's). */
+  readonly kind?: FunctionRequest["reference"]["kind"];
+  /** Told the store a query read and its read set (`Invocation.observeReads`). */
+  readonly observeReads?: (
+    storeId: StoreId,
+    readSet: Record<string, number>
+  ) => void;
+}
+
+/** `callAppFunction`, with all of its options. */
+const callFunction = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams">,
   app: unknown,
   request: unknown,
-  deadline = Date.now() + platformLimits.serverInvocationWallMs,
-  stillAllowed?: () => Promise<void>,
-  /** The sandbox session (its call ID) of the Code Mode run that calls. */
-  parentSession?: string
+  options: FunctionCallOptions
 ): Promise<FunctionAnswer> => {
+  const { deadline, stillAllowed, parentSession, kind, observeReads } = options;
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
     result: { ok: false, error: refusalOf(error, requestId) },
@@ -939,6 +946,9 @@ export const callAppFunction = async (
   let call: FunctionRequest;
   try {
     call = readFunctionRequest(request);
+    if (kind !== undefined && call.reference.kind !== kind) {
+      throw operationErrors.create("contract.invalid_request");
+    }
   } catch (error) {
     return refused(error);
   }
@@ -966,9 +976,17 @@ export const callAppFunction = async (
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       sources,
     });
+    const { store } = release;
     const result = await callOperation(
       hostedRelease(env, release),
-      invocation,
+      observeReads === undefined || store === null
+        ? invocation
+        : {
+            ...invocation,
+            observeReads: (readSet) => {
+              observeReads(storeIdSchema.parse(store.storeId), readSet);
+            },
+          },
       { path, kind: call.reference.kind },
       call.input,
       {
@@ -987,6 +1005,67 @@ export const callAppFunction = async (
   } catch (error) {
     return refused(error);
   }
+};
+
+/**
+ * Calls a public function of App `app` for `by` (spec 32.6): `request`
+ * is the call as its caller sent it, as text, bounded before it is read.
+ * It runs only against the release of the App's current version, and
+ * only if its reference names exactly a public function there (see the
+ * header); then through the operation host, which decides the rest.
+ * Never throws.
+ */
+export const callAppFunction = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: unknown,
+  request: unknown,
+  deadline = Date.now() + platformLimits.serverInvocationWallMs,
+  stillAllowed?: () => Promise<void>,
+  /** The sandbox session (its call ID) of the Code Mode run that calls. */
+  parentSession?: string
+): Promise<FunctionAnswer> =>
+  await callFunction(env, by, app, request, {
+    deadline,
+    ...(stillAllowed === undefined ? {} : { stillAllowed }),
+    ...(parentSession === undefined ? {} : { parentSession }),
+  });
+
+/** What a live query's evaluation answered, and what it read. */
+export interface EvaluatedQuery {
+  readonly answer: FunctionAnswer;
+  /**
+   * The store it read and the generation of each table it read, once its
+   * reads stood as one state of the store; none when it read no store
+   * (it failed before it ran, or its App has none).
+   */
+  readonly reads:
+    | { readonly storeId: StoreId; readonly readSet: Record<string, number> }
+    | undefined;
+}
+
+/**
+ * Evaluates a public query of App `app` for `by`, as `callAppFunction`
+ * calls it, refusing any other kind (`contract.invalid_request`), and
+ * answers what it read with its answer: a live query's evaluation
+ * (query-subscriptions.ts). Never throws.
+ */
+export const evaluateAppQuery = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: unknown,
+  request: string,
+  deadline: number
+): Promise<EvaluatedQuery> => {
+  let reads: EvaluatedQuery["reads"];
+  const answer = await callFunction(env, by, app, request, {
+    deadline,
+    kind: "query",
+    observeReads: (storeId, readSet) => {
+      reads = { storeId, readSet };
+    },
+  });
+  return { answer, reads };
 };
 
 /**

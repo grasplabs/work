@@ -53,6 +53,10 @@ export interface FrameTarget {
   control: (run: string, kind: string) => Promise<unknown>;
   summary: (run: string) => Promise<unknown>;
   watchRuns: (workflow: string, onChange: unknown) => Promise<unknown>;
+  watchQuery: (
+    request: string,
+    onSnapshot: unknown
+  ) => Promise<{ release: () => Promise<void> }>;
 }
 
 /** The page's theme, as the `dark` class on its root says (theme.js). */
@@ -191,6 +195,27 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
   async watchRuns(workflow: unknown, onChange: unknown): Promise<unknown> {
     this.#request();
     return await this.#target.watchRuns(text(workflow), onChange);
+  }
+
+  /**
+   * Follows a query of the App (spec 11): its request goes on as the
+   * frame sent it, bounded as a function call's is, and its callback as
+   * `watchRuns`'s does; the subscription core answers goes back to the
+   * frame, to release. Following counts as a request; what core pushes
+   * doesn't, and core bounds what a connection follows.
+   */
+  async watchQuery(
+    request: unknown,
+    onSnapshot: unknown
+  ): Promise<{ release: () => Promise<void> }> {
+    this.#request();
+    if (
+      typeof request !== "string" ||
+      request.length > functionRequestMaxBytes
+    ) {
+      throw screenErrors.create("screen.invalid");
+    }
+    return await this.#target.watchQuery(request, onSnapshot);
   }
 
   /** Past what a screen may report, or in no valid shape: dropped here. */
