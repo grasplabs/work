@@ -2294,12 +2294,13 @@ msgctxt "kind of app"
 msgid "Developer tools"
 msgstr "Entwicklertools"
 
-#: src/brain/brain-atlas.ts
-msgid "Directory"
-msgstr "Verzeichnis"
 #: src/dashboard/outcome-card.tsx
 msgid "Did this happen? {who}"
 msgstr "Ist das geschehen? {who}"
+
+#: src/brain/brain-atlas.ts
+msgid "Directory"
+msgstr "Verzeichnis"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -2861,10 +2862,6 @@ msgstr "Grasp-Zugriff"
 #: src/routes/sign-in.tsx
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp ist gerade nicht erreichbar. Versuchen Sie es gleich noch einmal."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
-msgstr "Grasp rechnet die Kosten der Modelle auf die Budgets an, die es für Sie festlegt. Es ist kein Budget festgelegt, daher gibt es nichts anzuzeigen."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -3617,6 +3614,7 @@ msgstr "Mehr zu {title}"
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Mehr als {about} Apps, in denen Ihre Workflows arbeiten können. Grasp tut pro App nur, was Sie erlauben."
+
 #: src/dashboard/outcome-card.tsx
 msgid "More was sent than is shown above. Read exactly what was sent."
 msgstr "Es wurde mehr gesendet, als oben gezeigt wird. Lesen Sie genau, was gesendet wurde."
@@ -4641,10 +4639,6 @@ msgid "Read an email attachment"
 msgstr "Einen E-Mail-Anhang gelesen"
 
 #: src/activity/audit-words.ts
-msgid "Read an engine's statistics"
-msgstr "Die Statistiken einer Engine gelesen"
-
-#: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Die Aufrufe mit unbekanntem Ergebnis aller gelesen"
 
@@ -5248,6 +5242,10 @@ msgstr "Gesendet"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Gesendet <0>{sent}</0>"
+
+#: src/brain/brain.ts
+msgid "Served by"
+msgstr "Umgesetzt durch"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "where a package runs"
@@ -6519,13 +6517,14 @@ msgctxt "whether a tool has AI"
 msgid "Unknown"
 msgstr "Unbekannt"
 
-#: src/brain/brain.ts
-msgid "Unknown source"
-msgstr "Unbekannte Quelle"
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Unknown outcomes"
 msgstr "Unbekannte Ergebnisse"
+
+#: src/brain/brain.ts
+msgid "Unknown source"
+msgstr "Unbekannte Quelle"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx
@@ -6920,6 +6919,7 @@ msgstr "Was gehört, geschrieben und verbunden wurde"
 #: src/brain/brain.ts
 msgid "What was said"
 msgstr "Was gesagt wurde"
+
 #: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept: its run's details were removed."
 msgstr "Was gesendet wurde, wird nicht mehr aufbewahrt: Die Details seines Laufs wurden entfernt."

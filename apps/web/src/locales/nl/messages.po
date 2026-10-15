@@ -2294,12 +2294,13 @@ msgctxt "kind of app"
 msgid "Developer tools"
 msgstr "Ontwikkeltools"
 
-#: src/brain/brain-atlas.ts
-msgid "Directory"
-msgstr "Directory"
 #: src/dashboard/outcome-card.tsx
 msgid "Did this happen? {who}"
 msgstr "Is dit gebeurd? {who}"
+
+#: src/brain/brain-atlas.ts
+msgid "Directory"
+msgstr "Directory"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -2861,10 +2862,6 @@ msgstr "Toegang van Grasp"
 #: src/routes/sign-in.tsx
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp is nu niet bereikbaar. Probeer het zo opnieuw."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
-msgstr "Grasp telt wat de modellen kosten af tegen de budgetten die het voor u instelt. Er is geen budget ingesteld, dus er is niets te tonen."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -3617,6 +3614,7 @@ msgstr "Meer voor {title}"
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Meer dan {about} apps waarin je workflows kunnen werken. Grasp doet per app alleen wat jij toestaat."
+
 #: src/dashboard/outcome-card.tsx
 msgid "More was sent than is shown above. Read exactly what was sent."
 msgstr "Er is meer verstuurd dan hierboven staat. Lees precies wat is verstuurd."
@@ -4641,10 +4639,6 @@ msgid "Read an email attachment"
 msgstr "Een e-mailbijlage gelezen"
 
 #: src/activity/audit-words.ts
-msgid "Read an engine's statistics"
-msgstr "De statistieken van een engine gelezen"
-
-#: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "De aanroepen met onbekende uitkomst van iedereen gelezen"
 
@@ -5248,6 +5242,10 @@ msgstr "Verstuurd"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Verstuurd <0>{sent}</0>"
+
+#: src/brain/brain.ts
+msgid "Served by"
+msgstr "Ondersteund door"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "where a package runs"
@@ -6519,13 +6517,14 @@ msgctxt "whether a tool has AI"
 msgid "Unknown"
 msgstr "Onbekend"
 
-#: src/brain/brain.ts
-msgid "Unknown source"
-msgstr "Onbekende bron"
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Unknown outcomes"
 msgstr "Onbekende uitkomsten"
+
+#: src/brain/brain.ts
+msgid "Unknown source"
+msgstr "Onbekende bron"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx
@@ -6920,6 +6919,7 @@ msgstr "Wat gehoord, geschreven en gekoppeld is"
 #: src/brain/brain.ts
 msgid "What was said"
 msgstr "Wat er gezegd is"
+
 #: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept: its run's details were removed."
 msgstr "Wat is verstuurd wordt niet meer bewaard: de details van de run zijn verwijderd."

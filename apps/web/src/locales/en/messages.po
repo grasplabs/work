@@ -2294,12 +2294,13 @@ msgctxt "kind of app"
 msgid "Developer tools"
 msgstr "Developer tools"
 
-#: src/brain/brain-atlas.ts
-msgid "Directory"
-msgstr "Directory"
 #: src/dashboard/outcome-card.tsx
 msgid "Did this happen? {who}"
 msgstr "Did this happen? {who}"
+
+#: src/brain/brain-atlas.ts
+msgid "Directory"
+msgstr "Directory"
 
 #: src/connections/connection-list.tsx
 msgid "Disconnect"
@@ -2861,10 +2862,6 @@ msgstr "Grasp access"
 #: src/routes/sign-in.tsx
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp can't be reached right now. Try again in a moment."
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
-msgstr "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
 
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp doesn't know where this came from, so it can't be resolved here."
@@ -3617,6 +3614,7 @@ msgstr "More for {title}"
 #: src/routes/_shell.integrations.index.tsx
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
+
 #: src/dashboard/outcome-card.tsx
 msgid "More was sent than is shown above. Read exactly what was sent."
 msgstr "More was sent than is shown above. Read exactly what was sent."
@@ -4641,10 +4639,6 @@ msgid "Read an email attachment"
 msgstr "Read an email attachment"
 
 #: src/activity/audit-words.ts
-msgid "Read an engine's statistics"
-msgstr "Read an engine's statistics"
-
-#: src/activity/audit-words.ts
 msgid "Read everyone's calls of unknown outcome"
 msgstr "Read everyone's calls of unknown outcome"
 
@@ -5248,6 +5242,10 @@ msgstr "Sent"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Sent <0>{sent}</0>"
+
+#: src/brain/brain.ts
+msgid "Served by"
+msgstr "Served by"
 
 #: src/dashboard/dependency-requests.tsx
 msgctxt "where a package runs"
@@ -6519,13 +6517,14 @@ msgctxt "whether a tool has AI"
 msgid "Unknown"
 msgstr "Unknown"
 
-#: src/brain/brain.ts
-msgid "Unknown source"
-msgstr "Unknown source"
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Unknown outcomes"
 msgstr "Unknown outcomes"
+
+#: src/brain/brain.ts
+msgid "Unknown source"
+msgstr "Unknown source"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx
@@ -6920,6 +6919,7 @@ msgstr "What was heard, written and connected"
 #: src/brain/brain.ts
 msgid "What was said"
 msgstr "What was said"
+
 #: src/dashboard/outcome-card.tsx
 msgid "What was sent is no longer kept: its run's details were removed."
 msgstr "What was sent is no longer kept: its run's details were removed."
