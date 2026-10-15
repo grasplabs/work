@@ -145,6 +145,8 @@ export const organizations = sqliteTable("organizations", {
   logo: text(),
   metadata: text(),
   createdAt: timestamp("created_at").notNull(),
+  /** The IANA time zone an admin set (organization.ts); `UTC` until then. */
+  timeZone: text("time_zone"),
 });
 
 /** A person's place in the organization, with their role. */

@@ -44,6 +44,7 @@
     "./onboarding": "./src/onboarding.ts",
     "./operation-limits": "./src/operation-limits.ts",
     "./operations": "./src/operations.ts",
+    "./organization": "./src/organization.ts",
     "./onboarding-documents": "./src/onboarding-documents.ts",
     "./onboarding-gate": "./src/onboarding-gate.ts",
     "./onboarding-staff": "./src/onboarding-staff.ts",
