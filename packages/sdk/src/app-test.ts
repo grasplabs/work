@@ -48,7 +48,10 @@ export type PublicReference<Kind extends ReferenceKind> = Callable<
   readonly fingerprint: string;
 };
 
-/** The most snapshots a live query keeps that `next` hasn't taken. */
+/**
+ * The most snapshots a live query keeps that `next` hasn't taken: one
+ * more fails the test.
+ */
 export const maxBufferedSnapshots = 100;
 
 /**
@@ -378,6 +381,11 @@ interface TestRun {
   readonly closers: Set<() => void>;
   /** What each `next` under way waits on, for a test that runs out of time. */
   readonly waiting: Set<{ readonly describe: () => string }>;
+  /**
+   * What failed the test outside its own calls, such as a live query that
+   * left too many snapshots unread: it fails even if the test never asks.
+   */
+  readonly faults: Set<Error>;
 }
 
 /** The most of a snapshot a failure shows. */
@@ -408,30 +416,29 @@ const readPush = (
     : undefined;
 
 /**
- * How often in a row core may let go of a live query, with no snapshot
- * in between, before the test fails. Core lets go of one it can't keep
- * fresh for now (a read that met a concurrent write, a store that
- * restarted), and a screen follows it again from a fresh read; so does a
- * test, but one core can't keep following at all fails it.
+ * How many times in a row core may let go of a live query, with no
+ * snapshot in between, before the test fails: on that loss, it does. Core
+ * lets go of one it can't keep fresh for now (a read that met a
+ * concurrent write, a store that restarted), and a screen follows it
+ * again from a fresh read; so does a test, but one core can't keep
+ * following at all fails it.
  */
 export const maxLostInARow = 5;
 
 /** How long a test waits to follow again after each loss in a row, in ms. */
 const refollowMs = 50;
 
-/** One subscription to a live query, and the newest revision it pushed. */
+/** One subscription to a live query, as the test follows it. */
 interface Attempt {
-  revision: number;
   handle: AppTestSubscription | undefined;
 }
 
 /**
  * Follows `reference` with `args` as principal `name` (`subscribe`): the
- * snapshots core pushes are kept in order, each newer than the last of
- * its subscription (`readPush`'s revision), until `next` takes them.
- * Lost, it follows again, as a screen does, from a fresh read: a new
- * subscription, whose revisions start over, and whose predecessor's late
- * pushes are dropped.
+ * snapshots core pushes, one at a time and in order, are kept until
+ * `next` takes them. Lost, it follows again, as a screen does, from a
+ * fresh read: a new subscription, whose predecessor's late pushes are
+ * dropped.
  */
 const followed = async (
   run: TestRun,
@@ -462,11 +469,9 @@ const followed = async (
     !closed && failure === undefined && attempt === of;
   const pushed = (of: Attempt, push: unknown): void => {
     const read = readPush(push);
-    // One older than a snapshot already had came late: a newer stands.
-    if (!current(of) || read === undefined || read.revision <= of.revision) {
+    if (!current(of) || read === undefined) {
       return;
     }
-    of.revision = read.revision;
     lostInARow = 0;
     let value: unknown;
     try {
@@ -475,17 +480,41 @@ const followed = async (
       fail(error);
       return;
     }
+    // Dropping one unread could drop the very snapshot a `next` will
+    // wait for, which would then wait until the test's deadline: the
+    // test fails now, saying why.
+    if (snapshots.length >= maxBufferedSnapshots) {
+      const overflow = new TestAssertionError(
+        `more than ${maxBufferedSnapshots} snapshots of the live query of ${contract} went unread: take them with live.next, or close it`
+      );
+      run.faults.add(overflow);
+      fail(overflow);
+      return;
+    }
     snapshots.push(value);
     last = { value };
-    // Each snapshot is the whole result: one past the bound replaces
-    // nothing the test could still need but the oldest.
-    if (snapshots.length > maxBufferedSnapshots) {
-      snapshots.shift();
-    }
     notify();
   };
+  const end = (): Attempt | undefined => {
+    closed = true;
+    snapshots.length = 0;
+    notify();
+    const ended = attempt;
+    attempt = undefined;
+    return ended;
+  };
+  // As the test ends: nothing of it is held in the isolate past it.
+  // Registered before the first subscription is asked for, so a test
+  // that ends meanwhile still lets go of what it is answered (`follow`).
+  const drop = (): void => {
+    const ended = end();
+    if (ended?.handle !== undefined) {
+      disposed(ended.handle);
+    }
+  };
+  run.closers.add(drop);
   const follow = async (): Promise<void> => {
-    const of: Attempt = { revision: 0, handle: undefined };
+    const of: Attempt = { handle: undefined };
     attempt = of;
     let handle: AppTestSubscription;
     try {
@@ -531,7 +560,7 @@ const followed = async (
       disposed(of.handle);
     }
     lostInARow += 1;
-    if (lostInARow > maxLostInARow) {
+    if (lostInARow >= maxLostInARow) {
       fail(
         new TestAssertionError(
           `core stopped following the live query of ${contract} ${lostInARow} times in a row`
@@ -553,23 +582,12 @@ const followed = async (
       void again();
     }, refollowMs * lostInARow);
   };
-  await follow();
-  const end = (): Attempt | undefined => {
-    closed = true;
-    snapshots.length = 0;
-    notify();
-    const ended = attempt;
-    attempt = undefined;
-    return ended;
-  };
-  // As the test ends: nothing of it is held in the isolate past it.
-  const drop = (): void => {
-    const ended = end();
-    if (ended?.handle !== undefined) {
-      disposed(ended.handle);
-    }
-  };
-  run.closers.add(drop);
+  try {
+    await follow();
+  } catch (error) {
+    run.closers.delete(drop);
+    throw error;
+  }
   const waitOn = {
     describe: () =>
       `live.next on ${contract}, ${last === undefined ? "with no snapshot yet" : `whose last snapshot was ${shown(last.value)}`}`,
@@ -742,11 +760,20 @@ export const runAppSuite = async (
     // One test after another: each may only rely on its own session.
     // oxlint-disable-next-line no-await-in-loop -- see above
     const session = await host.open(fixtures, name);
-    const run: TestRun = { session, closers: new Set(), waiting: new Set() };
+    const run: TestRun = {
+      session,
+      closers: new Set(),
+      waiting: new Set(),
+      faults: new Set(),
+    };
     const failures: string[] = [];
     try {
       // oxlint-disable-next-line no-await-in-loop -- see above
       await withinTime(test(contextFor(run)), timeoutMs, run.waiting);
+      const [fault] = run.faults;
+      if (fault !== undefined) {
+        throw fault;
+      }
     } catch (error) {
       failures.push(failureOf(error));
     } finally {

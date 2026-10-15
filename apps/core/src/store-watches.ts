@@ -173,6 +173,13 @@ export class StoreWatches {
     watch.watcher[Symbol.dispose]();
   }
 
+  /** Lets go of every watch it keeps: its store was discarded. */
+  clear(): void {
+    for (const id of this.#watches.keys()) {
+      this.unwatch(id);
+    }
+  }
+
   /**
    * Tells every watch that read one of `tables` at an older generation
    * than the one named: a write changed it since. Returns at once.

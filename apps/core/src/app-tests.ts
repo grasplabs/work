@@ -333,22 +333,21 @@ const disposeStub = (stub: object): void => {
  * an RPC stub is let go of when that call returns unless it is
  * duplicated.
  */
-const keptCallback = (
-  given: object
-): { call: (...args: unknown[]) => unknown; stub: object } => {
+const keptCallback = (given: object): object => {
   const dup: unknown = Reflect.get(given, "dup");
   const kept: unknown =
     typeof dup === "function" ? Reflect.apply(dup, given, []) : given;
   if (typeof kept !== "function") {
     throw new TypeError("A live query's callback is a function.");
   }
-  return {
-    call: (...args) => {
-      const answer: unknown = Reflect.apply(kept, undefined, args);
-      return answer;
-    },
-    stub: kept,
-  };
+  return kept;
+};
+
+/** Calls `kept`, a test's callback (`keptCallback`), with `args`. */
+const callBack = async (kept: object, ...args: unknown[]): Promise<void> => {
+  if (typeof kept === "function") {
+    await Reflect.apply(kept, undefined, args);
+  }
 };
 
 /**
@@ -366,12 +365,7 @@ const testCallback = (
   onLost: object,
   ended: () => boolean
 ): SnapshotCallback => {
-  let kept:
-    | {
-        readonly snapshot: ReturnType<typeof keptCallback>;
-        readonly lost: ReturnType<typeof keptCallback>;
-      }
-    | undefined;
+  let kept: { readonly snapshot: object; readonly lost: object } | undefined;
   let holds = 0;
   const lost = async (): Promise<void> => {
     if (kept === undefined) {
@@ -379,13 +373,13 @@ const testCallback = (
     }
     try {
       if (!ended()) {
-        await kept.lost.call();
+        await callBack(kept.lost);
       }
     } catch {
       // The test's isolate is gone already.
     }
-    disposeStub(kept.snapshot.stub);
-    disposeStub(kept.lost.stub);
+    disposeStub(kept.snapshot);
+    disposeStub(kept.lost);
   };
   const hold = (): SnapshotCallback => {
     holds += 1;
@@ -395,7 +389,7 @@ const testCallback = (
         if (!held || ended() || kept === undefined) {
           throw new Error("This live query was let go of.");
         }
-        await kept.snapshot.call(push);
+        await callBack(kept.snapshot, push);
       },
       {
         dup: (): SnapshotCallback => {

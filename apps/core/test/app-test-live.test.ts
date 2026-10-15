@@ -3,6 +3,7 @@ import type { AppId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import { activateVersion } from "../src/app-activation.ts";
 import { loadRelease } from "../src/app-releases.ts";
@@ -20,6 +21,14 @@ import { person } from "./sealed-apps.ts";
 // snapshots are read as the principal who follows, a refusal or a query
 // nothing matches fails the test, and core releases a subscription when
 // the test closes it or ends.
+
+/** A push of `notes.list`'s, as far as the tests read it. */
+const pushOfNotes = z.object({
+  revision: z.number(),
+  result: z.object({
+    value: z.object({ items: z.array(z.object({ title: z.string() })) }),
+  }),
+});
 
 /** The Notes App the session client's tests use, with a fixture. */
 const appFiles: Record<string, string> = {
@@ -158,7 +167,7 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
     await expect(fixturesLeft()).resolves.toBe(0);
   });
 
-  it("show each principal only the rows they may read, in order", async () => {
+  it("show each principal only the rows they may read", async () => {
     const built = await appWith({
       ...appFiles,
       "tests/access.test.ts": suiteOf({
@@ -177,18 +186,6 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       });
       t.equal(seen.includes(createdId), false, "the other owner saw the note");
       t.equal(last.items.map((note) => note.title), ["Theirs"]);`,
-        "snapshots arrive in order, never older than one before": `
-      const owner = await t.as("note-owner");
-      const live = await owner.subscribe(api.notes.list, page);
-      const counts = [];
-      for (const title of ["One", "Two", "Three", "Four"]) {
-        await owner.mutation(api.notes.create, { title });
-      }
-      await live.next((p) => {
-        counts.push(p.items.length);
-        return p.items.length === 4;
-      });
-      t.equal(counts.every((count, index) => index === 0 || count >= counts[index - 1]), true, String(counts));`,
         "a refusal it expects": `
       const owner = await t.as("note-owner");
       const live = await owner.subscribe({ ...api.notes.list, contractId: "notes.nothing" }, page);
@@ -210,6 +207,16 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
       const owner = await t.as("note-owner");
       const live = await owner.subscribe(api.notes.list, page);
       await live.next((p) => p.items.length > 0);`,
+        "waits for two snapshots at once": `
+      const owner = await t.as("note-owner");
+      const live = await owner.subscribe(api.notes.list, page);
+      void live.next(() => false).catch(() => null);
+      await live.next();`,
+        "reads a live query it closed": `
+      const owner = await t.as("note-owner");
+      const live = await owner.subscribe(api.notes.list, page);
+      await live.close();
+      await live.next();`,
       }),
     });
     await expect(
@@ -219,8 +226,32 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
         /^tests\/failing\.test\.ts, "follows a query the App doesn't have": unexpected error operation\.not_found: /u
       ),
       'tests/failing.test.ts, "waits for a note nobody makes": didn\'t finish within 3 seconds, still waiting in live.next on notes.list, whose last snapshot was {"hasMore":false,"items":[],"nextCursor":null}',
+      'tests/failing.test.ts, "waits for two snapshots at once": live.next on notes.list waits for one snapshot at a time',
+      'tests/failing.test.ts, "reads a live query it closed": live.next on notes.list after it was closed',
     ]);
     await expect(fixturesLeft()).resolves.toBe(0);
+  });
+
+  it("fail a test that leaves more snapshots unread than a live query keeps", async () => {
+    // A write at a time, each read and pushed on its own (past the
+    // manager's gathering window): never a `next` to take them.
+    const built = await appWith({
+      ...appFiles,
+      "tests/unread.test.ts": suiteOf({
+        "never reads what it follows": `
+      const owner = await t.as("note-owner");
+      await owner.subscribe(api.notes.list, page);
+      for (let round = 0; round < 110; round += 1) {
+        await owner.mutation(api.notes.create, { title: \`Note \${round}\` });
+        await new Promise((resolve) => { setTimeout(resolve, 100); });
+      }`,
+      }),
+    });
+    await expect(
+      failuresOf(built, envWith({ APP_TEST_LIMITS_MS: "29000" }))
+    ).resolves.toStrictEqual([
+      'tests/unread.test.ts, "never reads what it follows": more than 100 snapshots of the live query of notes.list went unread: take them with live.next, or close it',
+    ]);
   });
 
   it("release the host subscription when a test closes it", async () => {
@@ -293,7 +324,7 @@ describe("an App test's live queries", { timeout: 180_000 }, () => {
     await expect(
       failuresOf(built, refusingWatches(Number.POSITIVE_INFINITY))
     ).resolves.toStrictEqual([
-      'tests/lost.test.ts, "follows the note it makes": core stopped following the live query of notes.list 6 times in a row',
+      'tests/lost.test.ts, "follows the note it makes": core stopped following the live query of notes.list 5 times in a row',
     ]);
     await expect(failuresOf(built, refusingWatches(2))).resolves.toStrictEqual(
       []
@@ -336,6 +367,56 @@ describe("a test session's live queries", { timeout: 120_000 }, () => {
     const host = fixtureHostFor(env, release, appFiles);
     return { host, release, opened: await host.open("notes", "live") };
   };
+
+  it("push a subscription's snapshots one at a time, each newer than the last and holding every note before it", async () => {
+    const { release, opened } = await session();
+    // A page that takes its time, and in its own time for each push: one
+    // pushed before the last was taken would be recorded out of order.
+    const recorded: { revision: number; titles: string[] }[] = [];
+    const onSnapshot = async (push: unknown): Promise<void> => {
+      await scheduler.wait(Math.floor(Math.random() * 400));
+      const { revision, result } = pushOfNotes.parse(push);
+      recorded.push({
+        revision,
+        titles: result.value.items.map(({ title }) => title),
+      });
+    };
+    await opened.subscribe(
+      "note-owner",
+      requestFor(release, "notes.list", { pagination: {} }),
+      onSnapshot,
+      () => null
+    );
+    const titles = ["One", "Two", "Three", "Four", "Five", "Six"];
+    for (const title of titles) {
+      // One write after another, each past the manager's gathering
+      // window, so each is read and pushed while the page takes its time.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await opened.call(
+        "note-owner",
+        requestFor(release, "notes.create", { title })
+      );
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      await scheduler.wait(70);
+    }
+    await vi.waitFor(
+      () => {
+        expect(recorded.at(-1)?.titles).toHaveLength(titles.length);
+      },
+      { timeout: 10_000 }
+    );
+
+    const outOfOrder = recorded.filter((snapshot, index) => {
+      const before = recorded[index - 1];
+      return (
+        before !== undefined &&
+        (snapshot.revision <= before.revision ||
+          !before.titles.every((title) => snapshot.titles.includes(title)))
+      );
+    });
+    expect(outOfOrder).toStrictEqual([]);
+    await opened.close();
+  });
 
   it("are released by the session when its test ends without closing them", async () => {
     const { release, opened } = await session();
