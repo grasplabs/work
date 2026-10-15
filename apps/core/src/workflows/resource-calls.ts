@@ -579,6 +579,9 @@ const callModel = async (
       // either: the step is tried once (spec 13.7), so a refusal fails it.
       askAgain: false,
       providerRetries: false,
+      // No longer than its attempt may run: a request past it is cut off,
+      // never left running (and paid for) after the attempt timed out.
+      timeoutMs: Math.max(1, Math.floor(effect.deadline - Date.now())),
     });
   } catch (error) {
     throw refused.by ?? error;

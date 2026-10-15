@@ -2122,15 +2122,24 @@ describe("a workflow's own limits", () => {
       reviewed: { version: 1 },
     });
     // The model never answers: only the attempt's timeout ends the call.
-    gatewayAnswering({ hang: true });
+    const gateway = gatewayAnswering({ hang: true });
     const startedAt = Date.now();
     const run = await ended(by, workflow.id, await started(by, workflow.id));
+    // Its request cut off with its attempt, never left running past it.
+    const cutOff = await vi.waitFor(
+      () => {
+        expect(gateway.requests[0]?.signal.aborted).toBeTruthy();
+        return true;
+      },
+      { timeout: 5000, interval: 100 }
+    );
     expect({
       status: run.status,
       // Its task's two seconds, not the host's minute.
       early:
         Date.parse(run.endedAt ?? "") - startedAt < maxAttemptTimeoutMs / 2,
-    }).toStrictEqual({ status: "failed", early: true });
+      cutOff,
+    }).toStrictEqual({ status: "failed", early: true, cutOff: true });
   });
 
   it("refuses to lower an active time nothing holds yet, by pointer", async () => {

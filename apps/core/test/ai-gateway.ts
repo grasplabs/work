@@ -66,6 +66,8 @@ export interface GatewayRequest {
   url: string;
   headers: Headers;
   body: unknown;
+  /** Its signal: aborted once its caller cut it off. */
+  signal: AbortSignal;
 }
 
 const encoder = new TextEncoder();
@@ -587,7 +589,12 @@ export const answeringGateway = (
   ): Promise<Response> => {
     const request = new Request(input, init);
     const body: unknown = await request.json();
-    requests.push({ url: request.url, headers: request.headers, body });
+    requests.push({
+      url: request.url,
+      headers: request.headers,
+      body,
+      signal: request.signal,
+    });
     const badInput = workersAiBadInput(request.url, body);
     if (badInput !== undefined) {
       return badInput;
