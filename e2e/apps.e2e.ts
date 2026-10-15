@@ -281,6 +281,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
         "Models",
         "AI spend",
         "Audit trail",
+        // Every person's calls of unknown outcome, read only, for admins.
+        "Unknown outcomes",
         "Profile",
       ],
     },

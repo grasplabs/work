@@ -148,14 +148,17 @@ msgid "{collection}: {name}"
 msgstr "{collection} : {name}"
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "{connection} ({tool})"
 msgstr "{connection} ({tool})"
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "{connection}, {resource}"
 msgstr "{connection}, {resource}"
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "{connection}, {resource} ({tool})"
 msgstr "{connection}, {resource} ({tool})"
 
@@ -757,6 +760,7 @@ msgid "{title} is now in place {place} of {count}."
 msgstr "{title} est maintenant à la place {place} sur {count}."
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "{title} on {connection}"
 msgstr "{title} sur {connection}"
 
@@ -859,6 +863,10 @@ msgstr "Une modification s’applique aux exécutions qui démarrent ensuite : c
 msgid "A change by {label} waits for approval by the person the run acts for"
 msgstr "Une modification par {label} attend l'accord de la personne pour qui l'exécution agit"
 
+#: src/workflows/history-view.tsx
+msgid "A change by {label} was sent but its answer was lost: it waits for the person the run acts for to say whether it happened"
+msgstr "Une modification de {label} a été envoyée, mais sa réponse s'est perdue : elle attend que la personne pour qui l'exécution agit dise si elle a eu lieu"
+
 #: src/engines/store-changes.tsx
 msgid "A change to the store {name} can't be applied"
 msgstr "Une modification du magasin {name} ne peut pas être appliquée"
@@ -874,6 +882,10 @@ msgstr "Une modification du stockage {name} est prête"
 #: src/workflows/history-view.tsx
 msgid "A change waits for approval by the person the run acts for"
 msgstr "Une modification attend l'accord de la personne pour qui l'exécution agit"
+
+#: src/workflows/history-view.tsx
+msgid "A change was sent but its answer was lost: it waits for the person the run acts for to say whether it happened"
+msgstr "Une modification a été envoyée, mais sa réponse s'est perdue : elle attend que la personne pour qui l'exécution agit dise si elle a eu lieu"
 
 #: src/activity/audit-words.ts
 msgid "A connection needs signing in again"
@@ -1658,6 +1670,10 @@ msgstr "Les plafonds qu'un admin a fixés pour le modèle d'un domaine, dans l'o
 msgid "Categories"
 msgstr "Catégories"
 
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Change"
+msgstr "Modification"
+
 #: src/chat/builds.tsx
 msgid "Changed"
 msgstr "Modifié"
@@ -1753,6 +1769,10 @@ msgstr "Modifiée : lit et réécrit chaque enregistrement de {table}, quel qu'e
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Changes"
 msgstr "Modifie"
+
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Changes Grasp sent for someone whose answer was lost, so nobody can tell whether they took effect. Only that person can say what happened, on their dashboard; follow up with them."
+msgstr "Des modifications envoyées par Grasp pour quelqu'un dont la réponse s'est perdue : personne ne sait si elles ont pris effet. Seule cette personne peut dire ce qui s'est passé, sur son tableau de bord ; faites le suivi avec elle."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Changes something"
@@ -2036,6 +2056,7 @@ msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "La connexion n’a pas abouti. Réessayez ou demandez à un admin."
 
 #: src/engines/resource-bindings.tsx
+#: src/routes/_shell.settings.outcomes.tsx
 msgid "Connection"
 msgstr "Connexion"
 
@@ -2272,6 +2293,10 @@ msgstr "Détails supprimés"
 msgctxt "kind of app"
 msgid "Developer tools"
 msgstr "Outils de développement"
+
+#: src/dashboard/outcome-card.tsx
+msgid "Did this happen? {who}"
+msgstr "Est-ce arrivé ? {who}"
 
 #: src/brain/brain-atlas.ts
 msgid "Directory"
@@ -2838,6 +2863,10 @@ msgstr "Accès de Grasp"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp est injoignable pour le moment. Réessayez dans un instant."
 
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp doesn't know where this came from, so it can't be resolved here."
+msgstr "Grasp ne sait pas d'où cela vient, cela ne peut donc pas être résolu ici."
+
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp a donné son feu vert"
@@ -2855,9 +2884,17 @@ msgctxt "who did it, in the log"
 msgid "Grasp itself"
 msgstr "Grasp lui-même"
 
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp lets it be sent once more, exactly as before, and a run waiting on it sends it again now. Nothing is undone: if it did take effect on {connection}, it takes effect twice."
+msgstr "Grasp permet de l'envoyer une fois de plus, exactement comme avant, et une exécution qui l'attend l'envoie de nouveau maintenant. Rien n'est annulé : s'il a bien pris effet sur {connection}, il prend effet deux fois."
+
 #: src/dashboard/pile-cards.tsx
 msgid "Grasp makes this change on {connection}, with exactly what is shown."
 msgstr "Grasp effectue cette modification dans {connection}, avec exactement ce qui est affiché."
+
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp never sends it again. Nothing is changed or undone on {connection}."
+msgstr "Grasp ne l'envoie plus jamais. Rien n'est modifié ni annulé sur {connection}."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Grasp opens"
@@ -2871,9 +2908,17 @@ msgstr "Grasp ouvre bientôt à tout le monde, dès que Stephen aura parlé avec
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 msgstr "Grasp n’enregistre cette réponse qu’une fois que vous l’avez confirmée ici. Vérifiez ce qui est demandé et ce que vous répondez."
 
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on {connection}."
+msgstr "Grasp enregistre votre parole qu'il a pris effet et ne l'envoie plus jamais ; une exécution qui l'attend continue sans la réponse perdue. Rien n'est modifié ni annulé sur {connection}."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
 msgstr "Grasp a résolu ces paquets depuis le registre npm et vérifié les fichiers de chacun avec l'empreinte du registre. Une licence est celle que le paquet indique lui-même."
+
+#: src/dashboard/outcome-card.tsx
+msgid "Grasp sent this, but its answer was lost: nobody can tell whether it took effect. Check on {connection} before you say."
+msgstr "Grasp a envoyé ceci, mais sa réponse s'est perdue : personne ne sait s'il a pris effet. Vérifiez sur {connection} avant de répondre."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Grasp sets these for your organization, as agreed with you. To change them, contact Grasp."
@@ -2952,6 +2997,10 @@ msgstr "Bonjour {name}"
 #: src/activity/audit-log.tsx
 msgid "Hide"
 msgstr "Masquer"
+
+#: src/chat/held-writes.tsx
+msgid "Hide exactly what was sent"
+msgstr "Masquer exactement ce qui a été envoyé"
 
 #: src/chat/held-writes.tsx
 msgid "Hide exactly what will be sent"
@@ -3089,9 +3138,21 @@ msgstr "Équipes invitées à l’étape 2"
 msgid "it answered something that isn't its records"
 msgstr "elle a répondu autre chose que ses enregistrements"
 
+#: src/dashboard/outcome-card.tsx
+msgid "It can be sent once more, exactly as before. Nothing is undone."
+msgstr "Il peut être envoyé une fois de plus, exactement comme avant. Rien n'est annulé."
+
 #: src/routes/_shell.settings.spend.tsx
 msgid "It counts against the budgets as spent: the most it could have cost. This can't be undone."
 msgstr "Il compte comme dépensé dans les budgets : le maximum qu’il aurait pu coûter. Cette action est irréversible."
+
+#: src/dashboard/outcome-card.tsx
+msgid "It didn't happen"
+msgstr "Ce n'est pas arrivé"
+
+#: src/dashboard/outcome-card.tsx
+msgid "It didn't happen: {who}"
+msgstr "Ce n'est pas arrivé : {who}"
 
 #: src/engines/store-change-errors.ts
 msgid "it didn't pass"
@@ -3100,6 +3161,14 @@ msgstr "elle n'a pas réussi"
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Elle a échoué sur ses enregistrements de test quand la version a été scellée : elle ne s'exécute sur aucun enregistrement, et la version ne peut pas être rendue actuelle"
+
+#: src/dashboard/outcome-card.tsx
+msgid "It happened"
+msgstr "C'est arrivé"
+
+#: src/dashboard/outcome-card.tsx
+msgid "It happened: {who}"
+msgstr "C'est arrivé : {who}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
@@ -3547,6 +3616,10 @@ msgstr "Plus pour {title}"
 msgid "More than {about} apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Plus de {about} applications dans lesquelles vos workflows peuvent travailler. Grasp ne fait que ce que vous autorisez pour chaque application."
 
+#: src/dashboard/outcome-card.tsx
+msgid "More was sent than is shown above. Read exactly what was sent."
+msgstr "Plus a été envoyé que ce qui est affiché ci-dessus. Lisez exactement ce qui a été envoyé."
+
 #: src/chat/held-writes.tsx
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "Plus de choses seront envoyées que ce qui est affiché ci-dessus. Lisez exactement ce qui sera envoyé avant de confirmer."
@@ -3652,6 +3725,10 @@ msgstr "Aucun budget défini : les appels de modèles ne sont pas limités en co
 #: src/routes/_shell.settings.models.tsx
 msgid "No call has to stay in the EU."
 msgstr "Aucun appel n’est tenu de rester dans l’UE."
+
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "No call of unknown outcome is open."
+msgstr "Aucun appel au résultat inconnu n'est ouvert."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "No caps of its own"
@@ -4078,6 +4155,7 @@ msgid "Often corrected"
 msgstr "Souvent corrigé"
 
 #: src/chat/held-writes.tsx
+#: src/dashboard/outcome-card.tsx
 msgid "On {where}"
 msgstr "Sur {where}"
 
@@ -4126,6 +4204,10 @@ msgstr "Sections de l’onboarding"
 #: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
 msgstr "Seuls les modèles marqués comme acceptant des données sensibles peuvent recevoir des données d’une collection sensible (marquée dans Connaissances) ou d’une connexion sensible, ou d’un chat, d’un domaine ou d’une exécution qui en a lu une."
+
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Only the newest {unknownOutcomeListLimit} are shown. Older ones show here as these are resolved."
+msgstr "Seuls les {unknownOutcomeListLimit} plus récents sont affichés. Les plus anciens apparaîtront ici à mesure que ceux-ci seront résolus."
 
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
@@ -4319,6 +4401,10 @@ msgctxt "tab of a workflow"
 msgid "Parameters"
 msgstr "Paramètres"
 
+#: src/dashboard/outcome-card.tsx
+msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
+msgstr "Une partie de ce qui a été envoyé est tronquée ci-dessus. Affichez tout, ou exactement ce qui a été envoyé, avant de dire que ce n'est pas arrivé."
+
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Une partie de ce qui sera envoyé est tronquée ci-dessus. Affichez tout, ou exactement ce qui sera envoyé, pour confirmer."
@@ -4413,6 +4499,10 @@ msgstr "Autorisation {permission}"
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
 msgstr "Autorisations demandées"
+
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Person"
+msgstr "Personne"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgctxt "who does a step"
@@ -4552,6 +4642,10 @@ msgstr "Relire"
 #: src/activity/audit-words.ts
 msgid "Read an email attachment"
 msgstr "A lu une pièce jointe d’e-mail"
+
+#: src/activity/audit-words.ts
+msgid "Read everyone's calls of unknown outcome"
+msgstr "A lu les appels au résultat inconnu de tout le monde"
 
 #: src/activity/audit-words.ts
 msgid "Read how knowledge is used"
@@ -5033,6 +5127,14 @@ msgstr "Exécutions cette semaine"
 msgid "Runs: {total}"
 msgstr "Exécutions : {total}"
 
+#: src/dashboard/outcome-card.tsx
+msgid "Said it didn't happen: {who}."
+msgstr "Indiqué comme non arrivé : {who}."
+
+#: src/dashboard/outcome-card.tsx
+msgid "Said it happened: {who}."
+msgstr "Indiqué comme arrivé : {who}."
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Said yes"
 msgstr "A dit oui"
@@ -5057,6 +5159,14 @@ msgstr "Enregistrer les accords"
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Saved."
 msgstr "Enregistré."
+
+#: src/dashboard/outcome-card.tsx
+msgid "Say it didn't happen?"
+msgstr "Dire que ce n'est pas arrivé ?"
+
+#: src/dashboard/outcome-card.tsx
+msgid "Say it happened?"
+msgstr "Dire que c'est arrivé ?"
 
 #: src/workflows/workflows-table.tsx
 msgid "Schedule stopped"
@@ -5122,6 +5232,14 @@ msgstr "Sensible"
 msgid "Sensitive connections: {connections}."
 msgstr "Connexions sensibles : {connections}."
 
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Sent"
+msgstr "Envoyé"
+
+#: src/dashboard/outcome-card.tsx
+msgid "Sent <0>{sent}</0>"
+msgstr "Envoyé <0>{sent}</0>"
+
 #: src/decision-confirmation.tsx
 msgctxt "what an App's screen sends with an answer to a decision"
 msgid "Sent by the app"
@@ -5185,6 +5303,10 @@ msgstr "Afficher tous les paquets"
 #: src/dashboard/dependency-requests.tsx
 msgid "Show every package before you approve them."
 msgstr "Affichez tous les paquets avant de les approuver."
+
+#: src/chat/held-writes.tsx
+msgid "Show exactly what was sent"
+msgstr "Afficher exactement ce qui a été envoyé"
 
 #: src/chat/held-writes.tsx
 msgid "Show exactly what will be sent"
@@ -5981,6 +6103,10 @@ msgstr "Les paquets n’ont pas pu être relus, cette liste n’est donc peut-ê
 msgid "The part of the address before the @, on the mail domain set up for Grasp."
 msgstr "La partie de l'adresse avant le @, sur le domaine de messagerie configuré pour Grasp."
 
+#: src/workflows/history-view.tsx
+msgid "The person the run acts for says what happened on their dashboard"
+msgstr "La personne pour qui l'exécution agit dit ce qui s'est passé sur son tableau de bord"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The platform is open to everyone at the company: it was never closed for the onboarding."
 msgstr "La plateforme est ouverte à toute l’entreprise : elle n’a jamais été fermée pour l’onboarding."
@@ -6393,6 +6519,11 @@ msgctxt "whether a tool has AI"
 msgid "Unknown"
 msgstr "Inconnu"
 
+#: src/routes/_shell.settings.outcomes.tsx
+#: src/routes/_shell.settings.tsx
+msgid "Unknown outcomes"
+msgstr "Résultats inconnus"
+
 #: src/brain/brain.ts
 msgid "Unknown source"
 msgstr "Source inconnue"
@@ -6790,6 +6921,10 @@ msgstr "Ce qui a été entendu, écrit et connecté"
 #: src/brain/brain.ts
 msgid "What was said"
 msgstr "Ce qui a été dit"
+
+#: src/dashboard/outcome-card.tsx
+msgid "What was sent is no longer kept."
+msgstr "Ce qui a été envoyé n'est plus conservé."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "What was spent this month is under <0>AI spend</0>."

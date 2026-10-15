@@ -12,6 +12,7 @@ import {
   refuseResolutionSchema,
   resolveOutcomeSchema,
   unknownOutcomeKeySchema,
+  unknownOutcomeListLimit,
   unknownOutcomeRequestSchema,
 } from "@grasp-os/shared/connect";
 import type {
@@ -20,9 +21,12 @@ import type {
   ResolutionChoice,
   UnknownOutcome,
   UnknownOutcomeKey,
+  UnknownOutcomeListing,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { codeSubjectSchema } from "@grasp-os/shared/permissions";
+import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -43,8 +47,7 @@ import type { ShownConnection } from "./pending.ts";
 // word, in one batch with the change it makes: never as a send, never as
 // an effect undone.
 
-/** Most calls of unknown outcome one list answers: the newest. */
-const listLimit = 200;
+const listLimit = unknownOutcomeListLimit;
 
 /** The key of the call `row` records, as a list and a resolution name it. */
 const keyOf = (row: Row): UnknownOutcomeKey =>
@@ -161,6 +164,112 @@ export const listUnknownOutcomes = async (
     .orderBy(desc(idempotentCalls.createdAt))
     .limit(listLimit);
   return rows.map(summaryOf);
+};
+
+/**
+ * The columns an admin's listing reads (`listingOf`): never the input,
+ * which may be large, nor the key or origin, which it never shows.
+ */
+const listingColumns = {
+  subjectType: idempotentCalls.subjectType,
+  subjectId: idempotentCalls.subjectId,
+  onBehalfOf: idempotentCalls.onBehalfOf,
+  connectionId: idempotentCalls.connectionId,
+  action: idempotentCalls.action,
+  claimedAt: idempotentCalls.claimedAt,
+  resource: idempotentCalls.resource,
+  createdAt: idempotentCalls.createdAt,
+};
+
+type ListingRow = Pick<Row, keyof typeof listingColumns>;
+
+/**
+ * What `row` shows an admin: never its input, key, claim or origin
+ * (`UnknownOutcomeListing`). Its title is its tool's, which names the
+ * action, never a value of what was sent.
+ */
+const listingOf = async ({
+  row,
+  connection,
+}: {
+  row: ListingRow;
+  connection: ShownConnection;
+}): Promise<UnknownOutcomeListing> => {
+  const title = descriptionOf(
+    { action: row.action, input: {} },
+    connection
+  )?.title;
+  return {
+    // Only tells rows apart, of what the admin is shown anyway, and never
+    // of its key: App code chooses keys and may put data in them, and a
+    // digest of a key a reader can guess would confirm the guess. Two calls
+    // alike in all of these, claimed in the same millisecond, share it until
+    // `distinctIds` tells them apart.
+    id: await sha256Hex(
+      JSON.stringify([
+        row.subjectType,
+        row.subjectId,
+        row.onBehalfOf,
+        row.connectionId,
+        row.action,
+        row.claimedAt.getTime(),
+      ])
+    ),
+    onBehalfOf: row.onBehalfOf,
+    subject: codeSubjectSchema.parse(
+      row.subjectType === "app"
+        ? { type: "app", appId: row.subjectId }
+        : { type: "agent", agentId: row.subjectId }
+    ),
+    connectionId: row.connectionId,
+    connectionName: nameOf(connection),
+    action: row.action,
+    ...(title === undefined ? {} : { title }),
+    resource: row.resource,
+    sentAt: row.createdAt.toISOString(),
+  };
+};
+
+/**
+ * `listings` with every id told apart: a repeat of an id already given
+ * gets its count after it, so a listing never names two rows alike.
+ */
+const distinctIds = (
+  listings: UnknownOutcomeListing[]
+): UnknownOutcomeListing[] => {
+  const seen = new Map<string, number>();
+  return listings.map((listing) => {
+    const count = seen.get(listing.id) ?? 0;
+    seen.set(listing.id, count + 1);
+    return count === 0 ? listing : { ...listing, id: `${listing.id}-${count}` };
+  });
+};
+
+/**
+ * Every person's calls of unknown outcome, newest first, at most
+ * {@link listLimit}, as an admin sees them (`listingOf`): only for one of
+ * the organization's own admins, as core read them now; refused to anyone
+ * else, Grasp staff included, who act for nobody here.
+ */
+export const listAllUnknownOutcomes = async (
+  env: Env,
+  request: unknown
+): Promise<UnknownOutcomeListing[]> => {
+  const parsed = connectionPersonSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  if (!isMemberAdmin(parsed.data)) {
+    throw roleErrors.create("role.forbidden");
+  }
+  const rows = await drizzle(env.DB)
+    .select({ row: listingColumns, connection: shownConnection })
+    .from(idempotentCalls)
+    .leftJoin(connections, eq(connections.id, idempotentCalls.connectionId))
+    .where(unknownNow(Date.now()))
+    .orderBy(desc(idempotentCalls.createdAt))
+    .limit(listLimit);
+  return distinctIds(await Promise.all(rows.map(listingOf)));
 };
 
 /** The person's call of unknown outcome `key` names, as stored, if any. */
@@ -332,6 +441,12 @@ export const resolveOutcome = async (
     // and lost again, it is another call to decide on.
     if (row === undefined || row.claimedAt.getTime() !== claim) {
       throw connectErrors.create("connect.outcome_not_found");
+    }
+    // What was sent is no longer kept (retention): "it didn't" would let
+    // it go out again unread, so only "it happened" is said (core checks
+    // this too, on its earlier read).
+    if (choice === "not_happened" && row.input === null) {
+      throw connectErrors.create("connect.outcome_not_kept");
     }
     const claims = await verifyCapability(signingKeys, capability, {
       connectionId: row.connectionId,

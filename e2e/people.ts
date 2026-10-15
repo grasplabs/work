@@ -19,6 +19,13 @@ import { origin } from "./stack.ts";
 /** Signs session cookies on the test stack only; never a real secret. */
 export const testAuthSecret = "e2e-only-better-auth-secret-of-32-chars-or-more";
 
+/**
+ * Signs the capabilities core gives connect for each connector call, on
+ * the test stack only (core and connect alike); never a real secret.
+ */
+export const testCapabilityKey =
+  "e2e-only-capability-signing-key-of-32-chars-or-more";
+
 const sessionCookie = "__Host-grasp.session_token";
 
 /** The `name=value` pairs a response sets, as a `Cookie` header. */
@@ -191,6 +198,7 @@ const cast = {
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
   chat: { user: "user" },
+  unknownOutcome: { admin: "admin", other: "admin", member: "user" },
   chatDock: { user: "user" },
   exports: { admin: "admin" },
   chatBuilds: { builder: "builder" },

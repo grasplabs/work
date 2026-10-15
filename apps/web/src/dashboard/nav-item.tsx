@@ -19,6 +19,7 @@ import type { Viewer } from "./to-do.tsx";
 
 // The nav's way to the dashboard, with how many things wait on the person
 // (as the prototype's badge, `app-sidebar.tsx`): changes to confirm,
+// changes sent whose answer was lost, for the person to say what became of,
 // unread failed workflows, connections to sign in to again, packages to
 // approve and, for admins, permission requests and apps to approve. Read again on every other page the person
 // opens and after every change on one; nothing is marked read by counting.
@@ -42,6 +43,12 @@ const readCount = async (
       readWithin(core, async (session) => {
         const held = await session.pendingActions.list();
         return held.length;
+      })
+    ),
+    countOf(
+      readWithin(core, async (session) => {
+        const lost = await session.unknownOutcomes.list();
+        return lost.length;
       })
     ),
     countOf(

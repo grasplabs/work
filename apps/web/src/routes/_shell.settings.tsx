@@ -9,6 +9,7 @@ import {
   useLocation,
 } from "@tanstack/react-router";
 import {
+  CircleHelpIcon,
   CoinsIcon,
   HistoryIcon,
   SparklesIcon,
@@ -23,8 +24,8 @@ import { SiteHeader } from "../frame/site-header.tsx";
 // who may do what in it, then one's own account, one section at a time.
 // Only the sections core has something behind are here, and only those
 // the person may open are listed: Profile for everyone; Members and roles,
-// Models, AI spend and the audit trail for admins (Members and
-// roles never for Grasp staff). Core checks the role on every call
+// Models, AI spend, the audit trail and calls of unknown outcome for admins
+// (Members and roles, and unknown outcomes, never for Grasp staff). Core checks the role on every call
 // whatever is listed.
 
 type SettingsPath =
@@ -32,7 +33,8 @@ type SettingsPath =
   | "/settings/members"
   | "/settings/models"
   | "/settings/spend"
-  | "/settings/audit";
+  | "/settings/audit"
+  | "/settings/outcomes";
 
 interface SettingsItem {
   label: MessageDescriptor;
@@ -62,6 +64,15 @@ const groupsFor = ({
         { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
         { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
         { label: msg`Audit trail`, to: "/settings/audit", icon: HistoryIcon },
+        ...(staff
+          ? []
+          : [
+              {
+                label: msg`Unknown outcomes`,
+                to: "/settings/outcomes" as const,
+                icon: CircleHelpIcon,
+              },
+            ]),
       ]
     : [];
   return [
