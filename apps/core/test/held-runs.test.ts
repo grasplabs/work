@@ -10,7 +10,7 @@ import { allEvents } from "./audit-events.ts";
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection, mailWithSearch } from "./mail-connection.ts";
-import { endLiveRuns, finished, liveStatus } from "./runs.ts";
+import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
 import { openRpc, outcome as codeOf, signedInWithRole } from "./sign-in.ts";
 import {
   appWith,
@@ -162,6 +162,51 @@ describe("a run's held side effects", { timeout: 60_000 }, () => {
         stepIds: 1,
         held: true,
       },
+    });
+  });
+
+  it("wake the waiting step as soon as its person decides, not at its next check", async () => {
+    const admin = await personApi("admin");
+    const mail = await mailConnection();
+    const app = await appWith(admin, mailer(`retries: { limit: 0 }`));
+    await grantMail(idp, admin, app, mail.id);
+    await appHost(env, appIdSchema.parse(app)).restrict();
+    const run = await admin.api.workflows.start(app, "mailer");
+    using events = await runInstance(run.id).subscribe({
+      filter: ["wait_started", "wait_completed", "wait_timed_out"],
+    });
+    // Its checks come further apart each time (from 250 ms in tests): the
+    // fourth waits two seconds, which only a wake ends early.
+    let waits = 0;
+    await vi.waitFor(
+      async () => {
+        const { done, value } = await events.next();
+        if (done === true) {
+          throw new Error(`Run ${run.id} ended while it was held`);
+        }
+        if (value.type === "wait_started") {
+          waits += 1;
+        }
+        expect(waits).toBeGreaterThanOrEqual(4);
+      },
+      { timeout: 20_000, interval: 0 }
+    );
+    const [held] = await admin.api.pendingActions.list();
+    if (held === undefined) {
+      throw new Error("Nothing held");
+    }
+    await admin.api.pendingActions.confirm(held.id, held.inputHash);
+    const { value: ended } = await events.next();
+    await finished(run.id);
+
+    expect({
+      ended: ended?.type,
+      run: await admin.api.workflows.status(run.id),
+      server: await mail.did(),
+    }).toMatchObject({
+      ended: "wait_completed",
+      run: { status: "completed", output: { messageId: "message-1" } },
+      server: { calls: 1, sent: [invoiceMail] },
     });
   });
 

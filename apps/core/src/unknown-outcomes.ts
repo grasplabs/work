@@ -25,6 +25,7 @@ import { requireHeldBinding } from "./resource-bindings.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { wakingHeld } from "./workflows/wakes.ts";
 
 // Calls of unknown outcome (spec 14.3), as core shows them to the person
 // each acted for and lets them say what became of it. Connect keeps them;
@@ -149,11 +150,24 @@ export const resolveUnknownOutcome = async (
     });
     throw error;
   }
-  await env.CONNECT.resolveOutcome({
-    ...request,
-    claim: parsedClaim.data,
-    capability,
-  });
+  // The run's step that waits on it is woken once it is resolved, whatever
+  // happened, once it no longer waits (workflows/wakes.ts).
+  await wakingHeld(
+    env,
+    {
+      appId: found.key.subject.type === "app" ? found.key.subject.appId : null,
+      idempotencyKey: found.key.idempotencyKey,
+    },
+    async () => {
+      await env.CONNECT.resolveOutcome({
+        ...request,
+        claim: parsedClaim.data,
+        capability,
+      });
+    },
+    async () =>
+      (await env.CONNECT.unknownOutcome({ person, key: found.key })) !== null
+  );
 };
 
 /** A signed-in person's calls of unknown outcome, over `/rpc`. */

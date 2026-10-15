@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { startRun } from "../src/workflows/runs.ts";
 import { allEvents } from "./audit-events.ts";
+import { runCron } from "./cron.ts";
 import {
   approvalApp,
   asking,
@@ -19,11 +20,13 @@ import type { Ask, Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam } from "./knowledge.ts";
 import {
+  aroundEngine,
   endLiveRuns,
   finished,
   resumed,
   runInstance,
   stopped,
+  whileEngineRefuses,
 } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
@@ -115,6 +118,16 @@ const eventsOf = async (decision: string) => {
   return events.filter(({ target }) => target?.id === decision);
 };
 
+/** How many wakes core still owes run `run` (workflows/wakes.ts). */
+const owed = async (run: string): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS owed FROM workflow_run_wakes WHERE run_id = ?"
+  )
+    .bind(run)
+    .first<{ owed: number }>();
+  return row?.owed ?? 0;
+};
+
 describe("decisions", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
 
@@ -203,6 +216,128 @@ describe("decisions", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("go on with the answer once, when the wake that answer owes is lost and the run restarts", async () => {
+    const builder = await personApi("builder");
+    const decider = await personApi("user");
+    const { run, decision } = await asking(builder, {
+      from: `person:${decider.userId}`,
+      timeout: week,
+    });
+    // Down while it waits, as a deploy or a crash leaves it, and the
+    // engine can't be reached as the answer comes in: the answer is
+    // recorded, and the event that would wake the run is lost.
+    await stopped(run.id);
+    const answered = await whileEngineRefuses(
+      (method) => method === "sendEvent",
+      async () =>
+        await decider.api.decisions.answer(decision, {
+          approved: true,
+          payload: { comment: "Matches the PO" },
+        })
+    );
+    // The same answer sent again, as after an acknowledgement that never
+    // came: it is the decision already taken, and owes nothing more.
+    const again = await outcome(
+      decider.api.decisions.answer(decision, { approved: true })
+    );
+    // The minute's repair sends the wake while the run is down, and the
+    // next ones find nothing left to send; the run takes it once it is
+    // back, days before the deadline.
+    const minute = 60_000;
+    await runCron({}, new Date(Date.now() + minute));
+    await runCron({}, new Date(Date.now() + 2 * minute));
+    await resumed(run.id);
+    const output = await outputOf(builder, run.id);
+    await runCron({}, new Date(Date.now() + 3 * minute));
+    const logged = await allEvents();
+    const answers = logged.filter(
+      ({ action, target }) =>
+        target?.id === decision &&
+        ["workflow.decision.approved", "workflow.decision.rejected"].includes(
+          action
+        )
+    );
+    const completions = logged.filter(
+      ({ action, target }) =>
+        action === "workflow.run.completed" && target?.id === run.id
+    );
+
+    expect({
+      answered: answered.status,
+      again,
+      output,
+      answers: answers.length,
+      completions: completions.length,
+    }).toStrictEqual({
+      answered: "approved",
+      again: "decision.closed",
+      output: {
+        timedOut: false,
+        approved: true,
+        by: decider.userId,
+        payload: { comment: "Matches the PO" },
+      },
+      answers: 1,
+      completions: 1,
+    });
+  });
+
+  it("give up a wake the engine refuses for good, or can't be reached for, and leave the run to read its answer at the deadline", async () => {
+    const builder = await personApi("builder");
+    const decider = await personApi("user");
+    // The run's inbox is full: the engine will never take the wake, so
+    // it is given up at once, rather than sent again for ever.
+    const full = await asking(builder, {
+      from: `person:${decider.userId}`,
+      timeout: 4000,
+    });
+    await aroundEngine(
+      async (method, call) => (method === "sendEvent" ? "full" : await call()),
+      async () =>
+        await decider.api.decisions.answer(full.decision, { approved: true })
+    );
+    const owedWhenFull = await owed(full.run.id);
+    // The engine can't be reached at all: the repair tries a bounded
+    // number of times (20), then gives the wake up.
+    const down = await asking(builder, {
+      from: `person:${decider.userId}`,
+      timeout: week,
+    });
+    const owedAfter = await whileEngineRefuses(
+      (method) => method === "sendEvent",
+      async () => {
+        await decider.api.decisions.answer(down.decision, { approved: true });
+        const counts: number[] = [];
+        const hours = 60 * 60 * 1000;
+        for (let repair = 1; repair <= 21; repair += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one repair at a time
+          await runCron({}, new Date(Date.now() + repair * 2 * hours));
+          if (repair >= 20) {
+            // oxlint-disable-next-line no-await-in-loop -- one repair at a time
+            counts.push(await owed(down.run.id));
+          }
+        }
+        return counts;
+      }
+    );
+
+    expect({
+      owedWhenFull,
+      // The run still goes on with the answer, at the decision's deadline.
+      output: await outputOf(builder, full.run.id),
+      owedAfter,
+    }).toStrictEqual({
+      owedWhenFull: 0,
+      output: {
+        timedOut: false,
+        approved: true,
+        by: decider.userId,
+        payload: null,
+      },
+      owedAfter: [1, 0],
+    });
+  });
+
   it("refuse anyone the decision isn't from", async () => {
     const builder = await personApi("builder");
     const decider = await personApi("user");
@@ -227,6 +362,21 @@ describe("decisions", { timeout: 60_000 }, () => {
     await expect(outputOf(builder, run.id)).resolves.toMatchObject({
       approved: false,
       by: decider.userId,
+    });
+    // The two refused answers are audited under who tried; looking isn't.
+    const events = await eventsOf(decision);
+    const refused = events.filter(
+      ({ action }) => action === "workflow.decision.answer_refused"
+    );
+    expect({
+      actors: new Set(refused.map(({ actor }) => actor)),
+      codes: refused.map(({ detail }) => detail.errorCode),
+    }).toStrictEqual({
+      actors: new Set([
+        { type: "person", userId: outsider.userId },
+        { type: "person", userId: builder.userId },
+      ]),
+      codes: ["decision.forbidden", "decision.forbidden"],
     });
   });
 
@@ -308,15 +458,60 @@ describe("decisions", { timeout: 60_000 }, () => {
       timeout: week,
     });
     await builder.api.workflows.cancel(run.id);
-
-    const answer = await outcome(
-      decider.api.decisions.answer(decision, { approved: true })
+    // A second run, whose cancel is admitted while the engine can't be
+    // reached to stop it: its row shows it running until the cancel's
+    // repair gets through, and its decision must take no answer meanwhile.
+    const second = await asking(builder, {
+      from: `person:${decider.userId}`,
+      timeout: week,
+    });
+    await whileEngineRefuses(
+      (method) => method === "terminate",
+      async () => await outcome(builder.api.workflows.cancel(second.run.id))
     );
-    const { status } = await decider.api.decisions.get(decision);
 
-    expect({ answer, status }).toStrictEqual({
-      answer: "decision.closed",
-      status: "closed",
+    const answers = await Promise.all([
+      outcome(decider.api.decisions.answer(decision, { approved: true })),
+      outcome(
+        decider.api.decisions.answer(second.decision, { approved: true })
+      ),
+    ]);
+    const statuses = await Promise.all([
+      decider.api.decisions.get(decision),
+      decider.api.decisions.get(second.decision),
+    ]);
+
+    const refusals = await Promise.all(
+      [decision, second.decision].map(async (id) => {
+        const events = await eventsOf(id);
+        return events
+          .filter(({ action }) => action === "workflow.decision.answer_refused")
+          .map(({ actor, detail }) => ({
+            actor,
+            keys: Object.keys(detail).toSorted(),
+            run: detail.run,
+            errorCode: detail.errorCode,
+          }));
+      })
+    );
+
+    expect({
+      answers,
+      statuses: statuses.map(({ status }) => status),
+      refusals,
+    }).toStrictEqual({
+      answers: ["decision.closed", "decision.closed"],
+      statuses: ["closed", "closed"],
+      // Each refusal audited under who tried, and why: never what they
+      // answered.
+      refusals: [run.id, second.run.id].map((runId) => [
+        {
+          actor: { type: "person", userId: decider.userId },
+          keys: ["app", "errorCode", "run", "step", "version", "workflow"],
+          run: runId,
+          errorCode: "decision.closed",
+        },
+      ]),
     });
   });
 
@@ -576,33 +771,56 @@ describe("decisions", { timeout: 60_000 }, () => {
     });
   });
 
-  it("don't take an answer from an event sent to the run", async () => {
+  it("don't take an answer from an event sent to the run, nor end its wait for one", async () => {
     const builder = await personApi("builder");
     const decider = await personApi("user");
-    // Approving events sent straight to a waiting run, again and again
-    // until it ends, as anyone with the Workflows API could send them,
-    // wake it, but answer nothing.
+    // Approving events sent straight to a waiting run, as anyone with the
+    // engine's API could send them: each wakes it, but answers nothing,
+    // and closes nothing before its deadline. The run waits again, as
+    // often as it is woken, and spends none of its steps (60 in tests)
+    // on it: each wake is a wait and a look.
     const { run, decision } = await asking(builder, {
       from: `person:${decider.userId}`,
-      timeout: 3000,
+      timeout: week,
     });
     const instance = runInstance(run.id);
+    using events = await instance.subscribe({
+      filter: ["wait_started", "wait_completed"],
+    });
+    let woken = 0;
     await vi.waitFor(
       async () => {
-        const { status } = await instance.status();
-        if (status !== "complete") {
+        const { done, value } = await events.next();
+        if (done === true) {
+          throw new Error(`Run ${run.id} ended while it waited`);
+        }
+        // Another forged answer each time the run waits again.
+        if (value.type === "wait_started") {
           await instance.sendEvent({
             type: `grasp-decision-${decision}`,
             payload: { answered: true, approved: true, by: builder.userId },
           });
+        } else {
+          woken += 1;
         }
-        expect(status).toBe("complete");
+        expect(woken).toBeGreaterThanOrEqual(35);
       },
-      { timeout: 20_000, interval: 200 }
+      { timeout: 20_000, interval: 0 }
     );
+    const { status } = await decider.api.decisions.get(decision);
+    await decider.api.decisions.answer(decision, { approved: false });
 
-    await expect(outputOf(builder, run.id)).resolves.toStrictEqual({
-      timedOut: true,
+    expect({
+      status,
+      output: await outputOf(builder, run.id),
+    }).toStrictEqual({
+      status: "open",
+      output: {
+        timedOut: false,
+        approved: false,
+        by: decider.userId,
+        payload: null,
+      },
     });
   });
 

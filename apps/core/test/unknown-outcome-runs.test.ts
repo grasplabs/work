@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
+import { waitKeyOf } from "../src/workflows/host.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -17,7 +18,7 @@ import {
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
-import { endLiveRuns, finished, liveStatus } from "./runs.ts";
+import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   openRpc,
@@ -238,6 +239,67 @@ const elapse = async (ms: number): Promise<void> => {
 
 describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
+
+  it("wakes the waiting step as soon as its person says what became of it, not at its next check", async () => {
+    const admin = await personApi("admin");
+    const { run } = await lostRun(admin);
+    const unknownWait = `$grasp:wait:${await waitKeyOf("send")}:unknown:`;
+    using events = await runInstance(run.id).subscribe({
+      filter: ["wait_started", "wait_completed", "wait_timed_out"],
+    });
+    const report = async () => {
+      const { done, value } = await events.next();
+      if (done === true) {
+        throw new Error(`Run ${run.id} ended while it waited`);
+      }
+      return value;
+    };
+    // Its checks come further apart each time (from 250 ms in tests): the
+    // fourth waits two seconds, which only a wake ends early.
+    let waits = 0;
+    await vi.waitFor(
+      async () => {
+        const value = await report();
+        if (
+          value.type === "wait_started" &&
+          value.stepName.startsWith(unknownWait)
+        ) {
+          waits += 1;
+        }
+        expect(waits).toBeGreaterThanOrEqual(4);
+      },
+      { timeout: 20_000, interval: 0 }
+    );
+    const [unknown] = await admin.api.unknownOutcomes.list();
+    if (unknown === undefined) {
+      throw new Error("Expected a call of unknown outcome");
+    }
+    await admin.api.unknownOutcomes.resolve(
+      unknown.key,
+      "happened",
+      unknown.claim
+    );
+    let ended: string | undefined;
+    while (ended === undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one report at a time
+      const value = await report();
+      if (
+        (value.type === "wait_completed" || value.type === "wait_timed_out") &&
+        value.stepName.startsWith(unknownWait)
+      ) {
+        ended = value.type;
+      }
+    }
+    await finished(run.id);
+
+    expect({
+      ended,
+      run: await admin.api.workflows.status(run.id),
+    }).toMatchObject({
+      ended: "wait_completed",
+      run: { status: "completed", output: { resolved: true } },
+    });
+  });
 
   it("holds the run, retries unspent, until its person says it happened: then the step completes without sending it again", async () => {
     const admin = await personApi("admin");
