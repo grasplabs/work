@@ -509,4 +509,17 @@ describe("a shared budget", () => {
       concurrent: ["50000", "expression.budget_exhausted"],
     });
   });
+
+  it("runs evaluations at once on a budget that covers both, never failing one for what the other holds", async () => {
+    const measured = { fuel: 2 ** 30 };
+    await drawing(50_000, measured);
+    const spent = 2 ** 30 - measured.fuel;
+    // Room for both, but each would hold all of it while it runs.
+    const shared = { fuel: Math.floor(spent * 2.5) };
+    const both = await Promise.all([
+      drawing(50_000, shared),
+      drawing(50_000, shared),
+    ]);
+    expect(both).toStrictEqual([50_000, 50_000]);
+  });
 });

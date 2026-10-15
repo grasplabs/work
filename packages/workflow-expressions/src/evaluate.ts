@@ -58,25 +58,37 @@ export interface CompileOptions<S extends Stage = Stage> {
 // jq's exit codes: 3 for a compile error, 5 for a runtime one.
 const jqCompileError = 3;
 
+/** The evaluation last queued on each shared budget (`drawing`). */
+const budgetQueues = new WeakMap<object, Promise<unknown>>();
+
 /**
- * Runs `run` with `given` fuel drawn from `budget`: taken before it runs
- * and what it didn't spend given back after, so evaluations sharing the
- * budget at once can't each spend all of it.
+ * Runs `run` with fuel drawn from `budget` (`give` says how much, from
+ * what is left): taken before it runs and what it didn't spend given back
+ * after. Evaluations sharing a budget run one after the other, so one
+ * never fails for fuel another only holds while it runs: what each spends
+ * is what the same expressions spend run in turn.
  */
 const drawing = async (
   budget: { fuel: number } | undefined,
-  given: number,
-  run: () => Promise<JqRun>
+  give: (left: number) => number,
+  run: (given: number) => Promise<JqRun>
 ): Promise<JqRun> => {
   if (budget === undefined) {
-    return await run();
+    return await run(give(runFuel));
   }
-  budget.fuel -= given;
-  const ran = await run();
-  if (ran.kind === "completed") {
-    budget.fuel += given - ran.fuelUsed;
-  }
-  return ran;
+  const before = budgetQueues.get(budget) ?? Promise.resolve();
+  const turn = (async (): Promise<JqRun> => {
+    await before.catch(() => null);
+    const given = give(budget.fuel);
+    budget.fuel -= given;
+    const ran = await run(given);
+    if (ran.kind === "completed") {
+      budget.fuel += given - ran.fuelUsed;
+    }
+    return ran;
+  })();
+  budgetQueues.set(budget, turn);
+  return await turn;
 };
 
 const fail = (
@@ -607,23 +619,22 @@ export const evaluateExpression = async <S extends Stage>(
     () => contextText(expression, scope)
   );
 
-  const given = Math.min(budget?.fuel ?? runFuel, runFuel);
-  if (given <= 0) {
-    return fail(
-      site,
-      "expression.budget_exhausted",
-      "Do less work in the task's expressions, or split the task."
-    );
-  }
+  // What it was given, of what was left of the budget when its turn came.
+  let given = runFuel;
   const run = await drawing(
     budget,
-    given,
-    async () =>
-      await runJq(
+    (left) => Math.max(0, Math.min(left, runFuel)),
+    async (fuel) => {
+      given = fuel;
+      if (fuel <= 0) {
+        return { kind: "exhausted", resource: "fuel" };
+      }
+      return await runJq(
         programFor(expression.source, variableNamesOf(expression)),
         stdin,
-        given
-      )
+        fuel
+      );
+    }
   );
   if (run.kind === "exhausted" && run.resource === "fuel" && given < runFuel) {
     return fail(
