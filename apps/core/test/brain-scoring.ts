@@ -78,12 +78,6 @@ const answerLine = /^\s*answer:(?<answer>[^\n]*)/iu;
  */
 const negation =
   /(?<![\p{L}\p{N}])(?:not|no|never|niet|geen|nooit|nicht|kein|keine|nie|pas|jamais|nunca|ninguno)(?![\p{L}\p{N}])/iu;
-/**
- * Words that join a second value to one ("37 or 99", "Marta Ruiz and
- * Tomas Okafor"), in the five languages: each value stands alone.
- */
-const joined =
-  /(?<![\p{L}\p{N}])(?:or|either|maybe|and|plus|of|en|oder|und|bzw|ou|et|o|u|y|e)(?![\p{L}\p{N}])|&/iu;
 const citation = /\[(?<cited>[^\]\n]{1,300})\]/gu;
 
 /** The answer protocol's abstention: an answer that starts with `ABSTAIN`. */
@@ -199,13 +193,14 @@ const orderings = (count: number): number[][] =>
 /**
  * Whether the answer line's values, separated by semicolons, are the
  * task's facts: one value each, in the order asked unless any order goes,
- * none joined to another ("37 or 99") or denied ("not 37").
+ * none denied ("not 37"). A value joined to another ("37 or 99") isn't
+ * the fact (`says`).
  */
 const answers = (
   said: string,
   expected: Extract<BrainExpectation, { kind: "answer" }>
 ): boolean => {
-  if (negation.test(said) || joined.test(said)) {
+  if (negation.test(said)) {
     return false;
   }
   const values = said.split(";").map((value) => value.trim());
