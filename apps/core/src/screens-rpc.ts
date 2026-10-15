@@ -677,18 +677,20 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     const state: { hold?: RunSubscription; ended: boolean } = {
       ended: false,
     };
+    // Ended, it is still released: what holds it besides its callback (a
+    // run watch in the App's host) goes now, not at the next push.
     const subscription = await open(() => {
       state.ended = true;
-      if (state.hold !== undefined) {
-        this.#held.delete(state.hold);
-      }
+      void state.hold?.release();
     });
     const hold = new RunSubscription(async () => {
       this.#held.delete(hold);
       await subscription.release();
     });
     state.hold = hold;
-    if (!state.ended) {
+    if (state.ended) {
+      await hold.release();
+    } else {
       this.#keep(hold);
     }
     return hold;
