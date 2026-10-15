@@ -1161,6 +1161,25 @@ describe("what a start rechecks, and records", () => {
     });
   });
 
+  it("admits no start of an agent's commit once its permission is revoked after the check, before the receipt", async () => {
+    const fx = await fixture();
+    const { agent, permissionId } = await agentOf(fx);
+    const db = racingDb(async () => {
+      await revokePermission(env, fx.admin, permissionId);
+    }, /insert into "workflow_start_receipts"/iu);
+    const answer = await dispatched(
+      { ...env, DB: db },
+      entryOf(fx, fx.bob, { agent })
+    );
+    expect({
+      answer,
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({
+      answer: { undeliverable: "workflow.start_denied" },
+      receipts: 0,
+    });
+  });
+
   it("decides again when a parameter edit makes its decision stale, and starts it", async () => {
     const fx = await fixture();
     const db = racingDb(

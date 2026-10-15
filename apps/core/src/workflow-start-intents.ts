@@ -15,11 +15,14 @@ import type {
   WorkflowStart,
   WorkflowStartIntent,
 } from "@grasp-os/shared/workflow-resources";
+import { sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { chatAuthority, chatContext } from "./agent-scope.ts";
 import { startAppBinding } from "./app-workflow-bindings.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
+import { permissions } from "./db/core/schema.ts";
 import { appHost } from "./durable-objects.ts";
 import type { WorkflowStarts } from "./operations.ts";
 import { defaultMaxAttempts } from "./outbox-delivery.ts";
@@ -28,7 +31,7 @@ import type {
   OutboxConsumers,
   OutboxEntry,
 } from "./outbox-delivery.ts";
-import { grantedPermissions } from "./permissions.ts";
+import { allowingPermissionSql, grantedPermissions } from "./permissions.ts";
 import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
 
 // Starting workflows from an App's server functions (spec 7.4, 9.5): an
@@ -49,7 +52,8 @@ import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
 //   release not revoked, the person's role in the App, the binding, and
 //   everything the workflow's version needs are all read again as each
 //   start is admitted, by the one admitting statement. A start an agent's
-//   call staged needs the agent's permission on the App again too. A
+//   call staged needs the agent's permission on the App again too, in its
+//   chat, read by that same statement (`agentAllowedSql`). A
 //   mutation's start, dispatched later, is decided then: authority lost
 //   since the commit starts nothing, and the refusal is audited.
 // - Restricted data carried into a run: an App that read restricted data
@@ -109,6 +113,35 @@ const notedOf = (agent: CallingAgent | null): Record<string, string> =>
   agent === null ? {} : { agent: agent.agentId };
 
 /**
+ * That `agent` still holds `write` on App `app` for `principal`, in its
+ * chat, as SQL the admitting statement reads (`requireAgentAllowed`'s
+ * rule): an agent's permission revoked after that check, before the
+ * receipt is written, admits nothing.
+ */
+const agentAllowedSql = (
+  app: AppId,
+  principal: string,
+  agent: CallingAgent
+): SQL => {
+  const { subject } = chatAuthority({
+    agentId: agent.agentId,
+    personId: principal,
+  });
+  if (subject.type !== "agent") {
+    return sql`0`;
+  }
+  const allowing = allowingPermissionSql(
+    subject,
+    undefined,
+    { type: "app", appId: app },
+    "write",
+    true,
+    { context: chatContext(agent), onBehalfOf: principal }
+  );
+  return sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
+};
+
+/**
  * Starts the workflow App `authority` binds under `alias`: refused while
  * the App is restricted (see the header), audited naming `agent`.
  */
@@ -125,7 +158,16 @@ const startAsApp = async (
   if (await appHost(env, authority.subject.appId).isRestricted()) {
     throw workflowResourceErrors.create("workflow.start_restricted");
   }
-  return await startAppBinding(env, authority, alias, request, notedOf(agent));
+  return await startAppBinding(
+    env,
+    authority,
+    alias,
+    request,
+    notedOf(agent),
+    agent === null
+      ? undefined
+      : agentAllowedSql(authority.subject.appId, authority.onBehalfOf, agent)
+  );
 };
 
 /**
@@ -207,12 +249,12 @@ const requireAgentAllowed = async (
   if (agent === null) {
     return;
   }
-  const permissions = await grantedPermissions(
+  const granted = await grantedPermissions(
     env,
     chatAuthority({ agentId: agent.agentId, personId: principal }),
     chatContext(agent)
   );
-  const allowed = permissions.some(
+  const allowed = granted.some(
     ({ object, actions }) =>
       object.type === "app" && object.appId === app && actions.includes("write")
   );
