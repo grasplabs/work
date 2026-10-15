@@ -552,6 +552,15 @@ export const callStoreOperation = async (
     requestId: caller.requestId,
     deadline: caller.deadline,
     runId: caller.runId,
+    // The serialization point: the operation host runs this gate last
+    // before each commit (`fenced` checks only the lease after it). A
+    // revocation, a release replaced or a grant withdrawn applies to every
+    // call admitted after it; one landing between this gate and the commit
+    // doesn't stop that commit. It can't be atomic with it: grants and
+    // releases live in core's D1 and the write in the store's own Durable
+    // Object, with no transaction across the two. The window is bounded to
+    // a call an authorized consumer already had admitted (accepted on
+    // GRA-506, as for an App's own mutations).
     authorize: async () => {
       await requireNotRevoked(env, owner, version);
       await requireStillCurrent(env, owner, version);
