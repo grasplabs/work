@@ -958,6 +958,9 @@ const queueWaitMs = 30_000;
 /** A `retry-after` in whole seconds, as opposed to a date. */
 const wholeSecondsPattern = /^\d+$/u;
 
+/** A `retry-after-ms`: a number of milliseconds, perhaps with a fraction. */
+const decimalPattern = /^\d+(?:\.\d+)?$/u;
+
 /** The least, the most and the default wait a provider's rate limit is held to. */
 const rateLimitBounds = {
   leastSeconds: 1,
@@ -975,7 +978,10 @@ const rateLimitBounds = {
  */
 const rateLimitedSeconds = (headers: Headers, now = Date.now()): number => {
   const { leastSeconds, mostSeconds, defaultSeconds } = rateLimitBounds;
-  const ms = Number(headers.get("retry-after-ms") ?? Number.NaN);
+  // A blank or unreadable `retry-after-ms` is none: it never stands in
+  // for a readable `retry-after`.
+  const msTold = headers.get("retry-after-ms")?.trim() ?? "";
+  const ms = decimalPattern.test(msTold) ? Number(msTold) : Number.NaN;
   const told = headers.get("retry-after");
   let seconds = Number.NaN;
   if (Number.isFinite(ms)) {

@@ -717,6 +717,33 @@ describe("model gateway", { timeout: 30_000 }, () => {
     }
   );
 
+  it("reads a rate limit's wait from retry-after when retry-after-ms is blank, held to core's most", async () => {
+    const { gatewayEnv } = withGateway(
+      Array.from({ length: 3 }, () => ({
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after-ms": " ", "retry-after": "61" },
+      }))
+    );
+
+    const told = await models(gatewayEnv)
+      .call({
+        model: workersAi,
+        input: "Hello.",
+        purpose: "chat.turn",
+        trigger: newPerson(),
+        work: work(),
+      })
+      .then(
+        () => "admitted",
+        (error: unknown) => error
+      );
+    expect(told).toMatchObject({
+      code: "model.rate_limited",
+      details: { retryAfterSeconds: 60 },
+    });
+  });
+
   it("tells a call whose last request was lost that it failed, not that it was rate-limited before", async () => {
     const { gatewayEnv } = withGateway([
       { status: 429, errorType: "rate_limit_error" },

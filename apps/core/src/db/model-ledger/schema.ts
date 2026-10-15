@@ -144,7 +144,9 @@ export const queue = sqliteTable(
   },
   (table) => [
     // The places still asking, in the order they are served.
-    index("queue_order").on(table.seenAt, table.turn, table.enqueuedAt),
+    index("queue_order").on(table.turn, table.enqueuedAt, table.place),
+    // The places that stopped asking, to drop.
+    index("queue_seen").on(table.seenAt),
     // A person's places in an App, and an App's: their caps and turns.
     index("queue_subject").on(table.subject, table.resource, table.seenAt),
     index("queue_resource").on(table.resource, table.seenAt),

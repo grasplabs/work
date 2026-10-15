@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b00edcee-3a64-454a-a5c4-0b7a5fa85ae8",
+  "id": "599a2ac8-c1b9-49df-85a9-cf0a3fba9dc2",
   "prevId": "99186ffe-dd24-4f26-9311-9322694f4f19",
   "tables": {
     "alerts": {
@@ -188,9 +188,16 @@
         "queue_order": {
           "name": "queue_order",
           "columns": [
-            "seen_at",
             "turn",
-            "enqueued_at"
+            "enqueued_at",
+            "place"
+          ],
+          "isUnique": false
+        },
+        "queue_seen": {
+          "name": "queue_seen",
+          "columns": [
+            "seen_at"
           ],
           "isUnique": false
         },

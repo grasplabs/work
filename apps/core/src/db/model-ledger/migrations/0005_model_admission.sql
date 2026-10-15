@@ -9,7 +9,8 @@ CREATE TABLE `queue` (
 	`retry_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE INDEX `queue_order` ON `queue` (`seen_at`,`turn`,`enqueued_at`);--> statement-breakpoint
+CREATE INDEX `queue_order` ON `queue` (`turn`,`enqueued_at`,`place`);--> statement-breakpoint
+CREATE INDEX `queue_seen` ON `queue` (`seen_at`);--> statement-breakpoint
 CREATE INDEX `queue_subject` ON `queue` (`subject`,`resource`,`seen_at`);--> statement-breakpoint
 CREATE INDEX `queue_resource` ON `queue` (`resource`,`seen_at`);--> statement-breakpoint
 ALTER TABLE `requests` ADD `subject` text;--> statement-breakpoint
