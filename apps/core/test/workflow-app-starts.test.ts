@@ -1227,6 +1227,47 @@ describe("what a start rechecks, and records", () => {
     });
   });
 
+  it("recovers an action's start under its key after an App upgrade that changed nothing of the start", async () => {
+    const fx = await fixture();
+    await env.DB.prepare(
+      "INSERT INTO app_versions (app_id, version, tree, files, author_id, message, created_at, approved) VALUES (?, 2, 'tree', 0, ?, 'Version', ?, 1)"
+    )
+      .bind(fx.app, fx.ada.userId, Date.now())
+      .run();
+    const key = `kick-${unique()}`;
+    const before = await appWorkflowStarts(env, appAuthority(fx, fx.bob)).start(
+      "followUp",
+      { who: "Bob" },
+      key
+    );
+    // The reply was lost; the App moved on to version 2, and the call is
+    // made again under the same key.
+    const upgraded = appWorkflowStarts(env, {
+      ...appAuthority(fx, fx.bob),
+      appVersion: 2,
+    });
+    const again = await outcome(
+      upgraded.start("followUp", { who: "Bob" }, key)
+    );
+    const otherInput = await outcome(
+      upgraded.start("followUp", { who: "Eve" }, key)
+    );
+    expect({
+      again,
+      sameHandle:
+        JSON.stringify(
+          await upgraded.start("followUp", { who: "Bob" }, key)
+        ) === JSON.stringify(before),
+      otherInput,
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({
+      again: "ok",
+      sameHandle: true,
+      otherInput: "workflow.start_conflict",
+      receipts: 1,
+    });
+  });
+
   it("keys each commit's start by its outbox entry, so a later commit under a reused mutation key starts anew", async () => {
     const fx = await fixture();
     const receipt = unique();

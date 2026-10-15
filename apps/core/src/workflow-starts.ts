@@ -695,11 +695,20 @@ const sameStart = (
   },
   inputHash: string
 ): WorkflowStart => {
+  // An App's start is the same start across the App's versions: a call
+  // retried after an upgrade derives the same key, and the same workflow
+  // version (what its binding serves), person and input make it the same
+  // start, whichever of the App's versions asks (GRA-376). Its receipt
+  // keeps the version that started it.
+  const sameOrigin =
+    row.invokerType === "app"
+      ? row.originAppVersion !== null && start.originAppVersion !== null
+      : row.originAppVersion === start.originAppVersion;
   if (
     row.workflowResourceId !== start.workflowId ||
     row.workflowResourceVersion !== start.version ||
     row.principalId !== start.principal ||
-    row.originAppVersion !== start.originAppVersion ||
+    !sameOrigin ||
     row.triggerVersion !== start.triggerVersion ||
     row.inputHash !== inputHash
   ) {
