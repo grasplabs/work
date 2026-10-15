@@ -683,6 +683,12 @@ export interface RunIdentity {
   split: BrainSplit;
   repeats: number;
   seed: number;
+  /** The arms and controls, in order: they shape the seeded schedule. */
+  schedule: {
+    arms: readonly BrainArm[];
+    controls: readonly BrainControl[];
+    controlTasks: readonly string[];
+  };
 }
 
 export interface BrainReport {
@@ -870,6 +876,7 @@ export const runBrainBaseline = async (
       split,
       repeats,
       seed,
+      schedule: { arms, controls, controlTasks },
     },
     coverage: {
       families: counts(tasks.map(({ family }) => family)),

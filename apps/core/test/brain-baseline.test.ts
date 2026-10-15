@@ -166,6 +166,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
         digest.test(value)
       ),
       run: [identity.split, identity.repeats, identity.harness],
+      schedule: identity.schedule,
     }).toStrictEqual({
       suite: brainSuiteVersion,
       digest: true,
@@ -180,6 +181,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       },
       pinned: true,
       run: ["dev", repeats, "1"],
+      schedule: { arms: brainArms, controls: brainControls, controlTasks },
     });
   });
 
