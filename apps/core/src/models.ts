@@ -505,6 +505,13 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    */
   beforeSend?: () => void;
   /**
+   * The caller's own authority, decided again once the ledger admitted
+   * each provider request, before `beforeSend`: it throws to stop the
+   * request, which is then never sent (a workflow run's call whose
+   * approval or grant went while it waited, resource-calls.ts).
+   */
+  reauthorize?: () => Promise<void>;
+  /**
    * Told while the call waits in the queue for a share of the model
    * requests in flight, each time it asks again: the share and when it
    * asks again at the latest (ms since the epoch); and `null` once it
@@ -755,6 +762,8 @@ interface Route extends Admitted {
   disclose: ShareIdentity["disclose"];
   /** The caller's last check before each provider request (`ModelCall.beforeSend`). */
   beforeSend?: () => void;
+  /** The caller's authority, decided again (`ModelCall.reauthorize`). */
+  reauthorize?: () => Promise<void>;
   /** Told while the call waits for a share (`ModelCall.onQueued`). */
   onQueued?: QueuedHook;
   /** The call's notes of its wait, one after another (`told`). */
@@ -1552,6 +1561,7 @@ const open = (
     // awaited before the request is sent: refused, it is never sent, and
     // its reservation goes back.
     try {
+      await route.reauthorize?.();
       route.beforeSend?.();
       // Cancelled while it was admitted, or while its wait was cleared: it
       // is never sent, and its reservation goes back whole.
@@ -2411,6 +2421,7 @@ const callModel = async <Output>(
     schema,
     askAgain,
     beforeSend,
+    reauthorize,
     onQueued,
     signal,
     providerRetries = true,
@@ -2421,6 +2432,7 @@ const callModel = async <Output>(
   const route: Route = {
     ...(await admit(env, call)),
     ...(beforeSend === undefined ? {} : { beforeSend }),
+    ...(reauthorize === undefined ? {} : { reauthorize }),
     ...(onQueued === undefined ? {} : { onQueued }),
     providerRetries,
   };

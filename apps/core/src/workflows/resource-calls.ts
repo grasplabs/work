@@ -508,26 +508,46 @@ const callModel = async (
   }
   const descriptor = JSON.stringify(call.outputSchema);
   const native = schemaOfDescriptor(descriptor);
-  const answer = await models(env).call({
-    model: target.model,
-    ...(tokens === undefined ? {} : { maxTokens: tokens }),
-    system: call.instructions,
-    input: z.json().parse(call.input),
-    schema: z.fromJSONSchema(jsonSchemaOf(native.descriptor, { exact: true })),
-    purpose: "workflow.step",
-    trigger: { type: "system" },
-    connections: await connectionsOf(env, run),
-    work: { authority: runAuthority(run), context: runContext(run) },
-    // After the ledger admitted each provider request, nothing awaited.
-    beforeSend: effect.requireHolds,
-    // One request per call, so the run's limit of model calls
-    // (`maxModelCalls`, resource-host.ts) bounds its requests: an answer
-    // that doesn't fit the task's schema fails the call, never asks again,
-    // and a request the provider refused for a moment isn't sent again
-    // either: the step is tried once (spec 13.7), so a refusal fails it.
-    askAgain: false,
-    providerRetries: false,
-  });
+  // What refused the request, said as it was: the gateway reports any
+  // failure of its own hooks as the model's.
+  const refused: { by?: unknown } = {};
+  let answer: Awaited<ReturnType<ReturnType<typeof models>["call"]>>;
+  try {
+    answer = await models(env).call({
+      model: target.model,
+      ...(tokens === undefined ? {} : { maxTokens: tokens }),
+      system: call.instructions,
+      input: z.json().parse(call.input),
+      schema: z.fromJSONSchema(
+        jsonSchemaOf(native.descriptor, { exact: true })
+      ),
+      purpose: "workflow.step",
+      trigger: { type: "system" },
+      connections: await connectionsOf(env, run),
+      work: { authority: runAuthority(run), context: runContext(run) },
+      // Once the ledger admitted each provider request, the run's authority
+      // decided again (it may have gone while the request waited), then its
+      // lease, nothing awaited before the request is sent.
+      reauthorize: async () => {
+        try {
+          await requireCallAuthority(env, run, binding);
+        } catch (error) {
+          refused.by = error;
+          throw error;
+        }
+      },
+      beforeSend: effect.requireHolds,
+      // One request per call, so the run's limit of model calls
+      // (`maxModelCalls`, resource-host.ts) bounds its requests: an answer
+      // that doesn't fit the task's schema fails the call, never asks again,
+      // and a request the provider refused for a moment isn't sent again
+      // either: the step is tried once (spec 13.7), so a refusal fails it.
+      askAgain: false,
+      providerRetries: false,
+    });
+  } catch (error) {
+    throw refused.by ?? error;
+  }
   return requireShape(descriptor, answer.output, "output");
 };
 

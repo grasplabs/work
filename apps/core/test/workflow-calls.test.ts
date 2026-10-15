@@ -114,6 +114,12 @@ const objectSchema = (properties: Record<string, unknown>) => ({
   },
 });
 
+/** The read of the quota policy, as the ledger admits a model request. */
+const quotaRead = /from "quota_policies"/iu;
+
+/** A call's read of its run's authority (resource-authority.ts). */
+const authorityRead = /approval\.alias/iu;
+
 /** The read of an App's current release, as a call makes on its way. */
 const currentRelease = /select .*"current_version".* from "apps"/iu;
 
@@ -1013,6 +1019,50 @@ describe("grasp.model calls of JSON workflows", () => {
         status: "failed",
         code: "workflow.call_denied",
       })),
+      requests: 0,
+    });
+  });
+
+  it("sends a model call's request only while its run's authority holds once the ledger admitted it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, approval } = await greetingWorkflow(ada, admin, {
+      before: [hold],
+    });
+    const gateway = gatewayAnswering(answer('{"line":"Never sent"}'));
+    const run = await started(ada, workflow.id);
+    // The approval is revoked as the ledger admits the request, after the
+    // call was authorized.
+    const db = env.DB;
+    const prepare = db.prepare.bind(db);
+    const revoking: Promise<unknown>[] = [];
+    const authorized = { once: false };
+    vi.spyOn(db, "prepare").mockImplementation((statement) => {
+      authorized.once ||= authorityRead.test(statement);
+      if (
+        authorized.once &&
+        revoking.length === 0 &&
+        quotaRead.test(statement)
+      ) {
+        revoking.push(
+          prepare(
+            "UPDATE workflow_binding_approvals SET status = 'revoked' WHERE id = ?"
+          )
+            .bind(approval.id)
+            .run()
+        );
+      }
+      return prepare(statement);
+    });
+    const end = endOf(await ended(ada, workflow.id, run));
+    await Promise.all(revoking);
+    expect({
+      raced: revoking.length,
+      end,
+      requests: gateway.requests.length,
+    }).toStrictEqual({
+      raced: 1,
+      end: { status: "failed", code: "workflow.call_denied" },
       requests: 0,
     });
   });
