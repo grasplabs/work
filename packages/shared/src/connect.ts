@@ -230,6 +230,37 @@ export interface ConnectionOwner {
 }
 
 /**
+ * A person's request for an app the catalog doesn't have, as they type
+ * it: its name, what Grasp should do in it, and where it lives.
+ */
+export const appRequestSchema = z.strictObject({
+  name: z.string().trim().min(1).max(128),
+  why: z.string().trim().max(2000).optional(),
+  url: z
+    .url({ protocol: /^https?$/u })
+    .max(2048)
+    .optional(),
+});
+export type AppRequestInput = z.input<typeof appRequestSchema>;
+
+/** An app someone asked Grasp to add, as the catalog doesn't have it. */
+export interface AppRequest {
+  id: string;
+  /** As the first person to ask for it typed it. */
+  name: string;
+  /** What Grasp should do in it, in their words. */
+  why: string | null;
+  /** Where the app lives, as they gave it. */
+  url: string | null;
+  /** Who asked first; `name` is null once they are gone. */
+  requestedBy: { userId: string; name: string | null };
+  requestedAt: string;
+}
+
+/** Most app requests listed at once: the latest. */
+export const appRequestsListed = 200;
+
+/**
  * A signed-in person's connections, over `/rpc`. Starting one returns the
  * provider URL to send the browser to; the provider sends it back to
  * core's callback, which returns it to `returnTo` (a path on this origin)
@@ -287,6 +318,14 @@ export interface ConnectionsApi {
     consent: string;
     returnTo?: string;
   }) => Promise<{ url: string }>;
+  /**
+   * Asks for an app the catalog doesn't have, audited. An app asked for
+   * already, by its name in any case, isn't asked for again: that
+   * request is returned.
+   */
+  requestApp: (request: AppRequestInput) => Promise<AppRequest>;
+  /** The apps people asked for, latest first, at most {@link appRequestsListed}. */
+  appRequests: () => Promise<AppRequest[]>;
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -313,7 +352,178 @@ export interface CatalogEntry {
   categories: string[];
   /** How many tools it has; `catalogTools` lists them. */
   toolCount: number;
+  /**
+   * Where its logo is, on the deployment's own origin
+   * ({@link catalogLogoUrl}), or `null` when it has none: the page draws its
+   * first letter. Never its provider's address: a browser loading that
+   * would call outside connect, and tell the provider who looks.
+   */
+  logo: string | null;
+  /**
+   * What it is for, in its provider's words: the first sentence of its
+   * description ({@link firstSentence}), or `null` when it has none.
+   */
+  description: string | null;
+  /** Which of Grasp's kinds of app it is ({@link catalogGroupOf}). */
+  group: CatalogGroup;
 }
+
+/**
+ * Grasp's kinds of app, in the order the Integrations page lists them. Each
+ * id is the group's English name, which the web app translates; `Other` is
+ * for an app none of the others fits.
+ */
+export const catalogGroups = [
+  "Email and calendar",
+  "Files and documents",
+  "Chat",
+  "CRM",
+  "Finance and accounting",
+  "HR",
+  "Signing",
+  "Marketing",
+  "Support",
+  "Projects and tasks",
+  "Forms and surveys",
+  "Data and analytics",
+  "AI",
+  "Commerce",
+  "Design and media",
+  "Developer tools",
+  "Other",
+] as const;
+export type CatalogGroup = (typeof catalogGroups)[number];
+
+/**
+ * Which group a category is in, by its words in lower case. The first
+ * group that fits wins, so the order is the precedence: "payroll" is HR
+ * before it is finance, "e-signature" signing before documents. These are
+ * the design prototype's words for Composio's categories.
+ */
+const groupWords: readonly (readonly [CatalogGroup, RegExp])[] = [
+  ["Signing", /signature/u],
+  ["HR", /human resources|hr talent|recruit|payroll/u],
+  [
+    "Finance and accounting",
+    /accounting|payment|invoic|tax|fundraising|banking|finance|proposal & invoice/u,
+  ],
+  ["CRM", /crm|contact management|sales/u],
+  ["Support", /customer support|help ?desk|customer appreciation|reviews/u],
+  [
+    "Marketing",
+    /marketing|newsletter|social media|ads|url shortener|seo|drip email|webinar/u,
+  ],
+  ["Email and calendar", /email|calendar|scheduling/u],
+  [
+    "Chat",
+    /chat|communication|phone|sms|notification|video conferencing|team collaboration/u,
+  ],
+  ["Forms and surveys", /form|survey/u],
+  [
+    "Projects and tasks",
+    /project|task|productivity|time tracking|event management|notes|bookmark/u,
+  ],
+  [
+    "Files and documents",
+    /document|file|spreadsheet|content|transcription|pdf/u,
+  ],
+  ["Data and analytics", /analytics|business intelligence|database|dashboard/u],
+  ["AI", /artificial intelligence|^ai |ai$|model context protocol/u],
+  ["Commerce", /commerce|fulfil|shipping|inventory/u],
+  [
+    "Design and media",
+    /image|design|video|audio|website builder|photo|music|gaming/u,
+  ],
+  [
+    "Developer tools",
+    /developer|server|it operations|security|internet of things|devops|app builder|cloud/u,
+  ],
+];
+
+/** The group one category is in, if any fits it. */
+const groupOfCategory = (category: string): CatalogGroup | undefined => {
+  const words = category.trim().toLowerCase();
+  return groupWords.find(([, pattern]) => pattern.test(words))?.[0];
+};
+
+/**
+ * The group of an app with these categories, as its provider names them
+ * (Composio's, its main one first): that of the first category a group
+ * fits, or `Other` when none does.
+ */
+export const catalogGroupOf = (categories: readonly string[]): CatalogGroup => {
+  for (const category of categories) {
+    const group = groupOfCategory(category);
+    if (group !== undefined) {
+      return group;
+    }
+  }
+  return "Other";
+};
+
+/** Longest description a catalog entry carries: one line a row can show. */
+const descriptionMaxLength = 140;
+
+const whitespace = /\s+/gu;
+/**
+ * Up to the first sentence's end: a stop, possibly inside closing quotes,
+ * followed by a space or the end, but not the stop of a common
+ * abbreviation ("Acme Inc. makes…").
+ */
+const firstSentenceOf =
+  /^.*?(?<!\b(?:Inc|Ltd|Co|Corp|LLC|etc|vs|e\.g|i\.e|approx|St|Dr|Mr|Mrs|Ms|No))[.!?]["'”’)]?(?= |$)/u;
+const lastWord = /\s+\S*$/u;
+const trailingPause = /[,;:]$/u;
+
+/**
+ * A description as a catalog entry carries it: its first sentence, its
+ * whitespace collapsed, cut at a word with an ellipsis where it is longer
+ * than {@link descriptionMaxLength}; `null` when nothing is left.
+ */
+export const firstSentence = (text: string): string | null => {
+  const clean = text.replaceAll(whitespace, " ").trim();
+  if (clean === "") {
+    return null;
+  }
+  const sentence = firstSentenceOf.exec(clean)?.[0] ?? clean;
+  if (sentence.length <= descriptionMaxLength) {
+    return sentence;
+  }
+  const cut = sentence
+    .slice(0, descriptionMaxLength - 2)
+    .replace(lastWord, "")
+    .replace(trailingPause, "");
+  return `${cut}…`;
+};
+
+/**
+ * Where core serves catalog entries' logos, which connect fetches from
+ * their provider and checks (`ConnectApi.catalogLogo`).
+ */
+export const catalogLogoPath = "/api/catalog/logos";
+
+/** Where one catalog entry's logo is served. */
+export const catalogLogoUrl = (source: CatalogSource, id: string): string =>
+  `${catalogLogoPath}/${source}/${encodeURIComponent(id)}`;
+
+/**
+ * A catalog entry's logo, as connect hands it to core: an image, of
+ * `contentType`, which connect has checked is what its bytes are.
+ */
+export interface CatalogLogo {
+  contentType: CatalogLogoType;
+  bytes: Uint8Array;
+}
+
+/** The image types a catalog logo may be. */
+export const catalogLogoTypes = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+] as const;
+export type CatalogLogoType = (typeof catalogLogoTypes)[number];
 
 /**
  * The catalog, native entries first. `composio` says whether Composio's
@@ -431,6 +641,9 @@ export const catalogToolsRequestSchema = z.strictObject({
   id: identifierSchema,
 });
 export type CatalogToolsRequest = z.input<typeof catalogToolsRequestSchema>;
+
+export const catalogLogoRequestSchema = catalogToolsRequestSchema;
+export type CatalogLogoRequest = CatalogToolsRequest;
 
 // Side effects held for their person (threat model R7, R12). Connect
 // holds a side effect from chat, from a person using an App, or from any
@@ -909,6 +1122,13 @@ export interface ConnectApi extends PackageRegistryApi {
    * Composio doesn't list the catalog or the toolkit's tools completely.
    */
   catalogTools: (request: CatalogToolsRequest) => Promise<CatalogTool[]>;
+  /**
+   * One catalog entry's logo, fetched from its provider and checked, or
+   * `null` when the catalog lists none for it, or its provider's isn't
+   * an image connect serves (`catalogLogoTypes`, size-capped) or doesn't
+   * come.
+   */
+  catalogLogo: (request: CatalogLogoRequest) => Promise<CatalogLogo | null>;
   /**
    * The generated contract `contract` names as the connection
    * `connectionId` serves it now, each action with the JSON Schemas of its

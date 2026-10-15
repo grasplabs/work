@@ -4,7 +4,7 @@ import type {
 } from "@grasp-os/shared/onboarding";
 import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 import type { I18n, MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
+import { msg, ph, plural } from "@lingui/core/macro";
 
 import { plainText } from "../chat/chat-markdown.ts";
 import { formatDate } from "../format.ts";
@@ -154,7 +154,7 @@ const workflowsSection = (
     const { started, completed, failed } = workflow;
     return item(
       i18n._(
-        msg`${name} in ${engine}: ${started} started, ${completed} completed, ${failed} failed`
+        msg`${name} in ${ph({ domain: engine })}: ${started} started, ${completed} completed, ${failed} failed`
       )
     );
   });

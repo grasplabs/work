@@ -35,7 +35,7 @@ import {
 } from "@grasp-os/ui/components/tooltip";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
@@ -360,7 +360,7 @@ const actorOf = (
     const engine = appName(directory, actor.appId);
     const { workflowId } = actor;
     return {
-      label: i18n._(msg`${engine}: run of ${workflowId}`),
+      label: i18n._(msg`${ph({ domain: engine })}: run of ${workflowId}`),
       id: actor.runId,
     };
   }
@@ -368,7 +368,9 @@ const actorOf = (
     const engine = appName(directory, actor.appId);
     const person = personName(directory, actor.invitedBy);
     return {
-      label: i18n._(msg`Guest of ${engine}, invited for ${person}`),
+      label: i18n._(
+        msg`Guest of ${ph({ domain: engine })}, invited for ${person}`
+      ),
       id: actor.chatId,
     };
   }

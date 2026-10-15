@@ -48,7 +48,7 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { alias } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { appsFoundBy, appsReadableBy } from "../app-access.ts";
+import { appsBuiltBy, appsFoundBy, appsReadableBy } from "../app-access.ts";
 import { appFor, versionFiles } from "../apps.ts";
 import type { Member } from "../auth/identity.ts";
 import {
@@ -62,6 +62,7 @@ import {
 import { answerableBy, stillOpen } from "../decisions/decisions.ts";
 import { queuedRuns } from "./admission.ts";
 import { declaredParams, dryRunTests, hasWorkflow } from "./code.ts";
+import { ownerKey, ownersSet, setWorkflowOwner } from "./owners.ts";
 import { paramValues } from "./param-values.ts";
 import { listParams } from "./params.ts";
 import {
@@ -301,14 +302,15 @@ const latestRuns = async (
 };
 
 /**
- * The summaries of `workflows`: each one's latest run, its runs waiting
- * now (counted from the open decisions), those failed lately and those it
- * handled this week (from the runs ended since), and whether a schedule
- * of it stopped (triggers.ts): five queries, whatever the number of
- * workflows.
+ * The summaries of `workflows`, for `by`: each one's owner (owners.ts),
+ * latest run, its runs waiting now (counted from the open decisions),
+ * those failed lately and those it handled this week (from the runs ended
+ * since), whether a schedule of it stopped (triggers.ts), and whether `by`
+ * may change its owner: seven queries, whatever the number of workflows.
  */
 const summariesOf = async (
   env: Env,
+  by: Member,
   workflows: readonly AppWorkflow[]
 ): Promise<WorkflowSummary[]> => {
   if (workflows.length === 0) {
@@ -323,57 +325,61 @@ const summariesOf = async (
   const now = new Date();
   const failedSince = new Date(now.getTime() - failedRunDays * dayMs);
   const handledSince = new Date(now.getTime() - handledRunDays * dayMs);
-  const [latest, waiting, failed, handled, stopped] = await Promise.all([
-    latestRuns(db, workflows, now),
-    db
-      .select({
-        ...byWorkflow,
-        count: sql<number>`count(DISTINCT ${workflowRuns.id})`,
-      })
-      .from(workflowDecisions)
-      .innerJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
-      .where(
-        and(stillOpen(workflowDecisions, now), runUnended(), ofApps(appIds))
-      )
-      .groupBy(workflowRuns.appId, workflowRuns.workflowId),
-    db
-      .select({ ...byWorkflow, count: sql<number>`count(*)` })
-      .from(workflowRuns)
-      .where(
-        and(
-          eq(workflowRuns.status, "failed"),
-          gte(workflowRuns.endedAt, failedSince),
-          ofApps(appIds)
+  const [latest, waiting, failed, handled, stopped, owners, built] =
+    await Promise.all([
+      latestRuns(db, workflows, now),
+      db
+        .select({
+          ...byWorkflow,
+          count: sql<number>`count(DISTINCT ${workflowRuns.id})`,
+        })
+        .from(workflowDecisions)
+        .innerJoin(workflowRuns, eq(workflowRuns.id, workflowDecisions.runId))
+        .where(
+          and(stillOpen(workflowDecisions, now), runUnended(), ofApps(appIds))
         )
-      )
-      .groupBy(workflowRuns.appId, workflowRuns.workflowId),
-    db
-      .select({ ...byWorkflow, count: sql<number>`count(*)` })
-      .from(workflowRuns)
-      .where(
-        and(
-          eq(workflowRuns.status, "completed"),
-          gte(workflowRuns.endedAt, handledSince),
-          ofApps(appIds)
+        .groupBy(workflowRuns.appId, workflowRuns.workflowId),
+      db
+        .select({ ...byWorkflow, count: sql<number>`count(*)` })
+        .from(workflowRuns)
+        .where(
+          and(
+            eq(workflowRuns.status, "failed"),
+            gte(workflowRuns.endedAt, failedSince),
+            ofApps(appIds)
+          )
         )
-      )
-      .groupBy(workflowRuns.appId, workflowRuns.workflowId),
-    // The Apps' triggers, by the index that starts with their App.
-    db
-      .select({
-        app: workflowTriggers.appId,
-        workflow: workflowTriggers.workflowId,
-        version: workflowTriggers.version,
-      })
-      .from(workflowTriggers)
-      .where(
-        and(
-          sql`${workflowTriggers.appId} IN ${listOf(appIds)}`,
-          eq(workflowTriggers.type, "schedule"),
-          gte(workflowTriggers.failedStarts, maxFailedStarts)
+        .groupBy(workflowRuns.appId, workflowRuns.workflowId),
+      db
+        .select({ ...byWorkflow, count: sql<number>`count(*)` })
+        .from(workflowRuns)
+        .where(
+          and(
+            eq(workflowRuns.status, "completed"),
+            gte(workflowRuns.endedAt, handledSince),
+            ofApps(appIds)
+          )
         )
-      ),
-  ]);
+        .groupBy(workflowRuns.appId, workflowRuns.workflowId),
+      // The Apps' triggers, by the index that starts with their App.
+      db
+        .select({
+          app: workflowTriggers.appId,
+          workflow: workflowTriggers.workflowId,
+          version: workflowTriggers.version,
+        })
+        .from(workflowTriggers)
+        .where(
+          and(
+            sql`${workflowTriggers.appId} IN ${listOf(appIds)}`,
+            eq(workflowTriggers.type, "schedule"),
+            gte(workflowTriggers.failedStarts, maxFailedStarts)
+          )
+        ),
+      ownersSet(env, appIds),
+      // Staff change no owner (owners.ts), so whether they build is moot.
+      by.staff ? new Set<string>() : appsBuiltBy(env, by, appIds),
+    ]);
   const waitingOf = countsByKey(waiting);
   const failedOf = countsByKey(failed);
   const handledOf = countsByKey(handled);
@@ -385,7 +391,11 @@ const summariesOf = async (
     appName: app.name,
     workflow,
     version: app.currentVersion ?? 0,
-    owner: { userId: app.ownerId, name: app.ownerName },
+    owner: owners.get(ownerKey(app.id, workflow)) ?? {
+      userId: app.ownerId,
+      name: app.ownerName,
+    },
+    changesOwner: built.has(app.id),
     lastRun: latest.get(keyOf(app.id, workflow)) ?? null,
     waiting: waitingOf.get(keyOf(app.id, workflow)) ?? 0,
     failed: failedOf.get(keyOf(app.id, workflow)) ?? 0,
@@ -409,6 +419,7 @@ export const workflowOverview = async (
 ): Promise<WorkflowSummary[]> =>
   await summariesOf(
     env,
+    by,
     workflowsOf(await visibleApps(env, by)).filter(({ app, workflow }) =>
       keep(app.id, workflow)
     )
@@ -865,7 +876,7 @@ export const workflowDetail = async (
 ): Promise<WorkflowDetail> => {
   const current = await currentWorkflow(env, by, app, workflow, "user");
   const [[summary], builds, triggers] = await Promise.all([
-    summariesOf(env, [current]),
+    summariesOf(env, by, [current]),
     buildsApp(env, by, current.app.id),
     registeredTriggers(env, current.app.id, current.version, current.workflow),
   ]);
@@ -917,4 +928,28 @@ export const dryRunWorkflow = async (
       Object.fromEntries(values)
     ),
   };
+};
+
+/**
+ * Makes `owner` the owner of an App's workflow (owners.ts), for an admin
+ * or a builder of the App, and returns the workflow's summary as it is
+ * now.
+ */
+export const setOwner = async (
+  env: Env,
+  by: Identity,
+  app: unknown,
+  workflow: unknown,
+  owner: unknown
+): Promise<WorkflowSummary> => {
+  const set = await setWorkflowOwner(env, by, app, workflow, owner);
+  const [summary] = await workflowOverview(
+    env,
+    by,
+    (id, workflowId) => id === set.app && workflowId === set.workflow
+  );
+  if (summary === undefined) {
+    throw workflowErrors.create("workflow.not_found");
+  }
+  return summary;
 };
