@@ -2715,5 +2715,12 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       expect(followed.now().error?.code).toBe("screen.access_changed");
     }, deliveryWait);
     expect(kept.now()).toMatchObject({ value: undefined });
+    // Read again, it is read afresh, under the roles they have now.
+    const again = reading(client, apiOf(opened.release).list, {
+      pagination: {},
+    });
+    await eventually(() => {
+      expect(shown(again.now())).toStrictEqual([]);
+    });
   });
 });

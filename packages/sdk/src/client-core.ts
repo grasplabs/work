@@ -1827,7 +1827,7 @@ export class GraspClient {
         entry.live = undefined;
       }
       if (error.code === accessChangedCode) {
-        this.#accessChanged(entry.reference.resourceId, error);
+        this.#accessChanged(entry.reference.resourceId);
       }
       show(entry, { value: undefined, error });
     }
@@ -2107,21 +2107,21 @@ export class GraspClient {
   /**
    * The person's roles in App `resourceId` dropped (`screen.access_changed`,
    * pushed as a followed query's last result): what any query of the App
-   * shows that nobody follows was read under the old roles, so it is
-   * shown no more and read afresh when next read. A followed query is
-   * left to its own pushes: core ends each with this, and one that
-   * followed again since shows what it read under the new roles.
+   * keeps that nobody reads was read under the old roles: forgotten, so
+   * whoever reads it next reads it afresh, under the new. A query that
+   * is read is left to its own pushes: core ends each followed one with
+   * this, and one that followed again since shows what it read under
+   * the new roles.
    */
-  #accessChanged(resourceId: string, error: GraspError): void {
+  #accessChanged(resourceId: string): void {
     for (const entry of this.#queries.values()) {
-      if (
-        entry.reference.resourceId === resourceId &&
-        entry.live === undefined
-      ) {
-        entry.shown = entry.sent;
-        entry.stale = true;
-        entry.changes += 1;
-        show(entry, { value: undefined, error });
+      if (entry.reference.resourceId === resourceId && !wanted(entry)) {
+        clearTimeout(entry.evict);
+        entry.evict = undefined;
+        entry.reading?.stop.abort();
+        entry.reading = undefined;
+        this.#queries.delete(entry.key);
+        show(entry, loading);
       }
     }
   }
