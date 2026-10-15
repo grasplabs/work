@@ -1435,19 +1435,21 @@ export class ResourceRunHost
   }
 
   /**
-   * Refuses `attempt`'s call of call task `task` with `frame` unless what
-   * comes before it in the task held as the host itself saw it, in this
-   * attempt, never as the isolate says: its `if` (where it has one)
-   * evaluated and true, its raw input, as the step captured it, taken by
-   * its input schema (where it has one), and the input it calls with as
-   * its `input.from` (where it has one) made it, or that raw input. So a
-   * forged module can't send for a task the sealed workflow skips, or with
-   * input it never checked.
+   * Refuses what `attempt` does for task `task` with `frame` (`doing`: its
+   * call, or resolving its deadline) unless what comes before it in the
+   * task held as the host itself saw it, in this attempt, never as the
+   * isolate says: its `if` (where it has one) evaluated and true, its raw
+   * input, as the step captured it, taken by its input schema (where it
+   * has one), and the input it acts on as its `input.from` (where it has
+   * one) made it, or that raw input. So a forged module can't send for a
+   * task the sealed workflow skips, or build anything on input it never
+   * checked.
    */
-  #requireCallOpen(
+  #requireOpen(
     attempt: StepAttempt,
-    task: Extract<SealedTask, { kind: "call" }>,
-    frame: unknown
+    task: SealedTask,
+    frame: unknown,
+    doing: "makes its call" | "resolves its deadline"
   ): void {
     const stages = new Set(
       this.#run.build.expressions
@@ -1458,25 +1460,24 @@ export class ResourceRunHost
       return this.#refuse(`Task "${task.id}" is skipped.`);
     }
     if (stages.has("taskIf") && attempt.condition !== "held") {
-      return this.#refuse(
-        `Task "${task.id}" makes its call only once its if held.`
-      );
+      return this.#refuse(`Task "${task.id}" ${doing} only once its if held.`);
     }
     // Built by the host, from the task's sealed input.from and its own
     // evaluations of it in this attempt; the raw input where it has none.
+    const inputFrom = task.kind === "call" ? task.inputFrom : undefined;
     const expected =
-      task.inputFrom === undefined
+      inputFrom === undefined
         ? attempt.data.input
-        : filledFrom(task.inputFrom, attempt.inputFrom);
+        : filledFrom(inputFrom, attempt.inputFrom);
     if (expected === undefined) {
       return this.#refuse(
-        `Task "${task.id}" makes its call only on the input its input.from made.`
+        `Task "${task.id}" ${doing} only on the input its input.from made.`
       );
     }
     const input = canonicalJson(expected);
     if (canonicalJson(this.#callFrame(frame).input) !== input) {
       return this.#refuse(
-        `Task "${task.id}" makes its call on its own transformed input.`
+        `Task "${task.id}" ${doing} on its own transformed input.`
       );
     }
     // The schema takes the raw input, before `input.from` transforms it.
@@ -1485,7 +1486,7 @@ export class ResourceRunHost
       attempt.checkedInput !== canonicalJson(attempt.data.input)
     ) {
       return this.#refuse(
-        `Task "${task.id}" makes its call only once its input schema took its input.`
+        `Task "${task.id}" ${doing} only once its input schema took its input.`
       );
     }
   }
@@ -1517,7 +1518,7 @@ export class ResourceRunHost
         return this.#refuse(`Task "${task.id}" makes its call once.`);
       }
       attempt.call = "pending";
-      this.#requireCallOpen(attempt, task, frame);
+      this.#requireOpen(attempt, task, frame, "makes its call");
       try {
         const answer = await this.#made(attempt, task, frame);
         attempt.call = "done";
@@ -1641,20 +1642,20 @@ export class ResourceRunHost
         throw executionErrors.create("execution.stale_attempt");
       }
       const { step } = attempt;
+      const { task } = step;
       const deadline =
-        step.kind === "enter" && step.task !== undefined
-          ? deadlineOf(step.task)
+        step.kind === "enter" && task !== undefined
+          ? deadlineOf(task)
           : undefined;
-      if (deadline === undefined) {
+      if (task === undefined || deadline === undefined) {
         return this.#refuse(
-          `Step of "${step.task?.id ?? "the workflow"}" resolves no deadline.`
+          `Step of "${task?.id ?? "the workflow"}" resolves no deadline.`
         );
       }
       if (attempt.until !== undefined || attempt.condition === "failed") {
-        return this.#refuse(
-          `Task "${step.task?.id ?? ""}" resolves its deadline once.`
-        );
+        return this.#refuse(`Task "${task.id}" resolves its deadline once.`);
       }
+      this.#requireOpen(attempt, task, frame, "resolves its deadline");
       const passed = this.#callFrame(frame);
       const value = await this.#built(
         attempt,

@@ -1706,6 +1706,18 @@ describe("a run's host, against a forged module's calls", () => {
     const otherHost = await hostOf(by, workflow.id);
     await entered(otherHost);
     const forgedHost = await hostOf(by, workflow.id);
+    // A deadline built on input other than what the step captured.
+    const substitutedHost = await hostOf(by, workflow.id);
+    const substituted = await substitutedHost.do(
+      "enter:later",
+      adaData,
+      async (attempt) => {
+        const until = await attempt.until({ input: { who: "Mallory" } });
+        return until.ok
+          ? { ok: true, value: { output: adaFrame.input, until: until.value } }
+          : { ok: false, error: until.error };
+      }
+    );
     expect({
       beforeEnter: codeOf(beforeEnter),
       honest: codeOf(honest),
@@ -1718,6 +1730,7 @@ describe("a run's host, against a forged module's calls", () => {
       forgedRecord: codeOf(
         await entered(forgedHost, (until) => until - 30_000)
       ),
+      substituted: codeOf(substituted),
     }).toStrictEqual({
       beforeEnter: "workflow.invalid",
       honest: "ok",
@@ -1725,6 +1738,7 @@ describe("a run's host, against a forged module's calls", () => {
       sleep: "ok",
       otherTime: "workflow.invalid",
       forgedRecord: "workflow.invalid",
+      substituted: "workflow.invalid",
     });
   });
 });
