@@ -547,8 +547,9 @@ const sameStart = (
  * Admits the start `authorization` decided on, with `input` and the
  * invoker's idempotency `key`: its receipt, written in one statement only
  * while the authorization still holds, with its audit event. A start
- * whose authority changed since is refused (`workflow.start_denied`) and
- * the refusal audited; the same key again answers the same start.
+ * whose authority changed since is refused (`workflow.start_denied`); the
+ * same key again answers the same start, and the key with other input is
+ * `workflow.start_conflict`. Every refusal is audited, input never in it.
  */
 export const admitWorkflowStart = async (
   env: Env,
@@ -556,7 +557,47 @@ export const admitWorkflowStart = async (
   input: unknown,
   key: string
 ): Promise<WorkflowStart> => {
-  const text = acceptedInput(authorization.inputDescriptor, input);
+  const db = drizzle(env.DB);
+  const base = {
+    version: authorization.version,
+    manifestHash: authorization.manifestHash,
+    invokerType: authorization.invoker.type,
+    invoker: authorization.invoker.id,
+    principal: authorization.principal,
+    generation: authorization.generation,
+  };
+  const refuse = async (
+    reason: string,
+    inputHash: string | null
+  ): Promise<void> => {
+    await auditedBatch(env, db, [
+      outboxed(db, {
+        actor: authorization.actor,
+        action: "workflow.start.refused",
+        target: { type: "workflow_resource", id: authorization.workflowId },
+        detail: { ...base, receipt: null, inputHash, reason },
+      }),
+    ]);
+  };
+  // Settled the same way however the start is refused or answered.
+  const settled = async (
+    row: typeof workflowStartReceipts.$inferSelect,
+    inputHash: string
+  ): Promise<WorkflowStart> => {
+    try {
+      return sameStart(row, authorization, inputHash);
+    } catch (error) {
+      await refuse("workflow.start_conflict", inputHash);
+      throw error;
+    }
+  };
+  let text: string;
+  try {
+    text = acceptedInput(authorization.inputDescriptor, input);
+  } catch (error) {
+    await refuse("workflow.start_invalid", null);
+    throw error;
+  }
   const inputHash = await sha256Hex(text);
   const existing = await receiptOf(
     env,
@@ -565,11 +606,10 @@ export const admitWorkflowStart = async (
     key
   );
   if (existing !== undefined) {
-    return sameStart(existing, authorization, inputHash);
+    return await settled(existing, inputHash);
   }
   const id = crypto.randomUUID();
   const createdAt = new Date();
-  const db = drizzle(env.DB);
   const values = [
     id,
     authorization.invoker.type,
@@ -586,16 +626,7 @@ export const admitWorkflowStart = async (
     inputHash,
     createdAt.getTime(),
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
-  const detail = {
-    receipt: id,
-    version: authorization.version,
-    manifestHash: authorization.manifestHash,
-    invokerType: authorization.invoker.type,
-    invoker: authorization.invoker.id,
-    principal: authorization.principal,
-    generation: authorization.generation,
-    inputHash,
-  };
+  const detail = { ...base, receipt: id, inputHash };
   try {
     await auditedBatch(env, db, [
       db
@@ -623,16 +654,9 @@ export const admitWorkflowStart = async (
     key
   );
   if (admitted !== undefined) {
-    return sameStart(admitted, authorization, inputHash);
+    return await settled(admitted, inputHash);
   }
-  await auditedBatch(env, db, [
-    outboxed(db, {
-      actor: authorization.actor,
-      action: "workflow.start.refused",
-      target: { type: "workflow_resource", id: authorization.workflowId },
-      detail: { ...detail, receipt: null, reason: "workflow.start_denied" },
-    }),
-  ]);
+  await refuse("workflow.start_denied", inputHash);
   throw denied();
 };
 

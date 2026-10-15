@@ -361,6 +361,15 @@ describe("a person starting a workflow", () => {
       code,
       leaks: JSON.stringify(error).includes(secret.nested),
     }).toStrictEqual({ code: "workflow.start_invalid", leaks: false });
+    const events = await allEvents();
+    const refused = events.filter(
+      ({ action, target }) =>
+        action === "workflow.start.refused" && target?.id === workflow.id
+    );
+    expect({
+      reasons: refused.map(({ detail }) => detail?.reason),
+      leaks: JSON.stringify(refused).includes(secret.nested),
+    }).toStrictEqual({ reasons: ["workflow.start_invalid"], leaks: false });
   });
 
   it("is the same start for the same key, and refuses the key with other input", async () => {
@@ -377,6 +386,15 @@ describe("a person starting a workflow", () => {
         })
       ),
     }).toStrictEqual({ again: started, other: "workflow.start_conflict" });
+    const events = await allEvents();
+    expect(
+      events
+        .filter(
+          ({ action, target }) =>
+            action === "workflow.start.refused" && target?.id === workflow.id
+        )
+        .map(({ detail }) => detail?.reason)
+    ).toStrictEqual(["workflow.start_conflict"]);
   });
 });
 
