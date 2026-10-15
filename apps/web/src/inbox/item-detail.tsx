@@ -9,6 +9,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
+import { ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { ArrowLeftIcon, ArrowUpRightIcon } from "lucide-react";
@@ -531,7 +532,7 @@ const PackagesItem = ({
       acts={[
         {
           label: t`Approve`,
-          name: t`Approve the packages for ${engine}`,
+          name: t`Approve the packages for ${ph({ domain: engine })}`,
           disabled: review === undefined,
           describedBy: review === undefined ? hintId : undefined,
           onPress: async () => {
@@ -540,7 +541,7 @@ const PackagesItem = ({
         },
         {
           label: t`Reject`,
-          name: t`Reject the packages for ${engine}`,
+          name: t`Reject the packages for ${ph({ domain: engine })}`,
           onPress: async () => {
             await decide(false, t`Rejected: ${who}.`);
           },

@@ -36,7 +36,7 @@ import { actorOf, typeLabels } from "../activity/audit-log.tsx";
 import { actionWords } from "../activity/audit-words.ts";
 import type { LatestActivity } from "../dashboard/activity.tsx";
 import type { Directory } from "../directory.ts";
-import { formatDateTime, formatDay } from "../format.ts";
+import { formatDateTime, formatDayMonth } from "../format.ts";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { NotLoaded } from "../load-from-core.tsx";
@@ -115,7 +115,7 @@ const ItemRow = ({
       <KindPill kind={item.kind} />
     </span>
     <span className="text-muted-foreground w-16 flex-none text-right text-xs tabular-nums">
-      {formatDay(item.date)}
+      {formatDayMonth(item.date)}
     </span>
     <UrgentDot urgent={item.urgent} />
   </button>

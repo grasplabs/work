@@ -4,7 +4,7 @@ import type { Notification } from "@grasp-os/shared/notifications";
 import type { Permission } from "@grasp-os/shared/permissions";
 import type { ScreensWaiting } from "@grasp-os/shared/screen-trust";
 import { i18n } from "@lingui/core";
-import { plural, t } from "@lingui/core/macro";
+import { ph, plural, t } from "@lingui/core/macro";
 
 import { objectOf, subjectOf } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
@@ -218,8 +218,8 @@ const packageItems = (
     return {
       id: `packages:${request.id}`,
       kind: "packages",
-      title: t`Approve the packages for ${engine}?`,
-      context: t`Packages for ${engine}`,
+      title: t`Approve the packages for ${ph({ domain: engine })}?`,
+      context: t`Packages for ${ph({ domain: engine })}`,
       body: [request.purpose],
       facts: [
         { label: t`Asked by`, value: request.requestedBy.name },
@@ -257,7 +257,7 @@ const screenItems = (
       }),
       context: name,
       body: [
-        t`An app runs only once an admin approved its code. That happens on the engine's page.`,
+        t`An app runs only once an admin approved its code. That happens on the domain's page.`,
       ],
       facts: [
         { label: t`Version`, value: String(version) },
@@ -284,7 +284,7 @@ const failedItems = (failed: NotificationsPage, me: string): InboxItem[] =>
         t`It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached.`,
       ],
       facts: [
-        { label: t`Engine`, value: appName },
+        { label: t`Domain`, value: appName },
         {
           label: t`Failed`,
           value: plural(failures, { one: "Once", other: "# times" }),

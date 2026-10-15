@@ -24,7 +24,7 @@ export const TargetLink = ({
     return (
       <Link
         params={{ engine: destination.engine }}
-        to="/engines/$engine"
+        to="/domains/$engine"
         {...props}
       />
     );

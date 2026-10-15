@@ -108,11 +108,11 @@ const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
 /** Why a binding no longer serves its resource, by its state. */
 const stateReasons: Readonly<Partial<Record<BindingState, MessageDescriptor>>> =
   {
-    unbound: msg`The engine's actions can't use it until an admin binds it.`,
+    unbound: msg`The domain's actions can't use it until an admin binds it.`,
     declaration_changed: msg`The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now.`,
     contract_changed: msg`What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits.`,
     grant_lost: msg`What it is bound to can't serve it any more: its permission was revoked, the model is no longer allowed, or the template can't be read.`,
-    unchecked: msg`The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
+    unchecked: msg`The domain has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
     budget_damaged: msg`Its budget can't be read, so it serves nothing rather than run without one. Bind it again to set its budget afresh.`,
   };
 
@@ -276,13 +276,13 @@ const NothingToChoose = ({
     model: <Trans>This deployment allows no model.</Trans>,
     connector: (
       <Trans>
-        None of the engine&apos;s integration permissions serves {contract} with
+        None of the domain&apos;s integration permissions serves {contract} with
         every action it declares. Grant one first.
       </Trans>
     ),
     knowledge: (
       <Trans>
-        The engine has no permission to read a collection. Grant one first.
+        The domain has no permission to read a collection. Grant one first.
       </Trans>
     ),
     template: (
@@ -370,7 +370,7 @@ const BudgetFieldSet = ({
       </FieldLegend>
       <FieldDescription>
         <Trans>
-          What the engine&apos;s actions may spend through this binding, on top
+          What the domain&apos;s actions may spend through this binding, on top
           of the deployment&apos;s budgets. Leave a cap empty for none. A
           workflow&apos;s own AI steps don&apos;t go through it.
         </Trans>
@@ -687,7 +687,7 @@ const Revoke = ({
           </DialogTitle>
           <DialogDescription>
             <Trans>
-              The engine&apos;s next request through it is refused, and actions
+              The domain&apos;s next request through it is refused, and actions
               waiting on it are dropped. Bind it again to use it again.
             </Trans>
           </DialogDescription>
@@ -933,14 +933,14 @@ export const ResourceBindings = ({
       <p className="text-muted-foreground max-w-prose">
         {decides ? (
           <Trans>
-            The engine&apos;s actions reach a model, an integration, knowledge
+            The domain&apos;s actions reach a model, an integration, knowledge
             or a template only through a binding an admin approves here.
             Declaring one grants nothing, and revoking a binding stops the next
             request through it.
           </Trans>
         ) : (
           <Trans>
-            The engine&apos;s actions reach a model, an integration, knowledge
+            The domain&apos;s actions reach a model, an integration, knowledge
             or a template only through a binding an admin of your organization
             approves.
           </Trans>
@@ -949,7 +949,7 @@ export const ResourceBindings = ({
       {version === null || resources.length === 0 ? (
         <p className="text-muted-foreground">
           <Trans>
-            The engine&apos;s current version declares no resource for its
+            The domain&apos;s current version declares no resource for its
             actions.
           </Trans>
         </p>

@@ -116,13 +116,13 @@ const Dot = ({
 const WorkflowDot = ({ workflow }: { workflow: WorkflowSummary }) => {
   const { t } = useLingui();
   const name = workflow.workflow;
-  const engine = workflow.appName;
+  const domain = workflow.appName;
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Link
-            aria-label={t`${name} in ${engine}`}
+            aria-label={t`${name} in ${domain}`}
             className="focus-visible:ring-ring flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2"
             params={{ app: workflow.app, workflow: name }}
             to="/workflows/$app/$workflow"
@@ -133,7 +133,7 @@ const WorkflowDot = ({ workflow }: { workflow: WorkflowSummary }) => {
       </TooltipTrigger>
       <TooltipContent>
         <Trans>
-          {name} in {engine}
+          {name} in {domain}
         </Trans>
       </TooltipContent>
     </Tooltip>
@@ -304,8 +304,8 @@ const Others = ({ count }: { count: number }) =>
   count === 0 ? null : (
     <p className="text-muted-foreground border-t pt-3 text-xs first:border-t-0 first:pt-0">
       <Plural
-        one="# more engine with no workflows to show"
-        other="# more engines with no workflows to show"
+        one="# more domain with no workflows to show"
+        other="# more domains with no workflows to show"
         value={count}
       />
     </p>
@@ -326,7 +326,7 @@ const EngineSections = ({ engines, others }: Engines) => {
             <Link
               className="truncate font-medium hover:underline"
               params={{ engine: engine.app.id }}
-              to="/engines/$engine"
+              to="/domains/$engine"
             >
               {engine.app.name}
             </Link>
@@ -376,12 +376,12 @@ const EnginesWidget = ({
   rows: WorkflowSummary[];
 }) => {
   const { t } = useLingui();
-  const title = t`Engines`;
+  const title = t`Domains`;
   if (apps.length === 0) {
     return (
       <WidgetBlock title={title}>
         <NothingYet>
-          <Trans>No engines yet. Engines are made in chat.</Trans>
+          <Trans>No domains yet. Domains are made in chat.</Trans>
         </NothingYet>
       </WidgetBlock>
     );
@@ -402,7 +402,7 @@ const EnginesWidget = ({
             <Link
               className="min-w-0 flex-1 truncate hover:underline"
               params={{ engine: engine.app.id }}
-              to="/engines/$engine"
+              to="/domains/$engine"
             >
               {engine.app.name}
             </Link>
@@ -441,7 +441,7 @@ const NotRead = ({
 /** Each widget's name: its block's title, and how the add card lists it. */
 const widgetTitles: Record<StandardWidgetId, MessageDescriptor> = {
   workflows: msg`Workflows`,
-  engines: msg`Engines`,
+  engines: msg`Domains`,
   runs: msg`Runs this week`,
   signals: msg`Could be better`,
 };

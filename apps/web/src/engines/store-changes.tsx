@@ -22,6 +22,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
+import { ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Await } from "@tanstack/react-router";
 import { DatabaseIcon, TriangleAlertIcon } from "lucide-react";
@@ -162,7 +163,7 @@ const AbandonDialog = ({
             <Trans>
               The store keeps its tables as they are, and takes changes again.
               The release that needed this change can never be made current, in
-              this engine or any other engine using the store: it has to be
+              this domain or any other domain using the store: it has to be
               built again. The new fields stay reserved with the meaning this
               change gave them: a later version can add them again only exactly
               as they were. The values already filled in stay in the records,
@@ -276,15 +277,15 @@ export const StoreChange = ({
           {nothingToMend(backfill.failure) ? (
             <Trans>
               Until this is resolved, no release that changes this store&apos;s
-              tables can be made current, in this engine or any other engine
+              tables can be made current, in this domain or any other domain
               using the store. No record is to blame, so there is nothing to
               mend: abandon the change for the store to take changes again.
             </Trans>
           ) : (
             <Trans>
               Until this is resolved, no release that changes this store&apos;s
-              tables can be made current, in this engine or any other engine
-              using the store. Mend the record through the engine and the change
+              tables can be made current, in this domain or any other domain
+              using the store. Mend the record through the domain and the change
               is tried again, or abandon it.
             </Trans>
           )}
@@ -319,8 +320,8 @@ export const Abandoned = ({
   const releases = formatList(
     abandoned.releases.map(({ app, version }) =>
       app === engine.id
-        ? t`${engineName}, version ${version}`
-        : t`engine ${app}, version ${version}`
+        ? t`${ph({ domainName: engineName })}, version ${version}`
+        : t`domain ${app}, version ${version}`
     )
   );
   const reserved = formatList(
@@ -468,7 +469,7 @@ const StoreChangesOf = ({
   };
   return (
     <section
-      aria-label={t`Changes to the engine's stores`}
+      aria-label={t`Changes to the domain's stores`}
       className="flex flex-col gap-3 empty:hidden"
       id={storeChangesAnchor}
     >

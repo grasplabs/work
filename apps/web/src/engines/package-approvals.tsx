@@ -23,6 +23,7 @@ import {
 } from "@grasp-os/ui/components/table";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import { i18n } from "@lingui/core";
+import { ph } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { useId, useState } from "react";
 
@@ -146,8 +147,8 @@ const EndDialog = ({
         <header className="flex flex-col gap-1 pr-8">
           <DialogTitle>
             {ending === "retire"
-              ? t`Retire the packages for ${engine}?`
-              : t`Revoke the packages for ${engine}?`}
+              ? t`Retire the packages for ${ph({ domain: engine })}?`
+              : t`Revoke the packages for ${ph({ domain: engine })}?`}
           </DialogTitle>
           <DialogDescription>
             <PackagesOf request={request} />
@@ -290,7 +291,7 @@ const ApprovalRow = ({
             <div className="flex gap-2">
               {request.status === "approved" ? (
                 <Button
-                  aria-label={t`Retire the packages for ${engine}`}
+                  aria-label={t`Retire the packages for ${ph({ domain: engine })}`}
                   disabled={busy}
                   onClick={() => {
                     void ask("retire");
@@ -302,7 +303,7 @@ const ApprovalRow = ({
                 </Button>
               ) : null}
               <Button
-                aria-label={t`Revoke the packages for ${engine}`}
+                aria-label={t`Revoke the packages for ${ph({ domain: engine })}`}
                 disabled={busy}
                 onClick={() => {
                   void ask("revoke");
@@ -433,7 +434,7 @@ export const PackageApprovals = ({
       )}
       {listed.approvals.length === 0 ? (
         <p className="text-muted-foreground">
-          <Trans>No packages are approved for this engine.</Trans>
+          <Trans>No packages are approved for this domain.</Trans>
         </p>
       ) : (
         <ApprovalsTable listed={listed} onAsk={setAsked} />
