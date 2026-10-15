@@ -24,15 +24,13 @@ export interface TrialObservation {
   modelInput: string;
   /**
    * The chat as the model read it, request after request, each part marked
-   * by who wrote it. Evidence counts where it first appeared in a source,
-   * or in a tool result when a Knowledge read in the trial returned it:
-   * never where the model wrote it, or made it in code, itself.
+   * by who wrote it. Evidence counts where a source gave it before the
+   * model wrote it, or where a tool result held it that a Knowledge read
+   * in the trial returned: never where only the model wrote it, or made
+   * it in code, itself.
    */
   transcript: readonly TranscriptPart[];
-  /**
-   * The text of what the agent's Knowledge reads and searches in the trial
-   * reached: each section read, each document read or found.
-   */
+  /** What each of the agent's Knowledge reads in the trial returned. */
   readTexts: readonly string[];
   /** Strings that must not reach a model or answer in this trial. */
   forbidden: readonly string[];
@@ -295,12 +293,16 @@ export const scoreTrial = (
     };
   }
   const reads = observed.readTexts.map((text) => normalized(text));
+  // A source gave it before the model wrote it, or a tool returned it
+  // that a Knowledge read in the trial returned too: a guess the model
+  // made doesn't spoil a read that followed it.
   const reached = expect.evidence.filter(({ marker }) => {
     const words = normalized(marker);
-    const first = parts.find(({ text }) => text.includes(words))?.by;
+    const holding = parts.filter(({ text }) => text.includes(words));
     return (
-      first === "source" ||
-      (first === "tool" && reads.some((text) => text.includes(words)))
+      holding[0]?.by === "source" ||
+      (holding.some(({ by }) => by === "tool") &&
+        reads.some((text) => text.includes(words)))
     );
   }).length;
   const cited = citationsOf(observed.answer);

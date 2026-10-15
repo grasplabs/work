@@ -118,6 +118,14 @@ describe("scoring a trial", () => {
         transcript: [{ by: "tool", text: `Returned: ${marker}` }],
         readTexts: [`## Lease\n${marker}.`],
       }).evidenceRecall,
+      // It guessed in its code, then read the section that says it.
+      guessedThenRead: verdict(contract, {
+        transcript: [
+          { by: "model", text: `search("${marker}")` },
+          { by: "tool", text: `Returned: ${marker}` },
+        ],
+        readTexts: [`## Lease\n${marker}.`],
+      }).evidenceRecall,
       // It read another section of the document, then made the marker.
       readElsewhere: verdict(contract, {
         transcript: [{ by: "tool", text: `Returned: ${marker}` }],
@@ -151,6 +159,7 @@ describe("scoring a trial", () => {
       },
       constructed: 0,
       read: 1,
+      guessedThenRead: 1,
       readElsewhere: 0,
       quoted: 1,
       dropped: true,
