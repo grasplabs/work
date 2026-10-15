@@ -359,7 +359,7 @@ describe("a search while records change", () => {
 });
 
 describe("a euclidean generation", () => {
-  it("puts the smallest distance first across policy batches", async () => {
+  it("puts the smallest distance first across batches, a duplicate at its nearest", async () => {
     const euclidean: VectorGeneration = {
       ...generation,
       id: "test-3-euclidean-1",
@@ -374,13 +374,26 @@ describe("a euclidean generation", () => {
       record("far", first, [4, 0, 0]),
       record("near", last, [1.5, 0, 0]),
       record("nearest", first, [1.1, 0, 0]),
+      record("moving", first, [3, 0, 0]),
     ]);
+    // Re-embedded and re-indexed under the last batch's policy after the
+    // first batch was read: both batches find it, at different distances.
+    provider.behaviour.afterQuery = () => {
+      const moving = provider.vectors.get("moving");
+      if (moving !== undefined) {
+        moving.metadata.p = last;
+        moving.values = [1.2, 0, 0];
+      }
+    };
 
-    const found = await index.query([1, 0, 0], { policies, topK: 2 });
+    const found = await index.query([1, 0, 0], { policies, topK: 3 });
 
-    expect(found.matches.map(({ id }) => id)).toStrictEqual([
-      "nearest",
-      "near",
+    expect(
+      found.matches.map(({ id, score }) => [id, Number(score.toFixed(3))])
+    ).toStrictEqual([
+      ["nearest", 0.1],
+      ["moving", 0.2],
+      ["near", 0.5],
     ]);
   });
 });
