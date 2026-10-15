@@ -388,6 +388,7 @@ const trial = (
   citationSupport: 1,
   leaks: [],
   stateChanged: false,
+  changedTables: [],
   authorized: true,
   completed,
   failed: false,

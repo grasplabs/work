@@ -211,11 +211,24 @@ const rowText = (row: unknown): string =>
   );
 
 /**
- * What changes with every call whatever a trial does: core's and
- * Knowledge's audit outboxes, as calls and reads are recorded and drained.
- * Not something a task could ask to change.
+ * What changes on its own whatever a trial does: the audit outboxes as
+ * calls and reads are recorded and drained, sign-in sessions as they are
+ * checked and refreshed, signing keys as they are made when first needed,
+ * SQLite's sequence counters, and usage signals as they are computed. Not
+ * something a task could ask to change.
  */
-const bookkeeping = new Set(["core.audit_outbox", "knowledge.audit_outbox"]);
+const bookkeeping = new Set([
+  "core.audit_outbox",
+  "core.audit_outbox_rejected",
+  "knowledge.audit_outbox",
+  "knowledge.audit_outbox_rejected",
+  "core.sessions",
+  "core.jwks",
+  "core.sqlite_sequence",
+  "knowledge.sqlite_sequence",
+  "core.improvement_signal_computations",
+  "knowledge.knowledge_signal_computations",
+]);
 
 /**
  * Each table's digest, in core's and Knowledge's databases, but the
@@ -685,7 +698,7 @@ const runTrial = async (
     failure = error instanceof Error ? error.message : String(error);
   }
   const latencyMs = performance.now() - started;
-  const stateChanged = changedBetween(stateBefore, await stateNow()).length > 0;
+  const changedTables = changedBetween(stateBefore, await stateNow());
   const requests = gateway.requests.slice(firstRequest);
   return {
     taskId: task.id,
@@ -701,7 +714,8 @@ const runTrial = async (
     transcript: requests.flatMap(({ body }) => transcriptOf(body)),
     corpus,
     forbidden: forbiddenIn(task),
-    stateChanged,
+    stateChanged: changedTables.length > 0,
+    changedTables,
     ...(failure === undefined ? {} : { error: failure }),
     latencyMs,
     costMicros: (await charged(company)) - spentBefore,
@@ -856,6 +870,21 @@ export const runBrainBaseline = async (
   for (const persona of brainPersonas) {
     // oxlint-disable-next-line no-await-in-loop -- one workspace at a time
     places.set(persona, await workspaceOf(company, persona));
+  }
+  // One unmeasured turn in each object first: what the deployment sets up
+  // once, on first use, is neither a trial's latency nor its change.
+  for (const place of places.values()) {
+    // oxlint-disable-next-line no-await-in-loop -- one object at a time
+    await pointAtGateway(place.stub, provider.gateway);
+    provider.setTurn({ phase: "prior" });
+    // oxlint-disable-next-line no-await-in-loop -- one object at a time
+    const chat = await place.stub.createChat(
+      "Baseline warm-up",
+      company.people[place.persona].userId,
+      place.agent.agentId
+    );
+    // oxlint-disable-next-line no-await-in-loop -- one object at a time
+    await place.stub.ask(chat.id, { text: "Warm-up: just say noted.", model });
   }
   const observations: TrialObservation[] = [];
   const sources: RunIdentity["sources"] = {};
