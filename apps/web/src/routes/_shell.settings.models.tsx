@@ -155,7 +155,7 @@ const DataRules = ({
         <Trans>
           Only the models marked as taking sensitive data may be sent data from
           a sensitive collection (marked in Knowledge) or a sensitive
-          connection, or from a chat, engine or run that read one.
+          connection, or from a chat, domain or run that read one.
         </Trans>
       </li>
       <li>
@@ -340,7 +340,7 @@ const BindingBudgets = ({
   if (bound.length === 0) {
     return (
       <p className="text-muted-foreground text-sm">
-        <Trans>No engine has a model bound to it.</Trans>
+        <Trans>No domain has a model bound to it.</Trans>
       </p>
     );
   }
@@ -351,7 +351,7 @@ const BindingBudgets = ({
         <TableHeader>
           <TableRow>
             <TableHead>
-              <Trans>Engine</Trans>
+              <Trans>Domain</Trans>
             </TableHead>
             <TableHead>
               <Trans>Caps</Trans>
@@ -377,7 +377,7 @@ const BindingBudgets = ({
                   <Link
                     className="underline underline-offset-4"
                     params={{ engine: binding.appId }}
-                    to="/engines/$engine"
+                    to="/domains/$engine"
                   >
                     {binding.appName}
                   </Link>
@@ -424,7 +424,7 @@ const BindingBudgets = ({
       {more ? (
         <p className="text-muted-foreground text-sm">
           <Trans>
-            The first {shown} by engine; more engines have models bound.
+            The first {shown} by domain; more domains have models bound.
           </Trans>
         </p>
       ) : null}
@@ -442,13 +442,13 @@ const EngineBudgets = ({ settings }: { settings: ModelSettings }) => {
     <Section
       description={
         <Trans>
-          Caps an admin set on an engine&apos;s model, on the engine&apos;s
+          Caps an admin set on a domain&apos;s model, on the domain&apos;s
           Resources tab, on top of the deployment&apos;s budgets, and what the
-          engine&apos;s actions spent through it. A workflow&apos;s own AI steps
+          domain&apos;s actions spent through it. A workflow&apos;s own AI steps
           don&apos;t count here.
         </Trans>
       }
-      title={t`Engine budgets`}
+      title={t`Domain budgets`}
     >
       <BindingBudgets bindings={settings.bindings} day={settings.day} />
     </Section>
