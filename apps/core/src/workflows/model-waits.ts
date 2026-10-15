@@ -3,6 +3,7 @@ import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { workflowModelWaits, workflowRuns } from "../db/core/schema.ts";
+import { maxAskAgainSeconds } from "../model-admission.ts";
 import type { ModelShare } from "../model-admission.ts";
 import { queueLiveMs } from "./admission.ts";
 
@@ -74,6 +75,11 @@ export const modelWaitRecorded = async (
     .set({ summaryRevision: sql`${workflowRuns.summaryRevision} + 1` })
     .where(eq(workflowRuns.id, runId));
   if (queued === null) {
+    // A tombstone, not a deletion: dated as a note written now would be
+    // (`retryAt`, the fixed wait on), so an older call's note written
+    // before it, landing late, asks sooner and is refused below. Only the
+    // row's own call clears it; a newer call's wait stays.
+    const clearedAt = new Date(now + maxAskAgainSeconds * 1000);
     await db.batch([
       ...pruned(db, now),
       db
@@ -82,10 +88,24 @@ export const modelWaitRecorded = async (
         .where(
           and(
             eq(workflowRuns.id, runId),
-            sql`EXISTS (SELECT 1 FROM ${workflowModelWaits} WHERE ${mine})`
+            sql`EXISTS (SELECT 1 FROM ${workflowModelWaits} WHERE ${mine} AND ${workflowModelWaits.waitingFor} IS NOT NULL)`
           )
         ),
-      db.delete(workflowModelWaits).where(mine),
+      db
+        .insert(workflowModelWaits)
+        .values({
+          runId,
+          stepHash,
+          owner,
+          waitingFor: null,
+          retryAt: clearedAt,
+          seenAt: new Date(now),
+        })
+        .onConflictDoUpdate({
+          target: [workflowModelWaits.runId, workflowModelWaits.stepHash],
+          set: { waitingFor: null, retryAt: clearedAt, seenAt: new Date(now) },
+          setWhere: eq(workflowModelWaits.owner, owner),
+        }),
     ]);
     return;
   }

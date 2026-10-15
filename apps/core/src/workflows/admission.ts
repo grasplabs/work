@@ -3,7 +3,7 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
 import type { RunQueue } from "@grasp-os/shared/workflows";
-import { and, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -574,7 +574,8 @@ export const queuedRuns = async (
       .where(
         and(
           sql`${workflowModelWaits.runId} IN (SELECT value FROM json_each(${listed}))`,
-          gt(workflowModelWaits.seenAt, new Date(now - queueLiveMs))
+          gt(workflowModelWaits.seenAt, new Date(now - queueLiveMs)),
+          isNotNull(workflowModelWaits.waitingFor)
         )
       ),
   ]);
@@ -583,7 +584,7 @@ export const queuedRuns = async (
   );
   const byRun = new Map<string, RunQueue>();
   for (const { runId, waitingFor, retryAt } of rows) {
-    if (!byRun.has(runId)) {
+    if (waitingFor !== null && !byRun.has(runId)) {
       byRun.set(runId, { waitingFor, retryAt: retryAt.toISOString() });
     }
   }

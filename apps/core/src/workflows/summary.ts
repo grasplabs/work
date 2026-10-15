@@ -238,6 +238,7 @@ export const runSummary = async (
             UNION ALL
             SELECT m.waiting_for, m.retry_at FROM workflow_model_waits m
               WHERE m.run_id = r.id AND m.seen_at > ?1
+                AND m.waiting_for IS NOT NULL
           ) q
           ORDER BY q.retry_at
           LIMIT 1) AS queued

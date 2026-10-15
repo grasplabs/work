@@ -1315,10 +1315,14 @@ export const workflowModelWaits = sqliteTable(
     stepHash: text("step_hash").notNull(),
     /** The call of the step that wrote it: only it clears it (model-waits.ts). */
     owner: text().notNull(),
-    /** Which share its call waits for: `client`, `person` or `app`. */
+    /**
+     * Which share its call waits for: `client`, `person` or `app`; null
+     * once the call that owns the row stopped waiting (a tombstone, so an
+     * older call's late note can't bring the wait back: model-waits.ts).
+     */
     waitingFor: text("waiting_for", {
       enum: ["client", "person", "app"],
-    }).notNull(),
+    }),
     /** When its call asks again at the latest. */
     retryAt: timestamp("retry_at").notNull(),
     /** When its call last asked: it lapses a while after. */

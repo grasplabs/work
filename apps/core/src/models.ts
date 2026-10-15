@@ -1360,9 +1360,22 @@ const askUntilServed = async (
   waiting: Waiting
 ): Promise<Admission | { held: Refusal }> => {
   const startedAt = Date.now();
+  // Every moment since it began counts, its asks and notes too, not only
+  // its sleeps.
+  const msLeft = (hintSeconds: number): number =>
+    askAgainMs({
+      waited: waiting.rounds,
+      retryAfterSeconds: hintSeconds,
+      waitedMs: Date.now() - startedAt,
+      maxWaitMs,
+    });
   let last: { held: Refusal } | undefined = undefined;
   for (;;) {
-    if (last !== undefined && signal.aborted) {
+    // Cancelled or out of time since it last asked: it asks no more.
+    if (
+      last !== undefined &&
+      (signal.aborted || Date.now() - startedAt >= maxWaitMs)
+    ) {
       return last;
     }
     // oxlint-disable-next-line no-await-in-loop -- asked again after each wait
@@ -1376,21 +1389,18 @@ const askUntilServed = async (
     }
     last = admitted;
     waiting.placed ||= admitted.held.placed === true;
-    // Every moment since it began counts, its asks and notes too, not
-    // only its sleeps.
-    const ms = askAgainMs({
-      waited: waiting.rounds,
-      retryAfterSeconds: admitted.held.retryAfterSeconds ?? maxAskAgainSeconds,
-      waitedMs: Date.now() - startedAt,
-      maxWaitMs,
-    });
+    const retryAfter = admitted.held.retryAfterSeconds ?? maxAskAgainSeconds;
     // The caller's word: a workflow attempt let go of stops waiting (it
     // throws).
     route.beforeSend?.();
     // Out of time, cancelled, or given no place (its person's, its App's
     // or the client's places all taken): told so at once, and the ledger
     // asked nothing more for it.
-    if (ms <= 0 || signal.aborted || admitted.held.placed === false) {
+    if (
+      msLeft(retryAfter) <= 0 ||
+      signal.aborted ||
+      admitted.held.placed === false
+    ) {
       return admitted;
     }
     const { waitingFor = "client" } = admitted.held;
@@ -1402,8 +1412,10 @@ const askUntilServed = async (
       waitingFor,
       retryAt: Date.now() + maxAskAgainSeconds * 1000,
     });
+    // Its sleep, worked out after the note, which takes time too: never
+    // past the time it may wait.
     // oxlint-disable-next-line no-await-in-loop -- each round
-    await pause(ms, signal);
+    await pause(Math.max(0, msLeft(retryAfter)), signal);
     waiting.rounds += 1;
   }
 };
@@ -2143,17 +2155,15 @@ const readPolicy = async (env: ModelsEnv): Promise<QuotaPolicy> => {
  * isolate read, else the platform's own (its ceilings): for a call's
  * shares, which a policy only lowers, and which bound no spend.
  */
-const policyOrPlatform = async (
-  env: ModelsEnv
-): Promise<{ policy: QuotaPolicy; read: boolean }> => {
+const policyOrPlatform = async (env: ModelsEnv): Promise<QuotaPolicy> => {
   try {
-    return { policy: await readPolicy(env), read: true };
+    return await readPolicy(env);
   } catch (error) {
     log.error("model.quota_policy_failed", {
       ...errorFields(error),
       fallback: lastPolicyRead === undefined ? "platform" : "last_read",
     });
-    return { policy: lastPolicyRead ?? quotaPolicyOf(), read: false };
+    return lastPolicyRead ?? quotaPolicyOf();
   }
 };
 
@@ -2241,12 +2251,8 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
       const lineage =
         call.trigger.type === "workflow" ? await readPolicy(env) : undefined;
       // The shares, as the policy stands too; for a call with no lineage,
-      // the platform's own should the policy not be read, never more.
-      const shared =
-        lineage === undefined
-          ? await policyOrPlatform(env)
-          : { policy: lineage, read: true };
-      const { policy } = shared;
+      // the last read or the platform's own should the policy not be read.
+      const policy = lineage ?? (await policyOrPlatform(env));
       // One clock for both, so a request at a month's last instant never
       // counts its day in one month and its month in the next.
       const { month, day } = budgetPeriods(env);
@@ -2256,11 +2262,14 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
           day,
           lineage?.limits.lineageModelRequests ?? lineageModelRequests
         ),
-        // The generation of the policy its shares come from, read now, so
-        // the ledger refuses shares from a policy older than one it saw
-        // (`policyBehind`), and the request reads it again. A fallback
-        // carries none: it never lifts a share above the platform's.
-        policyGeneration: shared.read ? policy.generation : undefined,
+        // The generation of the policy its shares come from, a fallback's
+        // too (the last read's, or the platform's own, 0), so the ledger
+        // refuses shares from a policy older than one it saw
+        // (`policyBehind`): the request reads it again, and is held back
+        // if it still can't. Shares from a fallback apply only while the
+        // ledger knows of no newer policy, so an operator's lowered share
+        // holds through an outage.
+        policyGeneration: policy.generation,
         fair: { place, subject, resource, shares: modelSharesOf(policy) },
       };
     },

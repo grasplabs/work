@@ -1028,6 +1028,44 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     });
   });
 
+  it("holds back a call whose policy can't be read once the ledger knows a newer one", async () => {
+    // A ledger of this test's own, which a newer policy reached already.
+    const own = `ledger-${crypto.randomUUID()}`;
+    const ledgerNamespace = new Proxy(env.MODEL_LEDGER, {
+      get: (namespace, name): unknown =>
+        name === "getByName"
+          ? () => namespace.getByName(own)
+          : Reflect.get(namespace, name, namespace),
+    });
+    await env.MODEL_LEDGER.getByName(own).admit({
+      ...request("someone", null),
+      policyGeneration: policy.generation + 1,
+    });
+    // Core's database, failing only to read the quota policy.
+    const db = new Proxy(env.DB, {
+      get: (target, name): unknown =>
+        name === "prepare"
+          ? (query: string) => {
+              if (query.includes("quota_policies")) {
+                throw new Error("D1_ERROR: the database is unavailable");
+              }
+              return target.prepare(query);
+            }
+          : Reflect.get(target, name, target),
+    });
+    const { fake, call } = gatewayWith([answered], {
+      DB: db,
+      MODEL_LEDGER: ledgerNamespace,
+    });
+
+    // Its shares, from the last policy read or the platform's own, would
+    // be above the newer policy's: it is held back, not admitted.
+    expect({
+      told: await outcome(call(callBy(newPerson().userId, 0))),
+      sent: fake.requests.length,
+    }).toStrictEqual({ told: "model.quota_policy_behind", sent: 0 });
+  });
+
   it("keeps a step's newer call's wait whatever an older call's late notes say", async () => {
     const db = drizzle(env.DB);
     const runId = `run-${crypto.randomUUID()}`;
@@ -1049,6 +1087,11 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     await modelWaitRecorded(db, runId, "extract", "older", null);
     const whileNewerWaits = await shown();
     await modelWaitRecorded(db, runId, "extract", "newer", null);
+    // Another note the older call wrote before, landing later still.
+    await modelWaitRecorded(db, runId, "extract", "older", {
+      waitingFor: "app",
+      retryAt: now + 1000,
+    });
 
     expect({ whileNewerWaits, after: await shown() }).toStrictEqual({
       whileNewerWaits: {
