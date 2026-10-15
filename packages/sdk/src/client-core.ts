@@ -1353,6 +1353,10 @@ export class GraspClient {
       // oxlint-disable-next-line no-await-in-loop -- one connection after another
       const followed = await follow(what);
       if (followed.kind === "aborted") {
+        // Its start may have reached the host, and what it ran saved
+        // something: the App's queries are read again, as on every other
+        // exit that leaves its outcome unknown.
+        this.#changed(resourceId);
         throw clientError("stream.cancelled", { idempotencyKey: key });
       }
       const settled: Settled =
@@ -1399,6 +1403,8 @@ export class GraspClient {
       // oxlint-disable-next-line no-await-in-loop -- one connection after another
       await sleep(wait, signal);
       if (isAborted(signal)) {
+        // As above: it may have run, and saved something.
+        this.#changed(resourceId);
         throw clientError("stream.cancelled", { idempotencyKey: key });
       }
     }

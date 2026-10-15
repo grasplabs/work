@@ -615,6 +615,58 @@ describe("the session client and a streaming action's cancel", () => {
   });
 });
 
+describe("the session client and a stream its caller stops following", () => {
+  it("reads the App's queries again once a stream that may have saved loses its follower", async () => {
+    let reads = 0;
+    const transport: ClientTransport = {
+      call: async () => {
+        reads += 1;
+        return await Promise.resolve(answered({ title: "Before" }));
+      },
+      // It started, and saved something its progress tells of; no result.
+      stream: async (_what, _request, onFrame) => {
+        await Promise.resolve();
+        setTimeout(() => {
+          onFrame({ type: "progress", seq: 1, value: { done: 1 } });
+        }, 0);
+        return { release: () => null };
+      },
+      cancelStream: async () => await Promise.resolve({ requested: true }),
+    };
+    const client = new GraspClient(transport);
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const unsubscribe = internals.subscribe(entry, unheard);
+    await vi.waitFor(() => {
+      expect(reads).toBe(1);
+    });
+    const progressed = Promise.withResolvers<null>();
+    const controller = new AbortController();
+    const stopped = failureOf(
+      client.stream(
+        api.notes.exportAll,
+        { format: "csv" },
+        {
+          signal: controller.signal,
+          onProgress: () => {
+            progressed.resolve(null);
+          },
+        }
+      )
+    );
+    await progressed.promise;
+    controller.abort();
+    await expect(stopped).resolves.toMatchObject({
+      code: "stream.cancelled",
+    });
+    // What it saved shows: the query read is read again.
+    await vi.waitFor(() => {
+      expect(reads).toBe(2);
+    });
+    unsubscribe();
+  });
+});
+
 describe("the session client and a cancel asked for while a stream opens", () => {
   it("sends the cancel only once the invocation has answered", async () => {
     const seen: string[] = [];
