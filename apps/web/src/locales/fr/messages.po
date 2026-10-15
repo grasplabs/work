@@ -964,8 +964,8 @@ msgid "1 Vision"
 msgstr "1 Vision"
 
 #: src/landscape/landscape.ts
-msgid "10 to 50 users"
-msgstr "10 à 50 utilisateurs"
+msgid "10 to 49 users"
+msgstr "10 à 49 utilisateurs"
 
 #: src/landscape/landscape.ts
 msgid "100 users or more"
@@ -976,8 +976,8 @@ msgid "2 Inventory"
 msgstr "2 Inventaire"
 
 #: src/landscape/landscape.ts
-msgid "50 to 100 users"
-msgstr "50 à 100 utilisateurs"
+msgid "50 to 99 users"
+msgstr "50 à 99 utilisateurs"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
@@ -3461,6 +3461,10 @@ msgstr "Impossible de joindre Grasp. Vérifiez la connexion et importez de nouve
 msgid "Grasp could not read this policy"
 msgstr "Grasp n’a pas pu lire cette politique"
 
+#: src/landscape/usage-tab.tsx
+msgid "Grasp doesn't track who uses {appName} yet. Usage shows here once it does."
+msgstr "Grasp ne mesure pas encore qui utilise {appName}. L’usage s’affichera ici dès que ce sera le cas."
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp found no requirement in this policy that a rule can check."
 msgstr "Grasp n’a trouvé dans cette politique aucune exigence qu’une règle puisse vérifier."
@@ -4712,10 +4716,6 @@ msgstr "Personne n’a répondu à temps : cette décision est donc close."
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
 msgstr "Personne n’a encore approuvé le code de cette application pour les données du domaine. Un admin peut l’approuver sur la page du domaine."
 
-#: src/landscape/usage-tab.tsx
-msgid "Nobody has signed in to {appName} or used it through the desktop agent yet. Usage shows here once people connect."
-msgstr "Aucune connexion à {appName} ni aucun usage via l’agent pour postes de travail pour l’instant. L’usage s’affichera ici dès que des personnes se connecteront."
-
 #: src/brain/brain-atlas.ts
 msgid "Nobody is named yet to approve a new tool."
 msgstr "Personne n’est encore désigné pour approuver un nouvel outil."
@@ -5481,7 +5481,7 @@ msgstr "Mise à jour de la plateforme"
 #: src/routes/_shell.policies.index.tsx
 #: src/routes/_shell.policies.rules.$ruleId.tsx
 msgid "Policies"
-msgstr "Règles"
+msgstr "Politiques"
 
 #: src/landscape/landscape-audit.ts
 msgctxt "category of an audit event"

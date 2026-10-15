@@ -215,6 +215,7 @@ const LandscapePage = () => {
                 />
               ) : null}
               <Button
+                disabled={loaded.state !== "ready"}
                 onClick={() => {
                   downloadCsv(
                     landscapeCsv(shown),
@@ -233,7 +234,7 @@ const LandscapePage = () => {
           </div>
         </div>
 
-        {view === "table" ? (
+        {loaded.state === "ready" && view === "table" ? (
           <AppTable
             apps={shown}
             columns={columns}
@@ -241,7 +242,8 @@ const LandscapePage = () => {
             onSortChange={setSort}
             sort={sort}
           />
-        ) : (
+        ) : null}
+        {loaded.state === "ready" && view === "mosaic" ? (
           <AppMosaic
             apps={shown}
             onOpen={(appId) => {
@@ -251,7 +253,7 @@ const LandscapePage = () => {
               });
             }}
           />
-        )}
+        ) : null}
       </Page>
     </>
   );

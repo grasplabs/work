@@ -102,6 +102,25 @@ describe("matching the landscape's filters", () => {
     ).toBeTruthy();
   });
 
+  it("puts each count in exactly one bucket", () => {
+    const bucketsOf = (users: number) =>
+      (["lt10", "10to50", "50to100", "gte100"] as const).filter((bucket) =>
+        matchesLandscape(
+          { ...lenders, users },
+          { ...noFilters, users: [bucket] },
+          ""
+        )
+      );
+    expect([9, 10, 49, 50, 99, 100].map(bucketsOf)).toStrictEqual([
+      ["lt10"],
+      ["10to50"],
+      ["10to50"],
+      ["50to100"],
+      ["50to100"],
+      ["gte100"],
+    ]);
+  });
+
   it("needs every quick filter to hold", () => {
     expect(matching({ show: ["unowned"] })).toStrictEqual([
       "Notion",
@@ -205,6 +224,19 @@ describe("exports", () => {
     expect(landscapeCsv([quoted]).split("\n")[1]).toContain(
       '"Writes, ""drafts"" and more"'
     );
+  });
+
+  it("keeps a cell that starts like a formula from running as one", () => {
+    const formula = {
+      ...chatGpt,
+      name: '=HYPERLINK("x")',
+      description: "@SUM(A1)",
+    };
+    const [, row = ""] = landscapeCsv([formula]).split("\n");
+    expect([row.split(",")[0], row.split(",").at(-1)]).toStrictEqual([
+      `"'=HYPERLINK(""x"")"`,
+      "'@SUM(A1)",
+    ]);
   });
 
   it("leaves data and usage it doesn't know empty, and says None for an app that touches none", () => {

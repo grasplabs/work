@@ -36,8 +36,8 @@ export const UsageTab = ({ appName }: { appName: string }) => {
             </EmptyTitle>
             <EmptyDescription>
               <Trans>
-                Nobody has signed in to {appName} or used it through the desktop
-                agent yet. Usage shows here once people connect.
+                Grasp doesn&apos;t track who uses {appName} yet. Usage shows
+                here once it does.
               </Trans>
             </EmptyDescription>
           </EmptyHeader>

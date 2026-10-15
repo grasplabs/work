@@ -207,8 +207,8 @@ export type UsersBucket = "lt10" | "10to50" | "50to100" | "gte100";
 
 export const usersBucketLabel: Record<UsersBucket, MessageDescriptor> = {
   lt10: msg`Fewer than 10 users`,
-  "10to50": msg`10 to 50 users`,
-  "50to100": msg`50 to 100 users`,
+  "10to50": msg`10 to 49 users`,
+  "50to100": msg`50 to 99 users`,
   gte100: msg`100 users or more`,
 };
 
@@ -265,13 +265,13 @@ const inBucket = (users: number | null, bucket: UsersBucket): boolean => {
       return users < 10;
     }
     case "10to50": {
-      return users >= 10 && users <= 50;
+      return users >= 10 && users < 50;
     }
     case "50to100": {
-      return users > 50 && users <= 100;
+      return users >= 50 && users < 100;
     }
     case "gte100": {
-      return users > 100;
+      return users >= 100;
     }
     default: {
       return bucket satisfies never;
@@ -467,10 +467,14 @@ export const moveColumn = (
 
 /* ── Export ──────────────────────────────────────────────────────────── */
 
-const csvSpecial = /[",\n]/u;
+const formulaStart = /^\s*[=+\-@]|^[\t\r]/u;
+const csvSpecial = /[",\r\n]/u;
 
-const csvCell = (value: string): string =>
-  csvSpecial.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+/** One cell, quoted where it has to be and safe to open in a spreadsheet. */
+const csvCell = (value: string): string => {
+  const safe = formulaStart.test(value) ? `'${value}` : value;
+  return csvSpecial.test(safe) ? `"${safe.replaceAll('"', '""')}"` : safe;
+};
 
 /** Rows as CSV, each cell quoted where it has to be. */
 export const toCsv = (rows: readonly (readonly string[])[]): string =>

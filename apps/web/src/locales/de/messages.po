@@ -964,8 +964,8 @@ msgid "1 Vision"
 msgstr "1 Vision"
 
 #: src/landscape/landscape.ts
-msgid "10 to 50 users"
-msgstr "10 bis 50 Nutzende"
+msgid "10 to 49 users"
+msgstr "10 bis 49 Nutzende"
 
 #: src/landscape/landscape.ts
 msgid "100 users or more"
@@ -976,8 +976,8 @@ msgid "2 Inventory"
 msgstr "2 Bestandsaufnahme"
 
 #: src/landscape/landscape.ts
-msgid "50 to 100 users"
-msgstr "50 bis 100 Nutzende"
+msgid "50 to 99 users"
+msgstr "50 bis 99 Nutzende"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "A .txt, .vtt, .srt or .docx file, or pasted text."
@@ -3461,6 +3461,10 @@ msgstr "Grasp ist nicht erreichbar. Prüfen Sie die Verbindung und laden Sie die
 msgid "Grasp could not read this policy"
 msgstr "Grasp konnte diese Richtlinie nicht lesen"
 
+#: src/landscape/usage-tab.tsx
+msgid "Grasp doesn't track who uses {appName} yet. Usage shows here once it does."
+msgstr "Grasp erfasst noch nicht, wer {appName} nutzt. Die Nutzung erscheint hier, sobald das der Fall ist."
+
 #: src/routes/_shell.policies.documents.$policyId.tsx
 msgid "Grasp found no requirement in this policy that a rule can check."
 msgstr "Grasp hat in dieser Richtlinie keine Anforderung gefunden, die eine Regel prüfen kann."
@@ -4711,10 +4715,6 @@ msgstr "Niemand hat rechtzeitig geantwortet, daher ist diese Entscheidung geschl
 #: src/screens/screen-frame.tsx
 msgid "Nobody has approved this app's code for the domain's data yet. An admin can approve it on the domain's page."
 msgstr "Noch hat niemand den Code dieser App für die Daten der Domäne genehmigt. Ein Admin kann das auf der Seite der Domäne tun."
-
-#: src/landscape/usage-tab.tsx
-msgid "Nobody has signed in to {appName} or used it through the desktop agent yet. Usage shows here once people connect."
-msgstr "Noch niemand hat sich bei {appName} angemeldet oder die App über den Desktop-Agenten genutzt. Die Nutzung erscheint hier, sobald sich Personen verbinden."
 
 #: src/brain/brain-atlas.ts
 msgid "Nobody is named yet to approve a new tool."
