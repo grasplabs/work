@@ -3927,6 +3927,10 @@ msgstr "aucune pour l’instant"
 msgid "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
 msgstr "Aucune des autorisations d'intégration du domaine ne sert {contract} avec toutes les actions qu'il déclare. Accordez-en une d'abord."
 
+#: src/engines/resource-bindings.tsx
+msgid "None of the domain's store permissions serves every operation it declares, exactly as declared. Grant one first."
+msgstr "Aucune autorisation de magasin du domaine ne sert chaque opération déclarée, exactement comme déclarée. Accordez-en une d'abord."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "None stated"
 msgstr "Non indiquée"
@@ -5629,7 +5633,12 @@ msgstr "A arrêté de suivre ce qui change sur une connexion"
 msgid "Stopped."
 msgstr "Arrêté."
 
+#: src/engines/resource-bindings.tsx
+msgid "Store"
+msgstr "Magasin"
+
 #: src/activity/pending.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Store {store}"
 msgstr "Magasin {store}"
 

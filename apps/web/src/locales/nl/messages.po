@@ -3927,6 +3927,10 @@ msgstr "nu geen"
 msgid "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
 msgstr "Geen van de integratierechten van het domein bedient {contract} met elke actie die het declareert. Verleen er eerst een."
 
+#: src/engines/resource-bindings.tsx
+msgid "None of the domain's store permissions serves every operation it declares, exactly as declared. Grant one first."
+msgstr "Geen opslagrecht van het domein bedient elke gedeclareerde operatie precies zoals gedeclareerd. Verleen er eerst een."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "None stated"
 msgstr "Niet vermeld"
@@ -5629,7 +5633,12 @@ msgstr "Gestopt met volgen wat er bij een verbinding verandert"
 msgid "Stopped."
 msgstr "Gestopt."
 
+#: src/engines/resource-bindings.tsx
+msgid "Store"
+msgstr "Opslag"
+
 #: src/activity/pending.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Store {store}"
 msgstr "Opslag {store}"
 

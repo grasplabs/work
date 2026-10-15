@@ -1,5 +1,9 @@
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
-import { resourceAliasPattern } from "@grasp-os/shared/operation-limits";
+import {
+  resourceAliasPattern,
+  storeOperationPathMaxLength,
+  storeOperationPathPattern,
+} from "@grasp-os/shared/operation-limits";
 
 import type { ConnectorCatalog } from "./connector-catalog.gen.ts";
 import type { FilesOperation } from "./references.ts";
@@ -12,7 +16,8 @@ import type {
 import { readDescriptor } from "./value-read.ts";
 import { descriptorOf, schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
-import type { Infer } from "./values.ts";
+import { v } from "./values.ts";
+import type { Infer, ObjectInput, ValueShape } from "./values.ts";
 
 // `resource`: how an App says which outside capabilities its actions need
 // (spec 12, 32.3): a model, a connector's actions, knowledge collections,
@@ -24,9 +29,21 @@ import type { Infer } from "./values.ts";
 // Only an action can use one, through `ctx.resources.<alias>`, and only
 // one it lists in its `uses`; queries and mutations never reach the
 // network (inspection refuses a resource in their `uses`, app.ts).
+//
+// A store resource is another business store's public operations: the
+// public queries and mutations of the App that owns it, each named by its
+// path with the exact arguments and return the App declares for it, so
+// the binding resolves only where the store serves exactly that. Its
+// tables and schema stay the store's own: the declaration copies none of
+// them, and the host runs each call as that App's own code.
 
 /** The kinds of resource an action can use. */
-export type ResourceKind = "model" | "connector" | "knowledge" | "template";
+export type ResourceKind =
+  | "model"
+  | "connector"
+  | "knowledge"
+  | "template"
+  | "store";
 
 /** What a declaration's config may say about a model. */
 export interface ModelConfig<Output extends AnySchema | undefined> {
@@ -122,6 +139,40 @@ export interface TemplateConfig {
   readonly contract: string;
 }
 
+/** The kinds of a store's public operation a store resource may call. */
+export type StoreOperationKind = "query" | "mutation";
+
+/**
+ * One of a store's public operations, as a store resource declares it:
+ * its kind, its arguments (a map of field schemas, as the store's App
+ * declares the function's `args`) and its return, exactly as that App
+ * declares them.
+ */
+export interface StoreOperationConfig<
+  Shape extends ValueShape = ValueShape,
+  Returns extends AnySchema = AnySchema,
+> {
+  readonly kind: StoreOperationKind;
+  readonly args: Shape;
+  readonly returns: Returns;
+}
+
+/** What a declaration's config may say about a store. */
+export interface StoreConfig<
+  Operations extends Readonly<Record<string, StoreOperationConfig>>,
+> {
+  /** The store's public operations the App calls, by path, e.g. `notes.list`. */
+  readonly operations: Operations;
+}
+
+/** One store operation as a declaration holds it: data only. */
+export interface StoreOperationShape {
+  readonly kind: StoreOperationKind;
+  /** The object descriptor of its arguments. */
+  readonly args: ValueDescriptor;
+  readonly returns: ValueDescriptor;
+}
+
 interface DeclarationBase<Kind extends ResourceKind, Alias extends string> {
   readonly "~resource": Kind;
   readonly alias: Alias;
@@ -166,6 +217,18 @@ export interface TemplateResource<
   readonly contract: string;
 }
 
+/** A requirement of another store's public operations. */
+export interface StoreResource<
+  Alias extends string = string,
+  Operations extends Readonly<Record<string, StoreOperationConfig>> = Readonly<
+    Record<string, StoreOperationConfig>
+  >,
+> extends DeclarationBase<"store", Alias> {
+  readonly operations: Readonly<Record<string, StoreOperationShape>>;
+  /** The operations' types, for types only: never set. */
+  readonly "~operations"?: Operations;
+}
+
 /**
  * A files requirement (spec 10.7.5, 32.3): what the App's screens may do
  * with files, through the host. Browser-facing: no function lists it.
@@ -200,7 +263,8 @@ export type AnyResource =
   | ModelResource<string, unknown>
   | ConnectorResource
   | KnowledgeResource
-  | TemplateResource;
+  | TemplateResource
+  | StoreResource;
 
 /** One search result from knowledge: a title and an excerpt of it. */
 export interface KnowledgeHit {
@@ -292,17 +356,61 @@ export interface TemplateClient {
   readonly read: () => Promise<TemplateContent>;
 }
 
+/**
+ * What `ctx.resources.<alias>` is for a store: each declared operation by
+ * its path, with its arguments, answering its return.
+ */
+export interface StoreClient<
+  Operations extends Readonly<Record<string, StoreOperationConfig>>,
+> {
+  readonly call: <Path extends Extract<keyof Operations, string>>(
+    ...call: StoreCallArgs<Operations, Path>
+  ) => Promise<Infer<Operations[Path]["returns"]>>;
+}
+
+/**
+ * A store call's arguments: each path of `Path` paired with its own
+ * arguments, so a path that may be either of two needs arguments that fit
+ * whichever it is, never just one of them.
+ */
+type StoreCallArgs<
+  Operations extends Readonly<Record<string, StoreOperationConfig>>,
+  Path,
+> =
+  Path extends Extract<keyof Operations, string>
+    ? [path: Path, args: ObjectInput<Operations[Path]["args"]>]
+    : never;
+
 /** What `ctx.resources.<alias>` is for `Resource`. */
-export type ResourceClient<Resource> =
-  Resource extends ModelResource<string, infer Output>
+export type ResourceClient<Resource> = Resource extends {
+  readonly "~resource": infer Kind extends ResourceKind;
+}
+  ? ResourceClients<Resource>[Kind]
+  : never;
+
+/** Each kind's client for `Resource`, a declaration of that kind. */
+interface ResourceClients<Resource> {
+  readonly model: Resource extends ModelResource<string, infer Output>
     ? ModelClient<Output>
-    : Resource extends ConnectorResource<string, infer Contract, infer Actions>
-      ? ConnectorClient<Contract, Actions>
-      : Resource extends KnowledgeResource<string, infer Operations>
-        ? KnowledgeClient<Operations>
-        : Resource extends TemplateResource
-          ? TemplateClient
-          : never;
+    : never;
+  readonly connector: Resource extends ConnectorResource<
+    string,
+    infer Contract,
+    infer Actions
+  >
+    ? ConnectorClient<Contract, Actions>
+    : never;
+  readonly knowledge: Resource extends KnowledgeResource<
+    string,
+    infer Operations
+  >
+    ? KnowledgeClient<Operations>
+    : never;
+  readonly template: TemplateClient;
+  readonly store: Resource extends StoreResource<string, infer Operations>
+    ? StoreClient<Operations>
+    : never;
+}
 
 /** Why a resource's declaration was refused. */
 export class ResourceDefinitionError extends Error {
@@ -502,6 +610,95 @@ const checkedOrigins = (origins: unknown): readonly string[] => {
   return Object.freeze(checked);
 };
 
+/** The descriptors of one store operation's arguments and return. */
+type StoreShapeOf = (config: Record<string, unknown>) => {
+  readonly args: ValueDescriptor;
+  readonly returns: ValueDescriptor;
+};
+
+/**
+ * A store declaration's operations, as data: 1 to 32 paths, each one of a
+ * store's operation paths (`storeOperationPathPattern`), a query or a
+ * mutation, its arguments an object, each with the descriptors `shapeOf`
+ * reads from its config: from schemas in code, from data in a manifest.
+ */
+const checkedStoreOperations = (
+  operations: unknown,
+  shapeOf: StoreShapeOf
+): Readonly<Record<string, StoreOperationShape>> => {
+  if (!isPlainObject(operations)) {
+    return refuse("A store resource's `operations` is an object of paths.");
+  }
+  const entries = Object.entries(operations);
+  if (entries.length === 0 || entries.length > listMax) {
+    return refuse(
+      `A store resource lists between 1 and ${listMax} operations.`
+    );
+  }
+  const checked: Record<string, StoreOperationShape> = {};
+  for (const [path, entry] of entries) {
+    if (
+      path.length > storeOperationPathMaxLength ||
+      !storeOperationPathPattern.test(path)
+    ) {
+      return refuse(
+        `\`${path}\` isn't a store operation's path: up to four dotted names, at most ${storeOperationPathMaxLength} characters.`
+      );
+    }
+    const config = checkedConfig(entry, ["kind", "args", "returns"]);
+    const { kind } = config;
+    if (kind !== "query" && kind !== "mutation") {
+      return refuse(
+        "A store resource calls a store's queries and mutations, never its actions."
+      );
+    }
+    const { args, returns } = shapeOf(config);
+    if (args.kind !== "object") {
+      return refuse("A store operation's arguments are an object.");
+    }
+    checked[path] = { kind, args, returns };
+  }
+  return checked;
+};
+
+/** A store operation's descriptors, from the schemas code declares it with. */
+const shapeFromSchemas: StoreShapeOf = (config) => {
+  if (!isPlainObject(config.args)) {
+    return refuse(
+      "A store operation's `args` is a map of field names to schemas, as its App declares them."
+    );
+  }
+  // SAFETY: `args` was checked to be a plain object; `v.object` checks
+  // each field is a schema.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const argsSchema = v.object(config.args as ValueShape);
+  return {
+    args: structuredClone(descriptorOf(argsSchema)),
+    returns: structuredClone(descriptorOf(config.returns)),
+  };
+};
+
+/** A store operation's descriptors, as a manifest holds them. */
+const shapeFromData: StoreShapeOf = (config) => ({
+  args: readDescriptor(config.args, 1, { nodes: 0 }),
+  returns: readDescriptor(config.returns, 1, { nodes: 0 }),
+});
+
+/** A store declaration, from its alias and its operations as data. */
+const storeDeclaration = (
+  alias: unknown,
+  operations: unknown,
+  shapeOf: StoreShapeOf
+): StoreResource =>
+  // SAFETY: built from what was checked: the alias and the operations,
+  // each with its descriptors, as `StoreResource` holds them.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  declared({
+    "~resource": "store",
+    alias: checkedAlias(alias),
+    operations: checkedStoreOperations(operations, shapeOf),
+  }) as StoreResource;
+
 /**
  * Resource requirements (spec 32.3). Each answers a frozen declaration to
  * list in an action's `uses` and the App's `uses`; the host binds it.
@@ -620,6 +817,28 @@ export const resource = Object.freeze({
     }) as TemplateResource<Alias>;
   },
   /**
+   * Some of another business store's public operations, by path: queries
+   * and mutations, each with exactly the arguments and return its App
+   * declares, so the host binds only a store that serves exactly that.
+   */
+  store: <
+    const Alias extends string,
+    const Operations extends Readonly<Record<string, StoreOperationConfig>>,
+  >(
+    alias: Alias,
+    config: StoreConfig<Operations>
+  ): StoreResource<Alias, Operations> => {
+    const checked = checkedConfig(config, ["operations"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the operations given, by path.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return storeDeclaration(
+      alias,
+      checked.operations,
+      shapeFromSchemas
+    ) as StoreResource<Alias, Operations>;
+  },
+  /**
    * What the App's screens may do with files through the host: upload,
    * read, attach, delete. Listed in the App's `uses`, never a function's.
    */
@@ -715,6 +934,13 @@ export const readResourceDeclaration = (
   }
   if (kind === "template") {
     return resource.template(alias, loose);
+  }
+  if (kind === "store") {
+    const { operations, ...rest } = config;
+    if (Object.keys(rest).length > 0) {
+      return refuse("A store resource's config has only `operations`.");
+    }
+    return storeDeclaration(alias, operations, shapeFromData);
   }
   if (kind === "files") {
     return resource.files(alias, loose);

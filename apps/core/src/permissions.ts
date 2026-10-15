@@ -6,6 +6,7 @@ import type {
   AuditEntry,
 } from "@grasp-os/shared/audit";
 import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import {
   appIdSchema,
   permissionIdSchema,
@@ -71,7 +72,9 @@ import {
   apps,
   appVersions,
   auditOutbox,
+  businessStores,
   permissions,
+  sdkStoreOwners,
   triggerResources,
   triggerResourceVersions,
   workflowResources,
@@ -168,6 +171,13 @@ const objectColumns = (object: PermissionObject) => {
         resource: null,
       };
     }
+    case "store": {
+      return {
+        objectType: object.type,
+        objectId: object.storeId,
+        resource: null,
+      };
+    }
     case "platform": {
       // One platform: the ID only fills the column.
       return {
@@ -209,6 +219,12 @@ const objectOf = (row: Row): PermissionObject => {
       return permissionObjectSchema.parse({
         type: row.objectType,
         appId: row.objectId,
+      });
+    }
+    case "store": {
+      return permissionObjectSchema.parse({
+        type: row.objectType,
+        storeId: row.objectId,
       });
     }
     case "platform": {
@@ -636,6 +652,67 @@ const requireObjectFits = (
   ) {
     refuseRequest("object: A store reaches connections and collections only.");
   }
+  if (
+    object.type === "store" &&
+    subject.type !== "app" &&
+    subject.type !== "workflow"
+  ) {
+    refuseRequest(
+      "subject: An App or a workflow calls a store's public operations."
+    );
+  }
+};
+
+/** A store a request may not name, refused as one that doesn't exist. */
+const noSuchStore = () =>
+  permissionErrors.create("permission.invalid", {
+    issues: ["object.storeId: There's no such store."],
+  });
+
+/**
+ * Refuses a store object unless `by` may name it (store-operations.ts):
+ * a live store an App owns, which `by` has a role in (`roles.app`), so
+ * they could call its public operations themselves; never the subject's
+ * own App's store, whose functions it calls as itself. Anything else is
+ * "no such store", as for one that doesn't exist.
+ */
+const requireStoreObject = async (
+  env: Env,
+  subject: PermissionSubject,
+  object: PermissionObject,
+  roles: PermissionRoles
+): Promise<void> => {
+  if (object.type !== "store") {
+    return;
+  }
+  const row = await drizzle(env.DB)
+    .select({ owner: sdkStoreOwners.appId })
+    .from(businessStores)
+    .innerJoin(sdkStoreOwners, eq(sdkStoreOwners.storeId, businessStores.id))
+    .where(
+      and(
+        eq(businessStores.id, object.storeId),
+        isNull(businessStores.deletedAt)
+      )
+    )
+    .get();
+  const owner = appIdSchema.safeParse(row?.owner);
+  if (!owner.success) {
+    throw noSuchStore();
+  }
+  try {
+    await roles.app(owner.data, "user");
+  } catch (error) {
+    if (isExpectedError(error)) {
+      throw noSuchStore();
+    }
+    throw error;
+  }
+  if (subject.type === "app" && subject.appId === owner.data) {
+    refuseRequest(
+      "object.storeId: An App calls its own store's functions without one."
+    );
+  }
 };
 
 /**
@@ -747,6 +824,7 @@ export const requestPermission = async (
     }
     await roles.app(object.appId, "user");
   }
+  await requireStoreObject(env, subject, object, roles);
   await requireApps(env, subject, object);
   await requireCollection(env, subject, object);
   const row: Row = {
@@ -1070,6 +1148,7 @@ const auditDetailSql = sql`json_patch(
     WHEN 'collection' THEN json_object('collectionId', ${permissions.objectId})
     WHEN 'app' THEN json_object('appId', ${permissions.objectId})
     WHEN 'workflow' THEN json_object('workflowId', ${permissions.objectId})
+    WHEN 'store' THEN json_object('storeId', ${permissions.objectId})
     ELSE '{}'
   END
 )`;
@@ -1087,10 +1166,12 @@ const canGrantSql = (by: Identity): SQL =>
  * writes from its reads; connect knows), or with an action other than
  * `read`, such as writing a collection, starting a workflow, or calling
  * another App's exports marked `write` (or one by name, whichever it is
- * marked: its App's next version may mark it `write`).
+ * marked: its App's next version may mark it `write`). Any on a store too:
+ * its actions are operation paths, and a mutation may be named `read`.
  */
 const changesThingsSql = or(
   eq(permissions.objectType, "connection"),
+  eq(permissions.objectType, "store"),
   sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value NOT IN ('read', 'statistics'))`
 );
 
@@ -1100,6 +1181,7 @@ const changesThingsSql = or(
  */
 const changesThings = (object: PermissionObject, action: string): boolean =>
   object.type === "connection" ||
+  object.type === "store" ||
   (action !== "read" && action !== "statistics");
 
 /**
@@ -1114,6 +1196,22 @@ const unapprovedSql = (
   version: number | SQLWrapper
 ): SQL =>
   sql`EXISTS (SELECT 1 FROM ${appVersions} WHERE ${appVersions.appId} = ${app} AND ${appVersions.version} = ${version} AND ${appVersions.approved} = 0)`;
+
+/**
+ * Whether `version` of App `app` is one an admin approved, as
+ * `allowingPermissionSql` requires of a version whose code changes
+ * things: one from before approvals counts as approved.
+ */
+export const isApprovedVersion = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<boolean> => {
+  const row = await drizzle(env.DB).get<{ unapproved: number }>(
+    sql`SELECT ${unapprovedSql(app, version)} AS unapproved`
+  );
+  return row.unapproved === 0;
+};
 
 /**
  * The permissions that allow `action` on `object` for `subject`, as SQL
@@ -1484,6 +1582,18 @@ export const listPermissions = async (
           or(
             ne(permissions.objectType, "app"),
             inArray(permissions.objectId, open)
+          ),
+          // A store's permission names the App that owns it, as its
+          // operations are that App's: listed only where that App is open.
+          or(
+            ne(permissions.objectType, "store"),
+            inArray(
+              permissions.objectId,
+              db
+                .select({ id: sdkStoreOwners.storeId })
+                .from(sdkStoreOwners)
+                .where(inArray(sdkStoreOwners.appId, open))
+            )
           )
         );
   const ofOne =

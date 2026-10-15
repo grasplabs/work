@@ -33,8 +33,6 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import {
-  hostedRelease,
-  noStore,
   publicOperationOf,
   readFunctionRequest,
   refusalOf,
@@ -52,6 +50,7 @@ import type {
   Reader,
   SnapshotCallback,
 } from "./query-subscriptions.ts";
+import { hostedRelease, noStore } from "./release-runner.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildAppTests } from "./screens.ts";

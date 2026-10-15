@@ -196,3 +196,40 @@ await crmCtx.resources.crm.call("HUBSPOT_CREATE_CONTACT", {});
 resource.connector("old", { contract: "composio.hubspot@2", actions: ["X"] });
 // @ts-expect-error -- not a Composio contract: a family of no native connector
 resource.connector("lookalike", { contract: "hubspot.crm@1", actions: ["X"] });
+
+// Another store's public operations: each declared path's arguments and
+// return, inferred from the declaration alone.
+const ledger = resource.store("ledger", {
+  operations: {
+    "entries.list": {
+      kind: "query",
+      args: { limit: v.number().optional() },
+      returns: v.array(v.object({ amount: v.number() })),
+    },
+    "entries.add": {
+      kind: "mutation",
+      args: { amount: v.number() },
+      returns: v.null(),
+    },
+  },
+});
+declare const ledgerCtx: ActionCtx<readonly [typeof ledger]>;
+expectTypeOf(
+  ledgerCtx.resources.ledger.call("entries.list", {})
+).resolves.toEqualTypeOf<{ amount: number }[]>();
+expectTypeOf(
+  ledgerCtx.resources.ledger.call("entries.add", { amount: 3 })
+).resolves.toEqualTypeOf<null>();
+// @ts-expect-error -- only the operations it declares
+await ledgerCtx.resources.ledger.call("entries.remove", {});
+// @ts-expect-error -- arguments as the operation declares them
+await ledgerCtx.resources.ledger.call("entries.add", { amount: "3" });
+// A path known only as one of several: its arguments must fit whichever
+// it is, so arguments that fit only `entries.list` are refused.
+declare const entriesPath: "entries.add" | "entries.list";
+// @ts-expect-error -- fits `entries.list`, but not `entries.add`
+await ledgerCtx.resources.ledger.call(entriesPath, {});
+resource.store("bad", {
+  // @ts-expect-error -- a store's actions are never called
+  operations: { ping: { kind: "action", args: {}, returns: v.null() } },
+});

@@ -346,6 +346,17 @@ export const commitSchema = z
     writes: z.array(storeWriteSchema).max(commitMaxWrites),
     intents: z.array(storeIntentSchema).max(commitMaxIntents).default([]),
     result: fieldValueSchema.default(null),
+    /**
+     * The consumer whose call of a store's public operation this commit
+     * is (another App or a workflow, by ID and version): kept with the
+     * commit for as long as the store is. None for its own App's commits.
+     */
+    writer: z
+      .strictObject({
+        resourceId: identifierSchema,
+        resourceVersion: z.number().int().min(1),
+      })
+      .optional(),
   })
   .refine(
     ({ guards, readSet, writes, intents, result }) =>
