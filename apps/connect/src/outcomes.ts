@@ -27,7 +27,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { codeSubjectSchema } from "@grasp-os/shared/permissions";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, lt, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -52,18 +52,17 @@ import type { ShownConnection } from "./pending.ts";
 const listLimit = unknownOutcomeListLimit;
 
 /**
- * The row SQLite numbers each call by: a list's cursor names it with the
- * call's first send (`UnknownOutcome.cursor`), never its key.
+ * The cursor of the call `row` records: its first send and its random
+ * list ID, so it says nothing of anyone else's calls (not how many were
+ * made in between, as a row number would) and stays where it is, whatever
+ * the database does with its rows.
  */
-const rowNumber = sql<number>`${idempotentCalls}.rowid`;
-
-/** The cursor of the call first sent at `createdAt`, as row `rowid`. */
-const cursorOf = (createdAt: Date, rowid: number): string =>
-  `${createdAt.getTime()}.${rowid}`;
+const cursorOf = (row: Pick<Row, "createdAt" | "listId">): string =>
+  `${row.createdAt.getTime()}.${row.listId}`;
 
 /**
  * The calls listed after `before`, in the order lists go (newest first,
- * then by row), or every one without it. Throws `connect.invalid` for a
+ * then by list ID), or every one without it. Throws `connect.invalid` for a
  * cursor no list gave.
  */
 const after = (before: unknown): SQL | undefined => {
@@ -74,15 +73,19 @@ const after = (before: unknown): SQL | undefined => {
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
-  const [at = 0, rowid = 0] = parsed.data.split(".").map(Number);
+  const [time = "0", listId = ""] = parsed.data.split(".");
+  const at = new Date(Number(time));
   return or(
-    lt(idempotentCalls.createdAt, new Date(at)),
-    and(eq(idempotentCalls.createdAt, new Date(at)), lt(rowNumber, rowid))
+    lt(idempotentCalls.createdAt, at),
+    and(eq(idempotentCalls.createdAt, at), lt(idempotentCalls.listId, listId))
   );
 };
 
-/** The order lists go in: newest first, then by row. */
-const listOrder = [desc(idempotentCalls.createdAt), desc(rowNumber)];
+/** The order lists go in: newest first, then by list ID. */
+const listOrder = [
+  desc(idempotentCalls.createdAt),
+  desc(idempotentCalls.listId),
+];
 
 /** The key of the call `row` records, as a list and a resolution name it. */
 const keyOf = (row: Row): UnknownOutcomeKey =>
@@ -110,11 +113,9 @@ const inputOf = (row: Row): ConnectCall["input"] | undefined => {
 
 const summaryOf = ({
   row,
-  rowid,
   connection,
 }: {
   row: Row;
-  rowid: number;
   connection: ShownConnection;
 }): UnknownOutcome => {
   const input = inputOf(row);
@@ -143,7 +144,7 @@ const summaryOf = ({
               ? {}
               : { binding: origin.binding }),
           },
-    cursor: cursorOf(row.createdAt, rowid),
+    cursor: cursorOf(row),
   };
 };
 
@@ -197,11 +198,7 @@ export const listUnknownOutcomes = async (
     return [];
   }
   const rows = await drizzle(env.DB)
-    .select({
-      row: idempotentCalls,
-      rowid: rowNumber,
-      connection: shownConnection,
-    })
+    .select({ row: idempotentCalls, connection: shownConnection })
     .from(idempotentCalls)
     .leftJoin(connections, eq(connections.id, idempotentCalls.connectionId))
     .where(and(theirs(parsed.data), unknownNow(Date.now()), page))
@@ -223,12 +220,10 @@ const listingColumns = {
   claimedAt: idempotentCalls.claimedAt,
   resource: idempotentCalls.resource,
   createdAt: idempotentCalls.createdAt,
-  rowid: rowNumber,
+  listId: idempotentCalls.listId,
 };
 
-type ListingRow = Pick<Row, Exclude<keyof typeof listingColumns, "rowid">> & {
-  rowid: number;
-};
+type ListingRow = Pick<Row, keyof typeof listingColumns>;
 
 /**
  * What `row` shows an admin: never its input, key, claim or origin
@@ -248,10 +243,11 @@ const listingOf = async ({
   )?.title;
   return {
     // Only tells rows apart, of what the admin is shown anyway and the
-    // row's number, and never of its key: App code chooses keys and may put
-    // data in them, and a digest of a key a reader can guess would confirm
-    // the guess. The row's number makes it unique across every page, even
-    // for two calls alike in all the rest, claimed in the same millisecond.
+    // row's random list ID, and never of its key: App code chooses keys and
+    // may put data in them, and a digest of a key a reader can guess would
+    // confirm the guess. The list ID makes it unique across every page,
+    // even for two calls alike in all the rest, claimed in the same
+    // millisecond.
     id: await sha256Hex(
       JSON.stringify([
         row.subjectType,
@@ -260,7 +256,7 @@ const listingOf = async ({
         row.connectionId,
         row.action,
         row.claimedAt.getTime(),
-        row.rowid,
+        row.listId,
       ])
     ),
     onBehalfOf: row.onBehalfOf,
@@ -275,7 +271,7 @@ const listingOf = async ({
     ...(title === undefined ? {} : { title }),
     resource: row.resource,
     sentAt: row.createdAt.toISOString(),
-    cursor: cursorOf(row.createdAt, row.rowid),
+    cursor: cursorOf(row),
   };
 };
 
@@ -315,18 +311,16 @@ const unknownRowOf = async (
   env: Env,
   person: ConnectionPerson,
   key: UnknownOutcomeKey
-): Promise<{ row: Row; rowid: number } | undefined> => {
+): Promise<Row | undefined> => {
   if (person.staff) {
     return undefined;
   }
-  const found = await drizzle(env.DB)
-    .select({ row: idempotentCalls, rowid: rowNumber })
+  const row = await drizzle(env.DB)
+    .select()
     .from(idempotentCalls)
     .where(theirs(person, key))
     .get();
-  return found !== undefined && isUnknown(found.row, Date.now())
-    ? found
-    : undefined;
+  return row !== undefined && isUnknown(row, Date.now()) ? row : undefined;
 };
 
 /** One call of unknown outcome of the person's, or `null`. */
@@ -338,16 +332,16 @@ export const unknownOutcomeFor = async (
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
-  const found = await unknownRowOf(env, parsed.data.person, parsed.data.key);
-  if (found === undefined) {
+  const row = await unknownRowOf(env, parsed.data.person, parsed.data.key);
+  if (row === undefined) {
     return null;
   }
   const connection = await drizzle(env.DB)
     .select(shownConnection)
     .from(connections)
-    .where(eq(connections.id, found.row.connectionId))
+    .where(eq(connections.id, row.connectionId))
     .get();
-  return summaryOf({ ...found, connection: connection ?? null });
+  return summaryOf({ row, connection: connection ?? null });
 };
 
 /** What a resolution's events say of the call: identifiers, never input. */
@@ -445,8 +439,7 @@ export const resolveOutcome = async (
     throw connectErrors.create("connect.invalid");
   }
   const { capability, person, key, choice } = parsed.data;
-  const found = await unknownRowOf(env, person, key);
-  const row = found?.row;
+  const row = await unknownRowOf(env, person, key);
   if (row === undefined && !(await anyUnder(env, key))) {
     // No call was ever made under it: nothing to record a refusal of.
     throw connectErrors.create("connect.outcome_not_found");

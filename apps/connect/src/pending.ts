@@ -337,6 +337,8 @@ const deletion = (
           // Never of unknown outcome: nothing of the call is kept.
           input: sql<null>`NULL`.as("input"),
           origin: sql<null>`NULL`.as("origin"),
+          // Declined, never listed as of unknown outcome.
+          listId: sql<string>`''`.as("list_id"),
         })
         .from(pendingActions)
         .where(

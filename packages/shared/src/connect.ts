@@ -969,13 +969,13 @@ export const unknownOutcomeListLimit = 200;
 
 /**
  * Where a list of calls of unknown outcome goes on: when the call was
- * first sent, in milliseconds, and the row it is, as SQLite numbers its
- * rows (never its key, which App code chooses). A list `before` one
- * answers the calls listed after it, newest first.
+ * first sent, in milliseconds, and its random list ID; never its key,
+ * which App code chooses, nor anything counting other calls. A list
+ * `before` one answers the calls listed after it, newest first.
  */
 export const unknownOutcomeCursorSchema = z
   .string()
-  .regex(/^\d{1,15}\.\d{1,15}$/u);
+  .regex(/^\d{1,15}\.[0-9a-f-]{0,36}$/u);
 export type UnknownOutcomeCursor = z.infer<typeof unknownOutcomeCursorSchema>;
 
 /**
@@ -987,7 +987,8 @@ export type UnknownOutcomeCursor = z.infer<typeof unknownOutcomeCursorSchema>;
 export interface UnknownOutcomeListing {
   /**
    * For telling rows apart, unique across every page: a digest of what
-   * the listing shows anyway and the row's number, never of the call's key.
+   * the listing shows anyway and the call's random list ID, never of its
+   * key.
    */
   id: string;
   /** The person it acted for: theirs to resolve. */

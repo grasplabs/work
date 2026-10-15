@@ -503,6 +503,7 @@ export const idempotencyStore = (
             connectorVersion,
             input: kept?.input ?? null,
             origin: kept?.origin ?? null,
+            listId: crypto.randomUUID(),
           })
           .onConflictDoNothing()
           .returning({ state: idempotentCalls.state }),

@@ -954,17 +954,23 @@ describe("a run's step key with many calls of unknown outcome", () => {
 });
 
 describe("a person's many calls of unknown outcome", () => {
-  it("are listed page by page, every one once, to them and to admins, however many share a moment", async () => {
+  it("are listed page by page, every one once, to them and to admins, however many share a moment, even once the database renumbers its rows", async () => {
     const connection = await connected();
     graph.loseWriteAnswer();
     await outcome(send(connection, "run-15:send"));
     // Two hundred more like it, first sent in the same millisecond.
     await env.DB.prepare(
-      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200) INSERT INTO idempotent_calls (subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key, input_hash, state, output, provenance, created_at, claimed_at, connector_version, resource, input, origin) SELECT subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key || '-' || i, input_hash, state, output, provenance, created_at, claimed_at, connector_version, resource, input, origin FROM idempotent_calls, n WHERE connection_id = ?"
+      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200) INSERT INTO idempotent_calls (subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key, input_hash, state, output, provenance, created_at, claimed_at, connector_version, resource, input, origin, list_id) SELECT subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key || '-' || i, input_hash, state, output, provenance, created_at, claimed_at, connector_version, resource, input, origin, lower(hex(randomblob(16))) FROM idempotent_calls, n WHERE connection_id = ?"
     )
       .bind(connection.id)
       .run();
     const first = await exports.default.listUnknownOutcomes(connection.person);
+    // The rows numbered anew, in the reverse order, as a VACUUM may.
+    await env.DB.prepare(
+      "UPDATE idempotent_calls SET rowid = -rowid WHERE connection_id = ?"
+    )
+      .bind(connection.id)
+      .run();
     const second = await exports.default.listUnknownOutcomes(
       connection.person,
       first.at(-1)?.cursor
@@ -1006,6 +1012,52 @@ describe("a person's many calls of unknown outcome", () => {
       byAdmin: 201,
       distinctByAdmin: 201,
       invalid: "connect.invalid",
+    });
+  });
+
+  it("are each listed with a cursor that says nothing of anyone else's calls: only its own first send and a random ID", async () => {
+    const anna = await connected();
+    const ben = await connected();
+    graph.loseWriteAnswer();
+    await outcome(send(anna, "run-17:first"));
+    // Ben's calls in between, lost too.
+    for (const index of [1, 2, 3, 4, 5]) {
+      graph.loseWriteAnswer();
+      // oxlint-disable-next-line no-await-in-loop -- one after another, in order
+      await outcome(send(ben, `run-17:ben-${index}`));
+    }
+    graph.loseWriteAnswer();
+    await outcome(send(anna, "run-17:second"));
+    const annas = await exports.default.listUnknownOutcomes(anna.person);
+    const bens = await exports.default.listUnknownOutcomes(ben.person);
+    const cursorPattern =
+      /^(?<sent>\d+)\.(?<id>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/u;
+    /** What each cursor holds: whether it is its call's send time, and a random ID. */
+    const shapes = (listed: { cursor: string; sentAt: string }[]) =>
+      listed.map(({ cursor, sentAt }) => {
+        const groups = cursorPattern.exec(cursor)?.groups;
+        return {
+          ownSendTime: groups?.sent === String(Date.parse(sentAt)),
+          randomId: groups?.id !== undefined,
+        };
+      });
+    const ids = [...annas, ...bens].map(
+      ({ cursor }) => cursorPattern.exec(cursor)?.groups?.id
+    );
+    expect({
+      annas: shapes(annas),
+      bens: shapes(bens),
+      distinctIds: new Set(ids).size,
+    }).toStrictEqual({
+      annas: Array.from({ length: 2 }, () => ({
+        ownSendTime: true,
+        randomId: true,
+      })),
+      bens: Array.from({ length: 5 }, () => ({
+        ownSendTime: true,
+        randomId: true,
+      })),
+      distinctIds: 7,
     });
   });
 

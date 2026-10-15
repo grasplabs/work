@@ -168,6 +168,13 @@ export const idempotentCalls = sqliteTable(
      * needing their confirmation (`requireConfirmation`).
      */
     origin: text(),
+    /**
+     * A random ID, set at the first claim: where a list of calls of unknown
+     * outcome goes on after this one, with `created_at` (its cursor). Never
+     * a row number, which would tell how many calls anyone made in between,
+     * and which the database may renumber. Empty on a row nothing lists.
+     */
+    listId: text("list_id").notNull().default(""),
   },
   (table) => [
     primaryKey({
@@ -187,6 +194,12 @@ export const idempotentCalls = sqliteTable(
     index("idempotent_calls_person_state_idx").on(
       table.onBehalfOf,
       table.state
+    ),
+    // A person's list, page by page, in the order it goes.
+    index("idempotent_calls_person_list_idx").on(
+      table.onBehalfOf,
+      table.createdAt,
+      table.listId
     ),
     // The inputs past retention, swept on every claim: only the rows that
     // still keep one, never every old row.
