@@ -146,6 +146,24 @@ const appsReachedBy = async (
 };
 
 /**
+ * `appsReachedBy`, read before a change, or none when that read fails:
+ * the change goes ahead all the same, and the look after it
+ * (`tellReached`) finds what it reaches still.
+ */
+const appsReachedBefore = async (
+  env: Env,
+  userId: string,
+  role: string
+): Promise<AppId[]> => {
+  try {
+    return await appsReachedBy(env, userId, role);
+  } catch (error) {
+    log.error("app.access_revocation_failed", errorFields(error));
+    return [];
+  }
+};
+
+/**
  * Tells the Apps `reached` before the change, and those `userId` reaches
  * in role `role` now (an App shared with them while it ran), that their
  * role there may have dropped. Never throws: the change has committed,
@@ -342,7 +360,7 @@ const removeMember = async (
   const target = targetOf(by, userId);
   const membership = await membershipOf(env, target);
   if (membership) {
-    const reached = await appsReachedBy(env, target, membership.role);
+    const reached = await appsReachedBefore(env, target, membership.role);
     const removedNow = await recordRemoval(env, by, target, membership.id);
     // Someone else's removal of them may have landed first; otherwise the
     // admin stopped being one since their session was checked.
@@ -428,7 +446,7 @@ const setMemberRole = async (
     return;
   }
   const reached = lowers(membership.role, newRole)
-    ? await appsReachedBy(env, target.data, membership.role)
+    ? await appsReachedBefore(env, target.data, membership.role)
     : [];
   const db = drizzle(env.DB);
   const keepsAnAdmin =

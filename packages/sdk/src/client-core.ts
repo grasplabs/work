@@ -1827,7 +1827,7 @@ export class GraspClient {
         entry.live = undefined;
       }
       if (error.code === accessChangedCode) {
-        this.#accessChanged(entry.reference.resourceId);
+        this.#accessChanged(entry.reference.resourceId, error);
       }
       show(entry, { value: undefined, error });
     }
@@ -2110,11 +2110,14 @@ export class GraspClient {
    * keeps that nobody reads was read under the old roles: forgotten, so
    * whoever reads it next reads it afresh, under the new. One read but
    * not followed (a `query()` under way) keeps nothing a read sent before
-   * answers: that answer goes to its caller only. A followed query is
-   * left to its own pushes: core ends each with this, and one that
-   * followed again since shows what it read under the new roles.
+   * answers: that answer goes to its caller only. One whose following
+   * was lost and waits to follow again (or whose new following core has
+   * not answered or pushed to yet) shows no more what it kept, until its
+   * next push. A followed query is left to its own pushes: core ends each
+   * with this, and one that followed again since shows what it read
+   * under the new roles.
    */
-  #accessChanged(resourceId: string): void {
+  #accessChanged(resourceId: string, error: GraspError): void {
     for (const entry of this.#queries.values()) {
       if (entry.reference.resourceId !== resourceId) {
         continue;
@@ -2133,8 +2136,21 @@ export class GraspClient {
         if (entry.listeners.size === 0) {
           show(entry, loading);
         }
+      } else if (GraspClient.#waitsToFollow(entry.live)) {
+        show(entry, { value: undefined, error });
       }
     }
+  }
+
+  /**
+   * Whether `live` shows nothing core pushed it: lost and waiting to
+   * follow again, or not yet answered nor pushed to.
+   */
+  static #waitsToFollow(live: Live): boolean {
+    return (
+      live.retry !== undefined ||
+      (live.release === undefined && live.revision === 0)
+    );
   }
 
   /**

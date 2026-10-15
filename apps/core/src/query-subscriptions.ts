@@ -1,4 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -164,8 +165,13 @@ const rolesOf = async (
   try {
     const { appMember, appBuilder } = await operationRoles(env, by, app);
     return canonicalJson({ appMember, appBuilder });
-  } catch {
-    // No role in the App any more, or no answer: no roles to push under.
+  } catch (error) {
+    // No answer (the database away for a moment): thrown, so the gate
+    // refuses as one to try again, never as though the role were gone.
+    if (!isExpectedError(error)) {
+      throw error;
+    }
+    // No role in the App any more: no roles to push under.
     return undefined;
   }
 };
@@ -410,10 +416,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   readonly #following = new Map<AppId, Following>();
 
   /**
-   * How many times the person's access may have dropped (`#revoked`): a
-   * read that one landed during is read again rather than pushed.
+   * How many times the person's access to each App may have dropped
+   * (`#revoked`): a read or push of the App that one landed during is
+   * read again rather than pushed. Per App, so events for one App never
+   * hold back another's.
    */
-  #revocations = 0;
+  readonly #revocations = new Map<AppId, number>();
 
   constructor(env: Env, reads: LiveReads<By>) {
     this.#env = env;
@@ -611,7 +619,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // The roles it is read under, looked at first: the read sees records
     // by roles at least as new, and a result whose roles changed since is
     // read again rather than pushed (`#send`).
-    const revocations = this.#revocations;
+    const revocations = this.#revocations.get(app);
     const before = await this.#gate(evaluation);
     if ("refusal" in before) {
       await this.#end(evaluation, before.refusal);
@@ -664,7 +672,10 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       await this.#end(evaluation, after.refusal);
       return;
     }
-    if (after.roles !== before.roles || this.#revocations !== revocations) {
+    if (
+      after.roles !== before.roles ||
+      this.#revocations.get(app) !== revocations
+    ) {
       evaluation.dirty = true;
       return;
     }
@@ -704,14 +715,20 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       };
       this.#cleared.set(key, cached);
     }
-    let access: Awaited<ReturnType<AccessCheck<By>>>;
-    let roles: string | undefined;
-    try {
-      access = await cached.access;
-      roles = access === "open" ? await cached.roles : undefined;
-    } catch {
-      access = "role";
+    const [accessed, read] = await Promise.allSettled([
+      cached.access,
+      cached.roles,
+    ]);
+    if (read.status === "rejected") {
+      // No answer of the roles (the database away for a moment): refused
+      // as a failure to try again, which clears what the screen shows and
+      // has it follow again, never as a lost role, which would sign the
+      // page out of the App for someone who still has it.
+      this.#cleared.delete(key);
+      return { refusal: refusalResult(read.reason) };
     }
+    const access = accessed.status === "fulfilled" ? accessed.value : "role";
+    const roles = access === "open" ? read.value : undefined;
     if (access === "open" && roles !== undefined) {
       return { roles, by };
     }
@@ -962,13 +979,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     this.#unsent += snapshot.bytes;
     try {
       // Every push of data passes the gate first, however long it waited.
-      const revocations = this.#revocations;
+      const revocations = this.#revocations.get(evaluation.app);
       const gate = await this.#gate(evaluation);
       if ("refusal" in gate) {
         void this.#end(evaluation, gate.refusal);
       } else if (
         gate.roles !== snapshot.roles ||
-        this.#revocations !== revocations
+        this.#revocations.get(evaluation.app) !== revocations
       ) {
         // Read under roles the person no longer has, or passed by a gate
         // that looked before a revocation landed (`#revoked`): dropped,
@@ -1171,7 +1188,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * whose roles changed. Changes nothing for someone whose access holds.
    */
   #revoked(app: AppId): void {
-    this.#revocations += 1;
+    this.#revocations.set(app, (this.#revocations.get(app) ?? 0) + 1);
     this.#reads.forget();
     this.#cleared.clear();
     for (const evaluation of this.#evaluations.values()) {
