@@ -45,7 +45,7 @@ const gateway = "grasp-os-test";
  * The tests' policy: three requests in flight for the whole client, and
  * three asked for each person and each App, which the gateway holds to two
  * each, one less than the client's, so one person or one App always leaves
- * room (`modelSharesOf`).
+ * room (`modelSharesOf`); and two places in the queue for each person.
  */
 const policy = {
   generation: 2,
@@ -54,6 +54,7 @@ const policy = {
     modelClientRequests: 3,
     modelPersonRequests: 3,
     modelAppRequests: 3,
+    modelQueuedPerPerson: 2,
   },
 };
 
@@ -163,6 +164,67 @@ const queueOf = () => {
       await Promise.resolve();
     },
   };
+};
+
+/** A ledger no other test uses. */
+const newLedger = () => env.MODEL_LEDGER.getByName(crypto.randomUUID());
+
+/** Shares of three in all and two for a person and an App. */
+const shares: ModelShares = {
+  client: 3,
+  person: 2,
+  app: 2,
+  queuedPerPerson: 2,
+  queuedPerApp: 3,
+};
+
+/** A request of `subject` in App `resource`, its call's place `place`. */
+const request = (
+  subject: string,
+  resource: string | null,
+  place: string = crypto.randomUUID()
+): Admission => {
+  const deadline = Date.now() + 60_000;
+  return {
+    id: crypto.randomUUID(),
+    period: "2400-01",
+    scopes: [
+      {
+        scope: "deployment",
+        key: "deployment",
+        limitMicros: null,
+        alertMicros: null,
+        names: {},
+      },
+    ],
+    model: workersAi,
+    price: {
+      version: "test",
+      input: 1,
+      output: 1,
+      cacheRead: 1,
+      cacheWrite: 1,
+    },
+    reservedMicros: 1,
+    actor: { type: "person", userId: subject },
+    deadline,
+    reconcileAt: deadline + 60_000,
+    fair: { place, subject, resource, shares },
+  };
+};
+
+/** What the ledger answered: admitted, or the share a refusal waits for. */
+const answer = async (
+  ledger: ReturnType<typeof newLedger>,
+  admission: Admission
+): Promise<string> => {
+  const admitted = await ledger.admit(admission);
+  if (admitted.ok) {
+    return "admitted";
+  }
+  return "queued" in admitted
+    ? `queued:${admitted.queued.waitingFor}:${admitted.queued.placed ? "placed" : "unplaced"}`
+    : JSON.stringify(admitted);
 };
 
 describe("fair model admission", { timeout: 60_000 }, () => {
@@ -425,6 +487,170 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     }).toStrictEqual({ admitted: "ok", waited: "app", afterTheLease: true });
   });
 
+  it("tells a call given no place that it is queued at once, without waiting", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const { fake, call } = gatewayWith([
+      paused(release.promise),
+      paused(release.promise),
+      ...Array.from({ length: 2 }, () => answered),
+    ]);
+    const ada = newPerson().userId;
+    const running = [
+      outcome(call(callBy(ada, 0))),
+      outcome(call(callBy(ada, 0))),
+    ];
+    await until(() => fake.requests.length === 2);
+    // Ada's two places taken by calls that wait.
+    const placed = [queueOf(), queueOf()];
+    const waiting = placed.map(
+      async ({ onQueued }) => await outcome(call(callBy(ada, 0, { onQueued })))
+    );
+    await until(() => placed.every(({ seen }) => seen.length > 0));
+    const unplaced = queueOf();
+    const told = await Promise.race([
+      outcome(call(callBy(ada, 0, { onQueued: unplaced.onQueued }))),
+      stillWaiting(3000),
+    ]);
+    release.resolve(true);
+
+    expect({
+      told,
+      waitedAtAll: unplaced.seen,
+      others: await Promise.all([...running, ...waiting]),
+    }).toStrictEqual({
+      told: "model.queued",
+      waitedAtAll: [],
+      others: ["ok", "ok", "ok", "ok"],
+    });
+  });
+
+  it("stops a cancelled call's wait at once, asking for a share no more", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const { fake, call } = gatewayWith([
+      paused(release.promise),
+      paused(release.promise),
+    ]);
+    const ada = newPerson().userId;
+    const busy = [outcome(call(callBy(ada, 0))), outcome(call(callBy(ada, 0)))];
+    await until(() => fake.requests.length === 2);
+    const queue = queueOf();
+    const cancel = new AbortController();
+    const waiting = outcome(
+      call(callBy(ada, 0, { onQueued: queue.onQueued, signal: cancel.signal }))
+    );
+    await until(() => queue.seen.length > 0);
+    const before = queue.seen.length;
+    cancel.abort();
+    const told = await Promise.race([waiting, stillWaiting(3000)]);
+    release.resolve(true);
+    await Promise.all(busy);
+
+    // Told once that it stopped waiting, and nothing else after.
+    expect({ told, after: queue.seen.slice(before) }).toStrictEqual({
+      told: "model.queued",
+      after: [null],
+    });
+  });
+
+  it("gives a guest a share and places of its own, never the member's who invited them", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const { fake, call } = gatewayWith([
+      paused(release.promise),
+      paused(release.promise),
+      ...Array.from({ length: 4 }, () => answered),
+    ]);
+    const ada = newPerson().userId;
+    const chatId = `chat-${crypto.randomUUID()}`;
+    const asGuest = (more: Partial<ModelCall<undefined>> = {}) =>
+      callBy(ada, 0, {
+        trigger: {
+          type: "guest",
+          chatId,
+          appId: appIdSchema.parse(apps[0]?.appId),
+          invitedBy: ada,
+        },
+        ...more,
+      });
+    // The guest's chat runs two at once, and keeps two more waiting: all
+    // its share, and all the places a person may have.
+    const guestRunning = [outcome(call(asGuest())), outcome(call(asGuest()))];
+    await until(() => fake.requests.length === 2);
+    const guestQueues = [queueOf(), queueOf()];
+    const guestWaiting = guestQueues.map(
+      async ({ onQueued }) => await outcome(call(asGuest({ onQueued })))
+    );
+    await until(() => guestQueues.every(({ seen }) => seen.length > 0));
+    // Ada's own call in another App goes ahead at once: her share is hers.
+    const adaElsewhere = await outcome(call(callBy(ada, 1)));
+    // Her call in the guest's App waits for that App, with a place of her
+    // own: the guest's places aren't hers.
+    const adaQueue = queueOf();
+    const adaWaiting = outcome(
+      call(callBy(ada, 0, { onQueued: adaQueue.onQueued }))
+    );
+    await until(() => adaQueue.seen.length > 0);
+    release.resolve(true);
+
+    expect({
+      adaElsewhere,
+      adaWaitedFor: adaQueue.seen[0],
+      guestWaitedFor: guestQueues.map(({ seen }) => seen[0]),
+      all: await Promise.all([...guestRunning, ...guestWaiting, adaWaiting]),
+    }).toStrictEqual({
+      adaElsewhere: "ok",
+      adaWaitedFor: "app",
+      guestWaitedFor: ["app", "app"],
+      all: ["ok", "ok", "ok", "ok", "ok"],
+    });
+  });
+
+  it("tells a guest neither whose share is full nor a wait from its leases", async () => {
+    const { call } = gatewayWith([]);
+    const ada = newPerson().userId;
+    const chatId = `chat-${crypto.randomUUID()}`;
+    // Two requests of the guest's chat in flight elsewhere, ending in
+    // three seconds: its own share is full, the App's isn't.
+    const deadline = Date.now() + 3000;
+    const ledger = modelLedger(env);
+    for (const _ of [1, 2]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await ledger.admit({
+        ...request(`guest:${chatId}`, "elsewhere"),
+        deadline,
+        reconcileAt: deadline + 60_000,
+        fair: {
+          place: crypto.randomUUID(),
+          subject: `guest:${chatId}`,
+          resource: "elsewhere",
+          shares: { ...shares, queuedPerPerson: 32, queuedPerApp: 64 },
+        },
+      });
+    }
+    const told = await toldBy(
+      call(
+        callBy(ada, 0, {
+          timeoutMs: 2000,
+          trigger: {
+            type: "guest",
+            chatId,
+            appId: appIdSchema.parse(apps[0]?.appId),
+            invitedBy: ada,
+          },
+        })
+      )
+    );
+
+    expect(told).toStrictEqual({
+      code: "model.queued",
+      details: {
+        model: workersAi,
+        because: "client",
+        waitingFor: "client",
+        retryAfterSeconds: 5,
+      },
+    });
+  });
+
   it("shows a run queued while its step's model call waits for its App's share, and goes on once it has one", async () => {
     const builder = await signedInApi(idp, "builder");
     const app = await serverAppWith(builder, {
@@ -512,67 +738,6 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     }
   });
 });
-
-/** A ledger no other test uses. */
-const newLedger = () => env.MODEL_LEDGER.getByName(crypto.randomUUID());
-
-/** Shares of three in all and two for a person and an App. */
-const shares: ModelShares = {
-  client: 3,
-  person: 2,
-  app: 2,
-  queuedPerPerson: 2,
-  queuedPerApp: 3,
-};
-
-/** A request of `subject` in App `resource`, its call's place `place`. */
-const request = (
-  subject: string,
-  resource: string | null,
-  place: string = crypto.randomUUID()
-): Admission => {
-  const deadline = Date.now() + 60_000;
-  return {
-    id: crypto.randomUUID(),
-    period: "2400-01",
-    scopes: [
-      {
-        scope: "deployment",
-        key: "deployment",
-        limitMicros: null,
-        alertMicros: null,
-        names: {},
-      },
-    ],
-    model: workersAi,
-    price: {
-      version: "test",
-      input: 1,
-      output: 1,
-      cacheRead: 1,
-      cacheWrite: 1,
-    },
-    reservedMicros: 1,
-    actor: { type: "person", userId: subject },
-    deadline,
-    reconcileAt: deadline + 60_000,
-    fair: { place, subject, resource, shares },
-  };
-};
-
-/** What the ledger answered: admitted, or the share a refusal waits for. */
-const answer = async (
-  ledger: ReturnType<typeof newLedger>,
-  admission: Admission
-): Promise<string> => {
-  const admitted = await ledger.admit(admission);
-  if (admitted.ok) {
-    return "admitted";
-  }
-  return "queued" in admitted
-    ? `queued:${admitted.queued.waitingFor}:${admitted.queued.placed ? "placed" : "unplaced"}`
-    : JSON.stringify(admitted);
-};
 
 describe("the model ledger's queue", () => {
   it("takes one lease for a request admitted twice under the same ID", async () => {
@@ -667,6 +832,65 @@ describe("the model ledger's queue", () => {
       waits: "queued:client:placed",
       eve: "admitted",
     });
+  });
+
+  it("lets a newcomer to an App take its turn before one person's backlog there", async () => {
+    const ledger = newLedger();
+    const adaRunning = request("ada", "inbox");
+    const zedRunning = request("zed", "inbox");
+    await answer(ledger, adaRunning);
+    await answer(ledger, zedRunning);
+    // The Inbox is full. Ada queues two more, then Ben one.
+    const adaFirst = request("ada", "inbox");
+    const adaSecond = request("ada", "inbox");
+    const ben = request("ben", "inbox");
+    for (const waiting of [adaFirst, adaSecond, ben]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await scheduler.wait(5);
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await answer(ledger, waiting);
+    }
+    // Zed's request ends: Ada's first, first in line, takes the room.
+    await ledger.settle(zedRunning.id, { by: "refused" });
+    const first = await answer(ledger, {
+      ...adaFirst,
+      id: crypto.randomUUID(),
+    });
+    // Ada's running one ends: Ben's turn comes before Ada's second, though
+    // he joined after it.
+    await ledger.settle(adaRunning.id, { by: "refused" });
+    const second = await answer(ledger, {
+      ...adaSecond,
+      id: crypto.randomUUID(),
+    });
+    const bens = await answer(ledger, { ...ben, id: crypto.randomUUID() });
+
+    expect({ first, second, bens }).toStrictEqual({
+      first: "admitted",
+      second: "queued:app:placed",
+      bens: "admitted",
+    });
+  });
+
+  it("keeps no more places for an App than it may, whoever waits", async () => {
+    const ledger = newLedger();
+    for (const subject of ["ada", "ben", "cid"]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await answer(ledger, request(subject, `app-${subject}`));
+    }
+    const outcomes = [];
+    for (const subject of ["dan", "eve", "fay", "gus"]) {
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      outcomes.push(await answer(ledger, request(subject, "inbox")));
+    }
+
+    // Three places an App: the fourth asks again from the back.
+    expect(outcomes).toStrictEqual([
+      "queued:client:placed",
+      "queued:client:placed",
+      "queued:client:placed",
+      "queued:client:unplaced",
+    ]);
   });
 
   it("keeps no more places for a person or an App than it may, and refuses the rest unplaced", async () => {

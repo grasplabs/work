@@ -554,12 +554,19 @@ describe("model budgets", { timeout: 60_000 }, () => {
       // oxlint-disable-next-line no-await-in-loop -- until both are under way
       await scheduler.wait(10);
     }
+    // A cent leaves no room for Sonnet at all: Ada's budget there is used
+    // up, with nothing of hers under way.
+    const usedUp = withRules({ budgets: { user: { limit: 0.01 } } }, []);
     const told = {
       ada: await toldBy(own.call(sonnet(ada))),
       guest: await toldBy(own.call(sonnet(guest))),
       ben: await toldBy(shared.call(sonnet(newPerson()))),
     };
+    // Held by the member's calls under way, or used up: a guest is told
+    // the same, so it learns nothing of what the member has under way.
+    const guestWhenUsedUp = await toldBy(usedUp.call(sonnet(guest)));
     release.resolve(true);
+    expect(guestWhenUsedUp).toStrictEqual(told.guest);
 
     expect({ told, answered: await Promise.all(answering) }).toStrictEqual({
       told: {

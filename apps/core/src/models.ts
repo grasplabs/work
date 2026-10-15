@@ -73,17 +73,15 @@ import { keepAuditEvent } from "./audit-outbox.ts";
 import {
   maxAskAgainSeconds,
   modelSharesOf,
-  resourceOf,
-  subjectOf,
+  shareIdentity,
 } from "./model-admission.ts";
-import type { Fairness, ModelShare } from "./model-admission.ts";
+import type { Fairness, ModelShare, ShareIdentity } from "./model-admission.ts";
 import {
   bindingRequestMicros,
   bindingScopes,
   budgetPeriods,
   hasBudget,
   lineageModelRequests,
-  personOf,
   scopesFor,
 } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
@@ -507,6 +505,11 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    * (workflows/model-waits.ts). A failure of it never fails the call.
    */
   onQueued?: QueuedHook;
+  /**
+   * Cancels the call when its caller goes away: a request waiting for a
+   * share stops waiting, and one under way is cut off.
+   */
+  signal?: AbortSignal;
 };
 
 /** Where a call waiting for a share stands, or `null` once it stopped waiting. */
@@ -734,6 +737,8 @@ interface Route extends Admitted {
   env: ModelsEnv;
   /** The call's ID: its place in the queue while it waits for a share. */
   place: string;
+  /** What its refusals may tell it of others' calls (model-admission.ts). */
+  disclose: ShareIdentity["disclose"];
   /** The caller's last check before each provider request (`ModelCall.beforeSend`). */
   beforeSend?: () => void;
   /** Told while the call waits for a share (`ModelCall.onQueued`). */
@@ -1133,27 +1138,31 @@ const scopesRead = async (
   }
 };
 
-/** Why the ledger's refusal `admitted` holds back a request of `call`. */
+/**
+ * Why the ledger's refusal `admitted` holds back a request of `call`, as
+ * its share identity may be told (`disclose`, model-admission.ts).
+ */
 const heldBecause = (
   call: Session,
   admitted: Exclude<
     LedgerAdmitted,
     { ok: true } | { policyBehind: true; highest: number }
-  >
+  >,
+  disclose: ShareIdentity["disclose"]
 ): Refusal => {
+  // A guest is told nothing shaped by anyone else's calls.
+  const fixed = disclose === "fixed";
   if ("queued" in admitted) {
     const { queued } = admitted;
+    // Never which person's share is full, nor a wait from leases.
+    const waitingFor =
+      fixed && queued.waitingFor === "person" ? "client" : queued.waitingFor;
     return {
       code: "model.queued",
-      because: queued.waitingFor,
-      waitingFor: queued.waitingFor,
-      // A guest's person share is the member who invited them: when the
-      // member's calls end is theirs to know, so a guest is told the
-      // fixed wait.
-      retryAfterSeconds:
-        call.trigger.type === "guest"
-          ? maxAskAgainSeconds
-          : queued.retryAfterSeconds,
+      because: waitingFor,
+      waitingFor,
+      retryAfterSeconds: fixed ? maxAskAgainSeconds : queued.retryAfterSeconds,
+      placed: queued.placed,
     };
   }
   if ("unpriced" in admitted) {
@@ -1169,13 +1178,13 @@ const heldBecause = (
     log.error("model.request_id_reused", { model: call.model });
     return { code: "model.ledger_unavailable" };
   }
-  // A guest's user scope is the member who invited them: whether that
-  // member has calls under way is theirs to know, not the guest's.
+  // A guest spends the budgets of the member who invited them: whether
+  // that member has calls under way is theirs to know. Held or used up,
+  // in any scope, a guest hears the same: used up, with no wait.
+  if (fixed) {
+    return { code: "model.over_budget", because: admitted.scope };
+  }
   if ("heldUntil" in admitted) {
-    if (call.trigger.type === "guest") {
-      // Only that it is used up: when it resets would be no truer.
-      return { code: "model.over_budget", because: admitted.scope };
-    }
     return {
       code: "model.budget_busy",
       because: admitted.scope,
@@ -1288,7 +1297,7 @@ const admitRequest = async (
       }
       return { id, reservedMicros };
     }
-    return { held: heldBecause(call, admitted) };
+    return { held: heldBecause(call, admitted, route.disclose) };
   } catch (error) {
     log.error("model.ledger_failed", errorFields(error));
     // The admission may have committed with its answer lost: nothing was
@@ -1343,14 +1352,23 @@ const admitWaiting = async (
       await stopWaiting(route, waited);
       throw error;
     }
-    if (ms <= 0 || signal.aborted) {
+    // Out of time, cancelled, or given no place (its person's, its App's
+    // or the client's places all taken): told so at once, and the ledger
+    // asked nothing more for it.
+    if (ms <= 0 || signal.aborted || admitted.held.placed === false) {
       // oxlint-disable-next-line no-await-in-loop -- once, as it ends
       await stopWaiting(route, waited);
       return admitted;
     }
     const { waitingFor = "client" } = admitted.held;
+    // When it asks again at the latest, as others who see it waiting (a
+    // run's viewers) are told: the fixed wait, never one taken from its
+    // person's leases, which would tell when their other calls were sent.
     // oxlint-disable-next-line no-await-in-loop -- each round
-    await told(route, { waitingFor, retryAt: Date.now() + ms });
+    await told(route, {
+      waitingFor,
+      retryAt: Date.now() + maxAskAgainSeconds * 1000,
+    });
     // oxlint-disable-next-line no-await-in-loop -- each round
     await pause(ms, signal);
     waited += 1;
@@ -2021,15 +2039,34 @@ const parseCall = <Schema extends z.ZodType>(
 };
 
 /**
- * The deployment's quota policy, or the platform's own (its ceilings)
- * when it can't be read: for a call's shares, which a policy only lowers.
+ * The last quota policy this isolate read, for a call's shares when the
+ * policy can't be read for a moment: closer to what the operator set than
+ * the platform's ceilings. Per isolate, never shared or stored: a lowered
+ * policy read anywhere else applies here at the next read that works.
+ */
+let lastPolicyRead: QuotaPolicy | undefined;
+
+/** The deployment's quota policy as it stands, remembered (`lastPolicyRead`). */
+const readPolicy = async (env: ModelsEnv): Promise<QuotaPolicy> => {
+  const read = await quotaPolicy(env);
+  lastPolicyRead = read;
+  return read;
+};
+
+/**
+ * The deployment's quota policy; when it can't be read, the last this
+ * isolate read, else the platform's own (its ceilings): for a call's
+ * shares, which a policy only lowers, and which bound no spend.
  */
 const policyOrPlatform = async (env: ModelsEnv): Promise<QuotaPolicy> => {
   try {
-    return await quotaPolicy(env);
+    return await readPolicy(env);
   } catch (error) {
-    log.error("model.quota_policy_failed", errorFields(error));
-    return quotaPolicyOf();
+    log.error("model.quota_policy_failed", {
+      ...errorFields(error),
+      fallback: lastPolicyRead === undefined ? "platform" : "last_read",
+    });
+    return lastPolicyRead ?? quotaPolicyOf();
   }
 };
 
@@ -2099,8 +2136,7 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   }
   // Whose shares of the requests in flight the call takes, from its
   // trigger and work context, which core's host sets: never from App code.
-  const resource = resourceOf(call);
-  const subject = subjectOf(personOf(call), resource);
+  const { subject, resource, disclose } = shareIdentity(call);
   const place = crypto.randomUUID();
   return {
     call,
@@ -2110,11 +2146,12 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     transport: createAiBindingFetch(env.AI),
     price,
     place,
+    disclose,
     scopesNow: async () => {
       // A run lineage's request limit, as the policy stands for this
       // request: lowered for runs already under way too (model-budgets.ts).
       const lineage =
-        call.trigger.type === "workflow" ? await quotaPolicy(env) : undefined;
+        call.trigger.type === "workflow" ? await readPolicy(env) : undefined;
       // The shares, as the policy stands too; for a call with no lineage,
       // the platform's own should the policy not be read, never more.
       const policy = lineage ?? (await policyOrPlatform(env));
@@ -2223,7 +2260,14 @@ const answerCall = async <Output>(
 
 const callModel = async <Output>(
   env: ModelsEnv,
-  { schema, askAgain, beforeSend, onQueued, ...fields }: ModelCall<Output>
+  {
+    schema,
+    askAgain,
+    beforeSend,
+    onQueued,
+    signal,
+    ...fields
+  }: ModelCall<Output>
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
   const route: Route = {
@@ -2232,7 +2276,7 @@ const callModel = async <Output>(
     ...(onQueued === undefined ? {} : { onQueued }),
   };
   const { model } = route;
-  const limit = deadline(call.timeoutMs ?? defaultTimeoutMs);
+  const limit = deadline(call.timeoutMs ?? defaultTimeoutMs, signal);
   try {
     return await answerCall(
       env,

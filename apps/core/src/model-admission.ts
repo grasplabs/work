@@ -70,13 +70,21 @@ import { z } from "zod";
 //   sets (models.ts), never from what an App or a workflow passes. A call
 //   nobody makes for a person takes its App's share of its own
 //   (`app:<id>`), held to a person's, or core's own (`system`).
+// - A guest taking the member's share, or learning of the member's calls:
+//   a guest's chat takes a share and places of its own (`guest:<chatId>`,
+//   `shareIdentity`), never the member's who invited them, though it spends
+//   the member's budgets. A guest is never told which person's share is
+//   full, nor a wait taken from leases, and is told the same whether the
+//   member's budget is held by calls under way or used up.
 // - A queue so long admission overloads the ledger: a person, and an App,
 //   may have so many places at once (`modelQueuedPerPerson`,
-//   `modelQueuedPerApp`); past them a call is refused as queued without a
-//   place, and asks again from the back.
+//   `modelQueuedPerApp`), and the whole client {@link placesPerClientShare}
+//   times its share; past them a call is refused as queued without a
+//   place, at once, and the gateway asks the ledger nothing more for it.
 // - A policy change missed: shares are read from the policy for every
 //   provider request (models.ts, `scopesNow`), as the run lineage's
-//   request limit is.
+//   request limit is. A policy that can't be read is the last one read in
+//   that isolate, else the platform's own ceilings: a policy only lowers.
 //
 // What a waiting call shows: `model.queued`, with the share it waits for
 // and when to ask again, to whoever made it; for a workflow run, `queued`
@@ -115,6 +123,13 @@ export const modelSharesOf = (policy: QuotaPolicy): ModelShares => {
  * admission names.
  */
 export const maxLeaseMs = 15 * 60_000;
+
+/**
+ * The places the whole client's queue keeps, per request of its share in
+ * flight: 128 under the platform's 16. However many people and Apps there
+ * are, each ask serves a queue no longer than this.
+ */
+export const placesPerClientShare = 8;
 
 /** The longest a call waits before it asks again, in seconds. */
 export const maxAskAgainSeconds = 5;
@@ -249,7 +264,7 @@ export const waitOf = (
   };
 };
 
-/** What a call's budgets and shares count it by (model-budgets.ts). */
+/** What a call's shares count it by: its trigger and work, which core's host sets. */
 interface FairInput {
   trigger: AuditActor;
   work?: { authority: Authority } | { onboarding: true };
@@ -257,11 +272,7 @@ interface FairInput {
 }
 
 /** The App a call is made for or through, if any. */
-export const resourceOf = ({
-  trigger,
-  work,
-  binding,
-}: FairInput): string | null => {
+const resourceOf = ({ trigger, work, binding }: FairInput): string | null => {
   if (
     trigger.type === "workflow" ||
     trigger.type === "app" ||
@@ -282,18 +293,59 @@ export const resourceOf = ({
   return null;
 };
 
-/**
- * Whose share a call takes: `person`, the person its budgets count it
- * for, if any; else its App's, as a person's of its own (`app:<id>`), so a
- * trigger's or a mail sender's calls never take the App owner's share; else
- * core's own (`system`).
- */
-export const subjectOf = (
-  person: string | undefined,
-  resource: string | null
-): string => {
-  if (person !== undefined) {
-    return person;
+/** The person a call is made by or for, if any, a guest's aside. */
+const personOf = ({ trigger, work }: FairInput): string | undefined => {
+  if (trigger.type === "person" || trigger.type === "staff") {
+    return trigger.userId;
   }
-  return resource === null ? "system" : `app:${resource}`;
+  if (trigger.type === "agent") {
+    return trigger.onBehalfOf;
+  }
+  return work !== undefined && "authority" in work
+    ? work.authority.onBehalfOf
+    : undefined;
+};
+
+/**
+ * Whose shares a call takes, and what its refusals may tell it:
+ *
+ * - `subject`: the person its calls count for (who makes it, or whom an
+ *   agent or a run acts for); for a guest's chat, its own
+ *   (`guest:<chatId>`), never the member who invited them, whose budgets it
+ *   still spends (model-budgets.ts) but whose share and places it never
+ *   takes; for a call nobody makes for a person, its App's own
+ *   (`app:<id>`), held to a person's share, so a trigger's or a mail
+ *   sender's calls never take the App owner's; else core's own (`system`).
+ * - `resource`: its App, if any.
+ * - `disclose`: `own` when what its refusals say may come from its own
+ *   calls; `fixed` for a guest, who is told nothing shaped by anyone
+ *   else's calls: never which person's share is full, never a wait taken
+ *   from leases, and the same answer whether the member's budget is busy
+ *   or used up (models.ts, `heldBecause`).
+ */
+export interface ShareIdentity {
+  subject: string;
+  resource: string | null;
+  disclose: "own" | "fixed";
+}
+
+/** The one place a call's share identity, and every guest rule of it, is decided. */
+export const shareIdentity = (call: FairInput): ShareIdentity => {
+  const resource = resourceOf(call);
+  if (call.trigger.type === "guest") {
+    return {
+      subject: `guest:${call.trigger.chatId}`,
+      resource,
+      disclose: "fixed",
+    };
+  }
+  const person = personOf(call);
+  if (person !== undefined) {
+    return { subject: person, resource, disclose: "own" };
+  }
+  return {
+    subject: resource === null ? "system" : `app:${resource}`,
+    resource,
+    disclose: "own",
+  };
 };

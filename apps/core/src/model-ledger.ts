@@ -42,6 +42,7 @@ import { inJurisdiction } from "./durable-objects.ts";
 import {
   fairnessSchema,
   maxLeaseMs,
+  placesPerClientShare,
   servedInOrder,
   waitOf,
 } from "./model-admission.ts";
@@ -743,7 +744,7 @@ export class ModelLedger extends DurableObject<Env> {
   }
 
   /** The places in the queue that `where` takes. Inside a transaction. */
-  #placesWhere(where: SQL | undefined): number {
+  #placesWhere(where?: SQL): number {
     return (
       this.#db
         .select({ count: sql<number>`count(*)` })
@@ -825,6 +826,7 @@ export class ModelLedger extends DurableObject<Env> {
       };
     }
     const room =
+      this.#placesWhere() < fair.shares.client * placesPerClientShare &&
       this.#placesWhere(eq(queue.subject, fair.subject)) <
         fair.shares.queuedPerPerson &&
       (fair.resource === null ||
