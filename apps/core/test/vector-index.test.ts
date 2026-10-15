@@ -4,6 +4,7 @@ import {
   maxPolicyBatches,
   maxPolicyKeyBytes,
   maxPolicyKeysPerFilter,
+  reservedPrefix,
   policyFilters,
   unsupportedVectorIndex,
   vectorIndexOf,
@@ -51,6 +52,23 @@ const cosine = (a: readonly number[], b: readonly number[]): number => {
 interface Stored {
   values: number[];
   metadata: Record<string, VectorizeVectorMetadata>;
+  /** The fields a metadata index took when it was written. */
+  filterable: ReadonlySet<string>;
+}
+
+interface FakeBehaviour {
+  failQueries: boolean;
+  hang: boolean;
+  failUpsertAfterBatches: number;
+  afterQuery: () => void;
+  /**
+   * The metadata index on `p`, as it was when each vector was written: a
+   * vector written before a string index on `p` existed never matches a
+   * filter on `p`, as Vectorize documents.
+   */
+  metadataIndex: "string" | "number" | "none";
+  /** An index that reports no applied write yet. */
+  noAppliedMutation: boolean;
 }
 
 /** A Vectorize index in memory, with the failures a test asks for. */
@@ -60,11 +78,13 @@ const fakeVectorize = (
 ) => {
   const vectors = new Map<string, Stored>();
   const filters: (VectorizeVectorMetadataFilter | undefined)[] = [];
-  const behaviour = {
+  const behaviour: FakeBehaviour = {
     failQueries: false,
     hang: false,
     failUpsertAfterBatches: Number.POSITIVE_INFINITY,
     afterQuery: (): void => undefined,
+    metadataIndex: "string",
+    noAppliedMutation: false,
   };
   let upsertBatches = 0;
   const never = Promise.withResolvers<never>().promise;
@@ -77,6 +97,9 @@ const fakeVectorize = (
       return true;
     }
     return Object.entries(filter).every(([field, condition]) => {
+      if (!stored.filterable.has(field)) {
+        return false;
+      }
       const value = stored.metadata[field];
       const indexed = typeof value === "string" ? prefixOf(value) : value;
       if (
@@ -96,11 +119,17 @@ const fakeVectorize = (
   const binding: VectorizeBinding = {
     describe: async () => {
       await Promise.resolve();
+      // SAFETY: an index with no applied write answers null here, whatever
+      // the binding's type says.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const none = JSON.parse("null") as number;
       return {
         vectorCount: vectors.size,
         dimensions,
         processedUpToDatetime: 0,
-        processedUpToMutation: upsertBatches,
+        processedUpToMutation: behaviour.noAppliedMutation
+          ? none
+          : upsertBatches,
       };
     },
     query: async (
@@ -121,7 +150,7 @@ const fakeVectorize = (
       const answeredFrom = [...vectors].map(
         ([id, stored]): [string, Stored] => [
           id,
-          { values: stored.values, metadata: { ...stored.metadata } },
+          { ...stored, metadata: { ...stored.metadata } },
         ]
       );
       behaviour.afterQuery();
@@ -149,15 +178,34 @@ const fakeVectorize = (
       if (upsertBatches >= behaviour.failUpsertAfterBatches) {
         throw new Error("VECTOR_UPSERT_ERROR: upstream unavailable");
       }
+      if (new Set(batch.map(({ id }) => id)).size < batch.length) {
+        throw new Error("VECTOR_UPSERT_ERROR: duplicate ids in one batch");
+      }
       await Promise.resolve();
       upsertBatches += 1;
       for (const vector of batch) {
+        const metadata = vector.metadata ?? {};
         vectors.set(vector.id, {
           values: [...vector.values],
-          metadata: vector.metadata ?? {},
+          metadata,
+          filterable: new Set(
+            behaviour.metadataIndex === "string" &&
+              typeof metadata.p === "string"
+              ? ["p"]
+              : []
+          ),
         });
       }
       return { mutationId: crypto.randomUUID() };
+    },
+    getByIds: async (ids: string[]) => {
+      await Promise.resolve();
+      return ids.flatMap((id) => {
+        const stored = vectors.get(id);
+        return stored === undefined
+          ? []
+          : [{ id, values: stored.values, metadata: stored.metadata }];
+      });
     },
     deleteByIds: async (ids: string[]) => {
       await Promise.resolve();
@@ -265,19 +313,34 @@ describe("a search", () => {
     }
   });
 
-  it("says it is incomplete when the caller holds more policies than a search covers", async () => {
+  it("says it is incomplete when the caller holds more policies than a search covers, and searches the first", async () => {
     const provider = fakeVectorize();
     const index = vectorIndexOf(provider.binding, generation);
-    const policies = Array.from(
-      { length: 2000 },
-      (_, n) => `policy:${String(n).padStart(4, "0")}`
-    );
-    await index.upsert([record("plan", "policy:1999")]);
+    // Most important first: a key that sorts last still comes first.
+    const policies = [
+      "policy:z-priority",
+      ...Array.from(
+        { length: 2000 },
+        (_, n) => `policy:${String(n).padStart(4, "0")}`
+      ),
+    ];
+    await index.upsert([
+      record("priority", "policy:z-priority"),
+      record("covered", "policy:0000", [0.9, 0.1, 0]),
+      record("left-out", "policy:1999"),
+    ]);
 
     const found = await index.query([1, 0, 0], { policies, topK: 10 });
 
-    expect(found.complete).toBeFalsy();
-    expect(provider.filters).toHaveLength(maxPolicyBatches);
+    expect({
+      complete: found.complete,
+      batches: provider.filters.length,
+      matches: found.matches.map(({ id }) => id),
+    }).toStrictEqual({
+      complete: false,
+      batches: maxPolicyBatches,
+      matches: ["priority", "covered"],
+    });
   });
 
   it("refuses input the generation or the provider can't hold exactly", async () => {
@@ -327,16 +390,82 @@ describe("a search", () => {
   });
 });
 
+describe("an index's status", () => {
+  it("proves the policy filter works with a sentinel no caller can reach", async () => {
+    const provider = fakeVectorize();
+    const index = vectorIndexOf(provider.binding, generation);
+
+    const first = await index.status();
+    const second = await index.status();
+    const reserved = `${reservedPrefix}filter-probe`;
+    const kinds = await Promise.all([
+      kindOf(index.query([1, 0, 0], { policies: [reserved], topK: 5 })),
+      kindOf(index.upsert([record(reserved, "policy:sales")])),
+      kindOf(index.upsert([record("plan", reserved)])),
+      kindOf(index.delete([reserved])),
+    ]);
+    await index.upsert([record("plan", "policy:sales")]);
+    const found = await index.query([1, 0, 0], {
+      policies: ["policy:sales"],
+      topK: 10,
+    });
+
+    expect({
+      filtering: [first.filtering, second.filtering],
+      kinds,
+      found: found.matches.map(({ id }) => id),
+    }).toStrictEqual({
+      filtering: ["unproven", "working"],
+      kinds: ["invalid", "invalid", "invalid", "invalid"],
+      found: ["plan"],
+    });
+  });
+
+  it("says filtering fails without a string metadata index on the policy", async () => {
+    const results = await Promise.all(
+      (["none", "number"] as const).map(async (metadataIndex) => {
+        const provider = fakeVectorize();
+        provider.behaviour.metadataIndex = metadataIndex;
+        const index = vectorIndexOf(provider.binding, generation);
+        await index.status();
+        const { filtering } = await index.status();
+        return filtering;
+      })
+    );
+
+    expect(results).toStrictEqual(["failing", "failing"]);
+  });
+
+  it("says filtering fails when the metadata index came after the records", async () => {
+    const provider = fakeVectorize();
+    provider.behaviour.metadataIndex = "none";
+    const index = vectorIndexOf(provider.binding, generation);
+    await index.status();
+    await index.upsert([record("plan", "policy:sales")]);
+    provider.behaviour.metadataIndex = "string";
+
+    const { filtering } = await index.status();
+
+    expect(filtering).toBe("failing");
+  });
+
+  it("leaves out the last applied write when the index reports none", async () => {
+    const provider = fakeVectorize();
+    provider.behaviour.noAppliedMutation = true;
+
+    const status = await vectorIndexOf(provider.binding, generation).status();
+
+    expect(status.appliedUpTo).toBeUndefined();
+  });
+});
+
 describe("a search while records change", () => {
   it("counts a record moved between two policy batches once", async () => {
     const provider = fakeVectorize();
     const index = vectorIndexOf(provider.binding, generation);
     const policies = Array.from({ length: 150 }, (_, n) => `policy:team-${n}`);
-    // Batches split the sorted keys: these two are in the first and last.
-    const [first = "", last = ""] = [
-      policies.toSorted((a, b) => a.localeCompare(b))[0],
-      policies.toSorted((a, b) => a.localeCompare(b)).at(-1),
-    ];
+    // Batches keep the caller's order: these two are in the first and last.
+    const [first = "", last = ""] = [policies[0], policies.at(-1)];
     await index.upsert([
       record("moving", first),
       record("other", first, [0.8, 0.2, 0]),
@@ -368,8 +497,7 @@ describe("a euclidean generation", () => {
     const provider = fakeVectorize(3, "euclidean");
     const index = vectorIndexOf(provider.binding, euclidean);
     const policies = Array.from({ length: 150 }, (_, n) => `policy:team-${n}`);
-    const sorted = policies.toSorted((a, b) => a.localeCompare(b));
-    const [first = "", last = ""] = [sorted[0], sorted.at(-1)];
+    const [first = "", last = ""] = [policies[0], policies.at(-1)];
     await index.upsert([
       record("far", first, [4, 0, 0]),
       record("near", last, [1.5, 0, 0]),
@@ -439,6 +567,18 @@ describe("when the provider fails", () => {
     provider.behaviour.failUpsertAfterBatches = Number.POSITIVE_INFINITY;
     await index.upsert(records);
     expect(provider.vectors.size).toBe(2500);
+  });
+
+  it("saves the last record of an ID given twice in one call", async () => {
+    const provider = fakeVectorize();
+    const index = vectorIndexOf(provider.binding, generation);
+
+    await index.upsert([
+      record("plan", "policy:sales"),
+      record("plan", "policy:finance"),
+    ]);
+
+    expect(provider.vectors.get("plan")?.metadata.p).toBe("policy:finance");
   });
 
   it("deletes exactly what it is told, and repeating a delete is no error", async () => {

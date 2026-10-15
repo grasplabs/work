@@ -68,7 +68,10 @@ export interface VectorSearch {
 }
 
 export interface VectorQuery {
-  /** The read-policy keys the caller holds now. */
+  /**
+   * The read-policy keys the caller holds now, most important first: when
+   * there are more than one search covers, the last ones are left out.
+   */
   policies: readonly string[];
   /** At most {@link maxTopK}. */
   topK: number;
@@ -81,6 +84,18 @@ export interface VectorIndexStatus {
   vectors: number;
   /** The last write the provider has applied, if it says. */
   appliedUpTo?: string;
+  /**
+   * Whether the policy filter is proven to work on this index, by a
+   * sentinel written under a reserved key and found through that key's
+   * filter. `working`: found. `unproven`: just written, as on the first
+   * status of a new index; writes apply seconds later, so ask again.
+   * `failing`: written earlier but not found through the filter, so the
+   * metadata index on `p` is missing, isn't a string index, or was created
+   * after the sentinel, and the records written then are as unfilterable
+   * (or the sentinel's write is still being applied). Only `working` may
+   * be searched; `failing` needs the index rebuilt.
+   */
+  filtering: "working" | "unproven" | "failing";
 }
 
 export interface VectorIndex {
@@ -97,7 +112,9 @@ export interface VectorIndex {
    * Fails `invalid` when the index's dimensions aren't the generation's.
    * The provider can show nothing else of a generation (its model,
    * revision or metric), so provisioning pins each index to one: an index
-   * per generation, created with its dimensions and metric.
+   * per generation, created with its dimensions and metric. Called first
+   * when the index is created, before any record, so its sentinel proves
+   * the metadata index was there before them.
    */
   status: () => Promise<VectorIndexStatus>;
 }
@@ -156,11 +173,24 @@ const maxFilterBytes = 2048;
 export const maxPolicyKeysPerFilter = 100;
 const maxWriteBatch = 1000;
 
-/** Policy-key batches one search may run before it reports itself incomplete. */
+/**
+ * Policy-key batches one search may run before it reports itself
+ * incomplete. The keys it leaves out are the caller's last ones, so a
+ * caller orders its keys by importance.
+ */
 export const maxPolicyBatches = 4;
 
 const queryDeadlineMs = 5000;
 const writeDeadlineMs = 15_000;
+
+/**
+ * Policy keys and IDs starting with this are the adapter's own, never a
+ * caller's: the sentinel {@link VectorIndex.status} writes and searches
+ * for, which no caller can hold, find, overwrite or delete.
+ */
+export const reservedPrefix = "!";
+const probeId = `${reservedPrefix}filter-probe`;
+const probePolicy = `${reservedPrefix}filter-probe`;
 
 const policyField = "p";
 const versionField = "v";
@@ -181,17 +211,23 @@ const checkPolicyKey = (key: string): void => {
       `A read-policy key must be 1 to ${maxPolicyKeyBytes} bytes.`
     );
   }
+  if (key.startsWith(reservedPrefix)) {
+    throw new VectorIndexError(
+      "invalid",
+      `A read-policy key can't start with ${reservedPrefix}.`
+    );
+  }
 };
 
 /**
- * The caller's policy keys, deduplicated and sorted, split into filters
- * Vectorize accepts, at most {@link maxPolicyBatches} of them. Each key must
- * be one the index can match exactly.
+ * The caller's policy keys, deduplicated in their order, split into
+ * filters Vectorize accepts, at most {@link maxPolicyBatches} of them, the
+ * first keys first. Each key must be one the index can match exactly.
  */
 export const policyFilters = (
   policies: readonly string[]
 ): { filters: VectorizeVectorMetadataFilter[]; complete: boolean } => {
-  const keys = [...new Set(policies)].toSorted();
+  const keys = [...new Set(policies)];
   for (const key of keys) {
     checkPolicyKey(key);
   }
@@ -254,6 +290,12 @@ const checkId = (id: string): void => {
       `A vector ID must be 1 to ${maxIdBytes} bytes.`
     );
   }
+  if (id.startsWith(reservedPrefix)) {
+    throw new VectorIndexError(
+      "invalid",
+      `A vector ID can't start with ${reservedPrefix}.`
+    );
+  }
 };
 
 const checkRecord = (
@@ -312,7 +354,7 @@ const fromProvider = async <Result>(
 /** What the adapter uses of a Vectorize index binding. */
 export type VectorizeBinding = Pick<
   Vectorize,
-  "describe" | "query" | "upsert" | "deleteByIds"
+  "describe" | "query" | "upsert" | "deleteByIds" | "getByIds"
 >;
 
 export interface VectorizeOptions {
@@ -388,7 +430,12 @@ export const vectorizeIndex = (
     for (const record of records) {
       checkRecord(generation, record);
     }
-    for (const batch of inBatches(records)) {
+    // The last record of an ID replaces the earlier ones, as a later call
+    // would; what Vectorize does with one ID twice in a batch is undocumented.
+    const latest = [
+      ...new Map(records.map((record) => [record.id, record])).values(),
+    ];
+    for (const batch of inBatches(latest)) {
       // oxlint-disable-next-line no-await-in-loop -- one batch at a time, so a failure leaves the later ones unsent
       await fromProvider(
         "save vectors",
@@ -422,6 +469,48 @@ export const vectorizeIndex = (
     }
   };
 
+  /** Whether the sentinel comes back through its own key's filter. */
+  const probeFiltering = async (): Promise<VectorIndexStatus["filtering"]> => {
+    const probe = Array.from({ length: generation.dimensions }, (_, n) =>
+      n === 0 ? 1 : 0
+    );
+    const found = await fromProvider(
+      "search",
+      queryDeadline,
+      async () =>
+        await binding.query(probe, {
+          topK: 1,
+          filter: filterOf([probePolicy]),
+          returnValues: false,
+          returnMetadata: "none",
+        })
+    );
+    if (found.matches.some(({ id }) => id === probeId)) {
+      return "working";
+    }
+    const written = await fromProvider(
+      "read vectors",
+      queryDeadline,
+      async () => await binding.getByIds([probeId])
+    );
+    if (written.length > 0) {
+      return "failing";
+    }
+    await fromProvider(
+      "save vectors",
+      writeDeadline,
+      async () =>
+        await binding.upsert([
+          {
+            id: probeId,
+            values: probe,
+            metadata: { [policyField]: probePolicy, [versionField]: "probe" },
+          },
+        ])
+    );
+    return "unproven";
+  };
+
   const status = async (): Promise<VectorIndexStatus> => {
     const info = await fromProvider(
       "describe itself",
@@ -434,11 +523,14 @@ export const vectorizeIndex = (
         `The vector index has ${info.dimensions} dimensions, not the ${generation.dimensions} of generation ${generation.id}.`
       );
     }
+    // Typed as a number, but an index with no writes yet may report none.
+    const applied: number | null | undefined = info.processedUpToMutation;
     return {
       generation: generation.id,
       dimensions: info.dimensions,
       vectors: info.vectorCount,
-      appliedUpTo: String(info.processedUpToMutation),
+      ...(typeof applied === "number" ? { appliedUpTo: String(applied) } : {}),
+      filtering: await probeFiltering(),
     };
   };
 
