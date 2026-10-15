@@ -37,7 +37,7 @@ import { appFor, findVersion, getApp, versionFiles } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
-import { QuerySubscriptions } from "./query-subscriptions.ts";
+import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
@@ -547,8 +547,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     this.#check = check;
     this.#queries = new QuerySubscriptions(
       env,
-      check,
-      async (by, app, artifact) => {
+      screenReads(env, check, async (by, app, artifact) => {
         if (!(await this.#stillOpen(app)())) {
           return "role";
         }
@@ -557,7 +556,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
           stage: "push",
         });
         return open ? "open" : "build";
-      }
+      })
     );
   }
 

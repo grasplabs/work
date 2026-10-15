@@ -5,7 +5,7 @@ import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { activateVersion } from "../src/app-activation.ts";
 import { callAppFunction } from "../src/app-functions.ts";
@@ -704,6 +704,38 @@ describe("fixture stores", () => {
     ).resolves.toBe("kept");
     await expect(tablesIn(store)).resolves.toBeGreaterThan(0);
     await expect(opened.generations(["notes"])).resolves.toBeDefined();
+  });
+
+  it("let go of their live queries' watchers once discarded", async () => {
+    const app = await sealed();
+    const id = await fixtureStore(app);
+    const object = env.DATA_STORES.getByName(id);
+    const { notes } = await object.generations(id, ["notes"]);
+    let released = 0;
+    // A watcher as core passes one: released once the store lets go of it.
+    const watcher = Object.assign(
+      (_tables: string[]): void => {
+        // Told of no write: nothing writes to the store here.
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          released += 1;
+        },
+      }
+    );
+    await object.watch(
+      id,
+      "fixture-note-owner",
+      { notes: notes ?? 0 },
+      watcher
+    );
+    expect(released).toBe(0);
+
+    await discardFixtureStore(env, id);
+
+    await vi.waitFor(() => {
+      expect(released).toBe(1);
+    });
   });
 
   it("never discard a store core didn't record as a fixture", async () => {

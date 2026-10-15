@@ -292,7 +292,7 @@ export class DataStore extends DurableObject<Env> {
    * for a store core recorded as a fixture (`app_test_fixtures`) and its
    * inventory doesn't list, whatever asks: a business store is only ever
    * deleted through its deletion (store-deletion.ts), audited and kept
-   * until nothing refers to it. Both are read in one query, and nothing
+   * until nothing refers to it. Its live queries' watches go with it. Both are read in one query, and nothing
    * is awaited between it and emptying the object.
    */
   async discardFixture(storeId: StoreId): Promise<void> {
@@ -313,6 +313,9 @@ export class DataStore extends DurableObject<Env> {
     await this.ctx.storage.deleteAll();
     this.ctx.storage.kv.put(discardedKey, true);
     await this.ctx.storage.deleteAlarm();
+    // Its live queries too: nothing is written to it again, so they would
+    // only hold their watchers (a test's) until the object is evicted.
+    this.#watches.clear();
   }
 
   /**
