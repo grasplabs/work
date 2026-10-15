@@ -464,6 +464,7 @@ const stepOf = (
     workflow: workflowIdSchema.parse("sleeper"),
     runId: runIdSchema.parse(runId),
     version: 1,
+    shareSubject: builder.userId,
     authority: {
       subject: { type: "app", appId: appIdSchema.parse(app) },
       onBehalfOf: builder.userId,

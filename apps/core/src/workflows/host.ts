@@ -123,6 +123,13 @@ export interface HostedRun {
   rootRunId?: RunId;
   /** Who the run acts for in this execution. */
   authority: Authority;
+  /**
+   * Whose person share its workflow attempts and model requests take, from
+   * its row (dispatcher.ts, `admissionSubjectOf`): who started it, its
+   * lineage root's, or its App's triggers' (`trigger:<app>`). Not who it
+   * acts for, which is the App's owner for a run nobody started.
+   */
+  shareSubject: string;
   /** Its collections' stubs, by binding name (`runBindingsFor`). */
   collections: Record<string, Fetcher<CollectionBinding>>;
   /** Its connection permissions, by binding name (`runBindingsFor`). */
@@ -2135,6 +2142,9 @@ export class RunHost extends RpcTarget {
                 schema,
                 purpose: "workflow.step",
                 trigger: this.#actor,
+                // Whose share it takes: who started the run, never the
+                // owner it acts for when nobody did.
+                shareSubject: this.#run.shareSubject,
                 // The step may have read any of them into its input.
                 connections: [
                   ...new Set(

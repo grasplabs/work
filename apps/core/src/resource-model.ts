@@ -206,6 +206,10 @@ const generate = async (
       // The App for a screen's call; the run for a workflow's, whose
       // workflow and run lineage budgets then count it too.
       trigger: caller.actor,
+      // A run's: whose share its requests take (BindingCaller).
+      ...(caller.shareSubject === undefined
+        ? {}
+        : { shareSubject: caller.shareSubject }),
       provenance: [...caller.sources.snapshot().collectionIds],
       connections: [...caller.sources.connections()],
       work: { authority: caller.authority, context: caller.context },

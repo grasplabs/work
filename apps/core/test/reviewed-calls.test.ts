@@ -188,6 +188,7 @@ const hostHeldTo = async (
       workflow: workflowIdSchema.parse("tidy"),
       version: 1,
       runId,
+      shareSubject: `trigger:${app}`,
       authority,
       collections: {},
       connections,

@@ -1,7 +1,7 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { runActorOf } from "@grasp-os/shared/audit";
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -16,6 +16,7 @@ import { models } from "../src/models.ts";
 import type { ModelCall, ModelsEnv } from "../src/models.ts";
 import { queuedRuns } from "../src/workflows/admission.ts";
 import { modelWaitRecorded } from "../src/workflows/model-waits.ts";
+import { startRun } from "../src/workflows/runs.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
@@ -1101,6 +1102,70 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       },
       after: undefined,
     });
+  });
+
+  it("gives a run nobody started its App's model share, never its owner's who it acts for", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const app = await serverAppWith(owner, {
+      ...modelRegistration({ reader: 6000 }),
+      ...workflowFiles(
+        "reader",
+        `  return await step.llm("extract", {
+    description: "Read the total",
+    binding: "reader",
+    instructions: "Read the total in cents.",
+    input: "Total 12.34 EUR",
+    schema: z.object({ total: z.int() }),
+  });`,
+        { extract: { total: 1234 } }
+      ),
+    });
+    await bindModel(app, "reader", workersAi);
+    const release = Promise.withResolvers<boolean>();
+    const fake = fakeGateway(paused(release.promise), paused(release.promise), {
+      text: '{ "total": 1234 }',
+      inputTokens: 10,
+      outputTokens: 5,
+    });
+    const ai: AiBinding = env.AI;
+    const sending = vi
+      .spyOn(ai, "fetch")
+      .mockImplementation(fake.binding.fetch);
+    const before = { gateway: env.MODEL_GATEWAY, quotas: env.QUOTA_LIMITS };
+    env.MODEL_GATEWAY = { gateway, models: [workersAi] };
+    env.QUOTA_LIMITS = policy;
+    try {
+      // The owner's own two calls, elsewhere, fill the owner's share.
+      const holding = [
+        outcome(models(env).call(callBy(owner.userId, 1))),
+        outcome(models(env).call(callBy(owner.userId, 2))),
+      ];
+      await until(() => fake.requests.length === 2);
+      // Mail, say: a run of the App nobody started, acting for its owner.
+      const run = await startRun(env, {
+        app: appIdSchema.parse(app),
+        workflow: workflowIdSchema.parse("reader"),
+        input: null,
+        startedBy: null,
+        actor: { type: "system" },
+      });
+      // It goes on while the owner's calls still hold the owner's share.
+      const ran = await Promise.race([
+        finished(run.id).then(() => "finished"),
+        stillWaiting(20_000),
+      ]);
+      release.resolve(true);
+
+      expect({ ran, holding: await Promise.all(holding) }).toStrictEqual({
+        ran: "finished",
+        holding: ["ok", "ok"],
+      });
+    } finally {
+      release.resolve(true);
+      env.MODEL_GATEWAY = before.gateway;
+      env.QUOTA_LIMITS = before.quotas;
+      sending.mockRestore();
+    }
   });
 
   it("shows a run queued while its step's model call waits for its App's share, and goes on once it has one", async () => {

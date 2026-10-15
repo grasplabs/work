@@ -279,6 +279,8 @@ interface FairInput {
   trigger: AuditActor;
   work?: { authority: Authority } | { onboarding: true };
   binding?: { app: string };
+  /** For a workflow run's call: whose share it takes (models.ts). */
+  shareSubject?: string;
 }
 
 /** The App a call is made for or through, if any. */
@@ -351,6 +353,18 @@ export const shareIdentity = (call: FairInput): ShareIdentity => {
       subject: `guest:${call.trigger.chatId}`,
       resource,
       disclose: "fixed",
+    };
+  }
+  // A workflow run's call takes the share of who started the run, as its
+  // attempts do, from the run's row (workflows/dispatcher.ts): never the
+  // App's owner it acts for when nobody started it, so a trigger's, a mail
+  // sender's or an event's runs never fill the owner's own share. Without
+  // one, the App's own.
+  if (call.trigger.type === "workflow") {
+    return {
+      subject: call.shareSubject ?? `app:${call.trigger.appId}`,
+      resource,
+      disclose: "own",
     };
   }
   const person = personOf(call);

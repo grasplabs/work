@@ -433,6 +433,13 @@ const sessionShape = {
     .optional(),
   requestId: auditEventSchema.shape.requestId,
   /**
+   * For a workflow run's call: whose person share of the model requests in
+   * flight it takes (model-admission.ts), from the run's row: who started
+   * it, or its App's triggers' for a run nobody started. Set by core's host
+   * only, never by App code; without it, a run's call takes its App's.
+   */
+  shareSubject: z.string().min(1).max(512).optional(),
+  /**
    * The App's model binding the call is made through, with its own caps
    * (model-budgets.ts): set by core's model resource only, from the
    * binding's row, never by App code.
