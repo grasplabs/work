@@ -36,6 +36,7 @@ import {
   callAppFunction,
   readFunctionRequest,
   refusalOf,
+  requireNotRevoked,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
@@ -622,13 +623,23 @@ const streamRecheckMs = 5000;
 /**
  * Whether the person whose session `headers` carry is still `call`'s,
  * with the access `access` fingerprints (organization role, teams and
- * role in the App, `accessOf`), and its build still gets the App's data:
- * throws the refusal otherwise.
+ * role in the App, `accessOf`), its build still gets the App's data, and
+ * no release the stream runs under (`versions`) was revoked: throws the
+ * refusal otherwise. The build's delivery reads the App's current
+ * release only, which a publish moves on from the one the stream runs.
  */
 const stillDelivering = async (
   env: Env,
   headers: Headers,
-  { call, access }: { readonly call: AdmittedCall; readonly access: string },
+  {
+    call,
+    access,
+    versions,
+  }: {
+    readonly call: AdmittedCall;
+    readonly access: string;
+    readonly versions: readonly number[];
+  },
   stage: "push" | "delivery"
 ): Promise<void> => {
   const now = await identify(env, headers);
@@ -643,6 +654,10 @@ const stillDelivering = async (
     operation: "stream",
     stage,
   });
+  for (const version of versions) {
+    // oxlint-disable-next-line no-await-in-loop -- one or two, in turn
+    await requireNotRevoked(env, call.id, version);
+  }
 };
 
 /** One frame's line as the relay reads it: its type, if it is JSON at all. */
@@ -662,6 +677,8 @@ interface RelayOf {
   readonly call: AdmittedCall;
   /** The access the request was admitted under (`accessOf`). */
   readonly access: string;
+  /** The release versions the stream runs under, the caller's among them. */
+  readonly versions: readonly number[];
   readonly requestId: string;
   /** Cancels the invocation: the person or the build lost access. */
   readonly cancel: () => Promise<unknown>;
@@ -677,7 +694,7 @@ interface RelayOf {
  */
 const relay = (
   frames: ReadableStream<Uint8Array>,
-  { env, headers, call, access, requestId, cancel }: RelayOf
+  { env, headers, call, access, versions, requestId, cancel }: RelayOf
 ): ReadableStream<Uint8Array> => {
   const reader = frames.pipeThrough(new TextDecoderStream()).getReader();
   const encoder = new TextEncoder();
@@ -742,7 +759,12 @@ const relay = (
         // Runs on a timer nobody awaits: it never throws.
         const check = async (): Promise<void> => {
           try {
-            await stillDelivering(env, headers, { call, access }, "push");
+            await stillDelivering(
+              env,
+              headers,
+              { call, access, versions },
+              "push"
+            );
           } catch (error) {
             try {
               await refuse?.(error);
@@ -780,7 +802,12 @@ const relay = (
           return;
         }
         try {
-          await stillDelivering(env, headers, { call, access }, "delivery");
+          await stillDelivering(
+            env,
+            headers,
+            { call, access, versions },
+            "delivery"
+          );
         } catch (error) {
           await refuse?.(error);
           return;
@@ -875,12 +902,22 @@ const appStreamResponse = async (
       streaming: true,
       attach: action === "attach",
     });
+    // The release it runs under, besides the caller's: a join or an attach
+    // may follow a run a release published since started.
+    const running = await invocation.version(person.userId);
+    const versions = [
+      ...new Set([
+        call.reference.resourceVersion,
+        ...(running === undefined ? [] : [running]),
+      ]),
+    ];
     return new Response(
       relay(frames, {
         env,
         headers: request.headers,
         call: admittedCall,
         access,
+        versions,
         requestId,
         cancel: async () => await invocation.cancel(person.userId),
       }),

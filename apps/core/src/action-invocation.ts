@@ -365,6 +365,17 @@ export class ActionInvocation extends DurableObject<Env> {
   }
 
   /**
+   * The release version the invocation of `userId` runs or ran under,
+   * which a relay of it keeps checking isn't revoked; undefined for
+   * anyone else, or when there is no invocation.
+   */
+  async version(userId: string): Promise<number | undefined> {
+    await Promise.resolve();
+    const record = this.#record();
+    return record?.owner === userId ? record.version : undefined;
+  }
+
+  /**
    * Asks for the invocation of `userId`, the person it runs for, to stop:
    * its run stops as at its deadline, and its result says what is known
    * (see the header). Decided after any start, join or attach before it,

@@ -1419,6 +1419,36 @@ describe("an action's invocation object", { timeout: 120_000 }, () => {
     });
   });
 
+  it("stops relaying a stream whose release is revoked while it runs, after a later one is published", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    let steps = 0;
+    const running = client.stream(
+      api.slow,
+      { title: "Made under one" },
+      {
+        onProgress: () => {
+          steps += 1;
+        },
+      }
+    );
+    await until(() => steps >= 1);
+    await published(opened);
+    await revokeRelease(
+      env,
+      await person("admin"),
+      { app: appIdSchema.parse(opened.app), version: 1 },
+      "Leaks data"
+    );
+    const revokedAt = Date.now();
+    await expect(failureOf(running)).resolves.toMatchObject({
+      code: "version.revoked",
+    });
+    // Stopped at the relay's next check, not once the run ends (40 s on).
+    expect(Date.now() - revokedAt).toBeLessThan(15_000);
+  });
+
   it("refuses a receipt made under a release revoked since, to a caller of a later one", async () => {
     const opened = await openedApp();
     const { client } = clientFor(opened);
