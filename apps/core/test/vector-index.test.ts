@@ -150,7 +150,10 @@ const fakeVectorize = (
         );
       }
       await Promise.resolve();
-      if (!JSON.stringify(options?.filter ?? {}).includes(reservedPrefix)) {
+      const probing = JSON.stringify(options?.filter ?? {}).includes(
+        reservedPrefix
+      );
+      if (!probing) {
         filters.push(options?.filter);
       }
       // The index as this read saw it, before anything changes it.
@@ -160,7 +163,10 @@ const fakeVectorize = (
           { ...stored, metadata: { ...stored.metadata } },
         ]
       );
-      behaviour.afterQuery();
+      // The sentinel's check isn't one of the search's batches.
+      if (!probing) {
+        behaviour.afterQuery();
+      }
       const matches = answeredFrom
         .filter(([, stored]) => matchesFilter(stored, options?.filter))
         .map(([id, stored]) => ({
@@ -552,7 +558,7 @@ describe("a euclidean generation", () => {
       }
     };
 
-    const found = await index.query([1, 0, 0], { policies, topK: 3 });
+    const found = await index.query([1, 0, 0], { policies, topK: 4 });
 
     expect(
       found.matches.map(({ id, score }) => [id, Number(score.toFixed(3))])
@@ -560,6 +566,7 @@ describe("a euclidean generation", () => {
       ["nearest", 0.1],
       ["moving", 0.2],
       ["near", 0.5],
+      ["far", 3],
     ]);
   });
 });
