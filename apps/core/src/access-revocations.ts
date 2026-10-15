@@ -1,10 +1,11 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { appMembers } from "./db/core/schema.ts";
+import { appMembers, teamMembers } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
 
 // Telling an App's open screens that someone's access to it may have
@@ -67,9 +68,47 @@ const appsSharedWith = async (env: Env, teamId: string): Promise<AppId[]> => {
 };
 
 /**
- * `accessMayHaveDropped` for the Apps shared with team `teamId`, after
- * `userIds` left it, or everyone in it was let go of with it (`null`).
- * Never throws: Better Auth's change has committed already.
+ * The Apps shared with any of `userIds`, as a person or through a team
+ * they are in now. Leaving a team can take those away too, though none
+ * is shared with that team: one that read a collection only that team
+ * may read is refused to them from then on (app-provenance.ts).
+ */
+const appsSharedWithPeople = async (
+  env: Env,
+  userIds: readonly string[]
+): Promise<AppId[]> => {
+  if (userIds.length === 0) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .selectDistinct({ appId: appMembers.appId })
+    .from(appMembers)
+    .where(
+      or(
+        and(
+          eq(appMembers.memberType, "person"),
+          inList(appMembers.memberId, userIds)
+        ),
+        and(
+          eq(appMembers.memberType, "team"),
+          inArray(
+            appMembers.memberId,
+            drizzle(env.DB)
+              .select({ teamId: teamMembers.teamId })
+              .from(teamMembers)
+              .where(inList(teamMembers.userId, userIds))
+          )
+        )
+      )
+    );
+  return rows.map(({ appId }) => appIdSchema.parse(appId));
+};
+
+/**
+ * `accessMayHaveDropped` once `userIds` left team `teamId`: the Apps
+ * shared with the team, and those shared with them otherwise, whose
+ * provenance the team may have been what let them read. Never throws:
+ * Better Auth's change has committed already.
  */
 export const teamAccessMayHaveDropped = async (
   env: Env,
@@ -77,8 +116,49 @@ export const teamAccessMayHaveDropped = async (
   userIds: readonly string[] | null
 ): Promise<void> => {
   try {
-    await accessMayHaveDropped(env, await appsSharedWith(env, teamId), userIds);
+    const [shared, theirs] = await Promise.all([
+      appsSharedWith(env, teamId),
+      appsSharedWithPeople(env, userIds ?? []),
+    ]);
+    await accessMayHaveDropped(env, [...shared, ...theirs], userIds);
   } catch (error) {
     log.error("app.access_revocation_failed", errorFields(error));
   }
+};
+
+/**
+ * The people of each team about to be deleted, read before Better Auth
+ * deletes the team with its members (`teamAboutToGo`), for `teamGone` to
+ * tell once it has. Before and after run in the same request.
+ */
+const leavingTeams = new Map<string, readonly string[]>();
+
+/**
+ * Reads who is in team `teamId`, which is about to be deleted. Never
+ * throws: a read that failed leaves `teamGone` telling everyone.
+ */
+export const teamAboutToGo = async (
+  env: Env,
+  teamId: string
+): Promise<void> => {
+  try {
+    const rows = await drizzle(env.DB)
+      .select({ userId: teamMembers.userId })
+      .from(teamMembers)
+      .where(eq(teamMembers.teamId, teamId));
+    leavingTeams.set(
+      teamId,
+      rows.map(({ userId }) => userId)
+    );
+  } catch (error) {
+    log.error("app.access_revocation_failed", errorFields(error));
+  }
+};
+
+/** `teamAccessMayHaveDropped` for everyone team `teamId` had, now it is gone. */
+export const teamGone = async (env: Env, teamId: string): Promise<void> => {
+  // Unread (the read before failed): everyone the App knows of looks.
+  const userIds = leavingTeams.get(teamId) ?? null;
+  leavingTeams.delete(teamId);
+  await teamAccessMayHaveDropped(env, teamId, userIds);
 };

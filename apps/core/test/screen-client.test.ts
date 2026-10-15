@@ -28,13 +28,20 @@ import { buildScreens } from "../src/screens.ts";
 import { sessionRecheckMs } from "../src/session-check.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeMaxWatches } from "../src/store-watches.ts";
-import { pastAccessRecheck } from "./apps.ts";
+import { pastAccessRecheck, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
-import { newTeam } from "./knowledge.ts";
+import { newTeam, readCollection } from "./knowledge.ts";
 import { apiOf, notesFiles as files, referenceTo } from "./notes-client-app.ts";
 import { person as sealedPerson } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { callAuth, openRpc, outcome, routed, signedInApi } from "./sign-in.ts";
+import {
+  callAuth,
+  openRpc,
+  outcome,
+  routed,
+  signedInApi,
+  unique,
+} from "./sign-in.ts";
 
 // The session client a screen's queries, mutations and actions go through
 // (spec 10.1, 10.7.1), against core's real function route, as an approved
@@ -2391,6 +2398,68 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await admin.api.apps.members.add(opened.app, {
       type: "team",
       id: team,
+      role: "user",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, member.api.screens, lease);
+
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId: team,
+      userId: member.userId,
+    });
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears the screen of someone whose team, the App's way to them, is deleted", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const member = await personApi("user");
+    const team = await newTeam(admin, [member]);
+    await admin.api.apps.members.add(opened.app, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, member.api.screens, lease);
+    // The organization keeps a team: this one is never its last.
+    await newTeam(admin, []);
+
+    const removed = await callAuth("/organization/remove-team", admin.session, {
+      teamId: team,
+    });
+    expect(removed.status).toBe(200);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears the screen of someone the App was shared with directly, once leaving a team leaves them unable to read what it read", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const member = await personApi("user");
+    const team = await newTeam(admin, [member]);
+    const { id: collection } = await admin.api.knowledge.createCollection({
+      name: `HR ${unique()}`,
+      access: "teams",
+      teams: [team],
+      sensitive: false,
+    });
+    await requestGranted(
+      idp,
+      opened.builder,
+      readCollection(
+        { type: "app", appId: opened.app },
+        collection,
+        `HR_${unique().toUpperCase()}`
+      )
+    );
+    // Shared with them as a person, never with the team.
+    await opened.builder.api.apps.members.add(opened.app, {
+      type: "person",
+      id: member.userId,
       role: "user",
     });
     const { lease } = await member.api.screens.open(opened.app, "notes");

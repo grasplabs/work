@@ -244,6 +244,8 @@ interface Evaluation {
 interface Following {
   id: string | undefined;
   ready: Promise<void>;
+  /** Let go of by the host before its answer was taken. */
+  early: boolean;
 }
 
 /** What the connection's access check says, before each push of data. */
@@ -610,8 +612,11 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
     let evaluated: LiveRead;
     try {
+      // As the very reading the gate looked at, so the roles a result goes
+      // out under are those of the person it was read for: a newer reading
+      // (after a revocation, `#revoked`) is never paired with an older read.
       evaluated = await this.#reads.evaluate(
-        by,
+        before.by,
         app,
         artifact,
         request,
@@ -641,7 +646,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if (reads === undefined) {
       // Nothing read that could be watched.
       await this.#unwatch(evaluation);
-    } else if (!(await this.#keepWatched(evaluation, by, reads))) {
+    } else if (!(await this.#keepWatched(evaluation, before.by, reads))) {
       await this.#lose(evaluation);
       return;
     }
@@ -652,7 +657,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       await this.#end(evaluation, after.refusal);
       return;
     }
-    if (after.roles !== before.roles) {
+    if (after.roles !== before.roles || after.by !== before.by) {
       evaluation.dirty = true;
       return;
     }
@@ -672,7 +677,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    */
   async #gate(
     evaluation: Evaluation
-  ): Promise<{ refusal: Result } | { roles: string }> {
+  ): Promise<{ refusal: Result } | { roles: string; by: By }> {
     const { app, artifact } = evaluation;
     let by: By;
     try {
@@ -701,7 +706,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       access = "role";
     }
     if (access === "open" && roles !== undefined) {
-      return { roles };
+      return { roles, by };
     }
     this.#cleared.delete(key);
     // Someone without a role is refused as a read refuses them: nothing
@@ -1056,9 +1061,22 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * watched, and the screens follow again later.
    */
   #follow(userId: string, app: AppId): void {
-    const following: Following = { id: undefined, ready: Promise.resolve() };
+    const following: Following = {
+      id: undefined,
+      ready: Promise.resolve(),
+      early: false,
+    };
     this.#following.set(app, following);
     const current = (): boolean => this.#following.get(app) === following;
+    // Let go of by the host: an event may have been missed, so look now,
+    // and follow again while a query of the App is still followed here.
+    const letGo = (): void => {
+      this.#following.delete(app);
+      this.#revoked(app);
+      if (this.#follows(app)) {
+        this.#follow(userId, app);
+      }
+    };
     const watcher = Object.assign(
       (revoked: boolean): void => {
         // Once it no longer follows, it says it is gone, so the host drops
@@ -1072,14 +1090,15 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       },
       {
         [Symbol.dispose]: (): void => {
-          if (!current() || following.id === undefined) {
+          if (!current()) {
             return;
           }
-          this.#following.delete(app);
-          this.#revoked(app);
-          if (this.#follows(app)) {
-            this.#follow(userId, app);
+          if (following.id === undefined) {
+            // Before the host's answer was taken: once it is (`answered`).
+            following.early = true;
+            return;
           }
+          letGo();
         },
       }
     );
@@ -1103,7 +1122,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
         }
         return;
       }
-      if (current()) {
+      if (current() && following.early) {
+        letGo();
+      } else if (current()) {
         this.#revoked(app);
       } else {
         await this.#leave(app, following.id);

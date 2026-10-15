@@ -26,7 +26,11 @@ import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
-import { teamAccessMayHaveDropped } from "../access-revocations.ts";
+import {
+  teamAboutToGo,
+  teamAccessMayHaveDropped,
+  teamGone,
+} from "../access-revocations.ts";
 import {
   auditedBatch,
   keepAuditEvent,
@@ -711,8 +715,11 @@ const createAuth = (
               teamMember.userId,
             ]);
           },
+          beforeDeleteTeam: async ({ team }) => {
+            await teamAboutToGo(env, team.id);
+          },
           afterDeleteTeam: async ({ team }) => {
-            await teamAccessMayHaveDropped(env, team.id, null);
+            await teamGone(env, team.id);
           },
         },
       }),
