@@ -31,12 +31,33 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 // - A lease leaked by an attempt that died, or its activation, or core:
 //   a lease counts for what its receipt holds (`reserved_ms`), an
 //   attempt's wall time after its admission at most, whatever its
-//   deadline, so none outlives a minute. An attempt the engine took from
-//   an activation that is over (a lower generation of the same step's key)
-//   is settled as the new one is admitted (quotas.ts), so a replaced
-//   activation's lease never keeps its own retry waiting. One that settles
-//   gives its share back at once; a run that pauses or ends gives up its
-//   places (runs.ts, `projectStatus`).
+//   deadline, so none outlives a minute. One that settles gives its share
+//   back at once; a run that pauses or ends gives up its places (runs.ts,
+//   `projectStatus`).
+// - A lease kept by an attempt the engine gave up on: its run cancelled
+//   while its code still runs, paused or ended once its activation died,
+//   or taken over by a newer activation. The engine's fence decides it,
+//   never core's record of the run, which lags the engine: each time the
+//   run's object tells core of a status (its durable outbox, in order, at
+//   least once), it gives back every lease of the run's generations none
+//   of whose attempts holds any more, as its journal has them then
+//   (run-object.ts, `notify`; quotas.ts, `sharesReleased`). An activation
+//   that took the run over gives back its older ones' leases with its
+//   first admission, of any step (quotas.ts). Only the leases of the run
+//   the object holds, by its own journal (a batch naming another run acts
+//   on none), only of generations fenced: a notification late, or handed
+//   over again, gives back nothing a newer activation's attempt holds,
+//   since the fence only grows. A cancelled run's attempt is charged to
+//   its lineage up to its deadline, as its isolate may compute on, though
+//   its share comes back at once. A dead activation is told from a slow one only by the
+//   engine's watchdog, a lease away: its leases come back then, or as its
+//   run is cancelled.
+// - A fenced attempt taking a share again, its admission landing after
+//   its lease came back, or retried under the same key: an attempt of a
+//   generation the run's object fenced (`shares_fenced_through`), of a
+//   cancelled run, or of an activation a newer one's attempt came after,
+//   takes no lease (`execution.stale_attempt`), in the statement that
+//   would take it. An attempt settled is never admitted again.
 // - The same attempt admitted twice: it holds one lease (its receipt's
 //   key), so a retried admission is never a second share.
 // - A saturated App, or a person running many runs, taking every share:
