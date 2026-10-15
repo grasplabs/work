@@ -162,7 +162,31 @@ describe("scoring a trial", () => {
         ...input,
         answer: "37 and 12, at 123 cent [fleet.md]",
       }).completed,
-    }).toStrictEqual({ inside: false, whole: true, staleInside: true });
+      decimal: verdict(fleet, {
+        ...input,
+        answer: "37.5 trucks, 12,9 electric [fleet.md]",
+      }).completed,
+      grouped: verdict(fleet, {
+        ...input,
+        answer: "1.037 trucks, 12 electric [fleet.md]",
+      }).completed,
+      time: verdict(fleet, {
+        ...input,
+        answer: "37 trucks at 12:30 [fleet.md]",
+      }).completed,
+      sentence: verdict(fleet, {
+        ...input,
+        answer: "37 trucks; 12. [fleet.md]",
+      }).completed,
+    }).toStrictEqual({
+      inside: false,
+      whole: true,
+      staleInside: true,
+      decimal: false,
+      grouped: false,
+      time: false,
+      sentence: true,
+    });
   });
 
   it("measures evidence recall as the share of the evidence that reached the model", () => {
@@ -297,7 +321,7 @@ describe("summarising and comparing arms", () => {
     ]);
   });
 
-  it("pairs arms by task, blocks a comparison when either arm broke the gate, and decides nothing unpaired", () => {
+  it("pairs arms by task, blocks a comparison when either arm broke the gate, and decides nothing on fewer than two pairs", () => {
     const better = compareArms(
       {
         arm: "fullContext",
@@ -333,18 +357,26 @@ describe("summarising and comparing arms", () => {
       { arm: "agent", scores: [trial("agent", "b", true)] },
       0.05
     );
+    const single = (candidate: boolean, base: boolean) =>
+      compareArms(
+        { arm: "fullText", scores: [trial("fullText", "a", candidate)] },
+        { arm: "agent", scores: [trial("agent", "a", base)] },
+        0.05
+      ).decision;
     expect({
       tasks: better.tasks,
       mean: better.meanDifference,
       decision: better.decision,
       leaked: leaked.decision,
       unpaired: [unpaired.tasks, unpaired.decision],
+      single: [single(true, false), single(true, true)],
     }).toStrictEqual({
       tasks: 4,
       mean: 0.75,
       decision: "better",
       leaked: "blocked",
       unpaired: [0, "inconclusive"],
+      single: ["inconclusive", "inconclusive"],
     });
   });
 });

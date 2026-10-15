@@ -72,10 +72,45 @@ export const citationsOf = (answer: string): string[] =>
   );
 
 const wordCharacter = /[\p{L}\p{N}]/u;
+const digit = /\p{N}/u;
+/** What joins the digits of one number: a decimal, a thousands or a time separator. */
+const numberJoint = /[.,:]/u;
 
 /**
- * Whether `text` holds `words` as whole words: "37" isn't in "137 trucks",
- * nor "23 cent" in "123 cent". Both are normalized.
+ * Whether the match of `words` at `at` in `text` stands alone at its
+ * start: no letter or digit before it, and when it starts with a digit,
+ * no number it continues ("37" in "1.37").
+ */
+const startsAlone = (text: string, words: string, at: number): boolean => {
+  const before = text.charAt(at - 1);
+  if (wordCharacter.test(before)) {
+    return false;
+  }
+  return !(
+    digit.test(words.charAt(0)) &&
+    numberJoint.test(before) &&
+    digit.test(text.charAt(at - 2))
+  );
+};
+
+/** As `startsAlone`, at the match's end ("37" in "37.5", "5" in "5:30"). */
+const endsAlone = (text: string, words: string, at: number): boolean => {
+  const end = at + words.length;
+  const after = text.charAt(end);
+  if (wordCharacter.test(after)) {
+    return false;
+  }
+  return !(
+    digit.test(words.at(-1) ?? "") &&
+    numberJoint.test(after) &&
+    digit.test(text.charAt(end + 1))
+  );
+};
+
+/**
+ * Whether `text` holds `words` as whole words, and a number as the whole
+ * number: "37" isn't in "137 trucks" or "37.5 trucks", nor "23 cent" in
+ * "123 cent". Both are normalized.
  */
 const holds = (text: string, words: string): boolean => {
   if (words === "") {
@@ -86,9 +121,7 @@ const holds = (text: string, words: string): boolean => {
     at !== -1;
     at = text.indexOf(words, at + 1)
   ) {
-    const before = text.charAt(at - 1);
-    const after = text.charAt(at + words.length);
-    if (!wordCharacter.test(before) && !wordCharacter.test(after)) {
+    if (startsAlone(text, words, at) && endsAlone(text, words, at)) {
       return true;
     }
   }
@@ -414,7 +447,7 @@ const completionByTask = (scores: readonly TrialScore[]): Map<string, number> =>
 
 /**
  * A comparison's decision: blocked by a security failure, inconclusive
- * with no task to pair, else what the interval says.
+ * with fewer than two tasks to pair, else what the interval says.
  */
 const decisionOf = ({
   blocked,
@@ -430,7 +463,9 @@ const decisionOf = ({
   if (blocked) {
     return "blocked";
   }
-  if (differences.length === 0) {
+  // A single task has no spread to bootstrap: its interval would be a
+  // point, however chance decided it.
+  if (differences.length < 2) {
     return "inconclusive";
   }
   return decide(mean(differences) ?? 0, interval, gain);
