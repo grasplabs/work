@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema } from "./ids.ts";
 
@@ -88,7 +89,227 @@ export const workflowResourceErrors = defineErrorFamily({
     "This trigger doesn't exist, was disabled or was deleted.",
   "workflow.trigger_limit":
     "You have as many live triggers as one person may: delete one first.",
+  "workflow.contract_invalid":
+    "That isn't a contract the host catalog can hold.",
+  "workflow.contract_exists":
+    "The catalog already has this contract key: a contract never changes, so publish another key.",
+  "workflow.binding_invalid":
+    "That target can't serve this binding: check its kind, its contract and that the workflow holds the permission it needs.",
+  "workflow.binding_unapproved":
+    "A binding of this version has no approval that serves its exact contract, so it can't start.",
+  "workflow.binding_conflict":
+    "Someone changed this binding as you did. Read it again, then retry.",
+  "workflow.params_invalid":
+    "Those parameter values aren't ones the workflow's current version accepts.",
+  "workflow.params_conflict":
+    "Someone changed the parameters since you read them. Read them again, then retry.",
+  "workflow.app_binding_invalid":
+    "That isn't a workflow version this App can bind.",
+  "workflow.app_binding_unavailable": "This App has no such workflow binding.",
 });
+
+/** The binding kinds the host catalog serves, beside other workflows. */
+export const catalogBindingKinds = [
+  "operation",
+  "connector",
+  "model",
+  "decision",
+] as const;
+export type CatalogBindingKind = (typeof catalogBindingKinds)[number];
+
+/**
+ * A host catalog contract key: lowercase segments, never one of this
+ * deployment's workflows (`workspace/...`) nor a workflow's own module
+ * (`local:`).
+ */
+export const catalogKeySchema = z
+  .string()
+  .max(128)
+  .regex(
+    /^[a-z0-9][a-z0-9.-]*(?:\/[a-z0-9][a-z0-9.-]*){0,2}$/u,
+    "Lowercase segments of letters, digits, dots and dashes, separated by /"
+  )
+  .refine((key) => !key.startsWith(`${workflowNamespace}/`), {
+    message: "Workflow contract keys are this deployment's workflows",
+  });
+
+/**
+ * A catalog contract as an admin publishes it: its key, kind, and the SDK
+ * value descriptors (as JSON text) of what a call passes and returns, as
+ * `@grasp-os/open-workflow`'s catalog reads them.
+ */
+/** The most a catalog contract holds, as JSON. */
+const catalogContractMaxBytes = 512 * 1024;
+
+export const catalogContractSchema = z
+  .strictObject({
+    key: catalogKeySchema,
+    kind: z.enum(catalogBindingKinds),
+    input: z
+      .string()
+      .max(256 * 1024)
+      .optional(),
+    output: z
+      .string()
+      .max(256 * 1024)
+      .optional(),
+    response: z
+      .string()
+      .max(256 * 1024)
+      .optional(),
+    operations: z
+      .record(
+        z.string().regex(/^[A-Za-z][\w.-]{0,63}$/u),
+        z.strictObject({
+          input: z.string().max(256 * 1024),
+          output: z.string().max(256 * 1024),
+        })
+      )
+      .optional(),
+  })
+  .refine(
+    // One row of the catalog: well under what a database row may hold.
+    (contract) =>
+      new TextEncoder().encode(JSON.stringify(contract)).byteLength <=
+      catalogContractMaxBytes,
+    { message: "A contract is at most 512 KiB, its operations included." }
+  );
+export type CatalogContractInput = z.input<typeof catalogContractSchema>;
+
+/** A catalog contract as the catalog lists it. */
+export interface CatalogContractEntry {
+  key: string;
+  kind: CatalogBindingKind;
+  fingerprint: string;
+  publishedBy: string;
+  publishedAt: string;
+}
+
+/** Who answers a decision binding: people, teams or an organization role. */
+const deciderSchema = z.string().regex(/^(?:person|team|role):[\w.-]{1,128}$/u);
+
+/**
+ * What an admin binds a workflow's alias to, by its kind:
+ *
+ * - `model`: one model the deployment allows, through the model gateway;
+ * - `connector`: one of the workflow's own connection permissions, and the
+ *   contract connect generates for that connection (`<connector>.<family>@1`
+ *   or `composio.<toolkit>@1`) whose actions serve the catalog contract;
+ * - `operation`: an exact version of an App's export, through one of the
+ *   workflow's own permissions on that App's exports;
+ * - `decision`: who answers it.
+ */
+export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("model"),
+    model: z
+      .string()
+      .min(3)
+      .max(200)
+      .regex(/^[a-z0-9-]+\/\S+$/u),
+  }),
+  z.strictObject({
+    kind: z.literal("connector"),
+    permissionId: identifierSchema,
+    contract: connectorContractIdSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("operation"),
+    permissionId: identifierSchema,
+    appVersion: z.int().min(1),
+    export: z.string().regex(/^[A-Za-z][\w]{0,63}$/u),
+  }),
+  z.strictObject({
+    kind: z.literal("decision"),
+    deciders: z.array(deciderSchema).min(1).max(16),
+  }),
+]);
+export type WorkflowBindingTarget = z.infer<typeof workflowBindingTargetSchema>;
+
+/**
+ * An admin's approval of a workflow's binding: the alias, its target, and
+ * the version of the workflow they reviewed, whose declaration of the
+ * alias (kind, contract key, fingerprint) is what they approve, for that
+ * version alone.
+ */
+export const workflowBindingApprovalSchema = z.strictObject({
+  alias: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
+  target: workflowBindingTargetSchema,
+  reviewed: z.strictObject({ version: z.int().min(1) }),
+});
+
+/** An approved binding of a workflow's alias. */
+export interface WorkflowBindingApproval {
+  id: string;
+  alias: string;
+  kind: CatalogBindingKind;
+  contractId: string;
+  fingerprint: string;
+  target: WorkflowBindingTarget;
+  /** The one version of the workflow it serves: the version reviewed. */
+  reviewedVersion: number;
+  status: "active" | "revoked";
+  approvedBy: string;
+  approvedAt: string;
+}
+
+const paramNameSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
+
+/**
+ * New values for a workflow's parameters: the revision they were read at,
+ * each parameter's new value (null is a value, for a parameter that takes
+ * it), and the parameters to put back to their defaults. A parameter in
+ * neither keeps its value; one in both is refused.
+ */
+export const workflowParamsEditSchema = z
+  .strictObject({
+    expectedRevision: z.int().min(0),
+    values: z.record(paramNameSchema, z.json()).default({}),
+    reset: z.array(paramNameSchema).max(64).default([]),
+  })
+  .refine(
+    ({ values, reset }) => reset.every((name) => !Object.hasOwn(values, name)),
+    { message: "A parameter is either set or reset, not both." }
+  );
+
+/**
+ * A parameter's configuration, as its members read it: its label, whether
+ * it is sensitive, and its value, never a sensitive one's (`set` says
+ * whether one is set).
+ */
+export interface WorkflowParamSetting {
+  name: string;
+  label: string;
+  sensitive: boolean;
+  /** Whether a value is set; otherwise its default applies. */
+  set: boolean;
+  /** The value set, for a parameter that isn't sensitive; null otherwise. */
+  value: unknown;
+}
+
+/** A workflow's parameter configuration at a revision. */
+export interface WorkflowParams {
+  revision: number;
+  params: WorkflowParamSetting[];
+}
+
+/** An App's binding of an exact version of a workflow, by an alias of the App's. */
+export const appWorkflowBindingSchema = z.strictObject({
+  app: identifierSchema,
+  alias: z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u),
+  version: z.int().min(1),
+});
+
+/** An App's binding of a workflow version. */
+export interface AppWorkflowBinding {
+  id: string;
+  app: string;
+  alias: string;
+  workflowId: string;
+  version: number;
+  boundBy: string;
+  boundAt: string;
+}
 
 /**
  * A start of an independent workflow: the exact version (a publication
@@ -111,6 +332,10 @@ export interface WorkflowStart {
   principal: string;
   authorityGeneration: number;
   inputHash: string;
+  /** The parameter revision its values were frozen at. */
+  paramsRevision: number;
+  /** The SHA-256 of the frozen bindings. */
+  bindingsHash: string;
   createdAt: string;
 }
 
@@ -131,11 +356,13 @@ export interface WorkflowResource {
  * A binding a version resolved, by the host: exact IDs and fingerprints.
  * Which workflow it binds (its ID, version and contract key, which names
  * it) only for a builder of that workflow: anyone else gets null there,
- * and only the alias and the contract's fingerprint.
+ * and only the alias and the contract's fingerprint. A catalog binding
+ * (an operation, connector, model or decision contract) names its
+ * contract key and fingerprint; what serves it is an approval's.
  */
 export interface WorkflowVersionBinding {
   alias: string;
-  kind: "workflow";
+  kind: "workflow" | CatalogBindingKind;
   resourceId: string | null;
   resourceVersion: number | null;
   /** The contract key the definition named. */
@@ -157,6 +384,12 @@ export interface WorkflowBinders {
    * starts it: those the caller may see, and how many more.
    */
   triggers: { ids: string[]; hidden: number };
+  /**
+   * Active App bindings of one of its versions whose App holds an active
+   * `start` grant on it: each binding and its App. Its builders may remove
+   * any of them, so they see them all.
+   */
+  appBindings: { id: string; app: string }[];
 }
 
 /** One published version of a workflow. */
@@ -213,4 +446,25 @@ export interface WorkflowResourcesApi {
    * for them (`workflowStartSchema`): its admitted receipt.
    */
   start: (id: string, input: unknown) => Promise<WorkflowStart>;
+  /** Its parameters' configuration, for anyone with a role. */
+  params: (id: string) => Promise<WorkflowParams>;
+  /** Sets parameter values, revision-checked; for builders. */
+  setParams: (id: string, input: unknown) => Promise<WorkflowParams>;
+  /** Its approved bindings, for anyone with a role. */
+  bindings: (id: string) => Promise<WorkflowBindingApproval[]>;
+  /** Approves a binding; for the organization's admins. */
+  approveBinding: (
+    id: string,
+    input: unknown
+  ) => Promise<WorkflowBindingApproval>;
+  /** Revokes a binding approval; for the organization's admins. */
+  revokeBinding: (id: string, approval: string) => Promise<void>;
+  /** Binds an exact version to an App; for the App's builders. */
+  bindToApp: (id: string, input: unknown) => Promise<AppWorkflowBinding>;
+  /** Removes an App's binding; for the App's builders. */
+  unbindFromApp: (binding: string) => Promise<void>;
+  /** The host catalog's contracts, for builders. */
+  catalog: () => Promise<CatalogContractEntry[]>;
+  /** Publishes a catalog contract; for the organization's admins. */
+  publishContract: (input: unknown) => Promise<CatalogContractEntry>;
 }

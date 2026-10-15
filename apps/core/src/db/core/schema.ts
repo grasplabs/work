@@ -728,8 +728,9 @@ export const sdkReleaseTombstones = sqliteTable(
 /**
  * What keeps a sealed release past its retention (spec 16.3): an open
  * screen's lease, which lapses 15 minutes after its last renewal, or a
- * run, a compatible migration, a pinned trigger or a legal hold, held
- * until released.
+ * run, a compatible migration, a pinned trigger, a workflow binding's
+ * approval naming one of its exports (src/workflow-bindings.ts) or a legal
+ * hold, held until released.
  */
 export const sdkReleasePins = sqliteTable(
   "sdk_release_pins",
@@ -737,7 +738,7 @@ export const sdkReleasePins = sqliteTable(
     appId: text("app_id").notNull(),
     version: integer().notNull(),
     holderKind: text("holder_kind", {
-      enum: ["frame", "run", "migration", "trigger", "hold"],
+      enum: ["frame", "run", "migration", "trigger", "hold", "approval"],
     }).notNull(),
     holderId: text("holder_id").notNull(),
     /** When it lapses, for a frame's lease; null for a held pin. */
@@ -768,7 +769,16 @@ export const sdkResourceBindings = sqliteTable(
     resourceId: text("resource_id").notNull(),
     resourceVersion: integer("resource_version").notNull(),
     alias: text().notNull(),
-    kind: text({ enum: ["store", "workflow"] }).notNull(),
+    kind: text({
+      enum: [
+        "store",
+        "workflow",
+        "operation",
+        "connector",
+        "model",
+        "decision",
+      ],
+    }).notNull(),
     targetId: text("target_id").notNull(),
     schemaHash: text("schema_hash").notNull(),
     manifestHash: text("manifest_hash").notNull(),
@@ -2136,6 +2146,13 @@ export const workflowResources = sqliteTable("workflow_resources", {
    * once it moved, so no start lands on authority that changed under it.
    */
   policyGeneration: integer("policy_generation").notNull().default(1),
+  /**
+   * The parameter revision in force (`workflow_resource_params`): 0 while
+   * no value was ever set. Every edit names the revision it read and
+   * moves it on; a start freezes the values of the revision it read, and
+   * is refused if an edit landed in between (workflow-starts.ts).
+   */
+  configRevision: integer("config_revision").notNull().default(0),
 });
 
 /**
@@ -2265,7 +2282,10 @@ export const triggerResourceVersions = sqliteTable(
  * invoked it (a person, an App, an agent or a trigger, with the App
  * version or trigger version), the person it acts for, the workflow's
  * policy generation it was admitted under and its validated input
- * (canonical JSON, with its SHA-256). Never changed after.
+ * (canonical JSON, with its SHA-256). Never changed after, but for its
+ * input and frozen parameter values, which run retention removes
+ * (workflows/retention.ts): set to null once, with `details_removed_at`,
+ * while every ID, hash and link stays, as the database enforces.
  */
 export const workflowStartReceipts = sqliteTable(
   "workflow_start_receipts",
@@ -2287,9 +2307,29 @@ export const workflowStartReceipts = sqliteTable(
     triggerVersion: integer("trigger_version"),
     principalId: text("principal_id").notNull(),
     authorityGeneration: integer("authority_generation").notNull(),
-    input: text().notNull(),
+    /** The validated input; null once retention removed it. */
+    input: text(),
     inputHash: text("input_hash").notNull(),
+    /**
+     * The parameter values the start froze (canonical JSON of every
+     * parameter's value: set, or its default), and the revision they were
+     * read at; null once retention removed them. Sensitive values
+     * included: a receipt is never listed or audited with them, nor with a
+     * hash of them, which a guess at a short value could be checked
+     * against.
+     */
+    params: text(),
+    paramsRevision: integer("params_revision").notNull().default(0),
+    /**
+     * The bindings the start froze (canonical JSON: each alias, its kind,
+     * contract and fingerprint, and the exact workflow version or approved
+     * target serving it), and their SHA-256.
+     */
+    bindings: text().notNull().default("[]"),
+    bindingsHash: text("bindings_hash").notNull().default(""),
     createdAt: timestamp("created_at").notNull(),
+    /** When retention removed its input and parameter values. */
+    detailsRemovedAt: timestamp("details_removed_at"),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -2301,6 +2341,133 @@ export const workflowStartReceipts = sqliteTable(
     index("workflow_start_receipts_workflow").on(
       table.workflowResourceId,
       table.createdAt
+    ),
+    // The receipts retention has yet to reach, oldest first.
+    index("workflow_start_receipts_due")
+      .on(table.createdAt)
+      .where(sql`${table.detailsRemovedAt} IS NULL`),
+  ]
+);
+
+/**
+ * The host catalog of contracts independent workflows bind besides each
+ * other (spec 13.2; src/workflow-catalog.ts): operation, connector, model
+ * and decision contracts, each published once by an admin and never
+ * changed, so a key always names the same descriptors. `contract` is the
+ * canonical JSON a workflow's validation reads; `fingerprint` its SHA-256.
+ */
+export const workflowCatalogContracts = sqliteTable(
+  "workflow_catalog_contracts",
+  {
+    key: text().primaryKey(),
+    kind: text({
+      enum: ["operation", "connector", "model", "decision"],
+    }).notNull(),
+    contract: text().notNull(),
+    fingerprint: text().notNull(),
+    publishedBy: text("published_by").notNull(),
+    publishedAt: timestamp("published_at").notNull(),
+  }
+);
+
+/**
+ * Which concrete resource serves each catalog binding of an independent
+ * workflow (src/workflow-bindings.ts): approved by an admin for the
+ * declaration they reviewed (its kind, contract key and fingerprint) in
+ * the exact version they reviewed (`reviewed_version`), and serving that
+ * version alone: another version, newer or older, is code nobody reviewed
+ * for it. `target` is the resource (JSON, `WorkflowBindingTarget`). At
+ * most one active approval per version and alias; approving another
+ * revokes it in the same batch. Revoked rows stay.
+ */
+export const workflowBindingApprovals = sqliteTable(
+  "workflow_binding_approvals",
+  {
+    id: text().primaryKey(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    alias: text().notNull(),
+    kind: text({
+      enum: ["operation", "connector", "model", "decision"],
+    }).notNull(),
+    contractId: text("contract_id").notNull(),
+    fingerprint: text().notNull(),
+    target: text().notNull(),
+    reviewedVersion: integer("reviewed_version").notNull(),
+    status: text({ enum: ["active", "revoked"] }).notNull(),
+    approvedBy: text("approved_by").notNull(),
+    approvedAt: timestamp("approved_at").notNull(),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    uniqueIndex("workflow_binding_approvals_active_idx")
+      .on(table.workflowResourceId, table.reviewedVersion, table.alias)
+      .where(sql`${table.status} = 'active'`),
+  ]
+);
+
+/**
+ * Each revision of an independent workflow's parameter values
+ * (src/workflow-params.ts): written once per edit, never changed, numbered
+ * from 1 per workflow; the workflow's `config_revision` names the one in
+ * force. `values` is the canonical JSON of the values set (a parameter
+ * left out has its default), sensitive ones included: they are never
+ * listed, audited or returned, only frozen into a start. A revision no
+ * longer in force has its values removed by run retention once it was
+ * replaced that long ago (workflows/retention.ts): set to null once, with
+ * `values_removed_at`, while the revision, who set it and when stay.
+ */
+export const workflowResourceParams = sqliteTable(
+  "workflow_resource_params",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    values: text(),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+    valuesRemovedAt: timestamp("values_removed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * Which exact version of an independent workflow each App binds, by an
+ * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
+ * version and grants nothing: starting it still takes the App's own
+ * `start` permission. At most one active binding per App and alias;
+ * moving to another version is a new binding. Removed ones stay.
+ */
+export const appWorkflowBindings = sqliteTable(
+  "app_workflow_bindings",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    alias: text().notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    status: text({ enum: ["active", "removed"] }).notNull(),
+    boundBy: text("bound_by").notNull(),
+    boundAt: timestamp("bound_at").notNull(),
+    removedBy: text("removed_by"),
+    removedAt: timestamp("removed_at"),
+  },
+  (table) => [
+    uniqueIndex("app_workflow_bindings_active_idx")
+      .on(table.appId, table.alias)
+      .where(sql`${table.status} = 'active'`),
+    index("app_workflow_bindings_workflow_idx").on(
+      table.workflowResourceId,
+      table.status
     ),
   ]
 );
