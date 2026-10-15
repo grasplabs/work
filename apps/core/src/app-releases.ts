@@ -118,7 +118,8 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   caller's choice, the host's, never App code's.
 
 /** Where an artifact's bytes are, by their SHA-256. */
-const artifactKey = (sha256: string): string => `release-artifacts/${sha256}`;
+export const artifactKey = (sha256: string): string =>
+  `release-artifacts/${sha256}`;
 
 const encoder = new TextEncoder();
 
@@ -484,10 +485,12 @@ const reserveWait = { attempts: 50, ms: 200 };
  * this, so they outlive that deletion); a deletion whose owner stopped
  * (`markTakeoverMs`) is taken over and finished here.
  * `version.seal_busy` if a deletion is still in flight after the wait.
+ * `key.app` is the release's resource: an App, or an independent workflow
+ * whose version seals its build (workflow-builds.ts).
  */
-const reserveArtifacts = async (
+export const reserveArtifacts = async (
   env: Env,
-  key: { app: AppId; version: number },
+  key: { app: string; version: number },
   hashes: readonly string[]
 ): Promise<void> => {
   const unique = [...new Set(hashes)];

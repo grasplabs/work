@@ -79,6 +79,12 @@ export const workflowResourceErrors = defineErrorFamily({
     "You have created as many workflows as one person may, deleted ones included.",
   "workflow.version_corrupt":
     "This version's stored record doesn't match what was published, so it isn't used. Report it to Grasp.",
+  "workflow.build_failed":
+    "The code generated from this definition didn't build, so it wasn't published. Report it to Grasp.",
+  "workflow.build_slow":
+    "Building the code generated from this definition took longer than a publication waits, so nothing was published. Publish it again in a moment.",
+  "workflow.protocol_unsupported":
+    "This version was built for a protocol between the platform and workflow code that this platform doesn't run. Publish it again as a new version.",
   "workflow.start_invalid":
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
   "workflow.start_denied":
@@ -392,6 +398,38 @@ export interface WorkflowBinders {
   appBindings: { id: string; app: string }[];
 }
 
+/**
+ * The version of the protocol between the host and the code generated
+ * from a JSON workflow: what core's run module calls of the sealed SDK
+ * (`openWorkflow`'s definition and engine, `@grasp-os/sdk/open-workflow`).
+ * A version built for another one doesn't run
+ * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
+ */
+export const openWorkflowProtocol = 1;
+
+/**
+ * Something of a definition the code generator doesn't lower yet: its
+ * place, the task it is in, and what it is (a task kind such as
+ * `call:grasp.model`, or a property such as `then`).
+ */
+export interface UnsupportedConstruct {
+  pointer: string;
+  taskId: string | null;
+  feature: string;
+}
+
+/**
+ * What a version runs: code generated from its definition, compiled and
+ * sealed with it, named by `hash`, its executable identity (the same
+ * definition, generator, compiler and SDK always make the same hash); or,
+ * for a definition that uses what the generator doesn't lower yet,
+ * nothing, and what those constructs are. Such a version is published and
+ * can be started, but no run executes it.
+ */
+export type WorkflowVersionBuild =
+  | { executable: true; hash: string }
+  | { executable: false; unsupported: UnsupportedConstruct[] };
+
 /** One published version of a workflow. */
 export interface WorkflowResourceVersion {
   resourceId: string;
@@ -403,8 +441,19 @@ export interface WorkflowResourceVersion {
   contractHash: string;
   manifestHash: string;
   bindings: WorkflowVersionBinding[];
+  build: WorkflowVersionBuild;
   author: string;
   createdAt: string;
+}
+
+/**
+ * A version's portable source, for its builders: the definition exactly as
+ * published and the SDK TypeScript generated from it, by path (nothing
+ * generated for a version that isn't executable). Edited generated code
+ * can't come back: a version is only ever published from a definition.
+ */
+export interface WorkflowVersionSource {
+  files: Record<string, string>;
 }
 
 /** Someone a workflow is shared with. */
@@ -437,6 +486,11 @@ export interface WorkflowResourcesApi {
   versions: (id: string) => Promise<WorkflowResourceVersion[]>;
   /** One version's definition text, exactly as published; for builders. */
   definition: (id: string, version: number) => Promise<string>;
+  /**
+   * One version's portable source: its definition and the code generated
+   * from it, read back from what was sealed; for builders.
+   */
+  source: (id: string, version: number) => Promise<WorkflowVersionSource>;
   share: (id: string, input: unknown) => Promise<void>;
   unshare: (id: string, input: unknown) => Promise<void>;
   members: (id: string) => Promise<WorkflowMember[]>;

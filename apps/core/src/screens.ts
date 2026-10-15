@@ -9,12 +9,14 @@ import {
   kitModules,
   screenRuntime,
   limitErrors,
+  openWorkflowErrors,
   serverFiles,
   workflowFiles,
 } from "@grasp-os/compiler";
 import type {
   AppCodeBuild,
   Diagnostic,
+  OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
   WorkflowBuild,
@@ -89,6 +91,17 @@ type AppFiles = Record<string, string>;
 export const buildKey = async (files: AppFiles): Promise<string> =>
   `${compilerVersion}/${await hashOf(files)}`;
 
+/** What a build of `kind` takes, as its errors past it. */
+const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
+  // An App's server code carries the host's generated modules, held to
+  // their own allowance, so they never count against the App's limits.
+  if (kind === "app") {
+    return appCodeLimitErrors;
+  }
+  // A JSON workflow's generated module: one file, held to its own bound.
+  return kind === "open-workflow" ? openWorkflowErrors : limitErrors;
+};
+
 /** A build refused before it started, or one that failed. */
 interface FailedBuild {
   ok: false;
@@ -108,6 +121,7 @@ const compilerMethods = {
   workflow: "buildWorkflows",
   app: "buildAppCode",
   "app-tests": "buildAppTests",
+  "open-workflow": "buildOpenWorkflow",
 } as const;
 
 /** The kinds of build, by the compiler's method each runs. */
@@ -136,6 +150,12 @@ const isBuildShaped = (value: unknown): boolean =>
  * checker can't make the compiler run on every view, on Cloudflare or
  * on-prem. A stop the load can cause (the wall-clock deadline, a process
  * killed) isn't: the next view builds again.
+ *
+ * Code the host generated (a JSON workflow's module) is never stopped by
+ * its author: the generator, not a builder, writes its types, so no stop
+ * is a verdict on it. Any stop of its build is thrown as it is, never a
+ * failed build and never cached, for its publication to be tried again
+ * (`workflow.build_slow`, workflow-builds.ts).
  */
 const compiled = async (
   runner: PlatformRunner,
@@ -146,7 +166,7 @@ const compiled = async (
     const built = await runner.run("compiler", compilerMethods[kind], [files]);
     return { built, cache: true };
   } catch (error) {
-    if (!(error instanceof PlatformBoundError)) {
+    if (!(error instanceof PlatformBoundError) || kind === "open-workflow") {
       throw error;
     }
     const failed: FailedBuild = {
@@ -191,10 +211,7 @@ const cachedBuild = async <Build>(
   select: (files: AppFiles) => AppFiles
 ): Promise<Build | FailedBuild> => {
   const files = select(appFiles);
-  // An App's server code carries the host's generated modules, held to
-  // their own allowance, so they never count against the App's limits.
-  const tooMuch =
-    kind === "app" ? appCodeLimitErrors(files) : limitErrors(files);
+  const tooMuch = limitsOf(kind)(files);
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
@@ -291,6 +308,24 @@ export const buildWorkflows = async (
   appFiles: AppFiles
 ): Promise<WorkflowBuild> =>
   await cachedBuild<WorkflowBuild>(env, "workflow", appFiles, workflowFiles);
+
+/**
+ * Builds the module the host generated from a JSON workflow
+ * (`.grasp/workflow.ts`, workflow-builds.ts) into one ES module, in the
+ * compiler's isolate, type-checked against its SDK. Cached in R2 like the
+ * others: the same generated module builds the same with the same
+ * compiler, so identical definitions share one build.
+ */
+export const buildOpenWorkflow = async (
+  env: BuildEnv,
+  files: AppFiles
+): Promise<OpenWorkflowBuild> =>
+  await cachedBuild<OpenWorkflowBuild>(
+    env,
+    "open-workflow",
+    files,
+    (all) => all
+  );
 
 /** The details of a `*.build_failed` error: the version (null for a draft), and why. */
 export const buildFailed = (

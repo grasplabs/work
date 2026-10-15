@@ -668,7 +668,10 @@ export const sdkReleaseManifests = sqliteTable(
  * here before it stores their bytes, and an artifact's bytes are deleted
  * only once no row names it, under a deletion mark
  * (`sdk_artifact_deletions`) a seal can't reserve past. A reservation of
- * a seal that never finished is swept with its release's grace.
+ * a seal that never finished is swept with its release's grace. `app_id`
+ * is the release's resource: an App, or an independent workflow whose
+ * version's build is sealed (src/workflow-builds.ts), whose reservations
+ * stay as long as its version, for good.
  */
 export const sdkReleaseArtifacts = sqliteTable(
   "sdk_release_artifacts",
