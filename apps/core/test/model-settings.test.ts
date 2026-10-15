@@ -706,6 +706,7 @@ describe("model settings", { timeout: 60_000 }, () => {
           actor: { type: "person", userId: "someone" },
           deadline: Date.now() + 60_000,
           reconcileAt: Date.now() + 60_000,
+          fair: roomyFair(),
         });
         await ledger.settle(id, {
           by: "usage",
