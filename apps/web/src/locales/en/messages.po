@@ -400,6 +400,10 @@ msgstr "{run}: failed"
 msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 msgstr "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{runs, plural, one {# run} other {# runs}}"
+msgstr "{runs, plural, one {# run} other {# runs}}"
+
 #: src/dashboard/runs-widget.tsx
 msgid "{runs, plural, one {of # run} other {of # runs}}"
 msgstr "{runs, plural, one {of # run} other {of # runs}}"
@@ -2171,10 +2175,6 @@ msgstr "Granted a permission"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp can't be reached right now. Try again in a moment."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
-msgstr "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
-
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp gave its go"
@@ -2846,6 +2846,10 @@ msgstr "Next run: {next}"
 msgid "No apps yet"
 msgstr "No apps yet"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "No budget is set for all calls together"
+msgstr "No budget is set for all calls together"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "No budget is set: model calls aren't limited by cost."
 msgstr "No budget is set: model calls aren't limited by cost."
@@ -2957,6 +2961,10 @@ msgstr "No runs yet."
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"
 msgstr "No teams"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "No workflow has called a model this month."
+msgstr "No workflow has called a model this month."
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No workflow in this engine yet."
@@ -4625,6 +4633,10 @@ msgid "That way of signing in isn't set up here."
 msgstr "That way of signing in isn't set up here."
 
 #: src/routes/_shell.settings.spend.tsx
+msgid "The {top} that spent most; more spent less."
+msgstr "The {top} that spent most; more spent less."
+
+#: src/routes/_shell.settings.spend.tsx
 msgid "The {top} who spent most; more spent less."
 msgstr "The {top} who spent most; more spent less."
 
@@ -5465,6 +5477,10 @@ msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "What counts as success"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "What each workflow's model calls cost this month, most first, and how often it ran."
+msgstr "What each workflow's model calls cost this month, most first, and how often it ran."
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
 msgstr "What every agent has in its context, all the time."
@@ -5720,6 +5736,10 @@ msgstr "Workflows known"
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
 msgstr "Workflows that failed"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Workflows this month"
+msgstr "Workflows this month"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."

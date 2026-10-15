@@ -4,13 +4,14 @@ import type {
   HeldDecision,
   HeldHow,
   HeldRequest,
+  ModelMonthSpend,
   ModelSettings,
   ModelsApi,
 } from "@grasp-os/shared/models";
 import { requireAdmin } from "@grasp-os/shared/roles";
 import { z } from "zod";
 
-import { budgetPeriods, budgetSpend } from "./model-budgets.ts";
+import { budgetPeriods, budgetSpend, monthSpend } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import { microsPerDollar } from "./model-prices.ts";
 import { gatewaySettings } from "./models.ts";
@@ -20,10 +21,11 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 
 // The model gateway's settings, for admins to read: the allowlist and the
-// client's rules (models.ts, model-rules.ts), and this month's spend
-// against each budget (model-budgets.ts), and each App's model binding
-// with its own caps and what it spent (resource-bindings.ts). The settings are deployment
-// config that the console sets, so nothing here changes them. Reads aren't
+// client's rules (models.ts, model-rules.ts), this month's spend against
+// each budget, and this month's spend budget or not (model-budgets.ts),
+// and each App's model binding with its own caps and what it spent
+// (resource-bindings.ts). The settings are deployment config that the
+// console sets, so nothing here changes them. Reads aren't
 // audited: the rules are the console's to record, and each call's cost is
 // in the audit log already, with its model call.
 //
@@ -81,6 +83,13 @@ export class ModelsRpc extends CoreRpcTarget implements ModelsApi {
         held,
         bindings,
       };
+    });
+  }
+
+  async spend(): Promise<ModelMonthSpend> {
+    return await withPerson(this.#check, async (person) => {
+      requireAdmin(person);
+      return await monthSpend(this.#env, budgetPeriods(this.#env).month);
     });
   }
 
