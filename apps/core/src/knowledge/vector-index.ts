@@ -138,6 +138,12 @@ export const maxSourceVersionBytes = 256;
 export const maxTopK = 100;
 /** A filter's compact JSON must be shorter than this. */
 const maxFilterBytes = 2048;
+/**
+ * Vectorize documents no limit on an `$in` list's length, only on the
+ * filter's size. Staying at 100 keeps an undocumented one from turning a
+ * grant set into a refused search; few more short keys fit in a filter.
+ */
+export const maxPolicyKeysPerFilter = 100;
 const maxWriteBatch = 1000;
 
 /** Policy-key batches one search may run before it reports itself incomplete. */
@@ -183,7 +189,10 @@ export const policyFilters = (
   let batch: string[] = [];
   for (const key of keys) {
     const grown = [...batch, key];
-    if (bytesOf(JSON.stringify(filterOf(grown))) < maxFilterBytes) {
+    if (
+      grown.length <= maxPolicyKeysPerFilter &&
+      bytesOf(JSON.stringify(filterOf(grown))) < maxFilterBytes
+    ) {
       batch = grown;
       continue;
     }

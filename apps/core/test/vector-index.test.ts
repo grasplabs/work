@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   maxPolicyBatches,
   maxPolicyKeyBytes,
+  maxPolicyKeysPerFilter,
   policyFilters,
   unsupportedVectorIndex,
   vectorIndexOf,
@@ -407,6 +408,25 @@ describe("a profile with no vector index", () => {
 });
 
 describe("policy filters", () => {
+  it("hold at most a bounded number of short keys each", () => {
+    const keys = Array.from({ length: 150 }, (_, n) => `p${n}`);
+
+    const { filters, complete } = policyFilters(keys);
+
+    expect(complete).toBeTruthy();
+    expect(filters).toHaveLength(2);
+    for (const filter of filters) {
+      const condition = filter.p;
+      const listed =
+        condition !== null &&
+        typeof condition === "object" &&
+        "$in" in condition
+          ? (condition.$in ?? [])
+          : [];
+      expect(listed.length).toBeLessThanOrEqual(maxPolicyKeysPerFilter);
+    }
+  });
+
   it("cover each key once, in filters the provider accepts", () => {
     const keys = Array.from({ length: 120 }, (_, n) => `policy:${n}`);
 
