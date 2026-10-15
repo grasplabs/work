@@ -57,7 +57,9 @@ export const retryingOn = async <T>(
       connected = true;
       return await run(current);
     },
-    startRetryMs,
+    // Jittered, so frames whose calls failed together, as when core
+    // restarts, don't all ask again at the same moment.
+    startRetryMs.map((ms) => ms / 2 + (Math.random() * ms) / 2),
     (failure) => connected && open() && isTransient(failure)
   );
 };

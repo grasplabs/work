@@ -53,12 +53,15 @@ export interface Joined {
 export const tabLink = (core: CoreConnection, onEnded: Ended): Joined => {
   const left = new AbortController();
   const stopListening = core.onEnded(onEnded);
-  const session = async (): Promise<Session> => await core.session(left.signal);
+  const session = async (): Promise<Session> =>
+    await core.session(left.signal, { patient: true });
   return {
     link: {
       session,
       person: async () => {
-        const { userId } = await core.person(left.signal);
+        const { userId } = await core.person(left.signal, {
+          patient: true,
+        });
         return userId;
       },
       // Ending closes the connection, so a session is refused from then.

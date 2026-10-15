@@ -91,6 +91,16 @@ const onPageBack = (back: () => void): void => {
   window.addEventListener("online", back);
 };
 
+/**
+ * How a caller waits for the connection. A person waiting (the shell's
+ * calls, which give up in a few seconds) cuts a reconnect pause short; an
+ * App frame is patient: it waits for the next attempt the backoff makes,
+ * so however often a screen asks during an outage, it never adds one.
+ */
+export interface Waiting {
+  patient?: boolean;
+}
+
 /** What a tab's connection is made with. */
 export interface CoreConnectionOptions {
   /**
@@ -113,8 +123,10 @@ export interface CoreConnectionOptions {
  * own, screens/core-link.ts.) It opens when first used (a guest's page
  * never uses it) and connects again whenever it drops, for as long as it
  * takes, after a pause of up to 1 to 30 s (`reconnectDelay`), cut short
- * when the page comes back to the tab or online, or someone asks for it
- * (a person trying again need not wait out the pause). Whoever asks for it
+ * when the page comes back to the tab or online, or a person asks for it
+ * (trying again need not wait out the pause; an App frame never cuts it,
+ * `Waiting`). Once per pause at most: an attempt starts the next, longer
+ * one. Whoever asks for it
  * meanwhile waits for the next connection, in the order they asked: the
  * shell for a few seconds per call (`deadline()`), App frames for as long
  * as it takes. A call already on its way when the connection drops fails,
@@ -174,7 +186,7 @@ export class CoreConnection {
    * then refused with its reason.
    */
   async api(signal = deadline()): Promise<RpcStub<CoreApi>> {
-    const { api } = await this.#current(signal);
+    const { api } = await this.#current(signal, {});
     return api;
   }
 
@@ -184,8 +196,8 @@ export class CoreConnection {
    * the connection that dropped. Refused as core refuses it when nobody is
    * signed in.
    */
-  async session(signal = deadline()): Promise<Session> {
-    const { session } = await this.#signedIn(signal);
+  async session(signal = deadline(), waiting: Waiting = {}): Promise<Session> {
+    const { session } = await this.#signedIn(signal, waiting);
     return session;
   }
 
@@ -194,8 +206,8 @@ export class CoreConnection {
    * the person every connection it hands out is signed in as. Refused when
    * nobody is signed in.
    */
-  async person(signal = deadline()): Promise<Identity> {
-    const { person } = await this.#signedIn(signal);
+  async person(signal = deadline(), waiting: Waiting = {}): Promise<Identity> {
+    const { person } = await this.#signedIn(signal, waiting);
     return person;
   }
 
@@ -244,6 +256,9 @@ export class CoreConnection {
         failures.push(error);
       }
     }
+    // The open chat was this person's: whoever signs in next starts
+    // without it, however the session ended.
+    setActiveChat(undefined);
     this.#onSessionEnded();
     if (failures.length > 0) {
       throw new AggregateError(failures, "Stopping a frame failed.");
@@ -266,9 +281,10 @@ export class CoreConnection {
 
   /** The connection, with someone signed in on it, or refused. */
   async #signedIn(
-    signal: AbortSignal
+    signal: AbortSignal,
+    waiting: Waiting
   ): Promise<{ session: Session; person: Identity }> {
-    const { session, person } = await this.#current(signal);
+    const { session, person } = await this.#current(signal, waiting);
     if (session === undefined || person === undefined) {
       throw authErrors.create("auth.unauthenticated");
     }
@@ -280,13 +296,17 @@ export class CoreConnection {
    * again once it is there, so what gave up in the same moment isn't sent
    * either.
    */
-  async #current(signal: AbortSignal): Promise<Connected> {
+  async #current(
+    signal: AbortSignal,
+    { patient = false }: Waiting
+  ): Promise<Connected> {
     this.#closing.signal.throwIfAborted();
-    // Someone wants core now, such as a person trying again: a reconnect
-    // waiting out its pause tries at once. Only a pause is cut short, so
-    // however many ask, one attempt is made at a time, and with nobody
-    // asking the pauses stand.
-    this.#wake?.();
+    // A person wants core now, such as trying again: a reconnect waiting
+    // out its pause tries at once. Only a pause is cut short, so however
+    // many ask, one attempt is made at a time. App frames never cut it.
+    if (!patient) {
+      this.#wake?.();
+    }
     // One wait that either ends, so a call that gave up during an outage
     // leaves nothing waiting on the connection behind it.
     const connected = await unlessAborted(
@@ -509,7 +529,5 @@ export const signOut = async (core: CoreConnection): Promise<void> => {
     headers: { "content-type": "application/json" },
     body: "{}",
   });
-  // The open chat was this person's: whoever signs in next starts without it.
-  setActiveChat(undefined);
   core.end("signed-out");
 };
