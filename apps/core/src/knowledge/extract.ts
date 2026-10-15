@@ -56,7 +56,11 @@ import type ExtractorWorker from "./extractor/worker.ts";
 //   platform-sandbox.ts), the extractor handed over a chunk at a time as
 //   the compiler is, and read the same way: the supervisor kills
 //   its process past `extractorCpuMs` of CPU time, its memory cap or
-//   `extractorWallMs`, and the upload fails as `upload.too_complex`.
+//   `extractorWallMs`. Past its CPU time or memory the upload fails as
+//   `upload.too_complex`; past its wall-clock time, or with its process
+//   killed from outside, which load can cause, the extractor is
+//   unavailable and the extraction is tried again (`PlatformBoundError`'s
+//   `own`).
 //   Chosen over bounding it here (a size limit doesn't bound how long
 //   pdf.js may spin on a small file, and workerd has no worker threads)
 //   and over a mechanism of its own: the session already bounds an
@@ -257,7 +261,9 @@ const extractedOnHost = async (
       }
     );
   } catch (error) {
-    if (error instanceof PlatformBoundError) {
+    // The file's own stop fails it for good; one the load can cause (its
+    // deadline, its process killed) is tried again, as a busy sandbox is.
+    if (error instanceof PlatformBoundError && error.own) {
       throw uploadErrors.create("upload.too_complex");
     }
     throw new ExtractorUnavailableError({

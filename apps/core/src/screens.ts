@@ -30,12 +30,8 @@ import {
 import { sharedRun } from "@grasp-os/shared/shared-runs";
 import type { SharedRun } from "@grasp-os/shared/shared-runs";
 
-import {
-  PlatformBoundError,
-  platformCallMs,
-  platformRunner,
-} from "./platform-sandbox.ts";
-import type { PlatformEnv, PlatformRun } from "./platform-sandbox.ts";
+import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
+import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
 import type { FrameCode } from "./screen-frame.ts";
 
 /**
@@ -142,14 +138,12 @@ const isBuildShaped = (value: unknown): boolean =>
  * killed) isn't: the next view builds again.
  */
 const compiled = async (
-  run: PlatformRun,
+  runner: PlatformRunner,
   kind: BuildKind,
   files: AppFiles
 ): Promise<{ built: unknown; cache: boolean }> => {
   try {
-    const built = await run("compiler", compilerMethods[kind], [
-      { value: files },
-    ]);
+    const built = await runner.run("compiler", compilerMethods[kind], [files]);
     return { built, cache: true };
   } catch (error) {
     if (!(error instanceof PlatformBoundError)) {
@@ -210,7 +204,7 @@ const cachedBuild = async <Build>(
   // (platform-sandbox.ts). Where nothing bounds it, refused before the
   // cache is read: a deployment where nothing compiles has nothing cached
   // to serve.
-  const run = platformRunner(env);
+  const runner = platformRunner(env);
   const cacheKey = `${kind}-builds/${await buildKey(files)}.json`;
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
@@ -221,9 +215,9 @@ const cachedBuild = async <Build>(
   const built = await sharedRun(
     buildsRunning,
     cacheKey,
-    platformCallMs(env, "compiler"),
+    runner.callMs("compiler"),
     async () => {
-      const answer = await compiled(run, kind, files);
+      const answer = await compiled(runner, kind, files);
       if (!isBuild(answer.built)) {
         throw new TypeError(
           "The compiler answered something else than a build."

@@ -4,8 +4,8 @@ import type { PackageLimits, PackageTarball } from "@grasp-os/shared/packages";
 
 import { PlatformBoundError, platformRunner } from "../platform-sandbox.ts";
 import type { PlatformEnv } from "../platform-sandbox.ts";
-import { functionCapability, inOrderReader } from "../sandbox-session.ts";
-import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
+import { inOrderReader } from "../sandbox-session.ts";
+import { SandboxUnavailableError } from "../sandboxed.ts";
 
 // The package builder, wherever it runs (platform-sandbox.ts): on
 // Cloudflare in a Dynamic Worker of core's own, whose CPU the runtime
@@ -14,8 +14,9 @@ import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 // the artifact are larger than a session's message, so the builder reads
 // the tarballs a chunk at a time, in order and once (`inOrderReader`), and
 // writes the artifact's files back a chunk at a time, which core takes up
-// to the artifact's limit and no further. It does the same in core's
-// Loader, so both run one code path and are judged the same.
+// to the artifact's limit and no further. In core's Loader it is handed
+// them as values (`packageBuilder` says why); either way its stops are
+// judged the same (`builderFailure`).
 
 /** What the builder does for core: what resolve.ts and build.ts call. */
 export interface PackageBuilderRun {
@@ -37,8 +38,8 @@ const handedOver = (packages: readonly PackageTarball[]) => ({
     ...header,
     size: tarball.byteLength,
   })),
-  read: functionCapability(
-    inOrderReader(packages.map(({ key, tarball }) => [key, tarball] as const))
+  read: inOrderReader(
+    packages.map(({ key, tarball }) => [key, tarball] as const)
   ),
 });
 
@@ -136,41 +137,46 @@ export const builderFailure = (error: unknown, refusal: string): unknown => {
 };
 
 /**
- * Refuses, with `SandboxUnavailableError`, where nothing bounds the
- * builder: off Cloudflare without `SANDBOX_HOST`, unless the deployment
- * accepts that nothing does. Called before any tarball is fetched.
- */
-export const requireBuilderBound = (env: PackageBuilderEnv): void => {
-  sessionHost(env);
-};
-
-/**
  * The package builder for one resolve or build, wherever the runner runs
- * it (platform-sandbox.ts): the same methods either way, the tarballs
- * read and the artifact written back a chunk at a time. Each call throws
+ * it (platform-sandbox.ts). Throws `SandboxUnavailableError` at once where
+ * nothing bounds it: made before any tarball is fetched. Each call throws
  * {@link PlatformBoundError} when the builder was stopped at its bounds
  * (`own` when the packages reach it whatever the load),
  * `SandboxUnavailableError` when the sandbox had no place for it, and
  * what the builder threw otherwise.
+ *
+ * On the sandbox host the tarballs and the artifact go a chunk at a time,
+ * the builder calling back into core for each. In core's Loader they go
+ * as values in the call, as they always did: the builder's isolate has
+ * `subRequests: 0`, and whether Cloudflare counts a Dynamic Worker's
+ * calls to a function it was handed as subrequests isn't documented nor
+ * checkable without a Cloudflare account to run on, so nothing there
+ * depends on it.
  */
 export const packageBuilder = (env: PackageBuilderEnv): PackageBuilderRun => {
-  const run = platformRunner(env);
+  const { inCore, run } = platformRunner(env);
   return {
     inspect: async (limits, packages) => {
+      if (inCore) {
+        return await run("package-builder", "inspect", [{ limits, packages }]);
+      }
       const { headers, read } = handedOver(packages);
       return await run("package-builder", "inspectRead", [
-        { value: limits },
-        { value: headers },
-        { capability: read },
+        limits,
+        headers,
+        read,
       ]);
     },
     build: async (request) => {
+      if (inCore) {
+        return await run("package-builder", "build", [request]);
+      }
       const { headers, read } = handedOver(request.packages);
       const writer = artifactWriter(request.limits.artifactBytes);
       const answer = await run("package-builder", "buildRead", [
-        { value: { ...request, packages: headers } },
-        { capability: read },
-        { capability: functionCapability(writer.write) },
+        { ...request, packages: headers },
+        read,
+        writer.write,
       ]);
       return withWrittenFiles(answer, writer.files());
     },

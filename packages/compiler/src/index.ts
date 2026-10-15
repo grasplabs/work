@@ -169,6 +169,25 @@ export const isolateSettings = {
   limits: { cpuMs: 20_000, subRequests: 0 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
+/** The compiler's isolate as a Loader takes it, its code read from the assets. */
+const compilerWorker = async (
+  assets: Fetcher
+): Promise<WorkerLoaderWorkerCode> => {
+  const [source, kitJson] = await Promise.all([
+    readCompilerFile(assets, compilerAssets.source, "javascript"),
+    readCompilerFile(assets, compilerAssets.kit, "json"),
+  ]);
+  const kit: unknown = JSON.parse(kitJson);
+  return {
+    ...isolateSettings,
+    mainModule: "compiler.js",
+    modules: {
+      "compiler.js": source,
+      [kitModule]: { json: kit },
+    },
+  };
+};
+
 /**
  * The compiler, in one isolate per release that every build shares, with
  * its code read from core's static assets. Kept warm, a build doesn't load
@@ -178,29 +197,28 @@ export const isolateSettings = {
  * (`isolateSettings`). App code itself never runs here. The name holds
  * only the release's compiler version: workerd keeps a named isolate for
  * as long as the process runs, so a name per build would keep one
- * compiler for every build ever made.
+ * compiler for every build ever made. Being shared, its limits are every
+ * build's together: a stop at them may be another build's doing
+ * (`loadScreenCompiler`).
  */
 export const startScreenCompiler = (
   loader: WorkerLoader,
   assets: Fetcher
 ): Service<ScreenCompiler> =>
   loader
-    .get(`compiler:${version}`, async () => {
-      const [source, kitJson] = await Promise.all([
-        readCompilerFile(assets, compilerAssets.source, "javascript"),
-        readCompilerFile(assets, compilerAssets.kit, "json"),
-      ]);
-      const kit: unknown = JSON.parse(kitJson);
-      return {
-        ...isolateSettings,
-        mainModule: "compiler.js",
-        modules: {
-          "compiler.js": source,
-          [kitModule]: { json: kit },
-        },
-      };
-    })
+    .get(`compiler:${version}`, async () => await compilerWorker(assets))
     .getEntrypoint<ScreenCompiler>();
+
+/**
+ * The compiler in a fresh isolate of its own, for one build: what a stop
+ * at its limits says is that build's alone, as it is in the shared one
+ * only when nothing else compiled beside it.
+ */
+export const loadScreenCompiler = async (
+  loader: WorkerLoader,
+  assets: Fetcher
+): Promise<Service<ScreenCompiler>> =>
+  loader.load(await compilerWorker(assets)).getEntrypoint<ScreenCompiler>();
 
 /**
  * The screen compiler's or the package builder's code as bytes, for the
@@ -235,7 +253,7 @@ const platformCodeReading = new WeakMap<
 >();
 
 /** The longest a read of platform code from the assets may take. */
-const platformCodeReadMs = 10_000;
+export const platformCodeReadMs = 10_000;
 
 const memoisedCode = async (
   assets: Fetcher,

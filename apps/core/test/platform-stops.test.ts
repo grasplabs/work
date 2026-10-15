@@ -1,8 +1,13 @@
+import { isExpectedError } from "@grasp-os/shared/errors";
 import type { Role } from "@grasp-os/shared/roles";
 import { isolateBase } from "@grasp-os/shared/runtime";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import {
+  ExtractorUnavailableError,
+  localExtractor,
+} from "../src/knowledge/extract.ts";
 import { resolveDependencies } from "../src/packages/resolve.ts";
 import {
   sandboxCallIdHeader,
@@ -127,6 +132,51 @@ const twoBuilds = async (buildEnv: Parameters<typeof buildScreens>[0]) => {
 
 const stoppedOnce = "The compiler was stopped before it finished:";
 
+/** A compiler's `build` body that throws `message`. */
+const throwing = (message: string): string =>
+  `throw new Error(${JSON.stringify(message)});`;
+
+/** An isolate whose compiler's `build` runs `body`. */
+const compilerOf = (body: string): WorkerLoaderWorkerCode => ({
+  ...isolateBase,
+  mainModule: "compiler.js",
+  modules: {
+    "compiler.js": `import { WorkerEntrypoint } from "cloudflare:workers";
+export default class extends WorkerEntrypoint {
+  async build() { ${body} }
+}`,
+  },
+});
+
+/**
+ * Cloudflare's Loader as the compiler sees it: its shared, warm isolate
+ * (`get`) and a fresh one of a build's own (`load`), each running its
+ * body, and counted. Plain workerd enforces no limits: a body that fails
+ * as the runtime fails an isolate it stopped stands in for one.
+ */
+const compilers = (bodies: { shared: string; fresh: string }) => {
+  const counts = { shared: 0, fresh: 0 };
+  const loader: WorkerLoader = {
+    get: () => {
+      counts.shared += 1;
+      return env.LOADER.get(`shared-${unique()}`, () =>
+        compilerOf(bodies.shared)
+      );
+    },
+    load: () => {
+      counts.fresh += 1;
+      return env.LOADER.load(compilerOf(bodies.fresh));
+    },
+  };
+  return { loader, compiles: () => ({ ...counts }) };
+};
+
+/** Core's env on Cloudflare, with `loader` and `files` as its own. */
+const onCloudflare = (
+  loader: WorkerLoader,
+  files: ReturnType<typeof countingFiles>["files"]
+) => ({ ...env, LOADER: loader, RUNTIME_PROFILE: "cloudflare", FILES: files });
+
 describe("a screen the sandbox stops the compiler on", () => {
   it("is kept as failed when the screen stopped it itself, and never compiled again", async () => {
     for (const verdict of ["cpu", "memory", "refused"]) {
@@ -180,42 +230,49 @@ describe("a screen the sandbox stops the compiler on", () => {
     }
   });
 
-  it("is kept as failed on Cloudflare too, where the runtime stops the compiler's isolate at its CPU limit", async () => {
-    let compiles = 0;
-    // Plain workerd enforces no CPU limit: an isolate that fails each build
-    // as the runtime fails one it stopped stands in for it.
-    const overCpu: WorkerLoader = {
-      get: () => {
-        compiles += 1;
-        return env.LOADER.get(`over-cpu-${unique()}`, () => ({
-          ...isolateBase,
-          mainModule: "compiler.js",
-          modules: {
-            "compiler.js": `import { WorkerEntrypoint } from "cloudflare:workers";
-export default class extends WorkerEntrypoint {
-  async build() { throw new Error("Worker exceeded CPU time limit."); }
-}`,
-          },
-        }));
-      },
-      load: () => {
-        throw new Error("The compiler is kept warm, never loaded per build.");
-      },
-    };
+  it("is kept as failed on Cloudflare only once a fresh isolate of its own stopped it too", async () => {
+    const { loader, compiles } = compilers({
+      shared: throwing("Worker exceeded memory limit."),
+      fresh: throwing("Worker exceeded CPU time limit."),
+    });
     const { files, kept } = countingFiles();
 
-    const ended = await twoBuilds({
-      ...env,
-      LOADER: overCpu,
-      RUNTIME_PROFILE: "cloudflare",
-      FILES: files,
-    });
+    const ended = await twoBuilds(onCloudflare(loader, files));
 
-    expect({ ended, compiles, kept: kept() }).toStrictEqual({
+    expect({ ended, compiles: compiles(), kept: kept() }).toStrictEqual({
       ended: [stoppedOnce, stoppedOnce],
-      compiles: 1,
+      compiles: { shared: 1, fresh: 1 },
       kept: 1,
     });
+  });
+
+  it("is built in a fresh isolate on Cloudflare when the shared one was stopped, as another App's build beside it can do", async () => {
+    const { loader, compiles } = compilers({
+      shared: throwing("Worker exceeded memory limit."),
+      fresh: "return { ok: true, modules: {}, screens: {}, css: '' };",
+    });
+    const { files, kept } = countingFiles();
+
+    const ended = await twoBuilds(onCloudflare(loader, files));
+
+    expect({ ended, compiles: compiles(), kept: kept() }).toStrictEqual({
+      ended: ["built", "built"],
+      compiles: { shared: 1, fresh: 1 },
+      kept: 1,
+    });
+  });
+
+  it("isn't taken on Cloudflare for stopped by a message that only names a limit", async () => {
+    const { loader } = compilers({
+      shared: throwing("Can't read src/exceeded memory limit.ts"),
+      fresh: throwing("Never loaded: nothing stopped the shared one."),
+    });
+    const { files, kept } = countingFiles();
+
+    await expect(
+      buildScreens(onCloudflare(loader, files), freshScreen())
+    ).rejects.toThrow("Can't read src/exceeded memory limit.ts");
+    expect(kept()).toBe(0);
   });
 
   it("is refused as no place in the sandbox, before anything ran, while builds hold their share", async () => {
@@ -278,5 +335,75 @@ describe("packages the sandbox stops the builder on", () => {
     await expect(
       resolveDependencies({ ...env, SANDBOX_HOST: host }, identity, intent)
     ).rejects.toBeInstanceOf(SandboxUnavailableError);
+  });
+
+  it("are handed to the builder as values on Cloudflare, never read back through core", async () => {
+    // A builder in core's Loader whose isolate may not call back (its
+    // `subRequests: 0`, if Cloudflare counts calls to a function it was
+    // handed): reading through core fails as Cloudflare would fail it,
+    // and taking the values is stopped at the isolate's memory limit.
+    const builderIsolate = `import { WorkerEntrypoint } from "cloudflare:workers";
+export default class extends WorkerEntrypoint {
+  async inspect() { throw new Error("Worker exceeded memory limit."); }
+  async inspectRead() { throw new Error("Too many subrequests."); }
+}`;
+    const loader: WorkerLoader = {
+      get: () => {
+        throw new Error("The builder is never shared.");
+      },
+      load: () =>
+        env.LOADER.load({
+          ...isolateBase,
+          mainModule: "package-builder.js",
+          modules: { "package-builder.js": builderIsolate },
+        }),
+    };
+    const { identity, intent } = await builderAsking();
+
+    const outcome = await failure(
+      resolveDependencies(
+        { ...env, LOADER: loader, RUNTIME_PROFILE: "cloudflare" },
+        identity,
+        intent
+      )
+    );
+
+    expect(outcome.code).toBe("package.refused");
+  });
+});
+
+/** How an extraction on a host that stops it as `verdict` ended. */
+const extractionStopped = async (verdict: string) => {
+  const { host } = sandboxStopping({ verdict });
+  try {
+    await localExtractor({ ...env, SANDBOX_HOST: host })({
+      name: "policy.pdf",
+      mediaType: "application/pdf",
+      bytes: new TextEncoder().encode("%PDF-1.7"),
+    });
+  } catch (error) {
+    if (error instanceof ExtractorUnavailableError) {
+      return { unavailable: true, busy: error.busy };
+    }
+    return { code: isExpectedError(error) ? error.code : String(error) };
+  }
+  return "extracted";
+};
+
+describe("an upload the sandbox stops the extractor on", () => {
+  it("fails for good when it stopped the extractor itself", async () => {
+    await expect(extractionStopped("memory")).resolves.toMatchObject({
+      code: "upload.too_complex",
+    });
+  });
+
+  it("is tried again when a crash or the deadline cut the extractor off", async () => {
+    for (const verdict of ["crashed", "deadline"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one verdict at a time
+      await expect(extractionStopped(verdict)).resolves.toStrictEqual({
+        unavailable: true,
+        busy: false,
+      });
+    }
   });
 });

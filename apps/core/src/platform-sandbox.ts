@@ -1,19 +1,21 @@
 import {
+  loadScreenCompiler,
   packageBuilderCode,
+  platformCodeReadMs,
   screenCompilerCode,
   startPackageBuilder,
   startScreenCompiler,
 } from "@grasp-os/compiler";
 import type { PlatformCode } from "@grasp-os/compiler";
 
-import { runInSession, sandboxVerdictOf } from "./sandbox-session.ts";
-import type { SessionArgument } from "./sandbox-session.ts";
 import {
-  callStub,
-  SandboxUnavailableError,
-  sandboxWaitMs,
-  sessionHost,
-} from "./sandboxed.ts";
+  functionCapability,
+  runInSession,
+  sandboxVerdictOf,
+  sessionCallMs,
+} from "./sandbox-session.ts";
+import type { SessionArgument } from "./sandbox-session.ts";
+import { callStub, SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
 
 // The release's platform code (the screen compiler, the package builder,
 // the file extractor), which reads hostile input (an App's source; npm
@@ -38,13 +40,23 @@ import {
 //   screen pinned as failed until the next release, a package refused.
 //   Only `cpu`, `memory` and `refused` are the input's own, whatever the
 //   load (`PlatformBoundError.own`); a `deadline` (waits for the shared
-//   machine count) or a `crashed` process (the shared cgroup or the kernel
-//   can kill it under load) is never kept as the input's verdict.
+//   machine count) or a `crashed` process (the kernel's OOM killer, which
+//   a full cgroup sends to any process) is never kept as the input's
+//   verdict. A process that ended itself (V8 at its heap limit) is
+//   `memory`: the supervisor tells the two apart by how it died.
+// - On Cloudflare every App's screens compile in one warm, shared
+//   isolate, whose limits are theirs together: one App's heavy builds
+//   could get another's screen kept as failed. A stop there is tried once
+//   more in a fresh isolate of the build's own, and only that is kept.
 // - The input is made to stop the same way on Cloudflare and on-prem but
 //   is judged differently, so one path recompiles a screen on every view
 //   at 20 s of CPU, or refuses a package the other accepts. Both run
-//   through one runner (`platformRunner`), the same methods with the same
-//   arguments, whose stops map to the same verdicts.
+//   through one runner (`platformRunner`), whose stops map to the same
+//   verdicts.
+// - One shared build multiplies under load: every request waiting on one
+//   that was cancelled starts its own. Waiters share one replacement
+//   (`sharedRun`), and wait as long as the call's own bounds allow
+//   (`PlatformRunner.callMs`).
 // - Builds take every sandbox process, starving App code (or App code
 //   starves builds). Each kind runs as one owner of its own
 //   (`platform:builder`, `platform:extractor`), held to the supervisor's
@@ -120,10 +132,18 @@ export const platformWallMs = (
 };
 
 /**
- * How the runtime says it stopped a Loader isolate over its limits:
- * "Worker exceeded CPU time limit." or "… memory limit."
+ * How the runtime says it stopped a Loader isolate over its limits, and
+ * nothing else: exactly "Worker exceeded CPU time limit." or "Worker
+ * exceeded memory limit.", never a message that only mentions them (a
+ * file a hostile tarball names, a path a compiler error quotes).
  */
-const overLimit = /exceeded (?:its )?(?<limit>CPU|memory)/iu;
+const overLimit = /^Worker exceeded (?<limit>CPU time|memory) limit\.?$/u;
+
+/** The verdict for each limit the runtime names. */
+const limitVerdicts = new Map([
+  ["CPU time", "cpu"],
+  ["memory", "memory"],
+]);
 
 /**
  * What `error`, which ended a call of platform code, says of how it was
@@ -136,7 +156,7 @@ const overLimit = /exceeded (?:its )?(?<limit>CPU|memory)/iu;
 const stopOf = (error: unknown, inCore: boolean): unknown => {
   const message = error instanceof Error ? error.message : String(error);
   const limit = inCore ? overLimit.exec(message)?.groups?.limit : undefined;
-  const verdict = limit?.toLowerCase() ?? sandboxVerdictOf(error);
+  const verdict = limitVerdicts.get(limit ?? "") ?? sandboxVerdictOf(error);
   if (
     verdict !== undefined &&
     (ownVerdicts.has(verdict) || loadVerdicts.has(verdict))
@@ -228,18 +248,6 @@ const programWallMs: Record<PlatformProgram, number> = {
   "package-builder": 60_000,
 };
 
-/** How much longer than its wall-clock time a call may take, waits included. */
-const callMarginMs = sandboxWaitMs + 2000;
-
-/**
- * The longest one call of `program` may take, from asking for a place to
- * its answer: what something waiting on it waits at most.
- */
-export const platformCallMs = (
-  env: Pick<Env, "SANDBOX_DEADLINE_MS">,
-  program: PlatformProgram
-): number => platformWallMs(env, programWallMs[program]) + callMarginMs;
-
 /** What a runner reads from core's env. */
 export type PlatformEnv = Pick<
   Env,
@@ -251,50 +259,90 @@ export type PlatformEnv = Pick<
   | "SANDBOX_IN_PROCESS"
 >;
 
-/**
- * Runs `method` of `program` with `args`, wherever the runner runs it.
- * Throws as {@link runPlatformCode} does, wherever that is.
- */
-export type PlatformRun = (
-  program: PlatformProgram,
-  method: string,
-  args: readonly SessionArgument[]
-) => Promise<unknown>;
+/** The release's platform code, run where it is bounded. */
+export interface PlatformRunner {
+  /**
+   * Whether it runs in core's own Loader (Cloudflare), not on the sandbox
+   * host: where a caller hands values rather than readers (builder.ts).
+   */
+  readonly inCore: boolean;
+  /**
+   * What `method` of `program` answers for `args`: values, and functions
+   * the program may call back. Throws as {@link runPlatformCode} does,
+   * wherever it runs.
+   */
+  readonly run: (
+    program: PlatformProgram,
+    method: string,
+    args: readonly unknown[]
+  ) => Promise<unknown>;
+  /**
+   * The longest one call of `program` may take here, from reading its code
+   * to its end, every bound and wait included: how long something waiting
+   * on another request's call waits before taking it for abandoned.
+   */
+  readonly callMs: (program: PlatformProgram) => number;
+}
 
-/** `args` as a Loader isolate takes them: values, and functions as RPC stubs. */
-const loaderArgs = (args: readonly SessionArgument[]): unknown[] =>
-  args.map((arg) => {
-    if ("value" in arg) {
-      return arg.value;
-    }
-    const call: unknown = Reflect.get(arg.capability.target, "call");
-    if (!arg.capability.function || typeof call !== "function") {
-      throw new TypeError(
-        "Platform code takes only functions as capabilities."
+/**
+ * What `method` of `entrypoint` answers for `args` in a Loader isolate,
+ * a stop at the isolate's limits thrown as {@link PlatformBoundError}.
+ */
+const loaderCall = async (
+  entrypoint: unknown,
+  method: string,
+  args: readonly unknown[]
+): Promise<unknown> =>
+  await boundedInCore(async () => await callStub(entrypoint, method, args));
+
+/**
+ * The runner in core's own Loader. The compiler runs warm in its named
+ * isolate, which every App's builds share, so its limits are theirs
+ * together: one heavy build beside another can stop both. A stop there is
+ * tried once more in a fresh isolate of the build's own
+ * (`loadScreenCompiler`), whose stop is the build's alone, and only that
+ * is answered: a build is never kept as failed for what another did. The
+ * builder runs in a fresh isolate per runner, so nothing one App's
+ * packages leave in memory is there for the next, and its stops are its
+ * own already.
+ */
+const inCore = (env: PlatformEnv): PlatformRunner => {
+  let builder: ReturnType<typeof startPackageBuilder> | undefined;
+  const compile = async (
+    method: string,
+    args: readonly unknown[]
+  ): Promise<unknown> => {
+    try {
+      return await loaderCall(
+        startScreenCompiler(env.LOADER, env.ASSETS),
+        method,
+        args
+      );
+    } catch (error) {
+      if (!(error instanceof PlatformBoundError)) {
+        throw error;
+      }
+      return await loaderCall(
+        await loadScreenCompiler(env.LOADER, env.ASSETS),
+        method,
+        args
       );
     }
-    return call;
-  });
-
-/**
- * The runner in core's own Loader: the compiler warm in its named isolate,
- * the builder in a fresh one per runner, so nothing one App's packages
- * leave in memory is there for the next.
- */
-const inCore = (env: PlatformEnv): PlatformRun => {
-  let builder: ReturnType<typeof startPackageBuilder> | undefined;
-  const entrypointOf = async (program: PlatformProgram): Promise<unknown> => {
-    if (program === "compiler") {
-      return startScreenCompiler(env.LOADER, env.ASSETS);
-    }
-    builder ??= startPackageBuilder(env.LOADER, env.ASSETS);
-    return await builder;
   };
-  return async (program, method, args) => {
-    const entrypoint = await entrypointOf(program);
-    return await boundedInCore(
-      async () => await callStub(entrypoint, method, loaderArgs(args))
-    );
+  return {
+    inCore: true,
+    run: async (program, method, args) => {
+      if (program === "compiler") {
+        return await compile(method, args);
+      }
+      builder ??= startPackageBuilder(env.LOADER, env.ASSETS);
+      return await loaderCall(await builder, method, args);
+    },
+    // No wall-clock bound in core: the runtime bounds each call's CPU.
+    // Two calls at most (a compile tried again), each as long as one may
+    // take on the sandbox host.
+    callMs: (program) =>
+      2 * (platformCodeReadMs + sessionCallMs(programWallMs[program])),
   };
 };
 
@@ -307,17 +355,35 @@ const programCode: Record<
   "package-builder": packageBuilderCode,
 };
 
+/** `args` as a session carries them: values, and functions as capabilities. */
+const sessionArgs = (args: readonly unknown[]): SessionArgument[] =>
+  args.map((arg) =>
+    typeof arg === "function"
+      ? {
+          capability: functionCapability((...called: never[]): unknown =>
+            Reflect.apply(arg, undefined, called)
+          ),
+        }
+      : { value: arg }
+  );
+
 /** The runner on the sandbox host: a session for each call, as `platform:builder`. */
-const onHost =
-  (env: PlatformEnv, host: Fetcher): PlatformRun =>
-  async (program, method, args) =>
-    await runPlatformCode(host, await programCode[program](env.ASSETS), {
-      method,
-      args,
-      wallMs: platformWallMs(env, programWallMs[program]),
-      owner: builderOwner,
-      memoryMib: builderMemoryMib,
-    });
+const onHost = (env: PlatformEnv, host: Fetcher): PlatformRunner => {
+  const wallMs = (program: PlatformProgram): number =>
+    platformWallMs(env, programWallMs[program]);
+  return {
+    inCore: false,
+    run: async (program, method, args) =>
+      await runPlatformCode(host, await programCode[program](env.ASSETS), {
+        method,
+        args: sessionArgs(args),
+        wallMs: wallMs(program),
+        owner: builderOwner,
+        memoryMib: builderMemoryMib,
+      }),
+    callMs: (program) => platformCodeReadMs + sessionCallMs(wallMs(program)),
+  };
+};
 
 /**
  * The runner of the release's platform code for `env`: on the sandbox host
@@ -325,7 +391,7 @@ const onHost =
  * bounds it (`sessionHost`). Throws `SandboxUnavailableError`, at once,
  * where nothing bounds it: before anything is read or fetched for it.
  */
-export const platformRunner = (env: PlatformEnv): PlatformRun => {
+export const platformRunner = (env: PlatformEnv): PlatformRunner => {
   const host = sessionHost(env);
   return host === undefined ? inCore(env) : onHost(env, host);
 };

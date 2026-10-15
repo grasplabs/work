@@ -51,11 +51,8 @@ import { admitDependencies } from "../dependencies/requests.ts";
 import type { Admitted } from "../dependencies/requests.ts";
 import { windowedAccessEnd } from "../screen-frame.ts";
 import { packageArtifactAddress } from "./address.ts";
-import {
-  builderFailure,
-  packageBuilder,
-  requireBuilderBound,
-} from "./builder.ts";
+import { builderFailure, packageBuilder } from "./builder.ts";
+import type { PackageBuilderRun } from "./builder.ts";
 import { clearBuildCleanup, recordCleanup } from "./cleanup-records.ts";
 import { holdLockFor } from "./locks.ts";
 import { graphOfLock } from "./resolve.ts";
@@ -612,8 +609,10 @@ const lockedTarballs = async (
  * its shape, that its files are the ones it describes, byte for byte,
  * and the artifact's size.
  */
-const builtArtifact = async (env: Env, request: BuildRequest) => {
-  const builder = packageBuilder(env);
+const builtArtifact = async (
+  builder: PackageBuilderRun,
+  request: BuildRequest
+) => {
   const started = Date.now();
   let answer: unknown;
   try {
@@ -919,7 +918,8 @@ const buildUnderLease = async (
     read: { lock: GraspLock; stored: string };
     configHash: string;
     pinned: ArtifactPin | undefined;
-  }
+  },
+  builder: PackageBuilderRun
 ): Promise<PackageBuild> => {
   const { lock } = read;
   const { approval } = admitted;
@@ -933,7 +933,12 @@ const buildUnderLease = async (
   const limits = packageLimitsOf(env.PACKAGE_LIMITS);
   const packages = await lockedTarballs(env, lock, limits);
   const { artifact, stats, artifactBytes, builtMs, files } =
-    await builtArtifact(env, { limits, lock, target: asked.target, packages });
+    await builtArtifact(builder, {
+      limits,
+      lock,
+      target: asked.target,
+      packages,
+    });
   // The policy may have moved on while the build ran (an approval retired
   // or revoked with it): what decides now wins, and nothing is kept or
   // pinned for a graph no longer admitted. The pin's own write checks it
@@ -1057,7 +1062,7 @@ export const buildDependencies = async (
 ): Promise<PackageBuild> => {
   // As in resolveDependencies (resolve.ts): only where the builder is
   // bounded (builder.ts), refused before any tarball is fetched.
-  requireBuilderBound(env);
+  const builder = packageBuilder(env);
   const asked = dependencyErrors.parse(
     "dependency.invalid",
     packageBuildRequestSchema,
@@ -1117,7 +1122,7 @@ export const buildDependencies = async (
     if (!taken) {
       throw packageErrors.create("package.build_busy");
     }
-    return await buildUnderLease(env, by, leasedBuild, now);
+    return await buildUnderLease(env, by, leasedBuild, now, builder);
   } finally {
     if (taken) {
       await giveLeaseBack(env, leased, holder);

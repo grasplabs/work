@@ -389,6 +389,20 @@ export const noPlaceOf = (error: unknown): boolean =>
 const verdictWaitMs = 1000;
 const verdictPollMs = 100;
 
+/**
+ * The longest `runInSession` may take for a call of `wallMs`, from asking
+ * for a session to settling, every bound and wait of its own included:
+ * the supervisor's answer to the upgrade (`openSession`), the call's
+ * backstop, the wait for a verdict, and telling the supervisor the
+ * session is over, twice at most, before and after.
+ */
+export const sessionCallMs = (wallMs: number): number =>
+  2 * sandboxWaitMs +
+  backstopMs +
+  (sandboxWaitMs + wallMs + backstopMs) +
+  verdictWaitMs +
+  2 * (2 * backstopMs);
+
 /** Whether `signal` has aborted, read as it is now. */
 const isAborted = (signal: AbortSignal | undefined): boolean =>
   signal?.aborted === true;
