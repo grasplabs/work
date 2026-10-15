@@ -2318,6 +2318,9 @@ type Follower = Awaited<ReturnType<typeof followedList>>;
 /** Statements that read whom an App is shared with. */
 const sharedWithQueries = /from "app_members"/u;
 
+/** The look at an App by its ID (apps.ts `findApp`). */
+const appLookup = /^select "id", "name", "description"/u;
+
 /** The look at which Apps someone reaches (members.ts). */
 const appsLookup = /^select "id" from "apps"/u;
 
@@ -2442,6 +2445,101 @@ const slowToFollow = async (opened: Opened) => {
     };
   });
   return undo;
+};
+
+/**
+ * Has the opened App's host let go of the first connection it takes on
+ * as a follower of its revocations right away, as a host that restarted
+ * would, and take the next one on only `followDelayMs` late. Answers how
+ * to undo it.
+ */
+const lettingGoEarly = async (opened: Opened) => {
+  let undo = nothingToUndo;
+  await runInDurableObject(appHost(env, opened.app), (instance) => {
+    // SAFETY: an App's object's prototype holds its methods.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const methods = Object.getPrototypeOf(instance) as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >;
+    const original = methods.followAccess;
+    const letGo = methods.unfollowAccess;
+    if (original === undefined || letGo === undefined) {
+      throw new Error("An App's object follows access");
+    }
+    let calls = 0;
+    methods.followAccess = async function followAccess(this: unknown, ...args) {
+      calls += 1;
+      if (calls > 1) {
+        await scheduler.wait(followDelayMs);
+        return await original.apply(this, args);
+      }
+      const id = await original.apply(this, args);
+      await Reflect.apply(letGo, this, [id]);
+      return id;
+    };
+    undo = () => {
+      methods.followAccess = original;
+    };
+  });
+  return undo;
+};
+
+/**
+ * Counts the opened App's store's reads of a page of `pageSize` records
+ * from now on, holding the first until `release`.
+ */
+const holdPageReads = async (opened: Opened, pageSize: number) => {
+  const storeId = opened.release.store?.storeId;
+  const counted = { reads: 0 };
+  const held = Promise.withResolvers<null>();
+  let undo = nothingToUndo;
+  const pageOfSize = z.object({
+    kind: z.literal("query"),
+    query: z.object({
+      terminal: z.object({
+        kind: z.literal("paginate"),
+        pageSize: z.literal(pageSize),
+      }),
+    }),
+  });
+  await runInDurableObject(storeObjectOf(opened), (instance) => {
+    // SAFETY: a store's object's prototype holds its methods.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const methods = Object.getPrototypeOf(instance) as {
+      read: (...args: unknown[]) => Promise<string>;
+    };
+    const original: unknown = Reflect.get(methods, "read");
+    if (typeof original !== "function") {
+      throw new TypeError("A store's object reads");
+    }
+    methods.read = async function read(
+      this: unknown,
+      ...args: unknown[]
+    ): Promise<string> {
+      if (args[0] === storeId && pageOfSize.safeParse(args[2]).success) {
+        counted.reads += 1;
+        if (counted.reads === 1) {
+          await held.promise;
+        }
+      }
+      const answer: unknown = await Reflect.apply(original, this, args);
+      return String(answer);
+    };
+    undo = () => {
+      Reflect.set(methods, "read", original);
+    };
+  });
+  return {
+    count: () => counted.reads,
+    release: () => {
+      held.resolve(null);
+    },
+    restore: () => {
+      held.resolve(null);
+      undo();
+    },
+  };
 };
 
 /** What reaches `follower` once someone commits to what it read. */
@@ -2840,7 +2938,7 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     });
   });
 
-  it("pushes one App's queries however often another App's revocations are looked at", async () => {
+  it("reads one App's query once, though another App's access is looked at again while it is read", async () => {
     const opened = await openedApp();
     const other = await openedApp();
     const { lease, member } = await memberOf(opened);
@@ -2855,33 +2953,94 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     );
     await member.api.screens.present(other.app, otherLease);
     await followedList(other, member.api.screens, otherLease);
-    // The other App's host tells the connection to look again, over and
-    // over: its own queries look; this App's reads must still go out.
-    const flood = setInterval(() => {
-      void appHost(env, other.app)
-        .accessRevoked([member.userId])
-        .catch(() => {
-          // Only noise.
-        });
-    }, 20);
+    const pageSize = 7;
+    const reads = await holdPageReads(opened, pageSize);
     try {
       const follower = pageFollower();
       await member.api.screens.watchQuery(
         opened.app,
         lease,
+        requestOf(apiOf(opened.release).list, { pagination: { pageSize } }),
+        follower.callback
+      );
+      await eventually(() => {
+        expect(reads.count()).toBe(1);
+      });
+
+      // While this App's query is read, the other App's host tells the
+      // connection to look again: only the other App's queries look.
+      await expect(
+        appHost(env, other.app).accessRevoked([member.userId])
+      ).resolves.toBe(1);
+      await scheduler.wait(500);
+      reads.release();
+
+      await eventually(() => {
+        expect(follower.received.at(-1)?.result.ok).toBeTruthy();
+      });
+      await scheduler.wait(1000);
+      expect({
+        reads: reads.count(),
+        pushes: follower.received.length,
+      }).toStrictEqual({ reads: 1, pushes: 1 });
+    } finally {
+      reads.restore();
+    }
+  });
+
+  it("reads nothing of an App until the host that let go of it early takes the connection on again", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const demoted = await personApi("admin");
+    const { lease } = await demoted.api.screens.open(opened.app, "notes");
+    const { core } = await openRpc(demoted.session);
+    const tab = core.authenticate().screens;
+    await tab.present(opened.app, lease);
+    // The host lets go of the connection's first following at once, and
+    // takes the next one on only `followDelayMs` later.
+    const undo = await lettingGoEarly(opened);
+    try {
+      const follower = pageFollower();
+      await tab.watchQuery(
+        opened.app,
+        lease,
         requestOf(apiOf(opened.release).list, { pagination: {} }),
         follower.callback
       );
+      await scheduler.wait(500);
+      // Before the next following: no host tells the connection of this.
+      await admin.api.members.setRole(demoted.userId, "user");
 
       await vi.waitFor(
         () => {
-          expect(follower.received.at(-1)?.result.ok).toBeTruthy();
+          expect(follower.state.released).toBeTruthy();
         },
-        { timeout: 10_000, interval: 50 }
+        { ...deliveryWait, timeout: deliveryWait.timeout + followDelayMs }
       );
+      expect(follower.received.map(({ result }) => result.ok)).toStrictEqual([
+        false,
+      ]);
     } finally {
-      clearInterval(flood);
+      undo();
     }
+  });
+
+  it("refuses as a failure to try again, not a lost role, when the App can't be looked up for a moment", async () => {
+    const opened = await openedApp();
+    const { lease, member } = await memberOf(opened);
+    const flaky = flakyDb(appLookup);
+    const { core } = await openRpc(member.session, { coreEnv: flaky.env });
+    const tab = core.authenticate().screens;
+    await tab.present(opened.app, lease);
+    const follower = await followedList(opened, tab, lease);
+
+    flaky.fail();
+    await appHost(env, opened.app).accessRevoked([member.userId]);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual({
+      last: "internal.unexpected",
+      released: true,
+    });
   });
 
   it("removes someone from the organization, and lowers a role, even when looking up their Apps fails", async () => {

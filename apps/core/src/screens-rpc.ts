@@ -464,6 +464,30 @@ const watchRuns = async (
  * the connection, as on any call. For the callbacks of an App's screens,
  * and of a draft's preview (chats-rpc.ts).
  */
+/**
+ * Whether `by` has a role in `app` now, for a live query's gate before
+ * each push (query-subscriptions.ts): false when refused, while a failure
+ * nobody expected (the database away for a moment) is thrown, so the gate
+ * refuses as one to try again, never as a lost role, which would sign
+ * the page out of the App. `by` is the gate's own reading of the
+ * session, and the gate keeps the answer for a second.
+ */
+const hasRoleNow = async (
+  env: Env,
+  by: Identity,
+  app: AppId
+): Promise<boolean> => {
+  try {
+    await appFor(env, by, app, "user");
+    return true;
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return false;
+    }
+    throw error;
+  }
+};
+
 export const stillHasRole = (
   env: Env,
   check: SessionCheck,
@@ -914,7 +938,7 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     this.#queries = new QuerySubscriptions(
       env,
       screenReads(env, check, async (by, app, artifact) => {
-        if (!(await this.#stillOpen(app)())) {
+        if (!(await hasRoleNow(env, by, app))) {
           return "role";
         }
         const open = await deliveryOpen(env, by, app, artifact, {

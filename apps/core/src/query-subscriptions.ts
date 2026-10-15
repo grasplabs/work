@@ -719,13 +719,23 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       cached.access,
       cached.roles,
     ]);
-    if (read.status === "rejected") {
-      // No answer of the roles (the database away for a moment): refused
-      // as a failure to try again, which clears what the screen shows and
-      // has it follow again, never as a lost role, which would sign the
-      // page out of the App for someone who still has it.
+    // No answer of the roles or the access check (the database away for a
+    // moment): refused as a failure to try again, which clears what the
+    // screen shows and has it follow again, never as a lost role, which
+    // would sign the page out of the App for someone who still has it.
+    const unanswered = [read, accessed].find(
+      (settled): settled is PromiseRejectedResult =>
+        settled.status === "rejected" && !isExpectedError(settled.reason)
+    );
+    if (unanswered !== undefined) {
       this.#cleared.delete(key);
-      return { refusal: refusalResult(read.reason) };
+      return { refusal: refusalResult(unanswered.reason) };
+    }
+    if (read.status === "rejected") {
+      this.#cleared.delete(key);
+      return {
+        refusal: refusalResult(appErrors.create("app.not_found")),
+      };
     }
     const access = accessed.status === "fulfilled" ? accessed.value : "role";
     const roles = access === "open" ? read.value : undefined;
