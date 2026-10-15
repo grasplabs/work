@@ -59,10 +59,18 @@ import {
   workflowTriggers,
 } from "../db/core/schema.ts";
 import { answerableBy, stillOpen } from "../decisions/decisions.ts";
+import { queuedRuns } from "./admission.ts";
 import { declaredParams, dryRunTests, hasWorkflow } from "./code.ts";
 import { paramValues } from "./param-values.ts";
 import { listParams } from "./params.ts";
-import { runFor, shownStatus, unended, workflowInputSchema } from "./runs.ts";
+import {
+  goesOn,
+  queuedRun,
+  runFor,
+  shownStatus,
+  unended,
+  workflowInputSchema,
+} from "./runs.ts";
 import type { RunRow } from "./runs.ts";
 
 // Every workflow a person can see, across Apps, and their runs: the
@@ -76,6 +84,12 @@ import type { RunRow } from "./runs.ts";
 // page. A run that waits otherwise (a sleep, a feature switched
 // off, a decision past its deadline that it hasn't timed out yet) goes on
 // by itself, and counts as running.
+//
+// A run that goes on without a decision to wait for, while a step of it
+// waits in the client's queue for a share of the attempts running at
+// once, shows as queued (admission.ts, `queuedRuns`), with the share and
+// when it asks again: its own place alone, never who else waits. The
+// Running filter lists it: throttling, not a failure.
 //
 // The queries are written for a D1 without statistics (a fresh one never
 // has them), where SQLite picks indexes by the query's shape alone. Each
@@ -256,22 +270,32 @@ const latestRuns = async (
       ORDER BY created_at DESC
       LIMIT 1
     )`);
+  const latest = z.array(latestRunSchema).parse(rows);
+  // A run waiting for a decision says so; one that goes on otherwise may
+  // wait for a share of the attempts running at once.
+  const queues = await queuedRuns(
+    db,
+    latest.flatMap(({ id, status, waits: waiting }) =>
+      goesOn(status) && waiting !== 1 ? [id] : []
+    ),
+    now.getTime()
+  );
   return new Map(
-    z
-      .array(latestRunSchema)
-      .parse(rows)
-      .map((row) => {
-        const status: RunStatus =
-          row.waits === 1 ? "waiting" : shownStatus(row.status);
-        return [
-          keyOf(row.app, row.workflow),
-          {
-            id: runIdSchema.parse(row.id),
-            status,
-            createdAt: new Date(row.createdAt).toISOString(),
-          },
-        ];
-      })
+    latest.map((row) => {
+      const status: RunStatus =
+        row.waits === 1 ? "waiting" : shownStatus(row.status);
+      const queue = queues.get(row.id);
+      return [
+        keyOf(row.app, row.workflow),
+        {
+          id: runIdSchema.parse(row.id),
+          ...(status === "running" && queue !== undefined
+            ? { status: "queued", queued: queue }
+            : { status }),
+          createdAt: new Date(row.createdAt).toISOString(),
+        },
+      ];
+    })
   );
 };
 
@@ -607,13 +631,24 @@ export const listAllRuns = async (
       : [await byStatus[filter.status]()];
   const matched = pages.flat();
   const rows = matched.slice(0, runsPageSize);
-  const answering = await answerableDecisions(
-    env,
-    db,
-    by,
-    rows.flatMap(({ id, decision }) => (decision === null ? [] : [id])),
-    now
-  );
+  const [answering, queues] = await Promise.all([
+    answerableDecisions(
+      env,
+      db,
+      by,
+      rows.flatMap(({ id, decision }) => (decision === null ? [] : [id])),
+      now
+    ),
+    // A run waiting for a decision says so; one that goes on otherwise
+    // may wait for a share of the attempts running at once.
+    queuedRuns(
+      db,
+      rows.flatMap(({ id, status, decision }) =>
+        decision === null && goesOn(status) ? [id] : []
+      ),
+      now.getTime()
+    ),
+  ]);
   return {
     runs: rows.map(({ appName, decision, ...row }): ListedRun => {
       const run = {
@@ -621,7 +656,7 @@ export const listAllRuns = async (
         appName,
       };
       if (decision === null) {
-        return run;
+        return queuedRun(run, queues.get(row.id));
       }
       const answered = answering.get(row.id);
       return answered === undefined

@@ -175,7 +175,8 @@ interface WorkflowRun {
   workflow: string;
   /** The App version it runs. */
   version: number;
-  status: "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
+  /** queued: waiting for a share of the attempts that run at once, not a fault. */
+  status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
   /** A person started it, or a trigger did. */
   startedBy: { type: "person"; userId: string } | { type: "trigger" };
   createdAt: string;
