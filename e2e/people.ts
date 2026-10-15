@@ -180,6 +180,7 @@ const cast = {
   notFound: { member: "user" },
   errorReports: { member: "user" },
   connections: { admin: "admin", user: "user" },
+  landscape: { admin: "admin", user: "user" },
   knowledge: { one: "user", two: "user" },
   knowledgeUploads: { one: "user" },
   knowledgeReader: { admin: "admin", reader: "user" },
