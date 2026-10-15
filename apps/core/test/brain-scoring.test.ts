@@ -318,6 +318,11 @@ describe("scoring a trial", () => {
       hedged: completed(conflict, "gratis of 3 euro; 3 euro", parking),
       added: completed(fleet, "37 and 99 trucks; 12 electric", trucks),
       listed: completed(fleet, "37 trucks, 99; 12/14", trucks),
+      both: completed(
+        fleet,
+        "37 trucks, 12 electric; 37 trucks, 12 electric",
+        trucks
+      ),
     }).toStrictEqual({
       reversed: false,
       unsplit: false,
@@ -327,6 +332,7 @@ describe("scoring a trial", () => {
       hedged: false,
       added: false,
       listed: false,
+      both: false,
     });
   });
 

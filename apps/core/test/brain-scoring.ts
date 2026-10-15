@@ -208,10 +208,23 @@ const answers = (
   if (values.length !== expected.facts.length) {
     return false;
   }
+  // A value that also holds another of the requested facts ("06:00 and
+  // 09:00") answers two slots at once: it fits neither.
+  const holdsOther = (value: string, index: number) =>
+    expected.facts.some(
+      (other, at) =>
+        at !== index &&
+        other.some((variant) => holds(value, normalized(variant)))
+    );
   const fits = (order: readonly number[]) =>
     order.every((value, index) => {
       const fact = expected.facts[index];
-      return fact !== undefined && says(values[value] ?? "", fact, evidence);
+      const given = values[value] ?? "";
+      return (
+        fact !== undefined &&
+        says(given, fact, evidence) &&
+        !holdsOther(given, index)
+      );
     });
   return expected.anyOrder === true
     ? orderings(values.length).some(fits)
