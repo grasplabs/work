@@ -13,6 +13,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { operationErrors } from "@grasp-os/shared/operations";
+import type { AppErrorPayload } from "@grasp-os/shared/operations";
 import { portableFunctionPath } from "@grasp-os/shared/portable";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -123,6 +124,15 @@ import { admitted } from "./screens-rpc.ts";
 //   invocation on an attach or a join.
 // - Another person reaches the stream: the invocation is named by the
 //   person signed in, never by anything in the request.
+//
+// A plain action sent under a key (`<path>/<app>`, as every session
+// client sends one) runs in the same object, without progress
+// (`streaming: false`), so a lost answer is recovered by its key: the
+// resend joins the run under way or answers its receipt, never runs it
+// again. Every resend is admitted exactly as a start is, the person's
+// access fingerprinted again (`accessOf`), the build's delivery checked
+// before the run and again before its answer. A portable host's action
+// goes the same way, its token checked again where a screen's session is.
 
 /** How long a screen waits for a function's answer. */
 const screenCallMs = 30_000;
@@ -283,7 +293,221 @@ interface Caller {
   operation: string;
   /** For a portable host's call: the session its App token came from. */
   portableSession?: string;
+  /** Who calls now, read again: the session, or the App token, still theirs. */
+  current: () => Promise<Identity | undefined>;
 }
+
+/** One frame's line as the relay reads it: its type, if it is JSON at all. */
+const frameOf = (line: string): { type?: unknown; result?: unknown } => {
+  try {
+    const frame: unknown = JSON.parse(line);
+    return typeof frame === "object" && frame !== null ? frame : {};
+  } catch {
+    return {};
+  }
+};
+
+/** The call and its key, if `body` is an action sent under a valid key. */
+const keyedAction = (
+  body: string
+): { call: FunctionRequest; key: string } | undefined => {
+  let call: FunctionRequest;
+  try {
+    call = readFunctionRequest(body);
+  } catch {
+    // The call refuses it, as it refuses any request it can't read.
+    return undefined;
+  }
+  const key = idempotencyKeySchema.safeParse(call.idempotencyKey);
+  return call.reference.kind === "action" && key.success
+    ? { call, key: key.data }
+    : undefined;
+};
+
+/** Which App a keyed action is for, and as which build. */
+interface KeyedTarget {
+  readonly id: AppId;
+  readonly artifact: string | undefined;
+}
+
+/**
+ * The release versions an invocation's answer comes from: the caller's,
+ * and the one it runs, or ran, under (`ActionInvocation.version`), which a
+ * join, an attach or a receipt may have from before a publish.
+ */
+const releasesOf = async (
+  invocation: ReturnType<typeof actionInvocation>,
+  userId: string,
+  call: FunctionRequest
+): Promise<readonly number[]> => {
+  const running = await invocation.version(userId);
+  return [
+    ...new Set([
+      call.reference.resourceVersion,
+      ...(running === undefined ? [] : [running]),
+    ]),
+  ];
+};
+
+/**
+ * Throws `version.revoked` once any of `versions` of `app` is revoked:
+ * the build's delivery reads the App's current release only, which a
+ * publish moves on from the one an invocation ran.
+ */
+const requireReleasesLive = async (
+  env: Env,
+  app: AppId,
+  versions: readonly number[]
+): Promise<void> => {
+  for (const version of versions) {
+    // oxlint-disable-next-line no-await-in-loop -- one or two, in turn
+    await requireNotRevoked(env, app, version);
+  }
+};
+
+/**
+ * Whether `caller` is still who they were, with the access `access`
+ * fingerprints, and their build still gets the App's data: throws the
+ * refusal otherwise.
+ */
+const stillTheirs = async (
+  env: Env,
+  { person, operation, current }: Caller,
+  { id, artifact }: KeyedTarget,
+  { access, versions }: { access: string; versions: readonly number[] }
+): Promise<void> => {
+  const now = await current();
+  if (now?.userId !== person.userId) {
+    throw authErrors.create("auth.unauthenticated");
+  }
+  // Refuses, too, someone with no role in the App any more.
+  if ((await accessOf(env, now, id)) !== access) {
+    throw operationErrors.create("operation.access_changed");
+  }
+  await requireDelivery(env, now, id, artifact, {
+    operation,
+    stage: "delivery",
+  });
+  await requireReleasesLive(env, id, versions);
+};
+
+/**
+ * `refusal`, of an action's answer after it ran, as the outcome it
+ * withholds: `submission.outcome_unknown`, uncertain, with the key that
+ * recovers it once the person may have it again and the refusal's code.
+ */
+const withheld = (
+  refusal: { readonly code: string },
+  key: string
+): AppErrorPayload => ({
+  code: "submission.outcome_unknown",
+  message:
+    "Whether this finished is unknown: its answer was withheld. Sending it again with the same idempotency key gets its outcome, and never runs it a second time.",
+  category: "uncertain",
+  retryable: false,
+  requestId: crypto.randomUUID(),
+  details: { idempotencyKey: key, refusal: refusal.code },
+});
+
+/** What a keyed action answers: what it ran, as far as its invocation keeps. */
+interface KeyedAnswer {
+  readonly result: unknown;
+  readonly provenance: null;
+  readonly fingerprint: string;
+  readonly manifestHash: null;
+}
+
+/**
+ * The answer to the plain action `call`, under `key`, for `caller`: from
+ * the invocation its key names (action-invocation.ts), which starts it,
+ * joins it or answers its receipt, read to its result. Its result comes
+ * from core's own object, so it is handed on as it is; what it read (its
+ * provenance) stays with the run, and so does the release it ran
+ * (`manifestHash`), which the receipt doesn't keep.
+ *
+ * What the invocations keep now grows with every keyed action, not just
+ * with streams: accepted, since the invocation object's cap on running
+ * plain actions, the request rate, and its receipt's retention and
+ * tombstone bound how many one person holds in an App, and no answer is
+ * larger than an operation's.
+ */
+const keyedAnswer = async (
+  env: Env,
+  caller: Caller,
+  target: KeyedTarget,
+  { call, key }: { call: FunctionRequest; key: string }
+): Promise<KeyedAnswer> => {
+  const { person, operation } = caller;
+  const { id, artifact } = target;
+  // Nothing ran yet: a build nobody approved is refused as any call is.
+  await requireDelivery(env, person, id, artifact, {
+    operation,
+    stage: "admission",
+  });
+  const name = await invocationName(person.userId, id, call, key, false);
+  const access = await accessOf(env, person, id);
+  const invocation = actionInvocation(env, name);
+  const frames = await invocation.open({
+    by: { userId: person.userId, role: person.role, teams: person.teams },
+    access,
+    app: id,
+    name,
+    call,
+    streaming: false,
+    attach: false,
+  });
+  const text = await new Response(frames).text();
+  const frame = text
+    .split("\n")
+    .map((line) => frameOf(line))
+    .find(({ type }) => type === "result");
+  if (frame === undefined) {
+    throw new Error("The invocation ended without a result.");
+  }
+  const versions = await releasesOf(invocation, person.userId, call);
+  const answer: KeyedAnswer = {
+    result: frame.result,
+    provenance: null,
+    fingerprint: call.reference.fingerprint,
+    manifestHash: null,
+  };
+  // Checked again before the answer is handed over, as a stream's relay
+  // checks before its result: someone signed out, whose access changed,
+  // whose build lost its approval, or whose answer's release was revoked
+  // while it ran gets nothing of it. The
+  // run settles on its own receipt whatever happens here, and may have
+  // changed something: the refusal is no answer to what it did, so it
+  // goes back as an outcome withheld, with its key, never as a failure
+  // that invites a resubmit under a fresh one.
+  try {
+    await stillTheirs(env, caller, target, { access, versions });
+  } catch (error) {
+    if (!isExpectedError(error)) {
+      throw error;
+    }
+    return { ...answer, result: { ok: false, error: withheld(error, key) } };
+  }
+  if (jsonBytes(answer, screenLimits.answerBytes) <= screenLimits.answerBytes) {
+    return answer;
+  }
+  // The action ran, and its receipt holds an answer larger than a screen
+  // takes: what it did is unknown to the screen, not refused.
+  const refusal = refusalOf(
+    screenErrors.create("screen.answer_too_large"),
+    crypto.randomUUID()
+  );
+  return {
+    ...answer,
+    result: {
+      ok: false,
+      error: {
+        ...refusal,
+        category: "uncertain",
+        details: { idempotencyKey: key },
+      },
+    },
+  };
+};
 
 /**
  * Calls a function of `app` for `caller` under the bounds of the header:
@@ -295,9 +519,10 @@ const boundedCall = async (
   request: Request,
   env: Env,
   app: string,
-  { person, lease, operation, portableSession }: Caller,
+  caller: Caller,
   requestId: string
 ): Promise<Response> => {
+  const { person, lease, operation, portableSession } = caller;
   try {
     const id = await admitted(env, person, app);
     // SAFETY: a request's body in workerd is a byte stream, of Uint8Array
@@ -324,6 +549,14 @@ const boundedCall = async (
       lease === undefined
         ? undefined
         : await leasedArtifact(env, person.userId, id, lease);
+    const text = new TextDecoder().decode(body);
+    const keyed = keyedAction(text);
+    if (keyed !== undefined) {
+      // Checks delivery itself, before the run and again before its answer.
+      return Response.json(
+        await keyedAnswer(env, caller, { id, artifact }, keyed)
+      );
+    }
     const answer = await delivering(
       env,
       person,
@@ -336,7 +569,7 @@ const boundedCall = async (
             env,
             person,
             id,
-            new TextDecoder().decode(body),
+            text,
             Date.now() + screenCallMs
           )
         )
@@ -423,6 +656,7 @@ export const appFunctionResponse = async (
       // A missing lease is no build: unreviewed.
       lease: request.headers.get(screenLeaseHeader),
       operation: "call",
+      current: async () => await identify(env, request.headers),
     },
     requestId
   );
@@ -535,6 +769,10 @@ export const portableFunctionResponse = async (
         lease: undefined,
         operation: "portable.call",
         portableSession: checked.sessionId,
+        current: async () => {
+          const now = await checkAppToken(env, token ?? "", app);
+          return now.ok ? now.person : undefined;
+        },
       },
       requestId
     )
@@ -654,20 +892,7 @@ const stillDelivering = async (
     operation: "stream",
     stage,
   });
-  for (const version of versions) {
-    // oxlint-disable-next-line no-await-in-loop -- one or two, in turn
-    await requireNotRevoked(env, call.id, version);
-  }
-};
-
-/** One frame's line as the relay reads it: its type, if it is JSON at all. */
-const frameOf = (line: string): { type?: unknown; result?: unknown } => {
-  try {
-    const frame: unknown = JSON.parse(line);
-    return typeof frame === "object" && frame !== null ? frame : {};
-  } catch {
-    return {};
-  }
+  await requireReleasesLive(env, call.id, versions);
 };
 
 /** What the relay of one stream needs besides its frames. */
@@ -904,13 +1129,7 @@ const appStreamResponse = async (
     });
     // The release it runs under, besides the caller's: a join or an attach
     // may follow a run a release published since started.
-    const running = await invocation.version(person.userId);
-    const versions = [
-      ...new Set([
-        call.reference.resourceVersion,
-        ...(running === undefined ? [] : [running]),
-      ]),
-    ];
+    const versions = await releasesOf(invocation, person.userId, call);
     return new Response(
       relay(frames, {
         env,

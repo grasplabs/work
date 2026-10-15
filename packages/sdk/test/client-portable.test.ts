@@ -431,7 +431,20 @@ describe("a portable host's client", () => {
     const seen = network(async ({ authorization }) => {
       await Promise.resolve();
       if (authorization === `Bearer ${tokenOf("ann")}`) {
-        throw new TypeError("The connection was reset.");
+        // An outcome the host can't tell: the action's key is left unknown
+        // (a lost answer would be sent again for its receipt).
+        return Response.json({
+          result: {
+            ok: false,
+            error: {
+              code: "operation.sandbox_lost",
+              message: "The sandbox stopped answering.",
+              category: "uncertain",
+              retryable: false,
+              requestId: "r",
+            },
+          },
+        });
       }
       return 3;
     });
@@ -609,7 +622,7 @@ describe("a portable host's client", () => {
     );
   });
 
-  it("takes an answer that never comes as lost: an action's outcome is then unknown", async () => {
+  it("takes an answer that never comes as lost: an action's outcome is then unknown once its key no longer recovers it", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
       "fetch",
@@ -626,9 +639,12 @@ describe("a portable host's client", () => {
       getToken: async () => await Promise.resolve(tokenOf("ann")),
     });
     const outcome = failureOf(client.action(api.notes.tally));
-    await vi.advanceTimersByTimeAsync(60_000);
+    // Sent again under its key, which would answer its receipt, for the
+    // lost answer's five minutes; past them, unknown.
+    await vi.advanceTimersByTimeAsync(7 * 60_000);
     const failure = await outcome;
     expect(failure.code).toBe("submission.outcome_unknown");
+    expect(failure.details).toHaveProperty("idempotencyKey");
   });
 
   it("takes any refusal of a token as one, whatever its body, and asks the host again", async () => {

@@ -17,9 +17,12 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { actionInvocation, invocationName } from "../src/action-invocation.ts";
+import { readFunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { versionFiles } from "../src/apps.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { withScreenReferences } from "../src/screen-references.ts";
 import { buildScreens } from "../src/screens.ts";
 import { StoreHost } from "../src/store-host.ts";
@@ -27,6 +30,7 @@ import { storeMaxWatches } from "../src/store-watches.ts";
 import { pastAccessRecheck } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles as files, referenceTo } from "./notes-client-app.ts";
+import { person as sealedPerson } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { openRpc, outcome, routed, signedInApi } from "./sign-in.ts";
 
@@ -36,8 +40,10 @@ import { openRpc, outcome, routed, signedInApi } from "./sign-in.ts";
 // deleted; a lost response recovered from its receipt, never saved twice;
 // a cancelled save that still commits and can't be duplicated; caller
 // keys reused for other input or past their receipt refused; an action's
-// lost response never repeated; and arguments the operation can't take
-// refused before anything is sent.
+// lost response recovered from its receipt and a resend joining it while
+// it runs, never run twice, its receipt kept from another person and from
+// its own person once their role narrowed; and arguments the operation
+// can't take refused before anything is sent.
 
 const idp = mockIdp();
 
@@ -66,6 +72,7 @@ const openedApp = async (appFiles: Record<string, string> = files) => {
   const { lease } = await builder.api.screens.open(id, "notes");
   // The frame's connection presents its build, as the page does.
   await builder.api.screens.present(id, lease);
+  const { lease: adminLease } = await admin.api.screens.open(id, "notes");
   const release = await loadRelease(env, id, version);
   return {
     app: id,
@@ -75,6 +82,8 @@ const openedApp = async (appFiles: Record<string, string> = files) => {
     release,
     builder,
     screens: builder.api.screens,
+    builderId: builder.userId,
+    admin: { ...admin, lease: adminLease, cookie: admin.session },
   };
 };
 
@@ -152,6 +161,7 @@ const pageTransport = (
 /** The network between page and core, which can drop answers on the way back. */
 const network = (transport: ClientTransport) => {
   let dropping = 0;
+  let meanwhile: (() => Promise<unknown>) | undefined;
   let sent = 0;
   return {
     transport: {
@@ -161,24 +171,41 @@ const network = (transport: ClientTransport) => {
         const answer = await transport.call(request, app);
         if (dropping > 0) {
           dropping -= 1;
+          await meanwhile?.();
           // The request reached core; its answer didn't come back.
           throw new Error("The connection was reset.");
         }
         return answer;
       },
     } satisfies ClientTransport,
-    /** Drops the next `count` answers. */
-    drop: (count: number) => {
+    /** Drops the next `count` answers, doing `then` before each is lost. */
+    drop: (count: number, then?: () => Promise<unknown>) => {
       dropping = count;
+      meanwhile = then;
     },
     /** How many requests reached core so far. */
     sent: () => sent,
   };
 };
 
-/** A client over the page's transport, as the frame's runtime mounts it. */
-const clientFor = (opened: Opened, screens: Screens = opened.screens) => {
-  const net = network(pageTransport(opened, screens));
+/**
+ * A client over the page's transport, as the frame's runtime mounts it:
+ * the builder's, or the admin's with `asAdmin`.
+ */
+const clientFor = (
+  opened: Opened,
+  screens: Screens = opened.screens,
+  asAdmin = false
+) => {
+  const seat = asAdmin
+    ? {
+        app: opened.app,
+        lease: opened.admin.lease,
+        cookie: opened.admin.cookie,
+        userId: opened.admin.userId,
+      }
+    : opened;
+  const net = network(pageTransport(seat, screens));
   return { client: new GraspClient(net.transport), net };
 };
 
@@ -384,26 +411,276 @@ describe("the session client", { timeout: 120_000 }, () => {
     });
   });
 
-  it("never sends an action again when its answer is lost, and recovers it by its key", async () => {
+  it("recovers an action whose answer was lost from its receipt, running it once", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const { client, net } = clientFor(opened);
     // The empty input may be left out: its default applies.
     await expect(client.action(api.echo)).resolves.toBe("hello");
+    // The action committed its note, then its answer was lost on the way
+    // back: the resend under its key answers the receipt.
     net.drop(1);
     const before = net.sent();
-    const lost = await failureOf(client.action(api.echo, { word: "once" }));
-    expect(lost).toMatchObject({
+    const keyed = { idempotencyKey: "stamp-once" };
+    const first = await client.action(api.stamp, { title: "Once" }, keyed);
+    expect(net.sent()).toBe(before + 2);
+    // A deliberate call under the same key answers it again.
+    await expect(
+      client.action(api.stamp, { title: "Once" }, keyed)
+    ).resolves.toStrictEqual(first);
+    await expect(titles(client, api)).resolves.toStrictEqual(["Once"]);
+    await expect(
+      failureOf(client.action(api.stamp, { title: "Other" }, keyed))
+    ).resolves.toMatchObject({ code: "submission.key_conflict" });
+  });
+
+  it("joins an action still running when it is sent again under its key", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    // Two tabs, so neither client joins the other's call on its own side.
+    const one = clientFor(opened).client;
+    const two = clientFor(opened).client;
+    const keyed = { idempotencyKey: "stamp-slowly" };
+    const input = { title: "Joined", pauseMs: 1500 };
+    const first = one.action(api.stamp, input, keyed);
+    await scheduler.wait(300);
+    const [started, joined] = await Promise.all([
+      first,
+      two.action(api.stamp, input, keyed),
+    ]);
+    expect(joined).toStrictEqual(started);
+    await expect(titles(one, api)).resolves.toStrictEqual(["Joined"]);
+  });
+
+  it("keeps an action's receipt from another person under the same key", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const keyed = { idempotencyKey: "everyones-key" };
+    const input = { title: "Mine" };
+    const mine = await clientFor(opened).client.action(api.stamp, input, keyed);
+    // From the admin's own screen: an invocation of theirs, run for them.
+    const { client: theirs } = clientFor(
+      opened,
+      opened.admin.api.screens,
+      true
+    );
+    const their = await theirs.action(api.stamp, input, keyed);
+    expect(their.token).not.toBe(mine.token);
+    // The builder's invocation itself, reached in the admin's name.
+    const request = JSON.stringify({
+      reference: {
+        resourceId: api.stamp.resourceId,
+        resourceVersion: api.stamp.resourceVersion,
+        contractId: api.stamp.contractId,
+        fingerprint: api.stamp.fingerprint,
+        kind: "action",
+      },
+      input: { title: "Mine", pauseMs: 0 },
+      idempotencyKey: keyed.idempotencyKey,
+    });
+    const app = appIdSchema.parse(opened.app);
+    const call = readFunctionRequest(request);
+    const name = await invocationName(
+      opened.builderId,
+      app,
+      call,
+      keyed.idempotencyKey,
+      false
+    );
+    const frames = await actionInvocation(env, name).open({
+      by: { userId: opened.admin.userId, role: "admin", teams: [] },
+      access: "the admin's",
+      app,
+      name,
+      call,
+      streaming: false,
+      attach: false,
+    });
+    const refused = z
+      .object({ result: z.object({ error: z.object({ code: z.string() }) }) })
+      .parse(JSON.parse(await new Response(frames).text()));
+    expect(refused.result.error.code).toBe("operation.not_found");
+  });
+
+  it("withholds an action's receipt from its person once their role narrowed", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "before-demotion" };
+    await client.action(api.stamp, { title: "Budget" }, keyed);
+    await opened.admin.api.members.setRole(opened.builderId, "user");
+    // Withheld, never told as a refusal: the action ran under that key.
+    await expect(
+      failureOf(client.action(api.stamp, { title: "Budget" }, keyed))
+    ).resolves.toMatchObject({
       code: "submission.outcome_unknown",
       category: "uncertain",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "operation.access_changed",
+      },
     });
-    expect(net.sent()).toBe(before + 1);
-    const { idempotencyKey } = z
-      .object({ idempotencyKey: z.string() })
-      .parse(lost.details);
+    await expect(titles(client, api)).resolves.toStrictEqual(["Budget"]);
+  });
+
+  it("keeps an action's outcome unknown when its resend after a lost answer is refused", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client, net } = clientFor(opened);
+    const keyed = { idempotencyKey: "lost-then-signed-out" };
+    // Its answer is lost, and the person was removed before the resend.
+    net.drop(1, async () => {
+      await opened.admin.api.members.remove(opened.builderId);
+    });
     await expect(
-      client.action(api.echo, { word: "once" }, { idempotencyKey })
-    ).resolves.toBe("once");
+      failureOf(client.action(api.stamp, { title: "Ran" }, keyed))
+    ).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      category: "uncertain",
+      details: { idempotencyKey: keyed.idempotencyKey },
+    });
+  });
+
+  it("withholds an action's answer from its person whose role narrowed while it ran", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "demoted-while-running" };
+    const running = failureOf(
+      client.action(api.stamp, { title: "Ran", pauseMs: 1500 }, keyed)
+    );
+    await scheduler.wait(300);
+    await opened.admin.api.members.setRole(opened.builderId, "user");
+    await expect(running).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "operation.access_changed",
+      },
+    });
+  });
+
+  it("withholds an action's answer from its person removed while it ran, as an outcome unknown on its first answer", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "removed-while-running" };
+    const running = failureOf(
+      client.action(api.stamp, { title: "Ran", pauseMs: 1500 }, keyed)
+    );
+    await scheduler.wait(300);
+    await opened.admin.api.members.remove(opened.builderId);
+    await expect(running).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      category: "uncertain",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "auth.unauthenticated",
+      },
+    });
+  });
+
+  it("keeps an action's outcome unknown, with its key, when it is sent again past its receipt", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "kept-too-long" };
+    const input = { title: "Ran" };
+    await client.action(api.stamp, input, keyed);
+    const request = JSON.stringify({
+      reference: {
+        resourceId: api.stamp.resourceId,
+        resourceVersion: api.stamp.resourceVersion,
+        contractId: api.stamp.contractId,
+        fingerprint: api.stamp.fingerprint,
+        kind: "action",
+      },
+      input: { ...input, pauseMs: 0 },
+      idempotencyKey: keyed.idempotencyKey,
+    });
+    const name = await invocationName(
+      opened.builderId,
+      appIdSchema.parse(opened.app),
+      readFunctionRequest(request),
+      keyed.idempotencyKey,
+      false
+    );
+    const stub = actionInvocation(env, name);
+    // Its receipt kept past its time, so only its tombstone is left.
+    await runInDurableObject(stub, (_instance, state) => {
+      const record = z
+        .object({ settledAt: z.number() })
+        .loose()
+        .parse(state.storage.kv.get("invocation"));
+      state.storage.kv.put("invocation", {
+        ...record,
+        settledAt: Date.now() - 16 * 60_000,
+      });
+    });
+    await runDurableObjectAlarm(stub);
+    // A form that stayed uncertain that long sends it again: it ran, so
+    // its outcome is unknown, never a failure a fresh key would repeat.
+    await expect(
+      failureOf(client.action(api.stamp, input, keyed))
+    ).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      category: "uncertain",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "submission.expired",
+      },
+    });
+    await expect(titles(client, api)).resolves.toStrictEqual(["Ran"]);
+  });
+
+  it("withholds an action's answer made under a release revoked while it ran, its outcome unknown with its key", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const keyed = { idempotencyKey: "made-under-v1" };
+    // It saves at once, then takes a while before it answers.
+    const running = failureOf(
+      client.action(api.stamp, { title: "Ran", thenMs: 2500 }, keyed)
+    );
+    await expect
+      .poll(async () => await titles(client, api))
+      .toStrictEqual(["Ran"]);
+    // Version 2 published, and version 1 revoked, while it runs.
+    const { version } = await opened.builder.api.apps.files.commit(
+      opened.app,
+      {
+        ...files,
+        "app.ts": `${files["app.ts"] ?? ""}\n// The second version.\n`,
+      },
+      "Second"
+    );
+    await opened.builder.api.apps.versions.setCurrent(opened.app, version);
+    await revokeRelease(
+      env,
+      await sealedPerson("admin"),
+      { app: appIdSchema.parse(opened.app), version: 1 },
+      "Leaks data"
+    );
+    await expect(running).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+      category: "uncertain",
+      details: {
+        idempotencyKey: keyed.idempotencyKey,
+        refusal: "version.revoked",
+      },
+    });
+  });
+
+  it("answers an action whose receipt is larger than a screen takes as uncertain, with its key", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    const failure = await failureOf(client.action(api.big));
+    expect(failure).toMatchObject({
+      code: "screen.answer_too_large",
+      category: "uncertain",
+    });
+    expect(failure.details).toHaveProperty("idempotencyKey");
   });
 
   it("saves from two tabs that read more at once than the person's request budget holds", async () => {
@@ -1709,16 +1986,16 @@ export const tell = mutation({
 `,
     "app.ts": app
       .replace(
-        "import { create, echo, get, list, remove, update }",
-        "import { create, echo, get, list, remove, secrets, tell, update }"
+        "import { big, create, echo, get, list, remove, stamp, update }",
+        "import { big, create, echo, get, list, remove, secrets, stamp, tell, update }"
       )
       .replace(
         'access: { tables: { notes: { read: "owner", write: "owner" } } }',
         'access: { tables: { notes: { read: "owner", write: "owner" }, secrets: { read: "appBuilders", write: "appBuilders" } } }'
       )
       .replace(
-        "operations: { notes: { list, get, create, update, remove, echo } }",
-        "operations: { notes: { list, get, create, update, remove, echo, secrets, tell } }"
+        "operations: { notes: { list, get, create, update, remove, echo, stamp, big } }",
+        "operations: { notes: { list, get, create, update, remove, echo, stamp, big, secrets, tell } }"
       ),
   };
 };

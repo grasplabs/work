@@ -8,9 +8,11 @@ import {
 import {
   clientError,
   fences,
+  fencingRefusalOf,
   GraspError,
   issueDetails,
   nothingRanCodes,
+  hidesOutcome,
   readAnswer,
   refusedBeforeCallCodes,
   readRejection,
@@ -54,15 +56,15 @@ import { readDescriptor } from "./value-read.ts";
 //   mutation carries an idempotency key, the caller's or a fresh random
 //   one, and a retry after a lost response sends the very same request,
 //   so the host answers its receipt instead of saving again.
-// - An uncertain outcome passes for success or failure: a mutation whose
-//   response was lost is retried under its key until the host answers,
-//   for `lostBudgetMs` at most, then rejects as uncertain with its key;
-//   it resolves only on the host's committed answer. An action's lost
-//   response is never sent again (it may have reached outside):
-//   `submission.outcome_unknown`, with the key. The host keeps no
-//   receipt of a whole action: a deliberate call with that key runs it
-//   again, its completed steps reconciled by the keys operations.ts
-//   derives from it, not repeated.
+// - An uncertain outcome passes for success or failure: a mutation or
+//   action whose response was lost is sent again under its key until the
+//   host answers, for `lostBudgetMs` at most, then rejects as uncertain
+//   with its key; it resolves only on the host's own answer. The host
+//   keeps a receipt of each (a mutation's with its commit, an action's in
+//   its invocation's object), so the resend answers what the first did,
+//   or joins it while it still runs, and never runs it a second time. An
+//   outcome the host itself can't tell (`operation.sandbox_lost`) is that
+//   receipt: it rejects at once, with its key.
 // - Retries spend the person's request budget: reads run at most
 //   `maxReadsInFlight` at once (re-reads after changes, on a portable
 //   host, gathered first), a refusal for the budget waits as long as it
@@ -933,7 +935,7 @@ const ranNothing = (settled: Settled, isAction: boolean): boolean =>
  * Whether, after `settled`, what the App's queries show may be out of
  * date: a confirmed change; an action's failure after a step, or its lost
  * answer, which undoes none of what it committed (its queries are read
- * again, the action itself never is); or records that moved on since this
+ * again, the action itself is never run again); or records that moved on since this
  * client read them (`data.conflict`), so a draft kept for the person to
  * reload gets the record as it is now.
  */
@@ -950,14 +952,45 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
 const uncertainScope = (reference: ReadReference, key: string): string =>
   canonicalJson([reference.resourceId, reference.contractId, key]);
 
+/**
+ * The code of the refusal `settled` is, if it withholds the outcome of
+ * what may have run: one `hidesOutcome` names, after a lost answer
+ * (`lost`), or, for an action, `operation.access_changed` or
+ * `submission.expired`, which come only once something ran under its key
+ * (its receipt, or its tombstone once the receipt expired): a form that
+ * stays uncertain past the receipt still keeps its key.
+ */
+const ranUnderKeyCodes: ReadonlySet<string> = new Set([
+  "operation.access_changed",
+  "submission.expired",
+]);
+
+/** The code `settled` withholds an outcome with, if it does (see above). */
+const withheldCode = (
+  settled: Settled,
+  lost: boolean,
+  isAction: boolean
+): string | undefined => {
+  if (settled.kind !== "failed" || !hidesOutcome(settled.error.code)) {
+    return undefined;
+  }
+  const { code } = settled.error;
+  return lost || (isAction && ranUnderKeyCodes.has(code)) ? code : undefined;
+};
+
 /** What a submission does next after `settled` (see `#send`). */
 const submissionVerdict = (
   settled: Settled,
   attempt: SubmissionAttempt
 ): SubmissionVerdict => {
   const { isAction, key, started, lostSince, now } = attempt;
-  const outcomeUnknown = () =>
-    clientError("submission.outcome_unknown", { idempotencyKey: key });
+  const outcomeUnknown = (refusal?: string) =>
+    clientError(
+      "submission.outcome_unknown",
+      refusal === undefined
+        ? { idempotencyKey: key }
+        : { idempotencyKey: key, refusal }
+    );
   if (settled.kind === "value") {
     return { next: "settle", value: settled.value };
   }
@@ -972,29 +1005,44 @@ const submissionVerdict = (
     // else.
     return { next: "fail", error: outcomeUnknown() };
   }
+  // A refusal that withholds the outcome of what may have run: after a
+  // lost answer, or an action's `operation.access_changed`, which comes
+  // only once something ran under its key. Still unknown, with the key:
+  // never a definite failure that invites a resubmit under a fresh one.
+  const withheld = withheldCode(settled, lostSince !== undefined, isAction);
+  if (withheld !== undefined) {
+    return { next: "fail", error: outcomeUnknown(withheld) };
+  }
   // An answer lost, or an outcome the host itself can't tell.
   const unknown =
     settled.kind === "lost" || settled.error.category === "uncertain";
-  if (unknown && isAction) {
-    return {
-      next: "fail",
-      error:
-        settled.kind === "lost"
-          ? outcomeUnknown()
-          : withKey(settled.error, key),
-    };
+  if (unknown && isAction && settled.kind === "failed") {
+    // The action's receipt holds what the host can't tell: sending it
+    // again answers the same.
+    return { next: "fail", error: withKey(settled.error, key) };
   }
   if (unknown) {
-    // A mutation is sent again under its key, which recovers its receipt,
-    // for as long as `lostBudgetMs`: never forever.
+    // Sent again under its key, which recovers its receipt (or joins an
+    // action still running), for as long as `lostBudgetMs`: never forever.
     return now - (lostSince ?? now) >= lostBudgetMs
       ? { next: "fail", error: outcomeUnknown() }
       : { next: "retry", unknown: true };
   }
-  if (!ranNothing(settled, isAction) || now - started >= submissionBudgetMs) {
+  if (!ranNothing(settled, isAction)) {
     return { next: "fail", error: settled.error };
   }
-  return { next: "retry", unknown: false };
+  // A refusal that ran nothing (its budget, a busy sandbox) is sent again
+  // for `submissionBudgetMs` from the call's start, or, once an answer was
+  // lost, for `lostBudgetMs` from then, past which what the lost answer
+  // would have said stays unknown, with its key.
+  if (lostSince === undefined) {
+    return now - started >= submissionBudgetMs
+      ? { next: "fail", error: settled.error }
+      : { next: "retry", unknown: false };
+  }
+  return now - lostSince >= lostBudgetMs
+    ? { next: "fail", error: outcomeUnknown(settled.error.code) }
+    : { next: "retry", unknown: false };
 };
 
 /**
@@ -1156,7 +1204,8 @@ export class GraspClient {
   /**
    * Runs the action `reference` names with `args`: resolves with its
    * declared result, or rejects with a structured error. A lost response
-   * is never sent again (see the header). See `SubmitOptions`.
+   * is recovered from its receipt under its key, never run again (see the
+   * header). See `SubmitOptions`.
    */
   async action<Reference extends ActionReference>(
     reference: Reference,
@@ -1867,8 +1916,10 @@ export class GraspClient {
     // what that fence already cleared: it doesn't fence whoever came after.
     const current =
       bound.generation === undefined || bound.generation === this.#generation;
-    if (current && settled.kind === "failed" && fences(settled.error.code)) {
-      this.#fence(settled.error);
+    const fencing =
+      settled.kind === "failed" ? fencingRefusalOf(settled.error) : undefined;
+    if (current && fencing !== undefined) {
+      this.#fence(fencing);
     }
     return settled;
   }
@@ -2092,10 +2143,10 @@ export class GraspClient {
   }
 
   /**
-   * Sends `request` until the host settles it: a mutation's lost
-   * response under the same key until the host answers, a refusal that
-   * ran nothing a few times; never an action's lost response. Kept among
-   * the submissions in flight until it settles.
+   * Sends `request` until the host settles it: a lost response under the
+   * same key until the host answers from its receipt, a refusal that ran
+   * nothing a few times. Kept among the submissions in flight until it
+   * settles.
    */
   async #send(
     reference: ReadReference,
