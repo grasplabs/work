@@ -1,5 +1,4 @@
 import { signCapability } from "@grasp-os/shared/capability";
-import type { CapabilityScope } from "@grasp-os/shared/capability";
 import { unknownOutcomeKeySchema } from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
@@ -22,6 +21,7 @@ import {
   ownAccount,
   someone,
 } from "./connect.ts";
+import type { Signed } from "./connect.ts";
 import { invoices } from "./fixtures/graph.ts";
 import { fakeGraph } from "./graph-api.ts";
 import { fakeProviders } from "./oauth-provider.ts";
@@ -86,10 +86,6 @@ const keyOf = (
     idempotencyKey,
   });
 
-/**
- * The capability core signs once it checked the call's permission again,
- * resolving it by `choice`, unless `signed` says otherwise.
- */
 /** The claim the call under `key` is at now, as its person is shown it. */
 const claimOf = async (key: UnknownOutcomeKey): Promise<number> => {
   const row = await env.DB.prepare(
@@ -100,11 +96,16 @@ const claimOf = async (key: UnknownOutcomeKey): Promise<number> => {
   return row?.claim ?? 0;
 };
 
+/**
+ * The capability core signs once it checked the call's permission again,
+ * resolving it by `choice` at the claim it is at now, unless `extra` says
+ * otherwise (another claim, decision or origin).
+ */
 const resolutionCapability = async (
   key: UnknownOutcomeKey,
   choice: ResolutionChoice | undefined,
   authority: Authority,
-  extra: Pick<CapabilityScope, "confirms"> & { claim?: number } = {}
+  extra: Signed & { claim?: number } = {}
 ): Promise<string> => {
   const { claim = await claimOf(key), ...signed } = extra;
   return await signCapability(env.CAPABILITY_SIGNING_KEY, authority, {
@@ -113,33 +114,30 @@ const resolutionCapability = async (
     resource: invoices,
     action: key.action,
     idempotencyKey: key.idempotencyKey,
-    ...(choice === undefined ? {} : { resolves: { choice, claimedAt: claim } }),
+    ...(choice === undefined
+      ? {}
+      : { decision: { kind: "resolve", choice, claimedAt: claim } }),
     ...signed,
   });
 };
 
 /**
- * Resolves `key` as core does for `person`, at the claim the call is at
- * now unless `claim` says another, with its capability.
+ * Resolves `key` as core does for `person`, with `capability`, or one
+ * resolving it at the claim it is at now.
  */
 const resolve = async (
   person: ConnectionPerson,
   key: UnknownOutcomeKey,
   choice: ResolutionChoice,
-  capability?: string,
-  claim?: number
+  capability?: string
 ): Promise<void> => {
-  const at = claim ?? (await claimOf(key));
   await exports.default.resolveOutcome({
     person,
     key,
     choice,
-    claim: at,
     capability:
       capability ??
-      (await resolutionCapability(key, choice, agentFor(person.userId), {
-        claim: at,
-      })),
+      (await resolutionCapability(key, choice, agentFor(person.userId))),
   });
 };
 
@@ -172,6 +170,10 @@ const listedFor = async (person: ConnectionPerson) => {
   const listed = await exports.default.listUnknownOutcomes(person);
   return listed.length;
 };
+
+/** Whether a statement bound to `values` would claim the row of `key`. */
+const claimsRow = (values: unknown[], key: string): boolean =>
+  values.includes(key) && values.includes("running");
 
 describe("a call of unknown outcome", () => {
   it("is listed for the person it acted for, with what was sent, and for nobody else", async () => {
@@ -425,7 +427,8 @@ describe("a call of unknown outcome", () => {
             idempotencyKey: "run-4:send",
           },
           {
-            resolves: {
+            decision: {
+              kind: "resolve",
               choice: "not_happened",
               claimedAt: await claimOf(key),
             },
@@ -492,20 +495,17 @@ describe("a call of unknown outcome", () => {
       )
     );
     vi.restoreAllMocks();
-    // The resolution lands between the recovery's read and its retake.
+    // The resolution lands between the recovery's read and its retake:
+    // right before the first statement that would claim the call's row
+    // (bound to its key and to `running`), whatever its SQL says.
     const prepare = env.DB.prepare.bind(env.DB);
+    let raced = false;
     let resolved: string | undefined;
-    const resolving = async (): Promise<void> => {
-      resolved ??= await outcome(
-        resolve(
-          connection.person,
-          keyOf(connection, "mail.createDraft", "run-5:other"),
-          "happened"
-        )
-      );
-    };
-    /** The statement, its every method waiting for the resolution first. */
-    const delayed = (statement: D1PreparedStatement): D1PreparedStatement =>
+    /** The statement, the resolution run once before it claims the row. */
+    const racing = (
+      statement: D1PreparedStatement,
+      values: unknown[] = []
+    ): D1PreparedStatement =>
       new Proxy(statement, {
         get: (target, property) => {
           const value: unknown = Reflect.get(target, property);
@@ -513,24 +513,28 @@ describe("a call of unknown outcome", () => {
             return value;
           }
           if (property === "bind") {
-            return (...values: unknown[]) => delayed(target.bind(...values));
+            return (...bound: unknown[]) =>
+              racing(target.bind(...bound), bound);
           }
-          return async (...values: unknown[]): Promise<unknown> => {
-            await resolving();
-            const result: unknown = await Reflect.apply(value, target, values);
+          return async (...args: unknown[]): Promise<unknown> => {
+            if (!raced && claimsRow(values, "run-5:other")) {
+              raced = true;
+              resolved = await outcome(
+                resolve(
+                  connection.person,
+                  keyOf(connection, "mail.createDraft", "run-5:other"),
+                  "happened"
+                )
+              );
+            }
+            const result: unknown = await Reflect.apply(value, target, args);
             return result;
           };
         },
       });
-    let first = true;
-    vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
-      const statement = prepare(query);
-      if (!first || !query.startsWith('update "idempotent_calls"')) {
-        return statement;
-      }
-      first = false;
-      return delayed(statement);
-    });
+    vi.spyOn(env.DB, "prepare").mockImplementation((query) =>
+      racing(prepare(query))
+    );
     const lateRecovery = await outcome(draft(connection, "run-5:other"));
     vi.restoreAllMocks();
     expect({
@@ -702,7 +706,7 @@ describe("a native connector's call of unknown outcome", () => {
     });
   });
 
-  it("keeps the resource binding its call came through, for core to check before it signs a resolution", async () => {
+  it("keeps the resource binding its call came through, for core to check before it signs a resolution, and is resolved only with that binding and App version", async () => {
     const connection = await connected();
     const app = appFor(connection.person.userId);
     graph.loseWriteAnswer();
@@ -722,16 +726,40 @@ describe("a native connector's call of unknown outcome", () => {
     const [listed] = await exports.default.listUnknownOutcomes(
       connection.person
     );
-    expect(listed?.origin).toStrictEqual({
-      mode: "workflow",
-      appVersion: 1,
-      permissionId: "permission-mail",
-      context: { type: "app", appId: "app-crm" },
-      binding,
+    const key = keyOf(connection, "mail.send", "run-10:send");
+    const appKey = { ...key, subject: app.subject };
+    const resolveAs = async (authority: Authority, signed: Signed) =>
+      await outcome(
+        resolve(
+          connection.person,
+          appKey,
+          "happened",
+          await resolutionCapability(appKey, "happened", authority, signed)
+        )
+      );
+    expect({
+      origin: listed?.origin,
+      noBinding: await resolveAs(app, {}),
+      otherVersion: await resolveAs(
+        { ...app, appVersion: 2 },
+        { origin: { ...originOf(app), binding } }
+      ),
+      exact: await resolveAs(app, { origin: { ...originOf(app), binding } }),
+    }).toStrictEqual({
+      origin: {
+        mode: "workflow",
+        appVersion: 1,
+        permissionId: "permission-mail",
+        context: { type: "app", appId: "app-crm" },
+        binding,
+      },
+      noBinding: "capability.invalid",
+      otherVersion: "capability.invalid",
+      exact: "ok",
     });
   });
 
-  it("refuses, without recording anything, a resolution of a call never made, and refuses one that also confirms, or names another person", async () => {
+  it("refuses, without recording anything, a resolution of a call never made, and refuses one carrying a held action's confirmation, for another person, or from another origin than the call's", async () => {
     const connection = await connected();
     graph.loseWriteAnswer();
     await outcome(send(connection, "run-11:send"));
@@ -745,29 +773,39 @@ describe("a native connector's call of unknown outcome", () => {
       )
     );
     const recordedForNever = await recorded();
+    const resolveWith = async (authority: Authority, signed: Signed = {}) =>
+      await outcome(
+        resolve(
+          connection.person,
+          key,
+          "happened",
+          await resolutionCapability(key, "happened", authority, signed)
+        )
+      );
     const refused = {
-      confirmsToo: await outcome(
-        resolve(
-          connection.person,
-          key,
-          "happened",
-          await resolutionCapability(key, "happened", owner, {
-            confirms: crypto.randomUUID(),
-          })
-        )
+      confirmation: await resolveWith(owner, {
+        decision: { kind: "confirm", pendingActionId: crypto.randomUUID() },
+      }),
+      otherPerson: await resolveWith(agentFor(someone().userId)),
+      otherMode: await resolveWith(
+        agentFor(connection.person.userId, "agent-chat", "interactive")
       ),
-      otherPerson: await outcome(
-        resolve(
-          connection.person,
-          key,
-          "happened",
-          await resolutionCapability(
-            key,
-            "happened",
-            agentFor(someone().userId)
-          )
-        )
-      ),
+      otherPermission: await resolveWith(owner, {
+        origin: { ...originOf(owner), permissionId: "permission-other" },
+      }),
+      otherContext: await resolveWith(owner, {
+        origin: {
+          ...originOf(owner),
+          context: {
+            type: "chat",
+            workspaceId: "workspace-1",
+            chatId: "chat-2",
+          },
+        },
+      }),
+      withBinding: await resolveWith(owner, {
+        origin: { ...originOf(owner), binding },
+      }),
     };
     expect({
       never,
@@ -779,13 +817,17 @@ describe("a native connector's call of unknown outcome", () => {
       never: "connect.outcome_not_found",
       recordedForNever: [],
       refused: {
-        confirmsToo: "capability.invalid",
+        confirmation: "capability.invalid",
         otherPerson: "capability.invalid",
+        otherMode: "capability.invalid",
+        otherPermission: "capability.invalid",
+        otherContext: "capability.invalid",
+        withBinding: "capability.invalid",
       },
-      recorded: [
-        ["connection.call.resolve_refused", "capability.invalid"],
-        ["connection.call.resolve_refused", "capability.invalid"],
-      ],
+      recorded: Array.from({ length: 6 }, () => [
+        "connection.call.resolve_refused",
+        "capability.invalid",
+      ]),
       stillListed: 1,
     });
   });
@@ -818,14 +860,14 @@ describe("two resolutions that it didn't happen, at once", () => {
       ),
     ]);
     const first = await outcome(
-      resolve(connection.person, key, "not_happened", capabilities[0], shown)
+      resolve(connection.person, key, "not_happened", capabilities[0])
     );
     // Its one more send is lost again: a new claim, of unknown outcome.
     graph.loseWriteAnswer();
     const resent = await outcome(send(connection, "run-12:send"));
     // The second, late, finds the claim it was signed for gone.
     const second = await outcome(
-      resolve(connection.person, key, "not_happened", capabilities[1], shown)
+      resolve(connection.person, key, "not_happened", capabilities[1])
     );
     expect({
       first,
@@ -908,5 +950,115 @@ describe("a run's step key with many calls of unknown outcome", () => {
         idempotencyKey: "run-14:step",
       })
     ).resolves.toBeTruthy();
+  });
+});
+
+describe("a person's many calls of unknown outcome", () => {
+  it("are listed page by page, every one once, to them and to admins, however many share a moment", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await outcome(send(connection, "run-15:send"));
+    // Two hundred more like it, first sent in the same millisecond.
+    await env.DB.prepare(
+      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 200) INSERT INTO idempotent_calls (subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key, input_hash, state, output, provenance, created_at, claimed_at, connector_version, resource, input, origin) SELECT subject_type, subject_id, on_behalf_of, connection_id, action, idempotency_key || '-' || i, input_hash, state, output, provenance, created_at, claimed_at, connector_version, resource, input, origin FROM idempotent_calls, n WHERE connection_id = ?"
+    )
+      .bind(connection.id)
+      .run();
+    const first = await exports.default.listUnknownOutcomes(connection.person);
+    const second = await exports.default.listUnknownOutcomes(
+      connection.person,
+      first.at(-1)?.cursor
+    );
+    const admin = someone("admin");
+    const theirs = async (before?: string) => {
+      const page = await exports.default.listAllUnknownOutcomes(admin, before);
+      return {
+        page,
+        mine: page.filter(
+          ({ onBehalfOf }) => onBehalfOf === connection.person.userId
+        ),
+      };
+    };
+    // The admin's pages hold everyone's: follow them to the end.
+    const listed: string[] = [];
+    let before: string | undefined;
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- each page after the last
+      const { page, mine } = await theirs(before);
+      listed.push(...mine.map(({ id }) => id));
+      if (page.length < 200) {
+        break;
+      }
+      before = page.at(-1)?.cursor;
+    }
+    const keys = [...first, ...second].map(({ key }) => key.idempotencyKey);
+    expect({
+      pages: [first.length, second.length],
+      distinct: new Set(keys).size,
+      byAdmin: listed.length,
+      invalid: await outcome(
+        exports.default.listUnknownOutcomes(connection.person, "not-a-cursor")
+      ),
+    }).toStrictEqual({
+      pages: [200, 1],
+      distinct: 201,
+      byAdmin: 201,
+      invalid: "connect.invalid",
+    });
+  });
+
+  it("are listed, and kept inputs swept, by an index: never by reading every call ever made", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await outcome(send(connection, "run-16:send"));
+    const prepare = env.DB.prepare.bind(env.DB);
+    const statements: { query: string; values: unknown[] }[] = [];
+    vi.spyOn(env.DB, "prepare").mockImplementation((query) => {
+      const statement = prepare(query);
+      return new Proxy(statement, {
+        get: (target, property) => {
+          if (property === "bind") {
+            return (...values: unknown[]) => {
+              statements.push({ query, values });
+              return target.bind(...values);
+            };
+          }
+          const value: unknown = Reflect.get(target, property);
+          if (typeof value !== "function") {
+            return value;
+          }
+          const bound: unknown = value.bind(target);
+          return bound;
+        },
+      });
+    });
+    await exports.default.listUnknownOutcomes(connection.person);
+    await outcome(send(connection, "run-16:other"));
+    vi.restoreAllMocks();
+    const steps = await Promise.all(
+      statements.map(async ({ query, values }) => {
+        const { results } = await env.DB.prepare(`EXPLAIN QUERY PLAN ${query}`)
+          .bind(...values)
+          .all<{ detail: string }>();
+        return results.map(({ detail }) => detail);
+      })
+    );
+    const all = steps.flat();
+    expect({
+      // A person's list, by their calls alone.
+      listedByPerson: all.some((step) =>
+        /^SEARCH idempotent_calls USING INDEX \S+ \(on_behalf_of=\?/u.test(step)
+      ),
+      // No statement reads every call ever made.
+      scans: all.filter((step) => step.startsWith("SCAN idempotent_calls")),
+      // The sweep reads only the calls that still keep an input.
+      sweptByKeptInputs: all.some((step) =>
+        step.includes("idempotent_calls_kept_input_idx")
+      ),
+    }).toStrictEqual({
+      listedByPerson: true,
+      scans: [],
+      sweptByKeptInputs: true,
+    });
   });
 });

@@ -1,4 +1,3 @@
-import { unknownOutcomeListLimit } from "@grasp-os/shared/connect";
 import type { UnknownOutcomeListing } from "@grasp-os/shared/connect";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
@@ -12,6 +11,7 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
+import { everyPage } from "../dashboard/outcome-pages.ts";
 import { readPeople } from "../directory.ts";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -97,14 +97,6 @@ const OutcomeRows = ({ outcomes }: { outcomes: Outcomes }) => {
           ))}
         </TableBody>
       </Table>
-      {listed.length >= unknownOutcomeListLimit ? (
-        <p className="text-muted-foreground border-t px-5 py-4" role="note">
-          <Trans>
-            Only the newest {unknownOutcomeListLimit} are shown. Older ones show
-            here as these are resolved.
-          </Trans>
-        </p>
-      ) : null}
     </div>
   );
 };
@@ -150,7 +142,9 @@ export const Route = createFileRoute("/_shell/settings/outcomes")({
   loader: async ({ context: { core } }) =>
     await loadFromCore(core, async (session): Promise<Outcomes> => {
       const [listed, people] = await Promise.all([
-        session.unknownOutcomes.listAll(),
+        everyPage(
+          async (before) => await session.unknownOutcomes.listAll(before)
+        ),
         readPeople(session),
       ]);
       return { listed, people };

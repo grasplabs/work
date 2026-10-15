@@ -4,13 +4,13 @@ import {
   capabilityErrors,
   verifyCapability,
 } from "@grasp-os/shared/capability";
-import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import {
   connectErrors,
   connectionPersonSchema,
   pendingKeySchema,
   refuseResolutionSchema,
   resolveOutcomeSchema,
+  unknownOutcomeCursorSchema,
   unknownOutcomeKeySchema,
   unknownOutcomeListLimit,
   unknownOutcomeRequestSchema,
@@ -27,13 +27,15 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { codeSubjectSchema } from "@grasp-os/shared/permissions";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { recordEventIf, recordEvents } from "./audit.ts";
 import { connectionFor, recoverableNow } from "./call.ts";
 import { connections, idempotentCalls } from "./db/schema.ts";
+import { requireDecision } from "./decisions.ts";
 import { isUnknown, originOf, resolution, unknownNow } from "./idempotency.ts";
 import type { Row } from "./idempotency.ts";
 import { descriptionOf, nameOf, shownConnection } from "./pending.ts";
@@ -48,6 +50,39 @@ import type { ShownConnection } from "./pending.ts";
 // an effect undone.
 
 const listLimit = unknownOutcomeListLimit;
+
+/**
+ * The row SQLite numbers each call by: a list's cursor names it with the
+ * call's first send (`UnknownOutcome.cursor`), never its key.
+ */
+const rowNumber = sql<number>`${idempotentCalls}.rowid`;
+
+/** The cursor of the call first sent at `createdAt`, as row `rowid`. */
+const cursorOf = (createdAt: Date, rowid: number): string =>
+  `${createdAt.getTime()}.${rowid}`;
+
+/**
+ * The calls listed after `before`, in the order lists go (newest first,
+ * then by row), or every one without it. Throws `connect.invalid` for a
+ * cursor no list gave.
+ */
+const after = (before: unknown): SQL | undefined => {
+  if (before === undefined) {
+    return undefined;
+  }
+  const parsed = unknownOutcomeCursorSchema.safeParse(before);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const [at = 0, rowid = 0] = parsed.data.split(".").map(Number);
+  return or(
+    lt(idempotentCalls.createdAt, new Date(at)),
+    and(eq(idempotentCalls.createdAt, new Date(at)), lt(rowNumber, rowid))
+  );
+};
+
+/** The order lists go in: newest first, then by row. */
+const listOrder = [desc(idempotentCalls.createdAt), desc(rowNumber)];
 
 /** The key of the call `row` records, as a list and a resolution name it. */
 const keyOf = (row: Row): UnknownOutcomeKey =>
@@ -75,9 +110,11 @@ const inputOf = (row: Row): ConnectCall["input"] | undefined => {
 
 const summaryOf = ({
   row,
+  rowid,
   connection,
 }: {
   row: Row;
+  rowid: number;
   connection: ShownConnection;
 }): UnknownOutcome => {
   const input = inputOf(row);
@@ -106,10 +143,10 @@ const summaryOf = ({
               ? {}
               : { binding: origin.binding }),
           },
+    cursor: cursorOf(row.createdAt, rowid),
   };
 };
 
-/** The rows of `person`'s, under `key` when given. */
 /** The rows under `key`, whoever they acted for. */
 const underKey = (key: UnknownOutcomeKey) =>
   and(
@@ -123,6 +160,7 @@ const underKey = (key: UnknownOutcomeKey) =>
     eq(idempotentCalls.idempotencyKey, key.idempotencyKey)
   );
 
+/** The rows of `person`'s, under `key` when given. */
 const theirs = (person: ConnectionPerson, key?: UnknownOutcomeKey) =>
   and(
     eq(idempotentCalls.onBehalfOf, person.userId),
@@ -141,27 +179,33 @@ const anyUnder = async (env: Env, key: UnknownOutcomeKey): Promise<boolean> => {
 
 /**
  * The calls of unknown outcome that acted for `person`, newest first, at
- * most {@link listLimit}: none for Grasp staff, who act for nobody here.
- * One connect may still recover on its own is listed too: the person may
- * know better.
+ * most {@link listLimit} a page, the next page `before` the last one's
+ * cursor: none for Grasp staff, who act for nobody here. One connect may
+ * still recover on its own is listed too: the person may know better.
  */
 export const listUnknownOutcomes = async (
   env: Env,
-  request: unknown
+  request: unknown,
+  before?: unknown
 ): Promise<UnknownOutcome[]> => {
   const parsed = connectionPersonSchema.safeParse(request);
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
+  const page = after(before);
   if (parsed.data.staff) {
     return [];
   }
   const rows = await drizzle(env.DB)
-    .select({ row: idempotentCalls, connection: shownConnection })
+    .select({
+      row: idempotentCalls,
+      rowid: rowNumber,
+      connection: shownConnection,
+    })
     .from(idempotentCalls)
     .leftJoin(connections, eq(connections.id, idempotentCalls.connectionId))
-    .where(and(theirs(parsed.data), unknownNow(Date.now())))
-    .orderBy(desc(idempotentCalls.createdAt))
+    .where(and(theirs(parsed.data), unknownNow(Date.now()), page))
+    .orderBy(...listOrder)
     .limit(listLimit);
   return rows.map(summaryOf);
 };
@@ -179,9 +223,12 @@ const listingColumns = {
   claimedAt: idempotentCalls.claimedAt,
   resource: idempotentCalls.resource,
   createdAt: idempotentCalls.createdAt,
+  rowid: rowNumber,
 };
 
-type ListingRow = Pick<Row, keyof typeof listingColumns>;
+type ListingRow = Pick<Row, Exclude<keyof typeof listingColumns, "rowid">> & {
+  rowid: number;
+};
 
 /**
  * What `row` shows an admin: never its input, key, claim or origin
@@ -227,6 +274,7 @@ const listingOf = async ({
     ...(title === undefined ? {} : { title }),
     resource: row.resource,
     sentAt: row.createdAt.toISOString(),
+    cursor: cursorOf(row.createdAt, row.rowid),
   };
 };
 
@@ -246,14 +294,15 @@ const distinctIds = (
 };
 
 /**
- * Every person's calls of unknown outcome, newest first, at most
- * {@link listLimit}, as an admin sees them (`listingOf`): only for one of
- * the organization's own admins, as core read them now; refused to anyone
- * else, Grasp staff included, who act for nobody here.
+ * Every person's calls of unknown outcome, newest first, paged as
+ * `listUnknownOutcomes` is, as an admin sees them (`listingOf`): only for
+ * one of the organization's own admins, as core read them now; refused to
+ * anyone else, Grasp staff included, who act for nobody here.
  */
 export const listAllUnknownOutcomes = async (
   env: Env,
-  request: unknown
+  request: unknown,
+  before?: unknown
 ): Promise<UnknownOutcomeListing[]> => {
   const parsed = connectionPersonSchema.safeParse(request);
   if (!parsed.success) {
@@ -266,27 +315,32 @@ export const listAllUnknownOutcomes = async (
     .select({ row: listingColumns, connection: shownConnection })
     .from(idempotentCalls)
     .leftJoin(connections, eq(connections.id, idempotentCalls.connectionId))
-    .where(unknownNow(Date.now()))
-    .orderBy(desc(idempotentCalls.createdAt))
+    .where(and(unknownNow(Date.now()), after(before)))
+    .orderBy(...listOrder)
     .limit(listLimit);
   return distinctIds(await Promise.all(rows.map(listingOf)));
 };
 
-/** The person's call of unknown outcome `key` names, as stored, if any. */
+/**
+ * The person's call of unknown outcome `key` names, as stored, with its
+ * row's number, if any.
+ */
 const unknownRowOf = async (
   env: Env,
   person: ConnectionPerson,
   key: UnknownOutcomeKey
-): Promise<Row | undefined> => {
+): Promise<{ row: Row; rowid: number } | undefined> => {
   if (person.staff) {
     return undefined;
   }
-  const row = await drizzle(env.DB)
-    .select()
+  const found = await drizzle(env.DB)
+    .select({ row: idempotentCalls, rowid: rowNumber })
     .from(idempotentCalls)
     .where(theirs(person, key))
     .get();
-  return row !== undefined && isUnknown(row, Date.now()) ? row : undefined;
+  return found !== undefined && isUnknown(found.row, Date.now())
+    ? found
+    : undefined;
 };
 
 /** One call of unknown outcome of the person's, or `null`. */
@@ -298,16 +352,16 @@ export const unknownOutcomeFor = async (
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
-  const row = await unknownRowOf(env, parsed.data.person, parsed.data.key);
-  if (row === undefined) {
+  const found = await unknownRowOf(env, parsed.data.person, parsed.data.key);
+  if (found === undefined) {
     return null;
   }
   const connection = await drizzle(env.DB)
     .select(shownConnection)
     .from(connections)
-    .where(eq(connections.id, row.connectionId))
+    .where(eq(connections.id, found.row.connectionId))
     .get();
-  return summaryOf({ row, connection: connection ?? null });
+  return summaryOf({ ...found, connection: connection ?? null });
 };
 
 /** What a resolution's events say of the call: identifiers, never input. */
@@ -388,32 +442,6 @@ export const refuseResolution = async (
 };
 
 /**
- * Whether `claims` are core's resolution of exactly the call `row`
- * records, by `choice`, for `person`, the person it acted for: the same
- * App or agent, the claim of its key it is now (one sent again since, and
- * lost again, is another call to decide on), and marked as a resolution,
- * never a call's or a held action's confirmation.
- */
-const resolvesThis = (
-  claims: CapabilityClaims,
-  row: Row,
-  person: ConnectionPerson,
-  choice: ResolutionChoice
-): boolean => {
-  const { subject, onBehalfOf } = claims.authority;
-  const subjectId = subject.type === "app" ? subject.appId : subject.agentId;
-  return (
-    claims.resolves?.choice === choice &&
-    claims.resolves.claimedAt === row.claimedAt.getTime() &&
-    claims.confirms === undefined &&
-    onBehalfOf === person.userId &&
-    onBehalfOf === row.onBehalfOf &&
-    subject.type === row.subjectType &&
-    subjectId === row.subjectId
-  );
-};
-
-/**
  * Resolves a call of unknown outcome by its person's word, with the
  * capability core signed for that resolution once it checked the call's
  * permission again: only for the person it acted for, on a connection
@@ -430,16 +458,30 @@ export const resolveOutcome = async (
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
-  const { capability, person, key, choice, claim } = parsed.data;
-  const row = await unknownRowOf(env, person, key);
+  const { capability, person, key, choice } = parsed.data;
+  const found = await unknownRowOf(env, person, key);
+  const row = found?.row;
   if (row === undefined && !(await anyUnder(env, key))) {
     // No call was ever made under it: nothing to record a refusal of.
     throw connectErrors.create("connect.outcome_not_found");
   }
   try {
+    if (row === undefined) {
+      throw connectErrors.create("connect.outcome_not_found");
+    }
+    const claims = await verifyCapability(signingKeys, capability, {
+      connectionId: row.connectionId,
+      resource: row.resource ?? undefined,
+      action: row.action,
+      idempotencyKey: row.idempotencyKey,
+    });
     // Not the claim of its key the person was shown: sent again since,
     // and lost again, it is another call to decide on.
-    if (row === undefined || row.claimedAt.getTime() !== claim) {
+    const claimedAt = row.claimedAt.getTime();
+    if (
+      claims.decision?.kind === "resolve" &&
+      claims.decision.claimedAt !== claimedAt
+    ) {
       throw connectErrors.create("connect.outcome_not_found");
     }
     // What was sent is no longer kept (retention): "it didn't" would let
@@ -448,17 +490,16 @@ export const resolveOutcome = async (
     if (choice === "not_happened" && row.input === null) {
       throw connectErrors.create("connect.outcome_not_kept");
     }
-    const claims = await verifyCapability(signingKeys, capability, {
-      connectionId: row.connectionId,
-      resource: row.resource ?? undefined,
-      action: row.action,
-      idempotencyKey: row.idempotencyKey,
+    requireDecision(claims, {
+      decision: { kind: "resolve", choice, claimedAt },
+      person,
+      call: {
+        subjectType: row.subjectType,
+        subjectId: row.subjectId,
+        onBehalfOf: row.onBehalfOf,
+        origin: originOf(row),
+      },
     });
-    if (!resolvesThis(claims, row, person, choice)) {
-      throw capabilityErrors.create("capability.invalid", {
-        reason: "scope",
-      });
-    }
     await connectionFor(env, claims, row.connectionId);
   } catch (error) {
     await auditRefused(

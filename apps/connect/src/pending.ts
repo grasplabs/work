@@ -42,6 +42,7 @@ import { providerName } from "./catalog.ts";
 import type { Connection } from "./connections.ts";
 import { nativeConnector } from "./connectors.ts";
 import { connections, idempotentCalls, pendingActions } from "./db/schema.ts";
+import type { DecidedCall } from "./decisions.ts";
 
 // Side effects that wait for their person (threat model R7, R12). A side
 // effect a person is there for (`interactive`: from chat, or from a person
@@ -202,6 +203,37 @@ const bindingOf = (row: Row): HeldBinding | "unreadable" | null => {
   }
   const parsed = heldBindingSchema.safeParse(stored);
   return parsed.success ? parsed.data : "unreadable";
+};
+
+/**
+ * The held action `row`, as a decision on it is checked (decisions.ts):
+ * whose it is and where it came from. One whose context or binding can't
+ * be read has no origin, and can't be confirmed.
+ */
+export const decidedCallOf = (row: Row): DecidedCall => {
+  const binding = bindingOf(row);
+  let context: unknown;
+  try {
+    context = JSON.parse(row.context);
+  } catch {
+    context = undefined;
+  }
+  const parsed = workContextSchema.safeParse(context);
+  return {
+    subjectType: row.subjectType,
+    subjectId: row.subjectId,
+    onBehalfOf: row.onBehalfOf,
+    origin:
+      binding === "unreadable" || !parsed.success
+        ? null
+        : {
+            mode: row.mode,
+            appVersion: row.appVersion,
+            permissionId: row.permissionId,
+            context: parsed.data,
+            ...(binding === null ? {} : { binding }),
+          },
+  };
 };
 
 /** The connection's name for people: what it reaches, and its account. */

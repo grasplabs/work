@@ -387,7 +387,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     });
   });
 
-  it("can't be resolved once the App's permission is revoked, nor by anyone else, and keeps the run waiting", async () => {
+  it("can't be resolved once the App's permission is revoked, nor by anyone else, nor as a send it wasn't shown, and keeps the run waiting", async () => {
     const admin = await personApi("admin");
     const { mailbox, connectionId, permission, run, unknown } =
       await waitingRun(admin);
@@ -397,6 +397,14 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
         unknown.key,
         "not_happened",
         unknown.claim
+      )
+    );
+    // A claim of its key other than the one it was shown.
+    const otherClaim = await codeOf(
+      admin.api.unknownOutcomes.resolve(
+        unknown.key,
+        "not_happened",
+        unknown.claim + 1
       )
     );
     await admin.api.permissions.revoke(permission);
@@ -409,7 +417,9 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     );
     expect({
       stranger,
+      otherClaim,
       revoked,
+      badCursor: await codeOf(admin.api.unknownOutcomes.list("not-a-cursor")),
       othersList: await other.api.unknownOutcomes.list(),
       stillListed: await listedFor(admin),
       live: await liveStatus(run.id),
@@ -417,12 +427,20 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       resolutions: await resolutions(connectionId),
     }).toStrictEqual({
       stranger: "connect.outcome_not_found",
+      otherClaim: "connect.outcome_not_found",
       revoked: "permission.denied",
+      badCursor: "connect.invalid",
       othersList: [],
       stillListed: 1,
       live: "waiting",
       sent: 1,
       resolutions: [
+        {
+          action: "connection.call.resolve_refused",
+          actor: "person",
+          choice: "not_happened",
+          reason: "connect.outcome_not_found",
+        },
         {
           action: "connection.call.resolve_refused",
           actor: "person",
@@ -557,6 +575,7 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
           "action",
           "connectionId",
           "connectionName",
+          "cursor",
           "id",
           "onBehalfOf",
           "resource",

@@ -6,13 +6,9 @@ import type {
   PendingActionsApi,
 } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
-import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
-import {
-  authoritySchema,
-  permissionErrors,
-} from "@grasp-os/shared/permissions";
+import { authoritySchema } from "@grasp-os/shared/permissions";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { runOfStepKey } from "@grasp-os/shared/workflows";
@@ -20,12 +16,11 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { signedCall } from "./bindings.ts";
 import { personOf } from "./connections.ts";
 import { workflowRuns } from "./db/core/schema.ts";
+import { reauthorizedCapability, refusedForBinding } from "./decided-calls.ts";
 import { workspace } from "./durable-objects.ts";
 import { isProviderUnreachable } from "./resource-adapter.ts";
-import { requireHeldBinding } from "./resource-bindings.ts";
 import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -133,54 +128,20 @@ const confirmHeld = async (
 ): Promise<ConnectResult> => {
   const { person } = request;
   let capability: string;
-  // Set while the held call's binding is being checked: refused there, it
-  // could never be confirmed, so it leaves the person's list.
-  let staleBinding = false;
   try {
-    // An App's action names the version whose code asked for it, or no
-    // version was approved for it: refused, as `authorize` would.
-    if (held.subject.type === "app" && held.appVersion === null) {
-      throw permissionErrors.create("permission.denied", {
-        action: held.action,
-      });
-    }
-    // A call an App's action made through a resource binding runs only if
-    // that binding would still serve it now, as a live request would.
     // A binding connect can no longer read is refused, never skipped.
-    if (held.subject.type === "app" && held.binding !== null) {
-      staleBinding = true;
-      if (held.binding === "unreadable") {
-        throw operationErrors.create("resource.unavailable");
-      }
-      await requireHeldBinding(
-        env,
-        held.subject.appId,
-        held.binding,
-        held.action
-      );
-      staleBinding = false;
+    if (held.binding === "unreadable") {
+      throw operationErrors.create("resource.unavailable");
     }
-    const authority = authoritySchema.parse({
-      subject: held.subject,
-      onBehalfOf: identity.userId,
-      mode: held.mode,
-      ...(held.appVersion === null ? {} : { appVersion: held.appVersion }),
-    });
-    ({ capability } = await signedCall(
+    capability = await reauthorizedCapability(
       env,
+      identity,
       {
-        authority,
-        context: held.context,
-        connection: {
-          type: "connection",
-          connectionId: connectionIdSchema.parse(held.connectionId),
-          resource: held.resource ?? undefined,
-        },
-        permissionId: permissionIdSchema.parse(held.permissionId),
+        ...held,
+        binding: held.binding ?? undefined,
       },
-      { action: held.action, idempotencyKey: held.idempotencyKey },
-      held.id
-    ));
+      { kind: "confirm", pendingActionId: held.id }
+    );
   } catch (error) {
     // Refused here (the permission is gone, the person has left, the
     // context is invalid): recorded as connect records its own refusals,
@@ -197,6 +158,8 @@ const confirmHeld = async (
     // left free, so the same call made again is decided afresh. One whose
     // provider couldn't be reached to say isn't known to be stale: it
     // keeps waiting, for the person to confirm once it can be checked.
+    const staleBinding =
+      held.binding === "unreadable" || refusedForBinding(error);
     if (staleBinding && !isProviderUnreachable(error)) {
       await env.CONNECT.dropStaleBinding({ person, id: held.id }).catch(
         (dropError: unknown) => {
@@ -252,8 +215,10 @@ export const confirmPendingAction = async (
     ? await env.CONNECT.pendingAction({ person, id: parsedId.data })
     : null;
   if (held === null) {
-    // Connect refuses it, and records who tried: nothing confirms it.
-    return await env.CONNECT.confirmAction({ ...request, capability: null });
+    // Connect refuses it, and records who tried: nothing confirms it,
+    // whatever connect answers.
+    await env.CONNECT.confirmAction({ ...request, capability: null });
+    throw connectErrors.create("connect.pending_not_found");
   }
   // A run that has ended can't take the answer: its held action goes.
   // Accepted: a run cancelled between this check and connect taking the

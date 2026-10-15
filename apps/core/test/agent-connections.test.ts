@@ -2,6 +2,7 @@ import type { AuditEvent } from "@grasp-os/shared/audit";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
 import {
   chatOf,
@@ -74,6 +75,12 @@ const eventsOf = async (
 /** What a held call returned to the chat's code, as the model read it. */
 const pendingOf = (id: string | undefined) =>
   `Returned:\n${JSON.stringify({ output: null, pending: { id } })}`;
+
+/** The subject of the mail a call sent, from its input as JSON text. */
+const subjectOf = (input: string | null): string | null =>
+  input === null
+    ? null
+    : z.object({ subject: z.string() }).parse(JSON.parse(input)).subject;
 
 /** The model reads how the held call `id` ended, or why it can't. */
 const outcomeOf = (id: string) =>
@@ -444,6 +451,84 @@ describe("a chat's connections", setUpTime, () => {
       "connection.call held ",
       "connection.call replayed ",
     ]);
+  });
+
+  it("read how a held write whose answer was lost ended once its person said what became of it: won't be sent again, or may be sent once more", async () => {
+    const person = await signedInApi(idp, "user");
+    const admin = await signedInApi(idp, "admin");
+    // Both sends go out, and their answers are lost.
+    const mail = await mailConnection(["lost", "lost"]);
+    const send = (subject: string) =>
+      codeStep(
+        `export default async (self, env) => await env.connections.call("MAIL", "mail.send", ${JSON.stringify({ ...invoiceMail, subject })});`
+      );
+    const chat = await chatOf(
+      person.userId,
+      send("First"),
+      says("It waits for you."),
+      send("Second"),
+      says("It waits for you too.")
+    );
+    await requestGranted(idp, admin, {
+      subject: chat.agent,
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: "MAIL",
+    });
+    await chat.ask("Send Ben the first invoice.");
+    await chat.ask("Send Ben the second invoice.");
+    const held = await person.api.pendingActions.list();
+    const ids = held.map(({ id }) => id).toSorted();
+    const confirmed = await Promise.all(
+      held.map(
+        async ({ id, inputHash }) =>
+          await outcome(person.api.pendingActions.confirm(id, inputHash))
+      )
+    );
+    const lost = await person.api.unknownOutcomes.list();
+    const first = lost.find(({ input }) => subjectOf(input) === "First");
+    const second = lost.find(({ input }) => subjectOf(input) === "Second");
+    if (first === undefined || second === undefined) {
+      throw new Error("Expected both sends of unknown outcome");
+    }
+    await person.api.unknownOutcomes.resolve(
+      first.key,
+      "happened",
+      first.claim
+    );
+    await person.api.unknownOutcomes.resolve(
+      second.key,
+      "not_happened",
+      second.claim
+    );
+    const heldIdOf = (subject: string): string =>
+      held.find(({ input }) => subjectOf(input) === subject)?.id ?? "";
+    await pointAtGateway(
+      chat.stub,
+      fakeGateway(
+        outcomeOf(heldIdOf("First")),
+        outcomeOf(heldIdOf("Second")),
+        says("One went, one may go again.")
+      )
+    );
+    await chat.ask("What became of them?");
+
+    const results = await texts(chat.stub, chat.chat.id);
+    const did = await mail.did();
+    expect({
+      ids: ids.length,
+      confirmed,
+      read: results.slice(-2),
+      sent: did.sent.length,
+    }).toStrictEqual({
+      ids: 2,
+      confirmed: ["connect.outcome_unknown", "connect.outcome_unknown"],
+      read: [
+        `Returned:\n${JSON.stringify({ status: "resolved", output: null, error: "connect.resolved_done" })}`,
+        `Returned:\n${JSON.stringify({ status: "resolved", output: null, error: "connect.resolved_not_done" })}`,
+      ],
+      sent: 2,
+    });
   });
 
   it("read a held call's outcome only as the call would be allowed now: not once its resource's permission is revoked", async () => {

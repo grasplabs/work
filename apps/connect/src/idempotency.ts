@@ -244,7 +244,11 @@ const storedOriginSchema = z.strictObject({
   appVersion: z.int().positive().nullable(),
   permissionId: z.string().min(1),
   context: workContextSchema,
-  /** Its context had read restricted data: every side effect of it waits. */
+  /**
+   * Recovering it needs its person: its context had read restricted data,
+   * so every side effect of it waits, or a recovery was refused since for
+   * needing their confirmation (`requireConfirmation`).
+   */
   restricted: z.boolean(),
   /**
    * The App's approved resource binding the call came through, if it
