@@ -994,6 +994,12 @@ export interface RunsPage {
 /** How many days back a workflow's failed runs are counted. */
 export const failedRunDays = 7;
 
+/**
+ * How many days back the runs a workflow handled are counted: a week, so
+ * its count reads as what it handles a week.
+ */
+export const handledRunDays = 7;
+
 /** A workflow of an App's current version, as the Workflows page lists it. */
 export interface WorkflowSummary {
   app: AppId;
@@ -1018,6 +1024,11 @@ export interface WorkflowSummary {
   waiting: number;
   /** Its runs that failed in the last {@link failedRunDays} days. */
   failed: number;
+  /**
+   * The items it handled a week: its runs, of any version, that completed
+   * in the last {@link handledRunDays} days.
+   */
+  handled: number;
   /**
    * A schedule of it stopped: its run failed to start
    * {@link maxFailedStarts} times in a row. It starts again once its

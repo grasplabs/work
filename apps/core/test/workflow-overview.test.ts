@@ -1,5 +1,9 @@
 import type { Role } from "@grasp-os/shared/roles";
-import { failedRunDays, runsPageSize } from "@grasp-os/shared/workflows";
+import {
+  failedRunDays,
+  handledRunDays,
+  runsPageSize,
+} from "@grasp-os/shared/workflows";
 import type {
   ListedRun,
   OutlineNode,
@@ -265,7 +269,7 @@ const seedRun = async (
 const buildTime = { timeout: 60_000 };
 
 describe("the Workflows page", buildTime, () => {
-  it("lists every workflow of every App the person can open, with its latest run and its waiting and failed runs", async () => {
+  it("lists every workflow of every App the person can open, with its latest run, its waiting and failed runs and those it handled this week", async () => {
     const [owner, other, user, admin] = await Promise.all([
       personApi("builder"),
       personApi("builder"),
@@ -301,6 +305,20 @@ describe("the Workflows page", buildTime, () => {
       status: "failed",
       createdAt: now - (failedRunDays + 2) * day,
       endedAt: now - (failedRunDays + 1) * day,
+    });
+    // Completed this week, though started before it: handled.
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "completed",
+      createdAt: now - (handledRunDays + 1) * day,
+      endedAt: now - 2 * day,
+    });
+    // Completed before the week: not counted.
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "completed",
+      createdAt: now - (handledRunDays + 3) * day,
+      endedAt: now - (handledRunDays + 1) * day,
     });
     await seedRun(invoices, {
       workflow: "approve",
@@ -352,6 +370,7 @@ describe("the Workflows page", buildTime, () => {
         },
         waiting: 1,
         failed: 1,
+        handled: 2,
       },
       {
         ...owned,
@@ -363,8 +382,16 @@ describe("the Workflows page", buildTime, () => {
         },
         waiting: 1,
         failed: 0,
+        handled: 0,
       },
-      { ...owned, workflow: "remind", lastRun: null, waiting: 0, failed: 0 },
+      {
+        ...owned,
+        workflow: "remind",
+        lastRun: null,
+        waiting: 0,
+        failed: 0,
+        handled: 0,
+      },
     ];
     await expect(listed(owner)).resolves.toStrictEqual(invoiceWorkflows);
     await expect(listed(user)).resolves.toStrictEqual(invoiceWorkflows);
