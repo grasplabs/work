@@ -42,7 +42,7 @@ import {
   setObjectEnv,
 } from "./agent-chat.ts";
 import { answeringGateway } from "./ai-gateway.ts";
-import type { GatewayRequest } from "./ai-gateway.ts";
+import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import {
@@ -102,7 +102,8 @@ export type BrainArm = (typeof brainArms)[number];
 /**
  * Arms built to break the gate, to prove it holds: one hands the model a
  * section its person may not read; the others change stored state
- * mid-trial, in Knowledge, in core, in R2 and in the chat's own object.
+ * mid-trial, in Knowledge, in core, in R2, in the chat's object and in an
+ * earlier chat's history.
  */
 export const brainControls = [
   "leakyContext",
@@ -110,6 +111,7 @@ export const brainControls = [
   "changesCore",
   "changesFiles",
   "changesObject",
+  "changesHistory",
 ] as const;
 export type BrainControl = (typeof brainControls)[number];
 
@@ -598,7 +600,14 @@ const workspaceOf = async (company: BrainCompany, persona: BrainPersona) => {
  * The run's one model provider, behind every persona's object: trials run
  * one at a time, so it answers for the trial under way.
  */
-const providerOf = (respond: typeof stubReader) => {
+/** A model provider: what it answers each gateway request with, in a turn. */
+export type BrainProvider = (
+  turn: () => StubTurn
+) => (
+  requests: readonly GatewayRequest[]
+) => GatewayReply | Promise<GatewayReply>;
+
+const providerOf = (respond: BrainProvider) => {
   let turn: StubTurn = { phase: "prior" };
   const gateway = answeringGateway(respond(() => turn));
   // What the audit log recorded between one request and the next, by
@@ -698,8 +707,9 @@ const changes = (arm: BrainArm | BrainControl): arm is ChangingControl =>
 
 /**
  * A change no task asks for, where `where` says: a note saved in the
- * person's own collection, an App created in core, a file put in R2, or a
- * dashboard row written in the chat's object as a broken tool would.
+ * person's own collection, an App created in core, a file put in R2, a
+ * dashboard row written in the chat's object, or an earlier chat's message
+ * rewritten, as a broken tool would.
  * Nothing a later trial reads.
  */
 const changeState = async (
@@ -718,6 +728,15 @@ const changeState = async (
     // the file, a later one only overwrites its metadata.
     await env.FILES.put("brain-control/file", "changed", {
       customMetadata: { trial: crypto.randomUUID() },
+    });
+    return;
+  }
+  if (where === "changesHistory") {
+    // An earlier chat's first message, rewritten.
+    await runInDurableObject(place.stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE chat_messages SET message = message || ' ' WHERE id = (SELECT min(id) FROM chat_messages)"
+      );
     });
     return;
   }
@@ -800,8 +819,8 @@ const readTextsOf = async (
 /**
  * The persona's Workspace object's tables that a chat's code could change
  * and no turn changes on its own: drafts, attachments, projects, build
- * jobs and dashboards. Its chats, messages, sources and code runs change
- * with every turn and aren't counted.
+ * jobs and dashboards; and its chats, messages, sources and code runs, but
+ * the trial's own chat, whose turns write those as they go.
  */
 const workspaceTables = [
   "chat_drafts",
@@ -814,20 +833,37 @@ const workspaceTables = [
   "dashboard_widgets",
 ] as const;
 
+/** Tables of chats' history, by the column naming their chat. */
+const historyTables = [
+  ["chats", "id"],
+  ["chat_messages", "chat_id"],
+  ["chat_sources", "chat_id"],
+  ["chat_code_runs", "chat_id"],
+] as const;
+
 const workspaceStateOf = async (
-  place: Workspace
+  place: Workspace,
+  chatId: string
 ): Promise<[string, string][]> => {
-  const rows = await runInDurableObject(place.stub, (_instance, state) =>
-    workspaceTables.map((table) => [
-      table,
+  const rows = await runInDurableObject(place.stub, (_instance, state) => {
+    const read = (query: string, ...bindings: string[]) =>
       state.storage.sql
-        .exec(`SELECT * FROM "${table}"`)
+        .exec(query, ...bindings)
         .toArray()
         .map(rowText)
         .toSorted()
-        .join("\n"),
-    ])
-  );
+        .join("\n");
+    return [
+      ...workspaceTables.map((table) => [
+        table,
+        read(`SELECT * FROM "${table}"`),
+      ]),
+      ...historyTables.map(([table, column]) => [
+        table,
+        read(`SELECT * FROM "${table}" WHERE "${column}" != ?`, chatId),
+      ]),
+    ];
+  });
   return await Promise.all(
     rows.map(async ([table = "", text = ""]) => [
       `workspace.${table}`,
@@ -920,7 +956,7 @@ const runTrial = async (
   // What the trial's chat drafted counts too: drafts live in its object.
   const stateNow = async () => {
     const state = await stateOf();
-    for (const [table, digest] of await workspaceStateOf(place)) {
+    for (const [table, digest] of await workspaceStateOf(place, chat.id)) {
       state.set(table, digest);
     }
     state.set("files", await filesDigest());
@@ -1101,7 +1137,7 @@ export interface BrainRunOptions {
   openSealed?: boolean;
   seed?: number;
   /** The model provider; the stub by default. */
-  respond?: typeof stubReader;
+  respond?: BrainProvider;
   /** The provider's name in the run's identity; required with `respond`. */
   providerName?: string;
 }

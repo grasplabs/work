@@ -568,11 +568,14 @@ const workersAiBadInput = (
 
 /**
  * A fake AI binding whose gateway answers each request with what `respond`
- * makes of it, given the requests so far, this one last. Its `requests`
+ * makes of it, given the requests so far, this one last: at once, or once
+ * a provider it asks has answered. Its `requests`
  * are what reached the gateway.
  */
 export const answeringGateway = (
-  respond: (requests: readonly GatewayRequest[]) => GatewayReply | undefined
+  respond: (
+    requests: readonly GatewayRequest[]
+  ) => GatewayReply | undefined | Promise<GatewayReply | undefined>
 ) => {
   const requests: GatewayRequest[] = [];
   const fetch = async (
@@ -586,7 +589,7 @@ export const answeringGateway = (
     if (badInput !== undefined) {
       return badInput;
     }
-    const reply = respond(requests);
+    const reply = await respond(requests);
     if (reply === undefined) {
       throw new Error("The fake gateway has no reply left");
     }

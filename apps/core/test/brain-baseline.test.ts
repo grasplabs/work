@@ -56,7 +56,7 @@ const idsOf = (...families: string[]) =>
     .map(({ id }) => id);
 
 describe("the Brain baseline", { timeout: 300_000 }, () => {
-  it("holds its security gate in every arm: nothing unreadable reaches a model, and nothing in D1, Knowledge, R2 or the chat's object changes (other objects' storage isn't checked)", async () => {
+  it("holds its security gate in every arm: nothing unreadable reaches a model, and nothing in D1, Knowledge, R2 or the Workspace object changes (other objects' storage isn't checked)", async () => {
     const { gate, arms, scores } = await run();
     expect({
       gate,
@@ -95,6 +95,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       violations: [
         "changesCore",
         "changesFiles",
+        "changesHistory",
         "changesKnowledge",
         "changesObject",
         "leakyContext",
