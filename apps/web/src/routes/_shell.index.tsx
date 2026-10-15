@@ -320,7 +320,13 @@ const Chat = () => {
     chats.find(({ id }) => id === open) ??
     (open === undefined
       ? undefined
-      : { id: open, title: t`Chat`, createdAt: "", running: false });
+      : {
+          id: open,
+          title: t`Chat`,
+          createdAt: "",
+          running: false,
+          projectId: null,
+        });
   return (
     <>
       <SiteHeader

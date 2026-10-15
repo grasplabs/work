@@ -298,18 +298,18 @@ describe("App roles", { timeout: 60_000 }, () => {
     const { id: permission } = await owner.api.permissions.request(
       outlook(app)
     );
-    // An agent's permission names the App too, as a workflow's.
+    // An agent's permission names the App too, as its exports'.
     const { id: agents } = await admin.api.permissions.request({
       subject: { type: "agent", agentId: `agent-${unique()}` },
-      object: { type: "workflow", appId: app, workflowId: "report" },
-      actions: ["start"],
+      object: { type: "app", appId: app },
+      actions: ["read"],
       binding: "REPORT",
     });
     const { id: theirs } = await other.api.apps.create({ name: "Theirs" });
     const startsReport: PermissionRequest = {
       subject: { type: "app", appId: theirs },
-      object: { type: "workflow", appId: app, workflowId: "report" },
-      actions: ["start"],
+      object: { type: "app", appId: app },
+      actions: ["read"],
       binding: "REPORT",
     };
     const listed = async (person: Person, subject?: string) => {

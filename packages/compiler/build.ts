@@ -31,7 +31,7 @@ import { withBuildLock } from "./build-lock.ts";
 import { serverSdkImports } from "./src/app-code.ts";
 import { extractCandidates } from "./src/candidates.ts";
 import { compileModule } from "./src/compile.ts";
-import { sdkImports } from "./src/imports.ts";
+import { openWorkflowSdkImports, sdkImports } from "./src/imports.ts";
 import {
   compilerAssets,
   kitModule,
@@ -39,6 +39,8 @@ import {
   kitStylesheet,
   screenHooks,
   screenRuntime,
+  screenSdk,
+  sdkRoot,
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
 import { platformModules } from "./src/packages/platform.ts";
@@ -94,9 +96,27 @@ interface Entry {
   id: string;
 }
 
-/** `@grasp-os/ui`: one module per file its exports (`./components/*`, …) cover. */
+/**
+ * `@grasp-os/ui`'s exports that are one module each, not a folder of them:
+ * the form helpers (`Form`, `TextField`, …) screens render the SDK's
+ * forms with.
+ */
+const uiSingleExports: ReadonlySet<string> = new Set(["./form"]);
+
+/**
+ * `@grasp-os/ui`: one module per file its exports (`./components/*`, …)
+ * cover, and its single-module exports (`uiSingleExports`).
+ */
 const uiEntries = (): Entry[] =>
   Object.entries(exportsOf(ui)).flatMap(([key, target]) => {
+    if (uiSingleExports.has(key) && typeof target === "string") {
+      return [
+        {
+          specifier: `@grasp-os/ui/${key.slice(2)}`,
+          id: path.join(ui, target),
+        },
+      ];
+    }
     if (!key.endsWith("/*") || typeof target !== "string") {
       return [];
     }
@@ -114,11 +134,13 @@ const uiEntries = (): Entry[] =>
   });
 
 /**
- * `@grasp-os/sdk`'s screen modules: the hooks App code imports and the
- * runtime that renders a screen in its frame (see kit.ts).
+ * `@grasp-os/sdk`'s screen modules: the React SDK and the legacy hooks
+ * App code imports, and the runtime that renders a screen in its frame
+ * and mounts the session client (see kit.ts). They share the client's
+ * module, so the provider the runtime mounts is the one the hooks read.
  */
 const sdkEntries = (): Entry[] =>
-  [screenHooks, screenRuntime].map((specifier) => {
+  [sdkRoot, screenHooks, screenSdk, screenRuntime].map((specifier) => {
     const target =
       exportsOf(sdk)[`.${specifier.slice("@grasp-os/sdk".length)}`];
     if (typeof target !== "string") {
@@ -863,6 +885,8 @@ const buildScreenCompiler = async (
     ...reactImports,
     ...components.map(({ specifier }) => specifier),
     screenHooks,
+    screenSdk,
+    sdkRoot,
   ];
   const stylesheets = collectStylesheets();
   const kit: Kit = {
@@ -871,7 +895,12 @@ const buildScreenCompiler = async (
     stylesheets,
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
-    types: collectTypes([...imports, "lucide-react"]),
+    // The generated workflow module is type-checked against its SDK too.
+    types: collectTypes([
+      ...imports,
+      "lucide-react",
+      ...openWorkflowSdkImports,
+    ]),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.
     lintRules: rulesSchema.parse(shadcnPreset.rules),
@@ -884,7 +913,11 @@ const buildScreenCompiler = async (
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
   const kitModules = modulesOf(kitCode);
-  const workflowSdkModules = modulesOf(await buildSdkModules(sdkImports));
+  // App workflows and the code generated from JSON workflows share one set:
+  // each imports only its own entry of it (imports.ts).
+  const workflowSdkModules = modulesOf(
+    await buildSdkModules([...sdkImports, ...openWorkflowSdkImports])
+  );
   const serverSdkModules = modulesOf(await buildSdkModules(serverSdkImports));
   // Everything a build depends on: the compiler, what it knows of the kit,
   // and the kit's and the SDK's modules the App's modules import.

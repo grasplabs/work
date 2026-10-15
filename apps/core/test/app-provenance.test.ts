@@ -449,11 +449,11 @@ describe("sharing an App", () => {
     });
     const mail = await mailConnection();
     const shared = await grantConnection(owner, app, mail.id);
-    // An agent's permission names the App too, as a workflow's.
+    // An agent's permission names the App too, as its exports'.
     const { id: agents } = await admin.api.permissions.request({
       subject: { type: "agent", agentId: `agent-${unique()}` },
-      object: { type: "workflow", appId: app, workflowId: "report" },
-      actions: ["start"],
+      object: { type: "app", appId: app },
+      actions: ["read"],
       binding: "REPORT",
     });
     const sees = async (person: Person) => {
@@ -472,7 +472,7 @@ describe("sharing an App", () => {
       after: after.filter(
         ({ subject, object }) =>
           (subject.type === "app" && subject.appId === app) ||
-          (object.type === "workflow" && object.appId === app)
+          (object.type === "app" && object.appId === app)
       ),
       owner: await sees(owner),
       ownersMailbox: ownerLists.some(({ id }) => id === mailbox),

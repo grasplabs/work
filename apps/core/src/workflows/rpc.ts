@@ -16,11 +16,13 @@ import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { runActivity } from "./activity.ts";
+import { connectionWorkflows } from "./connection-workflows.ts";
 import { cancelRun } from "./controls.ts";
 import { runHistory } from "./history.ts";
 import {
   dryRunWorkflow,
   listAllRuns,
+  setOwner,
   workflowDetail,
   workflowOverview,
 } from "./overview.ts";
@@ -98,6 +100,13 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     );
   }
 
+  async ofConnection(connection: string): Promise<WorkflowSummary[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await connectionWorkflows(this.#env, by, connection)
+    );
+  }
+
   async runs(filter?: RunFilter): Promise<RunsPage> {
     return await withPerson(
       this.#check,
@@ -116,6 +125,17 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await workflowDetail(this.#env, by, app, workflow)
+    );
+  }
+
+  async setOwner(
+    app: string,
+    workflow: string,
+    owner: string
+  ): Promise<WorkflowSummary> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setOwner(this.#env, by, app, workflow, owner)
     );
   }
 

@@ -13,7 +13,7 @@
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { clients } from "../../connect/test/provider-config.ts";
-import { composioApiScript } from "./composio-api.ts";
+import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { mailServerScript } from "./mail-server.ts";
 
 /** Grasp's Entra app for connections, as set on connect in the tests. */
@@ -35,9 +35,20 @@ export const graphControlUrl = "https://graph-control.test/receive";
 
 /**
  * Where tests read the mail Microsoft Graph sent for them (`sendMail`), in
- * order: `{ mailbox, subject, to }` each.
+ * order: `{ mailbox, subject, to, replyTo }` each, and the drafts it made
+ * (`draft: true`).
  */
 export const graphSentUrl = "https://graph-control.test/sent";
+
+/**
+ * Where tests have Graph lose the answers of a mailbox's next writes (a
+ * mail sent, a draft made): POST `{ mailbox, writes }`, how many. Each such write is
+ * carried out, then answered with a 502, as a gateway that lost it would.
+ */
+export const graphLoseUrl = "https://graph-control.test/lose";
+
+/** Where tests read how many drafts Graph made for `?mailbox=`: `{ drafts }`. */
+export const graphDraftsUrl = "https://graph-control.test/drafts";
 
 /**
  * Where tests publish a package on the fake npm registry: POST one
@@ -57,6 +68,7 @@ export const tokensFor = (subject: string): string[] => [
 export const connectProvidersScript = `
 ${mailServerScript}
 ${composioApiScript}
+${composioLogoScript}
 const base64Url = (bytes) =>
   btoa(String.fromCharCode(...bytes))
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
@@ -64,6 +76,17 @@ const encoded = (value) =>
   base64Url(new TextEncoder().encode(JSON.stringify(value)));
 const graphEvents = (${graphEventsFake.toString()})();
 const graphSent = [];
+const graphLosing = new Map();
+const graphDrafts = new Map();
+/** Whether Graph loses this write's answer (\`graphLoseUrl\`). */
+const losesAnswer = (mailbox) => {
+  const losing = graphLosing.get(mailbox) ?? 0;
+  if (losing === 0) {
+    return false;
+  }
+  graphLosing.set(mailbox, losing - 1);
+  return true;
+};
 const npm = (${npmRegistryFake.toString()})();
 
 export default {
@@ -71,6 +94,9 @@ export default {
     const url = new URL(request.url);
     if (url.hostname === "backend.composio.dev" && url.pathname.startsWith("/api/v3.1/")) {
       return await composioApi(request, url);
+    }
+    if (url.hostname === "logos.composio.dev") {
+      return composioLogo(url);
     }
     if (url.hostname === "backend.composio.dev" || url.hostname === "mail-control.test") {
       return await mailServer(request, url);
@@ -86,8 +112,29 @@ export default {
           mailbox,
           subject: message.subject,
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
+          replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
         });
-        return new Response(null, { status: 202 });
+        return losesAnswer(mailbox)
+          ? new Response("Bad Gateway", { status: 502 })
+          : new Response(null, { status: 202 });
+      }
+      if (request.method === "POST" && mailPath && rest[0] === "messages") {
+        graphDrafts.set(mailbox, (graphDrafts.get(mailbox) ?? 0) + 1);
+        if (losesAnswer(mailbox)) {
+          return new Response("Bad Gateway", { status: 502 });
+        }
+      }
+      if (request.method === "POST" && mailPath && rest[0] === "messages") {
+        // A draft, recorded as a message sent is, marked a draft.
+        const message = await request.json();
+        graphSent.push({
+          mailbox,
+          subject: message.subject,
+          to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
+          replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
+          draft: true,
+        });
+        return Response.json({ id: "draft-" + graphSent.length, conversationId: null, webLink: null });
       }
       if (request.method === "GET" && mailPath && rest[0] === "messages") {
         return Response.json({ value: [] });
@@ -96,6 +143,14 @@ export default {
     }
     if (url.href === ${JSON.stringify(graphSentUrl)}) {
       return Response.json(graphSent);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(graphLoseUrl)}) {
+      const { mailbox, writes } = await request.json();
+      graphLosing.set(mailbox, (graphLosing.get(mailbox) ?? 0) + writes);
+      return new Response(null, { status: 204 });
+    }
+    if (url.origin + url.pathname === ${JSON.stringify(graphDraftsUrl)}) {
+      return Response.json({ drafts: graphDrafts.get(url.searchParams.get("mailbox")) ?? 0 });
     }
     if (url.hostname === "registry.npmjs.org") {
       return await npm.answer(request);

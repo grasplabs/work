@@ -48,6 +48,11 @@ export interface OperationChannel {
     method: string,
     args: unknown
   ) => Promise<unknown>;
+  /**
+   * One progress snapshot of a streaming action (spec 10.7.6), for the
+   * screen that runs it: a streaming action's only.
+   */
+  readonly emit: (progress: unknown) => Promise<unknown>;
 }
 
 /** Why the runner couldn't run what it was asked to. */
@@ -194,6 +199,15 @@ export const runFunction = async (
       runMutation: caller("mutation"),
       runAction: caller("action"),
       resources: resourcesOf(fn, channel),
+      // Only a streaming action has `emit`; the host refuses any other's
+      // use of the channel's `emit` all the same (`operation.no_stream`).
+      ...(fn.stream === null
+        ? {}
+        : {
+            emit: async (progress: unknown): Promise<void> => {
+              await channel.emit(progress);
+            },
+          }),
     };
   }
   // SAFETY: the context is the one of the function's kind, and the

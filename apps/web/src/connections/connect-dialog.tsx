@@ -443,7 +443,7 @@ export const ConnectDialog = ({
         closeLabel={t`Close`}
       >
         <header className="flex flex-col gap-3">
-          <AppLogo name={app} size="sm" />
+          <AppLogo logo={integration.logo} name={app} size="sm" />
           <div className="flex flex-col gap-1">
             <DialogTitle>
               {again === undefined

@@ -513,7 +513,7 @@ describe("permissions", () => {
       },
       {
         subject: app,
-        object: { type: "workflow", appId: app.appId, workflowId: "w" },
+        object: { type: "workflow", workflowId: "w" },
         actions: ["write"],
         binding: "W",
       },
@@ -530,21 +530,22 @@ describe("permissions", () => {
     const admin = await permissionApi("admin");
     const app = await newApp(admin.api);
     const missing = { type: "app" as const, appId: `app-${unique()}` };
-    const workflowOf = (appId: string): PermissionRequest => ({
+    const other = await newApp(admin.api);
+    const exportsOf = (appId: string): PermissionRequest => ({
       subject: app,
-      object: { type: "workflow", appId, workflowId: "invoices" },
-      actions: ["start"],
+      object: { type: "app", appId },
+      actions: ["read"],
       binding: "INVOICES",
     });
     const refused = await Promise.all(
-      [outlook(missing.appId), workflowOf(missing.appId)].map(
+      [outlook(missing.appId), exportsOf(missing.appId)].map(
         async (request) => await outcome(admin.api.permissions.request(request))
       )
     );
     // As for any App the person has no role in.
     expect(refused).toStrictEqual(["app.not_found", "app.not_found"]);
     await expect(
-      outcome(admin.api.permissions.request(workflowOf(app.appId)))
+      outcome(admin.api.permissions.request(exportsOf(other.appId)))
     ).resolves.toBe("ok");
   });
 

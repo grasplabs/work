@@ -11,8 +11,8 @@ import {
   workspaceIdSchema,
 } from "./ids.ts";
 import type { PackageRegistryApi } from "./packages.ts";
-import { permissionActionSchema } from "./permissions.ts";
-import type { PermissionSubject, WorkContext } from "./permissions.ts";
+import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
+import type { CodeSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
@@ -221,7 +221,44 @@ export const connectionOwnersSchema = z
 export interface ConnectionOwner {
   id: string;
   ownerUserId: string | null;
+  /** Who carries out its actions: a native connector, or Composio. */
+  source: CatalogSource;
+  /** A native provider (`microsoft`), or a Composio toolkit's slug. */
+  provider: string;
+  /** The account at the provider, such as its email address. */
+  accountName: string | null;
 }
+
+/**
+ * A person's request for an app the catalog doesn't have, as they type
+ * it: its name, what Grasp should do in it, and where it lives.
+ */
+export const appRequestSchema = z.strictObject({
+  name: z.string().trim().min(1).max(128),
+  why: z.string().trim().max(2000).optional(),
+  url: z
+    .url({ protocol: /^https?$/u })
+    .max(2048)
+    .optional(),
+});
+export type AppRequestInput = z.input<typeof appRequestSchema>;
+
+/** An app someone asked Grasp to add, as the catalog doesn't have it. */
+export interface AppRequest {
+  id: string;
+  /** As the first person to ask for it typed it. */
+  name: string;
+  /** What Grasp should do in it, in their words. */
+  why: string | null;
+  /** Where the app lives, as they gave it. */
+  url: string | null;
+  /** Who asked first; `name` is null once they are gone. */
+  requestedBy: { userId: string; name: string | null };
+  requestedAt: string;
+}
+
+/** Most app requests listed at once: the latest. */
+export const appRequestsListed = 200;
 
 /**
  * A signed-in person's connections, over `/rpc`. Starting one returns the
@@ -281,6 +318,14 @@ export interface ConnectionsApi {
     consent: string;
     returnTo?: string;
   }) => Promise<{ url: string }>;
+  /**
+   * Asks for an app the catalog doesn't have, audited. An app asked for
+   * already, by its name in any case, isn't asked for again: that
+   * request is returned.
+   */
+  requestApp: (request: AppRequestInput) => Promise<AppRequest>;
+  /** The apps people asked for, latest first, at most {@link appRequestsListed}. */
+  appRequests: () => Promise<AppRequest[]>;
 }
 
 // The catalog: everything an admin can connect, in one list. Native
@@ -307,7 +352,178 @@ export interface CatalogEntry {
   categories: string[];
   /** How many tools it has; `catalogTools` lists them. */
   toolCount: number;
+  /**
+   * Where its logo is, on the deployment's own origin
+   * ({@link catalogLogoUrl}), or `null` when it has none: the page draws its
+   * first letter. Never its provider's address: a browser loading that
+   * would call outside connect, and tell the provider who looks.
+   */
+  logo: string | null;
+  /**
+   * What it is for, in its provider's words: the first sentence of its
+   * description ({@link firstSentence}), or `null` when it has none.
+   */
+  description: string | null;
+  /** Which of Grasp's kinds of app it is ({@link catalogGroupOf}). */
+  group: CatalogGroup;
 }
+
+/**
+ * Grasp's kinds of app, in the order the Integrations page lists them. Each
+ * id is the group's English name, which the web app translates; `Other` is
+ * for an app none of the others fits.
+ */
+export const catalogGroups = [
+  "Email and calendar",
+  "Files and documents",
+  "Chat",
+  "CRM",
+  "Finance and accounting",
+  "HR",
+  "Signing",
+  "Marketing",
+  "Support",
+  "Projects and tasks",
+  "Forms and surveys",
+  "Data and analytics",
+  "AI",
+  "Commerce",
+  "Design and media",
+  "Developer tools",
+  "Other",
+] as const;
+export type CatalogGroup = (typeof catalogGroups)[number];
+
+/**
+ * Which group a category is in, by its words in lower case. The first
+ * group that fits wins, so the order is the precedence: "payroll" is HR
+ * before it is finance, "e-signature" signing before documents. These are
+ * the design prototype's words for Composio's categories.
+ */
+const groupWords: readonly (readonly [CatalogGroup, RegExp])[] = [
+  ["Signing", /signature/u],
+  ["HR", /human resources|hr talent|recruit|payroll/u],
+  [
+    "Finance and accounting",
+    /accounting|payment|invoic|tax|fundraising|banking|finance|proposal & invoice/u,
+  ],
+  ["CRM", /crm|contact management|sales/u],
+  ["Support", /customer support|help ?desk|customer appreciation|reviews/u],
+  [
+    "Marketing",
+    /marketing|newsletter|social media|ads|url shortener|seo|drip email|webinar/u,
+  ],
+  ["Email and calendar", /email|calendar|scheduling/u],
+  [
+    "Chat",
+    /chat|communication|phone|sms|notification|video conferencing|team collaboration/u,
+  ],
+  ["Forms and surveys", /form|survey/u],
+  [
+    "Projects and tasks",
+    /project|task|productivity|time tracking|event management|notes|bookmark/u,
+  ],
+  [
+    "Files and documents",
+    /document|file|spreadsheet|content|transcription|pdf/u,
+  ],
+  ["Data and analytics", /analytics|business intelligence|database|dashboard/u],
+  ["AI", /artificial intelligence|^ai |ai$|model context protocol/u],
+  ["Commerce", /commerce|fulfil|shipping|inventory/u],
+  [
+    "Design and media",
+    /image|design|video|audio|website builder|photo|music|gaming/u,
+  ],
+  [
+    "Developer tools",
+    /developer|server|it operations|security|internet of things|devops|app builder|cloud/u,
+  ],
+];
+
+/** The group one category is in, if any fits it. */
+const groupOfCategory = (category: string): CatalogGroup | undefined => {
+  const words = category.trim().toLowerCase();
+  return groupWords.find(([, pattern]) => pattern.test(words))?.[0];
+};
+
+/**
+ * The group of an app with these categories, as its provider names them
+ * (Composio's, its main one first): that of the first category a group
+ * fits, or `Other` when none does.
+ */
+export const catalogGroupOf = (categories: readonly string[]): CatalogGroup => {
+  for (const category of categories) {
+    const group = groupOfCategory(category);
+    if (group !== undefined) {
+      return group;
+    }
+  }
+  return "Other";
+};
+
+/** Longest description a catalog entry carries: one line a row can show. */
+const descriptionMaxLength = 140;
+
+const whitespace = /\s+/gu;
+/**
+ * Up to the first sentence's end: a stop, possibly inside closing quotes,
+ * followed by a space or the end, but not the stop of a common
+ * abbreviation ("Acme Inc. makes…").
+ */
+const firstSentenceOf =
+  /^.*?(?<!\b(?:Inc|Ltd|Co|Corp|LLC|etc|vs|e\.g|i\.e|approx|St|Dr|Mr|Mrs|Ms|No))[.!?]["'”’)]?(?= |$)/u;
+const lastWord = /\s+\S*$/u;
+const trailingPause = /[,;:]$/u;
+
+/**
+ * A description as a catalog entry carries it: its first sentence, its
+ * whitespace collapsed, cut at a word with an ellipsis where it is longer
+ * than {@link descriptionMaxLength}; `null` when nothing is left.
+ */
+export const firstSentence = (text: string): string | null => {
+  const clean = text.replaceAll(whitespace, " ").trim();
+  if (clean === "") {
+    return null;
+  }
+  const sentence = firstSentenceOf.exec(clean)?.[0] ?? clean;
+  if (sentence.length <= descriptionMaxLength) {
+    return sentence;
+  }
+  const cut = sentence
+    .slice(0, descriptionMaxLength - 2)
+    .replace(lastWord, "")
+    .replace(trailingPause, "");
+  return `${cut}…`;
+};
+
+/**
+ * Where core serves catalog entries' logos, which connect fetches from
+ * their provider and checks (`ConnectApi.catalogLogo`).
+ */
+export const catalogLogoPath = "/api/catalog/logos";
+
+/** Where one catalog entry's logo is served. */
+export const catalogLogoUrl = (source: CatalogSource, id: string): string =>
+  `${catalogLogoPath}/${source}/${encodeURIComponent(id)}`;
+
+/**
+ * A catalog entry's logo, as connect hands it to core: an image, of
+ * `contentType`, which connect has checked is what its bytes are.
+ */
+export interface CatalogLogo {
+  contentType: CatalogLogoType;
+  bytes: Uint8Array;
+}
+
+/** The image types a catalog logo may be. */
+export const catalogLogoTypes = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+] as const;
+export type CatalogLogoType = (typeof catalogLogoTypes)[number];
 
 /**
  * The catalog, native entries first. `composio` says whether Composio's
@@ -426,6 +642,9 @@ export const catalogToolsRequestSchema = z.strictObject({
 });
 export type CatalogToolsRequest = z.input<typeof catalogToolsRequestSchema>;
 
+export const catalogLogoRequestSchema = catalogToolsRequestSchema;
+export type CatalogLogoRequest = CatalogToolsRequest;
+
 // Side effects held for their person (threat model R7, R12). Connect
 // holds a side effect from chat, from a person using an App, or from any
 // context that read restricted data, until the person it acts for confirms
@@ -460,7 +679,7 @@ export interface ActionDescription {
 export interface PendingAction {
   id: string;
   /** The App or agent that asked for it. */
-  subject: PermissionSubject;
+  subject: CodeSubject;
   /** For an App's code: the version that asked. */
   appVersion: number | null;
   /** Asked for with the person there, or by a workflow run. */
@@ -597,6 +816,10 @@ export type HeldOutcome =
   | { state: "declined" }
   | { state: "done"; result: ConnectResult }
   | { state: "unknown"; reason: "connect.outcome_unknown" }
+  | {
+      state: "resolved";
+      reason: "connect.resolved_done" | "connect.resolved_not_done";
+    }
   | { state: "failed"; reason: string; output: string | null };
 
 /** Workflow runs that have ended, each with its App: at most 50. */
@@ -623,6 +846,11 @@ export type RefuseConfirmation = z.input<typeof refuseConfirmationSchema>;
 export const pendingKeySchema = z.strictObject({
   onBehalfOf: identifierSchema,
   idempotencyKey: identifierSchema,
+  /**
+   * Count a call of unknown outcome connect could recover now as waiting
+   * too: past a hold's deadline, nothing is recovered on its own.
+   */
+  orRecoverable: z.literal(true).optional(),
 });
 export type PendingKey = z.input<typeof pendingKeySchema>;
 
@@ -643,6 +871,114 @@ export interface PendingActionsApi {
    * on its next turn.
    */
   decline: (id: string) => Promise<void>;
+}
+
+// Calls of unknown outcome (spec 14.3). A side effect sent whose answer
+// was lost, and that connect couldn't recover, is an open obligation of
+// the person it acted for: connect lists it for them, with what was sent,
+// and they say what became of it, once they have looked. "It happened"
+// keeps its key spent for good, answering every repeat with
+// `connect.resolved_done`; "it didn't happen" frees its key for exactly one
+// more send of the same input. Core signs the resolution's capability only
+// while the call's permission still holds, as for confirming a held
+// action; connect records it, and never says anything was undone.
+
+/** What the person a call acted for says became of its unknown outcome. */
+export const resolutionChoiceSchema = z.enum(["happened", "not_happened"]);
+export type ResolutionChoice = z.infer<typeof resolutionChoiceSchema>;
+
+/** The call of unknown outcome: whose, where, and the key it was sent under. */
+export const unknownOutcomeKeySchema = z.strictObject({
+  subject: codeSubjectSchema,
+  connectionId: connectionIdSchema,
+  action: permissionActionSchema,
+  idempotencyKey: identifierSchema,
+});
+export type UnknownOutcomeKey = z.infer<typeof unknownOutcomeKeySchema>;
+
+/** One call of unknown outcome, for the person it acted for. */
+export const unknownOutcomeRequestSchema = z.strictObject({
+  person: connectionPersonSchema,
+  key: unknownOutcomeKeySchema,
+});
+export type UnknownOutcomeRequest = z.input<typeof unknownOutcomeRequestSchema>;
+
+/** Resolves a call of unknown outcome, with core's capability for it. */
+export const resolveOutcomeSchema = z.strictObject({
+  capability: z.unknown(),
+  person: connectionPersonSchema,
+  key: unknownOutcomeKeySchema,
+  choice: resolutionChoiceSchema,
+  /** The claim of the key the person was shown (`UnknownOutcome.claim`). */
+  claim: z.int().nonnegative(),
+});
+export type ResolveOutcome = z.input<typeof resolveOutcomeSchema>;
+
+/** A resolution core refused, with why, for the audit log. */
+export const refuseResolutionSchema = z.strictObject({
+  person: connectionPersonSchema,
+  key: unknownOutcomeKeySchema,
+  choice: resolutionChoiceSchema,
+  /** An error code, such as `permission.denied`: never free text. */
+  reason: z
+    .string()
+    .regex(/^[a-z][a-z_]*(?:\.[a-z][a-z_]*)+$/u)
+    .max(64),
+});
+export type RefuseResolution = z.input<typeof refuseResolutionSchema>;
+
+/**
+ * Where a call of unknown outcome came from, as its capability said: what
+ * core checks again before it signs a resolution of it.
+ */
+export interface UnknownOutcomeOrigin {
+  mode: "interactive" | "workflow";
+  appVersion: number | null;
+  permissionId: string;
+  context: WorkContext;
+  /** The App's resource binding it came through, as `PendingAction.binding`. */
+  binding?: HeldBinding;
+}
+
+/** A call of unknown outcome, as the person it acted for sees it. */
+export interface UnknownOutcome {
+  key: UnknownOutcomeKey;
+  /** As `PendingAction.connectionName`. */
+  connectionName: string | null;
+  resource: string | null;
+  /** As `PendingAction.description`, of the input it was sent with. */
+  description?: ActionDescription;
+  /** The exact input it was sent with, as JSON text, while connect has it. */
+  input: string | null;
+  /** When it was first sent, ISO 8601. */
+  sentAt: string;
+  /**
+   * Which claim of its key this is, in milliseconds: a resolution names it,
+   * so it applies to this send only, never to one sent again since.
+   */
+  claim: number;
+  /** Null for a call whose origin connect doesn't have: it can't be resolved. */
+  origin: UnknownOutcomeOrigin | null;
+}
+
+/**
+ * The calls of unknown outcome of a signed-in person, over `/rpc`: only
+ * their own. Grasp staff have none, and resolve none.
+ */
+export interface UnknownOutcomesApi {
+  list: () => Promise<UnknownOutcome[]>;
+  /**
+   * Says what became of the call `key` names: `happened` keeps it from
+   * ever being sent again; `not_happened` lets it be sent once more, with
+   * the same input, under the same key. Refused once the call's permission
+   * is gone. `claim` is the call's `UnknownOutcome.claim`, as shown: one
+   * sent again since, and lost again, is another call to decide on.
+   */
+  resolve: (
+    key: UnknownOutcomeKey,
+    choice: ResolutionChoice,
+    claim: number
+  ) => Promise<void>;
 }
 
 /**
@@ -787,6 +1123,13 @@ export interface ConnectApi extends PackageRegistryApi {
    */
   catalogTools: (request: CatalogToolsRequest) => Promise<CatalogTool[]>;
   /**
+   * One catalog entry's logo, fetched from its provider and checked, or
+   * `null` when the catalog lists none for it, or its provider's isn't
+   * an image connect serves (`catalogLogoTypes`, size-capped) or doesn't
+   * come.
+   */
+  catalogLogo: (request: CatalogLogoRequest) => Promise<CatalogLogo | null>;
+  /**
    * The generated contract `contract` names as the connection
    * `connectionId` serves it now, each action with the JSON Schemas of its
    * input and output. A native connection serves `<connector>.<family>@1`,
@@ -859,10 +1202,29 @@ export interface ConnectApi extends PackageRegistryApi {
   declineChatActions: (request: DeclineChatActions) => Promise<number>;
   /**
    * Whether any side effect with idempotency key `idempotencyKey`, acting
-   * for `onBehalfOf`, still waits for that person: a workflow run waits
-   * before running a step whose side effect was held again.
+   * for `onBehalfOf`, still waits for that person: held for them, or of
+   * unknown outcome, unresolved and not recoverable now. A workflow run
+   * waits before running a step whose side effect was held again.
    */
   anyPending: (request: PendingKey) => Promise<boolean>;
+  /**
+   * The calls of unknown outcome that acted for `person`, newest first (at
+   * most 200), those connect may still recover on its own included: none
+   * for Grasp staff.
+   */
+  listUnknownOutcomes: (person: ConnectionPerson) => Promise<UnknownOutcome[]>;
+  /** One call of unknown outcome of the person's, or `null`. */
+  unknownOutcome: (
+    request: UnknownOutcomeRequest
+  ) => Promise<UnknownOutcome | null>;
+  /**
+   * Resolves a call of unknown outcome its person resolved: only with the
+   * capability core signed for that resolution, and only for that person.
+   * Recorded as `connection.call.resolved`.
+   */
+  resolveOutcome: (request: ResolveOutcome) => Promise<void>;
+  /** Records a resolution core refused before it reached connect. */
+  refuseResolution: (request: RefuseResolution) => Promise<void>;
   /**
    * Records a confirmation core refused before it reached connect (the
    * permission is gone, the person has left, the context is invalid): the
@@ -1018,6 +1380,14 @@ export const connectErrors = defineErrorFamily({
     "A call with this idempotency key is still running. Try again shortly.",
   "connect.outcome_unknown":
     "A call with this idempotency key was interrupted after it was sent, so it may or may not have taken effect. It won't be sent again blindly: where its connector can find what it did, or can't do it twice, trying again later (after `retryAfterSeconds`, when given) recovers it; otherwise check the outside system to see whether it did.",
+  "connect.outcome_unknown_unresolved":
+    "A call of this step was interrupted after it was sent, so it may or may not have taken effect, and the person it acted for didn't say what became of it in time: the step stopped waiting. It's still theirs to resolve.",
+  "connect.resolved_done":
+    "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it took effect: it won't be sent again, and what it returned isn't known.",
+  "connect.resolved_not_done":
+    "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it didn't take effect: it may be sent once more, with the same input.",
+  "connect.outcome_not_found":
+    "There's no call of unknown outcome like that for you to resolve: it was resolved or recovered, or it isn't yours.",
   "connect.action_failed": "The action reported an error.",
   "connect.pending_not_found":
     "There's no such action waiting for you: it was confirmed or declined, or it isn't yours.",

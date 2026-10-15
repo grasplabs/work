@@ -17,6 +17,7 @@ import { NotificationsRpc } from "./notifications.ts";
 import { OnboardingGateRpc } from "./onboarding/gate-rpc.ts";
 import { OnboardingRpc } from "./onboarding/rpc.ts";
 import { OnboardingStaffRpc } from "./onboarding/staff-rpc.ts";
+import { OrganizationRpc } from "./organization.ts";
 import { PendingActionsRpc } from "./pending-actions.ts";
 import { PermissionsRpc } from "./permissions-rpc.ts";
 import { ResourceBindingsRpc } from "./resource-bindings-rpc.ts";
@@ -28,6 +29,8 @@ import type { SessionCheck } from "./session-check.ts";
 import { SignalsRpc } from "./signals-rpc.ts";
 import { StoresRpc } from "./stores-rpc.ts";
 import { TemplatesRpc } from "./templates-rpc.ts";
+import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
+import { WorkflowResourcesRpc } from "./workflow-resources-rpc.ts";
 import { WorkflowsRpc } from "./workflows/rpc.ts";
 
 /**
@@ -53,15 +56,18 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
   readonly #templates: TemplatesRpc;
   readonly #connections: ConnectionsRpc;
   readonly #workflows: WorkflowsRpc;
+  readonly #workflowResources: WorkflowResourcesRpc;
   readonly #decisions: DecisionsRpc;
   readonly #dependencies: DependenciesRpc;
   readonly #screens: ScreensRpc;
   readonly #screenTrust: ScreenTrustRpc;
   readonly #members: MembersRpc;
+  readonly #organization: OrganizationRpc;
   readonly #audit: AuditRpc;
   readonly #models: ModelsRpc;
   readonly #stores: StoresRpc;
   readonly #pendingActions: PendingActionsRpc;
+  readonly #unknownOutcomes: UnknownOutcomesRpc;
   readonly #signals: SignalsRpc;
   readonly #chats: ChatsRpc;
   readonly #dashboard: DashboardRpc;
@@ -85,15 +91,18 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     this.#templates = new TemplatesRpc(env, full);
     this.#connections = new ConnectionsRpc(env, full);
     this.#workflows = new WorkflowsRpc(env, full);
+    this.#workflowResources = new WorkflowResourcesRpc(env, full);
     this.#decisions = new DecisionsRpc(env, full);
     this.#dependencies = new DependenciesRpc(env, full);
     this.#screens = new ScreensRpc(env, full);
     this.#screenTrust = new ScreenTrustRpc(env, full);
     this.#members = new MembersRpc(env, full);
+    this.#organization = new OrganizationRpc(env, full);
     this.#audit = new AuditRpc(env, full);
     this.#models = new ModelsRpc(env, full);
     this.#stores = new StoresRpc(env, full);
     this.#pendingActions = new PendingActionsRpc(env, full);
+    this.#unknownOutcomes = new UnknownOutcomesRpc(env, full);
     this.#signals = new SignalsRpc(env, full);
     this.#chats = new ChatsRpc(env, full);
     this.#dashboard = new DashboardRpc(env, full);
@@ -167,6 +176,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#workflows;
   }
 
+  get workflowResources(): WorkflowResourcesRpc {
+    return this.#workflowResources;
+  }
+
   get decisions(): DecisionsRpc {
     return this.#decisions;
   }
@@ -187,6 +200,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     return this.#members;
   }
 
+  get organization(): OrganizationRpc {
+    return this.#organization;
+  }
+
   get audit(): AuditRpc {
     return this.#audit;
   }
@@ -201,6 +218,10 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
 
   get pendingActions(): PendingActionsRpc {
     return this.#pendingActions;
+  }
+
+  get unknownOutcomes(): UnknownOutcomesRpc {
+    return this.#unknownOutcomes;
   }
 
   get signals(): SignalsRpc {
