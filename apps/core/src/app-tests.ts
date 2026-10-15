@@ -19,12 +19,15 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { rpcArgumentDepth } from "@grasp-os/shared/screens";
+import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -43,6 +46,13 @@ import type { OpenStore } from "./data-stores.ts";
 import { appTestFixtures } from "./db/core/schema.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation } from "./operations.ts";
+import { QuerySubscriptions } from "./query-subscriptions.ts";
+import type {
+  LiveRead,
+  Reader,
+  SnapshotCallback,
+} from "./query-subscriptions.ts";
+import { RunSubscription } from "./run-subscription.ts";
 import { sandbox } from "./sandbox.ts";
 import { buildAppTests } from "./screens.ts";
 import { startFailure } from "./workflows/code.ts";
@@ -65,7 +75,12 @@ import { startFailure } from "./workflows/code.ts";
 //   (`publicOperationOf`: public functions only, of this release and
 //   contract), then run through the operation host (`callOperation`) on
 //   the release's own runner, isolate and store host. Only the principal
-//   and the store are the fixture's.
+//   and the store are the fixture's. A principal's live query
+//   (`subscribe`) is followed by the realtime manager a screen's page
+//   follows one through (query-subscriptions.ts), each principal as a
+//   connection of its own: only who reads, the release and the store are
+//   the fixture's, so its snapshots are read as that principal, gated and
+//   ordered as a screen's are.
 // - Tests read or change the App's data: each test runs on a store of its
 //   own, created empty for it with the release's schema and discarded
 //   after it. A fixture store is never in the store inventory, so
@@ -87,6 +102,9 @@ import { startFailure } from "./workflows/code.ts";
 //   session that has ended is refused, and a store discarded refuses
 //   every call after, so a test that ran past its deadline changes
 //   nothing more.
+// - Live queries outlive their test: a session releases every one its
+//   test didn't before it discards its store, and its principals' reads
+//   are refused from then on, which ends any read already under way.
 // - App tests run where nothing bounds them: off Cloudflare they need the
 //   sandbox host, which doesn't run them yet (GRA-529); there a version
 //   with App tests is refused (`version.tests_unavailable`), saying so.
@@ -298,6 +316,117 @@ const TestTarget = boundedRpcTarget({
   size: functionRequestMaxBytes,
 });
 
+/** What ends a test's call or live read once its session closed. */
+const sessionEnded = (): Error =>
+  new Error("This test has ended: its calls change nothing more.");
+
+/** Releases `stub` when it is an RPC stub; anything else holds nothing. */
+const disposeStub = (stub: object): void => {
+  const dispose: unknown = Reflect.get(stub, Symbol.dispose);
+  if (typeof dispose === "function") {
+    Reflect.apply(dispose, stub, []);
+  }
+};
+
+/**
+ * `given`, a test isolate's callback, kept past the call that passed it:
+ * an RPC stub is let go of when that call returns unless it is
+ * duplicated.
+ */
+const keptCallback = (
+  given: object
+): { call: (...args: unknown[]) => unknown; stub: object } => {
+  const dup: unknown = Reflect.get(given, "dup");
+  const kept: unknown =
+    typeof dup === "function" ? Reflect.apply(dup, given, []) : given;
+  if (typeof kept !== "function") {
+    throw new TypeError("A live query's callback is a function.");
+  }
+  return {
+    call: (...args) => {
+      const answer: unknown = Reflect.apply(kept, undefined, args);
+      return answer;
+    },
+    stub: kept,
+  };
+};
+
+/**
+ * A test's two callbacks as the realtime manager holds a page's
+ * (`SnapshotCallback`): each push goes to `onSnapshot`, and once the
+ * manager lets go of the last hold it took (`dup`), `onLost` is told, as
+ * a page is when core lets go of its stub; then both of the test's stubs
+ * are released. They are kept only once the manager takes its hold, in
+ * the call that passed them: a subscription refused before then holds
+ * nothing. Once its test has `ended`, nothing more is sent to the test's
+ * isolate: nobody there listens, and the isolate may be done with its run.
+ */
+const testCallback = (
+  onSnapshot: object,
+  onLost: object,
+  ended: () => boolean
+): SnapshotCallback => {
+  let kept:
+    | {
+        readonly snapshot: ReturnType<typeof keptCallback>;
+        readonly lost: ReturnType<typeof keptCallback>;
+      }
+    | undefined;
+  let holds = 0;
+  const lost = async (): Promise<void> => {
+    if (kept === undefined) {
+      return;
+    }
+    try {
+      if (!ended()) {
+        await kept.lost.call();
+      }
+    } catch {
+      // The test's isolate is gone already.
+    }
+    disposeStub(kept.snapshot.stub);
+    disposeStub(kept.lost.stub);
+  };
+  const hold = (): SnapshotCallback => {
+    holds += 1;
+    let held = true;
+    return Object.assign(
+      async (push: QuerySnapshotPush): Promise<void> => {
+        if (!held || ended() || kept === undefined) {
+          throw new Error("This live query was let go of.");
+        }
+        await kept.snapshot.call(push);
+      },
+      {
+        dup: (): SnapshotCallback => {
+          kept ??= {
+            snapshot: keptCallback(onSnapshot),
+            lost: keptCallback(onLost),
+          };
+          return hold();
+        },
+        [Symbol.dispose]: (): void => {
+          if (!held) {
+            return;
+          }
+          held = false;
+          holds -= 1;
+          if (holds === 0) {
+            void lost();
+          }
+        },
+      }
+    );
+  };
+  return hold();
+};
+
+/** One principal's live queries: a connection of its own, and who it is. */
+interface PrincipalQueries {
+  readonly queries: QuerySubscriptions<Reader>;
+  readonly reader: Reader;
+}
+
 /** What `work` answers, or a rejection once `ms` have passed. */
 const within = async <T>(work: Promise<T>, ms: number): Promise<T> => {
   const limit = deadline(ms);
@@ -332,6 +461,10 @@ class FixtureSession extends TestTarget {
   readonly #fixture: Fixture;
   #store: Promise<OpenStore> | undefined;
   #closed = false;
+  /** Each principal's live queries, by name (`subscribe`). */
+  readonly #queries = new Map<string, PrincipalQueries>();
+  /** The live queries not released yet, which `close` releases. */
+  readonly #following = new Set<RunSubscription>();
 
   constructor(context: SessionContext, fixtures: string, fixture: Fixture) {
     super();
@@ -364,7 +497,7 @@ class FixtureSession extends TestTarget {
     // Closed meanwhile (a test past its deadline): no store is made that
     // nothing would discard but the sweep.
     if (this.#closed) {
-      throw new Error("This test has ended: its calls change nothing more.");
+      throw sessionEnded();
     }
     this.#store ??= createFixtureStore(this.#env, this.#release);
     return await this.#store;
@@ -391,23 +524,49 @@ class FixtureSession extends TestTarget {
    */
   async call(name: unknown, request: unknown): Promise<string> {
     if (this.#closed) {
-      throw new Error("This test has ended: its calls change nothing more.");
+      throw sessionEnded();
     }
     const role = this.#roleOf(name);
+    return JSON.stringify(await this.#invoke(String(name), role, request));
+  }
+
+  /**
+   * Runs the call `request` names as principal `name`, with `role`, as a
+   * screen's call is resolved and run: its result, a refusal included.
+   * A live read (`live`) runs only a query, by its deadline, and is told
+   * what the query read of the session's store.
+   */
+  async #invoke(
+    name: string,
+    role: "user" | "builder",
+    request: unknown,
+    live?: {
+      readonly deadline: number;
+      readonly observe: (
+        storeId: StoreId,
+        readSet: Record<string, number>
+      ) => void;
+    }
+  ): Promise<OperationResult> {
     const requestId = crypto.randomUUID();
-    let result: OperationResult;
     try {
       const call = readFunctionRequest(request);
+      // A live query follows a query only, as a screen's does.
+      if (live !== undefined && call.reference.kind !== "query") {
+        throw operationErrors.create("contract.invalid_request");
+      }
       const path = publicOperationOf(this.#release, call.reference);
+      const store = await this.#storeOf();
+      const wallEnd = Date.now() + platformLimits.serverInvocationWallMs;
       const invocation: Invocation = {
-        principal: `fixture-${String(name)}`,
+        principal: `fixture-${name}`,
         consumer: {
           resourceId: this.#release.manifest.resourceId,
           resourceVersion: this.#release.manifest.resourceVersion,
         },
-        store: await this.#storeOf(),
+        store,
         requestId,
-        deadline: Date.now() + platformLimits.serverInvocationWallMs,
+        deadline: Math.min(wallEnd, live?.deadline ?? wallEnd),
         runId: null,
         // The fixture's role, which nothing changes while the test runs.
         authorize: async () =>
@@ -416,8 +575,15 @@ class FixtureSession extends TestTarget {
             appBuilder: role === "builder",
           }),
         // No resources: outside systems aren't the tests' to reach.
+        ...(live === undefined || this.#release.store === null
+          ? {}
+          : {
+              observeReads: (readSet: Record<string, number>) => {
+                live.observe(store.id, readSet);
+              },
+            }),
       };
-      result = await callOperation(
+      return await callOperation(
         hostedRelease(this.#env, this.#release),
         invocation,
         { path, kind: call.reference.kind },
@@ -427,9 +593,119 @@ class FixtureSession extends TestTarget {
           : { idempotencyKey: call.idempotencyKey }
       );
     } catch (error) {
-      result = { ok: false, error: refusalOf(error, requestId) };
+      return { ok: false, error: refusalOf(error, requestId) };
     }
-    return JSON.stringify(result);
+  }
+
+  /**
+   * Principal `name`'s live queries: a connection of its own to the
+   * realtime manager, as a screen's page has (query-subscriptions.ts),
+   * read as the principal, with its role, on the session's store, until
+   * the session closes. Its reads are the test's own and bounded by its
+   * deadline, so none is charged to a budget.
+   */
+  #queriesOf(name: string, role: "user" | "builder"): PrincipalQueries {
+    const known = this.#queries.get(name);
+    if (known !== undefined) {
+      return known;
+    }
+    // One object for the session's life: the manager's gate is keyed by it.
+    const reader: Reader = Object.freeze({ userId: `fixture-${name}` });
+    const roles = canonicalJson({
+      appMember: true,
+      appBuilder: role === "builder",
+    });
+    const queries = new QuerySubscriptions<Reader>(this.#env, {
+      check: async () => {
+        if (this.#closed) {
+          throw sessionEnded();
+        }
+        return await Promise.resolve(reader);
+      },
+      access: async () =>
+        await Promise.resolve(this.#closed ? ("role" as const) : "open"),
+      roles: async () => await Promise.resolve(roles),
+      admit: async () => await Promise.resolve(true),
+      evaluate: async (
+        _by,
+        _app,
+        _artifact,
+        request,
+        readBy
+      ): Promise<LiveRead> => {
+        let reads: LiveRead["reads"];
+        const result = await this.#invoke(name, role, request, {
+          deadline: readBy,
+          observe: (storeId, readSet) => {
+            reads = { storeId, readSet };
+          },
+        });
+        return { result, reads };
+      },
+    });
+    const made = { queries, reader };
+    this.#queries.set(name, made);
+    return made;
+  }
+
+  /**
+   * Follows a public query as principal `name`: `request` is the call's
+   * JSON text, as `call` takes it. Each push of core's (`{ revision,
+   * result }`) goes to `onSnapshot`, and `onLost` is called once core lets
+   * go of the subscription. Answers what releases it, or the refusal's
+   * result as JSON text, such as `screen.too_many_queries`; the session
+   * releases whatever its test didn't as it closes. A refusal is
+   * answered, never thrown: workerd takes a call that rejects once it was
+   * passed callbacks for one that hung, and cancels it.
+   */
+  // oxlint-disable-next-line require-await
+  async subscribe(
+    name: unknown,
+    request: unknown,
+    onSnapshot: unknown,
+    onLost: unknown
+  ): Promise<{ subscription: RunSubscription } | { refusal: string }> {
+    try {
+      if (this.#closed) {
+        throw sessionEnded();
+      }
+      const role = this.#roleOf(name);
+      if (
+        typeof request !== "string" ||
+        request.length > functionRequestMaxBytes ||
+        typeof onSnapshot !== "function" ||
+        typeof onLost !== "function"
+      ) {
+        throw new Error(
+          "A live query is followed with its request and two callbacks."
+        );
+      }
+      const { queries, reader } = this.#queriesOf(String(name), role);
+      const callback = testCallback(onSnapshot, onLost, () => this.#closed);
+      // Refused (`screen.too_many_queries`), it throws before it holds the
+      // callback, which then holds nothing of the test's.
+      const held = queries.subscribe(
+        reader,
+        appIdSchema.parse(this.#release.manifest.resourceId),
+        undefined,
+        request,
+        callback
+      );
+      // The manager holds a callback of its own; this one is let go of.
+      callback[Symbol.dispose]();
+      const subscription: RunSubscription = new RunSubscription(async () => {
+        this.#following.delete(subscription);
+        await held.release();
+      });
+      this.#following.add(subscription);
+      return { subscription };
+    } catch (error) {
+      const refused: OperationResult = {
+        ok: false,
+        error: refusalOf(error, crypto.randomUUID()),
+      };
+      return { refusal: JSON.stringify(refused) };
+    }
   }
 
   /**
@@ -440,6 +716,12 @@ class FixtureSession extends TestTarget {
    */
   async close(): Promise<void> {
     this.#closed = true;
+    // Its live queries first: nothing follows a store being discarded.
+    await Promise.all(
+      [...this.#following].map(async (subscription) => {
+        await subscription.release();
+      })
+    );
     const store = this.#store;
     this.#store = undefined;
     if (store === undefined) {
@@ -519,6 +801,18 @@ class FixtureHost extends TestTarget {
 }
 
 /**
+ * Core's side of one suite's run of `release`'s tests, with the App's
+ * `files`: the host the suite's isolate calls (`AppTestHost`), each
+ * session's store discarded within `cleanupMs`.
+ */
+export const fixtureHostFor = (
+  env: Env,
+  release: Release,
+  files: AppFiles,
+  cleanupMs = defaultLimits.cleanupMs
+): FixtureHost => new FixtureHost({ env, release, cleanupMs }, files);
+
+/**
  * Why suite `path` fails, one line per failing test: run in an isolate of
  * its own, which loads the suite and runs it over a host of its own.
  */
@@ -537,7 +831,7 @@ const suiteFailures = async (
   const failed = (failure: string): string[] => [
     `${path}: ${failure}`.slice(0, maxFailureLength),
   ];
-  const host = new FixtureHost({ env, release, cleanupMs }, files);
+  const host = fixtureHostFor(env, release, files, cleanupMs);
   const entry = env.LOADER.get(null, () => ({
     ...testSandbox,
     mainModule,
