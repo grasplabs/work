@@ -600,6 +600,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       evaluation.dirty = true;
       return;
     }
+    // A read writes didn't tear (or tore once too often, and is let go
+    // of): the next torn read is the first in a row again.
+    evaluation.torn = 0;
     // A failure the host would answer differently later (the sandbox
     // busy or away, writes that kept tearing it) is not pushed as though
     // it were final, nor watched: what it read, if anything, isn't what an
@@ -627,7 +630,6 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       evaluation.dirty = true;
       return;
     }
-    evaluation.torn = 0;
     this.#publish(evaluation, result, before.roles);
   }
 
