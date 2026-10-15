@@ -6,9 +6,9 @@ import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { useCore } from "../use-core.ts";
 import { DecisionConfirmDialog } from "../decision-confirmation.tsx";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import { useCore } from "../use-core.ts";
 import { frameQuestions } from "./frame-questions.ts";
 import type { Asked } from "./frame-questions.ts";
 import { runPreview, runScreen } from "./screen-host.ts";
