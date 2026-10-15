@@ -66,7 +66,10 @@ export type BrainFact = readonly string[];
 export type BrainExpectation =
   | {
       kind: "answer";
+      /** What the answer line says, one value each, in the order asked. */
       facts: readonly BrainFact[];
+      /** The values may come in any order: two sides of a conflict. */
+      anyOrder?: true;
       /** What a stale or wrong answer would say instead. */
       forbidden?: readonly string[];
       evidence: readonly BrainEvidence[];
@@ -99,12 +102,16 @@ export interface BrainTask {
 const answer = (
   facts: readonly BrainFact[],
   evidence: readonly BrainEvidence[],
-  forbidden?: readonly string[]
+  {
+    forbidden,
+    anyOrder,
+  }: { forbidden?: readonly string[]; anyOrder?: true } = {}
 ): BrainExpectation => ({
   kind: "answer",
   facts,
   evidence,
   ...(forbidden === undefined ? {} : { forbidden }),
+  ...(anyOrder === undefined ? {} : { anyOrder }),
 });
 
 const abstain = (
@@ -200,7 +207,7 @@ export const brainTasks: readonly BrainTask[] = [
           marker: "25 cent per kilometer",
         },
       ],
-      ["23 cent"]
+      { forbidden: ["23 cent"] }
     ),
     documents: ["travel"],
   },
@@ -406,7 +413,8 @@ export const brainTasks: readonly BrainTask[] = [
           marker: "parkeren gratis op terrein P2",
         },
         { source: "handboek/terrein.md#Terrein P2", marker: "3 euro per dag" },
-      ]
+      ],
+      { anyOrder: true }
     ),
     documents: ["parking", "parkingSite"],
   },

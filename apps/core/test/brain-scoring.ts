@@ -78,6 +78,9 @@ const answerLine = /^\s*answer:(?<answer>[^\n]*)/iu;
  */
 const negation =
   /(?<![\p{L}\p{N}])(?:not|no|never|niet|geen|nooit|nicht|kein|keine|nie|pas|jamais|nunca|ninguno)(?![\p{L}\p{N}])/iu;
+/** Words that offer alternatives ("37 or 99"), in the five languages. */
+const hedge =
+  /(?<![\p{L}\p{N}])(?:or|either|maybe|of|oder|bzw|ou|o|u)(?![\p{L}\p{N}])/iu;
 const citation = /\[(?<cited>[^\]\n]{1,300})\]/gu;
 
 /** The answer protocol's abstention: an answer that starts with `ABSTAIN`. */
@@ -155,8 +158,53 @@ const holds = (text: string, words: string): boolean => {
   return false;
 };
 
-const says = (text: string, fact: BrainFact): boolean =>
-  fact.some((words) => holds(text, normalized(words)));
+/**
+ * Whether one value of the answer line says `fact`, and nothing else
+ * numeric: "37 trucks" says 37; "37 trucks or 99 trucks" doesn't.
+ */
+const says = (part: string, fact: BrainFact): boolean =>
+  fact.some((value) => {
+    const words = normalized(value);
+    return holds(part, words) && !digit.test(part.replace(words, " "));
+  });
+
+/** Every ordering of `0 … count - 1`: for the few values of one answer. */
+const orderings = (count: number): number[][] =>
+  count <= 1
+    ? [Array.from({ length: count }, (_, index) => index)]
+    : orderings(count - 1).flatMap((shorter) =>
+        Array.from({ length: count }, (_, at) => [
+          ...shorter.slice(0, at),
+          count - 1,
+          ...shorter.slice(at),
+        ])
+      );
+
+/**
+ * Whether the answer line's values, separated by semicolons, are the
+ * task's facts: one value each, in the order asked unless any order goes,
+ * none hedged ("37 or 99") or denied ("not 37").
+ */
+const answers = (
+  said: string,
+  expected: Extract<BrainExpectation, { kind: "answer" }>
+): boolean => {
+  if (negation.test(said) || hedge.test(said)) {
+    return false;
+  }
+  const values = said.split(";").map((value) => value.trim());
+  if (values.length !== expected.facts.length) {
+    return false;
+  }
+  const fits = (order: readonly number[]) =>
+    order.every((value, index) => {
+      const fact = expected.facts[index];
+      return fact !== undefined && says(values[value] ?? "", fact);
+    });
+  return expected.anyOrder === true
+    ? orderings(values.length).some(fits)
+    : fits(values.map((_, index) => index));
+};
 
 /** Whether `cited` names `source`: the same path is enough, whatever heading. */
 const names = (cited: string, source: string): boolean => {
@@ -226,8 +274,7 @@ export const scoreTrial = (
   ).length;
   const answered = !failed && !abstained;
   const right =
-    !negation.test(said) &&
-    expect.facts.every((fact) => says(said, fact)) &&
+    answers(said, expect) &&
     !(expect.forbidden ?? []).some((stale) => holds(said, normalized(stale)));
   return {
     ...common,

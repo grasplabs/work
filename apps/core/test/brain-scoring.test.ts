@@ -230,57 +230,80 @@ describe("scoring a trial", () => {
     const fleet: BrainExpectation = {
       kind: "answer",
       facts: [["37"], ["12"]],
-      forbidden: ["23 cent"],
       evidence: [{ source: "fleet.md#Size", marker: "37 trucks" }],
     };
     const input = { modelInput: "The fleet has 37 trucks." };
-    expect({
-      inside: verdict(fleet, {
-        ...input,
-        answer: "ANSWER: 137 trucks, 112 electric [fleet.md]",
-      }).completed,
-      whole: verdict(fleet, {
-        ...input,
-        answer: "ANSWER: 37 trucks, 12 electric [fleet.md]",
-      }).completed,
-      staleInside: verdict(fleet, {
-        ...input,
-        answer: "ANSWER: 37 and 12, at 123 cent [fleet.md]",
-      }).completed,
-      decimal: verdict(fleet, {
-        ...input,
-        answer: "ANSWER: 37.5 trucks, 12,9 electric [fleet.md]",
-      }).completed,
-      grouped: verdict(fleet, {
-        ...input,
-        answer: "ANSWER: 1.037 trucks, 12 electric [fleet.md]",
-      }).completed,
-      time: verdict(fleet, {
-        ...input,
-        answer: "ANSWER: 37 trucks at 12:30 [fleet.md]",
-      }).completed,
-      negative: verdict(fleet, {
-        ...input,
-        answer: "ANSWER: -37 trucks, \u221212 electric [fleet.md]",
-      }).completed,
-      inDate: verdict(fleet, {
-        ...input,
-        answer: "ANSWER: 37 trucks by 2026-12-15 [fleet.md]",
-      }).completed,
-      sentence: verdict(fleet, {
-        ...input,
-        answer: "ANSWER: 37 trucks; 12. [fleet.md]",
-      }).completed,
-    }).toStrictEqual({
-      inside: false,
+    const answers = {
+      whole: "37 trucks; 12 electric",
+      sentence: "37 trucks; 12.",
+      inside: "137 trucks; 112 electric",
+      decimal: "37.5 trucks; 12,9 electric",
+      grouped: "1.037 trucks; 12 electric",
+      time: "37 trucks; 12:30",
+      negative: "-37 trucks; \u221212 electric",
+      inDate: "37 trucks; 2026-12-15",
+    };
+    expect(
+      Object.fromEntries(
+        Object.entries(answers).map(([name, answer]) => [
+          name,
+          verdict(fleet, { ...input, answer: `ANSWER: ${answer} [fleet.md]` })
+            .completed,
+        ])
+      )
+    ).toStrictEqual({
       whole: true,
-      staleInside: true,
+      sentence: true,
+      inside: false,
       decimal: false,
       grouped: false,
       time: false,
       negative: false,
       inDate: false,
-      sentence: true,
+    });
+  });
+
+  it("takes the answer's values in the order asked, one each, with no alternative", () => {
+    const fleet: BrainExpectation = {
+      kind: "answer",
+      facts: [["37"], ["12"]],
+      evidence: [{ source: "fleet.md#Size", marker: "37 trucks" }],
+    };
+    const conflict: BrainExpectation = {
+      kind: "answer",
+      facts: [["gratis"], ["3 euro"]],
+      anyOrder: true,
+      evidence: [{ source: "p.md#P", marker: "parkeren gratis" }],
+    };
+    const completed = (
+      expected: BrainExpectation,
+      answer: string,
+      modelInput: string
+    ) =>
+      verdict(expected, {
+        modelInput,
+        answer: `ANSWER: ${answer} [p.md] [fleet.md]`,
+      }).completed;
+    const trucks = "The fleet has 37 trucks.";
+    const parking = "Medewerkers parkeren gratis.";
+    expect({
+      reversed: completed(fleet, "12 trucks; 37 electric", trucks),
+      unsplit: completed(fleet, "37 trucks, 12 electric", trucks),
+      alternative: completed(
+        fleet,
+        "37 trucks or 99 trucks; 12 electric",
+        trucks
+      ),
+      extra: completed(fleet, "37 trucks; 12 electric; 4 on order", trucks),
+      eitherOrder: completed(conflict, "3 euro; gratis", parking),
+      hedged: completed(conflict, "gratis of 3 euro; 3 euro", parking),
+    }).toStrictEqual({
+      reversed: false,
+      unsplit: false,
+      alternative: false,
+      extra: false,
+      eitherOrder: true,
+      hedged: false,
     });
   });
 

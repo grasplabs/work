@@ -115,7 +115,7 @@ export const fullContextChars = 60_000;
 export const answerProtocol = [
   "Answer from what you can read in this chat: your memory, this conversation and Knowledge.",
   "Cite each source you used in square brackets: [path#heading], [memory] or [session].",
-  "Start your reply with a line ANSWER: followed by only the answer itself, such as a name, number, date or code; explain after it.",
+  "Start your reply with a line ANSWER: followed by only the answer's values (names, numbers, dates, codes), in the order the question asks for them, separated by semicolons; explain after it.",
   "If those sources don't answer the question, start your reply with ABSTAIN: instead and say why.",
   "Don't save, change or send anything.",
 ].join("\n");
