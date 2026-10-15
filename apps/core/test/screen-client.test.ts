@@ -879,7 +879,7 @@ describe("live queries", { timeout: 120_000 }, () => {
     });
   });
 
-  it("never lets a late answer of a read replace a newer push", async () => {
+  it("never lets a late answer of a read replace a newer push, followed or no longer", async () => {
     const opened = await openedApp();
     const api = apiOf(opened.release);
     const counted = countingTransport(pageTransport(opened, opened.screens));
@@ -903,6 +903,10 @@ describe("live queries", { timeout: 120_000 }, () => {
     await eventually(() => {
       expect(note.now().value).toMatchObject({ _rev: 2, title: "Second" });
     });
+    // Nobody follows the note now: the read sent before the push is still
+    // older than what it shows.
+    note.stop();
+    await scheduler.wait(0);
     open();
     await late;
 
@@ -1769,6 +1773,55 @@ describe(
   }
 );
 
+/**
+ * Counts the store's reads of a page of `pageSize` records of the opened
+ * App's store from now on, as its object answers them.
+ */
+const countPageReads = async (opened: Opened, pageSize: number) => {
+  const storeId = opened.release.store?.storeId;
+  const counted = { reads: 0 };
+  let undo: (() => void) | undefined;
+  const pageOfSize = z.object({
+    kind: z.literal("query"),
+    query: z.object({
+      terminal: z.object({
+        kind: z.literal("paginate"),
+        pageSize: z.literal(pageSize),
+      }),
+    }),
+  });
+  await runInDurableObject(storeObjectOf(opened), (instance) => {
+    // SAFETY: a store's object's prototype holds its methods.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const methods = Object.getPrototypeOf(instance) as {
+      read: (...args: unknown[]) => Promise<string>;
+    };
+    const original: unknown = Reflect.get(methods, "read");
+    if (typeof original !== "function") {
+      throw new TypeError("A store's object reads");
+    }
+    methods.read = async function read(
+      this: unknown,
+      ...args: unknown[]
+    ): Promise<string> {
+      if (args[0] === storeId && pageOfSize.safeParse(args[2]).success) {
+        counted.reads += 1;
+      }
+      const answer: unknown = await Reflect.apply(original, this, args);
+      return String(answer);
+    };
+    undo = () => {
+      Reflect.set(methods, "read", original);
+    };
+  });
+  return {
+    count: () => counted.reads,
+    restore: () => {
+      undo?.();
+    },
+  };
+};
+
 describe(
   "live queries and the room a page leaves",
   { timeout: 120_000 },
@@ -1822,6 +1875,76 @@ describe(
       await eventually(() => {
         expect(titlesOf(third.received[0])).toStrictEqual(["Two", "One"]);
       });
+    });
+
+    it("reads a query whose result found no room again only once there is room for it", async () => {
+      const opened = await openedApp(withSecrets());
+      const api = apiOf(opened.release);
+      const { client } = clientFor(opened);
+      for (const title of ["One", "Two"]) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await client.mutation(api.create, { title, body: "x".repeat(100_000) });
+      }
+      const held = Promise.withResolvers<null>();
+      // oxlint-disable-next-line typescript/no-misused-promises, typescript/strict-void-return -- core waits for what a page's callback answers
+      const holding: (push: unknown) => void = async () => {
+        await held.promise;
+      };
+      for (const pageSize of [10, 11]) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other
+        await opened.screens.watchQuery(
+          opened.app,
+          opened.lease,
+          requestOf(api.list, { pagination: { pageSize } }),
+          holding
+        );
+      }
+      await scheduler.wait(1500);
+      // A third list finds no room; a small query of another table is
+      // taken at once.
+      const third = pageFollower();
+      await opened.screens.watchQuery(
+        opened.app,
+        opened.lease,
+        requestOf(api.list, { pagination: { pageSize: 12 } }),
+        third.callback
+      );
+      const secrets = referenceTo<Record<never, never>, unknown, "query">(
+        opened.release,
+        "notes.secrets"
+      );
+      const tell = referenceTo<{ text: string }, unknown, "mutation">(
+        opened.release,
+        "notes.tell"
+      );
+      const small = pageFollower();
+      await opened.screens.watchQuery(
+        opened.app,
+        opened.lease,
+        requestOf(secrets, {}),
+        small.callback
+      );
+      await scheduler.wait(1500);
+
+      // Each small push the page takes leaves no more room for the third.
+      const reads = await countPageReads(opened, 12);
+      try {
+        for (let told = 1; told <= 5; told += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one after the other
+          await client.mutation(tell, { text: `Told ${told}` });
+          // oxlint-disable-next-line no-await-in-loop -- see above
+          await eventually(() => {
+            expect(small.received.length).toBeGreaterThan(told);
+          });
+        }
+        expect({
+          third: third.received,
+          readsWithoutRoom: reads.count(),
+        }).toStrictEqual({ third: [], readsWithoutRoom: 0 });
+      } finally {
+        reads.restore();
+      }
+      held.resolve(null);
     });
   }
 );

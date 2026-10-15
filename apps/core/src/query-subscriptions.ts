@@ -148,6 +148,11 @@ interface Listener {
   pending: Snapshot | undefined;
   /** Dropped results past the connection's bound: owed the latest. */
   behind: boolean;
+  /**
+   * The size of the result dropped for it past the bound: it is read
+   * again only once that much fits.
+   */
+  behindBytes: number;
   released: boolean;
 }
 
@@ -290,6 +295,7 @@ export class QuerySubscriptions {
       inFlight: false,
       pending: undefined,
       behind: false,
+      behindBytes: 0,
       released: false,
     };
     evaluation.listeners.add(listener);
@@ -766,10 +772,12 @@ export class QuerySubscriptions {
       this.#unsent + snapshot.bytes > querySubscriptionLimits.unsentBytes
     ) {
       listener.behind = true;
+      listener.behindBytes = snapshot.bytes;
       QuerySubscriptions.#forgetDelivered(evaluation);
       return;
     }
     listener.behind = false;
+    listener.behindBytes = 0;
     if (listener.inFlight) {
       listener.pending = snapshot;
       this.#unsent += snapshot.bytes;
@@ -798,6 +806,7 @@ export class QuerySubscriptions {
           evaluation.latest = undefined;
         }
         listener.behind = true;
+        listener.behindBytes = 0;
       } else if (!listener.released) {
         await listener.toPage(snapshot.push);
       }
@@ -827,7 +836,9 @@ export class QuerySubscriptions {
   /**
    * Gives every subscription behind the connection's bound its latest
    * result, now the page took something: the one kept, if another
-   * subscription still waits for it, or a fresh read.
+   * subscription still waits for it, or a fresh read, once a result as
+   * large as the one dropped would fit: a read whose answer would only be
+   * dropped again isn't worth the person's live reads.
    */
   #catchUp(): void {
     for (const evaluation of this.#evaluations.values()) {
@@ -836,7 +847,13 @@ export class QuerySubscriptions {
           continue;
         }
         if (evaluation.latest === undefined) {
-          this.#enqueue(evaluation, true);
+          const fits =
+            this.#unsent === 0 ||
+            this.#unsent + listener.behindBytes <=
+              querySubscriptionLimits.unsentBytes;
+          if (fits) {
+            this.#enqueue(evaluation, true);
+          }
         } else {
           this.#offer(evaluation, listener, evaluation.latest);
         }

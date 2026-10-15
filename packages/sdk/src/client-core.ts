@@ -72,7 +72,8 @@ import { readDescriptor } from "./value-read.ts";
 //   one dropped, and a push of an earlier subscription dropped too; an
 //   imperative read's answer answers its caller and is shown only while
 //   nobody follows the query. Reads are numbered too, an answer older
-//   than the one shown dropped.
+//   than the one shown dropped, and a push counts every read sent before
+//   it as older, so none of them replaces it once nobody follows.
 // - A lost connection leaves a screen silently stale, or hammers core:
 //   once core lets go of a subscription, the query keeps its last
 //   authorized snapshot and follows again after a delay from 250 ms up
@@ -1092,6 +1093,9 @@ export class GraspClient {
       return;
     }
     live.revision = read.revision;
+    // Every read sent before this push is older than it: one answered
+    // later, once nobody follows the query, never replaces it.
+    entry.shown = entry.sent;
     const { settled } = read;
     if (settled.kind === "value") {
       show(entry, { value: settled.value, error: undefined });
