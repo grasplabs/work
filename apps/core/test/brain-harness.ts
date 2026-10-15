@@ -1026,24 +1026,39 @@ const runTrial = async (
   await provider.mark();
   const firstRequest = gateway.requests.length;
   let spentBefore = await charged();
-  // The chat's own rows before its question: they must stay as they
-  // were, while the question and its answer are added.
-  let historyBefore = await chatRowsOf(place, chat.id);
+  // The chat's own rows only grow: after each turn every row there was
+  // before it must still be there, unchanged, from the chat's creation on.
+  let kept = await chatRowsOf(place, chat.id);
+  let chatIntact = true;
+  const keep = async () => {
+    const now = await chatRowsOf(place, chat.id);
+    const rows = new Set(now);
+    chatIntact &&= kept.every((row) => rows.has(row));
+    kept = now;
+  };
   let answer = "";
   let failure: string | undefined;
   let started = performance.now();
   let observedBefore = provider.observingMs();
   try {
     setTurn({ phase: "prior" });
-    // The control that rewrites this chat's history needs some to rewrite.
+    // The controls that change this chat need an earlier turn: one
+    // rewrites it at the question, one changes the chat during it.
     const earlier =
       task.priorTurns ??
-      (arm === "changesChat" ? ["Control: an earlier turn to keep."] : []);
+      (arm === "changesChat" || arm === "changesChatTitle"
+        ? ["Control: an earlier turn to keep."]
+        : []);
     for (const said of earlier) {
+      if (arm === "changesChatTitle") {
+        // oxlint-disable-next-line no-await-in-loop -- in order, as said
+        await changeState(company, place, chat.id, arm);
+      }
       // oxlint-disable-next-line no-await-in-loop -- in order, as said
       await place.stub.ask(chat.id, { text: said, model });
+      // oxlint-disable-next-line no-await-in-loop -- in order, as said
+      await keep();
     }
-    historyBefore = await chatRowsOf(place, chat.id);
     spentBefore = await charged();
     // A cold question starts in a just-evicted object, its caches and
     // memory gone, after any earlier turns of its chat. Its timer starts
@@ -1059,7 +1074,7 @@ const runTrial = async (
     }
     // Then retrieval, then the agent; a failed question is timed too.
     const sources = await sourcesFor(company, plan);
-    if (changes(arm)) {
+    if (changes(arm) && arm !== "changesChatTitle") {
       await changeState(company, place, chat.id, arm);
     }
     setTurn({ phase: "question", task, searches: arm === "agent" });
@@ -1076,12 +1091,10 @@ const runTrial = async (
   }
   const latencyMs =
     performance.now() - started - (provider.observingMs() - observedBefore);
-  const historyAfter = new Set(await chatRowsOf(place, chat.id));
+  await keep();
   const changedTables = [
     ...changedBetween(stateBefore, await stateNow()),
-    ...(historyBefore.every((row) => historyAfter.has(row))
-      ? []
-      : ["workspace.chat (this chat's rows)"]),
+    ...(chatIntact ? [] : ["workspace.chat (this chat's rows)"]),
   ];
   const requests = gateway.requests.slice(firstRequest);
   return {
