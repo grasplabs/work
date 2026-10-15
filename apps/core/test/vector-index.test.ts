@@ -54,7 +54,10 @@ interface Stored {
 }
 
 /** A Vectorize index in memory, with the failures a test asks for. */
-const fakeVectorize = (dimensions = generation.dimensions) => {
+const fakeVectorize = (
+  dimensions = generation.dimensions,
+  metric: VectorGeneration["metric"] = generation.metric
+) => {
   const vectors = new Map<string, Stored>();
   const filters: (VectorizeVectorMetadataFilter | undefined)[] = [];
   const behaviour = {
@@ -126,9 +129,16 @@ const fakeVectorize = (dimensions = generation.dimensions) => {
         .filter(([, stored]) => matchesFilter(stored, options?.filter))
         .map(([id, stored]) => ({
           id,
-          score: cosine([...vector], stored.values),
+          score:
+            metric === "euclidean"
+              ? Math.hypot(
+                  ...stored.values.map((value, n) => value - (vector[n] ?? 0))
+                )
+              : cosine([...vector], stored.values),
         }))
-        .toSorted((a, b) => b.score - a.score)
+        .toSorted((a, b) =>
+          metric === "euclidean" ? a.score - b.score : b.score - a.score
+        )
         .slice(0, options?.topK ?? 5);
       return { matches, count: matches.length };
     },
@@ -348,6 +358,33 @@ describe("a search while records change", () => {
   });
 });
 
+describe("a euclidean generation", () => {
+  it("puts the smallest distance first across policy batches", async () => {
+    const euclidean: VectorGeneration = {
+      ...generation,
+      id: "test-3-euclidean-1",
+      metric: "euclidean",
+    };
+    const provider = fakeVectorize(3, "euclidean");
+    const index = vectorIndexOf(provider.binding, euclidean);
+    const policies = Array.from({ length: 150 }, (_, n) => `policy:team-${n}`);
+    const sorted = policies.toSorted((a, b) => a.localeCompare(b));
+    const [first = "", last = ""] = [sorted[0], sorted.at(-1)];
+    await index.upsert([
+      record("far", first, [4, 0, 0]),
+      record("near", last, [1.5, 0, 0]),
+      record("nearest", first, [1.1, 0, 0]),
+    ]);
+
+    const found = await index.query([1, 0, 0], { policies, topK: 2 });
+
+    expect(found.matches.map(({ id }) => id)).toStrictEqual([
+      "nearest",
+      "near",
+    ]);
+  });
+});
+
 describe("when the provider fails", () => {
   it("reports an outage as unavailable, not as no matches", async () => {
     const provider = fakeVectorize();
@@ -431,6 +468,39 @@ describe("a profile with no vector index", () => {
 });
 
 describe("policy filters", () => {
+  it("stay under the provider's filter size with long keys that grow in JSON", () => {
+    // 64 bytes each; every quote and backslash doubles when JSON-encoded.
+    const keys = Array.from(
+      { length: 60 },
+      (_, n) => `${'"\\'.repeat(28)}${String(n).padStart(8, "0")}`
+    );
+
+    const { filters, complete } = policyFilters(keys);
+
+    const covered = filters.flatMap((filter) => {
+      const condition = filter.p;
+      return condition !== null &&
+        typeof condition === "object" &&
+        "$in" in condition
+        ? (condition.$in ?? []).map(String)
+        : [];
+    });
+    expect({
+      complete,
+      batches: filters.length > 1,
+      underLimit: filters.every(
+        (filter) =>
+          new TextEncoder().encode(JSON.stringify(filter)).length < 2048
+      ),
+      covered: covered.toSorted((a, b) => a.localeCompare(b)),
+    }).toStrictEqual({
+      complete: true,
+      batches: true,
+      underLimit: true,
+      covered: keys.toSorted((a, b) => a.localeCompare(b)),
+    });
+  });
+
   it("hold at most a bounded number of short keys each", () => {
     const keys = Array.from({ length: 150 }, (_, n) => `p${n}`);
 
