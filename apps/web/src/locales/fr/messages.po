@@ -16,6 +16,11 @@ msgstr "« {text} »"
 msgid "(company)"
 msgstr "(entreprise)"
 
+#: src/brain/brain-source-contents.tsx
+msgctxt "a number that changed: what it was before"
+msgid "(was {before})"
+msgstr "(avant : {before})"
+
 #: src/routes/_shell.knowledge.index.tsx
 msgid "(yours)"
 msgstr "(la vôtre)"
@@ -347,7 +352,9 @@ msgstr "{fixtures, plural, one {Elle a réussi son # enregistrement de test quan
 msgid "{fixtures, plural, one {It runs on its # fixture when the version is sealed, before any record} other {It runs on its # fixtures when the version is sealed, before any record}}"
 msgstr "{fixtures, plural, one {Elle s'exécute sur son # enregistrement de test quand la version est scellée, avant tout enregistrement} other {Elle s'exécute sur ses # enregistrements de test quand la version est scellée, avant tout enregistrement}}"
 
+#. Earlier events on a timeline, folded away
 #: src/knowledge/timeline.tsx
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "{folded, plural, one {# earlier} other {# earlier}}"
 msgstr "{folded, plural, one {# antérieure} other {# antérieures}}"
 
@@ -358,6 +365,11 @@ msgstr "{gaps, plural, one {# lacune} other {# lacunes}}"
 #: src/brain/brain-atlas.ts
 msgid "{goals, plural, one {# goal} other {# goals}}"
 msgstr "{goals, plural, one {# objectif} other {# objectifs}}"
+
+#: src/brain/brain-chips.tsx
+#: src/brain/brain-source-contents.tsx
+msgid "{hidden, plural, one {Show # more} other {Show # more}}"
+msgstr "{hidden, plural, one {Afficher # de plus} other {Afficher # de plus}}"
 
 #: src/connections/connection-list.tsx
 msgid "{holder}: {actions} on {resource}"
@@ -427,6 +439,10 @@ msgstr "{link} dans {appName} a échoué"
 #: src/dashboard/failed-workflows.tsx
 msgid "{link} in {appName} failed {failures, plural, one {once} other {# times}}"
 msgstr "{link} dans {appName} a échoué {failures, plural, one {une fois} other {# fois}}"
+
+#: src/brain/brain-transcript.tsx
+msgid "{match} of {matches}"
+msgstr "{match} sur {matches}"
 
 #. A length of time, said short: 4 minutes and 21 seconds.
 #: src/chat/thread.tsx
@@ -696,6 +712,10 @@ msgstr "{spent} sur {limit}"
 msgid "{statements, plural, one {# statement: {breakdown}} other {# statements: {breakdown}}}"
 msgstr "{statements, plural, one {# affirmation : {breakdown}} other {# affirmations : {breakdown}}}"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "{statements, plural, one {# statement} other {# statements}}"
+msgstr "{statements, plural, one {# affirmation} other {# affirmations}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{statements, plural, one {They brought # statement, each one tagged and kept with its source.} other {They brought # statements, each one tagged and kept with its source.}}"
 msgstr "{statements, plural, one {Elles ont apporté # affirmation, étiquetée et gardée avec sa source.} other {Elles ont apporté # affirmations, chacune étiquetée et gardée avec sa source.}}"
@@ -811,6 +831,10 @@ msgstr "{who} ne pourra pas être accordé plus tard : il faudra le redemander."
 #: src/connections/connection-list.tsx
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} a donné son consentement avant de le connecter :"
+
+#: src/brain/brain-article/kern.tsx
+msgid "{who}, interviewed {day}"
+msgstr "{who}, interviewé le {day}"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{workflowId} in {domain}"
@@ -1039,6 +1063,7 @@ msgid "Added"
 msgstr "Ajouté"
 
 #: src/brain/brain.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgctxt "note property: what a source added"
 msgid "Added"
 msgstr "Apports"
@@ -1128,6 +1153,7 @@ msgid "Agreements"
 msgstr "Accords"
 
 #: src/brain/brain.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "AI"
 msgstr "IA"
 
@@ -1247,6 +1273,10 @@ msgstr "Une application est l’endroit où travaille l’équipe de ce domaine,
 msgid "An app nobody approved was refused the domain's data"
 msgstr "Une application que personne n’a approuvée s’est vu refuser les données du domaine"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "and {more} more"
+msgstr "et {more} de plus"
+
 #: src/activity/pending.tsx
 msgid "Another domain already keeps {type} records here: this domain's won't apply."
 msgstr "Un autre domaine conserve déjà ici des enregistrements de type {type} : ceux de ce domaine ne s’appliqueront pas."
@@ -1309,6 +1339,7 @@ msgctxt "kind of thing that waits"
 msgid "App approval"
 msgstr "Approbation d’applications"
 
+#: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 msgid "Application"
 msgstr "Application"
@@ -1316,6 +1347,14 @@ msgstr "Application"
 #: src/brain/brain.ts
 msgid "Applications"
 msgstr "Applications"
+
+#: src/brain/brain-source-contents.tsx
+msgid "Applications in use on devices"
+msgstr "Applications utilisées sur les appareils"
+
+#: src/brain/brain-source-contents.tsx
+msgid "Applications signed in to"
+msgstr "Applications avec connexion"
 
 #: src/engines/screen-approval.tsx
 msgid "Approval"
@@ -1502,6 +1541,10 @@ msgstr "Disponible, en direct"
 msgid "Available, via Composio"
 msgstr "Disponible, via Composio"
 
+#: src/brain/back-button.tsx
+msgid "Back"
+msgstr "Retour"
+
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
 msgstr "Revenir comme au début"
@@ -1547,6 +1590,12 @@ msgstr "Lié"
 msgid "Bound to"
 msgstr "Lié à"
 
+#: src/brain/brain-nav.tsx
+#: src/frame/app-sidebar.tsx
+#: src/routes/_shell.brain.tsx
+msgid "Brain"
+msgstr "Cerveau"
+
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
 msgstr "Fil d’Ariane"
@@ -1579,6 +1628,16 @@ msgstr "Concepteur"
 #: src/activity/audit-words.ts
 msgid "Built approved packages"
 msgstr "A compilé des paquets approuvés"
+
+#. Column value: a team named this application
+#: src/brain/brain-source-contents.tsx
+msgid "By a team"
+msgstr "Par une équipe"
+
+#. Column value: no team named this application
+#: src/brain/brain-source-contents.tsx
+msgid "By nobody"
+msgstr "Par personne"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "By person"
@@ -1816,6 +1875,10 @@ msgstr "Choisir un fichier"
 msgid "Clear"
 msgstr "Effacer"
 
+#: src/brain/brain-transcript.tsx
+msgid "Clear filters"
+msgstr "Effacer les filtres"
+
 #: src/connections/connect-dialog.tsx
 #: src/connections/connection-list.tsx
 #: src/dashboard/report-dialog.tsx
@@ -1828,6 +1891,7 @@ msgstr "Effacer"
 msgid "Close"
 msgstr "Fermer"
 
+#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Close {name}"
 msgstr "Fermer {name}"
@@ -2056,6 +2120,11 @@ msgstr "Consentir et se connecter"
 msgid "Content, as JSON"
 msgstr "Contenu, en JSON"
 
+#: src/brain/brain-transcript.tsx
+msgctxt "heading: the headings of a document, as a table of contents"
+msgid "Contents"
+msgstr "Sommaire"
+
 #: src/engines/resource-bindings.tsx
 msgid "Contract"
 msgstr "Contrat"
@@ -2227,6 +2296,7 @@ msgstr "Repensé"
 
 #: src/activity/audit-log.tsx
 #: src/knowledge/document.tsx
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "Details"
 msgstr "Détails"
 
@@ -2445,6 +2515,10 @@ msgctxt "kind of app"
 msgid "Email and calendar"
 msgstr "E-mail et agenda"
 
+#: src/brain/brain-article/kern.tsx
+msgid "Employee"
+msgstr "Employé"
+
 #: src/brain/brain.ts
 msgid "Employee interviews"
 msgstr "Entretiens avec les employés"
@@ -2509,6 +2583,10 @@ msgstr "Toutes sont interviewées."
 msgid "Every source adds its own share, and only once it is in."
 msgstr "Chaque source apporte sa propre part, et seulement une fois disponible."
 
+#: src/brain/brain-sections.ts
+msgid "Every team Grasp spoke to: who they are, how they work and what slows them down."
+msgstr "Chaque équipe à qui Grasp a parlé : qui elle est, comment elle travaille et ce qui la freine."
+
 #: src/onboarding/staff-words.ts
 msgid "Every team has its lead"
 msgstr "Chaque équipe a son responsable"
@@ -2545,6 +2623,7 @@ msgstr "Déplier les discussions"
 msgid "Expand the filters"
 msgstr "Déplier les filtres"
 
+#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Expand the navigation"
 msgstr "Déplier la navigation"
@@ -2659,6 +2738,11 @@ msgstr "Le remplissage des nouveaux champs n’avançait plus, et les nouvelles 
 msgid "Filter"
 msgstr "Filtrer"
 
+#: src/brain/brain-transcript.tsx
+msgctxt "open the filters"
+msgid "Filter"
+msgstr "Filtrer"
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "Filter integrations"
 msgstr "Filtrer les intégrations"
@@ -2701,6 +2785,7 @@ msgstr "Replier les discussions"
 msgid "Fold the filters"
 msgstr "Replier les filtres"
 
+#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 msgid "Fold the navigation"
 msgstr "Replier la navigation"
@@ -2993,6 +3078,10 @@ msgstr "Dans Brain"
 msgid "In the proposer's words"
 msgstr "Selon les mots de la personne qui le propose"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "In this conversation"
+msgstr "Dans cette conversation"
+
 #: src/brain/brain.ts
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
 msgid "In Workflows"
@@ -3228,8 +3317,11 @@ msgstr "Lancement"
 msgid "Kind"
 msgstr "Type"
 
+#: src/brain/brain-transcript.tsx
+msgid "Kind of statement"
+msgstr "Type de propos"
+
 #: src/engines/resource-bindings.tsx
-#: src/frame/app-sidebar.tsx
 #: src/knowledge/frame.tsx
 #: src/knowledge/nav.tsx
 #: src/routes/_shell.knowledge.$collection.tsx
@@ -3263,6 +3355,10 @@ msgstr "Langues dans lesquelles il mène les entretiens"
 msgctxt "chats from the past week"
 msgid "Last 7 days"
 msgstr "7 derniers jours"
+
+#: src/brain/brain-article/kern.tsx
+msgid "Last heard {day}"
+msgstr "Entendu pour la dernière fois {day}"
 
 #: src/dashboard/failed-workflows.tsx
 msgid "Last on {date}"
@@ -3528,6 +3624,11 @@ msgstr "A déplacé d’anciennes entrées hors du journal d’audit"
 msgid "Name"
 msgstr "Nom"
 
+#: src/brain/brain-source-contents.tsx
+msgctxt "column: whether a team named the application in a conversation"
+msgid "Named"
+msgstr "Citée"
+
 #: src/brain/brain.ts
 msgid "Named by"
 msgstr "Cité par"
@@ -3545,8 +3646,13 @@ msgid "Named in {source}"
 msgstr "Cité dans {source}"
 
 #: src/brain/brain-markdown.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "Named, not linked"
 msgstr "Cité, sans lien"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Names {title} under {under}"
+msgstr "Cite {title} sous {under}"
 
 #: src/connections/source-badge.tsx
 msgid "Native"
@@ -3596,6 +3702,10 @@ msgstr "Nouveau depuis la dernière approbation : {added}"
 #: src/dashboard/failed-workflows.tsx
 msgid "New: failed while acting for you"
 msgstr "Nouveau : a échoué en agissant pour vous"
+
+#: src/brain/brain-transcript.tsx
+msgid "Next match"
+msgstr "Résultat suivant"
 
 #: src/workflows/triggers.tsx
 msgid "Next run: {next}"
@@ -3675,6 +3785,10 @@ msgstr "Ne s’exécute plus {how}"
 #: src/dashboard/dependency-requests.tsx
 msgid "No longer used: {removed}"
 msgstr "N’est plus utilisé : {removed}"
+
+#: src/brain/brain-transcript.tsx
+msgid "No matches"
+msgstr "Aucun résultat"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "No memory files are written yet."
@@ -3887,6 +4001,10 @@ msgstr "Introuvable"
 msgid "Not found. It may have been renamed or removed."
 msgstr "Introuvable. Cet élément a peut-être été renommé ou supprimé."
 
+#: src/brain/brain-source-contents.tsx
+msgid "Not listed"
+msgstr "Non indiqués"
+
 #: src/connections/connection-list.tsx
 msgid "Not named by the provider"
 msgstr "Non nommé par le fournisseur"
@@ -3926,6 +4044,10 @@ msgctxt "severity of a finding"
 msgid "Note"
 msgstr "Note"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Note not found"
+msgstr "Note introuvable"
+
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "Notes"
 msgstr "Notes"
@@ -3950,6 +4072,10 @@ msgstr "Rien ne s’est encore passé."
 #: src/workflows/runs.tsx
 msgid "Nothing has run yet."
 msgstr "Rien n’a encore été exécuté."
+
+#: src/brain/brain-transcript.tsx
+msgid "Nothing here matches the filter."
+msgstr "Rien ici ne correspond au filtre."
 
 #: src/routes/_shell.integrations.index.tsx
 msgid "Nothing here yet."
@@ -4088,6 +4214,10 @@ msgstr "Onboarding"
 msgid "Onboarding sections"
 msgstr "Sections de l’onboarding"
 
+#: src/brain/brain-transcript.tsx
+msgid "Only highlighted turns"
+msgstr "Seulement les prises de parole surlignées"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
 msgstr "Seuls les modèles marqués comme acceptant des données sensibles peuvent recevoir des données d’une collection sensible (marquée dans Connaissances) ou d’une connexion sensible, ou d’un chat, d’un domaine ou d’une exécution qui en a lu une."
@@ -4127,6 +4257,7 @@ msgid "Open"
 msgstr "Ouvrir"
 
 #: src/brain/brain-markdown.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgctxt "on a timeline: not happened yet"
 msgid "Open"
 msgstr "À venir"
@@ -4136,6 +4267,7 @@ msgctxt "onboarding stage"
 msgid "Open"
 msgstr "Ouvert"
 
+#: src/brain/brain-nav.tsx
 #: src/knowledge/nav.tsx
 #: src/knowledge/uploads.tsx
 msgid "Open {name}"
@@ -4174,6 +4306,10 @@ msgstr "Ouvert maintenant"
 #: src/brain/brain.ts
 msgid "Open question"
 msgstr "Question ouverte"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Open questions"
+msgstr "Questions ouvertes"
 
 #: src/brain/brain.ts
 msgid "Open since {date}. Until it is answered, this stays unknown, never zero."
@@ -4283,6 +4419,10 @@ msgctxt "tab of a workflow"
 msgid "Parameters"
 msgstr "Paramètres"
 
+#: src/routes/_shell.brain.sections.$sectionId.tsx
+msgid "Part of the brain not found"
+msgstr "Partie du brain introuvable"
+
 #: src/chat/held-writes.tsx
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Une partie de ce qui sera envoyé est tronquée ci-dessus. Affichez tout, ou exactement ce qui sera envoyé, pour confirmer."
@@ -4327,6 +4467,11 @@ msgstr "PDF"
 #: src/knowledge/uploads.tsx
 msgid "Pending"
 msgstr "En attente"
+
+#: src/brain/brain-source-contents.tsx
+msgctxt "column: how many people"
+msgid "People"
+msgstr "Personnes"
 
 #: src/onboarding/staff-words.ts
 msgctxt "onboarding stage"
@@ -4374,6 +4519,11 @@ msgstr "Autorisation"
 msgid "Permission {permission}"
 msgstr "Autorisation {permission}"
 
+#: src/brain/brain-source-contents.tsx
+msgctxt "column: the OAuth permissions granted to an application"
+msgid "Permissions"
+msgstr "Autorisations"
+
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
 msgstr "Autorisations demandées"
@@ -4414,6 +4564,10 @@ msgstr "Aperçu de la première application du brouillon"
 #: src/screens/screen-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
 msgstr "Aperçu : ne modifie rien, ne lit aucune donnée réelle"
+
+#: src/brain/brain-transcript.tsx
+msgid "Previous match"
+msgstr "Résultat précédent"
 
 #: src/routes/_shell.settings.profile.tsx
 #: src/routes/_shell.settings.tsx
@@ -4853,6 +5007,7 @@ msgstr "Rôle"
 msgid "Role of {who}"
 msgstr "Rôle de {who}"
 
+#: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 msgid "Roles"
 msgstr "Rôles"
@@ -5048,6 +5203,10 @@ msgstr "Rechercher des membres"
 msgid "Search reads every collection you may read. Try other words, or fewer."
 msgstr "La recherche parcourt toutes les collections que vous pouvez lire. Essayez d’autres mots, ou moins de mots."
 
+#: src/brain/brain-transcript.tsx
+msgid "Search the transcript"
+msgstr "Chercher dans la transcription"
+
 #: src/activity/audit-words.ts
 msgid "Searched knowledge"
 msgstr "A cherché dans les connaissances"
@@ -5146,6 +5305,14 @@ msgstr "Affichez tous les paquets avant de les approuver."
 #: src/chat/held-writes.tsx
 msgid "Show exactly what will be sent"
 msgstr "Afficher exactement ce qui sera envoyé"
+
+#: src/brain/brain-chips.tsx
+msgid "Show fewer"
+msgstr "Afficher moins"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgid "Show in the brain"
+msgstr "Afficher dans le cerveau"
 
 #: src/chat/held-writes.tsx
 msgid "Show less"
@@ -5322,6 +5489,7 @@ msgstr "Source"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Sources"
 
@@ -5332,6 +5500,10 @@ msgstr "L’accès de l’équipe à cette organisation n’est pas ouvert."
 #: src/routes/_shell.onboarding.index.tsx
 msgid "Stages"
 msgstr "Étapes"
+
+#: src/brain/brain-article/kern.tsx
+msgid "Stakeholder"
+msgstr "Responsable"
 
 #: src/brain/brain.ts
 msgid "Stakeholder changed to the {role}"
@@ -5377,6 +5549,7 @@ msgstr "A commencé à suivre ce qui change sur une connexion"
 msgid "Statement"
 msgstr "Affirmation"
 
+#: src/brain/brain-transcript.tsx
 #: src/brain/brain.ts
 msgid "Statements"
 msgstr "Affirmations"
@@ -5476,6 +5649,11 @@ msgstr "ID du magasin : {store}"
 msgid "Structured, at most {tokens} tokens"
 msgstr "Structurée, au plus {tokens} jetons"
 
+#: src/routes/_shell.brain.$noteId.tsx
+msgctxt "tab: an interview written up short"
+msgid "Summary"
+msgstr "Résumé"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Support"
@@ -5517,6 +5695,7 @@ msgstr "Conception cible validée"
 msgid "Target ID"
 msgstr "ID de la cible"
 
+#: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 msgid "Team"
 msgstr "Équipe"
@@ -5543,6 +5722,10 @@ msgstr "Taille de l’équipe inconnue."
 #: src/routes/_shell.settings.profile.tsx
 msgid "Teams"
 msgstr "Équipes"
+
+#: src/brain/brain-source-contents.tsx
+msgid "Teams and roles"
+msgstr "Équipes et rôles"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Teams named"
@@ -5682,6 +5865,10 @@ msgstr "L’application n’a pas pu être chargée."
 msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the domain's page."
 msgstr "L’approbation du code de cette application a été retirée, et l’application a été arrêtée. Un admin peut l’approuver de nouveau sur la page du domaine."
 
+#: src/brain/brain-sections.ts
+msgid "The apps teams named, and the ones seen in use that nobody mentioned."
+msgstr "Les apps citées par les équipes, et celles utilisées que personne n’a mentionnées."
+
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "Les applications dans lesquelles vos workflows peuvent travailler. Grasp ne fait que ce que vous autorisez, application par application."
@@ -5697,6 +5884,10 @@ msgstr "La direction a confirmé la vision."
 #: src/brain/brain-atlas.ts
 msgid "The board has not confirmed the vision yet."
 msgstr "La direction n’a pas encore confirmé la vision."
+
+#: src/brain/brain-nav.tsx
+msgid "The brain"
+msgstr "Brain"
 
 #: src/onboarding/staff-words.ts
 msgctxt "kickoff field"
@@ -5868,6 +6059,10 @@ msgstr "Le lien fonctionne jusqu’au {until}."
 msgid "The list is full: remove a line to add another."
 msgstr "La liste est pleine : retirez une ligne pour en ajouter une autre."
 
+#: src/brain/brain-home.tsx
+msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
+msgstr "Les fichiers mémoire, les skills et les fichiers importés que lisent vos agents se trouvent dans <0>Connaissances</0>."
+
 #: src/engines/store-change-errors.ts
 msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again."
 msgstr "La migration {migration} a échoué sur son enregistrement de test {fixture} quand cette version a été scellée : {reason}. Elle ne s'exécute sur aucun enregistrement, donc la version ne peut pas être rendue actuelle : corrigez la migration ou son enregistrement de test et reconstruisez le domaine."
@@ -6035,6 +6230,7 @@ msgid "They are signed out everywhere, their personal connections are disconnect
 msgstr "La personne est déconnectée partout, ses connexions personnelles sont coupées et elle ne peut plus se connecter."
 
 #: src/brain/brain.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "They told us"
 msgstr "Ce qu’ils nous ont dit"
 
@@ -6211,6 +6407,10 @@ msgstr "Perte de temps"
 msgid "Time wasters"
 msgstr "Pertes de temps"
 
+#: src/brain/brain-sections.ts
+msgid "Time-consuming work that could be automated, and what was said about each."
+msgstr "Le travail chronophage qui pourrait être automatisé, et ce qui a été dit de chacun."
+
 #: src/dashboard/runs-widget.tsx
 msgid "Timed out"
 msgstr "Expiré"
@@ -6220,6 +6420,7 @@ msgid "Timed out: {timedOut}"
 msgstr "Expirées : {timedOut}"
 
 #: src/brain/brain-markdown.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "Timeline"
 msgstr "Chronologie"
 
@@ -6285,7 +6486,16 @@ msgstr "Outils à autoriser"
 msgid "Tools, products and the company's own words, so he hears them right."
 msgstr "Outils, produits et mots propres à l’entreprise, pour qu’il les comprenne bien."
 
+#: src/brain/brain-transcript.tsx
+msgid "Topics"
+msgstr "Sujets"
+
 #: src/brain/brain-markdown.ts
+msgid "Transcript"
+msgstr "Transcription"
+
+#: src/routes/_shell.brain.$noteId.tsx
+msgctxt "tab: the whole conversation word for word"
 msgid "Transcript"
 msgstr "Transcription"
 
@@ -6344,6 +6554,11 @@ msgstr "Annule ses modifications après son annulation"
 #: src/activity/pending.tsx
 msgid "Unknown"
 msgstr "Inconnue"
+
+#: src/brain/brain-source-contents.tsx
+msgctxt "number of people"
+msgid "Unknown"
+msgstr "Inconnu"
 
 #: src/brain/brain.ts
 msgctxt "whether a tool has AI"
@@ -6629,6 +6844,10 @@ msgstr "Ce qu’ont coûté ce mois-ci les appels au modèle de chaque workflow,
 msgid "What every agent has in its context, all the time."
 msgstr "Ce que chaque agent a en permanence dans son contexte."
 
+#: src/brain/brain-sections.ts
+msgid "What Grasp does not know yet, and who can answer it."
+msgstr "Ce que Grasp ne sait pas encore, et qui peut y répondre."
+
 #: src/connections/connect-dialog.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What Grasp may do"
@@ -6720,6 +6939,10 @@ msgstr "Ce que Stephen laisse de côté"
 msgid "What Stephen takes into every interview. What the conversation left open goes to the sponsor."
 msgstr "Ce que Stephen emporte dans chaque entretien. Ce que la conversation a laissé ouvert va au sponsor."
 
+#: src/brain/brain-sections.ts
+msgid "What the board wants from the sprint: its goals and the rules of the road."
+msgstr "Ce que la direction attend du sprint : ses objectifs et les règles du jeu."
+
 #: src/brain/brain.ts
 msgid "What the client shares, and our own desk research. Adds policies, procedures and process examples."
 msgstr "Ce que le client partage, et notre propre recherche documentaire. Ajoute des politiques, des procédures et des exemples de processus."
@@ -6736,6 +6959,10 @@ msgstr "Ce que les actions du domaine peuvent dépenser via cette liaison, en pl
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 msgstr "Ce que coûtent ce mois-ci ({month}, UTC) les modèles qui travaillent pour vous dans Grasp, en dollars américains, à leur prix."
 
+#: src/brain/brain-article/statements-by-kind.tsx
+msgid "What they told us"
+msgstr "Ce qu’ils nous ont dit"
+
 #: src/routes/_shell.dashboard.tsx
 msgid "What waits on you, each with its next step, and what could be better."
 msgstr "Ce qui vous attend, chacun avec son étape suivante, et ce qui pourrait être mieux."
@@ -6745,6 +6972,7 @@ msgid "What was heard, written and connected"
 msgstr "Ce qui a été entendu, écrit et connecté"
 
 #: src/brain/brain.ts
+#: src/routes/_shell.brain.$noteId.tsx
 msgid "What was said"
 msgstr "Ce qui a été dit"
 
@@ -6768,6 +6996,10 @@ msgstr "quand quelqu’un le lance"
 #: src/workflows/triggers.tsx
 msgid "When the event {event} happens"
 msgstr "Quand l'événement {event} se produit"
+
+#: src/brain/brain-sections.ts
+msgid "Where everything came from: conversations, documents, Pulse and connections."
+msgstr "D’où tout vient : conversations, documents, Pulse et connexions."
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Where it comes from"
@@ -7090,715 +7322,3 @@ msgstr "Votre session a expiré. Reconnectez-vous pour continuer."
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Votre espace de travail, qui peut y faire quoi, et votre propre compte."
-
-
-#: src/brain/brain-source-contents.tsx
-msgctxt "a number that changed: what it was before"
-msgid "(was {before})"
-msgstr "(avant : {before})"
-
-#: src/dashboard/widget-board.tsx
-msgid "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
-msgstr "{count, plural, one {# moteur de plus sans workflow à afficher} other {# moteurs de plus sans workflow à afficher}}"
-
-#: src/activity/pending.tsx
-msgid "{engine} already keeps {type} records here: this engine's won't apply."
-msgstr "{engine} conserve déjà ici des enregistrements de type {type} : ceux de ce moteur ne s’appliqueront pas."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{engine} doesn't get these packages."
-msgstr "{engine} ne reçoit pas ces paquets."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{engine} may use exactly these packages from now on."
-msgstr "{engine} peut désormais utiliser exactement ces paquets."
-
-#: src/activity/audit-log.tsx
-msgid "{engine}: run of {workflowId}"
-msgstr "{engine} : exécution de {workflowId}"
-
-#: src/engines/store-changes.tsx
-msgid "{engineName}, version {version}"
-msgstr "{engineName}, version {version}"
-
-#: src/brain/brain-chips.tsx
-#: src/brain/brain-source-contents.tsx
-msgid "{hidden, plural, one {Show # more} other {Show # more}}"
-msgstr "{hidden, plural, one {Afficher # de plus} other {Afficher # de plus}}"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label}: {count}"
-msgstr "{label} : {count}"
-
-#: src/brain/brain-transcript.tsx
-msgid "{match} of {matches}"
-msgstr "{match} sur {matches}"
-
-#: src/dashboard/widget-board.tsx
-msgid "{name} in {engine}"
-msgstr "{name} dans {engine}"
-
-#: src/dashboard/report.ts
-msgid "{name} in {engine}: {started} started, {completed} completed, {failed} failed"
-msgstr "{name} dans {engine} : {started} lancées, {completed} terminées, {failed} en échec"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the engine's data (write → read)"
-msgstr "{name} ne modifie plus les données du moteur (écriture → lecture)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the engine's data (read → write)"
-msgstr "{name} modifie désormais les données du moteur (lecture → écriture)"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgid "{statements, plural, one {# statement} other {# statements}}"
-msgstr "{statements, plural, one {# affirmation} other {# affirmations}}"
-
-#: src/connections/integration-row.tsx
-msgid "{toolCount, plural, one {# tool} other {# tools}}"
-msgstr "{toolCount, plural, one {# outil} other {# outils}}"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
-msgstr "{total, plural, one {# intégration affichée} other {# intégrations affichées}}"
-
-#: src/brain/brain-article/kern.tsx
-msgid "{who}, interviewed {day}"
-msgstr "{who}, interviewé le {day}"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "{workflowId} in {engine}"
-msgstr "{workflowId} dans {engine}"
-
-#: src/engines/store-change-errors.ts
-msgid "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
-msgstr "Une migration des données a transformé les enregistrements de ce moteur après cette version : elle ne peut plus être rendue actuelle, et aucune version conservée ne leur correspond désormais. Créez plutôt une nouvelle version."
-
-#: src/engines/store-change-errors.ts
-msgid "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
-msgstr "Une migration des données a transformé les enregistrements de ce moteur après cette version : elle ne peut plus être rendue actuelle. Versions conservées qui leur correspondent encore : {versions}."
-
-#: src/screens/screen-frame.tsx
-msgid "A new version of this engine is available."
-msgstr "Une nouvelle version de ce moteur est disponible."
-
-#: src/activity/audit-words.ts
-msgid "Added a member to an engine"
-msgstr "A ajouté un membre à un moteur"
-
-#: src/chat/builds.tsx
-msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Ajouté : il agit pour quiconque utilise le moteur, avec tout ce que détient le moteur"
-
-#: src/chat/side-panel.tsx
-msgid "All engines"
-msgstr "Tous les moteurs"
-
-#: src/engines/store-change-errors.ts
-msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
-msgstr "Un admin a abandonné la modification des données dont cette version a besoin : elle ne pourra jamais être rendue actuelle. Demandez à reconstruire le moteur."
-
-#: src/engines/store-change-errors.ts
-msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
-msgstr "Un admin peut voir, sur la page du moteur, l’enregistrement qui la bloque, et abandonner la modification."
-
-#: src/engines/store-change-errors.ts
-msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
-msgstr "Un admin peut voir ce qui n'a pas fonctionné et abandonner la modification sur la page du moteur."
-
-#: src/engines/screen-approval.tsx
-msgid "An admin said this engine's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
-msgstr "Un administrateur a indiqué que les données de ce moteur peuvent aller à des apps que personne n'a approuvées : ses apps fonctionnent donc sans approbation, sauf si leur approbation a été retirée."
-
-#: src/engines/screen-approval.tsx
-msgid "An app is code that runs in people's browsers. It gets this engine's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
-msgstr "Une application est du code qui s’exécute dans le navigateur des personnes. Elle ne reçoit les données de ce moteur qu’une fois qu’un admin a approuvé exactement ce code, et une modification du code demande une nouvelle approbation. Lisez d’abord le code : un code approuvé peut toujours envoyer ailleurs ce qu’il reçoit, l’approuver revient donc à dire que vous lui faites confiance."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "An app is what this engine's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
-msgstr "Une application est l’endroit où travaille l’équipe de ce moteur, appuyée sur ses workflows et ses intégrations. Demandez à Grasp dans le chat d’en créer une."
-
-#: src/activity/audit-words.ts
-msgid "An app nobody approved was refused the engine's data"
-msgstr "Une application que personne n’a approuvée s’est vu refuser les données du moteur"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgid "and {more} more"
-msgstr "et {more} de plus"
-
-#: src/activity/pending.tsx
-msgid "Another engine already keeps {type} records here: this engine's won't apply."
-msgstr "Un autre moteur conserve déjà ici des enregistrements de type {type} : ceux de ce moteur ne s’appliqueront pas."
-
-#: src/activity/pending.tsx
-msgid "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
-msgstr "Une autre version de ce moteur est devenue actuelle depuis la lecture de cette liste. La liste l’affiche maintenant : relisez cette version, puis approuvez à nouveau."
-
-#: src/brain/brain-source-contents.tsx
-msgid "Applications in use on devices"
-msgstr "Applications utilisées sur les appareils"
-
-#: src/brain/brain-source-contents.tsx
-msgid "Applications signed in to"
-msgstr "Applications avec connexion"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Approve the packages for {engine}"
-msgstr "Approuver les paquets pour {engine}"
-
-#: src/chat/side-panel.tsx
-msgid "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
-msgstr "Demandez à Grasp d’en créer un. Pendant qu’il travaille, le moteur apparaît à côté du chat, pour un aperçu avant d’être proposé."
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Available"
-msgstr "Disponibles"
-
-#: src/brain/back-button.tsx
-msgid "Back"
-msgstr "Retour"
-
-#: src/brain/brain-nav.tsx
-#: src/frame/app-sidebar.tsx
-#: src/routes/_shell.brain.tsx
-msgid "Brain"
-msgstr "Cerveau"
-
-#. Column value: a team named this application
-#: src/brain/brain-source-contents.tsx
-msgid "By a team"
-msgstr "Par une équipe"
-
-#. Column value: no team named this application
-#: src/brain/brain-source-contents.tsx
-msgid "By nobody"
-msgstr "Par personne"
-
-#: src/activity/audit-words.ts
-msgid "Called another engine"
-msgstr "A appelé un autre moteur"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
-msgstr "Les plafonds qu'un admin a fixés pour le modèle d'un moteur, dans l'onglet Ressources du moteur, en plus des budgets du déploiement, et ce que les actions du moteur ont dépensé par son biais. Les étapes d'IA propres à un workflow ne comptent pas ici."
-
-#: src/activity/audit-words.ts
-msgid "Changed an engine"
-msgstr "A modifié un moteur"
-
-#: src/activity/audit-words.ts
-msgid "Changed whether an engine's data needs approved apps"
-msgstr "A modifié si les données d’un moteur exigent des applications approuvées"
-
-#: src/chat/builds.tsx
-msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Modifié : il agit pour quiconque utilise le moteur, avec tout ce que détient le moteur"
-
-#: src/chat/builds-state.ts
-msgid "changes the engine's data"
-msgstr "modifie les données du moteur"
-
-#: src/chat/builds.tsx
-msgid "Changes the engine's data"
-msgstr "Modifie les données du moteur"
-
-#: src/engines/store-changes.tsx
-msgid "Changes to the engine's stores"
-msgstr "Modifications des magasins du moteur"
-
-#: src/brain/brain-transcript.tsx
-msgid "Clear filters"
-msgstr "Effacer les filtres"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Connected"
-msgstr "Connectées"
-
-#: src/brain/brain-transcript.tsx
-msgctxt "heading: the headings of a document, as a table of contents"
-msgid "Contents"
-msgstr "Sommaire"
-
-#: src/routes/_shell.workflows.index.tsx
-msgid "Couldn't load this engine's workflows."
-msgstr "Impossible de charger les workflows de ce moteur."
-
-#: src/routes/_shell.engines.index.tsx
-msgid "Each engine runs one part of the business: its workflows, apps and connections."
-msgstr "Chaque moteur fait tourner une partie de l’activité : ses workflows, ses applications et ses connexions."
-
-#: src/brain/brain-article/kern.tsx
-msgid "Employee"
-msgstr "Employé"
-
-#: src/dashboard/runs-widget.tsx
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.settings.models.tsx
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
-msgid "Engine"
-msgstr "Moteur"
-
-#: src/engines/store-changes.tsx
-msgid "engine {app}, version {version}"
-msgstr "moteur {app}, version {version}"
-
-#: src/connections/connection-list.tsx
-msgid "Engine {engine}"
-msgstr "Moteur {engine}"
-
-#: src/screens/screen-frame.tsx
-msgid "Engine app"
-msgstr "Application du moteur"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Engine budgets"
-msgstr "Budgets des moteurs"
-
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "Engine not found"
-msgstr "Moteur introuvable"
-
-#: src/chat/side-panel.tsx
-#: src/dashboard/widget-board.tsx
-#: src/frame/app-sidebar.tsx
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.engines.index.tsx
-msgid "Engines"
-msgstr "Moteurs"
-
-#: src/connections/connection-list.tsx
-msgid "Engines and agents with a permission"
-msgstr "Moteurs et agents avec une autorisation"
-
-#: src/brain/brain-sections.ts
-msgid "Every team Grasp spoke to: who they are, how they work and what slows them down."
-msgstr "Chaque équipe à qui Grasp a parlé : qui elle est, comment elle travaille et ce qui la freine."
-
-#: src/activity/pending.tsx
-msgid "Exports of {engine}: {covered}"
-msgstr "Exports de {engine} : {covered}"
-
-#: src/brain/brain-transcript.tsx
-msgctxt "open the filters"
-msgid "Filter"
-msgstr "Filtrer"
-
-#: src/activity/pending.tsx
-msgid "Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Chats invités. Ce moteur peut inviter des personnes non membres à un court chat avec un modèle via un lien, et relire ce qu’elles écrivent. Les invités n’accèdent à rien d’autre ; leurs chats consomment le budget de modèles de la personne qui les invite"
-
-#: src/activity/audit-log.tsx
-msgid "Guest of {engine}, invited for {person}"
-msgstr "Invité de {engine}, invité pour {person}"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgid "In this conversation"
-msgstr "Dans cette conversation"
-
-#: src/connections/connection-list.tsx
-msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
-msgstr "Son accès a expiré. Reconnectez-vous avec le même compte : les moteurs et les agents gardent leurs autorisations."
-
-#: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the engine is made current."
-msgstr "Sa planification s’est arrêtée : son exécution n’a pas pu démarrer {maxFailedStarts} fois de suite. Elle reprend quand la planification est définie sous Paramètres, ou quand une nouvelle version du moteur devient actuelle."
-
-#: src/connections/connection-list.tsx
-msgid "Its tokens are deleted, every engine and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
-msgstr "Ses jetons sont supprimés, chaque moteur et agent la perd, et les actions qui l’attendent sont abandonnées. Reconnectez-la pour l’utiliser à nouveau."
-
-#: src/brain/brain-transcript.tsx
-msgid "Kind of statement"
-msgstr "Type de propos"
-
-#: src/brain/brain-article/kern.tsx
-msgid "Last heard {day}"
-msgstr "Entendu pour la dernière fois {day}"
-
-#: src/brain/brain-source-contents.tsx
-msgctxt "column: whether a team named the application in a conversation"
-msgid "Named"
-msgstr "Citée"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgid "Names {title} under {under}"
-msgstr "Cite {title} sous {under}"
-
-#: src/brain/brain-transcript.tsx
-msgid "Next match"
-msgstr "Résultat suivant"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "No engine has a model bound to it."
-msgstr "Aucun moteur n'a de modèle lié."
-
-#: src/chat/side-panel.tsx
-#: src/routes/_shell.engines.index.tsx
-msgid "No engines yet"
-msgstr "Aucun moteur pour l’instant"
-
-#: src/dashboard/widget-board.tsx
-msgid "No engines yet. Engines are made in chat."
-msgstr "Aucun moteur pour l’instant. Les moteurs se créent dans le chat."
-
-#: src/brain/brain-transcript.tsx
-msgid "No matches"
-msgstr "Aucun résultat"
-
-#: src/engines/package-approvals.tsx
-msgid "No packages are approved for this engine."
-msgstr "Aucun paquet n’est approuvé pour ce moteur."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "No packages were approved for this engine before."
-msgstr "Aucun paquet n’avait encore été approuvé pour ce moteur."
-
-#: src/engines/store-change-errors.ts
-msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
-msgstr "Aucun enregistrement n’est en cause : un admin peut seulement abandonner la modification, sur la page du moteur."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "No workflow in this engine yet."
-msgstr "Aucun workflow dans ce moteur pour l’instant."
-
-#: src/screens/screen-frame.tsx
-msgid "Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page."
-msgstr "Personne n’a encore approuvé le code de cette application pour les données du moteur. Un admin peut l’approuver sur la page du moteur."
-
-#: src/engines/resource-bindings.tsx
-msgid "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
-msgstr "Aucune des autorisations d'intégration du moteur ne sert {contract} avec toutes les actions qu'il déclare. Accordez-en une d'abord."
-
-#: src/brain/brain-source-contents.tsx
-msgid "Not listed"
-msgstr "Non indiqués"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgid "Note not found"
-msgstr "Note introuvable"
-
-#: src/brain/brain-transcript.tsx
-msgid "Nothing here matches the filter."
-msgstr "Rien ici ne correspond au filtre."
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Nothing needs attention."
-msgstr "Rien à traiter."
-
-#: src/chat/builds.tsx
-msgid "Nothing runs yet: this would be the engine's first current version."
-msgstr "Rien ne s’exécute encore : ce serait la première version actuelle du moteur."
-
-#: src/brain/brain-transcript.tsx
-msgid "Only highlighted turns"
-msgstr "Seulement les prises de parole surlignées"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, engine or run that read one."
-msgstr "Seuls les modèles marqués comme acceptant des données sensibles peuvent recevoir des données d’une collection sensible (marquée dans Connaissances) ou d’une connexion sensible, ou d’un chat, d’un moteur ou d’une exécution qui en a lu une."
-
-#: src/connections/integration-row.tsx
-msgid "Only you"
-msgstr "Vous seul"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgid "Open questions"
-msgstr "Questions ouvertes"
-
-#: src/workflows/workflows-table.tsx
-msgid "Open the engine {name}"
-msgstr "Ouvrir le moteur {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other engines may no longer call {name}"
-msgstr "Les autres moteurs ne peuvent plus appeler {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other engines may now call {name}"
-msgstr "Les autres moteurs peuvent désormais appeler {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other engines may now call {name}, which {does}"
-msgstr "Les autres moteurs peuvent désormais appeler {name}, qui {does}"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Packages for {engine}"
-msgstr "Paquets pour {engine}"
-
-#: src/routes/_shell.brain.sections.$sectionId.tsx
-msgid "Part of the brain not found"
-msgstr "Partie du brain introuvable"
-
-#: src/brain/brain-source-contents.tsx
-msgctxt "column: how many people"
-msgid "People"
-msgstr "Personnes"
-
-#: src/brain/brain-source-contents.tsx
-msgctxt "column: the OAuth permissions granted to an application"
-msgid "Permissions"
-msgstr "Autorisations"
-
-#: src/activity/pending.tsx
-msgid "Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it"
-msgstr "Statistiques de la plateforme. Ce moteur peut lire le nombre d’exécutions et de signaux de chaque moteur, et les montrer à quiconque l’utilise"
-
-#: src/brain/brain-transcript.tsx
-msgid "Previous match"
-msgstr "Résultat précédent"
-
-#: src/activity/audit-words.ts
-msgid "Read an engine's statistics"
-msgstr "A lu les statistiques d’un moteur"
-
-#: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using an engine, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "« Lecture seule » est coché là où Composio indique qu’un outil ne fait que lire ; Grasp ne le vérifie pas. Un outil en lecture seule s’exécute sans demander. L’appel de tout autre outil depuis un chat, ou par une personne qui utilise un moteur, attend que cette personne le confirme ; l’exécution d’un workflow le fait comme l’une de ses étapes. Ne marquez un outil en lecture seule que s’il ne modifie rien : mal marqué, il modifie des choses sans demander."
-
-#: src/chat/builds-state.ts
-msgid "reads the engine's data"
-msgstr "lit les données du moteur"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Reject the packages for {engine}"
-msgstr "Rejeter les paquets pour {engine}"
-
-#: src/chat/builds.tsx
-msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Supprimé : il agissait pour quiconque utilise le moteur, avec tout ce que détient le moteur"
-
-#: src/engines/package-approvals.tsx
-msgid "Retire the packages for {engine}"
-msgstr "Mettre hors service les paquets de {engine}"
-
-#: src/engines/package-approvals.tsx
-msgid "Retire the packages for {engine}?"
-msgstr "Mettre hors service les paquets de {engine} ?"
-
-#: src/engines/package-approvals.tsx
-msgid "Revoke the packages for {engine}"
-msgstr "Révoquer les paquets de {engine}"
-
-#: src/engines/package-approvals.tsx
-msgid "Revoke the packages for {engine}?"
-msgstr "Révoquer les paquets de {engine} ?"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
-msgstr "Exécution {shortId} de {workflowId} dans {engine}, lancée le {started}"
-
-#: src/brain/brain-transcript.tsx
-msgid "Search the transcript"
-msgstr "Chercher dans la transcription"
-
-#: src/brain/brain-chips.tsx
-msgid "Show fewer"
-msgstr "Afficher moins"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgid "Show in the brain"
-msgstr "Afficher dans le cerveau"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Show the packages for {engine}"
-msgstr "Afficher les paquets pour {engine}"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Showing the first {count} of {total}. Refine your search to find others."
-msgstr "Affichage des {count} premiers sur {total}. Affinez votre recherche pour en trouver d’autres."
-
-#: src/brain/brain-article/kern.tsx
-msgid "Stakeholder"
-msgstr "Responsable"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgctxt "tab: an interview written up short"
-msgid "Summary"
-msgstr "Résumé"
-
-#: src/brain/brain-source-contents.tsx
-msgid "Teams and roles"
-msgstr "Équipes et rôles"
-
-#: src/screens/screen-frame.tsx
-msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page."
-msgstr "L’approbation du code de cette application a été retirée, et l’application a été arrêtée. Un admin peut l’approuver de nouveau sur la page du moteur."
-
-#: src/brain/brain-sections.ts
-msgid "The apps teams named, and the ones seen in use that nobody mentioned."
-msgstr "Les apps citées par les équipes, et celles utilisées que personne n’a mentionnées."
-
-#: src/brain/brain-nav.tsx
-msgid "The brain"
-msgstr "Brain"
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine has no permission to read a collection. Grant one first."
-msgstr "Le moteur n'a aucune autorisation de lire une collection. Accordez-en une d'abord."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
-msgstr "Le moteur a trop d'intégrations pour toutes les vérifier sur cette page : cette liaison n'a donc pas été vérifiée. Sa prochaine requête est vérifiée comme toujours."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions can't use it until an admin binds it."
-msgstr "Les actions du moteur ne peuvent pas l'utiliser tant qu'un admin ne l'a pas liée."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "Les actions du moteur n'atteignent un modèle, une intégration, des connaissances ou un modèle de contenu que par une liaison qu'un admin approuve ici. Déclarer une ressource n'accorde rien, et révoquer une liaison arrête la requête suivante qui passe par elle."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-msgstr "Les actions du moteur n'atteignent un modèle, une intégration, des connaissances ou un modèle de contenu que par une liaison qu'approuve un admin de votre organisation."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's current version declares no resource for its actions."
-msgstr "La version actuelle du moteur ne déclare aucune ressource pour ses actions."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
-msgstr "La prochaine requête du moteur qui passe par elle est refusée, et les actions qui l'attendent sont abandonnées. Liez-la à nouveau pour l'utiliser de nouveau."
-
-#: src/chat/builds.tsx
-msgid "The engines this chat builds didn't load."
-msgstr "Les moteurs que ce chat crée n’ont pas été chargés."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "The first {shown} by engine; more engines have models bound."
-msgstr "Les {shown} premiers par moteur ; d'autres moteurs ont des modèles liés."
-
-#: src/brain/brain-home.tsx
-msgid "The memory files, skills and uploads your agents read are in <0>Knowledge</0>."
-msgstr "Les fichiers mémoire, les skills et les fichiers importés que lisent vos agents se trouvent dans <0>Connaissances</0>."
-
-#: src/engines/store-change-errors.ts
-msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
-msgstr "La migration {migration} a échoué sur son enregistrement de test {fixture} quand cette version a été scellée : {reason}. Elle ne s'exécute sur aucun enregistrement, donc la version ne peut pas être rendue actuelle : corrigez la migration ou son enregistrement de test et reconstruisez le moteur."
-
-#: src/engines/store-change-errors.ts
-msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
-msgstr "La migration {migration} a échoué sur ses enregistrements de test quand cette version a été scellée : {reason}. Elle ne s'exécute sur aucun enregistrement, donc la version ne peut pas être rendue actuelle : corrigez la migration ou ses enregistrements de test et reconstruisez le moteur."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
-msgstr "Les paquets approuvés pour ce moteur. Vous les voyez parce que vous pouvez approuver des paquets ; le reste du moteur est réservé à ses membres."
-
-#: src/engines/store-changes.tsx
-msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-msgstr "Le magasin garde ses tables telles quelles et accepte à nouveau des modifications. La version qui avait besoin de cette modification ne pourra jamais être rendue actuelle, ni dans ce moteur ni dans un autre qui utilise le magasin : elle doit être reconstruite. Les nouveaux champs restent réservés avec le sens que cette modification leur a donné : une version ultérieure ne peut les ajouter à nouveau qu’exactement tels quels. Les valeurs déjà remplies restent dans les enregistrements, invisibles. Cette action est irréversible."
-
-#: src/routes/_shell.engines.index.tsx
-msgid "There are no engines you can open yet. Engines are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
-msgstr "Il n’y a pas encore de moteur que vous puissiez ouvrir. Les moteurs se créent dans le chat : décrivez une partie de votre travail, et Grasp en construit les workflows et les applications."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "This engine doesn't use an integration yet."
-msgstr "Ce moteur n’utilise encore aucune intégration."
-
-#: src/screens/screen-frame.tsx
-msgid "This engine has no such app."
-msgstr "Ce moteur n’a pas cette application."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/screens/screen-frame.tsx
-msgid "This engine has no version to run yet."
-msgstr "Ce moteur n’a pas encore de version à exécuter."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
-msgstr "Cette version modifie les données du moteur avec une migration, qui ne peut pas aboutir : sa transformation a échoué, ou a renvoyé ce que la table n'accepte pas."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
-msgstr "Cette version modifie les données du moteur, et la modification ne peut pas être appliquée : un enregistrement contient déjà une valeur que l’un de ses nouveaux champs n’accepte pas."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
-msgstr "Cette version modifie les données du moteur, et la modification ne peut pas être appliquée : le remplissage de ses nouveaux champs n’avançait plus."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
-msgstr "Cette version modifie les données du moteur, et la modification ne peut pas être appliquée : remplir l’un de ses nouveaux champs rendrait un enregistrement plus grand qu’un enregistrement ne peut l’être."
-
-#: src/brain/brain-sections.ts
-msgid "Time-consuming work that could be automated, and what was said about each."
-msgstr "Le travail chronophage qui pourrait être automatisé, et ce qui a été dit de chacun."
-
-#: src/brain/brain-transcript.tsx
-msgid "Topics"
-msgstr "Sujets"
-
-#: src/routes/_shell.brain.$noteId.tsx
-msgctxt "tab: the whole conversation word for word"
-msgid "Transcript"
-msgstr "Transcription"
-
-#: src/brain/brain-source-contents.tsx
-msgctxt "number of people"
-msgid "Unknown"
-msgstr "Inconnu"
-
-#: src/engines/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
-msgstr "Tant que ce n’est pas résolu, aucune version qui modifie les tables de ce magasin ne peut être rendue actuelle, ni dans ce moteur ni dans un autre qui utilise le magasin. Corrigez l’enregistrement via le moteur et la modification sera retentée, ou abandonnez-la."
-
-#: src/engines/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
-msgstr "Tant que ce n’est pas résolu, aucune version qui modifie les tables de ce magasin ne peut être rendue actuelle, ni dans ce moteur ni dans un autre qui utilise le magasin. Aucun enregistrement n’est en cause, il n’y a donc rien à corriger : abandonnez la modification pour que le magasin accepte à nouveau des modifications."
-
-#: src/activity/audit-words.ts
-msgid "Was called by another engine"
-msgstr "A été appelé par un autre moteur"
-
-#: src/activity/audit-words.ts
-msgid "Was refused adding a member to an engine"
-msgstr "N’a pas pu ajouter un membre à un moteur"
-
-#: src/brain/brain-sections.ts
-msgid "What Grasp does not know yet, and who can answer it."
-msgstr "Ce que Grasp ne sait pas encore, et qui peut y répondre."
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
-msgstr "Ce que font ses outils, tels que son fournisseur les déclare. Les moteurs et les agents n’utilisent que ce qui leur est accordé, et un outil qui modifie quelque chose attend que sa personne le confirme."
-
-#: src/chat/builds.tsx
-msgid "What other engines may call"
-msgstr "Ce que les autres moteurs peuvent appeler"
-
-#: src/brain/brain-sections.ts
-msgid "What the board wants from the sprint: its goals and the rules of the road."
-msgstr "Ce que la direction attend du sprint : ses objectifs et les règles du jeu."
-
-#: src/chat/builds.tsx
-msgid "What the engine holds"
-msgstr "Ce que détient le moteur"
-
-#: src/engines/resource-bindings.tsx
-msgid "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
-msgstr "Ce que les actions du moteur peuvent dépenser via cette liaison, en plus des budgets du déploiement. Laissez un plafond vide pour n'en fixer aucun. Les étapes d'IA propres à un workflow ne passent pas par elle."
-
-#: src/brain/brain-article/statements-by-kind.tsx
-msgid "What they told us"
-msgstr "Ce qu’ils nous ont dit"
-
-#: src/brain/brain-sections.ts
-msgid "Where everything came from: conversations, documents, Pulse and connections."
-msgstr "D’où tout vient : conversations, documents, Pulse et connexions."
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Which engines and agents hold permissions: {why}"
-msgstr "Quels moteurs et quels agents ont des autorisations : {why}"
-
-#: src/workflows/workflows-table.tsx
-msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
-msgstr "Les workflows se créent dans le chat : décrivez ce qui doit tourner tout seul, et Grasp l’intègre à un moteur."
-
-#: src/screens/screen-frame.tsx
-msgid "You can't open this engine's apps: your role doesn't allow it, or the engine has read data you can't read."
-msgstr "Vous ne pouvez pas ouvrir les applications de ce moteur : votre rôle ne le permet pas, ou le moteur a lu des données que vous ne pouvez pas lire."
