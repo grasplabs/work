@@ -659,7 +659,8 @@ describe("the Workflows page", buildTime, () => {
     const place = async (
       run: string,
       waitingFor: "client" | "person" | "app",
-      seenAt: number
+      seenAt: number,
+      asksAt = retryAt
     ) =>
       await env.DB.prepare(
         "INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)"
@@ -672,7 +673,7 @@ describe("the Workflows page", buildTime, () => {
           seenAt,
           seenAt,
           waitingFor,
-          retryAt,
+          asksAt,
           now + minute
         )
         .run();
@@ -683,12 +684,15 @@ describe("the Workflows page", buildTime, () => {
     await place(sleeper.id, "person", now);
     // Another run waits for another share: each run shows its own, and
     // only which share and when (`toStrictEqual` below), never who else
-    // waits, how many, or where in the queue.
+    // waits, how many, or where in the queue. Two of its steps wait, for
+    // different shares: the one that asks again first supplies both the
+    // share and when, whichever took its place first.
     const other = await seedRun(app, {
       workflow: "remind",
       status: "running",
       createdAt: at(5),
     });
+    await place(other.id, "person", now, retryAt + minute);
     await place(other.id, "client", now);
 
     const asked = async (person: Person) => {
