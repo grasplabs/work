@@ -697,12 +697,19 @@ describe("grasp.connector calls of JSON workflows", () => {
       default: { key: "none" },
       sensitive: true,
     };
-    const problems = async (tasks: unknown[], compound?: "keys") => {
+    // A number, which could come back as text unseen.
+    const pin = {
+      schema: { type: "integer" },
+      label: "PIN",
+      default: 1234,
+      sensitive: true,
+    };
+    const problems = async (tasks: unknown[], other?: "keys" | "pin") => {
       const error = await refusal(
         publishWorkflowVersion(env, ada, workflow.id, {
           definition: definitionOf(workflow.name, {
             bindings: { mail: { kind: "connector", contract: key } },
-            params: compound === undefined ? { token } : { token, keys },
+            params: { token, ...(other === undefined ? {} : { keys, pin }) },
             tasks: [...tasks, { finish: { set: { status: "done" } } }],
           }),
           basedOn: null,
@@ -727,6 +734,7 @@ describe("grasp.connector calls of JSON workflows", () => {
       set: await problems([{ leak: { set: { value: "${ $params.token }" } } }]),
       // A whole binding argument, but of a secret with parts.
       compound: await problems([send("${ $params.keys }")], "keys"),
+      number: await problems([send("${ $params.pin }")], "pin"),
       // Data shaped like a call is no call.
       lookalike: await problems([
         {
@@ -752,6 +760,12 @@ describe("grasp.connector calls of JSON workflows", () => {
         },
       ],
       compound: [
+        {
+          code: "expression.sensitive_param",
+          pointer: "/do/0/send/with/arguments/subject",
+        },
+      ],
+      number: [
         {
           code: "expression.sensitive_param",
           pointer: "/do/0/send/with/arguments/subject",

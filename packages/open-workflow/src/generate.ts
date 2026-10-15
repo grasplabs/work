@@ -447,28 +447,20 @@ const sensitiveParams = (definition: JsonValue): ReadonlySet<string> => {
   );
 };
 
-/** The JSON Schema types a value with no parts of its own has. */
-const scalarTypes: ReadonlySet<unknown> = new Set([
-  "string",
-  "number",
-  "integer",
-  "boolean",
-]);
-
 /**
- * The parameters of `definition` whose schema allows a value with parts
- * (an object or array), or doesn't say: a binding argument is sent as a
- * whole, and a connector's answer is checked for an echo of each whole
- * argument and of each string within it, so a part on its own, a number
- * or a key, could come back unseen. Only a scalar may be one.
+ * The parameters of `definition` whose schema allows anything but a
+ * string, or doesn't say: a connector's answer is checked for a binding
+ * argument anywhere in its text only for a string one; a number, a
+ * boolean or a part of an object could come back as text unseen. Only a
+ * string may be one.
  */
-const compoundParams = (definition: JsonValue): ReadonlySet<string> => {
+const unsendableParams = (definition: JsonValue): ReadonlySet<string> => {
   const params = isObject(definition) ? graspOf(definition)?.params : undefined;
   return new Set(
     Object.entries(isObject(params) ? params : {}).flatMap(([name, entry]) => {
       const schema = isObject(entry) ? entry.schema : undefined;
       const type = isObject(schema) ? schema.type : undefined;
-      return scalarTypes.has(type) ? [] : [name];
+      return type === "string" ? [] : [name];
     })
   );
 };
@@ -1609,7 +1601,7 @@ export const sensitiveReads = (
     return [];
   }
   const passed = bindingArguments(checked);
-  const compound = compoundParams(checked.definition);
+  const unsendable = unsendableParams(checked.definition);
   const reads: Unsupported[] = [];
   for (const [pointer, compiled] of checked.expressions) {
     const argument = passed.has(pointer)
@@ -1618,7 +1610,7 @@ export const sensitiveReads = (
           sensitive
         )
       : undefined;
-    if (argument !== undefined && !compound.has(argument)) {
+    if (argument !== undefined && !unsendable.has(argument)) {
       continue;
     }
     if (argument !== undefined) {
