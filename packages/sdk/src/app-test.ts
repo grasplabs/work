@@ -563,7 +563,8 @@ const followed = async (
     lostInARow += 1;
     if (lostInARow >= maxLostInARow) {
       // A fault of the run's, as an overflow is: the test fails even if it
-      // never asks this live query for a snapshot again.
+      // never asks this live query for a snapshot again. So is a refusal
+      // to follow it again (`again`).
       const gone = new TestAssertionError(
         `core stopped following the live query of ${contract} ${lostInARow} times in a row`
       );
@@ -578,7 +579,15 @@ const followed = async (
       try {
         await follow();
       } catch (error) {
+        if (closed) {
+          return;
+        }
+        // Refused or failed for good, out of the test's sight: a fault of
+        // the run's, as five losses in a row are.
         fail(error);
+        if (failure !== undefined) {
+          run.faults.add(failure);
+        }
       }
     };
     setTimeout(() => {
