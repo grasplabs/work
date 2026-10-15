@@ -2013,6 +2013,11 @@ msgstr "Exportaciones"
 msgid "Exports of {engine}: {covered}"
 msgstr "Exportaciones de {engine}: {covered}"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Extra high"
+msgstr "Muy alto"
+
 #: src/knowledge/uploads.tsx
 msgid "Extracting"
 msgstr "Extrayendo"
@@ -2287,6 +2292,11 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "Alta"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "High"
+msgstr "Alto"
+
 #: src/knowledge/timeline.tsx
 msgid "History"
 msgstr "Historial"
@@ -2294,6 +2304,10 @@ msgstr "Historial"
 #: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "Alojado en la UE"
+
+#: src/chat/composer.tsx
+msgid "How hard it thinks"
+msgstr "Cuánto piensa"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "How much has to be known before it opens"
@@ -2669,6 +2683,11 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Baja"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Low"
+msgstr "Bajo"
+
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
 msgstr "Hecho con Grasp el {date}"
@@ -2705,9 +2724,19 @@ msgstr "Gestionar {app}, conectado para ti"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Max"
+msgstr "Máximo"
+
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
 msgstr "Puede cambiar algo fuera de Grasp"
+
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Medium"
+msgstr "Medio"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Members"
@@ -2744,6 +2773,10 @@ msgstr "Llamada al modelo"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Coste del modelo"
+
+#: src/chat/composer.tsx
+msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
+msgstr "Modelo: {name}, razonamiento {effort, select, low {bajo} medium {medio} high {alto} xhigh {muy alto} other {máximo}}. Cambiar de modelo o de razonamiento"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"

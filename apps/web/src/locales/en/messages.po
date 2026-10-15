@@ -2013,6 +2013,11 @@ msgstr "Exports"
 msgid "Exports of {engine}: {covered}"
 msgstr "Exports of {engine}: {covered}"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Extra high"
+msgstr "Extra high"
+
 #: src/knowledge/uploads.tsx
 msgid "Extracting"
 msgstr "Extracting"
@@ -2287,6 +2292,11 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "High"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "High"
+msgstr "High"
+
 #: src/knowledge/timeline.tsx
 msgid "History"
 msgstr "History"
@@ -2294,6 +2304,10 @@ msgstr "History"
 #: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "Hosted in the EU"
+
+#: src/chat/composer.tsx
+msgid "How hard it thinks"
+msgstr "How hard it thinks"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "How much has to be known before it opens"
@@ -2669,6 +2683,11 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Low"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Low"
+msgstr "Low"
+
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
 msgstr "Made with Grasp on {date}"
@@ -2705,9 +2724,19 @@ msgstr "Manage {app}, connected for you"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Max"
+msgstr "Max"
+
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
 msgstr "May change something outside Grasp"
+
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Medium"
+msgstr "Medium"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Members"
@@ -2744,6 +2773,10 @@ msgstr "Model call"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Model cost"
+
+#: src/chat/composer.tsx
+msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
+msgstr "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"
