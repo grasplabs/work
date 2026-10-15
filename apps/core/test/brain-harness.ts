@@ -569,9 +569,11 @@ const runTrial = async (
     person.userId,
     place.agent.agentId
   );
-  const firstRequest = gateway.requests.length;
+  // The gate covers the whole trial, earlier turns too; requests, cost and
+  // latency are the question's own, from where its timer starts.
   const stateBefore = await stateFingerprint();
-  const spentBefore = await charged(company);
+  let firstRequest = gateway.requests.length;
+  let spentBefore = await charged(company);
   let answer = "";
   let failure: string | undefined;
   let started = performance.now();
@@ -581,16 +583,20 @@ const runTrial = async (
       // oxlint-disable-next-line no-await-in-loop -- in order, as said
       await place.stub.ask(chat.id, { text: said, model });
     }
+    firstRequest = gateway.requests.length;
+    spentBefore = await charged(company);
     // A cold question starts in a just-evicted object, its caches and
-    // memory gone, after any earlier turns of its chat. Pointing it
-    // constructs it again, so a fake provider's cold start leaves out the
-    // constructor itself, which a run against a deployment measures.
+    // memory gone, after any earlier turns of its chat. Its timer starts
+    // before the object is constructed again, which pointing it at the
+    // provider does.
     if (cold) {
       await evictDurableObject(place.stub);
+      started = performance.now();
       await pointAtGateway(place.stub, gateway);
+    } else {
+      started = performance.now();
     }
-    // Timed from here, failed questions too: retrieval, then the agent.
-    started = performance.now();
+    // Then retrieval, then the agent; a failed question is timed too.
     const sources = await sourcesFor(company, plan);
     if (arm === "changesState") {
       await changeState(company, task.persona);
