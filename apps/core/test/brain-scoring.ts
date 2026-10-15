@@ -161,15 +161,28 @@ const holds = (text: string, words: string): boolean => {
   return false;
 };
 
+const trailing = /[\s.,!]+$/u;
+
 /**
- * Whether one value of the answer line says `fact`, and nothing else
- * numeric: "37 trucks" says 37; "37 trucks or 99 trucks" doesn't.
+ * Whether one value of the answer line says `fact`: it is one of the
+ * fact's words exactly, or those words with the wording around them in
+ * the evidence ("37 trucks" when the source says "37 trucks"). Anything
+ * else it adds ("Ilse Vermeer, Marta Ruiz", "37 or 99") isn't the fact.
  */
-const says = (part: string, fact: BrainFact): boolean =>
-  fact.some((value) => {
-    const words = normalized(value);
-    return holds(part, words) && !digit.test(part.replace(words, " "));
+const says = (
+  part: string,
+  fact: BrainFact,
+  evidence: readonly string[]
+): boolean => {
+  const value = part.replace(trailing, "");
+  return fact.some((variant) => {
+    const words = normalized(variant);
+    return (
+      value === words ||
+      (holds(value, words) && evidence.some((marker) => holds(marker, value)))
+    );
   });
+};
 
 /** Every ordering of `0 … count - 1`: for the few values of one answer. */
 const orderings = (count: number): number[][] =>
@@ -196,13 +209,14 @@ const answers = (
     return false;
   }
   const values = said.split(";").map((value) => value.trim());
+  const evidence = expected.evidence.map(({ marker }) => normalized(marker));
   if (values.length !== expected.facts.length) {
     return false;
   }
   const fits = (order: readonly number[]) =>
     order.every((value, index) => {
       const fact = expected.facts[index];
-      return fact !== undefined && says(values[value] ?? "", fact);
+      return fact !== undefined && says(values[value] ?? "", fact, evidence);
     });
   return expected.anyOrder === true
     ? orderings(values.length).some(fits)

@@ -139,6 +139,9 @@ describe("scoring a trial", () => {
       contradicted: verdict(contract, {
         answer: "ANSWER: Marta Ruiz or Tomas Okafor [handbook/contracts.md]",
       }).completed,
+      extraName: verdict(contract, {
+        answer: "ANSWER: Marta Ruiz, Ilse Vermeer [handbook/contracts.md]",
+      }).completed,
       joined: verdict(
         { ...contract, forbidden: [] },
         {
@@ -153,6 +156,7 @@ describe("scoring a trial", () => {
       explained: false,
       denied: false,
       contradicted: false,
+      extraName: false,
       joined: false,
       staleInExplanation: true,
     });
@@ -237,9 +241,9 @@ describe("scoring a trial", () => {
     const fleet: BrainExpectation = {
       kind: "answer",
       facts: [["37"], ["12"]],
-      evidence: [{ source: "fleet.md#Size", marker: "37 trucks" }],
+      evidence: [{ source: "fleet.md#Size", marker: "37 trucks, 12 electric" }],
     };
-    const input = { modelInput: "The fleet has 37 trucks." };
+    const input = { modelInput: "The fleet has 37 trucks, 12 electric." };
     const answers = {
       whole: "37 trucks; 12 electric",
       sentence: "37 trucks; 12.",
@@ -274,7 +278,7 @@ describe("scoring a trial", () => {
     const fleet: BrainExpectation = {
       kind: "answer",
       facts: [["37"], ["12"]],
-      evidence: [{ source: "fleet.md#Size", marker: "37 trucks" }],
+      evidence: [{ source: "fleet.md#Size", marker: "37 trucks, 12 electric" }],
     };
     const conflict: BrainExpectation = {
       kind: "answer",
@@ -291,7 +295,7 @@ describe("scoring a trial", () => {
         modelInput,
         answer: `ANSWER: ${answer} [p.md] [fleet.md]`,
       }).completed;
-    const trucks = "The fleet has 37 trucks.";
+    const trucks = "The fleet has 37 trucks, 12 electric.";
     const parking = "Medewerkers parkeren gratis.";
     expect({
       reversed: completed(fleet, "12 trucks; 37 electric", trucks),
@@ -305,6 +309,7 @@ describe("scoring a trial", () => {
       eitherOrder: completed(conflict, "3 euro; gratis", parking),
       hedged: completed(conflict, "gratis of 3 euro; 3 euro", parking),
       added: completed(fleet, "37 and 99 trucks; 12 electric", trucks),
+      listed: completed(fleet, "37 trucks, 99; 12/14", trucks),
     }).toStrictEqual({
       reversed: false,
       unsplit: false,
@@ -313,6 +318,7 @@ describe("scoring a trial", () => {
       eitherOrder: true,
       hedged: false,
       added: false,
+      listed: false,
     });
   });
 
