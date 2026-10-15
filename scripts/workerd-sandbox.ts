@@ -537,6 +537,24 @@ const abortOf = async (signal: AbortSignal): Promise<void> => {
   }
 };
 
+/**
+ * Settles once `socket` has closed, however it closed: never rejects, as
+ * `once(socket, "close")` does on the `error` before it. On Linux a
+ * process that dies with bytes it never read resets its connection
+ * (ECONNRESET), as a session's process V8 aborted mid-call does when core
+ * sent it more meanwhile: still the session's end, to be judged as one.
+ */
+const closeOf = async (socket: Socket): Promise<void> => {
+  const closed = new AbortController();
+  socket.once("close", () => {
+    closed.abort();
+  });
+  if (socket.closed) {
+    closed.abort();
+  }
+  await abortOf(closed.signal);
+};
+
 /** A WebSocket frame's opcode for a close. */
 const closeOpcode = 0x8;
 
@@ -1530,7 +1548,7 @@ class SandboxPool {
       upstream.pipe(client, { end: false });
       // A signal aborted already settles this at once: its event has fired.
       await Promise.race([
-        once(upstream, "close"),
+        closeOf(upstream),
         abortOf(guard.signal),
         abortOf(caller.signal),
         abortOf(finished.signal),

@@ -896,6 +896,11 @@ describe("the sandbox supervisor", () => {
     });
   });
 
+  /** A running task's flags in its `stat`, as Linux writes them. */
+  const runningFlags = 4_194_560;
+  /** `PF_EXITING`: set in a task's flags as it starts to exit. */
+  const exitingFlag = 0x4;
+
   /**
    * A supervisor reading memory as Linux does, from a procfs of the test's
    * own: this process's status for the check at start, and each test's
@@ -906,22 +911,24 @@ describe("the sandbox supervisor", () => {
     test: (
       supervisor: SandboxSupervisor,
       events: Record<string, unknown>[]
-    ) => Promise<void>
+    ) => Promise<void>,
+    { flags = runningFlags }: { flags?: number } = {}
   ): Promise<void> => {
     const procRoot = tempDir();
     // Its `stat` as Linux writes it, in the state its status says.
-    const statusOf = (pid: number, text: string): void => {
+    const statusOf = (pid: number, text: string, taskFlags: number): void => {
       const state = /^State:\s+(?<state>\S)/mu.exec(text)?.groups?.state ?? "R";
       mkdirSync(path.join(procRoot, String(pid)), { recursive: true });
       writeFileSync(path.join(procRoot, String(pid), "status"), text);
       writeFileSync(
         path.join(procRoot, String(pid), "stat"),
-        `${pid} (work erd) ${state} 1 1 1 0 -1 4194560 0 0 0 0 5 3 0 0 20 0 1 0 100 0 0\n`
+        `${pid} (work erd) ${state} 1 1 1 0 -1 ${taskFlags} 0 0 0 0 5 3 0 0 20 0 1 0 100 0 0\n`
       );
     };
     statusOf(
       process.pid,
-      "Name:\tnode\nState:\tR (running)\nVmRSS:\t1000 kB\n"
+      "Name:\tnode\nState:\tR (running)\nVmRSS:\t1000 kB\n",
+      runningFlags
     );
     const events: Record<string, unknown>[] = [];
     await withSupervisor(
@@ -934,7 +941,7 @@ describe("the sandbox supervisor", () => {
       async (supervisor) => {
         if (status !== undefined) {
           for (const pid of supervisor.pids()) {
-            statusOf(pid, status);
+            statusOf(pid, status, flags);
           }
         }
         await test(supervisor, events);
@@ -1004,15 +1011,32 @@ describe("the sandbox supervisor", () => {
     }
   );
 
-  it("reads an exited process as gone, not unreadable, as Linux shows it until it's reaped", async () => {
-    await withFakeProc(
-      "Name:\tworkerd\nState:\tZ (zombie)\n",
-      async ({ socket }) => {
-        const result = await callSupervisor(socket, slowCall);
-        expect(result.answer).toStrictEqual({ ok: true, value: "unbounded" });
-      }
-    );
-  });
+  it.each([
+    ["an exited", "Name:\tworkerd\nState:\tZ (zombie)\n", runningFlags],
+    // Exiting, its memory let go of, though not yet a zombie: what a
+    // process killed mid-call shows for a moment, longer on a loaded
+    // machine.
+    [
+      "an exiting",
+      "Name:\tworkerd\nState:\tR (running)\n",
+      runningFlags + exitingFlag,
+    ],
+  ])(
+    "reads %s process as gone, not unreadable, as Linux shows it until it's reaped",
+    async (_, status, flags) => {
+      await withFakeProc(
+        status,
+        async ({ socket }) => {
+          const result = await callSupervisor(socket, slowCall);
+          expect(result.answer).toStrictEqual({
+            ok: true,
+            value: "unbounded",
+          });
+        },
+        { flags }
+      );
+    }
+  );
 
   it("bounds memory from Linux's VmRSS", async () => {
     await withFakeProc(
