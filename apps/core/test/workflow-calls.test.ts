@@ -114,6 +114,9 @@ const objectSchema = (properties: Record<string, unknown>) => ({
   },
 });
 
+/** The read of an App's current release, as a call makes on its way. */
+const currentRelease = /select .*"current_version".* from "apps"/iu;
+
 /** A descriptor's text, as the host catalog holds it. */
 const descriptorOf = (schema: { descriptor: unknown }): string =>
   JSON.stringify(schema.descriptor);
@@ -1225,6 +1228,91 @@ describe("grasp.operation calls of JSON workflows", () => {
         },
       },
       third: { status: "failed", code: "workflow.call_denied" },
+    });
+  });
+
+  it("runs an export only while its run's authority holds as the App takes the call", async () => {
+    const signedIn = await signedInApi(idp, "admin");
+    const admin = identityOf(signedIn.userId, "admin");
+    const input = descriptorOf(v.object({ who: v.string() }));
+    const output = descriptorOf(
+      v.object({ greeting: v.string(), key: v.string() })
+    );
+    const key = `lookup-${unique()}`;
+    await publishCatalogContract(env, admin, {
+      key,
+      kind: "operation",
+      input,
+      output,
+    });
+    const { id: app } = await signedIn.api.apps.create({
+      name: `Desk ${unique()}`,
+    });
+    const version = await release(signedIn, app, {
+      "app/server.ts": appServer,
+      "app/exports.json": JSON.stringify({
+        lookUp: {
+          access: "read",
+          input: shapeOf(input),
+          output: shapeOf(output),
+        },
+      }),
+    });
+    await serverBuilt(app, version);
+    await sealedRelease(app, version);
+    const { workflow } = await published(admin, {
+      bindings: { lookup: { kind: "operation", contract: key } },
+      tasks: [
+        { hold: { wait: "PT1S" } },
+        {
+          look: {
+            call: "grasp.operation",
+            with: { binding: "lookup", arguments: { who: "Ada" } },
+          },
+        },
+        { finish: { set: { status: "called" } } },
+      ],
+    });
+    const permissionId = await granted(admin, admin, {
+      subject: { type: "workflow", workflowId: workflow.id },
+      object: { type: "app", appId: appIdSchema.parse(app) },
+      actions: ["read"],
+      binding: `DESK_${unique().toUpperCase().replaceAll("-", "_")}`,
+    });
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "lookup",
+      target: {
+        kind: "operation",
+        permissionId,
+        appVersion: version,
+        export: "lookUp",
+      },
+      reviewed: { version: 1 },
+    });
+    const run = await started(admin, workflow.id);
+    // The permission is revoked as the call, authorized, reads which
+    // release is the App's current one on its way to the App.
+    const db = env.DB;
+    const prepare = db.prepare.bind(db);
+    const raced = { done: false };
+    const revoking: Promise<unknown>[] = [];
+    vi.spyOn(db, "prepare").mockImplementation((statement) => {
+      if (!raced.done && currentRelease.test(statement)) {
+        raced.done = true;
+        revoking.push(
+          prepare("UPDATE permissions SET status = 'revoked' WHERE id = ?")
+            .bind(permissionId)
+            .run()
+        );
+      }
+      return prepare(statement);
+    });
+    const end = endOf(await ended(admin, workflow.id, run));
+    vi.restoreAllMocks();
+    await Promise.all(revoking);
+    expect({ raced: raced.done, end }).toStrictEqual({
+      raced: true,
+      end: { status: "failed", code: "workflow.call_denied" },
     });
   });
 

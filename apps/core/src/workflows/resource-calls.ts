@@ -419,6 +419,11 @@ const callOperation = async (
         // Recorded once the App pinned the call to the version, before its
         // method runs: if it can't be, the method doesn't run.
         onPinned: async () => {
+          // Decided again as the App takes the call: its authority may have
+          // gone while the call waited for the App's turn, and the export
+          // may change the App's data without a stub call that would ask.
+          await requireCallAuthority(env, run, binding);
+          effect.requireHolds();
           await audited(env, {
             actor: { type: "app", appId: app.data, part: "server" },
             action: "app.called",
