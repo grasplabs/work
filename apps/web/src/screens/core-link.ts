@@ -38,7 +38,8 @@ const personOf = (identity: unknown): string | undefined => {
 /**
  * Runs `run` on the session `session` waits for, and a few times again,
  * with a growing pause, while it fails in a way that may pass (core
- * failing, or the connection breaking) and the connection is `open`.
+ * failing, or the connection breaking) and the connection is `open`,
+ * which is checked again right before each `run`.
  * After a break, the next try waits for the new connection, and a
  * connection that once worked reconnects for as long as it takes, so that
  * wait has no bound. Not getting a session at all fails at once: the
@@ -54,6 +55,11 @@ export const retryingOn = async <T>(
     async () => {
       connected = false;
       const current = await session();
+      // Checked in the turn `run` is called: what stopped while the
+      // session came (a frame that left) sends nothing.
+      if (!open()) {
+        throw closedError();
+      }
       connected = true;
       return await run(current);
     },
