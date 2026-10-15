@@ -4204,6 +4204,10 @@ msgstr "Sections de l’onboarding"
 msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, domain or run that read one."
 msgstr "Seuls les modèles marqués comme acceptant des données sensibles peuvent recevoir des données d’une collection sensible (marquée dans Connaissances) ou d’une connexion sensible, ou d’un chat, d’un domaine ou d’une exécution qui en a lu une."
 
+#: src/routes/_shell.settings.outcomes.tsx
+msgid "Only the newest {unknownOutcomeListLimit} are shown. Older ones show here as these are resolved."
+msgstr "Seuls les {unknownOutcomeListLimit} plus récents sont affichés. Les plus anciens apparaîtront ici à mesure que ceux-ci seront résolus."
+
 #: src/knowledge/collection-markers.tsx
 msgid "Only the owner"
 msgstr "Seulement le propriétaire"

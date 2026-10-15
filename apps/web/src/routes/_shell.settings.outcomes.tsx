@@ -1,3 +1,4 @@
+import { unknownOutcomeListLimit } from "@grasp-os/shared/connect";
 import type { UnknownOutcomeListing } from "@grasp-os/shared/connect";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
@@ -96,6 +97,14 @@ const OutcomeRows = ({ outcomes }: { outcomes: Outcomes }) => {
           ))}
         </TableBody>
       </Table>
+      {listed.length >= unknownOutcomeListLimit ? (
+        <p className="text-muted-foreground border-t px-5 py-4" role="note">
+          <Trans>
+            Only the newest {unknownOutcomeListLimit} are shown. Older ones show
+            here as these are resolved.
+          </Trans>
+        </p>
+      ) : null}
     </div>
   );
 };

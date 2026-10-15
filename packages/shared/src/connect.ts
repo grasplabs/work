@@ -961,6 +961,9 @@ export interface UnknownOutcome {
   origin: UnknownOutcomeOrigin | null;
 }
 
+/** Most calls of unknown outcome one list answers: the newest. */
+export const unknownOutcomeListLimit = 200;
+
 /**
  * A call of unknown outcome as an organization's admin sees it, to follow
  * up with the person it acted for: whose it is, what and where, and when.

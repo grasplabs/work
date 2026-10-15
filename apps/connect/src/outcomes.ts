@@ -12,6 +12,7 @@ import {
   refuseResolutionSchema,
   resolveOutcomeSchema,
   unknownOutcomeKeySchema,
+  unknownOutcomeListLimit,
   unknownOutcomeRequestSchema,
 } from "@grasp-os/shared/connect";
 import type {
@@ -46,8 +47,7 @@ import type { ShownConnection } from "./pending.ts";
 // word, in one batch with the change it makes: never as a send, never as
 // an effect undone.
 
-/** Most calls of unknown outcome one list answers: the newest. */
-const listLimit = 200;
+const listLimit = unknownOutcomeListLimit;
 
 /** The key of the call `row` records, as a list and a resolution name it. */
 const keyOf = (row: Row): UnknownOutcomeKey =>
