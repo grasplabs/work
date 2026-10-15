@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import { canonicalJson } from "@grasp-os/shared/json";
 import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { execute, quoted } from "./connections-seed.ts";
 import { test } from "./csp.ts";
@@ -237,114 +238,130 @@ test("a run's lost answer shows up for its person, and saying it happened comple
     core[Symbol.dispose]();
   }
 
-  const page = await pageOf(browser, admin);
-  // The run's page says why it waits, and where its person says.
-  await page.goto(`/workflows/${app}/mailer/runs/${run}`);
-  await expect(
-    page.getByText(
-      /^A change by .+ was sent but its answer was lost: it waits for the person the run acts for to say whether it happened$/u
-    )
-  ).toBeVisible({ timeout: 15_000 });
-  await page
-    .getByRole("link", {
-      name: "The person the run acts for says what happened on their dashboard",
-    })
-    .click();
-  await expect(page).toHaveURL(/\/dashboard$/u);
-  await expect(
-    page.getByRole("link", { name: /^Dashboard.*\bthings? waiting$/u })
-  ).toBeVisible();
-
-  // One whose input retention removed can only be said to have happened:
-  // nobody can read what saying it didn't would let go out again.
-  const removedName = `mail.send on Microsoft 365 (${account})`;
-  const removed = await toCard(page, `Did this happen? ${removedName}`);
-  const removedNote = "What was sent is no longer kept.";
-  await expect(removed).toContainText(removedNote);
-  await expect(
-    removed.getByRole("button", { name: `It didn't happen: ${removedName}` })
-  ).toBeDisabled();
-  await expect(
-    removed.getByRole("button", { name: `It didn't happen: ${removedName}` })
-  ).toHaveAccessibleDescription(removedNote);
-  // A press within moments of the card coming up is taken for a double
-  // press and ignored (todo-pile.tsx), so it is pressed again until taken.
-  // Only pressed again while nothing is on its way: the card's buttons
-  // stay off from a taken press until the card goes, and a dialog left
-  // open is confirmed rather than opened again.
-  const removedCard = page.getByRole("article", {
-    name: `Did this happen? ${removedName}`,
-    exact: true,
-  });
-  const happened = removed.getByRole("button", {
-    name: `It happened: ${removedName}`,
-  });
-  const sayHappened = page.getByRole("dialog", { name: "Say it happened?" });
-  await expect(async () => {
-    if ((await removedCard.count()) === 0) {
-      return;
-    }
-    if (!(await sayHappened.isVisible())) {
-      await expect(happened).toBeEnabled({ timeout: 1000 });
-      await happened.click({ timeout: 1000 });
-    }
-    await sayHappened
-      .getByRole("button", { name: "It happened" })
-      .click({ timeout: 1000 });
-    await expect(removedCard).toHaveCount(0, { timeout: 5000 });
-  }).toPass({ timeout: 30_000 });
-  await expect(removedCard).toHaveCount(0);
-
-  // On the pile, with what was sent.
-  const name = `Did this happen? Send an email on Microsoft 365 (${account})`;
-  const card = await toCard(page, name);
-  await expect(card).toContainText(
-    "Grasp sent this, but its answer was lost: nobody can tell whether it took effect."
-  );
-  await expect(card).toContainText(mail.subject);
-  await expect(card).toContainText(mail.body);
-
-  // Another admin reads it in Settings, without what was sent, and can't
-  // say what happened.
-  const otherPage = await pageOf(browser, other);
-  await otherPage.goto("/settings/outcomes");
-  const listed = otherPage.getByRole("row").filter({ hasText: account });
-  await expect(listed).toContainText("Send an email");
-  await expect(listed).not.toContainText(mail.subject);
-  await expect(otherPage.getByRole("button", { name: /happen/u })).toHaveCount(
-    0
-  );
-
-  // Anyone else who follows a link to it goes to their own settings.
-  const memberPage = await pageOf(browser, member);
-  await memberPage.goto("/settings/outcomes");
-  await expect(memberPage).toHaveURL(/\/settings\/profile$/u);
-
-  // Asked once more, then said: the card goes, and the run completes.
-  await card
-    .getByRole("button", {
-      name: `It happened: Send an email on Microsoft 365 (${account})`,
-    })
-    .click();
-  const dialog = page.getByRole("dialog", { name: "Say it happened?" });
-  await expect(dialog).toContainText("Nothing is changed or undone");
-  await dialog.getByRole("button", { name: "It happened" }).click();
-  await expect(page.getByRole("article", { name, exact: true })).toHaveCount(
-    0,
-    { timeout: 15_000 }
-  );
-
-  const check = apiOf(admin);
+  // Each page has a browser context of its own (`pageOf`), closed once the
+  // test is done with it, so none is left open for the next test.
+  const pages: Page[] = [];
+  const opened = async (person: Person): Promise<Page> => {
+    const made = await pageOf(browser, person);
+    pages.push(made);
+    return made;
+  };
   try {
+    const page = await opened(admin);
+    // The run's page says why it waits, and where its person says.
+    await page.goto(`/workflows/${app}/mailer/runs/${run}`);
+    await expect(
+      page.getByText(
+        /^A change by .+ was sent but its answer was lost: it waits for the person the run acts for to say whether it happened$/u
+      )
+    ).toBeVisible({ timeout: 15_000 });
+    await page
+      .getByRole("link", {
+        name: "The person the run acts for says what happened on their dashboard",
+      })
+      .click();
+    await expect(page).toHaveURL(/\/dashboard$/u);
+    await expect(
+      page.getByRole("link", { name: /^Dashboard.*\bthings? waiting$/u })
+    ).toBeVisible();
+
+    // One whose input retention removed can only be said to have happened:
+    // nobody can read what saying it didn't would let go out again.
+    const removedName = `mail.send on Microsoft 365 (${account})`;
+    const removed = await toCard(page, `Did this happen? ${removedName}`);
+    const removedNote = "What was sent is no longer kept.";
+    await expect(removed).toContainText(removedNote);
+    await expect(
+      removed.getByRole("button", { name: `It didn't happen: ${removedName}` })
+    ).toBeDisabled();
+    await expect(
+      removed.getByRole("button", { name: `It didn't happen: ${removedName}` })
+    ).toHaveAccessibleDescription(removedNote);
+    // A press within moments of the card coming up is taken for a double
+    // press and ignored (todo-pile.tsx), so it is pressed again until taken.
+    // Only pressed again while nothing is on its way: the card's buttons
+    // stay off from a taken press until the card goes, and a dialog left
+    // open is confirmed rather than opened again.
+    const removedCard = page.getByRole("article", {
+      name: `Did this happen? ${removedName}`,
+      exact: true,
+    });
+    const happened = removed.getByRole("button", {
+      name: `It happened: ${removedName}`,
+    });
+    const sayHappened = page.getByRole("dialog", { name: "Say it happened?" });
     await expect(async () => {
-      const status = await check.api.workflows.status(run);
-      expect(status).toMatchObject({
-        status: "completed",
-        output: { resolved: true },
-      });
-    }).toPass({ timeout: 60_000 });
-    expect(await check.api.unknownOutcomes.list()).toStrictEqual([]);
+      if ((await removedCard.count()) === 0) {
+        return;
+      }
+      if (!(await sayHappened.isVisible())) {
+        await expect(happened).toBeEnabled({ timeout: 1000 });
+        await happened.click({ timeout: 1000 });
+      }
+      await sayHappened
+        .getByRole("button", { name: "It happened" })
+        .click({ timeout: 1000 });
+      await expect(removedCard).toHaveCount(0, { timeout: 5000 });
+    }).toPass({ timeout: 30_000 });
+    await expect(removedCard).toHaveCount(0);
+
+    // On the pile, with what was sent.
+    const name = `Did this happen? Send an email on Microsoft 365 (${account})`;
+    const card = await toCard(page, name);
+    await expect(card).toContainText(
+      "Grasp sent this, but its answer was lost: nobody can tell whether it took effect."
+    );
+    await expect(card).toContainText(mail.subject);
+    await expect(card).toContainText(mail.body);
+
+    // Another admin reads it in Settings, without what was sent, and can't
+    // say what happened.
+    const otherPage = await opened(other);
+    await otherPage.goto("/settings/outcomes");
+    const listed = otherPage.getByRole("row").filter({ hasText: account });
+    await expect(listed).toContainText("Send an email");
+    await expect(listed).not.toContainText(mail.subject);
+    await expect(
+      otherPage.getByRole("button", { name: /happen/u })
+    ).toHaveCount(0);
+
+    // Anyone else who follows a link to it goes to their own settings.
+    const memberPage = await opened(member);
+    await memberPage.goto("/settings/outcomes");
+    await expect(memberPage).toHaveURL(/\/settings\/profile$/u);
+
+    // Asked once more, then said: the card goes, and the run completes.
+    await card
+      .getByRole("button", {
+        name: `It happened: Send an email on Microsoft 365 (${account})`,
+      })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Say it happened?" });
+    await expect(dialog).toContainText("Nothing is changed or undone");
+    await dialog.getByRole("button", { name: "It happened" }).click();
+    await expect(page.getByRole("article", { name, exact: true })).toHaveCount(
+      0,
+      { timeout: 15_000 }
+    );
+
+    const check = apiOf(admin);
+    try {
+      await expect(async () => {
+        const status = await check.api.workflows.status(run);
+        expect(status).toMatchObject({
+          status: "completed",
+          output: { resolved: true },
+        });
+      }).toPass({ timeout: 60_000 });
+      expect(await check.api.unknownOutcomes.list()).toStrictEqual([]);
+    } finally {
+      check.core[Symbol.dispose]();
+    }
   } finally {
-    check.core[Symbol.dispose]();
+    await Promise.all(
+      pages.map(async (open) => {
+        await open.context().close();
+      })
+    );
   }
 });
