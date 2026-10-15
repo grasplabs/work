@@ -544,6 +544,8 @@ interface StepAttempt {
   exportAs: Map<number, Json>;
   /** The deadline it resolved for its task, once (`until`). */
   until: number | undefined;
+  /** Whether it asked for its deadline: once, however it went. */
+  untilAsked: boolean;
 }
 
 /** Expressions compiled once per build, by build hash and slot. */
@@ -900,6 +902,7 @@ export class ResourceRunHost
               outputAs: new Map(),
               exportAs: new Map(),
               until: undefined,
+              untilAsked: false,
             };
             // An activation that can't fund a whole attempt any more cuts it
             // off as the Loader does an isolate past its CPU time: its step
@@ -1760,9 +1763,11 @@ export class ResourceRunHost
           `Step of "${task?.id ?? "the workflow"}" resolves no deadline.`
         );
       }
-      if (attempt.until !== undefined || attempt.condition === "failed") {
+      // Taken before anything is awaited: two asked at once resolve one.
+      if (attempt.untilAsked || attempt.condition === "failed") {
         return this.#refuse(`Task "${task.id}" resolves its deadline once.`);
       }
+      attempt.untilAsked = true;
       this.#requireOpen(attempt, task, frame, "resolves its deadline");
       const passed = this.#callFrame(frame);
       const value = await this.#built(

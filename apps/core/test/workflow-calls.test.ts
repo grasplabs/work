@@ -1996,6 +1996,32 @@ describe("a run's host, against a forged module's calls", () => {
     });
   });
 
+  it("resolves a literal deadline once, however many times it is asked at once", async () => {
+    const by = await person("builder");
+    const { workflow } = await published(by, {
+      tasks: [
+        {
+          later: {
+            call: "grasp.sleepUntil",
+            with: { timestamp: 1_000_000 },
+          },
+        },
+        { finish: { set: { status: "done" } } },
+      ],
+    });
+    let twice: unknown[] = [];
+    const host = await hostOf(by, workflow.id);
+    await host.do("enter:later", adaData, async (attempt) => {
+      const both = await Promise.all([
+        attempt.until(adaFrame),
+        attempt.until(adaFrame),
+      ]);
+      twice = both.map((until) => codeOf(until));
+      return { ok: true, value: { output: null } };
+    });
+    expect(twice).toStrictEqual(["ok", "workflow.invalid"]);
+  });
+
   it("sleeps only until the deadline its task's enter step resolved and recorded", async () => {
     const by = await person("builder");
     const { workflow } = await published(by, {
