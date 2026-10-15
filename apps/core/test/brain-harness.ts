@@ -92,9 +92,14 @@ export type BrainArm = (typeof brainArms)[number];
 
 /**
  * Arms built to break the gate, to prove it holds: one hands the model a
- * section its person may not read, one changes stored state mid-trial.
+ * section its person may not read; two change stored state mid-trial, one
+ * in Knowledge, one in core.
  */
-export const brainControls = ["leakyContext", "changesState"] as const;
+export const brainControls = [
+  "leakyContext",
+  "changesKnowledge",
+  "changesCore",
+] as const;
 export type BrainControl = (typeof brainControls)[number];
 
 /**
@@ -188,25 +193,61 @@ export const sealedDigest = async (): Promise<string> =>
 /** US dollars, as the model API reports them, in micros. */
 const microsOf = (dollars: number): number => Math.round(dollars * 1_000_000);
 
-/**
- * What stored state holds: every version of every document, every
- * collection and every permission. A trial that changes it changed
- * something no task asks for.
- */
-const stateFingerprint = async (): Promise<string> => {
-  const [versions, collections, permissions] = await Promise.all([
-    env.KNOWLEDGE.prepare(
-      "SELECT document_id, number, text FROM versions ORDER BY document_id, number"
-    ).all(),
-    env.KNOWLEDGE.prepare("SELECT id FROM collections ORDER BY id").all(),
-    env.DB.prepare("SELECT id, status FROM permissions ORDER BY id").all(),
-  ]);
-  return await digestOf([
-    versions.results,
-    collections.results,
-    permissions.results,
-  ]);
+/** The tables of `db`, but SQLite's and the runtime's own. */
+const tablesOf = async (db: D1Database): Promise<string[]> => {
+  const { results } = await db
+    .prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT LIKE 'd1_%' ORDER BY name"
+    )
+    .all<{ name: string }>();
+  return results.map(({ name }) => name);
 };
+
+/** A row as text, its bytes as numbers, so equal rows give equal text. */
+const rowText = (row: unknown): string =>
+  JSON.stringify(row, (_key, value: unknown) =>
+    value instanceof ArrayBuffer ? [...new Uint8Array(value)] : value
+  );
+
+/**
+ * What changes with every call whatever a trial does: the audit outbox,
+ * as calls are recorded. Not something a task could ask to change.
+ */
+const bookkeeping = new Set(["core.audit_outbox"]);
+
+/**
+ * Each table's digest, in core's and Knowledge's databases, but the
+ * bookkeeping ones: what stored state holds.
+ */
+const stateOf = async (): Promise<Map<string, string>> => {
+  const digests = new Map<string, string>();
+  for (const [name, db] of [
+    ["core", env.DB],
+    ["knowledge", env.KNOWLEDGE],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- one database at a time
+    for (const table of await tablesOf(db)) {
+      const key = `${name}.${table}`;
+      if (!bookkeeping.has(key)) {
+        // oxlint-disable-next-line no-await-in-loop -- one table at a time
+        const { results } = await db.prepare(`SELECT * FROM "${table}"`).all();
+        const rows = results.map(rowText).toSorted().join("\n");
+        // oxlint-disable-next-line no-await-in-loop -- one table at a time
+        digests.set(key, await sha256Hex(rows));
+      }
+    }
+  }
+  return digests;
+};
+
+/** The tables whose rows differ between two states. */
+const changedBetween = (
+  before: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>
+): string[] =>
+  [...new Set([...before.keys(), ...after.keys()])]
+    .filter((table) => before.get(table) !== after.get(table))
+    .toSorted();
 
 export interface BrainCompany {
   admin: Person;
@@ -541,8 +582,21 @@ const sourcesFor = async (
     : [...found, { source: leaked.path, text: leaked.text }];
 };
 
-/** A change no task asks for: a note saved in the person's own collection. */
-const changeState = async (company: BrainCompany, persona: BrainPersona) => {
+/**
+ * A change no task asks for: a note saved in the person's own collection,
+ * or an App created in core. Neither is anything a later trial reads.
+ */
+const changeState = async (
+  company: BrainCompany,
+  persona: BrainPersona,
+  where: "changesKnowledge" | "changesCore"
+) => {
+  if (where === "changesCore") {
+    await company.admin.api.apps.create({
+      name: `Control ${crypto.randomUUID()}`,
+    });
+    return;
+  }
   const person = company.people[persona];
   const { personal } = await person.api.memory.collections();
   await person.api.knowledge.saveDocument({
@@ -572,7 +626,16 @@ const runTrial = async (
   );
   // The gate and what reached the model cover the whole trial, earlier
   // turns too; cost and latency are the question's own.
-  const stateBefore = await stateFingerprint();
+  // What the trial's chat drafted counts too: drafts live in its object.
+  const stateNow = async () => {
+    const state = await stateOf();
+    state.set(
+      "workspace.drafts",
+      rowText(await place.stub.drafts(chat.id, person.userId))
+    );
+    return state;
+  };
+  const stateBefore = await stateNow();
   const firstRequest = gateway.requests.length;
   let spentBefore = await charged(company);
   let answer = "";
@@ -598,8 +661,8 @@ const runTrial = async (
     }
     // Then retrieval, then the agent; a failed question is timed too.
     const sources = await sourcesFor(company, plan);
-    if (arm === "changesState") {
-      await changeState(company, task.persona);
+    if (arm === "changesKnowledge" || arm === "changesCore") {
+      await changeState(company, task.persona, arm);
     }
     setTurn({ phase: "question", task, searches: arm === "agent" });
     const reply = await place.stub.ask(chat.id, {
@@ -624,7 +687,7 @@ const runTrial = async (
     modelInput: requests.flatMap(({ body }) => modelStrings(body)).join("\n"),
     sourceInput: requests.flatMap(({ body }) => sourceStrings(body)).join("\n"),
     forbidden: forbiddenIn(task),
-    stateChanged: (await stateFingerprint()) !== stateBefore,
+    stateChanged: changedBetween(stateBefore, await stateNow()).length > 0,
     ...(failure === undefined ? {} : { error: failure }),
     latencyMs,
     costMicros: (await charged(company)) - spentBefore,
@@ -677,7 +740,7 @@ export interface RunIdentity {
   tools: string[];
   /** Each distinct set of instructions and API declarations they carried. */
   prompt: string[];
-  /** The skills the personas' catalogs list. */
+  /** The skills the personas' catalogs list, and each one's text. */
   skills: string;
   /** Access, grants, gateway, protocol and budgets. */
   policy: string;
@@ -835,14 +898,24 @@ export const runBrainBaseline = async (
         )
       ),
     ].toSorted();
+  // Each skill the personas' agents could read, with its whole text.
   const catalogs = await Promise.all(
     brainPersonas.map(async (persona) => {
-      const { skills } = await company.people[persona].api.knowledge.catalog();
-      return skills.map(({ name, description }) => ({ name, description }));
+      const { knowledge } = company.people[persona].api;
+      const { skills } = await knowledge.catalog();
+      return await Promise.all(
+        skills.map(async ({ documentId, name, description }) => {
+          const { text } = await knowledge.read(documentId);
+          return { name, description, text: await sha256Hex(text) };
+        })
+      );
     })
   );
   const violations = gateViolations(armScores);
   const controlViolations = gateViolations(controlScores);
+  // A change one arm made alters every later trial's inputs, whichever
+  // arm: no comparison of the run stands.
+  const changed = violations.some(({ stateChanged }) => stateChanged);
   return {
     identity: {
       suite: {
@@ -898,14 +971,17 @@ export const runBrainBaseline = async (
         ([candidate, baseline]) =>
           arms.includes(candidate) && arms.includes(baseline)
       )
-      .map(([candidate, baseline]) =>
-        compareArms(
+      .map(([candidate, baseline]) => {
+        const comparison = compareArms(
           { arm: candidate, scores: scoresOf(candidate) },
           { arm: baseline, scores: scoresOf(baseline) },
           minimumMeaningfulGain,
           seed
-        )
-      ),
+        );
+        return changed
+          ? { ...comparison, decision: "blocked" as const }
+          : comparison;
+      }),
     gate: { passed: violations.length === 0, violations },
     controlGate: {
       passed: controlViolations.length === 0,

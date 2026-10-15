@@ -98,36 +98,20 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       })),
     }).toStrictEqual({
       passed: false,
-      violations: [
-        {
-          arm: "changesState",
-          taskId: "dev-fleet-size",
-          leaked: false,
-          stateChanged: true,
-        },
-        {
-          arm: "changesState",
-          taskId: "dev-route-plan",
-          leaked: false,
-          stateChanged: true,
-        },
-        {
-          arm: "leakyContext",
-          taskId: "dev-fleet-size",
-          leaked: true,
-          stateChanged: false,
-        },
-        {
-          arm: "leakyContext",
-          taskId: "dev-route-plan",
-          leaked: true,
-          stateChanged: false,
-        },
-      ],
-      controls: [
-        { arm: "leakyContext", evidenceRecall: 1, completionRate: 0 },
-        { arm: "changesState", evidenceRecall: 1, completionRate: 0 },
-      ],
+      violations: ["changesCore", "changesKnowledge", "leakyContext"].flatMap(
+        (arm) =>
+          controlTasks.map((taskId) => ({
+            arm,
+            taskId,
+            leaked: arm === "leakyContext",
+            stateChanged: arm !== "leakyContext",
+          }))
+      ),
+      controls: brainControls.map((arm) => ({
+        arm,
+        evidenceRecall: 1,
+        completionRate: 0,
+      })),
     });
   });
 
