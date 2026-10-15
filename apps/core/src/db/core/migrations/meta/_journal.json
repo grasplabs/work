@@ -603,6 +603,13 @@
       "when": 1792073484774,
       "tag": "0085_workflow_run_wakes",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "6",
+      "when": 1792075940314,
+      "tag": "0086_workflow_model_waits",
+      "breakpoints": true
     }
   ]
 }
