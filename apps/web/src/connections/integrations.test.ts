@@ -30,6 +30,8 @@ const entry = (
   categories,
   toolCount: 3,
   logo: null,
+  description: null,
+  group: "Other",
   offered: true,
 });
 
