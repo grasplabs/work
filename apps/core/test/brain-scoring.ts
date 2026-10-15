@@ -303,9 +303,15 @@ export const scoreTrial = (
   // part of the model's held that line.
   const reached = expect.evidence.filter(({ marker }) => {
     const words = normalized(marker);
-    const first = parts.find(({ text }) => text.includes(words));
+    const wroteFirst = (index: number, text: string) =>
+      parts
+        .slice(0, index)
+        .some((part) => part.by === "model" && part.text.includes(text));
     return (
-      first?.by === "source" ||
+      parts.some(
+        ({ by, text }, index) =>
+          by === "source" && text.includes(words) && !wroteFirst(index, words)
+      ) ||
       parts.some(
         ({ by, text, lines }, index) =>
           by === "tool" &&
@@ -313,9 +319,7 @@ export const scoreTrial = (
             (line) =>
               line.includes(words) &&
               text.includes(line) &&
-              !parts
-                .slice(0, index)
-                .some((part) => part.by === "model" && part.text.includes(line))
+              !wroteFirst(index, line)
           )
       )
     );

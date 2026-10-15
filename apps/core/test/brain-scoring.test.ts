@@ -151,6 +151,13 @@ describe("scoring a trial", () => {
           { by: "model", text: `const owner = "${line}";` },
         ],
       }).evidenceRecall,
+      // A tool gave a guess, then a source the line itself.
+      sourceAfterGuess: verdict(contract, {
+        transcript: [
+          tool(`Returned: ${marker} (probably)`, []),
+          { by: "source", text: `Contract register. ${line}` },
+        ],
+      }).evidenceRecall,
       // Read in an earlier request, left out of the last one.
       dropped: verdict(contract, {
         transcript: [
@@ -175,6 +182,7 @@ describe("scoring a trial", () => {
       readLater: 0,
       wordsOnly: 0,
       quoted: 1,
+      sourceAfterGuess: 1,
       dropped: true,
       citationOnly: false,
     });

@@ -38,7 +38,7 @@ import { gatewayConfig, model, pointAtGateway } from "./agent-chat.ts";
 import { answeringGateway } from "./ai-gateway.ts";
 import type { GatewayRequest } from "./ai-gateway.ts";
 import { grantReviewed } from "./apps.ts";
-import { eventsAfter, logHead } from "./audit-events.ts";
+import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import {
   compareArms,
   gateViolations,
@@ -557,8 +557,9 @@ const providerOf = (respond: typeof stubReader) => {
     ...gateway.binding,
     fetch: async (input: Request | string | URL, init?: RequestInit) => {
       const started = performance.now();
-      recorded.push(await eventsAfter(head));
-      head = await logHead();
+      const read = await eventsAfterWithHead(head);
+      recorded.push(read.events);
+      ({ head } = read);
       observingMs += performance.now() - started;
       return await fetch(input, init);
     },
