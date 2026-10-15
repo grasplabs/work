@@ -306,6 +306,19 @@ const coreStepOf = (
   step: NonNullable<ReadableHistoryRecord["step"]>,
   context: Context
 ): RunHistoryEntry | undefined => {
+  // A decision's wait again, after a wake that answered nothing: the
+  // same decision's wait, as its first is.
+  const decision =
+    step.kind === "waitForEvent" && step.eventType !== null
+      ? decisionOfEventType(step.eventType)
+      : undefined;
+  if (decision !== undefined) {
+    return waitOf(record, {
+      taskId: null,
+      waitId: decision,
+      waitKind: "decision",
+    });
+  }
   const parts = heldStep.exec(step.name)?.groups;
   const held =
     parts?.key === undefined ? undefined : context.heldByKey.get(parts.key);
@@ -330,7 +343,10 @@ const coreStepOf = (
       context
     );
   }
-  if (step.kind === "sleep") {
+  // Its waits for the person: event waits their decision wakes, with
+  // checks between (host.ts, `#waitWhileHeld`), and an unknown outcome's
+  // first sleep.
+  if (step.kind === "sleep" || step.kind === "waitForEvent") {
     return waitOf(record, {
       taskId: told.taskId,
       waitId: told.stepId,

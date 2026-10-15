@@ -1440,6 +1440,48 @@ export const workflowRunControls = sqliteTable(
 );
 
 /**
+ * Wakes core owes waiting runs (src/workflows/wakes.ts): one row per
+ * outstanding wake, written in the same batch as what it wakes the run
+ * for (a decision's answer), or before it (a held side effect's
+ * decision, which connect keeps), and deleted once the engine took the
+ * event. `id` is the delivery's key, which the engine takes once, and
+ * `type` the event type the run's wait waits for.
+ */
+export const workflowRunWakes = sqliteTable(
+  "workflow_run_wakes",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    type: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the repair next sends it, moved on further each time it does,
+     * so a wake the engine keeps refusing doesn't keep newer ones waiting.
+     */
+    retryAt: timestamp("retry_at").notNull(),
+    /** How often the repair sent it. */
+    retries: integer().notNull().default(0),
+    /**
+     * Set on a wake owed before what it is for is known to have happened
+     * (a held side effect's decision, still with connect): sent again by
+     * the repair, each time as a new delivery, until then, and dropped
+     * after. None on a wake the engine settles by taking it once.
+     */
+    resendUntil: timestamp("resend_until"),
+  },
+  (table) => [
+    // The repair (src/workflows/wakes.ts): next due first.
+    index("workflow_run_wakes_due_idx").on(table.retryAt, table.id),
+    // The repair's drop of wakes sent again for as long as they may be.
+    index("workflow_run_wakes_resend_idx")
+      .on(table.resendUntil)
+      .where(sql`resend_until IS NOT NULL`),
+  ]
+);
+
+/**
  * The triggers of the workflows in each App's current version
  * (src/workflows/trigger-registry.ts), written when a version is made
  * current and removed when another is. `position` is the trigger's place
