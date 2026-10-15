@@ -93,6 +93,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     }).toStrictEqual({
       passed: false,
       violations: [
+        "changesChat",
         "changesCore",
         "changesFiles",
         "changesHistory",

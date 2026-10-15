@@ -112,6 +112,7 @@ export const brainControls = [
   "changesFiles",
   "changesObject",
   "changesHistory",
+  "changesChat",
 ] as const;
 export type BrainControl = (typeof brainControls)[number];
 
@@ -708,13 +709,14 @@ const changes = (arm: BrainArm | BrainControl): arm is ChangingControl =>
 /**
  * A change no task asks for, where `where` says: a note saved in the
  * person's own collection, an App created in core, a file put in R2, a
- * dashboard row written in the chat's object, or an earlier chat's message
- * rewritten, as a broken tool would.
+ * dashboard row written in the chat's object, or a message of an earlier
+ * chat or of this one rewritten, as a broken tool would.
  * Nothing a later trial reads.
  */
 const changeState = async (
   company: BrainCompany,
   place: Workspace,
+  chatId: string,
   where: ChangingControl
 ) => {
   if (where === "changesCore") {
@@ -728,6 +730,16 @@ const changeState = async (
     // the file, a later one only overwrites its metadata.
     await env.FILES.put("brain-control/file", "changed", {
       customMetadata: { trial: crypto.randomUUID() },
+    });
+    return;
+  }
+  if (where === "changesChat") {
+    // The trial's own chat's first message, rewritten.
+    await runInDurableObject(place.stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE chat_messages SET message = message || ' ' WHERE id = (SELECT min(id) FROM chat_messages WHERE chat_id = ?)",
+        chatId
+      );
     });
     return;
   }
@@ -765,8 +777,12 @@ const changeState = async (
  * document. Following links, listing and history return none of it.
  */
 const contentRead = z.union([
-  z.object({ read: z.literal("section"), section: z.int().min(0) }),
-  z.object({ read: z.literal("document") }),
+  z.object({
+    read: z.literal("section"),
+    section: z.int().min(0),
+    version: z.int().min(1),
+  }),
+  z.object({ read: z.literal("document"), version: z.int().min(1) }),
 ]);
 
 /**
@@ -793,21 +809,25 @@ const readTextsOf = async (
       ? [
           {
             id: target.id,
+            version: read.version,
             section: "section" in read ? read.section : undefined,
           },
         ]
       : [];
   });
-  // A read the log recorded but Knowledge refused (a section that isn't
-  // there) returned nothing: it backs no evidence.
+  // Each read as the version it read: a whole document at that version,
+  // or a section of the current one, which is the version a section read
+  // returns. A section of a version since replaced, or a read Knowledge
+  // refused (a section that isn't there), backs no evidence.
   const texts = await Promise.all(
-    reads.map(async ({ id, section }) => {
+    reads.map(async ({ id, version, section }) => {
       try {
-        const read = await person.api.knowledge.read(
-          id,
-          section === undefined ? {} : { section }
-        );
-        return [read.text];
+        if (section === undefined) {
+          const read = await person.api.knowledge.getDocument(id, version);
+          return [read.version.text];
+        }
+        const read = await person.api.knowledge.read(id, { section });
+        return read.currentVersion === version ? [read.text] : [];
       } catch {
         return [];
       }
@@ -871,6 +891,18 @@ const workspaceStateOf = async (
     ])
   );
 };
+
+/** The chat's messages as stored, a row each. */
+const chatMessagesOf = async (
+  place: Workspace,
+  chatId: string
+): Promise<string[]> =>
+  await runInDurableObject(place.stub, (_instance, state) =>
+    state.storage.sql
+      .exec("SELECT * FROM chat_messages WHERE chat_id = ?", chatId)
+      .toArray()
+      .map(rowText)
+  );
 
 /**
  * Every object in R2's `FILES`: its key, version, etag, upload time and
@@ -966,16 +998,24 @@ const runTrial = async (
   await provider.mark();
   const firstRequest = gateway.requests.length;
   let spentBefore = await charged();
+  // The chat's own messages before its question: they must stay as they
+  // were, while the question and its answer are added.
+  let historyBefore = await chatMessagesOf(place, chat.id);
   let answer = "";
   let failure: string | undefined;
   let started = performance.now();
   let observedBefore = provider.observingMs();
   try {
     setTurn({ phase: "prior" });
-    for (const said of task.priorTurns ?? []) {
+    // The control that rewrites this chat's history needs some to rewrite.
+    const earlier =
+      task.priorTurns ??
+      (arm === "changesChat" ? ["Control: an earlier turn to keep."] : []);
+    for (const said of earlier) {
       // oxlint-disable-next-line no-await-in-loop -- in order, as said
       await place.stub.ask(chat.id, { text: said, model });
     }
+    historyBefore = await chatMessagesOf(place, chat.id);
     spentBefore = await charged();
     // A cold question starts in a just-evicted object, its caches and
     // memory gone, after any earlier turns of its chat. Its timer starts
@@ -992,7 +1032,7 @@ const runTrial = async (
     // Then retrieval, then the agent; a failed question is timed too.
     const sources = await sourcesFor(company, plan);
     if (changes(arm)) {
-      await changeState(company, place, arm);
+      await changeState(company, place, chat.id, arm);
     }
     setTurn({ phase: "question", task, searches: arm === "agent" });
     const reply = await place.stub.ask(chat.id, {
@@ -1008,7 +1048,13 @@ const runTrial = async (
   }
   const latencyMs =
     performance.now() - started - (provider.observingMs() - observedBefore);
-  const changedTables = changedBetween(stateBefore, await stateNow());
+  const historyAfter = new Set(await chatMessagesOf(place, chat.id));
+  const changedTables = [
+    ...changedBetween(stateBefore, await stateNow()),
+    ...(historyBefore.every((row) => historyAfter.has(row))
+      ? []
+      : ["workspace.chat_messages (this chat)"]),
+  ];
   const requests = gateway.requests.slice(firstRequest);
   return {
     taskId: task.id,
