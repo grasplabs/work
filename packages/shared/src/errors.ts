@@ -144,6 +144,8 @@ export const requestErrors = defineErrorFamily({
 /** Why a call needs a person to sign in (again). */
 export const authErrors = defineErrorFamily({
   "auth.unauthenticated": "Sign in to continue.",
+  "auth.token_unavailable":
+    "Sign-in keys were just renewed. Try again in a few seconds.",
 });
 
 /**

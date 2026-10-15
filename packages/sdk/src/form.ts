@@ -10,13 +10,23 @@ import type {
 } from "@tanstack/react-form";
 import { useEffect, useState } from "react";
 
-import type { GraspClient } from "./client-core.ts";
-import { clientError, GraspError } from "./client-error.ts";
-import type { ArgsOf, OperationReference, ReturnOf } from "./references.ts";
+import { clientInternals } from "./client-core.ts";
+import type {
+  ActionReference,
+  GraspClient,
+  MutationReference,
+} from "./client-core.ts";
+import {
+  clientError,
+  detailIssues,
+  GraspError,
+  issueDetails,
+  settlesSubmission,
+} from "./client-error.ts";
+import type { ArgsOf, ReturnOf } from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
-import { readDescriptor } from "./value-read.ts";
 
 // Forms (spec 10.2.1–10.3): one `useForm`, three ways in.
 //
@@ -41,11 +51,18 @@ import { readDescriptor } from "./value-read.ts";
 //   the arguments is taken per submission; the field helpers lock while
 //   it is active.
 // - A lost answer turns into a second save: the session client recovers
-//   a mutation under its key. A submission whose outcome is unknown keeps
-//   its key and its arguments, and the fields stay locked: the next submit
-//   sends both again, which gets a change's outcome. An action has no
-//   receipt, so it runs again, its completed steps not repeated; the
-//   person can `discard` it instead, knowingly.
+//   a mutation under its key, which it alone picks. A submission whose
+//   outcome is unknown keeps its arguments and the key the client says it
+//   went under, and the fields stay locked: the next submit sends both
+//   again, which gets a change's outcome. An action has no receipt, so it
+//   runs again, its completed steps not repeated; the person can
+//   `discard` it instead, knowingly.
+// - One person's draft is sent as another's: the session client sends a
+//   key left unknown only for the person it was sent for, and refuses it
+//   unsent as `auth.principal_changed` once someone else signed in or
+//   access was lost; the form then drops what it kept. A resend refused
+//   before it ran (a sign-out, the request budget) keeps it, key and all:
+//   the next submit sends it again, never anew.
 // - A remote change overwrites a draft: while the editable values differ
 //   from the baseline, newer records are only remembered; they replace
 //   the draft only on a deliberate `reload()`.
@@ -101,6 +118,8 @@ export interface FormFailure {
 /** What a form shows of its submission, beside its fields' own state. */
 export interface FormStatus {
   readonly phase: SubmitPhase;
+  /** Whether its fields take no edits now: a submission is in flight or unknown. */
+  readonly locked: boolean;
   /** Whether a submit was tried: field errors show from then on. */
   readonly attempted: boolean;
   /** Why the last submission failed, at the form's level. */
@@ -117,6 +136,7 @@ export interface FormStatus {
 
 const initialStatus: FormStatus = Object.freeze({
   phase: "idle",
+  locked: false,
   attempted: false,
   failure: undefined,
   fieldIssues: Object.freeze({}),
@@ -238,25 +258,12 @@ export type TextFieldName<Values> = {
     : never;
 }[DeepKeys<Values>];
 
-/** What a submission resolves with: the operation's result, or the callback's. */
-/**
- * `issues` as a refusal's details carry them: each message, and its path
- * as keys and indexes, as the session client's own refusals do.
- */
-const issuesOf = (issues: readonly StandardSchemaV1.Issue[]): Json[] =>
-  issues.map(({ message, path }) => ({
-    message,
-    path: (path ?? []).map((segment) => {
-      const key = typeof segment === "object" ? segment.key : segment;
-      return typeof key === "number" ? key : String(key);
-    }),
-  }));
-
+/** One submission of a form: what it sends, and, once its outcome is unknown, under what. */
 interface Submission {
   /** The normalized arguments, or the schema's output, to send. */
   readonly input: unknown;
-  /** For an operation: its key, kept across an uncertain outcome. */
-  readonly key: string;
+  /** The key the session client said it went under, its outcome unknown. */
+  readonly key?: string;
 }
 
 /** A document's identity and revision, as the SDK binds records by them. */
@@ -282,12 +289,6 @@ const pick = (
 /** Whether two plain values are the same, as JSON reads them, whatever their keys' order. */
 const same = (a: unknown, b: unknown): boolean =>
   canonicalText(a) === canonicalText(b);
-
-/** A fresh logical submission key: 128 random bits, in hex. */
-const freshKey = (): string =>
-  Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
-    byte.toString(16).padStart(2, "0")
-  ).join("");
 
 /**
  * An issue's path as TanStack names the field: `items[0].name`, array
@@ -330,10 +331,10 @@ const errorsOf = (
   return rest.length === 0 ? { fields } : { form: rest.join(" "), fields };
 };
 
-/** Sends one submission's input under its key, through the session client. */
+/** Sends one submission's input through the session client, under its key once it has one. */
 type Send = (
   input: unknown,
-  options: { readonly idempotencyKey: string }
+  options: { readonly idempotencyKey?: string }
 ) => Promise<unknown>;
 
 /** How a binding validates and submits, by the way the form was made. */
@@ -378,25 +379,10 @@ const failureOf = (error: GraspError): FormFailure => ({
   category: error.category,
 });
 
-/** The issues in a `contract.invalid_args` error's details. */
-const issuesIn = (details: Json | undefined): StandardSchemaV1.Issue[] => {
-  const issues = isPlainObject(details) ? details.issues : undefined;
-  if (!Array.isArray(issues)) {
-    return [];
-  }
-  return issues.flatMap((issue) => {
-    if (!isPlainObject(issue) || typeof issue.message !== "string") {
-      return [];
-    }
-    const path = Array.isArray(issue.path)
-      ? issue.path.filter(
-          (segment): segment is string | number =>
-            typeof segment === "string" || typeof segment === "number"
-        )
-      : [];
-    return [{ message: issue.message, path }];
-  });
-};
+/** What the form's one validator says of values: issues, or the normalized input. */
+type Checked =
+  | { readonly issues: readonly StandardSchemaV1.Issue[] }
+  | { readonly value: unknown; readonly issues?: undefined };
 
 /**
  * What a form holds beside TanStack's state: its status, the record's
@@ -417,6 +403,10 @@ export class FormBinding {
   #baseline: unknown;
   #latest: unknown;
   #mounted = true;
+  /** The last values checked, and what the check said: one check a submit. */
+  #checked:
+    | { readonly values: Record<string, unknown>; readonly checked: Checked }
+    | undefined;
   /** The values TanStack starts from: never changed after. */
   readonly initialValues: Record<string, unknown>;
 
@@ -460,8 +450,9 @@ export class FormBinding {
     this.#mounted = mounted;
   }
 
-  #set(change: Partial<FormStatus>): void {
-    this.#status = { ...this.#status, ...change };
+  #set(change: Partial<Omit<FormStatus, "locked">>): void {
+    const next = { ...this.#status, ...change };
+    this.#status = { ...next, locked: next.phase !== "idle" };
     for (const listener of this.#listeners) {
       listener();
     }
@@ -493,11 +484,7 @@ export class FormBinding {
   }
 
   /** Checks `values` with the form's one validator: issues, or the normalized input. */
-  #check(
-    values: Record<string, unknown>
-  ):
-    | { readonly issues: readonly StandardSchemaV1.Issue[] }
-    | { readonly value: unknown; readonly issues?: undefined } {
+  #check(values: Record<string, unknown>): Checked {
     const target = this.#target;
     if (target.kind === "schema") {
       const checked = target.schema["~standard"].validate(values);
@@ -520,6 +507,7 @@ export class FormBinding {
   /** TanStack's form-level validator: the same check, as field errors. */
   readonly validate: Validate<Record<string, unknown>> = ({ value }) => {
     const checked = this.#check(value);
+    this.#checked = { values: value, checked };
     return checked.issues === undefined
       ? undefined
       : errorsOf(checked.issues, (field) => this.#editable(field));
@@ -562,14 +550,7 @@ export class FormBinding {
       return;
     }
     this.#baseline = record;
-    const latest = identityOf(this.#latest);
-    const adopted = identityOf(record);
-    if (
-      latest === undefined ||
-      (adopted !== undefined && adopted.rev >= latest.rev)
-    ) {
-      this.#latest = record;
-    }
+    this.#remember(record);
     this.#formOf().reset(pick(record, target.fields), {
       keepDefaultValues: true,
     });
@@ -580,6 +561,18 @@ export class FormBinding {
       fieldIssues: {},
       attempted: false,
     });
+  }
+
+  /** Keeps `record` as the latest supplied, unless one of a later revision is. */
+  #remember(record: unknown): void {
+    const latest = identityOf(this.#latest);
+    const next = identityOf(record);
+    if (
+      latest === undefined ||
+      (next !== undefined && next.rev >= latest.rev)
+    ) {
+      this.#latest = record;
+    }
   }
 
   /**
@@ -605,7 +598,7 @@ export class FormBinding {
     if (next.rev === latest.rev && same(record, this.#latest)) {
       return;
     }
-    this.#latest = record;
+    this.#remember(record);
     // A record at the baseline's revision or below is one the form holds
     // already, or older: a read sent before a save that answered after it.
     const baseline = identityOf(this.#baseline);
@@ -661,7 +654,6 @@ export class FormBinding {
     ) {
       return;
     }
-    this.#set({ phase: "idle" });
     this.#adopt(this.#latest);
   }
 
@@ -690,8 +682,13 @@ export class FormBinding {
     const form = this.#formOf();
     this.#set({ attempted: true });
     await form.validate("submit");
-    // One snapshot of the values, validated and normalized as sent.
-    const checked = this.#check(form.state.values);
+    // One snapshot of the values, validated and normalized as sent: by the
+    // check TanStack's submit just ran, when it ran on these very values.
+    const { values } = form.state;
+    const checked =
+      this.#checked?.values === values
+        ? this.#checked.checked
+        : this.#check(values);
     if (checked.issues !== undefined) {
       const errors = errorsOf(checked.issues, (field) => this.#editable(field));
       this.#set({
@@ -704,9 +701,9 @@ export class FormBinding {
                 category: "contract",
               },
       });
-      return { issues: issuesOf(checked.issues) };
+      return { issues: issueDetails(checked.issues) };
     }
-    return { input: checked.value, key: freshKey() };
+    return { input: checked.value };
   }
 
   async #submitOnce(): Promise<unknown> {
@@ -720,14 +717,14 @@ export class FormBinding {
     this.#set({
       phase: "submitting",
       failure: undefined,
+      fieldIssues: {},
       applicationError: undefined,
     });
     let result: unknown;
     try {
       result = await this.#send(submission);
     } catch (error) {
-      const failure = this.#failed(error, submission);
-      throw failure;
+      throw this.#failed(error, submission);
     }
     this.#uncertain = undefined;
     const refused = this.#succeeded(result);
@@ -743,9 +740,10 @@ export class FormBinding {
     if (target.kind === "schema") {
       return await this.#options.onSubmit?.(submission.input);
     }
-    return await target.send(submission.input, {
-      idempotencyKey: submission.key,
-    });
+    return await target.send(
+      submission.input,
+      submission.key === undefined ? {} : { idempotencyKey: submission.key }
+    );
   }
 
   /**
@@ -755,26 +753,44 @@ export class FormBinding {
    */
   #failed(error: unknown, submission: Submission): GraspError {
     if (!(error instanceof GraspError)) {
-      const failed = new GraspError({
-        code: "form.failed",
-        message:
-          error instanceof Error && error.message !== ""
-            ? error.message
-            : "This couldn't be submitted.",
-        category: "operational",
-        retryable: false,
-        requestId: null,
-      });
+      const failed = clientError(
+        "form.failed",
+        undefined,
+        error instanceof Error && error.message !== ""
+          ? error.message
+          : undefined
+      );
       this.#set({ phase: "idle", failure: failureOf(failed) });
       return failed;
     }
     // An outcome the host or the client can't tell (an action's lost
-    // answer, an external effect's unknown result) keeps its identity: the
-    // next submit sends it again under it (see `SubmitPhase`), or the
-    // person discards it. A local form's callback has no identity to
-    // keep, so its failure is a plain one.
-    if (error.category === "uncertain" && this.#target.kind !== "schema") {
-      this.#uncertain = submission;
+    // answer, an external effect's unknown result) keeps its identity, the
+    // key the client says it went under: the next submit sends it again
+    // under it (see `SubmitPhase`), or the person discards it. A local
+    // form's callback has no identity to keep, so its failure is a plain
+    // one.
+    const key = isPlainObject(error.details)
+      ? error.details.idempotencyKey
+      : undefined;
+    if (
+      error.category === "uncertain" &&
+      this.#target.kind !== "schema" &&
+      typeof key === "string"
+    ) {
+      this.#uncertain = { ...submission, key };
+      this.#set({ phase: "uncertain", failure: failureOf(error) });
+      return error;
+    }
+    // A resend that may not have run (a sign-out, the request budget, a
+    // busy sandbox) leaves its outcome as unknown as it was: kept, key and
+    // all, so the next submit sends it again rather than anew, by the same
+    // rule the session client keeps the key's person by. Not once someone
+    // else signed in: then it was the person's before.
+    if (
+      submission.key !== undefined &&
+      error.code !== "auth.principal_changed" &&
+      !settlesSubmission(error)
+    ) {
       this.#set({ phase: "uncertain", failure: failureOf(error) });
       return error;
     }
@@ -783,7 +799,7 @@ export class FormBinding {
     const fieldIssues: Record<string, string> = {};
     let failure: FormFailure | undefined = failureOf(error);
     if (error.code === "contract.invalid_args") {
-      const issues = issuesIn(error.details);
+      const issues = detailIssues(error.details);
       const errors = errorsOf(issues, (field) => this.#editable(field));
       Object.assign(fieldIssues, errors?.fields ?? {});
       failure =
@@ -885,26 +901,6 @@ const isSchema = (value: unknown): value is StandardSchemaV1 =>
   "~standard" in value &&
   !("contractId" in value);
 
-/** Whether `value` is a public, single-answer reference of `kind`. */
-const isReferenceOf = <Kind extends "mutation" | "action">(
-  value: unknown,
-  kind: Kind
-): value is OperationReference<unknown, unknown, Kind> =>
-  isPlainObject(value) &&
-  value.kind === kind &&
-  value.visibility === "public" &&
-  value.mode === "single" &&
-  typeof value.contractId === "string";
-
-/** `reference`'s argument descriptor, read as data, or `contract.invalid_request`. */
-const argsOf = (reference: { readonly args: unknown }): ValueDescriptor => {
-  try {
-    return readDescriptor(reference.args, 1, { nodes: 0 });
-  } catch {
-    throw clientError("contract.invalid_request");
-  }
-};
-
 /** The way `target` and `options` make the form, read once. */
 const targetOf = (
   client: GraspClient,
@@ -914,24 +910,34 @@ const targetOf = (
   if (isSchema(target)) {
     return { kind: "schema", schema: target };
   }
-  if (isReferenceOf(target, "mutation")) {
-    const send: Send = async (input, submit) =>
-      await client.mutation(target, input, submit);
-    if (options.record !== undefined) {
-      const fields = (options.fields ?? []).filter(
-        (field) => typeof field === "string"
-      );
-      return { kind: "record", send, args: argsOf(target), fields };
-    }
-    return { kind: "operation", send, args: argsOf(target) };
-  }
+  const internals = clientInternals(client);
+  const kind = isPlainObject(target) ? target.kind : undefined;
   // A record form binds a mutation only.
-  if (isReferenceOf(target, "action") && options.record === undefined) {
-    const send: Send = async (input, submit) =>
-      await client.action(target, input, submit);
-    return { kind: "operation", send, args: argsOf(target) };
+  if (
+    kind !== "mutation" &&
+    (kind !== "action" || options.record !== undefined)
+  ) {
+    throw clientError("contract.invalid_request");
   }
-  throw clientError("contract.invalid_request");
+  const { args } = internals.readReference(target, kind);
+  if (kind === "action") {
+    const send: Send = async (input, submit) =>
+      // SAFETY: read as an action reference just above.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      await client.action(target as ActionReference, input, submit);
+    return { kind: "operation", send, args };
+  }
+  const send: Send = async (input, submit) =>
+    // SAFETY: read as a mutation reference just above.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    await client.mutation(target as MutationReference, input, submit);
+  if (options.record !== undefined) {
+    const fields = (options.fields ?? []).filter(
+      (field) => typeof field === "string"
+    );
+    return { kind: "record", send, args, fields };
+  }
+  return { kind: "operation", send, args };
 };
 
 /** The values a form starts from, by the way it is made. */
@@ -946,6 +952,20 @@ const initialValuesOf = (
 };
 
 /**
+ * The binding of a form of `target` with `options`, submitting through
+ * `client`: what `useGraspForm` holds, before its TanStack form is
+ * attached.
+ */
+export const bindForm = (
+  client: GraspClient,
+  target: unknown,
+  options: FormOptionsInput
+): FormBinding => {
+  const read = targetOf(client, target, options);
+  return new FormBinding(read, initialValuesOf(read, options), options);
+};
+
+/**
  * The form hook, untyped: what `useForm` in react.ts types by its three
  * ways in. `client` is the session client.
  */
@@ -956,10 +976,7 @@ export const useGraspForm = (
 ): RecordForm<Record<string, unknown>, unknown> => {
   // One binding for the form's life, never replaced: no setter.
   // oxlint-disable-next-line react/hook-use-state -- see above
-  const [binding] = useState(() => {
-    const read = targetOf(client, target, options);
-    return new FormBinding(read, initialValuesOf(read, options), options);
-  });
+  const [binding] = useState(() => bindForm(client, target, options));
   const form: FormApiOf<Record<string, unknown>> = useTanStackForm({
     defaultValues: binding.initialValues,
     validators: {
