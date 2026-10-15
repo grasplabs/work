@@ -894,6 +894,12 @@ const shuffled = <T>(items: readonly T[], random: () => number): T[] => {
 
 export interface RunIdentity {
   suite: { version: string; digest: string; sealedDigest: string };
+  /**
+   * What full-text search returned for each task's keywords, in order, at
+   * the start of each window: ranking also follows document IDs and times,
+   * which a freshly loaded company doesn't keep.
+   */
+  retrieval: Partial<Record<BrainWindow, string>>;
   /** The stored corpus at the start of each window it ran. */
   sources: Partial<Record<BrainWindow, string>>;
   model: { id: string; provider: string; gateway: string };
@@ -960,6 +966,23 @@ const counts = (values: readonly string[]): Record<string, number> => {
     counted[value] = (counted[value] ?? 0) + 1;
   }
   return counted;
+};
+
+/** What each task's search returns as its person, in order: its paths and sections. */
+const retrievalDigest = async (
+  company: BrainCompany,
+  tasks: readonly BrainTask[]
+): Promise<string> => {
+  const found: Record<string, string[]> = {};
+  for (const task of tasks) {
+    // oxlint-disable-next-line no-await-in-loop -- one search at a time
+    const { hits } = await company.people[task.persona].api.knowledge.search(
+      task.query,
+      { limit: 50 }
+    );
+    found[task.id] = hits.map(({ path, section }) => `${path}#${section}`);
+  }
+  return await digestOf(found);
 };
 
 /**
@@ -1045,6 +1068,7 @@ export const runBrainBaseline = async (
   }
   const observations: TrialObservation[] = [];
   const sources: RunIdentity["sources"] = {};
+  const retrieval: RunIdentity["retrieval"] = {};
   const updates: BrainReport["costs"]["updates"] = [];
   for (const window of brainWindows) {
     if (window !== "t0") {
@@ -1063,6 +1087,8 @@ export const runBrainBaseline = async (
     // oxlint-disable-next-line no-await-in-loop -- windows in order
     const snapshot = await sourceSnapshot(company);
     sources[window] = snapshot.digest;
+    // oxlint-disable-next-line no-await-in-loop -- windows in order
+    retrieval[window] = await retrievalDigest(company, tasks);
     const inWindow = tasks.filter((task) => task.window === window);
     const plans: TrialPlan[] = [];
     for (let repeat = 1; repeat <= repeats; repeat += 1) {
@@ -1155,6 +1181,7 @@ export const runBrainBaseline = async (
         sealedDigest: await sealedDigest(),
       },
       sources,
+      retrieval,
       model: {
         id: model,
         provider: providerId,

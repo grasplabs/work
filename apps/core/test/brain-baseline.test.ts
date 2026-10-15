@@ -141,6 +141,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       sealed: identity.suite.sealedDigest,
       // The corpus changes in each window, and each snapshot is recorded.
       windows: new Set(Object.values(identity.sources)).size,
+      retrieval: Object.keys(identity.retrieval),
       // One tool contract, and one set of instructions and API
       // declarations, across every arm, person and repeat.
       tools: identity.tools.length,
@@ -156,6 +157,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       digest: true,
       sealed: brainSealedDigests[brainSuiteVersion],
       windows: 3,
+      retrieval: ["t0", "t1", "t2"],
       tools: 1,
       prompt: 1,
       model: {
