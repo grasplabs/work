@@ -49,7 +49,8 @@ import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { checkClaims } from "./claims.ts";
 import { devIdpOrigin, oidcProviders, providerIds } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
-import { liveKeys } from "./token-keys.ts";
+import { keyIdOf, keyRing } from "./token-keys.ts";
+import type { KeyRing, KeyUse } from "./token-keys.ts";
 
 /** Better Auth's routes, under core's API. */
 export const authBasePath = "/api/auth";
@@ -410,12 +411,41 @@ const auditedChanges: Record<
   }),
 };
 
+/** Each env's token keys, as its isolate holds them, whatever its providers. */
+const tokenRings = new WeakMap<Env, KeyRing<Jwk>>();
+
+/** The token keys `env`'s isolate holds (token-keys.ts). */
+export const tokenKeysOf = (env: Env): KeyRing<Jwk> => {
+  const ring = tokenRings.get(env) ?? keyRing<Jwk>();
+  tokenRings.set(env, ring);
+  return ring;
+};
+
+/**
+ * What the JWT plugin asks its keys for, by the call that asks: only
+ * `signJWT` sends a `payload`; every other call checks a token, naming
+ * the key its header does, if that can be read at all.
+ */
+const keyUseOf = (body: unknown): KeyUse => {
+  if (typeof body === "object" && body !== null && "payload" in body) {
+    return { sign: true };
+  }
+  const token: unknown =
+    typeof body === "object" && body !== null
+      ? Reflect.get(body, "token")
+      : undefined;
+  return typeof token === "string"
+    ? { kid: keyIdOf(token), token }
+    : { kid: undefined };
+};
+
 const createAuth = (
   env: Env,
   config: SignInConfig,
   providers: OidcProvider[]
 ) => {
   const db = drizzle(env.DB);
+  const tokenKeys = tokenKeysOf(env);
   return betterAuth({
     appName: "Grasp",
     // The deployment's own address from its config, never the request's:
@@ -630,13 +660,25 @@ const createAuth = (
         disableSettingJwtHeader: true,
         // Its own key rows, read through Better Auth's adapter, less the
         // keys that can't verify a current token any more: without this
-        // it verifies with every key it ever made (token-keys.ts).
+        // it verifies with every key it ever made. Held a minute per
+        // isolate to check tokens, so a token costs no D1 read before it
+        // is checked (token-keys.ts); a key it makes is read at once.
         adapter: {
           getJwks: async (context) =>
-            liveKeys(
-              await context.context.adapter.findMany<Jwk>({ model: "jwks" }),
+            await tokenKeys.keys(
+              async () =>
+                await context.context.adapter.findMany<Jwk>({ model: "jwks" }),
+              keyUseOf(context.body),
               Date.now()
             ),
+          createJwk: async (key, context) => {
+            const made = await context.context.adapter.create<
+              Omit<Jwk, "id">,
+              Jwk
+            >({ model: "jwks", data: { ...key, createdAt: new Date() } });
+            tokenKeys.forget();
+            return made;
+          },
         },
         // Its model is `jwks` already; plural table names would make it
         // `jwkss`.

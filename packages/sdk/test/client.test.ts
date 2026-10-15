@@ -26,6 +26,10 @@ const failedWith = (code: string, category = "operational") => ({
   },
 });
 
+/** The category core gives `code`, of those these tests answer with. */
+const categoryOf = (code: string): string =>
+  code === "submission.key_conflict" ? "contract" : "operational";
+
 /** What the page rejects a call with when the person's budget is used up. */
 const rateLimited = () =>
   Object.assign(new Error("Too much at once."), {
@@ -188,25 +192,228 @@ describe("the session client and an outcome it can't tell", () => {
 });
 
 describe("the session client and lost access", () => {
-  it.each(["version.revoked", "permission.person_inactive", "app.not_running"])(
-    "drops a read under way when a call is refused with %s",
+  it.each([
+    "version.revoked",
+    "permission.person_inactive",
+    "app.not_running",
+    "auth.session_ended",
+  ])("drops a read under way when a call is refused with %s", async (code) => {
+    const { promise: held, resolve: release } = Promise.withResolvers<null>();
+    const { client } = network(async (_call, request) => {
+      if (request.includes("notes.get")) {
+        await held;
+        return answered({ title: "Kept from before" });
+      }
+      await Promise.resolve();
+      return failedWith(code, "authorization");
+    });
+    const reading = failureOf(client.query(api.notes.get, { id: noteId }));
+    await expect(
+      failureOf(client.mutation(api.notes.create, { title: "After" }))
+    ).resolves.toMatchObject({ code });
+    release(null);
+    // The answer to a read sent before the refusal never shows.
+    await expect(reading).resolves.toMatchObject({ code });
+  });
+
+  it("keeps what it read when the host only couldn't give a token yet", async () => {
+    let refuse = false;
+    const { client } = network(async () => {
+      await Promise.resolve();
+      if (refuse) {
+        throw Object.assign(new Error("No token yet."), {
+          code: "auth.token_unavailable",
+        });
+      }
+      return answered({ title: "Kept" });
+    });
+    await client.query(api.notes.get, { id: noteId });
+    refuse = true;
+    await failureOf(client.mutation(api.notes.create, { title: "Later" }));
+    refuse = false;
+    // Not fenced: the query it read is still there to read again.
+    await expect(
+      client.query(api.notes.get, { id: noteId })
+    ).resolves.toStrictEqual({ title: "Kept" });
+  });
+
+  it("never sends a key left unknown again once access was lost since, though a resend found it out", async () => {
+    let signedOut = false;
+    const sent: string[] = [];
+    const { client } = network(async (_call, request) => {
+      await Promise.resolve();
+      if (request.includes("notes.get")) {
+        return signedOut
+          ? failedWith("auth.unauthenticated", "authorization")
+          : answered(null);
+      }
+      sent.push(request);
+      if (sent.length === 1) {
+        throw new Error("The connection was reset.");
+      }
+      return signedOut
+        ? failedWith("auth.unauthenticated", "authorization")
+        : answered(3);
+    });
+    const lost = await failureOf(client.action(api.notes.tally));
+    const { details } = lost;
+    const key: unknown =
+      typeof details === "object" && details !== null
+        ? Reflect.get(details, "idempotencyKey")
+        : undefined;
+    expect(key).toBeTypeOf("string");
+    const keyed = { idempotencyKey: String(key) };
+    // The person's session ended: the resend is what finds it out.
+    signedOut = true;
+    const found = await failureOf(client.action(api.notes.tally, {}, keyed));
+    // Someone signs in, and the key is sent again: never as them.
+    signedOut = false;
+    const after = await failureOf(client.action(api.notes.tally, {}, keyed));
+    expect({
+      found: found.code,
+      after: after.code,
+      sent: sent.length,
+    }).toStrictEqual({
+      found: "auth.unauthenticated",
+      after: "auth.principal_changed",
+      sent: 2,
+    });
+  });
+
+  it.each([
+    "operation.sandbox_busy",
+    "operation.sandbox_unavailable",
+    "mutation.concurrent_change",
+    "submission.superseded",
+    // Answered while the first call's receipt has no outcome yet.
+    "submission.key_conflict",
+    "submission.expired",
+    "operation.deadline_exceeded",
+  ])(
+    "never sends a key left unknown as the next person after a resend refused with %s",
     async (code) => {
-      const { promise: held, resolve: release } = Promise.withResolvers<null>();
+      let signedOut = false;
+      const sent: string[] = [];
       const { client } = network(async (_call, request) => {
-        if (request.includes("notes.get")) {
-          await held;
-          return answered({ title: "Kept from before" });
-        }
         await Promise.resolve();
-        return failedWith(code, "authorization");
+        if (request.includes("notes.get")) {
+          return signedOut
+            ? failedWith("auth.unauthenticated", "authorization")
+            : answered(null);
+        }
+        sent.push(request);
+        if (sent.length === 1) {
+          throw new Error("The connection was reset.");
+        }
+        // The resend may not have run: the outcome is as unknown as it was.
+        return sent.length === 2
+          ? failedWith(code, categoryOf(code))
+          : answered(3);
       });
-      const reading = failureOf(client.query(api.notes.get, { id: noteId }));
-      await expect(
-        failureOf(client.mutation(api.notes.create, { title: "After" }))
-      ).resolves.toMatchObject({ code });
-      release(null);
-      // The answer to a read sent before the refusal never shows.
-      await expect(reading).resolves.toMatchObject({ code });
+      const lost = await failureOf(client.action(api.notes.tally));
+      const { details } = lost;
+      const key: unknown =
+        typeof details === "object" && details !== null
+          ? Reflect.get(details, "idempotencyKey")
+          : undefined;
+      const keyed = { idempotencyKey: String(key) };
+      await failureOf(client.action(api.notes.tally, {}, keyed));
+      // The person's session ends; someone else signs in and sends it.
+      signedOut = true;
+      await failureOf(client.query(api.notes.get, { id: noteId }));
+      signedOut = false;
+      const after = await failureOf(client.action(api.notes.tally, {}, keyed));
+      expect({ after: after.code, sent: sent.length }).toStrictEqual({
+        after: "auth.principal_changed",
+        sent: 2,
+      });
     }
   );
+
+  it("keeps whose a key left unknown is when the host's answer to a resend fences", async () => {
+    const sent: string[] = [];
+    const { client } = network(async (_call, request) => {
+      await Promise.resolve();
+      sent.push(request);
+      if (sent.length === 1) {
+        throw new Error("The connection was reset.");
+      }
+      // Core's own answer, with its request ID: the App stopped running.
+      return sent.length === 2 ? failedWith("app.not_running") : answered(3);
+    });
+    const lost = await failureOf(client.action(api.notes.tally));
+    const { details } = lost;
+    const key: unknown =
+      typeof details === "object" && details !== null
+        ? Reflect.get(details, "idempotencyKey")
+        : undefined;
+    const keyed = { idempotencyKey: String(key) };
+    const fenced = await failureOf(client.action(api.notes.tally, {}, keyed));
+    const after = await failureOf(client.action(api.notes.tally, {}, keyed));
+    expect({
+      fenced: fenced.code,
+      after: after.code,
+      sent: sent.length,
+    }).toStrictEqual({
+      fenced: "app.not_running",
+      after: "auth.principal_changed",
+      sent: 2,
+    });
+  });
+
+  it("keeps whose a key left unknown is for its operation, whatever another operation under the key does", async () => {
+    let signedOut = false;
+    const tallies: string[] = [];
+    const { client } = network(async (_call, request) => {
+      await Promise.resolve();
+      if (request.includes("notes.get")) {
+        return signedOut
+          ? failedWith("auth.unauthenticated", "authorization")
+          : answered(null);
+      }
+      if (request.includes("notes.create")) {
+        return answered(noteId);
+      }
+      tallies.push(request);
+      throw new Error("The connection was reset.");
+    });
+    const keyed = { idempotencyKey: "weekly" };
+    // X's outcome is left unknown; Y, under the same key, goes through.
+    await failureOf(client.action(api.notes.tally, {}, keyed));
+    await client.mutation(api.notes.create, { title: "Y" }, keyed);
+    signedOut = true;
+    await failureOf(client.query(api.notes.get, { id: noteId }));
+    signedOut = false;
+    const retried = await failureOf(client.action(api.notes.tally, {}, keyed));
+    expect({ retried: retried.code, tallies: tallies.length }).toStrictEqual({
+      retried: "auth.principal_changed",
+      tallies: 1,
+    });
+  });
+
+  it("never sends a lost save again once access was lost while it waited to", async () => {
+    let signedOut = false;
+    const creates: string[] = [];
+    const { client } = network(async (_call, request) => {
+      await Promise.resolve();
+      if (request.includes("notes.get")) {
+        return signedOut
+          ? failedWith("auth.unauthenticated", "authorization")
+          : answered(null);
+      }
+      creates.push(request);
+      throw new Error("The connection was reset.");
+    });
+    const saving = failureOf(
+      client.mutation(api.notes.create, { title: "A's" })
+    );
+    // Its first answer is lost; before it is sent again, access is lost.
+    await expect.poll(() => creates.length).toBe(1);
+    signedOut = true;
+    await failureOf(client.query(api.notes.get, { id: noteId }));
+    await expect(saving).resolves.toMatchObject({
+      code: "submission.outcome_unknown",
+    });
+    expect(creates).toHaveLength(1);
+  });
 });

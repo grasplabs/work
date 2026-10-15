@@ -3610,6 +3610,10 @@ msgstr "Publier une version de {contract}"
 msgid "Publish as"
 msgstr "Publier comme"
 
+#: src/workflows/runs.tsx
+msgid "Queued"
+msgstr "En file d’attente"
+
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
 msgid "Queued"
@@ -5367,6 +5371,18 @@ msgstr "Attend une personne"
 #: src/workflows/history-view.tsx
 msgid "Waiting for a set time"
 msgstr "Attend un délai fixé"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of the organization's runs; tries again by {time}"
+msgstr "En attente d’une part des exécutions de l’organisation ; réessaie au plus tard le {time}"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of this App's runs; tries again by {time}"
+msgstr "En attente d’une part des exécutions de cette App ; réessaie au plus tard le {time}"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of this person's runs; tries again by {time}"
+msgstr "En attente d’une part des exécutions de cette personne ; réessaie au plus tard le {time}"
 
 #: src/workflows/history-view.tsx
 msgid "Waiting for an event"

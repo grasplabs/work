@@ -21,6 +21,9 @@ const statusOf = (run: ScreenRun | null | undefined): string => {
     case "cancelled": {
       return "Cancelled";
     }
+    case "queued": {
+      return "Waiting its turn to read the notes";
+    }
     case "running":
     case "waiting":
     case "paused": {

@@ -1,4 +1,5 @@
 import type { Json } from "@grasp-os/shared/json";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { isPlainObject } from "./value-descriptor.ts";
 
@@ -61,6 +62,11 @@ const clientErrors = {
     message: "The arguments are larger than an operation accepts.",
     category: "contract",
   },
+  "contract.invalid_result": {
+    message:
+      "The save went through, but answered something other than the record it saved, so the form can't show the record as it is now.",
+    category: "contract",
+  },
   "contract.invalid_request": {
     message:
       "That isn't a public reference of this kind: use one from the App's generated api.",
@@ -94,6 +100,10 @@ const clientErrors = {
       "Someone else signed in, so what was shown for the person before was cleared.",
     category: "authorization",
   },
+  "form.failed": {
+    message: "This couldn't be submitted.",
+    category: "operational",
+  },
 } as const satisfies Record<
   string,
   { message: string; category: ErrorCategory }
@@ -102,25 +112,78 @@ const clientErrors = {
 /** A failure the client itself decides on. */
 export type ClientErrorCode = keyof typeof clientErrors;
 
-/** The client's own failure `code`, with its `details`. */
+/**
+ * The client's own failure `code`, with its `details`; and `message` in
+ * place of its own, for a failure whose words are someone else's (a local
+ * form's callback).
+ */
 export const clientError = (
   code: ClientErrorCode,
-  details?: Json
+  details?: Json,
+  message?: string
 ): GraspError =>
   new GraspError({
     code,
     ...clientErrors[code],
+    ...(message === undefined ? {} : { message }),
     retryable: code === "operation.unreachable",
     requestId: null,
     ...(details === undefined ? {} : { details }),
   });
 
 /**
- * Refusals that mean the person, or the build they run, no longer gets
- * the App's data: the client clears every cached result on one.
+ * `issues` as a refusal's details carry them: each one's message, its
+ * path as keys and indexes, and its code when it has one.
  */
-export const fencingCodes: ReadonlySet<string> = new Set([
-  "auth.unauthenticated",
+export const issueDetails = (
+  issues: readonly (StandardSchemaV1.Issue & { readonly code?: string })[]
+): Json[] =>
+  issues.map(({ code, message, path }) => ({
+    ...(code === undefined ? {} : { code }),
+    message,
+    path: (path ?? []).map((segment) => {
+      const key = typeof segment === "object" ? segment.key : segment;
+      return typeof key === "number" ? key : String(key);
+    }),
+  }));
+
+/** The issues a refusal's `details` carry (`issueDetails`), as read back. */
+export const detailIssues = (
+  details: Json | undefined
+): StandardSchemaV1.Issue[] => {
+  const issues = isPlainObject(details) ? details.issues : undefined;
+  if (!Array.isArray(issues)) {
+    return [];
+  }
+  return issues.flatMap((issue) => {
+    if (!isPlainObject(issue) || typeof issue.message !== "string") {
+      return [];
+    }
+    const path = Array.isArray(issue.path)
+      ? issue.path.filter(
+          (segment): segment is string | number =>
+            typeof segment === "string" || typeof segment === "number"
+        )
+      : [];
+    return [{ message: issue.message, path }];
+  });
+};
+
+/**
+ * Sign-in refusals that don't mean the person lost access: the host had
+ * no token to give yet, or the client itself refused a call because
+ * someone else signed in, which fenced already.
+ */
+const nonFencingAuthCodes: ReadonlySet<string> = new Set([
+  "auth.token_unavailable",
+  "auth.principal_changed",
+]);
+
+/**
+ * Refusals, besides sign-in's (`fences`), that mean the person or the
+ * build they run no longer gets the App's data.
+ */
+const fencingCodes: ReadonlySet<string> = new Set([
   "role.forbidden",
   "app.not_found",
   "app.unreadable",
@@ -130,6 +193,15 @@ export const fencingCodes: ReadonlySet<string> = new Set([
   "permission.person_inactive",
   "app.not_running",
 ]);
+
+/**
+ * Whether a refusal means the person, or the build they run, no longer
+ * gets the App's data: the client clears every cached result on one.
+ * Every sign-in refusal does (`auth.*`), but for `nonFencingAuthCodes`.
+ */
+export const fences = (code: string): boolean =>
+  fencingCodes.has(code) ||
+  (code.startsWith("auth.") && !nonFencingAuthCodes.has(code));
 
 /**
  * Host failures of a query or a mutation that changed nothing and may be
@@ -146,6 +218,38 @@ export const nothingRanCodes: ReadonlySet<string> = new Set([
   "query.concurrent_change",
   "submission.superseded",
 ]);
+
+/**
+ * Categories of the host's answers that prove a call ran and failed: the
+ * App's own failures and the data's (`domain`: `data.conflict` and the
+ * like), and its code going past what it may (`source`). Never one that
+ * may have been answered before or without running it: a refusal of the
+ * person, the request, the key (`submission.key_conflict`, answered while
+ * the first call's receipt has no outcome yet; `submission.expired`), the
+ * sandbox or the time it took (`contract`, `operational`, `authorization`),
+ * nor an outcome unknown.
+ */
+const ranAndFailedCategories: ReadonlySet<ErrorCategory> = new Set([
+  "domain",
+  "source",
+]);
+
+/**
+ * Whether `failure`, what a call of a submission came to, makes the
+ * outcome of a key left unknown known: the host's own answer (it carries
+ * a request ID) that the call ran and failed (`ranAndFailedCategories`).
+ * Anything else leaves it as unknown as it was, erring safe. The session
+ * client forgets whose such a key is, and a form gives up the submission
+ * it keeps, only on this, so neither ever sends it again for someone else.
+ */
+export const settlesSubmission = (failure: GraspError): boolean =>
+  failure.requestId !== null &&
+  ranAndFailedCategories.has(failure.category) &&
+  !nothingRanCodes.has(failure.code) &&
+  // A refusal that fences (the build revoked, the App stopped) says the
+  // access went, not what became of the call: whoever comes next never
+  // gets the key.
+  !fences(failure.code);
 
 /** Refusals sent before a call reached the App's code: nothing of it ran. */
 export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([

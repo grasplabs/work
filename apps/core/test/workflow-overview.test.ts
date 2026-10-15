@@ -13,6 +13,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, recordedQueries } from "./query-plans.ts";
+import { sleeping } from "./runs.ts";
 import {
   auditedDuring,
   openRpc,
@@ -146,6 +147,20 @@ const shown = (run: ListedRun) => ({
   decision: run.decision ?? null,
   failedAt: run.failure?.step ?? null,
 });
+
+/** A run's status, and the share it waits for while queued. */
+const queueOf = (run: { status: string; queued?: unknown }) => ({
+  status: run.status,
+  queued: run.queued ?? null,
+});
+
+/** What `queueOf` shows of each of `runs`, by run. */
+const byRun = (
+  runs: readonly { id: string; status: string; queued?: unknown }[]
+) =>
+  new Map<string, ReturnType<typeof queueOf>>(
+    runs.map((run) => [run.id, queueOf(run)])
+  );
 
 /**
  * The code an outline shows: conditions, loop heads, keys, parameters
@@ -585,6 +600,176 @@ describe("the Workflows page", buildTime, () => {
       counted: 0,
       last: "running",
     });
+  });
+
+  it("shows a run waiting for a share as queued, with the share and when it asks again, wherever runs are listed, and nothing of who else waits", async () => {
+    const [owner, user] = await Promise.all([
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    const app = await appOf(owner, `Invoices ${unique()}`, {
+      ...approveFiles,
+      ...workflowFiles("remind", "  return 1;"),
+      ...workflowFiles(
+        "idle",
+        `  await step.sleep("idle", { description: "Wait", duration: "1 day" });
+  return 1;`
+      ),
+    });
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const now = Date.now();
+    const at = (minutes: number) => now - minutes * minute;
+    const retryAt = now + 30_000;
+    const seeded = {
+      // Its step asks for a share of its App's attempts: queued.
+      queued: await seedRun(app, {
+        workflow: "remind",
+        status: "running",
+        createdAt: at(1),
+      }),
+      // Its step stopped asking two minutes ago: its place lapsed.
+      lapsed: await seedRun(app, {
+        workflow: "remind",
+        status: "running",
+        createdAt: at(2),
+      }),
+      // Paused before its place lapses: it waits for no share.
+      paused: await seedRun(app, {
+        workflow: "remind",
+        status: "paused",
+        createdAt: at(3),
+      }),
+      // A decision someone may answer comes first.
+      deciding: await seedRun(app, {
+        workflow: "approve",
+        status: "running",
+        createdAt: at(4),
+        decision: "open",
+        deciders: `person:${owner.userId}`,
+      }),
+    };
+    // The run's engine sleeps between asks, as a step waiting for a share
+    // does: the engine calls it waiting, though no decision is open.
+    const sleeper = await owner.api.workflows.start(app, "idle");
+    await sleeping(sleeper.id, "idle");
+    const place = async (
+      run: string,
+      waitingFor: "client" | "person" | "app",
+      seenAt: number,
+      asksAt = retryAt
+    ) =>
+      await env.DB.prepare(
+        "INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)"
+      )
+        .bind(
+          run,
+          `step-${unique()}`,
+          owner.userId,
+          app,
+          seenAt,
+          seenAt,
+          waitingFor,
+          asksAt,
+          now + minute
+        )
+        .run();
+    await place(seeded.queued.id, "app", now);
+    await place(seeded.lapsed.id, "app", now - 2 * minute);
+    await place(seeded.paused.id, "app", now);
+    await place(seeded.deciding.id, "app", now);
+    await place(sleeper.id, "person", now);
+    // Another run waits for another share: each run shows its own, and
+    // only which share and when (`toStrictEqual` below), never who else
+    // waits, how many, or where in the queue. Two of its steps wait, for
+    // different shares: the one that asks again first supplies both the
+    // share and when, whichever took its place first.
+    const other = await seedRun(app, {
+      workflow: "remind",
+      status: "running",
+      createdAt: at(5),
+    });
+    await place(other.id, "person", now, retryAt + minute);
+    await place(other.id, "client", now);
+
+    const asked = async (person: Person) => {
+      const [page, appRuns, overview, status, screenRuns] = await Promise.all([
+        person.api.workflows.runs({ app }),
+        person.api.workflows.list(app),
+        person.api.workflows.overview(),
+        person.api.workflows.status(sleeper.id),
+        person.api.screens.runs(app, "remind"),
+      ]);
+      const byId = byRun(page.runs);
+      const listed = byRun(appRuns);
+      const onScreen = byRun(screenRuns);
+      const last = (workflow: string) => {
+        const found = overview.find(
+          (row) => row.app === app && row.workflow === workflow
+        )?.lastRun;
+        return found === undefined || found === null ? null : queueOf(found);
+      };
+      return {
+        runs: Object.fromEntries(
+          Object.entries(seeded).map(([name, { id }]) => [name, byId.get(id)])
+        ),
+        appRuns: {
+          queued: listed.get(seeded.queued.id),
+          lapsed: listed.get(seeded.lapsed.id),
+          paused: listed.get(seeded.paused.id),
+        },
+        other: byId.get(other.id),
+        onScreen: onScreen.get(seeded.queued.id),
+        lastRemind: last("remind"),
+        lastIdle: last("idle"),
+        status: queueOf(status),
+      };
+    };
+    const queuedFor = (waitingFor: string) => ({
+      status: "queued",
+      queued: { waitingFor, retryAt: new Date(retryAt).toISOString() },
+    });
+    const expected = {
+      runs: {
+        queued: queuedFor("app"),
+        lapsed: { status: "running", queued: null },
+        paused: { status: "paused", queued: null },
+        deciding: { status: "waiting", queued: null },
+      },
+      appRuns: {
+        queued: queuedFor("app"),
+        lapsed: { status: "running", queued: null },
+        paused: { status: "paused", queued: null },
+      },
+      other: queuedFor("client"),
+      onScreen: queuedFor("app"),
+      lastRemind: queuedFor("app"),
+      lastIdle: queuedFor("person"),
+      status: queuedFor("person"),
+    };
+    try {
+      // The App's owner and one of its users see the same: the share, and
+      // when it asks again, of each run on its own.
+      await expect(asked(owner)).resolves.toStrictEqual(expected);
+      await expect(asked(user)).resolves.toStrictEqual(expected);
+      // Queued runs are among those going on, never among the failed.
+      const [running, failed] = await Promise.all([
+        idsOf(owner.api.workflows.runs({ app, status: "running" })),
+        idsOf(owner.api.workflows.runs({ app, status: "failed" })),
+      ]);
+      expect(running).toContain(seeded.queued.id);
+      expect(failed).not.toContain(seeded.queued.id);
+    } finally {
+      await owner.api.workflows.cancel(sleeper.id);
+      await env.DB.prepare(
+        "DELETE FROM workflow_admission_queue WHERE resource = ?"
+      )
+        .bind(app)
+        .run();
+    }
   });
 
   it("returns a page of runs, and says when more matched", async () => {
