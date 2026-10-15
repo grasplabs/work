@@ -149,6 +149,38 @@ const loseSend = async ({
   );
 };
 
+/**
+ * Says the card `cardName` (on top of the pile) happened, confirming it in
+ * its dialog, and waits for the card to go. A press within moments of the
+ * card coming up is taken for a double press and ignored (todo-pile.tsx),
+ * so it is pressed again until taken; only while nothing is on its way:
+ * the card's buttons stay off from a taken press until the card goes, and
+ * a dialog left open is confirmed rather than opened again.
+ */
+const sayItHappened = async (page: Page, cardName: string): Promise<void> => {
+  const card = page.getByRole("article", { name: cardName, exact: true });
+  const happened = card.getByRole("button", {
+    name: cardName.replace(/^Did this happen\? /u, "It happened: "),
+  });
+  const dialog = page.getByRole("dialog", { name: "Say it happened?" });
+  await expect(async () => {
+    // An open dialog hides the pile from the accessibility tree, so it is
+    // looked for first: the card counts as gone only with none open.
+    if (!(await dialog.isVisible())) {
+      if ((await card.count()) === 0) {
+        return;
+      }
+      await expect(happened).toBeEnabled({ timeout: 1000 });
+      await happened.click({ timeout: 1000 });
+    }
+    await dialog
+      .getByRole("button", { name: "It happened" })
+      .click({ timeout: 1000 });
+    await expect(card).toHaveCount(0, { timeout: 5000 });
+  }).toPass({ timeout: 30_000 });
+  await expect(card).toHaveCount(0);
+};
+
 test("a run's lost answer shows up for its person, and saying it happened completes the run", async ({
   browser,
 }) => {
@@ -277,33 +309,7 @@ test("a run's lost answer shows up for its person, and saying it happened comple
     await expect(
       removed.getByRole("button", { name: `It didn't happen: ${removedName}` })
     ).toHaveAccessibleDescription(removedNote);
-    // A press within moments of the card coming up is taken for a double
-    // press and ignored (todo-pile.tsx), so it is pressed again until taken.
-    // Only pressed again while nothing is on its way: the card's buttons
-    // stay off from a taken press until the card goes, and a dialog left
-    // open is confirmed rather than opened again.
-    const removedCard = page.getByRole("article", {
-      name: `Did this happen? ${removedName}`,
-      exact: true,
-    });
-    const happened = removed.getByRole("button", {
-      name: `It happened: ${removedName}`,
-    });
-    const sayHappened = page.getByRole("dialog", { name: "Say it happened?" });
-    await expect(async () => {
-      if ((await removedCard.count()) === 0) {
-        return;
-      }
-      if (!(await sayHappened.isVisible())) {
-        await expect(happened).toBeEnabled({ timeout: 1000 });
-        await happened.click({ timeout: 1000 });
-      }
-      await sayHappened
-        .getByRole("button", { name: "It happened" })
-        .click({ timeout: 1000 });
-      await expect(removedCard).toHaveCount(0, { timeout: 5000 });
-    }).toPass({ timeout: 30_000 });
-    await expect(removedCard).toHaveCount(0);
+    await sayItHappened(page, `Did this happen? ${removedName}`);
 
     // On the pile, with what was sent.
     const name = `Did this happen? Send an email on Microsoft 365 (${account})`;
@@ -336,13 +342,10 @@ test("a run's lost answer shows up for its person, and saying it happened comple
         name: `It happened: Send an email on Microsoft 365 (${account})`,
       })
       .click();
-    const dialog = page.getByRole("dialog", { name: "Say it happened?" });
-    await expect(dialog).toContainText("Nothing is changed or undone");
-    await dialog.getByRole("button", { name: "It happened" }).click();
-    await expect(page.getByRole("article", { name, exact: true })).toHaveCount(
-      0,
-      { timeout: 15_000 }
-    );
+    await expect(
+      page.getByRole("dialog", { name: "Say it happened?" })
+    ).toContainText("Nothing is changed or undone");
+    await sayItHappened(page, name);
 
     const check = apiOf(admin);
     try {
