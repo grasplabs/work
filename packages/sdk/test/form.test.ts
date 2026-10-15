@@ -240,6 +240,10 @@ describe("a form whose submission's outcome is unknown", () => {
     "operation.sandbox_unavailable",
     "mutation.concurrent_change",
     "submission.superseded",
+    // Answered while the first call's receipt has no outcome yet.
+    "submission.key_conflict",
+    "submission.expired",
+    "operation.deadline_exceeded",
   ])(
     "never sends it as whoever signs in after a resend refused with %s",
     async (code) => {
@@ -255,7 +259,11 @@ describe("a form whose submission's outcome is unknown", () => {
         }
         return sent.filter((call) => call.contractId === "notes.tally")
           .length === 2
-          ? { failed: code, category: "operational" }
+          ? {
+              failed: code,
+              category:
+                code === "submission.key_conflict" ? "contract" : "operational",
+            }
           : { value: 3 };
       });
       const { binding } = formOf(client, api.notes.tally, {

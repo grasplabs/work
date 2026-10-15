@@ -605,6 +605,14 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
   (isAction && !ranNothing(settled, isAction)) ||
   (settled.kind === "failed" && settled.error.code === "data.conflict");
 
+/**
+ * Where a key left unknown is remembered: by App, operation and key, as
+ * the host scopes a key's receipt; not by the App's version, so a resend
+ * after a new release is still checked.
+ */
+const uncertainScope = (reference: ReadReference, key: string): string =>
+  canonicalJson([reference.resourceId, reference.contractId, key]);
+
 /** What a submission does next after `settled` (see `#send`). */
 const submissionVerdict = (
   settled: Settled,
@@ -675,10 +683,11 @@ export class GraspClient {
   /** What the latest fence was for. */
   #fencedBy: GraspError | undefined;
   /**
-   * The keys of submissions whose outcome was left unknown, by the
+   * The keys of submissions whose outcome was left unknown, scoped by App
+   * and operation as the host scopes them (`uncertainScope`), by the
    * generation they were sent under: one is sent again only within it,
    * never for someone who signed in since, as the host scopes keys by
-   * person.
+   * person. Another operation under the same key never clears it.
    */
   readonly #uncertainKeys = new Map<string, number>();
 
@@ -1181,7 +1190,7 @@ export class GraspClient {
     const sentUnder =
       idempotencyKey === undefined
         ? undefined
-        : this.#uncertainKeys.get(idempotencyKey);
+        : this.#uncertainKeys.get(uncertainScope(reference, idempotencyKey));
     if (sentUnder !== undefined && sentUnder !== this.#generation) {
       throw clientError("auth.principal_changed");
     }
@@ -1263,14 +1272,17 @@ export class GraspClient {
           now,
         });
         if (verdict.next === "settle") {
-          this.#uncertainKeys.delete(key);
+          this.#uncertainKeys.delete(uncertainScope(reference, key));
           return verdict.value;
         }
         if (verdict.next === "fail") {
           if (verdict.error.category === "uncertain") {
-            this.#uncertainKeys.set(key, bound.generation ?? this.#generation);
+            this.#uncertainKeys.set(
+              uncertainScope(reference, key),
+              bound.generation ?? this.#generation
+            );
           } else if (settlesSubmission(verdict.error)) {
-            this.#uncertainKeys.delete(key);
+            this.#uncertainKeys.delete(uncertainScope(reference, key));
           }
           throw verdict.error;
         }

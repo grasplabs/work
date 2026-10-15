@@ -430,13 +430,13 @@ const keyUseOf = (body: unknown): KeyUse => {
   if (typeof body === "object" && body !== null && "payload" in body) {
     return { sign: true };
   }
-  return {
-    kid: keyIdOf(
-      typeof body === "object" && body !== null
-        ? Reflect.get(body, "token")
-        : undefined
-    ),
-  };
+  const token: unknown =
+    typeof body === "object" && body !== null
+      ? Reflect.get(body, "token")
+      : undefined;
+  return typeof token === "string"
+    ? { kid: keyIdOf(token), token }
+    : { kid: undefined };
 };
 
 const createAuth = (

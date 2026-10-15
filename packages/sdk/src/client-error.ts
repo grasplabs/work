@@ -220,19 +220,31 @@ export const nothingRanCodes: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Categories of the host's answers that prove a call ran and failed: the
+ * App's own failures and the data's (`domain`: `data.conflict` and the
+ * like), and its code going past what it may (`source`). Never one that
+ * may have been answered before or without running it: a refusal of the
+ * person, the request, the key (`submission.key_conflict`, answered while
+ * the first call's receipt has no outcome yet; `submission.expired`), the
+ * sandbox or the time it took (`contract`, `operational`, `authorization`),
+ * nor an outcome unknown.
+ */
+const ranAndFailedCategories: ReadonlySet<ErrorCategory> = new Set([
+  "domain",
+  "source",
+]);
+
+/**
  * Whether `failure`, what a call of a submission came to, makes the
  * outcome of a key left unknown known: the host's own answer (it carries
- * a request ID) that the call ran and failed. Anything that may mean
- * nothing ran (a refusal of the person or the page, one the client made
- * itself, a busy or unavailable sandbox, a change superseded) leaves it as
- * unknown as it was. The session client forgets whose such a key is, and a
- * form gives up the submission it keeps, only on this, so neither ever
- * sends it again for someone else.
+ * a request ID) that the call ran and failed (`ranAndFailedCategories`).
+ * Anything else leaves it as unknown as it was, erring safe. The session
+ * client forgets whose such a key is, and a form gives up the submission
+ * it keeps, only on this, so neither ever sends it again for someone else.
  */
 export const settlesSubmission = (failure: GraspError): boolean =>
   failure.requestId !== null &&
-  failure.category !== "authorization" &&
-  failure.category !== "uncertain" &&
+  ranAndFailedCategories.has(failure.category) &&
   !nothingRanCodes.has(failure.code) &&
   // A refusal that fences (the build revoked, the App stopped) says the
   // access went, not what became of the call: whoever comes next never

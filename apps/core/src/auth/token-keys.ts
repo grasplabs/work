@@ -41,12 +41,13 @@ const keysKeptMs = 60_000;
 const unknownKeyRereadMs = 5000;
 
 /**
- * How many unheld keys an isolate remembers checking unread: a bound on
- * forged ones. Once it is full, a genuine token signed by a key made since
- * gets a 401 within the window, as before tokens were told to try again;
- * that takes a flood of forged keys right after a rotation.
+ * How many checks against a stale copy an isolate remembers until each is
+ * taken (`takeStale`): a bound on forged tokens checked at once. Once it
+ * is full, a genuine token signed by a key made since gets a 401 within
+ * the window, as before tokens were told to try again; that takes a flood
+ * of forged keys right after a rotation.
  */
-const unreadKeysMax = 1024;
+const staleChecksMax = 1024;
 
 /** A key row, by the ID a token's header names it with (`kid`). */
 interface IdentifiedKeyRow extends KeyRow {
@@ -55,12 +56,13 @@ interface IdentifiedKeyRow extends KeyRow {
 
 /**
  * Why the keys are asked for, by the call that asks: to sign a token, for a
- * person signed in; or to check one, naming `kid` in its header (`undefined`
- * when it can't be read: a token checked all the same, and refused).
+ * person signed in; or to check `token`, naming `kid` in its header
+ * (`undefined` when it can't be read: a token checked all the same, and
+ * refused).
  */
 export type KeyUse =
   | { readonly sign: true }
-  | { readonly kid: string | undefined };
+  | { readonly kid: string | undefined; readonly token?: string };
 
 /**
  * The token-signing keys as one isolate holds them (the JWT plugin's key
@@ -80,10 +82,12 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
   /** How many reads began: the one under way is the latest. */
   let begunReads = 0;
   /**
-   * The keys tokens named that the held copy lacks, checked with it unread
-   * since it was read: each may be a key made since in another isolate.
+   * Tokens checked with the held copy, unread, though it lacked their key
+   * (one another isolate may have made since), by how many such checks of
+   * each are still to be taken. Each check's own decision: no later read
+   * or `forget` changes it.
    */
-  let unread = new Set<string>();
+  const staleChecks = new Map<string, number>();
   /** Whether a token naming `kid` is checked with what is held, unread. */
   const fresh = (kid: string | undefined, now: number): boolean => {
     if (held === undefined) {
@@ -106,7 +110,6 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
           const keys = await read();
           if (begun === version) {
             held = { keys, readAt: now };
-            unread = new Set();
           }
           return keys;
         } finally {
@@ -126,34 +129,42 @@ export const keyRing = <Key extends IdentifiedKeyRow>() => {
       now: number
     ): Promise<Key[]> => {
       if (!("sign" in use) && held !== undefined && fresh(use.kid, now)) {
-        const { kid } = use;
+        const { kid, token } = use;
         if (
           kid !== undefined &&
-          unread.size < unreadKeysMax &&
+          token !== undefined &&
+          staleChecks.size < staleChecksMax &&
           !held.keys.some(({ id }) => id === kid)
         ) {
-          unread.add(kid);
+          staleChecks.set(token, (staleChecks.get(token) ?? 0) + 1);
         }
         return liveKeys(held.keys, now);
       }
       return liveKeys(await readOnce(read, now), now);
     },
     /**
-     * Whether a token naming `kid` was checked with the held copy, unread,
-     * though the copy lacks its key: one another isolate may have made
-     * since. Its holder is told to try again (`auth.token_unavailable`),
-     * not to sign in. A key a fresh read didn't find is refused outright.
+     * Whether the check of `token` that just failed used the held copy,
+     * unread, though it lacked the token's key: one another isolate may
+     * have made since. Its holder is told to try again
+     * (`auth.token_unavailable`), not to sign in. A key a fresh read
+     * didn't find is refused outright. Takes that check's decision, once.
      */
-    pending: (kid: string | undefined, now: number): boolean =>
-      kid !== undefined &&
-      held !== undefined &&
-      now - held.readAt < keysKeptMs &&
-      unread.has(kid),
+    takeStale: (token: string): boolean => {
+      const checks = staleChecks.get(token);
+      if (checks === undefined) {
+        return false;
+      }
+      if (checks > 1) {
+        staleChecks.set(token, checks - 1);
+      } else {
+        staleChecks.delete(token);
+      }
+      return true;
+    },
     /** Drops the held copy: a key was made, or removed. */
     forget: (): void => {
       held = undefined;
       reading = undefined;
-      unread = new Set();
       version += 1;
     },
   };

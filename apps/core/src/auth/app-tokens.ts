@@ -10,7 +10,6 @@ import { authFor, tokenKeysOf } from "./auth.ts";
 import { signInConfig } from "./config.ts";
 import { sessionIdentity } from "./identity.ts";
 import type { SignedInSession } from "./identity.ts";
-import { keyIdOf } from "./token-keys.ts";
 
 // App tokens: how a portable host (spec 10.7.1, `new GraspClient({ url,
 // getToken })`) calls an App's functions in a person's name without their
@@ -173,7 +172,7 @@ export const checkAppToken = async (
     // A key made in another isolate within the last few seconds isn't
     // read here yet (token-keys.ts): its holder tries again, it isn't
     // told to sign in, which would clear what its screens hold.
-    return tokenKeysOf(env).pending(keyIdOf(token), Date.now())
+    return tokenKeysOf(env).takeStale(token)
       ? { ok: false, reason: "keys_pending" }
       : invalid;
   }

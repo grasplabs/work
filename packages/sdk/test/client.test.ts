@@ -26,6 +26,10 @@ const failedWith = (code: string, category = "operational") => ({
   },
 });
 
+/** The category core gives `code`, of those these tests answer with. */
+const categoryOf = (code: string): string =>
+  code === "submission.key_conflict" ? "contract" : "operational";
+
 /** What the page rejects a call with when the person's budget is used up. */
 const rateLimited = () =>
   Object.assign(new Error("Too much at once."), {
@@ -281,6 +285,10 @@ describe("the session client and lost access", () => {
     "operation.sandbox_unavailable",
     "mutation.concurrent_change",
     "submission.superseded",
+    // Answered while the first call's receipt has no outcome yet.
+    "submission.key_conflict",
+    "submission.expired",
+    "operation.deadline_exceeded",
   ])(
     "never sends a key left unknown as the next person after a resend refused with %s",
     async (code) => {
@@ -298,7 +306,9 @@ describe("the session client and lost access", () => {
           throw new Error("The connection was reset.");
         }
         // The resend may not have run: the outcome is as unknown as it was.
-        return sent.length === 2 ? failedWith(code) : answered(3);
+        return sent.length === 2
+          ? failedWith(code, categoryOf(code))
+          : answered(3);
       });
       const lost = await failureOf(client.action(api.notes.tally));
       const { details } = lost;
@@ -348,6 +358,36 @@ describe("the session client and lost access", () => {
       fenced: "app.not_running",
       after: "auth.principal_changed",
       sent: 2,
+    });
+  });
+
+  it("keeps whose a key left unknown is for its operation, whatever another operation under the key does", async () => {
+    let signedOut = false;
+    const tallies: string[] = [];
+    const { client } = network(async (_call, request) => {
+      await Promise.resolve();
+      if (request.includes("notes.get")) {
+        return signedOut
+          ? failedWith("auth.unauthenticated", "authorization")
+          : answered(null);
+      }
+      if (request.includes("notes.create")) {
+        return answered(noteId);
+      }
+      tallies.push(request);
+      throw new Error("The connection was reset.");
+    });
+    const keyed = { idempotencyKey: "weekly" };
+    // X's outcome is left unknown; Y, under the same key, goes through.
+    await failureOf(client.action(api.notes.tally, {}, keyed));
+    await client.mutation(api.notes.create, { title: "Y" }, keyed);
+    signedOut = true;
+    await failureOf(client.query(api.notes.get, { id: noteId }));
+    signedOut = false;
+    const retried = await failureOf(client.action(api.notes.tally, {}, keyed));
+    expect({ retried: retried.code, tallies: tallies.length }).toStrictEqual({
+      retried: "auth.principal_changed",
+      tallies: 1,
     });
   });
 

@@ -49,17 +49,21 @@ describe("an isolate's token keys", () => {
     const ring = keyRing<{ id: string }>();
     await ring.keys(keys.read, { kid: "one" }, now);
     keys.add("two");
-    const soon = await ring.keys(keys.read, { kid: "two" }, now + 1000);
+    const soon = await ring.keys(
+      keys.read,
+      { kid: "two", token: "two's token" },
+      now + 1000
+    );
     // Checked with the copy unread: maybe made since, so try again.
-    const pending = ring.pending("two", now + 1000);
+    const pending = ring.takeStale("two's token");
     const later = await ring.keys(keys.read, { kid: "two" }, now + 5000);
     const nobodys = await ring.keys(
       keys.read,
-      { kid: "nobody's" },
+      { kid: "nobody's", token: "nobody's token" },
       now + 10_000
     );
     // A fresh read didn't find it: refused outright.
-    const refused = ring.pending("nobody's", now + 10_000);
+    const refused = ring.takeStale("nobody's token");
     await ring.keys(keys.read, { kid: "made-up" }, now + 11_000);
     await ring.keys(keys.read, { kid: undefined }, now + 12_000);
     await ring.keys(keys.read, { kid: undefined }, now + 14_000);
@@ -78,6 +82,25 @@ describe("an isolate's token keys", () => {
       refused: false,
       reads: 3,
     });
+  });
+
+  it("keeps each check's own decision, whatever is read or forgotten while it runs", async () => {
+    const keys = store(["one"]);
+    const ring = keyRing<{ id: string }>();
+    await ring.keys(keys.read, { kid: "one" }, now);
+    keys.add("two");
+    // Checked with the copy unread, its key not in it.
+    await ring.keys(keys.read, { kid: "two", token: "stale" }, now + 1000);
+    // Meanwhile a signing reads afresh, finds the key, and one is made.
+    await ring.keys(keys.read, sign, now + 1500);
+    ring.forget();
+    // A check after that read, with the copy holding the key: no decision.
+    await ring.keys(keys.read, { kid: "two", token: "fresh" }, now + 2000);
+    expect({
+      stale: ring.takeStale("stale"),
+      again: ring.takeStale("stale"),
+      fresh: ring.takeStale("fresh"),
+    }).toStrictEqual({ stale: true, again: false, fresh: false });
   });
 
   it("shares one read among the requests that come while it is under way", async () => {
