@@ -1209,6 +1209,12 @@ export interface WorkflowsApi {
    */
   overview: () => Promise<WorkflowSummary[]>;
   /**
+   * The workflows of the Apps the person can open that use `connection`:
+   * each one whose App holds an active permission on it and whose code
+   * calls that permission's binding, summed up as in `overview`.
+   */
+  ofConnection: (connection: string) => Promise<WorkflowSummary[]>;
+  /**
    * Runs of the Apps the person can open, as `filter` narrows them:
    * waiting first (latest to wait first), then failed (latest ended
    * first), then the rest, newest first; at most {@link runsPageSize},
