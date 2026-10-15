@@ -48,14 +48,26 @@ import { wakingHeld } from "./workflows/wakes.ts";
 /**
  * The capability resolving the call `found` names by `choice`, signed only
  * once its permission and context pass again, as the call itself would
- * now (`signedCall`).
+ * now (`signedCall`), and, for `not_happened`, only while what it sent is
+ * still kept for its person to read.
  */
 const resolutionCapability = async (
   env: Env,
   identity: Identity,
-  { key, resource, origin }: UnknownOutcome,
+  found: UnknownOutcome,
   resolves: { choice: ResolutionChoice; claimedAt: number }
 ): Promise<string> => {
+  const { key, resource, origin } = found;
+  // What was sent is no longer kept (connect's retention, 30 days): the
+  // person can't read what "it didn't happen" would let go out again, and
+  // it still could, under the same key and input, from any caller of the
+  // same scope that repeats it (a run's wait gave up long before, at its
+  // 7-day deadline, but an App's screen or agent may repeat a call). The
+  // key frees nothing worth having then either: anything still wanted is
+  // asked for anew, under a key of its own. So only "it happened" is said.
+  if (resolves.choice === "not_happened" && found.input === null) {
+    throw connectErrors.create("connect.outcome_not_kept");
+  }
   // Where it came from isn't known, or an App's call names no version:
   // its permission can't be checked, so it can't be resolved.
   if (
@@ -104,8 +116,9 @@ const resolutionCapability = async (
  * Says what became of the call of unknown outcome `key` names, for the
  * signed-in person it acted for: `happened` or `not_happened`. Refused
  * once the call's permission is gone, its App's version unknown, or the
- * person has left; and by connect for anyone the call didn't act for,
- * Grasp staff included, which it records.
+ * person has left; `not_happened` once what it sent is no longer kept;
+ * and by connect for anyone the call didn't act for, Grasp staff
+ * included, which it records.
  */
 export const resolveUnknownOutcome = async (
   env: Env,

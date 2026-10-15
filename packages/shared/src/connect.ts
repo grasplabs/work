@@ -1427,6 +1427,8 @@ export const connectErrors = defineErrorFamily({
     "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it took effect: it won't be sent again, and what it returned isn't known.",
   "connect.resolved_not_done":
     "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it didn't take effect: it may be sent once more, with the same input.",
+  "connect.outcome_not_kept":
+    "What this call sent is no longer kept, so nobody can read what saying it didn't happen would let go out again: only that it happened can be said.",
   "connect.outcome_not_found":
     "There's no call of unknown outcome like that for you to resolve: it was resolved or recovered, or it isn't yours.",
   "connect.action_failed": "The action reported an error.",

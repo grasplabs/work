@@ -37,10 +37,12 @@ const OutcomeDetails = ({
   outcome,
   shown,
   unresolvableId,
+  removedId,
 }: {
   outcome: UnknownOutcome;
   shown: Shown;
   unresolvableId: string;
+  removedId: string;
 }) => {
   const { t } = useLingui();
   const { description, resource, input, key } = outcome;
@@ -80,7 +82,7 @@ const OutcomeDetails = ({
         />
       )}
       {input === null ? (
-        <p role="note">
+        <p id={removedId} role="note">
           <Trans>
             What was sent is no longer kept: its run&apos;s details were
             removed.
@@ -143,13 +145,21 @@ export const OutcomeCard = ({
   const { t } = useLingui();
   const shown = useShown(outcome);
   const unresolvableId = useId();
+  const removedId = useId();
   const who = useOutcomeName(outcome);
   const connection = outcome.connectionName ?? outcome.key.connectionId;
   const unresolvable = outcome.origin === null;
+  // What was sent is no longer kept, so the person can't read what saying
+  // it didn't happen would let go out again: only "It happened" is theirs
+  // to say. `summaryOf` leaves out the description too, so nothing reads
+  // as unseen (`shown.unseen`), and core refuses it as well.
+  const removed = outcome.input === null;
   // The line that says why "It didn't happen" waits, if it does.
   let whyNot: string | undefined;
   if (unresolvable) {
     whyNot = unresolvableId;
+  } else if (removed) {
+    whyNot = removedId;
   } else if (shown.unseen) {
     whyNot = shown.unseenId;
   }
@@ -180,6 +190,7 @@ export const OutcomeCard = ({
       details={
         <OutcomeDetails
           outcome={outcome}
+          removedId={removedId}
           shown={shown}
           unresolvableId={unresolvableId}
         />
@@ -190,7 +201,7 @@ export const OutcomeCard = ({
         label: t`It didn't happen`,
         name: t`It didn't happen: ${who}`,
         does: t`It can be sent once more, exactly as before. Nothing is undone.`,
-        disabled: unresolvable || shown.unseen,
+        disabled: unresolvable || removed || shown.unseen,
         describedBy: whyNot,
         confirm: {
           title: t`Say it didn't happen?`,

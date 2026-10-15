@@ -439,6 +439,61 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
     });
   });
 
+  it("can't be said not to have happened once what it sent is no longer kept, only that it happened", async () => {
+    const admin = await personApi("admin");
+    const { mailbox, connectionId, run, unknown } = await waitingRun(admin);
+    // Past connect's retention, its input goes; the obligation stays.
+    await connectDb()
+      .prepare(
+        "UPDATE idempotent_calls SET input = NULL WHERE connection_id = ?1"
+      )
+      .bind(connectionId)
+      .run();
+    const [removed] = await admin.api.unknownOutcomes.list();
+    const notHappened = await codeOf(
+      admin.api.unknownOutcomes.resolve(
+        unknown.key,
+        "not_happened",
+        unknown.claim
+      )
+    );
+    const live = await liveStatus(run.id);
+    await admin.api.unknownOutcomes.resolve(
+      unknown.key,
+      "happened",
+      unknown.claim
+    );
+    await finished(run.id);
+    expect({
+      input: removed?.input,
+      notHappened,
+      live,
+      run: await admin.api.workflows.status(run.id),
+      sent: await sentFrom(mailbox),
+      resolutions: await resolutions(connectionId),
+    }).toMatchObject({
+      input: null,
+      notHappened: "connect.outcome_not_kept",
+      live: "waiting",
+      run: { status: "completed", output: { resolved: true } },
+      sent: 1,
+      resolutions: [
+        {
+          action: "connection.call.resolve_refused",
+          actor: "person",
+          choice: "not_happened",
+          reason: "connect.outcome_not_kept",
+        },
+        {
+          action: "connection.call.resolved",
+          actor: "person",
+          choice: "happened",
+          reason: undefined,
+        },
+      ],
+    });
+  });
+
   it("is listed for the organization's other admins, read only and without what was sent, who can't resolve it; refused to anyone else", async () => {
     const admin = await personApi("admin");
     const { mailbox, connectionId, app, run, unknown } =

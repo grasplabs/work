@@ -90,6 +90,8 @@ const sharedMail = async (admin: Person, account: string): Promise<string> => {
  * The run's send, as connect records one whose answer was lost: of
  * unknown outcome, with what was sent and where it came from, claimed long
  * ago by no connector build that could look it up, so nothing recovers it.
+ * Under the step `step`; `kept` false records it as connect's retention
+ * leaves it, without what was sent.
  */
 const loseSend = async ({
   admin,
@@ -97,12 +99,16 @@ const loseSend = async ({
   run,
   connectionId,
   permissionId,
+  step = "send",
+  kept = true,
 }: {
   admin: Person;
   app: string;
   run: string;
   connectionId: string;
   permissionId: string;
+  step?: string;
+  kept?: boolean;
 }): Promise<void> => {
   const inputHash = createHash("sha256")
     .update(canonicalJson({ resource: null, input: mail }))
@@ -122,14 +128,14 @@ const loseSend = async ({
       quoted(admin.userId),
       quoted(connectionId),
       quoted("mail.send"),
-      quoted(`${run}:send`),
+      quoted(`${run}:${step}`),
       quoted(inputHash),
       quoted("unknown"),
       sentAt,
       sentAt,
       "NULL",
       "NULL",
-      quoted(JSON.stringify(mail)),
+      kept ? quoted(JSON.stringify(mail)) : "NULL",
       quoted(JSON.stringify(origin)),
     ].join(", ")})`
   );
@@ -164,6 +170,16 @@ test("a run's lost answer shows up for its person, and saying it happened comple
     await api.permissions.grant(permissionId, { version: 1 });
     ({ id: run } = await api.workflows.start(app, "mailer"));
     await loseSend({ admin, app, run, connectionId, permissionId });
+    // An earlier send of the run's, whose input retention removed.
+    await loseSend({
+      admin,
+      app,
+      run,
+      connectionId,
+      permissionId,
+      step: "earlier",
+      kept: false,
+    });
     // Its step comes back of unknown outcome, and the run waits.
     await expect(async () => {
       const { items } = await api.workflows.history(run, { pageSize: 100 });
@@ -195,6 +211,37 @@ test("a run's lost answer shows up for its person, and saying it happened comple
   await expect(
     page.getByRole("link", { name: /^Dashboard.*\bthings? waiting$/u })
   ).toBeVisible();
+
+  // One whose input retention removed can only be said to have happened:
+  // nobody can read what saying it didn't would let go out again.
+  const removedName = `mail.send on Microsoft 365 (${account})`;
+  const removed = await toCard(page, `Did this happen? ${removedName}`);
+  const removedNote =
+    "What was sent is no longer kept: its run's details were removed.";
+  await expect(removed).toContainText(removedNote);
+  await expect(
+    removed.getByRole("button", { name: `It didn't happen: ${removedName}` })
+  ).toBeDisabled();
+  await expect(
+    removed.getByRole("button", { name: `It didn't happen: ${removedName}` })
+  ).toHaveAccessibleDescription(removedNote);
+  // A press within moments of the card coming up is taken for a double
+  // press and ignored (todo-pile.tsx), so it is pressed again until taken.
+  await expect(async () => {
+    await removed
+      .getByRole("button", { name: `It happened: ${removedName}` })
+      .click({ timeout: 1000 });
+    await page
+      .getByRole("dialog", { name: "Say it happened?" })
+      .getByRole("button", { name: "It happened" })
+      .click({ timeout: 1000 });
+    await expect(
+      page.getByRole("article", {
+        name: `Did this happen? ${removedName}`,
+        exact: true,
+      })
+    ).toHaveCount(0, { timeout: 5000 });
+  }).toPass({ timeout: 30_000 });
 
   // On the pile, with what was sent.
   const name = `Did this happen? Send an email on Microsoft 365 (${account})`;
