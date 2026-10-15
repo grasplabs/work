@@ -436,9 +436,10 @@ describe("a session on the on-prem sandbox", () => {
         await expect
           .poll(() => small.stats().children, { timeout: 15_000, interval: 20 })
           .toBe(0);
-        // Its places came back while its verdict still waits on its exit.
-        expect(small.stats().crashed).toBe(0);
-        await expect(crashing).resolves.toMatchObject({ verdict: "crashed" });
+        // Its places came back while its verdict (V8 ended it at its heap
+        // limit: its memory) still waits on its exit.
+        expect(small.stats().memory).toBe(0);
+        await expect(crashing).resolves.toMatchObject({ verdict: "memory" });
         opened.socket?.destroy();
       } finally {
         await small.stop();
@@ -479,7 +480,7 @@ describe("a session on the on-prem sandbox", () => {
           // oxlint-disable-next-line no-await-in-loop -- sampled until it settles
           await sleep(20);
         }
-        await expect(crashing).resolves.toMatchObject({ verdict: "crashed" });
+        await expect(crashing).resolves.toMatchObject({ verdict: "memory" });
         expect(placeless).toStrictEqual([]);
       } finally {
         await small.stop();

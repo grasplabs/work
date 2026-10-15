@@ -412,6 +412,7 @@ describe("references in uses", () => {
         return await Promise.resolve(3);
       },
       resource: async () => await Promise.reject(new Error("no resources")),
+      emit: async () => await Promise.reject(new Error("no emits")),
     };
     await expect(runFunction(notes, "notes.tally", {}, channel)).resolves.toBe(
       3

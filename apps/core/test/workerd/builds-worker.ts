@@ -1,3 +1,4 @@
+import { packageBuilderCode } from "@grasp-os/compiler";
 import { npmRegistryOrigin } from "@grasp-os/shared/dependencies";
 import { sha256HexOfBytes, sha512Integrity } from "@grasp-os/shared/encoding";
 import {
@@ -22,6 +23,8 @@ import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 
 interface StandInEnv {
   SANDBOX_HOST: Fetcher;
+  /** This stand-in itself, for a request it makes and cancels. */
+  SELF: Fetcher;
   RUNTIME_PROFILE: string;
   SANDBOX_DEADLINE_MS?: string;
   /** The package builder and esbuild's WebAssembly, as core's build makes them. */
@@ -268,6 +271,32 @@ const assetsServing = (
   },
 });
 
+/**
+ * Core's static assets as every request of this isolate shares them, as
+ * core's own `ASSETS` binding is: each read `slowMs` long, and the reads
+ * of the builder's module counted.
+ */
+const shared = { reads: 0, slowMs: 0 };
+let sharedAssets: Fetcher | undefined;
+const sharedAssetsOf = (env: StandInEnv): Fetcher => {
+  sharedAssets ??= {
+    fetch: async (input, init) => {
+      if (new Request(input, init).url.endsWith("/package-builder.js")) {
+        shared.reads += 1;
+      }
+      // A read that takes its time, as one of 15 MB may.
+      await scheduler.wait(shared.slowMs);
+      return await assetsServing(env.PACKAGE_BUILDER, env.ESBUILD_WASM, {
+        builder: 0,
+      }).fetch(input, init);
+    },
+    connect: () => {
+      throw new Error("The assets take no connections.");
+    },
+  };
+  return sharedAssets;
+};
+
 /** A Loader core never reaches on-prem: building here would hold core. */
 const noLoader: WorkerLoader = {
   get: () => {
@@ -333,6 +362,37 @@ export default {
         )
       );
     }
+    if (pathname === "/code") {
+      // The builder's code, read from the shared assets once per isolate.
+      return Response.json(
+        await outcomeOf(async () => {
+          await packageBuilderCode(sharedAssetsOf(env));
+          return shared.reads;
+        })
+      );
+    }
+    if (pathname === "/cancelled-code") {
+      // A request starts reading the builder's code, slowly, and its
+      // caller gives up on it: then another asks for the code.
+      shared.slowMs = 2000;
+      const caller = new AbortController();
+      const first = env.SELF.fetch("http://core/code", {
+        method: "POST",
+        signal: caller.signal,
+      });
+      await scheduler.wait(300);
+      caller.abort();
+      try {
+        await first;
+      } catch {
+        // Given up on, as meant.
+      }
+      shared.slowMs = 0;
+      const second = await env.SELF.fetch("http://core/code", {
+        method: "POST",
+      });
+      return new Response(second.body, second);
+    }
     // How often the builder's code was read from the assets.
     const reads = { builder: 0 };
     const builderEnv = {
@@ -351,7 +411,7 @@ export default {
     if (pathname === "/build") {
       return Response.json(
         await outcomeOf(async () => {
-          const builder = await packageBuilder(builderEnv);
+          const builder = packageBuilder(builderEnv);
           return await builtFiles(
             await builder.build({
               limits: { ...packageLimits, artifactBytes: 2 * 1024 * 1024 },
@@ -368,8 +428,7 @@ export default {
       return Response.json(
         await outcomeOf(async () => {
           for (const _ of [1, 2]) {
-            // oxlint-disable-next-line no-await-in-loop -- one after the other
-            const builder = await packageBuilder(builderEnv);
+            const builder = packageBuilder(builderEnv);
             // oxlint-disable-next-line no-await-in-loop -- one after the other
             await builder.inspect(packageLimits, [pkg]);
           }
@@ -379,7 +438,7 @@ export default {
     }
     return Response.json(
       await outcomeOf(async () => {
-        const builder = await packageBuilder(builderEnv);
+        const builder = packageBuilder(builderEnv);
         return await builder.inspect(packageLimits, [pkg]);
       })
     );

@@ -409,6 +409,10 @@ msgstr "{run}: fallida"
 msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 msgstr "{runs, plural, one {{date}: # ejecución} other {{date}: # ejecuciones}}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{runs, plural, one {# run} other {# runs}}"
+msgstr "{runs, plural, one {# ejecución} other {# ejecuciones}}"
+
 #: src/dashboard/runs-widget.tsx
 msgid "{runs, plural, one {of # run} other {of # runs}}"
 msgstr "{runs, plural, one {de # ejecución} other {de # ejecuciones}}"
@@ -766,7 +770,6 @@ msgid "Agent"
 msgstr "Agente"
 
 #: src/activity/pending.tsx
-#: src/connections/connection-list.tsx
 msgid "Agent {agent}"
 msgstr "Agente {agent}"
 
@@ -2336,10 +2339,6 @@ msgstr "Concedió un permiso"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Ahora mismo no se puede acceder a Grasp. Vuelve a intentarlo en un momento."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
-msgstr "Grasp cuenta lo que cuestan los modelos frente a los presupuestos que fija para ti. No hay ningún presupuesto fijado, así que no hay nada que mostrar."
-
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp dio su visto bueno"
@@ -3034,6 +3033,10 @@ msgstr "Siguiente paso"
 msgid "No apps yet"
 msgstr "Aún no hay aplicaciones"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "No budget is set for all calls together"
+msgstr "No hay ningún presupuesto para todas las llamadas juntas"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "No budget is set: model calls aren't limited by cost."
 msgstr "No hay presupuesto definido: las llamadas a modelos no tienen límite de coste."
@@ -3145,6 +3148,10 @@ msgstr "Aún no hay ejecuciones."
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"
 msgstr "Ningún equipo"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "No workflow has called a model this month."
+msgstr "Ningún flujo de trabajo ha llamado a un modelo este mes."
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No workflow in this engine yet."
@@ -3866,6 +3873,10 @@ msgstr "Publicar una versión de {contract}"
 #: src/engines/resource-bindings.tsx
 msgid "Publish as"
 msgstr "Publicar como"
+
+#: src/workflows/runs.tsx
+msgid "Queued"
+msgstr "En cola"
 
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
@@ -4636,6 +4647,10 @@ msgstr "Cada persona elige su idioma al abrir su enlace."
 msgid "Someone else"
 msgstr "Otra persona"
 
+#: src/screens/screen-frame.tsx
+msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
+msgstr "Otra persona inició sesión en este navegador, así que esta aplicación se detuvo. Vuelve a intentarlo para abrirla como la persona que ha iniciado sesión ahora."
+
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Alguien que ya no está"
@@ -4754,6 +4769,10 @@ msgstr "Dejó de seguir lo que cambia en una conexión"
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Detenido."
+
+#: src/activity/pending.tsx
+msgid "Store {store}"
+msgstr "Almacén {store}"
 
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
@@ -4896,6 +4915,10 @@ msgstr "Esa transcripción es demasiado larga. Trae solo la conversación, sin a
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Esa forma de iniciar sesión no está configurada aquí."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "The {top} that spent most; more spent less."
+msgstr "Los {top} que más gastaron; otros gastaron menos."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "The {top} who spent most; more spent less."
@@ -5480,6 +5503,10 @@ msgstr "Herramientas que permitir"
 msgid "Tools, products and the company's own words, so he hears them right."
 msgstr "Herramientas, productos y las palabras propias de la empresa, para que las entienda bien."
 
+#: src/activity/pending.tsx
+msgid "Trigger {trigger}"
+msgstr "Disparador {trigger}"
+
 #: src/workflows/triggers.tsx
 msgid "Triggers"
 msgstr "Disparadores"
@@ -5663,6 +5690,18 @@ msgstr "Esperando a una persona"
 msgid "Waiting for a set time"
 msgstr "Esperando un tiempo fijado"
 
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of the organization's runs; tries again by {time}"
+msgstr "Esperando una parte de las ejecuciones de la organización; lo vuelve a intentar antes de {time}"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of this App's runs; tries again by {time}"
+msgstr "Esperando una parte de las ejecuciones de esta App; lo vuelve a intentar antes de {time}"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of this person's runs; tries again by {time}"
+msgstr "Esperando una parte de las ejecuciones de esta persona; lo vuelve a intentar antes de {time}"
+
 #: src/workflows/history-view.tsx
 msgid "Waiting for an event"
 msgstr "Esperando un evento"
@@ -5744,6 +5783,10 @@ msgstr "Qué podría ir mejor"
 msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Qué cuenta como éxito"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "What each workflow's model calls cost this month, most first, and how often it ran."
+msgstr "Lo que costaron este mes las llamadas al modelo de cada flujo de trabajo, de mayor a menor, y cuántas veces se ejecutó."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
@@ -5972,8 +6015,8 @@ msgid "Workflow"
 msgstr "Flujo de trabajo"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {engine}"
-msgstr "Flujo de trabajo {workflowId} de {engine}"
+msgid "Workflow {workflow}"
+msgstr "Flujo de trabajo {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"
@@ -6022,6 +6065,10 @@ msgstr "Flujos de trabajo conocidos"
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
 msgstr "Flujos de trabajo que fallaron"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Workflows this month"
+msgstr "Flujos de trabajo este mes"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."

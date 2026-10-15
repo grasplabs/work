@@ -124,6 +124,7 @@ ${Array.from({ length: calls }, () => `    await env.APP.call("hit", "${name}");
 /** A first attempt at the step `key`, holding `ms` from now: a minute unless said. */
 const attemptOf = (key: string, ms = 60_000) => ({
   key,
+  step: key,
   number: 1,
   generation: 1,
   deadline: Date.now() + ms,
@@ -202,7 +203,12 @@ const lineageOf = async () => {
   const app = await appWith(builder, workflowFiles("noop", "  return 1;"));
   const root = await builder.api.workflows.start(app, "noop");
   await finished(root.id);
-  return { run: root.id, root: root.id };
+  return {
+    run: root.id,
+    root: root.id,
+    subject: builder.userId,
+    resource: app,
+  };
 };
 
 /** How a call refused past the lineage's host calls is coded. */
@@ -293,7 +299,12 @@ ${calling("over", 1)}
     const app = await appWith(builder, workflowFiles("noop", "  return 1;"));
     const root = await builder.api.workflows.start(app, "noop");
     await finished(root.id);
-    const lineage = { run: root.id, root: root.id };
+    const lineage = {
+      run: root.id,
+      root: root.id,
+      subject: builder.userId,
+      resource: app,
+    };
 
     const result = await withQuotas({ lineageHostCalls: 50 }, async () => {
       // Three calls one after another: blocks of one, one and two, one of

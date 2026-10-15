@@ -17,11 +17,13 @@
     "./server": "./src/server.ts",
     "./runner": "./src/runner.ts",
     "./workflow": "./src/workflow.ts",
+    "./open-workflow": "./src/open-workflow.ts",
     "./engine": "./src/engine.ts",
     "./params": "./src/params.ts",
     "./describe": "./src/describe.ts",
     "./testing": "./src/testing.ts",
     "./client": "./src/client.ts",
+    "./form-binding": "./src/form-binding.ts",
     "./react": "./src/react.ts",
     "./screen": "./src/screen.ts",
     "./screen-runtime": "./src/screen-runtime.ts"
@@ -30,6 +32,7 @@
     "@babel/parser": "catalog:",
     "@grasp-os/shared": "workspace:*",
     "@standard-schema/spec": "catalog:",
+    "@tanstack/react-form": "catalog:",
     "capnweb": "catalog:",
     "zod": "catalog:"
   },

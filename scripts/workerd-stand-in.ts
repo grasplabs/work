@@ -51,7 +51,9 @@ export const bundle = (out: string, worker: string): string[] => {
 };
 
 /**
- * Serves `worker` with `SANDBOX_HOST` at `socket`, and answers its URL:
+ * Serves `worker` with `SANDBOX_HOST` at `socket` and `SELF` bound to
+ * itself (a request it makes, and cancels, as a caller of core would), and
+ * answers its URL:
  * `bindings` as text bindings, `files` as text bindings of the files'
  * contents (too large to write into the config itself), and `dataFiles`
  * as data bindings of theirs (bytes that aren't text).
@@ -97,6 +99,7 @@ const core :Workerd.Worker = (
   bindings = [
     (name = "RUNTIME_PROFILE", text = "workerd"),
     (name = "SANDBOX_HOST", service = "sandbox"),
+    (name = "SELF", service = "core"),
     ${texts.join(",\n    ")}
   ],
 );

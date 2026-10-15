@@ -8,7 +8,7 @@ import type {
 import { canBuild, isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ImprovementSignals } from "@grasp-os/shared/signals";
-import type { WorkflowSummary } from "@grasp-os/shared/workflows";
+import type { RunActivity, WorkflowSummary } from "@grasp-os/shared/workflows";
 
 import { readPendingRequests } from "../activity/pending.tsx";
 import { integrationsOf } from "../connections/integrations.ts";
@@ -22,7 +22,7 @@ import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
 import { defaultWidgets } from "./layout.ts";
-import { todayUtc } from "./programme.ts";
+import { reportWindow, todayUtc } from "./programme.ts";
 import type { ReportReads } from "./report.ts";
 import { fullDays } from "./runs.ts";
 import type { Signals } from "./signals.tsx";
@@ -215,6 +215,28 @@ const readEngines = async (
 };
 
 /**
+ * The runs the weekly report counts: those of its own week
+ * (`reportWindow`), read once the programme is known, not the board's
+ * days. Without a programme no report is offered: the board's runs.
+ */
+const readReportRuns = async (
+  core: CoreConnection,
+  programme: Promise<Loaded<Programme | null>>,
+  board: Promise<Loaded<RunActivity>>,
+  today: string
+): Promise<Loaded<RunActivity>> => {
+  const loaded = await programme;
+  if (loaded.state !== "ready" || loaded.data === null) {
+    return await board;
+  }
+  const window = reportWindow(loaded.data.start, today);
+  return await loadFromCore(
+    core,
+    async (session) => await session.workflows.activity(window)
+  );
+};
+
+/**
  * What the weekly report is made from, once all of it came: the board's
  * reads, and, for admins, how many the interviews heard.
  */
@@ -295,7 +317,11 @@ export const readDashboard = async (
         return progress;
       })
     : undefined;
-  const report = readReport({ workflows, runs, signals }, people);
+  const today = todayUtc();
+  const report = readReport(
+    { workflows, runs: readReportRuns(core, programme, runs, today), signals },
+    people
+  );
   // The board's order and the page's heading are known before they show,
   // so nothing moves once it is there; read alongside what waits, which
   // the page waits for too.
@@ -308,7 +334,7 @@ export const readDashboard = async (
     waiting,
     board: { layout, workflows, engines, runs, signals },
     programme: read,
-    today: todayUtc(),
+    today,
     report,
     activity,
   };

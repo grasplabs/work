@@ -4,12 +4,13 @@ import { modelSpendListed } from "@grasp-os/shared/models";
 import type {
   ModelBudget,
   ModelBudgetScope,
+  ModelMonthSpend,
   ModelSpender,
 } from "@grasp-os/shared/models";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ModelBindingBudget } from "@grasp-os/shared/resource-bindings";
-import { inArray } from "drizzle-orm";
+import { and, count, gte, inArray, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -514,4 +515,83 @@ export const budgetSpend = async (
     }),
     more,
   }));
+};
+
+/** The first millisecond of UTC month `month` (`yyyy-mm`), and of the one after. */
+const monthBounds = (month: string): { from: Date; until: Date } => {
+  const from = new Date(`${month}-01T00:00:00Z`);
+  const until = new Date(from);
+  until.setUTCMonth(until.getUTCMonth() + 1);
+  return { from, until };
+};
+
+/**
+ * What the models cost in `month`, budget or not: every scope is counted
+ * by the ledger, whether or not it limits spend (`scopesFor`). The
+ * deployment's total, and the workflows that spent most (at most
+ * `modelSpendListed`), each with its App's name where core still has it
+ * and its runs started in the month: for admins to read (models-rpc.ts).
+ */
+export const monthSpend = async (
+  env: Pick<Env, "DB" | "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">,
+  month: string
+): Promise<ModelMonthSpend> => {
+  // One more than are listed, to tell whether any are left out.
+  const spent = await modelLedger(env).spendOf(
+    month,
+    ["deployment", "workflow"],
+    modelSpendListed + 1
+  );
+  const total = (spent.deployment ?? []).reduce(
+    (sum, { spentMicros }) => sum + spentMicros,
+    0
+  );
+  const rows = (spent.workflow ?? []).flatMap(({ key, spentMicros }) => {
+    const workflow = workflowOf(key);
+    return workflow === undefined ? [] : [{ workflow, spentMicros }];
+  });
+  const listed = rows.slice(0, modelSpendListed);
+  const appIds = [...new Set(listed.map(({ workflow }) => workflow[0]))];
+  const db = drizzle(env.DB);
+  const { from, until } = monthBounds(month);
+  const [appRows, runRows] =
+    appIds.length === 0
+      ? [[], []]
+      : await Promise.all([
+          db
+            .select({ id: apps.id, name: apps.name })
+            .from(apps)
+            .where(inArray(apps.id, appIds)),
+          db
+            .select({
+              app: workflowRuns.appId,
+              workflow: workflowRuns.workflowId,
+              runs: count(),
+            })
+            .from(workflowRuns)
+            .where(
+              and(
+                inArray(workflowRuns.appId, appIds),
+                gte(workflowRuns.createdAt, from),
+                lt(workflowRuns.createdAt, until)
+              )
+            )
+            .groupBy(workflowRuns.appId, workflowRuns.workflowId),
+        ]);
+  const names = new Map(appRows.map(({ id, name }) => [id, name]));
+  const runs = new Map(
+    runRows.map((row) => [JSON.stringify([row.app, row.workflow]), row.runs])
+  );
+  return {
+    month,
+    total: total / microsPerDollar,
+    workflows: listed.map(({ workflow: [appId, workflowId], spentMicros }) => ({
+      appId,
+      appName: names.get(appId) ?? null,
+      workflowId,
+      amount: spentMicros / microsPerDollar,
+      runs: runs.get(JSON.stringify([appId, workflowId])) ?? 0,
+    })),
+    more: rows.length > modelSpendListed,
+  };
 };

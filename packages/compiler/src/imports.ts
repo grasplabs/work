@@ -4,6 +4,8 @@ import {
   kitModuleName,
   ownEntry,
   screenReferences,
+  screenRootNames,
+  sdkRoot,
 } from "./kit.ts";
 import type { Kit } from "./kit.ts";
 
@@ -246,6 +248,12 @@ export const importError = (
   if (specifier === "lucide-react") {
     return iconError(names, kit);
   }
+  if (
+    specifier === sdkRoot &&
+    (names === undefined || names.some((name) => !screenRootNames.has(name)))
+  ) {
+    return `Screens import only { v } from ${sdkRoot}, and its types: the rest is the App's server code.`;
+  }
   return kit.imports.includes(specifier)
     ? undefined
     : `"${specifier}" is outside the kit. Screens can import the App's own files and ${packagesOf(kit)}.`;
@@ -419,6 +427,25 @@ export const workflowCode: CodeKind = {
   folder: "workflows/",
   imports: new Map(
     sdkImports.map((specifier) => [specifier, kitModuleName(specifier)])
+  ),
+};
+
+/**
+ * The SDK module the code the host generates from a JSON workflow imports
+ * (`@grasp-os/sdk/open-workflow`), and nothing else: App workflows can't
+ * import it, nor it anything of theirs.
+ */
+export const openWorkflowSdkImports = ["@grasp-os/sdk/open-workflow"] as const;
+
+/** Generated workflow code imports only `openWorkflowSdkImports`. */
+export const generatedWorkflowCode: CodeKind = {
+  name: "Generated workflow",
+  folder: ".grasp/",
+  imports: new Map(
+    openWorkflowSdkImports.map((specifier) => [
+      specifier,
+      kitModuleName(specifier),
+    ])
   ),
 };
 

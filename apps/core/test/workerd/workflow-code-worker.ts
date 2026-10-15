@@ -40,9 +40,11 @@ const cases: Record<string, string> = {
 
 /** What a workflow's tests do, as the SDK's test harness would run them. */
 const harnesses: Record<string, string> = {
-  // Past V8's own heap limit, which aborts its process: a crash.
-  crashes:
+  // Past V8's own heap limit, which ends its process: its own doing.
+  exhausts:
     "export const runWorkflowTests = async () => { const held = []; for (;;) held.push(new Array(1e5).fill(1)); };",
+  // Never ends: on a process killed from outside, a crash.
+  spins: "export const runWorkflowTests = async () => { for (;;) {} };",
   fails:
     'export const runWorkflowTests = async () => ({ passed: false, results: [{ name: "t", failures: ["no"] }] });',
 };

@@ -308,21 +308,24 @@ export const auditOutboxRejected = sqliteTable(
 );
 
 /**
- * What each App and agent may use: one row per permission, never deleted,
- * so who asked, who granted and who revoked stays readable. Only its status
- * and the grant and revoke columns ever change.
+ * What each App, agent, independent workflow, business store and trigger
+ * may use: one row per permission, never deleted, so who asked, who
+ * granted and who revoked stays readable. Only its status and the grant
+ * and revoke columns ever change.
  *
  * The object is stored by type: a connection is `object_id`, with
  * `resource` naming one resource in it or null for all of it; a collection
- * is `object_id`; a workflow is its App's ID in `object_id` and the
- * workflow's in `resource`; another App's exports are that App's ID in
- * `object_id`. `actions` is a JSON array of action names.
+ * is `object_id`; a workflow is its workflow resource's ID in `object_id`;
+ * another App's exports are that App's ID in `object_id`. `actions` is a
+ * JSON array of action names.
  */
 export const permissions = sqliteTable(
   "permissions",
   {
     id: text().primaryKey(),
-    subjectType: text("subject_type", { enum: ["app", "agent"] }).notNull(),
+    subjectType: text("subject_type", {
+      enum: ["app", "agent", "workflow", "store", "trigger"],
+    }).notNull(),
     subjectId: text("subject_id").notNull(),
     objectType: text("object_type", {
       enum: ["connection", "collection", "workflow", "app", "platform"],
@@ -665,7 +668,10 @@ export const sdkReleaseManifests = sqliteTable(
  * here before it stores their bytes, and an artifact's bytes are deleted
  * only once no row names it, under a deletion mark
  * (`sdk_artifact_deletions`) a seal can't reserve past. A reservation of
- * a seal that never finished is swept with its release's grace.
+ * a seal that never finished is swept with its release's grace. `app_id`
+ * is the release's resource: an App, or an independent workflow whose
+ * version's build is sealed (src/workflow-builds.ts), whose reservations
+ * stay as long as its version, for good.
  */
 export const sdkReleaseArtifacts = sqliteTable(
   "sdk_release_artifacts",
@@ -725,8 +731,9 @@ export const sdkReleaseTombstones = sqliteTable(
 /**
  * What keeps a sealed release past its retention (spec 16.3): an open
  * screen's lease, which lapses 15 minutes after its last renewal, or a
- * run, a compatible migration, a pinned trigger or a legal hold, held
- * until released.
+ * run, a compatible migration, a pinned trigger, a workflow binding's
+ * approval naming one of its exports (src/workflow-bindings.ts) or a legal
+ * hold, held until released.
  */
 export const sdkReleasePins = sqliteTable(
   "sdk_release_pins",
@@ -734,7 +741,7 @@ export const sdkReleasePins = sqliteTable(
     appId: text("app_id").notNull(),
     version: integer().notNull(),
     holderKind: text("holder_kind", {
-      enum: ["frame", "run", "migration", "trigger", "hold"],
+      enum: ["frame", "run", "migration", "trigger", "hold", "approval"],
     }).notNull(),
     holderId: text("holder_id").notNull(),
     /** When it lapses, for a frame's lease; null for a held pin. */
@@ -749,8 +756,11 @@ export const sdkReleasePins = sqliteTable(
 );
 
 /**
- * What a sealed release binds, by alias (spec 16.1): for now the store it
- * reads and writes, which only the host chose when it sealed the release.
+ * What a sealed release binds, by alias (spec 16.1): the store it reads and
+ * writes, which only the host chose when it sealed the release, or, for a
+ * workflow version (`resource_id` a workflow resource's), the exact version
+ * of another workflow it runs (`kind` `workflow`, `schema_hash` that
+ * version's contract hash, workflow-resources.ts).
  * Routing, not a grant: whoever calls is authorized on every call. Also
  * how a store finds the releases that still rely on it: it can't be
  * deleted while any release kept is bound to it (data-stores.ts), and
@@ -762,7 +772,16 @@ export const sdkResourceBindings = sqliteTable(
     resourceId: text("resource_id").notNull(),
     resourceVersion: integer("resource_version").notNull(),
     alias: text().notNull(),
-    kind: text({ enum: ["store"] }).notNull(),
+    kind: text({
+      enum: [
+        "store",
+        "workflow",
+        "operation",
+        "connector",
+        "model",
+        "decision",
+      ],
+    }).notNull(),
     targetId: text("target_id").notNull(),
     schemaHash: text("schema_hash").notNull(),
     manifestHash: text("manifest_hash").notNull(),
@@ -771,6 +790,11 @@ export const sdkResourceBindings = sqliteTable(
      * binds (`business_store_versions.version`).
      */
     targetVersion: integer("target_version"),
+    /**
+     * The contract key the binding's source named, as the host resolved
+     * it (a workflow's `namespace/name/semver`); null for a store's.
+     */
+    contractId: text("contract_id"),
   },
   (table) => [
     primaryKey({
@@ -1162,6 +1186,19 @@ export const runLineageAttempts = sqliteTable(
      * once it settled, those it made; all it reserved if it never did.
      */
     hostCalls: integer("host_calls").notNull().default(0),
+    /**
+     * Who the attempt's run acts for (a user ID) and its App: whose shares
+     * of the attempts running at once it takes while it holds
+     * (src/workflows/admission.ts).
+     */
+    subject: text().notNull().default(""),
+    resource: text().notNull().default(""),
+    /**
+     * The SHA-256 of the attempt's step name: whose place in the queue its
+     * lease ends, and an older attempt of the step's late refusal may not
+     * put back (src/workflows/admission.ts).
+     */
+    stepHash: text("step_hash").notNull().default(""),
   },
   (table) => [
     primaryKey({
@@ -1173,6 +1210,74 @@ export const runLineageAttempts = sqliteTable(
     index("run_lineage_attempts_held_idx")
       .on(table.rootRunId, table.admittedAt)
       .where(sql`settled_at IS NULL`),
+    // The attempts running at once, in all, for a person and of an App:
+    // what fair admission counts (src/workflows/admission.ts), each until
+    // its hold ends, an attempt's wall time at most after its admission.
+    index("run_lineage_attempts_running_idx")
+      .on(table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+    index("run_lineage_attempts_subject_idx")
+      .on(table.subject, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+    index("run_lineage_attempts_resource_idx")
+      .on(table.resource, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+  ]
+);
+
+/**
+ * The client's queue of workflow attempts waiting for a share of the
+ * attempts running at once (src/workflows/admission.ts): one entry per
+ * step of a run refused for want of one, by the SHA-256 of the step's
+ * name (a keyed step's name holds the run's data), with who the run acts
+ * for, its App, its turn (one past the latest turn of the places of the
+ * same person and App waiting as it joined), when it joined and when it last asked. Places
+ * are served by turn, then by when they joined: round-robin between the
+ * people waiting in an App, first come, first served within each. An
+ * entry that hasn't asked for a while is no longer waiting, and goes; the
+ * step's next attempt joins at the back.
+ */
+export const workflowAdmissionQueue = sqliteTable(
+  "workflow_admission_queue",
+  {
+    runId: text("run_id").notNull(),
+    stepHash: text("step_hash").notNull(),
+    subject: text().notNull(),
+    resource: text().notNull(),
+    enqueuedAt: timestamp("enqueued_at").notNull(),
+    seenAt: timestamp("seen_at").notNull(),
+    /** Which share it waits for: `client`, `person` or `app`. */
+    waitingFor: text("waiting_for", {
+      enum: ["client", "person", "app"],
+    }).notNull(),
+    /** When it asks again at the latest: the run's summary shows it. */
+    retryAt: timestamp("retry_at").notNull(),
+    turn: integer().notNull(),
+    /**
+     * The deadline of the step's attempt that last wrote the place: which
+     * attempt owns it. An older attempt of the step (an earlier deadline)
+     * neither writes nor gives up a place a newer one wrote.
+     */
+    attemptDeadline: timestamp("attempt_deadline").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.stepHash] }),
+    // The places still asking, in the order they are served.
+    index("workflow_admission_queue_order_idx").on(
+      table.seenAt,
+      table.turn,
+      table.enqueuedAt
+    ),
+    // The places of a person, and of an App: their caps, and their turns.
+    index("workflow_admission_queue_subject_idx").on(
+      table.subject,
+      table.resource,
+      table.seenAt
+    ),
+    index("workflow_admission_queue_resource_idx").on(
+      table.resource,
+      table.seenAt
+    ),
   ]
 );
 
@@ -2016,6 +2121,356 @@ export const businessStoreMembers = sqliteTable(
     index("business_store_members_member_idx").on(
       table.memberType,
       table.memberId
+    ),
+  ]
+);
+
+/**
+ * The deployment's independent workflows (spec 3, 13.2, 24;
+ * src/workflow-resources.ts): each a resource of its own, owned by the
+ * person who created it, never by an App, so nothing done to an App
+ * (sharing, grouping, deleting) reaches it. Its ID is minted at random by
+ * the host; its name is fixed at creation and unique among every workflow
+ * there has been, deleted ones included. `current_version` is the version
+ * published last. A deleted workflow keeps its row, with `deleted_at` set,
+ * and is never served again.
+ */
+export const workflowResources = sqliteTable("workflow_resources", {
+  id: text().primaryKey(),
+  name: text().notNull().unique(),
+  ownerId: text("owner_id").notNull(),
+  currentVersion: integer("current_version"),
+  createdAt: timestamp("created_at").notNull(),
+  deletedAt: timestamp("deleted_at"),
+  /**
+   * Moves on with every change of who may start or follow it: its members,
+   * and grants and revocations of permissions on it or of it
+   * (workflow-starts.ts). A start admitted under one generation is refused
+   * once it moved, so no start lands on authority that changed under it.
+   */
+  policyGeneration: integer("policy_generation").notNull().default(1),
+  /**
+   * The parameter revision in force (`workflow_resource_params`): 0 while
+   * no value was ever set. Every edit names the revision it read and
+   * moves it on; a start freezes the values of the revision it read, and
+   * is refused if an edit landed in between (workflow-starts.ts).
+   */
+  configRevision: integer("config_revision").notNull().default(0),
+});
+
+/**
+ * Each published version of a workflow: written once, by its publication,
+ * and never changed. `version` counts publications from 1;
+ * `definition_version` is the definition's own semantic version, unique
+ * per workflow, so a semantic version always names the same content.
+ * `definition` is the workflow.json exactly as published (at most the
+ * profile's 1 MiB), `contract` the canonical JSON of its input, output and
+ * parameter schemas, and `manifest` the canonical JSON of what the version
+ * pins: its definition, profile, evaluator, contract and the exact versions
+ * its bindings resolved to (also in `sdk_resource_bindings`), each with
+ * its SHA-256.
+ */
+export const workflowResourceVersions = sqliteTable(
+  "workflow_resource_versions",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    version: integer().notNull(),
+    definitionVersion: text("definition_version").notNull(),
+    definition: text().notNull(),
+    definitionJsonHash: text("definition_json_hash").notNull(),
+    profileVersion: text("profile_version").notNull(),
+    evaluatorHash: text("evaluator_hash").notNull(),
+    contract: text().notNull(),
+    contractHash: text("contract_hash").notNull(),
+    manifest: text().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    authorId: text("author_id").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.version] }),
+    uniqueIndex("workflow_resource_versions_definition_version").on(
+      table.workflowResourceId,
+      table.definitionVersion
+    ),
+  ]
+);
+
+/**
+ * Whom each workflow is shared with (src/workflow-resources.ts): a person
+ * (`member_type` `person`, `member_id` their user ID) or a team, in role
+ * `user` or `builder`. Sharing again changes the role; unsharing deletes
+ * the row; who did which is in the audit log. Its owner has no row.
+ */
+export const workflowResourceMembers = sqliteTable(
+  "workflow_resource_members",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    memberType: text("member_type", { enum: ["person", "team"] }).notNull(),
+    memberId: text("member_id").notNull(),
+    role: text({ enum: ["user", "builder"] }).notNull(),
+    addedBy: text("added_by").notNull(),
+    addedAt: timestamp("added_at").notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.workflowResourceId, table.memberType, table.memberId],
+    }),
+    index("workflow_resource_members_member_idx").on(
+      table.memberType,
+      table.memberId
+    ),
+  ]
+);
+
+/**
+ * Independent triggers (spec 15, 24; src/trigger-resources.ts): what
+ * starts one exact workflow version on its own (a system event, a
+ * connector event, a webhook, a schedule), owned by whoever created it,
+ * never by the workflow's owner or an App. `current_version` names the
+ * version (`trigger_resource_versions`) future starts use; `enabled` false,
+ * or `deleted_at`, stops future starts, never runs already started. Its
+ * starts need a permission of its own (`start` on the workflow) like any
+ * other subject's.
+ */
+export const triggerResources = sqliteTable("trigger_resources", {
+  id: text().primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  kind: text({
+    enum: ["system", "connector", "webhook", "schedule"],
+  }).notNull(),
+  currentVersion: integer("current_version").notNull(),
+  enabled: integer({ mode: "boolean" }).notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  deletedAt: timestamp("deleted_at"),
+});
+
+/**
+ * Each version of a trigger, written once: the exact workflow version it
+ * starts (never "the latest": a new workflow version changes no trigger
+ * until one is explicitly updated to it), the SHA-256 of its
+ * configuration, and the person its starts act for (`principal_binding`,
+ * a user ID the host bound at creation: who created it, never the
+ * workflow's owner).
+ */
+export const triggerResourceVersions = sqliteTable(
+  "trigger_resource_versions",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    version: integer().notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    configHash: text("config_hash").notNull(),
+    principalBinding: text("principal_binding").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.triggerId, table.version] })]
+);
+
+/**
+ * Each start of an independent workflow the host admitted
+ * (src/workflow-starts.ts): its durable receipt, written in one statement
+ * with the authorization it was admitted on, read again as the statement
+ * ran. One per invoker, person it acts for and idempotency key, so the
+ * same start sent again is the same start, and one person's key never
+ * reaches another's start. It pins the exact workflow version and manifest, who
+ * invoked it (a person, an App, an agent or a trigger, with the App
+ * version or trigger version), the person it acts for, the workflow's
+ * policy generation it was admitted under and its validated input
+ * (canonical JSON, with its SHA-256). Never changed after, but for its
+ * input and frozen parameter values, which run retention removes
+ * (workflows/retention.ts): set to null once, with `details_removed_at`,
+ * while every ID, hash and link stays, as the database enforces.
+ */
+export const workflowStartReceipts = sqliteTable(
+  "workflow_start_receipts",
+  {
+    id: text().primaryKey(),
+    invokerType: text("invoker_type", {
+      enum: ["person", "app", "agent", "trigger"],
+    }).notNull(),
+    invokerId: text("invoker_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    /** The App version, for an App's start; null otherwise. */
+    originAppVersion: integer("origin_app_version"),
+    /** The trigger version, for a trigger's start; null otherwise. */
+    triggerVersion: integer("trigger_version"),
+    principalId: text("principal_id").notNull(),
+    authorityGeneration: integer("authority_generation").notNull(),
+    /** The validated input; null once retention removed it. */
+    input: text(),
+    inputHash: text("input_hash").notNull(),
+    /**
+     * The parameter values the start froze (canonical JSON of every
+     * parameter's value: set, or its default), and the revision they were
+     * read at; null once retention removed them. Sensitive values
+     * included: a receipt is never listed or audited with them, nor with a
+     * hash of them, which a guess at a short value could be checked
+     * against.
+     */
+    params: text(),
+    paramsRevision: integer("params_revision").notNull().default(0),
+    /**
+     * The bindings the start froze (canonical JSON: each alias, its kind,
+     * contract and fingerprint, and the exact workflow version or approved
+     * target serving it), and their SHA-256.
+     */
+    bindings: text().notNull().default("[]"),
+    bindingsHash: text("bindings_hash").notNull().default(""),
+    createdAt: timestamp("created_at").notNull(),
+    /** When retention removed its input and parameter values. */
+    detailsRemovedAt: timestamp("details_removed_at"),
+  },
+  (table) => [
+    uniqueIndex("workflow_start_receipts_key").on(
+      table.invokerType,
+      table.invokerId,
+      table.principalId,
+      table.idempotencyKey
+    ),
+    index("workflow_start_receipts_workflow").on(
+      table.workflowResourceId,
+      table.createdAt
+    ),
+    // The receipts retention has yet to reach, oldest first.
+    index("workflow_start_receipts_due")
+      .on(table.createdAt)
+      .where(sql`${table.detailsRemovedAt} IS NULL`),
+  ]
+);
+
+/**
+ * The host catalog of contracts independent workflows bind besides each
+ * other (spec 13.2; src/workflow-catalog.ts): operation, connector, model
+ * and decision contracts, each published once by an admin and never
+ * changed, so a key always names the same descriptors. `contract` is the
+ * canonical JSON a workflow's validation reads; `fingerprint` its SHA-256.
+ */
+export const workflowCatalogContracts = sqliteTable(
+  "workflow_catalog_contracts",
+  {
+    key: text().primaryKey(),
+    kind: text({
+      enum: ["operation", "connector", "model", "decision"],
+    }).notNull(),
+    contract: text().notNull(),
+    fingerprint: text().notNull(),
+    publishedBy: text("published_by").notNull(),
+    publishedAt: timestamp("published_at").notNull(),
+  }
+);
+
+/**
+ * Which concrete resource serves each catalog binding of an independent
+ * workflow (src/workflow-bindings.ts): approved by an admin for the
+ * declaration they reviewed (its kind, contract key and fingerprint) in
+ * the exact version they reviewed (`reviewed_version`), and serving that
+ * version alone: another version, newer or older, is code nobody reviewed
+ * for it. `target` is the resource (JSON, `WorkflowBindingTarget`). At
+ * most one active approval per version and alias; approving another
+ * revokes it in the same batch. Revoked rows stay.
+ */
+export const workflowBindingApprovals = sqliteTable(
+  "workflow_binding_approvals",
+  {
+    id: text().primaryKey(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    alias: text().notNull(),
+    kind: text({
+      enum: ["operation", "connector", "model", "decision"],
+    }).notNull(),
+    contractId: text("contract_id").notNull(),
+    fingerprint: text().notNull(),
+    target: text().notNull(),
+    reviewedVersion: integer("reviewed_version").notNull(),
+    status: text({ enum: ["active", "revoked"] }).notNull(),
+    approvedBy: text("approved_by").notNull(),
+    approvedAt: timestamp("approved_at").notNull(),
+    revokedBy: text("revoked_by"),
+    revokedAt: timestamp("revoked_at"),
+  },
+  (table) => [
+    uniqueIndex("workflow_binding_approvals_active_idx")
+      .on(table.workflowResourceId, table.reviewedVersion, table.alias)
+      .where(sql`${table.status} = 'active'`),
+  ]
+);
+
+/**
+ * Each revision of an independent workflow's parameter values
+ * (src/workflow-params.ts): written once per edit, never changed, numbered
+ * from 1 per workflow; the workflow's `config_revision` names the one in
+ * force. `values` is the canonical JSON of the values set (a parameter
+ * left out has its default), sensitive ones included: they are never
+ * listed, audited or returned, only frozen into a start. A revision no
+ * longer in force has its values removed by run retention once it was
+ * replaced that long ago (workflows/retention.ts): set to null once, with
+ * `values_removed_at`, while the revision, who set it and when stay.
+ */
+export const workflowResourceParams = sqliteTable(
+  "workflow_resource_params",
+  {
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    revision: integer().notNull(),
+    values: text(),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+    valuesRemovedAt: timestamp("values_removed_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.workflowResourceId, table.revision] }),
+  ]
+);
+
+/**
+ * Which exact version of an independent workflow each App binds, by an
+ * alias of the App's (src/app-workflow-bindings.ts). A binding pins the
+ * version and grants nothing: starting it still takes the App's own
+ * `start` permission. At most one active binding per App and alias;
+ * moving to another version is a new binding. Removed ones stay.
+ */
+export const appWorkflowBindings = sqliteTable(
+  "app_workflow_bindings",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    alias: text().notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    status: text({ enum: ["active", "removed"] }).notNull(),
+    boundBy: text("bound_by").notNull(),
+    boundAt: timestamp("bound_at").notNull(),
+    removedBy: text("removed_by"),
+    removedAt: timestamp("removed_at"),
+  },
+  (table) => [
+    uniqueIndex("app_workflow_bindings_active_idx")
+      .on(table.appId, table.alias)
+      .where(sql`${table.status} = 'active'`),
+    index("app_workflow_bindings_workflow_idx").on(
+      table.workflowResourceId,
+      table.status
     ),
   ]
 );
