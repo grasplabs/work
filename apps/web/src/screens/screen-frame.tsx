@@ -5,6 +5,8 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
+import type { CoreConnection } from "../core-connection.ts";
+import { useCore } from "../use-core.ts";
 import { DecisionConfirmDialog } from "../decision-confirmation.tsx";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import { frameQuestions } from "./frame-questions.ts";
@@ -69,16 +71,20 @@ interface FrameSource {
   chatId?: string;
 }
 
-/** Starts what `source` names in `frame`; returns what stops it. */
+/**
+ * Starts what `source` names in `frame`, a screen over the tab's
+ * connection `core`; returns what stops it.
+ */
 const start = (
   frame: HTMLIFrameElement,
+  core: CoreConnection,
   { app, screen, chatId }: FrameSource,
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
   confirm: (review: PendingConfirmation) => Promise<boolean>
 ): (() => void) =>
   chatId === undefined
-    ? runScreen(frame, app, screen ?? "", onState, onOpened, confirm)
+    ? runScreen(frame, core, app, screen ?? "", onState, onOpened, confirm)
     : runPreview(
         frame,
         { chatId, app, ...(screen === undefined ? {} : { screen }) },
@@ -95,6 +101,7 @@ const start = (
  */
 const startAsking = (
   frame: HTMLIFrameElement,
+  core: CoreConnection,
   source: FrameSource,
   onState: (state: ScreenState) => void,
   onOpened: (appName: string) => void,
@@ -103,6 +110,7 @@ const startAsking = (
   const questions = frameQuestions(onAsk);
   const stop = start(
     frame,
+    core,
     source,
     (state) => {
       if (state.status === "failed" || state.status === "signed-out") {
@@ -140,12 +148,14 @@ const Frame = ({
   onOpened,
   onAsk,
 }: FrameProps) => {
+  const core = useCore();
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   useEffect(
     () =>
       frame
         ? startAsking(
             frame,
+            core,
             {
               app,
               ...(screen === undefined ? {} : { screen }),
@@ -156,7 +166,7 @@ const Frame = ({
             onAsk
           )
         : undefined,
-    [frame, app, screen, chatId, onState, onOpened, onAsk]
+    [frame, core, app, screen, chatId, onState, onOpened, onAsk]
   );
   return (
     <iframe

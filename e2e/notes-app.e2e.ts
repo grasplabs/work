@@ -166,7 +166,7 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
   await expect(reloaded.getByText("No notes yet.")).toBeVisible();
 });
 
-test("a screen whose page connects again as someone else is stopped, and sends nothing of the first person's as them", async ({
+test("a screen whose page connects again as someone else is stopped, and the page loads again as them, sending nothing of the first person's", async ({
   browser,
 }) => {
   // Someone else may use the App and its data is ordinary, so a save sent
@@ -216,26 +216,18 @@ test("a screen whose page connects again as someone else is stopped, and sends n
 
   // The connection drops, and the browser's cookie becomes someone else's
   // (another tab signed in as them) before it connects again.
+  const reloaded = page.waitForEvent("load", { timeout: 20_000 });
   refuse = true;
   await drop?.();
   await signInTo(page.context(), next);
   loseSaves = false;
   refuse = false;
 
-  // Connected again as them: the screen is stopped and its frame emptied,
-  // and nothing the first person's screen held reached core.
-  await expect(
-    page.getByText("Someone else signed in on this browser")
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('iframe[title="notes app"]')).not.toHaveAttribute(
-    "src",
-    /./u
-  );
-  expect(reached).toStrictEqual([]);
-
-  // Tried again, the screen opens for the person signed in now, without
-  // the first person's note.
-  await page.getByRole("button", { name: "Try again" }).click();
+  // Connected again as them: the tab's connection ends, the screen is
+  // stopped before anything else, and the page loads again, for the person
+  // signed in now, without the first person's note. Nothing the first
+  // person's screen held reached core.
+  await reloaded;
   const theirs = page.frameLocator('iframe[title="notes app"]');
   await expect(theirs.getByText("No notes yet.")).toBeVisible({
     timeout: 20_000,
@@ -243,7 +235,7 @@ test("a screen whose page connects again as someone else is stopped, and sends n
   expect(reached).toStrictEqual([]);
 });
 
-test("a screen whose function call core refuses as someone else's is stopped, while its connection holds", async ({
+test("a screen whose function call core refuses as someone else's is stopped, and the page loads again as them", async ({
   browser,
 }) => {
   const { first, next } = peopleIn("notesAppTwoTabs");
@@ -265,30 +257,22 @@ test("a screen whose function call core refuses as someone else's is stopped, wh
   // Another tab signs in as someone else: the cookie changes, the page's
   // connection doesn't. The first person's save goes with their cookie.
   await signInTo(page.context(), next);
+  const reloaded = page.waitForEvent("load", { timeout: 20_000 });
   await createNote(screen, "Mine");
 
-  // Core refused it as someone else's, and the page stopped and emptied
-  // the frame.
-  await expect(
-    page.getByText("Someone else signed in on this browser")
-  ).toBeVisible({ timeout: 20_000 });
-  await expect(page.locator('iframe[title="notes app"]')).not.toHaveAttribute(
-    "src",
-    /./u
-  );
+  // Core refused it as someone else's: the tab's connection ends, the
+  // screen is stopped before anything else, and the page loads again, for
+  // the person signed in now, without the first person's note.
+  await reloaded;
   expect(answered.length).toBeGreaterThan(0);
   expect(answered.every((status) => status === 401)).toBe(true);
-
-  // Tried again, the screen opens for the person signed in now, without
-  // the first person's note.
-  await page.getByRole("button", { name: "Try again" }).click();
   const theirs = page.frameLocator('iframe[title="notes app"]');
   await expect(theirs.getByText("No notes yet.")).toBeVisible({
     timeout: 20_000,
   });
 });
 
-test("a screen whose person signed out is emptied, so nothing of theirs stays on the page", async ({
+test("a screen whose person signed out is stopped and the page loads again, so nothing of theirs stays on it", async ({
   browser,
 }) => {
   const { first } = peopleIn("notesAppSignedOut");
@@ -309,9 +293,13 @@ test("a screen whose person signed out is emptied, so nothing of theirs stays on
       .getByText("Private", { exact: true })
   ).toBeVisible();
 
-  // Signed out elsewhere; the page hears of it when it connects again.
+  // Signed out elsewhere; the page hears of it when it connects again,
+  // stops the screen and loads again, and shows the session ended, with
+  // no screen in the frame.
   await endSession(first);
+  const reloaded = page.waitForEvent("load", { timeout: 20_000 });
   await drop?.();
+  await reloaded;
   await expect(page.getByText("Your session has ended")).toBeVisible({
     timeout: 20_000,
   });

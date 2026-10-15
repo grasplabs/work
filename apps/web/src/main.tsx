@@ -15,11 +15,14 @@ import { startI18n } from "./i18n.ts";
 import { RouteError } from "./route-error.tsx";
 import { routeTree } from "./routeTree.gen.ts";
 
-// The tab's one connection to core, made once and handed to every route.
-// When the person's session ends, the page loads again: the shell finds
+// The tab's one connection to core, made once and handed to every route
+// and every App frame. When the person's session ends, the frames stop and
+// the page loads again: the shell finds
 // nobody signed in, and sends them to sign in and back to where they were.
-const core = new CoreConnection(() => {
-  window.location.reload();
+const core = new CoreConnection({
+  onSessionEnded: () => {
+    window.location.reload();
+  },
 });
 
 // Every route shows a failure the same way, and reports a fault of the

@@ -24,9 +24,9 @@ declare global {
 
 /**
  * How long no further connection may open once the page has reconnected.
- * A second round of attempts would have tried at the same moment as the
- * one that held (both wait 2 s after the refused attempt), so it shows
- * well within this.
+ * A second round of attempts would have tried about when the one that held
+ * did (each waits up to 2 s after the refused attempt), so it shows within
+ * this.
  */
 const noMoreConnectionsMs = 2000;
 
@@ -298,6 +298,57 @@ test("moving to another App's screen never shows the App it left in the chrome",
     namedTheNewApp: true,
     oldNameAfterNew: false,
   });
+});
+
+test("a tab holds one connection to core for its shell and every App frame it opens", async ({
+  browser,
+}) => {
+  const other = await releaseApp(one, attacker.url, "Board");
+  const page = await pageOf(browser, one);
+  const sockets: string[] = [];
+  page.on("websocket", (socket) => {
+    if (new URL(socket.url()).pathname === "/rpc") {
+      sockets.push(socket.url());
+    }
+  });
+  /** Moves within the page, as a link would: a new document starts afresh. */
+  const moveTo = async (path: string): Promise<void> => {
+    await page.evaluate((to) => {
+      history.pushState(null, "", to);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, path);
+  };
+  /** The App frame on the page, once its screen shows `name`. */
+  const shows = async (name: string) => {
+    const screen = page.frameLocator('iframe[title="notes app"]');
+    await expect(page.getByRole("heading", { exact: true, name })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
+      timeout: 20_000,
+    });
+    return screen;
+  };
+
+  // The shell, then one App's frame after another, and back to the first.
+  await page.goto("/dashboard");
+  await expect(page.getByRole("navigation").first()).toBeVisible();
+  await moveTo(`/domains/${app}/apps/notes`);
+  await shows("Notes");
+  await moveTo(`/domains/${other}/apps/notes`);
+  await shows("Board");
+  await moveTo(`/domains/${app}/apps/notes`);
+  const screen = await shows("Notes");
+
+  // The frame reads and writes through that same connection.
+  await screen.getByRole("button", { name: "Add a note" }).click();
+  await expect(
+    screen
+      .getByRole("list", { name: "Notes" })
+      .getByText(`Call Acme by ${one.userId}`)
+      .first()
+  ).toBeVisible();
+  expect(sockets).toHaveLength(1);
 });
 
 test("a new current version is offered while the screen is open", async ({

@@ -1,149 +1,88 @@
-import { CoreLink } from "./core-link.ts";
-import type { LinkEnded } from "./core-link.ts";
+import type { CoreConnection, SessionEnded } from "../core-connection.ts";
+import type { Session } from "../core.ts";
+import { CoreLink, retryingOn } from "./core-link.ts";
 
-// The tab's one link to core for the App frames it runs (spec 11.2): every
-// frame of the tab goes over it, so a tab holds one authenticated
-// connection for its frames however many it opens, and one reading of the
-// person's session. Each frame still gets its own bridge and its own way
-// to its App on that connection (core's `screens.frame`), never the link
-// itself, and closing a frame lets go of those, never of the link: the
-// link stays for the tab's life, so moving between pages keeps it.
+// How an App frame reaches core: over the tab's one connection, the
+// shell's own (core-connection.ts, spec 11.2), so a tab holds one
+// authenticated connection however many frames it opens, and one reading
+// of the person's session. Each frame still gets its own bridge and its
+// own way to its App on that connection (core's `screens.frame`), never
+// the connection itself, and closing a frame lets go of those, never of
+// the connection: it stays for the tab's life.
 //
-// A link is for one person (core-link.ts). Once it ends (signed out, or
-// someone else signed in on the browser), or a frame learns from core
-// that the browser's session is someone else's now, every frame on it is
-// told, it is closed, and the next frame opens a new one, for whoever is
-// signed in then. Nothing a frame sends or its App answers ends it: only
-// core's own answers to the page (screen-host.ts).
+// The connection is for one person. Once their session ends (signed out,
+// revoked, or someone else signed in on the browser), or a frame learns
+// from core that the browser's session is someone else's now, every frame
+// on it is told and stops before the page loads again. Nothing a frame
+// sends or its App answers ends it: only core's own answers to the page
+// (screen-host.ts).
 
-/** A link to core that a tab's frames share: what `TabLinks` needs of one. */
-export interface SharedLink {
-  close: () => void;
-  /** Whether its first connection failed for good (core-link.ts). */
-  readonly failedToStart: boolean;
+type Ended = (why: SessionEnded) => void;
+
+/** What a frame needs of its connection to core. */
+export interface FrameLink {
+  /**
+   * The signed-in session, once connected: waited for across reconnects
+   * for as long as it takes, and refused once the session ended.
+   */
+  session: () => Promise<Session>;
+  /** Who the connection is for, refused as `session` is. */
+  person: () => Promise<string>;
+  /** Runs `run` on the session, and again while it fails in a way that may pass. */
+  retrying: <T>(run: (session: Session) => Promise<T>) => Promise<T>;
 }
 
-/** A frame's place on the tab's link. */
-export interface Joined<Link extends SharedLink> {
-  link: Link;
-  /** Ends the link for every frame on it, the frame that ends it too. */
-  end: (why: LinkEnded) => void;
-  /** The frame is gone: it hears no more of the link. The link stays. */
+/** A frame's place on its connection to core. */
+export interface Joined {
+  link: FrameLink;
+  /** Ends the person's session on the page: every frame stops, this one too. */
+  end: (why: SessionEnded) => void;
+  /** The frame is gone: it hears no more of the connection, which stays. */
   leave: () => void;
 }
 
-type Ended = (why: LinkEnded) => void;
-
-/** One link and the frames on it. */
-interface Opened<Link> {
-  readonly link: Link;
-  /** The frames on it, each told once it ends. */
-  readonly frames: Set<Ended>;
-  ended: boolean;
-}
+/**
+ * Joins the tab's connection `core`: `onEnded` is called once if the
+ * person's session ends while the frame is on it. The frame waits for the
+ * connection across reconnects for as long as it takes, as its start has
+ * a deadline of its own (`screenLimits.openMs`) and a running screen waits
+ * out a reconnect, but no longer than it is on it: once it leaves, what
+ * it still waits for is refused, so nothing it asked for is sent once
+ * core is back.
+ */
+export const tabLink = (core: CoreConnection, onEnded: Ended): Joined => {
+  const left = new AbortController();
+  const stopListening = core.onEnded(onEnded);
+  const session = async (): Promise<Session> => await core.session(left.signal);
+  return {
+    link: {
+      session,
+      person: async () => {
+        const { userId } = await core.person(left.signal);
+        return userId;
+      },
+      // Ending closes the connection, so a session is refused from then.
+      retrying: async (run) =>
+        await retryingOn(session, run, () => !left.signal.aborted),
+    },
+    end: (why) => {
+      core.end(why);
+    },
+    leave: () => {
+      stopListening();
+      left.abort(new Error("The frame was stopped."));
+    },
+  };
+};
 
 /**
- * A tab's shared link: opened with `open` by the first frame that joins,
- * and again by the first to join after it ended.
+ * A link of one frame's own, closed when the frame leaves: for a draft's
+ * preview, as core keeps the callbacks its server calls pass
+ * (`chats.previewCall`) per connection, with no capability of the frame's
+ * own to let go of them, so only closing its connection when the preview
+ * stops releases them. Ending it ends the preview alone.
  */
-export class TabLinks<Link extends SharedLink> {
-  readonly #open: (onEnded: Ended) => Link;
-  #current: Opened<Link> | undefined;
-
-  constructor(open: (onEnded: Ended) => Link) {
-    this.#open = open;
-  }
-
-  /**
-   * Joins the tab's link: `onEnded` is called once if it ends while the
-   * frame is on it.
-   */
-  join(onEnded: Ended): Joined<Link> {
-    const opened = this.#live() ?? this.#opened();
-    opened.frames.add(onEnded);
-    return {
-      link: opened.link,
-      end: (why) => {
-        this.#end(opened, why);
-      },
-      leave: () => {
-        opened.frames.delete(onEnded);
-      },
-    };
-  }
-
-  /**
-   * The tab's link, unless its first connection failed for good: a link
-   * never tries that again, so it is given up on, and a new one opened.
-   * Its frames aren't told: each saw that connection fail.
-   */
-  #live(): Opened<Link> | undefined {
-    const current = this.#current;
-    if (current?.link.failedToStart === true) {
-      this.#retire(current);
-      return undefined;
-    }
-    return current;
-  }
-
-  /** Closes `opened` without telling its frames; the next join opens anew. */
-  #retire(opened: Opened<Link>): void {
-    if (opened.ended) {
-      return;
-    }
-    opened.ended = true;
-    if (this.#current === opened) {
-      this.#current = undefined;
-    }
-    opened.link.close();
-    opened.frames.clear();
-  }
-
-  /** A new link, the tab's from now on. */
-  #opened(): Opened<Link> {
-    // The link calls back only once it connected again, after this.
-    const made: { opened?: Opened<Link> } = {};
-    const link = this.#open((why) => {
-      if (made.opened !== undefined) {
-        this.#end(made.opened, why);
-      }
-    });
-    const opened: Opened<Link> = { link, frames: new Set(), ended: false };
-    made.opened = opened;
-    this.#current = opened;
-    return opened;
-  }
-
-  /** Closes `opened` and tells every frame on it, once. */
-  #end(opened: Opened<Link>, why: LinkEnded): void {
-    if (opened.ended) {
-      return;
-    }
-    // A copy: retiring the link forgets its frames.
-    const frames = [...opened.frames];
-    this.#retire(opened);
-    // Every frame is told, whatever stopping one of them throws: the link
-    // is gone already, so nothing would tell those after it again.
-    const failures: unknown[] = [];
-    for (const frame of frames) {
-      try {
-        frame(why);
-      } catch (error) {
-        failures.push(error);
-      }
-    }
-    if (failures.length > 0) {
-      throw new AggregateError(failures, "Stopping a frame failed.");
-    }
-  }
-}
-
-/**
- * A link of one frame's own, closed when the frame leaves: for a frame
- * whose hold in core only closing its connection lets go of (a draft's
- * preview, screen-host.ts).
- */
-export const ownLink = (onEnded: Ended): Joined<CoreLink> => {
+export const ownLink = (onEnded: Ended): Joined => {
   const link = new CoreLink(onEnded);
   return {
     link,
@@ -156,11 +95,3 @@ export const ownLink = (onEnded: Ended): Joined<CoreLink> => {
     },
   };
 };
-
-/**
- * The tab's link to core for its App frames. A module, so the tab keeps
- * it while pages come and go; a development reload of the page's other
- * modules (screen-host.ts, a page) keeps it too, as only what changed and
- * what imports it is loaded again.
- */
-export const frameLinks = new TabLinks((onEnded) => new CoreLink(onEnded));
