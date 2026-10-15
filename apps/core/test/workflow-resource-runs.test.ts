@@ -719,14 +719,18 @@ const evaluatedWith = async (
 };
 
 /** Whether an attempt of task `greet` on `host` got to run its module's code. */
-const attempted = async (host: ResourceRunHost): Promise<boolean> => {
+const attempted = async (
+  host: ResourceRunHost,
+  task: "greet" | "again",
+  slot: number
+): Promise<boolean> => {
   const ran = { module: false };
   await host.do(
-    "task:greet",
+    `task:${task}`,
     { input: { input: { who: "Ada" }, context: {} } },
     async (attempt) => {
       ran.module = true;
-      const value = await attempt.evaluate(0);
+      const value = await attempt.evaluate(slot);
       return value.ok ? { ok: true, value: value.value } : value;
     }
   );
@@ -740,6 +744,13 @@ describe("an activation's share of core's CPU", () => {
       definitionOf(name, [
         {
           greet: {
+            set: {
+              status: '${ $params.greeting + ", " + $workflow.input.who }',
+            },
+          },
+        },
+        {
+          again: {
             set: {
               status: '${ $params.greeting + ", " + $workflow.input.who }',
             },
@@ -819,16 +830,22 @@ describe("an activation's share of core's CPU", () => {
     settledFirst.push("attempt");
     const [late] = await Promise.all(leftRunning);
     const host = hostWithOneShare();
-    const first = await attempted(host);
-    const second = await attempted(host);
+    const first = await attempted(host, "greet", 0);
+    const second = await attempted(host, "again", 1);
+    // A step asked for again in the activation: refused before any read.
+    const askedAgain = await attempted(host, "greet", 0);
     // Two at once on a fresh activation: one holds the share from its start.
     const fresh = hostWithOneShare();
-    const atOnce = await Promise.all([attempted(fresh), attempted(fresh)]);
+    const atOnce = await Promise.all([
+      attempted(fresh, "greet", 0),
+      attempted(fresh, "again", 1),
+    ]);
     expect({
       late,
       settledFirst,
       first,
       second,
+      askedAgain,
       atOnce: atOnce.filter(Boolean).length,
       // A retryable timeout, as for an isolate stopped past its CPU time.
       failures,
@@ -837,6 +854,7 @@ describe("an activation's share of core's CPU", () => {
       settledFirst: ["evaluation", "attempt"],
       first: true,
       second: false,
+      askedAgain: false,
       atOnce: 1,
       failures: ["TimeoutError", "TimeoutError"],
     });

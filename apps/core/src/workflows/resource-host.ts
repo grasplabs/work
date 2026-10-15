@@ -251,6 +251,8 @@ export class ResourceRunHost
   #tampered: Error | undefined;
   /** Whether the Loader stopped the isolate past its CPU time. */
   #isolateStopped = false;
+  /** The tasks whose step this activation asked for: each at most once. */
+  readonly #asked = new Set<string>();
   /** What is left of this activation's fuel for expressions. */
   #activationFuel: number;
 
@@ -290,12 +292,19 @@ export class ResourceRunHost
     const task = this.#run.build.tasks.find(
       (sealed) => sealed.id === id && sealed.kind === kind
     );
-    return (
-      task ??
-      this.#refuse(
+    if (task === undefined) {
+      return this.#refuse(
         `The build has no ${kind} task as ${String(name).slice(0, 80)}.`
-      )
-    );
+      );
+    }
+    // Each step at most once an activation, as generated code asks for it,
+    // before anything is read: a module asking again, at once or in turn,
+    // costs core nothing more.
+    if (this.#asked.has(task.id)) {
+      return this.#refuse(`Step of task "${task.id}" runs once.`);
+    }
+    this.#asked.add(task.id);
+    return task;
   }
 
   /** The person the run acts for must still be an active member. */
