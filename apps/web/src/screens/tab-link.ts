@@ -19,6 +19,8 @@ import type { LinkEnded } from "./core-link.ts";
 /** A link to core that a tab's frames share: what `TabLinks` needs of one. */
 export interface SharedLink {
   close: () => void;
+  /** Whether its first connection failed for good (core-link.ts). */
+  readonly failedToStart: boolean;
 }
 
 /** A frame's place on the tab's link. */
@@ -57,7 +59,7 @@ export class TabLinks<Link extends SharedLink> {
    * frame is on it.
    */
   join(onEnded: Ended): Joined<Link> {
-    const opened = this.#current ?? this.#opened();
+    const opened = this.#live() ?? this.#opened();
     opened.frames.add(onEnded);
     return {
       link: opened.link,
@@ -68,6 +70,33 @@ export class TabLinks<Link extends SharedLink> {
         opened.frames.delete(onEnded);
       },
     };
+  }
+
+  /**
+   * The tab's link, unless its first connection failed for good: a link
+   * never tries that again, so it is given up on, and a new one opened.
+   * Its frames aren't told: each saw that connection fail.
+   */
+  #live(): Opened<Link> | undefined {
+    const current = this.#current;
+    if (current?.link.failedToStart === true) {
+      this.#retire(current);
+      return undefined;
+    }
+    return current;
+  }
+
+  /** Closes `opened` without telling its frames; the next join opens anew. */
+  #retire(opened: Opened<Link>): void {
+    if (opened.ended) {
+      return;
+    }
+    opened.ended = true;
+    if (this.#current === opened) {
+      this.#current = undefined;
+    }
+    opened.link.close();
+    opened.frames.clear();
   }
 
   /** A new link, the tab's from now on. */
@@ -90,16 +119,12 @@ export class TabLinks<Link extends SharedLink> {
     if (opened.ended) {
       return;
     }
-    opened.ended = true;
-    if (this.#current === opened) {
-      this.#current = undefined;
-    }
-    opened.link.close();
-    // Each frame told may leave as it stops, which a set allows.
-    for (const frame of opened.frames) {
+    // A copy: retiring the link forgets its frames.
+    const frames = [...opened.frames];
+    this.#retire(opened);
+    for (const frame of frames) {
       frame(why);
     }
-    opened.frames.clear();
   }
 }
 

@@ -233,7 +233,16 @@ interface Frame {
    * What one frame keeps through its calls (`ScreenFrameRpc`), let go of
    * when it closes; none for the connection's own calls.
    */
-  held?: Set<Disposable>;
+  held?: Holder;
+}
+
+/**
+ * What a frame keeps until it closes: `keep` lets go at once of what
+ * arrives once the frame has closed, `forget` drops what was let go of.
+ */
+interface Holder {
+  keep: (held: Disposable) => void;
+  forget: (held: Disposable) => void;
 }
 
 /** A function the App gets for a callback the screen passed. */
@@ -261,7 +270,7 @@ const refusals = {
 export const argumentsFor = (
   args: unknown[],
   stillOpen: StillOpen,
-  held?: Set<Disposable>
+  held?: Holder
 ): { passed: unknown[]; callbacks: Disposable[] } => {
   if (
     !args.every(
@@ -284,12 +293,13 @@ export const argumentsFor = (
       return arg;
     }
     // Kept by the frame that passed it, if any, until it is let go of:
-    // closing the frame lets go of it too.
+    // closing the frame lets go of it too, and a frame that closed while
+    // this call was admitted keeps none.
     const callback = callbackFor(arg, stillOpen, refusals, () => {
-      held?.delete(callback);
+      held?.forget(callback);
     });
-    held?.add(callback);
     callbacks.push(callback);
+    held?.keep(callback);
     return callback;
   });
   return { passed, callbacks };
@@ -575,8 +585,27 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
             stage: "push",
           }));
       },
-      held: this.#held,
+      held: {
+        keep: (held) => {
+          this.#keep(held);
+        },
+        forget: (held) => {
+          this.#held.delete(held);
+        },
+      },
     };
+  }
+
+  /**
+   * Keeps `held` until the frame closes; a frame that closed while it was
+   * being made (its call admitted, its subscription opened) lets go of it
+   * at once.
+   */
+  #keep(held: Disposable): void {
+    this.#held.add(held);
+    if (this.#closed) {
+      held[Symbol.dispose]();
+    }
   }
 
   /** The person behind the connection, still the frame's, if it is open. */
@@ -621,11 +650,7 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
       this.#held.delete(hold);
       await subscription.release();
     });
-    this.#held.add(hold);
-    if (this.#closed) {
-      // Closed while it was being made: let go of at once.
-      hold[Symbol.dispose]();
-    }
+    this.#keep(hold);
     return hold;
   }
 
