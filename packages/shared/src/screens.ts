@@ -440,7 +440,7 @@ export const screenErrors = defineErrorFamily({
     "The app's screens are still building. Try again in a moment.",
   "screen.invalid": "That isn't a valid request for a screen.",
   "screen.too_many_subscriptions":
-    "A screen follows at most 20 workflows' runs at a time.",
+    "This page follows at most 20 workflows' runs at once. Close a screen, then try again.",
   "screen.too_many_queries":
     "This page follows too many live queries at once. Close a screen, then try again.",
   "screen.rate_limited":
