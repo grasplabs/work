@@ -187,7 +187,7 @@ test("reads the packages again when a decision fails, keeping why", async ({
   // Why it failed stays; the list behind it is read again.
   await expect(dialog.getByRole("alert")).toBeVisible();
   await expect(
-    page.getByText("No packages are approved for this engine.")
+    page.getByText("No packages are approved for this domain.")
   ).toBeVisible();
 });
 

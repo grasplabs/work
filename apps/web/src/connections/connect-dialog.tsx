@@ -362,7 +362,7 @@ const ComposioFlow = ({ integration }: { integration: Integration }) => {
           <Trans>
             Read-only is ticked where Composio says a tool only reads; Grasp
             doesn&apos;t check that. A read-only tool runs without asking. A
-            call of any other tool from chat, or from a person using an engine,
+            call of any other tool from chat, or from a person using a domain,
             waits for that person to confirm it; a workflow&apos;s run makes it
             as one of its steps. Mark a tool read-only only if it changes
             nothing: marked wrongly, it changes things without asking.
