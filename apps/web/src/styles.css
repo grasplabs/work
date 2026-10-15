@@ -1155,3 +1155,94 @@
     radial-gradient(50% 100% at 50% 0, #000 96%, transparent) bottom /
       calc(var(--tear) * 2) var(--tear) round;
 }
+
+/*
+ * From the prototype (packages/grasp/src/index.css and
+ * components/onboarding/): the client onboarding (routes/setup.tsx). Its
+ * frame's foot: the mark, where you are in the middle, the language.
+ */
+@utility setup-footer {
+  grid-template-columns: 1fr auto 1fr;
+}
+
+/* Who leads each team and whether it takes part: a row a team, the list no taller than the window leaves. */
+@utility setup-org-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 12rem) auto;
+}
+@utility setup-org-list {
+  max-height: 40svh;
+}
+
+/* How far each team is: its name, its bar, its count. */
+@utility setup-team-row {
+  grid-template-columns: 8.5rem minmax(0, 1fr) 5rem;
+}
+
+/* A document in the onboarding's list: its icon, its name and state, its button. */
+@utility document-row {
+  grid-template-columns: 2.5rem minmax(0, 1fr) auto;
+}
+
+/*
+ * Where documents are dropped (onboarding/document-drop.tsx), beside the
+ * wash, glow and breath above: its edge is drawn in dashes that close into
+ * one line under a file, and a file it can't read shakes it.
+ */
+@utility drop-shake {
+  animation: drop-shake 0.42s ease-out;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+@keyframes drop-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  16% {
+    transform: translateX(-7px);
+  }
+  33% {
+    transform: translateX(6px);
+  }
+  50% {
+    transform: translateX(-4px);
+  }
+  66% {
+    transform: translateX(3px);
+  }
+  83% {
+    transform: translateX(-1.5px);
+  }
+}
+@utility drop-edge {
+  stroke-dasharray: 3.5 3.5;
+  stroke-dashoffset: 0;
+  transition:
+    stroke-dasharray 0.35s cubic-bezier(0.23, 1, 0.32, 1),
+    stroke-dashoffset 0.35s cubic-bezier(0.23, 1, 0.32, 1),
+    stroke 0.15s;
+}
+@utility drop-edge-closed {
+  stroke-dasharray: 7 0;
+  stroke-dashoffset: 1.75;
+}
+
+/* A document read: the circle closes, then the tick draws through it. */
+@utility drawn-check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: drawn-check 0.42s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+@utility drawn-check-late {
+  animation-delay: 0.16s;
+}
+@keyframes drawn-check {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
