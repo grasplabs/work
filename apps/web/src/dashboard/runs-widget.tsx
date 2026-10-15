@@ -297,7 +297,7 @@ const Workflows = ({ activity }: { activity: RunActivity }) => {
               <Trans>Workflow</Trans>
             </TableHead>
             <TableHead>
-              <Trans>Engine</Trans>
+              <Trans>Domain</Trans>
             </TableHead>
             <TableHead className="text-right">
               <Trans>Started</Trans>

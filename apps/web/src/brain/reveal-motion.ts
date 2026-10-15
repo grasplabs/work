@@ -1,19 +1,17 @@
+/* oxlint-disable no-bitwise, unicorn/prefer-math-trunc -- the Hilbert curve and the generator are integer bit arithmetic, kept as the prototype has them so they give the same numbers */
 /**
- * The maths of the dots that fly out of the brain and build a page: which dot goes where, and how
- * it eases. Kept apart from the drawing, so it can be tested. Ported from the prototype
- * (grasplabs/prototype, packages/grasp: lib/reveal-motion.ts).
+ * The maths of the way into the platform, where the brain's dots fly out and build the page:
+ * which dot goes where, and how it eases. Kept apart from the drawing, so it can be tested. Ported
+ * whole from the prototype (grasplabs/prototype, packages/grasp: lib/reveal-motion.ts); the
+ * Integrations banner lays its fibres with `seeded`, so it must be this generator, not the chat
+ * sign's.
  */
-
-/* oxlint-disable no-bitwise, unicorn/prefer-math-trunc -- a Hilbert curve and a seeded random are 32-bit integer arithmetic, as the prototype's: Math.trunc would change their numbers */
 
 /** Points, as two lists of coordinates. */
 export interface Points {
   x: ArrayLike<number>;
   y: ArrayLike<number>;
 }
-
-const at = (values: ArrayLike<number>, index: number): number =>
-  values[index] ?? 0;
 
 /**
  * Where a point falls along a Hilbert curve over the unit square, split into 2^order cells a
@@ -49,22 +47,22 @@ const alongCurve = (points: Points): number[] => {
   let top = Infinity;
   let right = -Infinity;
   let bottom = -Infinity;
-  for (let index = 0; index < count; index += 1) {
-    left = Math.min(left, at(points.x, index));
-    right = Math.max(right, at(points.x, index));
-    top = Math.min(top, at(points.y, index));
-    bottom = Math.max(bottom, at(points.y, index));
+  for (let at = 0; at < count; at += 1) {
+    left = Math.min(left, points.x[at] ?? 0);
+    right = Math.max(right, points.x[at] ?? 0);
+    top = Math.min(top, points.y[at] ?? 0);
+    bottom = Math.max(bottom, points.y[at] ?? 0);
   }
   const width = Math.max(right - left, 1e-6);
   const height = Math.max(bottom - top, 1e-6);
-  const keys = Array.from({ length: count }, (_, index) =>
+  const keys = Array.from({ length: count }, (_, at) =>
     curveIndex(
-      (at(points.x, index) - left) / width,
-      (at(points.y, index) - top) / height
+      ((points.x[at] ?? 0) - left) / width,
+      ((points.y[at] ?? 0) - top) / height
     )
   );
-  return Array.from({ length: count }, (_, index) => index).toSorted(
-    (a, b) => at(keys, a) - at(keys, b)
+  return Array.from({ length: count }, (_, at) => at).toSorted(
+    (a, b) => (keys[a] ?? 0) - (keys[b] ?? 0)
   );
 };
 
@@ -81,37 +79,31 @@ export const pairAlongCurve = (dots: Points, targets: Points): Int32Array => {
   const targetOrder = alongCurve(targets);
   const matched = Math.min(dotOrder.length, targetOrder.length);
   for (let rank = 0; rank < matched; rank += 1) {
-    const dot = at(dotOrder, Math.floor((rank * dotOrder.length) / matched));
-    const target = at(
-      targetOrder,
-      Math.floor((rank * targetOrder.length) / matched)
-    );
-    pairs[dot] = target;
+    const dot = dotOrder[Math.floor((rank * dotOrder.length) / matched)];
+    const target =
+      targetOrder[Math.floor((rank * targetOrder.length) / matched)];
+    if (dot !== undefined && target !== undefined) {
+      pairs[dot] = target;
+    }
   }
   return pairs;
 };
 
-export const clamp01 = (value: number): number =>
-  Math.min(Math.max(value, 0), 1);
-
+export const clamp01 = (value: number) => Math.min(Math.max(value, 0), 1);
 /** Fast out of the gate and slowing all the way in: a burst that settles. */
-export const easeOut = (t: number): number => 1 - (1 - t) ** 2.2;
-
+export const easeOut = (t: number) => 1 - (1 - t) ** 2.2;
 /** Under way from the first moment, though from standing still, and slowing all the way in: for what leaves at once and lands softly. */
-export const glide = (t: number): number =>
-  (1 - Math.cos(Math.PI * t ** 0.8)) / 2;
+export const glide = (t: number) => (1 - Math.cos(Math.PI * t ** 0.8)) / 2;
+export const easeInCubic = (t: number) => t * t * t;
+export const easeInQuad = (t: number) => t * t;
 
-export const easeInCubic = (t: number): number => t * t * t;
-
-export const easeInQuad = (t: number): number => t * t;
-
-/** A small seeded random (mulberry32), so the same page builds the same way each time. */
+/** A small seeded random, so the same page builds the same way each time. */
 export const seeded = (seed: number): (() => number) => {
   let state = seed;
   return () => {
     state = (state + 0x6d_2b_79_f5) | 0;
-    let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
-    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed);
-    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    return ((t ^ (t >>> 14)) >>> 0) / 4_294_967_296;
   };
 };

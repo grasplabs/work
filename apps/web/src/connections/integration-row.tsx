@@ -1,24 +1,58 @@
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
-import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link } from "@tanstack/react-router";
 import { CheckIcon } from "lucide-react";
 import { useState } from "react";
 
-import { formatList } from "../format.ts";
 import { AppLogo } from "./app-logo.tsx";
 import { canConnect, canReconnect, ConnectDialog } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
-import { stateOf } from "./integrations.ts";
+import { kindOf, stateOf } from "./integrations.ts";
 
 // One app in the Integrations list, as the prototype's row
 // (`components/integration-row.tsx`, `integration-button.tsx`): its tile,
 // its name to open it, what it is for, and its button: Connect, Sign in
 // again, or Connected, which says Manage under the pointer or focus.
 
-/** Connected: Manage under the pointer or keyboard focus, both labels in one place so it keeps its width. */
+/**
+ * Measures the two labels of a Manage button, so it slides from one's
+ * width to the other's, and keeps a strip on its left while it is narrower,
+ * so the pointer stays on it and it does not flicker back. Measured again
+ * once the fonts are in.
+ */
+const measureFaces = (element: HTMLElement | null): void => {
+  if (element === null) {
+    return;
+  }
+  const measure = () => {
+    const [connected, manage] =
+      element.querySelectorAll<HTMLElement>("[data-face]");
+    if (connected === undefined || manage === undefined) {
+      return;
+    }
+    element.style.setProperty("--face", `${connected.offsetWidth}px`);
+    element.style.setProperty("--face-hover", `${manage.offsetWidth}px`);
+    element.style.setProperty(
+      "--face-slack",
+      `${Math.max(0, connected.offsetWidth - manage.offsetWidth)}px`
+    );
+  };
+  const measureOnceFontsAreIn = async (): Promise<void> => {
+    await document.fonts.ready;
+    measure();
+  };
+  measure();
+  void measureOnceFontsAreIn();
+};
+
+/**
+ * Connected, which becomes Manage under the pointer or keyboard focus: the
+ * two labels cross-fade and the button slides to the new label's width.
+ * Its labels change width with the language, so the page mounts it again
+ * for another language (`key`).
+ */
 const ManageLink = ({
   integration,
   shared,
@@ -31,6 +65,8 @@ const ManageLink = ({
   const app = integration.name;
   return (
     <Button
+      className="relative"
+      ref={measureFaces}
       aria-label={
         shared
           ? t`Manage ${app}, connected for everyone`
@@ -46,13 +82,25 @@ const ManageLink = ({
       size="sm"
       variant="secondary"
     >
-      <span className="grid">
-        <span className="col-start-1 row-start-1 flex items-center justify-center gap-1 transition-opacity duration-150 group-hover/button:opacity-0 group-focus-visible/button:opacity-0">
-          <CheckIcon aria-hidden="true" className="size-3.5" />
-          <Trans context="state of one app">Connected</Trans>
-        </span>
-        <span className="col-start-1 row-start-1 opacity-0 transition-opacity duration-150 group-hover/button:opacity-100 group-focus-visible/button:opacity-100">
-          <Trans>Manage</Trans>
+      <span
+        aria-hidden="true"
+        className="absolute inset-y-0 right-full hidden w-(--face-slack) group-hover/button:block"
+      />
+      <span className="block w-(--face) overflow-hidden transition-all duration-200 ease-out group-hover/button:w-(--face-hover) group-focus-visible/button:w-(--face-hover)">
+        <span className="grid w-max">
+          <span
+            className="col-start-1 row-start-1 flex w-max items-center gap-1 transition-opacity duration-150 group-hover/button:opacity-0 group-focus-visible/button:opacity-0"
+            data-face
+          >
+            <CheckIcon aria-hidden="true" className="size-3.5" />
+            <Trans context="state of one app">Connected</Trans>
+          </span>
+          <span
+            className="col-start-1 row-start-1 w-max opacity-0 transition-opacity duration-150 group-hover/button:opacity-100 group-focus-visible/button:opacity-100"
+            data-face
+          >
+            <Trans>Manage</Trans>
+          </span>
         </span>
       </span>
     </Button>
@@ -67,7 +115,7 @@ const IntegrationButton = ({
   integration: Integration;
   identity: Identity;
 }) => {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   // Held above the swap below, so the dialog stays as the row changes.
   const [open, setOpen] = useState(false);
   const app = integration.name;
@@ -113,7 +161,13 @@ const IntegrationButton = ({
     );
   }
   if (state !== "not_connected") {
-    return <ManageLink integration={integration} shared={state === "shared"} />;
+    return (
+      <ManageLink
+        integration={integration}
+        key={i18n.locale}
+        shared={state === "shared"}
+      />
+    );
   }
   if (!canConnect(integration, identity)) {
     return null;
@@ -140,47 +194,12 @@ const IntegrationButton = ({
   );
 };
 
-/** For whom it is connected, once it is: everyone, or this person alone. */
-const ScopeBadge = ({ integration }: { integration: Integration }) => {
-  const state = stateOf(integration);
-  if (state === "shared") {
-    return (
-      <Badge variant="secondary">
-        <Trans>For everyone</Trans>
-      </Badge>
-    );
-  }
-  return state === "personal" ? (
-    <Badge variant="secondary">
-      <Trans>Only you</Trans>
-    </Badge>
-  ) : null;
-};
-
-/** What the app is for: its kinds, and how many tools it has. */
-const About = ({ integration }: { integration: Integration }) => {
-  const { t } = useLingui();
-  const { toolCount } = integration;
-  const tools =
-    toolCount === undefined
-      ? undefined
-      : t`${plural(toolCount, { one: "# tool", other: "# tools" })}`;
-  const kinds =
-    integration.categories.length === 0
-      ? undefined
-      : formatList(integration.categories);
-  return (
-    <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
-      {kinds === undefined ? null : <span className="truncate">{kinds}</span>}
-      {kinds === undefined || tools === undefined ? null : (
-        <span aria-hidden="true">·</span>
-      )}
-      {tools === undefined ? null : <span className="flex-none">{tools}</span>}
-    </span>
-  );
-};
-
-/** One app: its tile, name and what it is for, and its button. No frame. */
+/**
+ * One app, as the prototype's row: its logo, its name to open it, what kind
+ * of app it is, and its button. What it does, in a sentence, shows when it
+ * is pointed at. No frame. An app the organization doesn't offer says so to
+ * the admins who see it.
+ */
 export const IntegrationRow = ({
   integration,
   identity,
@@ -188,25 +207,27 @@ export const IntegrationRow = ({
   integration: Integration;
   identity: Identity;
 }) => (
-  <li className="flex min-h-16 items-center gap-3 py-2">
-    <AppLogo name={integration.name} />
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="flex min-w-0 items-center gap-2">
-        <Link
-          className="w-fit max-w-full truncate font-medium underline-offset-4 outline-none hover:underline focus-visible:underline"
-          params={{ integration: integration.key }}
-          to="/integrations/$integration"
-        >
-          {integration.name}
-        </Link>
-        <ScopeBadge integration={integration} />
+  <li className="flex h-14 min-w-0 items-center gap-3">
+    <AppLogo logo={integration.logo} name={integration.name} />
+    <div
+      className="flex min-w-0 flex-1 flex-col gap-0.5"
+      title={integration.description ?? undefined}
+    >
+      <Link
+        className="w-fit max-w-full truncate font-medium underline-offset-4 outline-none hover:underline focus-visible:underline"
+        params={{ integration: integration.key }}
+        to="/integrations/$integration"
+      >
+        {integration.name}
+      </Link>
+      <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
+        <span className="truncate">{kindOf(integration)}</span>
         {integration.listed && !integration.offered ? (
           <Badge variant="outline">
             <Trans>Not offered</Trans>
           </Badge>
         ) : null}
       </span>
-      <About integration={integration} />
     </div>
     <IntegrationButton identity={identity} integration={integration} />
   </li>

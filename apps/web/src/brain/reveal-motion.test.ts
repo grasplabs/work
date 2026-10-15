@@ -2,9 +2,6 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { curveIndex, pairAlongCurve } from "./reveal-motion.ts";
 
-// Which dot of the brain flies where when a note's page is built from it
-// (reveal-motion.ts): pure numbers.
-
 describe(curveIndex, () => {
   it("visits every cell once, each step to a neighbouring cell", () => {
     const order = 3;
@@ -16,11 +13,9 @@ describe(curveIndex, () => {
       }
     }
     expect(cells.filter(Boolean)).toHaveLength(n * n);
-    for (const [index, [bx, by]] of cells.entries()) {
-      if (index === 0) {
-        continue;
-      }
-      const [ax, ay] = cells[index - 1] ?? [0, 0];
+    for (let at = 1; at < cells.length; at += 1) {
+      const [ax = 0, ay = 0] = cells[at - 1] ?? [];
+      const [bx = 0, by = 0] = cells[at] ?? [];
       expect(Math.abs(ax - bx) + Math.abs(ay - by)).toBe(1);
     }
   });
@@ -43,7 +38,7 @@ describe(pairAlongCurve, () => {
   it("gives every target one dot when there are as many of each", () => {
     const pairs = pairAlongCurve(grid(8, 1, 0), grid(8, 30, 100));
     expect([...pairs].toSorted((a, b) => a - b)).toStrictEqual(
-      Array.from({ length: 64 }, (_, index) => index)
+      Array.from({ length: 64 }, (_, at) => at)
     );
   });
 
@@ -51,9 +46,9 @@ describe(pairAlongCurve, () => {
     const dots = grid(8, 1, 0);
     const targets = grid(8, 30, 100);
     const pairs = pairAlongCurve(dots, targets);
-    for (const [index, pair] of pairs.entries()) {
-      const left = (dots.x[index] ?? 0) < 4;
-      const top = (dots.y[index] ?? 0) < 4;
+    for (const [at, pair] of pairs.entries()) {
+      const left = (dots.x[at] ?? 0) < 4;
+      const top = (dots.y[at] ?? 0) < 4;
       expect((targets.x[pair] ?? 0) < 100 + 4 * 30).toBe(left);
       expect((targets.y[pair] ?? 0) < 100 + 4 * 30).toBe(top);
     }
