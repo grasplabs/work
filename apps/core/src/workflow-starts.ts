@@ -718,6 +718,35 @@ const sameStart = (
 };
 
 /**
+ * The refusal of a start of version `version` of workflow `id` decided on
+ * `decided` (its policy generation and parameter revision): stale, for a
+ * caller that decides again as for an admission's, when what it was
+ * decided on changed as it was read (a member, a parameter edit).
+ */
+const deniedAt = async (
+  env: Env,
+  id: string,
+  version: number,
+  decided: { generation: number; configRevision: number }
+): Promise<Error> => {
+  const refused = denied();
+  let now: Awaited<ReturnType<typeof pinned>> | undefined;
+  try {
+    now = await pinned(env, id, version);
+  } catch {
+    // Gone or never published: no fresh decision would start it.
+    return refused;
+  }
+  if (
+    now.generation !== decided.generation ||
+    now.configRevision !== decided.configRevision
+  ) {
+    staleRefusals.add(refused);
+  }
+  return refused;
+};
+
+/**
  * Decides on `request` (`workflowStartSchema`: the exact version, the
  * input and the invoker's idempotency key) to start workflow `id` for
  * `invoker` (see the rules above). The invoker's own access is checked
@@ -864,7 +893,7 @@ export const decideWorkflowStart = async (
     sql`SELECT ${holds} AS holds`
   );
   if (decided.holds === 0) {
-    throw denied();
+    throw await deniedAt(env, id, version, { generation, configRevision });
   }
   return {
     authorization: {
@@ -916,7 +945,12 @@ export const admitWorkflowStart = async (
   authorization: StartAuthorization,
   also: SQL = sql`1`,
   /** What else its audit events name (the agent that had it made, say). */
-  noted: Readonly<Record<string, string>> = {}
+  noted: Readonly<Record<string, string>> = {},
+  /**
+   * Asked last before the admitting batch, nothing awaited between:
+   * throws to start nothing (a caller that may no longer act).
+   */
+  beforeAdmit?: () => void
 ): Promise<WorkflowStart> => {
   const id = crypto.randomUUID();
   const createdAt = new Date();
@@ -962,6 +996,7 @@ export const admitWorkflowStart = async (
   // Why it wasn't admitted, if it isn't: read in the admitting batch, just
   // before its insert, so the reason is the state it was refused in.
   let refusedFor: { under: number } | undefined;
+  beforeAdmit?.();
   try {
     const [[state]] = await auditedBatch(env, db, [
       db
@@ -1066,13 +1101,16 @@ export const startWorkflow = async (
   beforeAdmit?: () => void
 ): Promise<WorkflowStart> => {
   const decision = await decideWorkflowStart(env, invoker, id, request);
-  if (!("start" in decision)) {
-    beforeAdmit?.();
-  }
   const start =
     "start" in decision
       ? decision.start
-      : await admitWorkflowStart(env, decision.authorization, also, noted);
+      : await admitWorkflowStart(
+          env,
+          decision.authorization,
+          also,
+          noted,
+          beforeAdmit
+        );
   // Its run, sent to the engine while it is still starting: a start sent
   // again finishes one core stopped in the middle of (resource-runs.ts).
   return { ...start, runId: await startResourceRun(env, start.id) };

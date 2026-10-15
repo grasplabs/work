@@ -546,9 +546,11 @@ const call = async (
     gate?: { passes: number; onPass?: (passes: number) => void };
     /** Aborted once the caller cancels the call. */
     cancelled?: AbortSignal;
+    /** The env the call's host reaches core through: core's own if unset. */
+    runEnv?: Env;
   } = {}
 ): Promise<OperationResult> => {
-  const invocation = await invocationFor(env, fx.release, {
+  const invocation = await invocationFor(options.runEnv ?? env, fx.release, {
     by,
     requestId: crypto.randomUUID(),
     deadline: Date.now() + 30_000,
@@ -1256,6 +1258,74 @@ describe("what a start rechecks, and records", () => {
     }).toStrictEqual({ answer: "delivered", receipts: 1 });
   });
 
+  it("decides again when a parameter edit lands as the start is decided, before its admission", async () => {
+    const fx = await fixture();
+    const real = env.DB;
+    const raced = { done: false };
+    // The edit lands just before the decision's last read of what it was
+    // decided on.
+    const racing = async (): Promise<void> => {
+      if (!raced.done) {
+        raced.done = true;
+        await setWorkflowParams(env, fx.ada, fx.workflowId, {
+          expectedRevision: 0,
+          values: { greeting: "Hi" },
+        });
+      }
+    };
+    const deciding = /config_revision[\s\S]*as holds/iu;
+    const db: D1Database = {
+      prepare: (statement) => {
+        const prepared = real.prepare(statement);
+        if (!deciding.test(statement)) {
+          return prepared;
+        }
+        return new Proxy(prepared, {
+          get: (target, property) => {
+            if (property === "bind") {
+              return (...values: unknown[]) => {
+                const bound = target.bind(...values);
+                return new Proxy(bound, {
+                  get: (inner, method) => {
+                    const value: unknown = Reflect.get(inner, method);
+                    if (typeof value !== "function") {
+                      return value;
+                    }
+                    return async (...rest: unknown[]): Promise<unknown> => {
+                      await racing();
+                      const result: unknown = await Reflect.apply(
+                        value,
+                        inner,
+                        rest
+                      );
+                      return result;
+                    };
+                  },
+                });
+              };
+            }
+            const value: unknown = Reflect.get(target, property);
+            return typeof value === "function"
+              ? (...rest: unknown[]): unknown =>
+                  Reflect.apply(value, target, rest)
+              : value;
+          },
+        });
+      },
+      batch: async (statements) => await real.batch(statements),
+      exec: async (statement) => await real.exec(statement),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    const answer = await dispatched({ ...env, DB: db }, entryOf(fx, fx.bob));
+    expect({
+      raced: raced.done,
+      answer,
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({ raced: true, answer: "delivered", receipts: 1 });
+  });
+
   it("hands a start back to its outbox while every decision goes stale, and starts it once the edits stop", async () => {
     const fx = await fixture();
     const edits = { revision: 0 };
@@ -1596,6 +1666,50 @@ describe("what a start rechecks, and records", () => {
       refused: !started.ok,
       receipts: await receiptCount(fx.app),
     }).toStrictEqual({ refused: true, receipts: 0 });
+  });
+
+  it("tells an action its start stopped at its deadline as it was decided, never an unexpected failure", async () => {
+    const fx = await fixture();
+    const restores: (() => void)[] = [];
+    const real = env.DB;
+    // The deadline passes as the start's binding is read, past the
+    // action's own check of it.
+    const db: D1Database = {
+      prepare: (statement) => {
+        if (/from "app_workflow_bindings"/iu.test(statement)) {
+          const later = vi
+            .spyOn(Date, "now")
+            .mockReturnValue(Date.now() + 120_000);
+          restores.push(() => {
+            later.mockRestore();
+          });
+        }
+        return real.prepare(statement);
+      },
+      batch: async (statements) => await real.batch(statements),
+      exec: async (statement) => await real.exec(statement),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    let started: OperationResult;
+    try {
+      started = await call(
+        fx,
+        fx.bob,
+        "requests.kickOff",
+        { who: "Bob" },
+        { runEnv: { ...env, DB: db } }
+      );
+    } finally {
+      for (const restore of restores) {
+        restore();
+      }
+    }
+    expect({
+      answer: answerOf(started),
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({ answer: "operation.deadline_exceeded", receipts: 0 });
   });
 
   it("stops once its hand-over's time is up, starting nothing", async () => {

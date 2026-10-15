@@ -1765,6 +1765,15 @@ const workflowStart = (
  * `internal.unexpected`, its cause logged.
  */
 const startFailure = (error: unknown, requestId: string): Error => {
+  // Stopped as it was about to be admitted (`requireGoing`): said as such.
+  const stopped = operationErrors.codeOf(error);
+  if (
+    error instanceof Error &&
+    (stopped === "operation.cancelled" ||
+      stopped === "operation.deadline_exceeded")
+  ) {
+    return hostError(error);
+  }
   const code = workflowResourceErrors.codeOf(error);
   if (code === "workflow.start_invalid") {
     return hostError(operationErrors.create("resource.invalid_args"));
