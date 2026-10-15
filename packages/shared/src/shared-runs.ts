@@ -11,13 +11,17 @@ import { deadline, whenAborted } from "./deadline.ts";
 // work's own bounds); past it, the work is taken for abandoned, and the
 // first waiter to find it so starts its own in its place, which every
 // other waiter, and whoever asks next, then shares: one replacement, not
-// one per waiter.
+// one per waiter. The abandoned entry keeps a link to its replacement, so
+// a waiter whose time runs out after the replacement already finished
+// still shares it rather than starting another.
 
 /** One request's work, as the others see it. */
 export interface SharedRun<T> {
   readonly promise: Promise<T>;
   /** When it started, by `Date.now()`. */
   readonly started: number;
+  /** The work that took its place once it was taken for abandoned. */
+  replacedBy?: SharedRun<T>;
 }
 
 /**
@@ -62,11 +66,9 @@ export const sharedRun = async <T>(
   abandonAfterMs: number,
   start: () => Promise<T>
 ): Promise<T> => {
-  for (;;) {
-    const running = runs.get(key);
-    if (running === undefined) {
-      break;
-    }
+  let running = runs.get(key);
+  let replaced: SharedRun<T> | undefined;
+  while (running !== undefined) {
     const left = running.started + abandonAfterMs - Date.now();
     // One wait after the other: each on the work running now.
     const settled =
@@ -75,13 +77,18 @@ export const sharedRun = async <T>(
     if (settled !== "elapsed") {
       return settled.value;
     }
-    if (runs.get(key) === running) {
+    if (running.replacedBy === undefined) {
       // Abandoned, and found so first here: this request replaces it.
+      replaced = running;
       break;
     }
-    // Another waiter replaced it already: wait on that.
+    // Another waiter replaced it already, finished or not: share that.
+    running = running.replacedBy;
   }
   const run: SharedRun<T> = { promise: start(), started: Date.now() };
+  if (replaced !== undefined) {
+    replaced.replacedBy = run;
+  }
   runs.set(key, run);
   try {
     return await run.promise;
