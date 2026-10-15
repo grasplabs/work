@@ -328,7 +328,9 @@ const removeMember = async (
       throw refusal(by, roleErrors.create("role.forbidden"));
     }
     if (removedNow) {
-      await accessMayHaveDropped(env, reached, [target]);
+      // And again now: an App shared with them while this ran.
+      const since = await appsReachedBy(env, target, membership.role);
+      await accessMayHaveDropped(env, [...reached, ...since], [target]);
     }
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
@@ -436,7 +438,11 @@ const setMemberRole = async (
     }),
   ]);
   if (changed) {
-    await accessMayHaveDropped(env, reached, [target.data]);
+    if (lowers(membership.role, newRole)) {
+      // And again now: an App shared with them while this ran.
+      const since = await appsReachedBy(env, target.data, membership.role);
+      await accessMayHaveDropped(env, [...reached, ...since], [target.data]);
+    }
     return;
   }
   const now = await membershipOf(env, target.data);

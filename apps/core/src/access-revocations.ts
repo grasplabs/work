@@ -104,10 +104,19 @@ const appsSharedWithPeople = async (
   return rows.map(({ appId }) => appIdSchema.parse(appId));
 };
 
+/** Every App shared with someone: whom a change of unknown people may reach. */
+const appsSharedWithAnyone = async (env: Env): Promise<AppId[]> => {
+  const rows = await drizzle(env.DB)
+    .selectDistinct({ appId: appMembers.appId })
+    .from(appMembers);
+  return rows.map(({ appId }) => appIdSchema.parse(appId));
+};
+
 /**
  * `accessMayHaveDropped` once `userIds` left team `teamId`: the Apps
  * shared with the team, and those shared with them otherwise, whose
- * provenance the team may have been what let them read. Never throws:
+ * provenance the team may have been what let them read. Who left unknown
+ * (`null`): every App shared with anyone, for everyone. Never throws:
  * Better Auth's change has committed already.
  */
 export const teamAccessMayHaveDropped = async (
@@ -118,7 +127,9 @@ export const teamAccessMayHaveDropped = async (
   try {
     const [shared, theirs] = await Promise.all([
       appsSharedWith(env, teamId),
-      appsSharedWithPeople(env, userIds ?? []),
+      userIds === null
+        ? appsSharedWithAnyone(env)
+        : appsSharedWithPeople(env, userIds),
     ]);
     await accessMayHaveDropped(env, [...shared, ...theirs], userIds);
   } catch (error) {

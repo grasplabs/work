@@ -409,6 +409,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   /** The Apps whose revocations this connection follows (`#follow`). */
   readonly #following = new Map<AppId, Following>();
 
+  /**
+   * How many times the person's access may have dropped (`#revoked`): a
+   * read that one landed during is read again rather than pushed.
+   */
+  #revocations = 0;
+
   constructor(env: Env, reads: LiveReads<By>) {
     this.#env = env;
     this.#reads = reads;
@@ -605,6 +611,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // The roles it is read under, looked at first: the read sees records
     // by roles at least as new, and a result whose roles changed since is
     // read again rather than pushed (`#send`).
+    const revocations = this.#revocations;
     const before = await this.#gate(evaluation);
     if ("refusal" in before) {
       await this.#end(evaluation, before.refusal);
@@ -657,7 +664,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       await this.#end(evaluation, after.refusal);
       return;
     }
-    if (after.roles !== before.roles || after.by !== before.by) {
+    if (after.roles !== before.roles || this.#revocations !== revocations) {
       evaluation.dirty = true;
       return;
     }
@@ -1159,6 +1166,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    * whose roles changed. Changes nothing for someone whose access holds.
    */
   #revoked(app: AppId): void {
+    this.#revocations += 1;
     this.#reads.forget();
     this.#cleared.clear();
     for (const evaluation of this.#evaluations.values()) {
@@ -1176,7 +1184,16 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       evaluation.roles !== undefined &&
       gate.roles !== evaluation.roles
     ) {
-      // Admitted as the person's own look, so not charged.
+      // What its screens show was read under roles the person no longer
+      // has: cleared now, by a result that carries nothing and ends
+      // nothing, not only once a read under their roles succeeds (one
+      // that fails to try again keeps what was last pushed). Then read
+      // again, admitted as the person's own look, so not charged.
+      this.#publish(
+        evaluation,
+        refusalResult(screenErrors.create("screen.access_changed")),
+        gate.roles
+      );
       this.#enqueue(evaluation, false);
     }
   }
