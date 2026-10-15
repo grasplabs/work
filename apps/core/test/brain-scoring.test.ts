@@ -40,7 +40,6 @@ const observed = (changes: Partial<TrialObservation>): TrialObservation => {
     answer: "ANSWER: Marta Ruiz\nFrom [handbook/contracts.md#Lease]",
     modelInput,
     transcript: [{ by: "source", text: modelInput }],
-    readTexts: ["## Lease\nOwner: Marta Ruiz."],
     forbidden: ["CANARY-1"],
     stateChanged: false,
     latencyMs: 10,
@@ -63,6 +62,16 @@ const verdict = (
     citationSupport: score.citationSupport,
   };
 };
+
+/** The contract's section, as a Knowledge read returns it. */
+const leaseSection = ["## Lease\nOwner: Marta Ruiz."];
+
+/** A tool result, backed by what its step's reads returned. */
+const tool = (text: string, backing: readonly string[] = leaseSection) => ({
+  by: "tool" as const,
+  text,
+  backing,
+});
 
 describe("scoring a trial", () => {
   it("completes a right, cited answer from evidence that reached the model", () => {
@@ -95,7 +104,7 @@ describe("scoring a trial", () => {
     });
   });
 
-  it("credits evidence a source gave first, or a tool returned in its stored line, never what the model wrote", () => {
+  it("credits evidence a source gave first, or its own step's read returned, never what the model made", () => {
     const marker = "Owner: Marta Ruiz";
     const line = `${marker}.`;
     expect({
@@ -104,31 +113,35 @@ describe("scoring a trial", () => {
         transcript: [
           { by: "source", text: "Who owns the lease?" },
           { by: "model", text: `return "${line}";` },
-          { by: "tool", text: `Returned: ${line}` },
+          tool(`Returned: ${line}`),
         ],
       }),
       // Its code returned the section it read.
       read: verdict(contract, {
-        transcript: [{ by: "tool", text: `Returned: ## Lease\n${line}` }],
+        transcript: [tool(`Returned: ## Lease\n${line}`)],
       }).evidenceRecall,
       // It guessed the words in its code, then read the line that says them.
       guessedThenRead: verdict(contract, {
         transcript: [
           { by: "model", text: `search("${marker}")` },
-          { by: "tool", text: `Returned: ${line}` },
+          tool(`Returned: ${line}`),
         ],
       }).evidenceRecall,
       // Its code built the line from pieces and read nothing.
       constructed: verdict(contract, {
         transcript: [
           { by: "model", text: 'return ["Owner: ", "Marta Ruiz."].join("");' },
-          { by: "tool", text: `Returned: ${line}` },
+          tool(`Returned: ${line}`, []),
         ],
-        readTexts: [],
+      }).evidenceRecall,
+      // It built the line in one step and read the section, unreturned,
+      // in a later one: the read backs only its own step.
+      readLater: verdict(contract, {
+        transcript: [tool(`Returned: ${line}`, []), tool("Returned: done")],
       }).evidenceRecall,
       // Its code returned the words but not the line they stand in.
       wordsOnly: verdict(contract, {
-        transcript: [{ by: "tool", text: `Returned: ${marker} (probably)` }],
+        transcript: [tool(`Returned: ${marker} (probably)`)],
       }).evidenceRecall,
       // It read it, then quoted it in its next code: still the source's.
       quoted: verdict(contract, {
@@ -140,7 +153,7 @@ describe("scoring a trial", () => {
       // Read in an earlier request, left out of the last one.
       dropped: verdict(contract, {
         transcript: [
-          { by: "tool", text: `Returned: ${line}` },
+          tool(`Returned: ${line}`),
           { by: "source", text: "[earlier results left out]" },
         ],
       }).completed,
@@ -158,6 +171,7 @@ describe("scoring a trial", () => {
       read: 1,
       guessedThenRead: 1,
       constructed: 0,
+      readLater: 0,
       wordsOnly: 0,
       quoted: 1,
       dropped: true,

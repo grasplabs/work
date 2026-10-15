@@ -25,14 +25,12 @@ export interface TrialObservation {
   /**
    * The chat as the model read it, request after request, each part marked
    * by who wrote it. Evidence counts where a source gave it before the
-   * model wrote it, or where a tool result holds a whole line of text one
-   * of the agent's Knowledge reads in the trial returned (`readTexts`),
-   * before the model wrote that line itself: never words the model only
-   * wrote, or made in code, without reading them.
+   * model wrote it, or where a tool result holds a whole line that the
+   * Knowledge reads of its own step returned (its `backing`), before the
+   * model wrote that line itself: never words the model only wrote, or
+   * made in code, without reading them.
    */
   transcript: readonly TranscriptPart[];
-  /** What each of the agent's Knowledge reads in the trial returned. */
-  readTexts: readonly string[];
   /** Strings that must not reach a model or answer in this trial. */
   forbidden: readonly string[];
   /** Whether stored state changed during the trial. */
@@ -264,9 +262,12 @@ export const scoreTrial = (
     )
   );
   const input = normalized(observed.modelInput);
-  const parts = observed.transcript.map(({ by, text }) => ({
+  const parts = observed.transcript.map(({ by, text, backing = [] }) => ({
     by,
     text: normalized(text),
+    lines: backing.flatMap((read) =>
+      read.split("\n").map((line) => normalized(line))
+    ),
   }));
   const leaks = observed.forbidden.filter((secret) => {
     const forbidden = normalized(secret);
@@ -297,24 +298,20 @@ export const scoreTrial = (
       completed: abstained && authorized,
     };
   }
-  const storedLines = observed.readTexts.flatMap((text) =>
-    text.split("\n").map((line) => normalized(line))
-  );
   // A source gave it before the model wrote it, or a tool result holds a
-  // whole line with it that a read returned and no earlier part of the
-  // model's held.
-  // A guess the model made earlier doesn't spoil a read after it.
+  // whole line with it that its own step's reads returned, and no earlier
+  // part of the model's held that line.
   const reached = expect.evidence.filter(({ marker }) => {
     const words = normalized(marker);
-    const lines = storedLines.filter((line) => line.includes(words));
     const first = parts.find(({ text }) => text.includes(words));
     return (
       first?.by === "source" ||
       parts.some(
-        ({ by, text }, index) =>
+        ({ by, text, lines }, index) =>
           by === "tool" &&
           lines.some(
             (line) =>
+              line.includes(words) &&
               text.includes(line) &&
               !parts
                 .slice(0, index)

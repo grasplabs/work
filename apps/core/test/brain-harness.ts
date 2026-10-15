@@ -1,4 +1,3 @@
-import { sha256Hex } from "@grasp-os/shared/encoding";
 /**
  * The Brain baseline's harness (GRA-295, experiment E01): loads the frozen
  * company of brain-corpus.ts into core through its public APIs, then asks
@@ -23,6 +22,8 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
  * that into the report. The run's identity pins what the comparison
  * depends on, so two runs are compared only when they share it.
  */
+import type { AuditEvent } from "@grasp-os/shared/audit";
+import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -59,7 +60,7 @@ import {
   transcriptOf,
   stubReader,
 } from "./brain-stub-model.ts";
-import type { StubTurn } from "./brain-stub-model.ts";
+import type { StubTurn, TranscriptPart } from "./brain-stub-model.ts";
 import {
   brainCollections,
   brainDocuments,
@@ -544,8 +545,27 @@ const workspaceOf = async (company: BrainCompany, persona: BrainPersona) => {
 const providerOf = (respond: typeof stubReader) => {
   let turn: StubTurn = { phase: "prior" };
   const gateway = answeringGateway(respond(() => turn));
+  // What the audit log recorded between one request and the next, by
+  // request: the reads the step before each request made, in log order,
+  // not by clock. A request comes only after its step's code has ended.
+  const recorded: AuditEvent[][] = [];
+  let head = 0;
+  const { fetch } = gateway.binding;
+  const binding = {
+    ...gateway.binding,
+    fetch: async (input: Request | string | URL, init?: RequestInit) => {
+      recorded.push(await eventsAfter(head));
+      head = await logHead();
+      return await fetch(input, init);
+    },
+  };
   return {
-    gateway,
+    gateway: { ...gateway, binding },
+    recorded,
+    /** Where the log stands now: a trial's reads come after it. */
+    mark: async () => {
+      head = await logHead();
+    },
     setTurn: (next: StubTurn) => {
       turn = next;
     },
@@ -645,17 +665,16 @@ const contentRead = z.union([
  * the trial's state is taken, as the reads are recorded too.
  */
 /**
- * What the persona's agent read through Knowledge since audit position
- * `after`, as the audit log records each read that returns text (a
- * document, or one of its sections), read again as the person it acted
- * for. Read after the trial's state is taken, as reads are recorded too.
+ * What the persona's agent read through Knowledge in `events`, as the
+ * audit log records each read that returns text (a document, or one of
+ * its sections), read again as the person it acted for. Read after the
+ * trial's state is taken, as reads are recorded too.
  */
 const readTextsOf = async (
   person: Person,
   place: Workspace,
-  after: number
+  events: readonly AuditEvent[]
 ): Promise<string[]> => {
-  const events = await eventsAfter(after);
   // Explicit reads only: a search's snippets aren't recorded, so nothing
   // shows what it returned, and the evidence an answer needs is a whole
   // section, which the agent reads.
@@ -692,6 +711,29 @@ const readTextsOf = async (
   return texts.flat();
 };
 
+/**
+ * Every request's parts, in order, each tool result backed by what the
+ * reads of its call's step returned: those recorded between the request
+ * that ran the step and the first request to carry its result back.
+ */
+const transcriptWithReads = (
+  requests: readonly GatewayRequest[],
+  reads: readonly (readonly string[])[]
+): TranscriptPart[] => {
+  const backings = new Map<string, readonly string[]>();
+  return requests.flatMap(({ body }, index) =>
+    transcriptOf(body).map((part) => {
+      if (part.by !== "tool" || part.call === undefined) {
+        return part;
+      }
+      if (!backings.has(part.call)) {
+        backings.set(part.call, reads[index] ?? []);
+      }
+      return { ...part, backing: backings.get(part.call) ?? [] };
+    })
+  );
+};
+
 const runTrial = async (
   company: BrainCompany,
   place: Workspace,
@@ -721,7 +763,7 @@ const runTrial = async (
     return state;
   };
   const stateBefore = await stateNow();
-  const auditBefore = await logHead();
+  await provider.mark();
   const firstRequest = gateway.requests.length;
   let spentBefore = await charged(company);
   let answer = "";
@@ -776,8 +818,15 @@ const runTrial = async (
     // earlier results, which the model still read.
     // Every request in order: a long turn's last request may leave out
     // earlier results, which the model still read.
-    transcript: requests.flatMap(({ body }) => transcriptOf(body)),
-    readTexts: await readTextsOf(person, place, auditBefore),
+    transcript: transcriptWithReads(
+      requests,
+      await Promise.all(
+        provider.recorded
+          .slice(firstRequest)
+          .map(async (events) => await readTextsOf(person, place, events))
+      )
+    ),
+
     forbidden: forbiddenIn(task),
     stateChanged: changedTables.length > 0,
     changedTables,

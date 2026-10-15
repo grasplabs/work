@@ -66,6 +66,7 @@ interface Block {
   type?: unknown;
   text?: unknown;
   content?: unknown;
+  tool_use_id?: unknown;
 }
 
 const messagesOf = (body: unknown): { role: unknown; content: unknown }[] => {
@@ -108,6 +109,13 @@ export interface TranscriptPart {
    */
   by: "source" | "tool" | "model";
   text: string;
+  /** For a tool result: the call that returned it. */
+  call?: string;
+  /**
+   * For a tool result: what the Knowledge reads made while its call's
+   * step ran returned, the only text that can back evidence in it.
+   */
+  backing?: readonly string[];
 }
 
 /**
@@ -130,7 +138,12 @@ export const transcriptOf = (body: unknown): TranscriptPart[] => [
       if (role === "assistant") {
         return { by: "model", text };
       }
-      return { by: block.type === "tool_result" ? "tool" : "source", text };
+      if (block.type !== "tool_result") {
+        return { by: "source", text };
+      }
+      return typeof block.tool_use_id === "string"
+        ? { by: "tool", text, call: block.tool_use_id }
+        : { by: "tool", text };
     })
   ),
 ];
