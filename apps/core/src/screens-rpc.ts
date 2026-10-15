@@ -384,7 +384,9 @@ const watchRuns = async (
     onChange,
   }: { app: unknown; workflow: unknown; onChange: unknown },
   frame: Frame,
-  subscriptions: Set<Disposable>
+  subscriptions: Set<Disposable>,
+  /** Told once the callback is let go of, however that happens. */
+  ended?: () => void
 ): Promise<RunSubscription> => {
   // Following is a request like any other: a screen that follows and
   // lets go over and over is held to what a person may ask. What core
@@ -409,6 +411,7 @@ const watchRuns = async (
     refusals,
     () => {
       subscriptions.delete(callback);
+      ended?.();
     }
   );
   subscriptions.add(callback);
@@ -647,12 +650,29 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
    * `subscription`, kept until it is released or the frame closes: the
    * page gets a hold that releases both.
    */
-  #hold(subscription: RunSubscription): RunSubscription {
+  async #hold(
+    open: (ended: () => void) => RunSubscription | Promise<RunSubscription>
+  ): Promise<RunSubscription> {
+    // Told when the subscription ends on its own (a refusal, a store
+    // that can't be watched, a callback the page no longer takes): the
+    // frame forgets it then, so ended ones don't pile up while it's open.
+    const state: { hold?: RunSubscription; ended: boolean } = {
+      ended: false,
+    };
+    const subscription = await open(() => {
+      state.ended = true;
+      if (state.hold !== undefined) {
+        this.#held.delete(state.hold);
+      }
+    });
     const hold = new RunSubscription(async () => {
       this.#held.delete(hold);
       await subscription.release();
     });
-    this.#keep(hold);
+    state.hold = hold;
+    if (!state.ended) {
+      this.#keep(hold);
+    }
     return hold;
   }
 
@@ -729,14 +749,16 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
   ): Promise<RunSubscription> {
     const by = await this.#person();
     const { env, app, runSubscriptions } = this.#connection;
-    return this.#hold(
-      await watchRuns(
-        env,
-        by,
-        { app, workflow, onChange },
-        this.#frame,
-        runSubscriptions
-      )
+    return await this.#hold(
+      async (ended) =>
+        await watchRuns(
+          env,
+          by,
+          { app, workflow, onChange },
+          this.#frame,
+          runSubscriptions,
+          ended
+        )
     );
   }
 
@@ -760,7 +782,9 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
       operation: "watchQuery",
       stage: "admission",
     });
-    return this.#hold(queries.subscribe(by, id, artifact, request, onSnapshot));
+    return await this.#hold((ended) =>
+      queries.subscribe(by, id, artifact, request, onSnapshot, ended)
+    );
   }
 
   /** Lets go of everything the frame follows; refuses its calls from now on. */

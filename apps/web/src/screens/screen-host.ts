@@ -248,7 +248,9 @@ const holdFrame = (
       // The last connection's broke with it, and core let go of it then.
       held = { session, frame: ask(session) };
     }
-    return await held.frame;
+    // Stopped while core made it: nothing is sent on it.
+    const { frame } = held;
+    return await whileOpen(async () => await frame);
   };
   return {
     use: async (run) => await run(await current()),
