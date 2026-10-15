@@ -271,17 +271,40 @@ describe("a search", () => {
   });
 
   it("refuses input the generation or the provider can't hold exactly", async () => {
-    const index = vectorIndexOf(fakeVectorize().binding, generation);
+    const provider = fakeVectorize();
+    const index = vectorIndexOf(provider.binding, generation);
+    await index.upsert([record("kept", "policy:sales")]);
+    // A hole at 1, as in a sparse array a caller built.
+    const sparse: number[] = [];
+    sparse[0] = 1;
+    sparse[2] = 0;
+    const search = { policies: ["policy:sales"], topK: 5 };
 
-    await expect(
-      kindOf(index.query([1, 0], { policies: ["policy:sales"], topK: 5 }))
-    ).resolves.toBe("invalid");
-    await expect(
-      kindOf(index.upsert([record("plan", "policy:sales", [1, 0, 0, 0])]))
-    ).resolves.toBe("invalid");
-    await expect(
-      kindOf(index.upsert([record("plan", "policy:sales", [1, Number.NaN, 0])]))
-    ).resolves.toBe("invalid");
+    const kinds = await Promise.all([
+      kindOf(index.query([1, 0], search)),
+      kindOf(index.query(sparse, search)),
+      kindOf(index.upsert([record("plan", "policy:sales", [1, 0, 0, 0])])),
+      kindOf(
+        index.upsert([record("plan", "policy:sales", [1, Number.NaN, 0])])
+      ),
+      kindOf(
+        index.upsert([{ ...record("plan", "policy:sales"), values: sparse }])
+      ),
+      kindOf(
+        index.upsert([
+          {
+            ...record("plan", "policy:sales"),
+            sourceVersion: "v".repeat(4096),
+          },
+        ])
+      ),
+      kindOf(index.delete(["kept", "x".repeat(65)])),
+    ]);
+
+    expect({ kinds, stored: [...provider.vectors.keys()] }).toStrictEqual({
+      kinds: Array.from({ length: 7 }, () => "invalid"),
+      stored: ["kept"],
+    });
   });
 
   it("refuses an index of another generation", async () => {

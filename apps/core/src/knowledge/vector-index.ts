@@ -230,7 +230,8 @@ const checkVector = (
 ): void => {
   if (
     values.length !== generation.dimensions ||
-    !values.every((value) => Number.isFinite(value))
+    // A hole in a sparse array is no value: `every` would skip it.
+    ![...values].every((value) => Number.isFinite(value))
   ) {
     throw new VectorIndexError(
       "invalid",
