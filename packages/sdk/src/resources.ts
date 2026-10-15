@@ -1043,6 +1043,14 @@ export const resource = Object.freeze({
     config: WorkflowConfig<Input>
   ): WorkflowResource<Alias, InferInput<Input>> => {
     const checked = checkedConfig(config, ["input"]);
+    const input = descriptorOf(checked.input);
+    // A start left without input takes the schema's default; an input that
+    // may be absent with none would be no JSON for the run to start with.
+    if (input.presence === "optional") {
+      refuse(
+        "A workflow's input is required or has a default, never only optional."
+      );
+    }
     // SAFETY: built from what was checked of the arguments the type is
     // inferred from: the alias given and the input schema's descriptor.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -1050,7 +1058,7 @@ export const resource = Object.freeze({
       "~resource": "workflow",
       alias: checkedAlias(alias),
       // The descriptor, as data: what the host checks a start against.
-      input: structuredClone(descriptorOf(checked.input)),
+      input: structuredClone(input),
     }) as WorkflowResource<Alias, InferInput<Input>>;
   },
   /**

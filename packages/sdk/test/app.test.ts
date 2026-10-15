@@ -646,6 +646,19 @@ describe("uses", () => {
     });
   });
 
+  test("a workflow's input is there, or its default, when a start leaves it out", () => {
+    const optional = refusal(() =>
+      resource.workflow("followUp", { input: v.string().optional() })
+    );
+    const defaulted = resource.workflow("followUp", {
+      input: v.string().default("Today"),
+    });
+    expect({
+      optional: optional.includes("never only optional"),
+      defaulted: defaulted.input.presence,
+    }).toStrictEqual({ optional: true, defaulted: "default" });
+  });
+
   test("a manifest can't make a workflow out of something else", () => {
     const followUp = resource.workflow("followUp", { input: v.object({}) });
     const start = server.action({
