@@ -10,6 +10,8 @@
  * imports only the version.
  */
 import { isolateBase } from "@grasp-os/shared/runtime";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 
 import { version } from "#version";
 
@@ -23,6 +25,7 @@ export type { KitModules } from "./kit.ts";
 export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export type {
   AppCodeBuild,
+  OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
   WorkflowBuild,
@@ -42,6 +45,8 @@ export {
   appCodeLimitErrors,
   buildFiles,
   limitErrors,
+  openWorkflowEntry,
+  openWorkflowErrors,
   serverFiles,
   workflowFiles,
   workflowIdOf,
@@ -167,6 +172,25 @@ export const isolateSettings = {
   limits: { cpuMs: 20_000, subRequests: 0 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
+/** The compiler's isolate as a Loader takes it, its code read from the assets. */
+const compilerWorker = async (
+  assets: Fetcher
+): Promise<WorkerLoaderWorkerCode> => {
+  const [source, kitJson] = await Promise.all([
+    readCompilerFile(assets, compilerAssets.source, "javascript"),
+    readCompilerFile(assets, compilerAssets.kit, "json"),
+  ]);
+  const kit: unknown = JSON.parse(kitJson);
+  return {
+    ...isolateSettings,
+    mainModule: "compiler.js",
+    modules: {
+      "compiler.js": source,
+      [kitModule]: { json: kit },
+    },
+  };
+};
+
 /**
  * The compiler, in one isolate per release that every build shares, with
  * its code read from core's static assets. Kept warm, a build doesn't load
@@ -176,29 +200,108 @@ export const isolateSettings = {
  * (`isolateSettings`). App code itself never runs here. The name holds
  * only the release's compiler version: workerd keeps a named isolate for
  * as long as the process runs, so a name per build would keep one
- * compiler for every build ever made.
+ * compiler for every build ever made. Being shared, its limits are every
+ * build's together: a stop at them may be another build's doing
+ * (`loadScreenCompiler`).
  */
 export const startScreenCompiler = (
   loader: WorkerLoader,
   assets: Fetcher
 ): Service<ScreenCompiler> =>
   loader
-    .get(`compiler:${version}`, async () => {
-      const [source, kitJson] = await Promise.all([
-        readCompilerFile(assets, compilerAssets.source, "javascript"),
-        readCompilerFile(assets, compilerAssets.kit, "json"),
-      ]);
-      const kit: unknown = JSON.parse(kitJson);
-      return {
-        ...isolateSettings,
-        mainModule: "compiler.js",
-        modules: {
-          "compiler.js": source,
-          [kitModule]: { json: kit },
-        },
-      };
-    })
+    .get(`compiler:${version}`, async () => await compilerWorker(assets))
     .getEntrypoint<ScreenCompiler>();
+
+/**
+ * The compiler in a fresh isolate of its own, for one build: what a stop
+ * at its limits says is that build's alone, as it is in the shared one
+ * only when nothing else compiled beside it.
+ */
+export const loadScreenCompiler = async (
+  loader: WorkerLoader,
+  assets: Fetcher
+): Promise<Service<ScreenCompiler>> =>
+  loader.load(await compilerWorker(assets)).getEntrypoint<ScreenCompiler>();
+
+/**
+ * The screen compiler's or the package builder's code as bytes, for the
+ * on-prem sandbox host, which loads it in a process of its own
+ * (apps/core/src/platform-sandbox.ts): its modules, whether it needs
+ * `nodejs_compat`, and the CPU time a call may use, as `isolateSettings`
+ * and `packageBuilderSettings` give them a Loader isolate.
+ */
+export interface PlatformCode {
+  mainModule: string;
+  modules: Record<string, { type: "js" | "json" | "wasm"; bytes: Uint8Array }>;
+  nodejsCompat: boolean;
+  cpuMs: number;
+}
+
+/**
+ * The platform code read so far, by assets binding and then by what it is
+ * and its release's version: read once per isolate, as it is the
+ * release's, so a build doesn't read 15 to 28 MB of it from the assets
+ * before the sandbox has even taken it. Only a read that worked is kept.
+ */
+const platformCodeRead = new WeakMap<Fetcher, Map<string, PlatformCode>>();
+
+/**
+ * The reads running now, by the same keys: builds that start together
+ * share one, for as long as a read may take (`sharedRun`), so one whose
+ * request was cancelled holds no other build.
+ */
+const platformCodeReading = new WeakMap<
+  Fetcher,
+  Map<string, SharedRun<PlatformCode>>
+>();
+
+/** The longest a read of platform code from the assets may take. */
+export const platformCodeReadMs = 10_000;
+
+const memoisedCode = async (
+  assets: Fetcher,
+  key: string,
+  read: () => Promise<PlatformCode>
+): Promise<PlatformCode> => {
+  const reads = platformCodeRead.get(assets) ?? new Map<string, PlatformCode>();
+  platformCodeRead.set(assets, reads);
+  const kept = reads.get(key);
+  if (kept !== undefined) {
+    return kept;
+  }
+  const reading =
+    platformCodeReading.get(assets) ??
+    new Map<string, SharedRun<PlatformCode>>();
+  platformCodeReading.set(assets, reading);
+  const code = await sharedRun(reading, key, platformCodeReadMs, read);
+  reads.set(key, code);
+  return code;
+};
+
+/**
+ * The screen compiler's code, read from core's static assets once per
+ * isolate (`memoisedCode`): the sandbox host runs one call per process,
+ * so nothing there stays warm. The kit goes as its JSON text, which core
+ * never parses.
+ */
+export const screenCompilerCode = async (
+  assets: Fetcher
+): Promise<PlatformCode> =>
+  await memoisedCode(assets, `compiler:${version}`, async () => {
+    const [source, kit] = await Promise.all([
+      readCompilerBytes(assets, compilerAssets.source, "javascript"),
+      readCompilerBytes(assets, compilerAssets.kit, "json"),
+    ]);
+    return {
+      mainModule: "compiler.js",
+      modules: {
+        "compiler.js": { type: "js", bytes: new Uint8Array(source) },
+        [kitModule]: { type: "json", bytes: new Uint8Array(kit) },
+      },
+      nodejsCompat: true,
+      cpuMs: isolateSettings.limits.cpuMs,
+    };
+  });
 
 /**
  * How the package builder's isolate runs: no bindings, no importable env,
@@ -239,3 +342,27 @@ export const startPackageBuilder = async (
     })
     .getEntrypoint<PackageBuilder>();
 };
+
+/**
+ * The package builder's code, for the on-prem sandbox host as
+ * `screenCompilerCode` gives the compiler's: esbuild's WebAssembly goes
+ * as its bytes, which the sandbox host compiles as it loads the isolate.
+ */
+export const packageBuilderCode = async (
+  assets: Fetcher
+): Promise<PlatformCode> =>
+  await memoisedCode(assets, `package-builder:${version}`, async () => {
+    const [source, wasm] = await Promise.all([
+      readCompilerBytes(assets, compilerAssets.packageBuilder, "javascript"),
+      readCompilerBytes(assets, compilerAssets.esbuildWasm, "wasm"),
+    ]);
+    return {
+      mainModule: "package-builder.js",
+      modules: {
+        "package-builder.js": { type: "js", bytes: new Uint8Array(source) },
+        "esbuild.wasm": { type: "wasm", bytes: new Uint8Array(wasm) },
+      },
+      nodejsCompat: false,
+      cpuMs: packageBuilderSettings.limits.cpuMs,
+    };
+  });

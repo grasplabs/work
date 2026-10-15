@@ -11,11 +11,14 @@
     "./components/*": "./src/components/*.tsx",
     "./lib/*": "./src/lib/*.ts",
     "./hooks/*": "./src/hooks/*.ts",
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./form": "./src/form.tsx"
   },
   "dependencies": {
     "@base-ui/react": "catalog:",
+    "@grasp-os/sdk": "workspace:*",
     "@shadcn/react": "catalog:",
+    "@tanstack/react-form": "catalog:",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "catalog:",

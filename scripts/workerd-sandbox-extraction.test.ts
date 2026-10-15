@@ -214,7 +214,11 @@ describe("extracting an upload on the on-prem sandbox", () => {
     });
   }, 60_000);
 
-  it("ends an extractor a file keeps busy for good, fails the upload as too complex, and core answers meanwhile", async () => {
+  it("ends an extractor a file keeps busy past its deadline as unavailable, to try again, and core answers meanwhile", async () => {
+    // Its deadline here (6 s) comes before its CPU time (20 s), as load can
+    // make it come: not the file's own verdict, so the extraction is tried
+    // again rather than failed for good. Past its CPU time it fails as too
+    // complex, as one that runs out of memory does.
     const running = extract(
       "expense-policy.pdf",
       `type=${types.pdf}&extractor=busy`
@@ -225,9 +229,14 @@ describe("extracting an upload on the on-prem sandbox", () => {
     const outcome = await running;
 
     expect(meanwhile).toBeLessThan(ANSWER_MS);
-    expect({ status: outcome.status, code: outcome.code }).toStrictEqual({
-      status: "failed",
-      code: "upload.too_complex",
+    expect({
+      status: outcome.status,
+      error: outcome.error,
+      busy: outcome.busy,
+    }).toStrictEqual({
+      status: "unavailable",
+      error: "ExtractorUnavailableError",
+      busy: false,
     });
     // At its deadline, not at the 60 s an extraction may take otherwise.
     expect(outcome.ms).toBeLessThan(DEADLINE_MS + 5000);
@@ -236,7 +245,7 @@ describe("extracting an upload on the on-prem sandbox", () => {
       .toBe(0);
   }, 60_000);
 
-  it("finds a kickoff's Word transcript unreadable when its extractor never returns, and core answers meanwhile", async () => {
+  it("asks for a kickoff's Word transcript again when its extractor runs past its deadline, and core answers meanwhile", async () => {
     const running = extract(
       "travel-policy.docx",
       "extractor=busy",
@@ -249,7 +258,7 @@ describe("extracting an upload on the on-prem sandbox", () => {
     expect(meanwhile).toBeLessThan(ANSWER_MS);
     expect({ status: outcome.status, code: outcome.code }).toStrictEqual({
       status: "failed",
-      code: "kickoff.unreadable",
+      code: "kickoff.not_read",
     });
   }, 60_000);
 
@@ -293,7 +302,7 @@ describe("extracting an upload on the on-prem sandbox", () => {
     });
     const ended = await first;
 
-    expect(ended.code).toBe("upload.too_complex");
+    expect(ended.status).toBe("unavailable");
   }, 60_000);
 
   it("refuses to extract where no sandbox bounds it, without loading the extractor in core", async () => {

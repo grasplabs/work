@@ -3,6 +3,7 @@ import type {
   HeldHow,
   HeldRequest,
   ModelBudget,
+  ModelMonthSpend,
   ModelSettings,
   ModelSpender,
 } from "@grasp-os/shared/models";
@@ -22,7 +23,7 @@ import {
 } from "@grasp-os/ui/components/dialog";
 import { Progress } from "@grasp-os/ui/components/progress";
 import type { I18n } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
@@ -44,8 +45,9 @@ import { useCoreAction } from "../use-core-action.ts";
 // AI spend, for admins, as in the prototype (`routes/settings/spend.tsx`):
 // what the models cost this month, as core counts it against the budgets
 // Grasp sets, and where it went, by workflow, person and run. Core counts
-// spend only against a budget, so without one there is nothing to show;
-// the budgets' limits are rules, and stay on the Models page.
+// every call, budget or not, so the month's total and the workflows that
+// spent most show without one; the budgets' limits are rules, and stay on
+// the Models page.
 
 /** One number of the top row: what it is, the amount, and a line that puts it in its place. */
 const Figure = ({
@@ -66,19 +68,38 @@ const Figure = ({
   </div>
 );
 
-/** This month so far, against the budget of all calls together, and where it ends. */
-const Month = ({ budget, month }: { budget: ModelBudget; month: string }) => {
-  const { t } = useLingui();
-  const spent = budget.spent.reduce((sum, { amount }) => sum + amount, 0);
+/** What `spent` is of the budget of all calls together, if one is set. */
+const ofBudget = (
+  spent: number,
+  budget: ModelBudget | undefined,
+  i18n: I18n
+): string => {
+  if (budget === undefined) {
+    return i18n._(msg`No budget is set for all calls together`);
+  }
   const share = percent(shareOf(spent, budget.limit));
   const limit = dollars(budget.limit);
+  return i18n._(msg`${share} of the ${limit} budget`);
+};
+
+/** This month so far, against the budget of all calls together if one is set, and where it ends. */
+const Month = ({
+  spent,
+  budget,
+  month,
+}: {
+  spent: number;
+  budget: ModelBudget | undefined;
+  month: string;
+}) => {
+  const { t, i18n } = useLingui();
   const end = monthEnd(spent, month, new Date());
   const ending = end === null ? null : dollars(end);
   return (
     <div className="bg-border grid gap-px border-t sm:grid-cols-2">
       <Figure
         label={t`This month so far`}
-        sub={t`${share} of the ${limit} budget`}
+        sub={ofBudget(spent, budget, i18n)}
         value={dollars(spent)}
       />
       {ending === null ? null : (
@@ -189,6 +210,58 @@ const SpentBy = ({
       {budget.more ? (
         <p className="text-muted-foreground border-t px-5 py-3">
           <Trans>The {top} who spent most; more spent less.</Trans>
+        </p>
+      ) : null}
+    </SettingsSection>
+  );
+};
+
+/**
+ * The workflows whose model calls cost most this month, with their runs
+ * started this month: shown when no budget of each workflow lists them.
+ */
+const WorkflowsThisMonth = ({ spend }: { spend: ModelMonthSpend }) => {
+  const { t, i18n } = useLingui();
+  const top = spend.workflows.length;
+  return (
+    <SettingsSection
+      description={t`What each workflow's model calls cost this month, most first, and how often it ran.`}
+      title={t`Workflows this month`}
+    >
+      {spend.workflows.length === 0 ? (
+        <SettingsBody>
+          <p className="text-muted-foreground">
+            <Trans>No workflow has called a model this month.</Trans>
+          </p>
+        </SettingsBody>
+      ) : (
+        <ul>
+          {spend.workflows.map(
+            ({ appId, appName, workflowId, amount, runs }) => (
+              <li
+                className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-6 border-t px-5 py-3"
+                key={JSON.stringify([appId, workflowId])}
+              >
+                <span className="truncate">
+                  {spenderName(
+                    { type: "workflow", appId, appName, workflowId },
+                    i18n
+                  )}
+                </span>
+                <span className="text-muted-foreground text-right tabular-nums">
+                  {t`${plural(runs, { one: "# run", other: "# runs" })}`}
+                </span>
+                <span className="text-right tabular-nums">
+                  {dollars(amount)}
+                </span>
+              </li>
+            )
+          )}
+        </ul>
+      )}
+      {spend.more ? (
+        <p className="text-muted-foreground border-t px-5 py-3">
+          <Trans>The {top} that spent most; more spent less.</Trans>
         </p>
       ) : null}
     </SettingsSection>
@@ -404,7 +477,13 @@ const Held = ({ held }: { held: readonly HeldRequest[] }) => {
   );
 };
 
-const Spend = ({ settings }: { settings: ModelSettings }) => {
+const Spend = ({
+  settings,
+  spend,
+}: {
+  settings: ModelSettings;
+  spend: ModelMonthSpend;
+}) => {
   const { t } = useLingui();
   const { month } = settings;
   if (settings.rules.state === "invalid") {
@@ -419,21 +498,8 @@ const Spend = ({ settings }: { settings: ModelSettings }) => {
     );
   }
   const { budgets } = settings.rules;
-  if (budgets.length === 0) {
-    return (
-      <SettingsSection title={t`AI spend`}>
-        <SettingsBody>
-          <p className="text-muted-foreground">
-            <Trans>
-              Grasp counts what the models cost against the budgets it sets for
-              you. No budget is set, so there is nothing to show.
-            </Trans>
-          </p>
-        </SettingsBody>
-      </SettingsSection>
-    );
-  }
   const all = budgets.find(({ scope }) => scope === "deployment");
+  const eachWorkflow = budgets.some(({ scope }) => scope === "workflow");
   return (
     <>
       <SettingsSection
@@ -445,8 +511,9 @@ const Spend = ({ settings }: { settings: ModelSettings }) => {
         }
         title={t`AI spend`}
       >
-        {all === undefined ? null : <Month budget={all} month={month} />}
+        <Month budget={all} month={month} spent={spend.total} />
       </SettingsSection>
+      {eachWorkflow ? null : <WorkflowsThisMonth spend={spend} />}
       {budgets.map((budget) =>
         budget.scope === "deployment" ? null : (
           <SpentBy
@@ -473,8 +540,8 @@ const SpendPage = () => {
   // with no budget set, or rules that don't parse.
   return (
     <>
-      <Spend settings={page.data} />
-      <Held held={page.data.held} />
+      <Spend settings={page.data.settings} spend={page.data.spend} />
+      <Held held={page.data.settings.held} />
     </>
   );
 };
@@ -484,8 +551,11 @@ export const Route = createFileRoute("/_shell/settings/spend")({
   errorComponent: SettingsError,
   component: SpendPage,
   loader: async ({ context: { core } }) =>
-    await loadFromCore(
-      core,
-      async (session) => await session.models.settings()
-    ),
+    await loadFromCore(core, async (session) => {
+      const [settings, spend] = await Promise.all([
+        session.models.settings(),
+        session.models.spend(),
+      ]);
+      return { settings, spend };
+    }),
 });

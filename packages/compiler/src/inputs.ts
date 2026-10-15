@@ -6,6 +6,7 @@
 import { appLimits, appManifestMaxBytes } from "@grasp-os/shared/app-limits";
 
 import type { Diagnostic } from "./diagnostic.ts";
+import { screenReferences } from "./kit.ts";
 
 export const screenFile = /^screens\/[\w-]+\.tsx$/u;
 // Folders are plain names, so a path can't step out of `components/`.
@@ -13,7 +14,11 @@ export const componentFile = /^components\/(?:[\w-]+\/)*[\w.-]+\.tsx?$/u;
 /** Types the App's code can use but that aren't code, e.g. its server's. */
 export const declarationFile = /^[\w-]+\.d\.ts$/u;
 
-/** The files a build reads: screens, components and declarations. */
+/**
+ * The files a build reads: screens, components and declarations, and the
+ * references the host generated for the App's server code, which screens
+ * import as `#grasp`.
+ */
 export const buildFiles = (
   files: Record<string, string>
 ): Record<string, string> =>
@@ -22,7 +27,8 @@ export const buildFiles = (
       ([path]) =>
         screenFile.test(path) ||
         componentFile.test(path) ||
-        declarationFile.test(path)
+        declarationFile.test(path) ||
+        path === screenReferences.path
     )
   );
 
@@ -73,6 +79,50 @@ export const workflowPaths = (
 const workflowPath = /^workflows\/(?<id>[A-Za-z][\w-]{0,63})\.ts$/u;
 export const workflowIdOf = (path: string): string | undefined =>
   workflowPath.exec(path)?.groups?.id;
+
+/**
+ * The module the host generates from a JSON workflow's definition: one
+ * file, never anything a person wrote.
+ */
+export const openWorkflowEntry = ".grasp/workflow.ts";
+
+/**
+ * The most characters the generated module may have: four times the
+ * largest definition the profile accepts (1 MiB), as it restates each
+ * literal once, with a few characters of code around it.
+ */
+const openWorkflowMaxLength = 4 * 1024 * 1024;
+
+/**
+ * Why `files` aren't one generated workflow module within its bounds, if
+ * they aren't: exactly `openWorkflowEntry`, at most
+ * {@link openWorkflowMaxLength} characters.
+ */
+export const openWorkflowErrors = (
+  files: Record<string, string>
+): Diagnostic[] => {
+  const paths = Object.keys(files);
+  if (paths.length !== 1 || paths[0] !== openWorkflowEntry) {
+    return [
+      {
+        rule: "limits",
+        severity: "error",
+        message: `A generated workflow is one module, ${openWorkflowEntry}.`,
+      },
+    ];
+  }
+  const source = files[openWorkflowEntry] ?? "";
+  return source.length > openWorkflowMaxLength
+    ? [
+        {
+          file: openWorkflowEntry,
+          rule: "limits",
+          severity: "error",
+          message: `The generated module has ${source.length} characters; a build takes at most ${openWorkflowMaxLength}.`,
+        },
+      ]
+    : [];
+};
 
 /**
  * The most a build takes: as much as an App holds, so any App fits, and a
@@ -136,9 +186,9 @@ const generatedLimits = {
 const isGenerated = (path: string): boolean => path.startsWith(".grasp/");
 
 /**
- * Why a build of an App's server code (`appCodeFiles`) is more than it
- * takes: the App's own files held to the App's limits (`limitErrors`),
- * the host's generated modules to their own.
+ * Why a build of an App's server code (`appCodeFiles`) or screens
+ * (`buildFiles`) is more than it takes: the App's own files held to the
+ * App's limits (`limitErrors`), the host's generated modules to their own.
  */
 export const appCodeLimitErrors = (
   files: Record<string, string>

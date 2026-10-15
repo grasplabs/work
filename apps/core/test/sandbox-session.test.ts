@@ -10,6 +10,8 @@ import {
   sandboxVerdictOf,
   sessionForwarder,
 } from "../src/sandbox-session.ts";
+import type { SessionArgument } from "../src/sandbox-session.ts";
+import { SandboxUnavailableError } from "../src/sandboxed.ts";
 
 // What reaches a capability through a sandbox session (on-prem) arrives
 // over Cap'n Web from the sandbox host, where App code runs: the forwarder
@@ -338,5 +340,86 @@ describe("a call that fails while its session looks open", () => {
       verdict: null,
     });
     expect(Date.now() - started).toBeLessThan(700);
+  });
+});
+
+/**
+ * A sandbox host that takes the session and ends it once a `run` arrived,
+ * keeping no verdict. Counts the runs it got.
+ */
+const hostEndingOnRun = () => {
+  let runs = 0;
+  const host: Fetcher = {
+    fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      if (!request.url.endsWith("/session")) {
+        // No verdict kept, and every end taken.
+        return await Promise.resolve(new Response("{}", { status: 404 }));
+      }
+      const { 0: client, 1: server } = new WebSocketPair();
+      server.accept();
+      server.addEventListener("message", () => {
+        runs += 1;
+        server.close(1011, "The process went away.");
+      });
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+        headers: {
+          [sandboxCpuHeader]: request.headers.get(sandboxCpuHeader) ?? "",
+        },
+      });
+    },
+    connect: () => {
+      throw new Error("Not a socket host");
+    },
+  };
+  return { host, runs: () => runs };
+};
+
+/**
+ * How a call of `args` on `host` failed: whether the sandbox says it may
+ * have started.
+ */
+const startedOn = async (host: Fetcher, args: SessionArgument[] = []) => {
+  try {
+    await runInSession(host, {
+      mainModule: "m.js",
+      modules: { "m.js": "" },
+      entrypoint: "E",
+      method: "go",
+      args,
+      owner: "app-test",
+      cpuMs: 1000,
+      wallMs: 5000,
+    });
+  } catch (error) {
+    return {
+      unavailable: error instanceof SandboxUnavailableError,
+      started: error instanceof SandboxUnavailableError && error.started,
+    };
+  }
+  return { unavailable: false, started: true };
+};
+
+describe("a call in a session its socket took", () => {
+  it("is surely not started when its run never went out", async () => {
+    const { host, runs } = hostEndingOnRun();
+
+    // An argument no session carries: the run fails as it's sent.
+    await expect(
+      startedOn(host, [{ value: new Map([["unsendable", true]]) }])
+    ).resolves.toStrictEqual({ unavailable: true, started: false });
+    expect(runs()).toBe(0);
+  });
+
+  it("may have started once its run went out", async () => {
+    const { host, runs } = hostEndingOnRun();
+
+    await expect(startedOn(host)).resolves.toStrictEqual({
+      unavailable: true,
+      started: true,
+    });
+    expect(runs()).toBe(1);
   });
 });

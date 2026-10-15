@@ -29,6 +29,7 @@ import { z } from "zod";
 
 import {
   capability,
+  noPlaceOf,
   passedCapability,
   runInSession,
   sandboxVerdictOf,
@@ -683,21 +684,13 @@ const neverSettles = async (): Promise<never> =>
     // Never settles.
   });
 
-/**
- * Whether `error` refused a load before any of its code ran, for want of a
- * place: its owner at its share (`busy`), or the pool full (503).
- */
-const noPlace = (error: unknown): boolean =>
-  sandboxVerdictOf(error) === "busy" ||
-  (error instanceof SandboxUnavailableError && error.status === 503);
-
 /** A run's load let go of: its run cancelled, or its activation superseded. */
 const letGoError = (): Error =>
   new Error("The run was cancelled or taken over: its load let go.");
 
 /**
  * Runs `load` on the sandbox, asking again while no place is free
- * (`noPlace`), backing off up to {@link runLoadRetryMs}, for up to
+ * (`noPlaceOf`), backing off up to {@link runLoadRetryMs}, for up to
  * {@link runLoadWaitMs}. It looks whether the run is still its
  * activation's (`current`) at once before each ask, with nothing awaited
  * in between, and every {@link runLoadCheckMs} as it waits: one cancelled
@@ -724,7 +717,7 @@ const waitingForPlace = async (
       // oxlint-disable-next-line no-await-in-loop -- one ask at a time
       return await load();
     } catch (error) {
-      if (!noPlace(error) || Date.now() + wait > until) {
+      if (!noPlaceOf(error) || Date.now() + wait > until) {
         throw error;
       }
     }

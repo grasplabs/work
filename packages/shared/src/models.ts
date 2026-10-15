@@ -225,10 +225,42 @@ export type HeldDecision =
 /** Most held requests listed at once. */
 export const heldListed = 100;
 
+/** A workflow's model spend this month, and its runs. */
+export interface WorkflowMonthSpend {
+  appId: string;
+  /** Null once the App is gone. */
+  appName: string | null;
+  workflowId: string;
+  /** US dollars charged this month. */
+  amount: number;
+  /** Its runs started this month, of any version. */
+  runs: number;
+}
+
+/**
+ * What the models cost this month, budget or not: every call of the
+ * deployment, and the workflows that spent most.
+ */
+export interface ModelMonthSpend {
+  /** The UTC month it counts, such as `2026-10`. */
+  month: string;
+  /** US dollars charged this month for every call; held reservations aren't spend yet. */
+  total: number;
+  /** The workflows that spent most, most first: at most {@link modelSpendListed}. */
+  workflows: WorkflowMonthSpend[];
+  /** More workflows spent than `workflows` lists. */
+  more: boolean;
+}
+
 /** The model gateway's settings, over `/rpc`, for admins only. */
 export interface ModelsApi {
   /** The settings, and this month's spend against each budget. */
   settings: () => Promise<ModelSettings>;
+  /**
+   * What the models cost this month, whether or not a budget is set: all
+   * calls, and the workflows that spent most with their runs.
+   */
+  spend: () => Promise<ModelMonthSpend>;
   /** The reservations held for review, oldest first. */
   held: () => Promise<HeldRequest[]>;
   /**

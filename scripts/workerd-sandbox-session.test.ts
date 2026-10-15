@@ -436,9 +436,10 @@ describe("a session on the on-prem sandbox", () => {
         await expect
           .poll(() => small.stats().children, { timeout: 15_000, interval: 20 })
           .toBe(0);
-        // Its places came back while its verdict still waits on its exit.
-        expect(small.stats().crashed).toBe(0);
-        await expect(crashing).resolves.toMatchObject({ verdict: "crashed" });
+        // Its places came back while its verdict (V8 ended it at its heap
+        // limit: its memory) still waits on its exit.
+        expect(small.stats().memory).toBe(0);
+        await expect(crashing).resolves.toMatchObject({ verdict: "memory" });
         opened.socket?.destroy();
       } finally {
         await small.stop();
@@ -479,7 +480,7 @@ describe("a session on the on-prem sandbox", () => {
           // oxlint-disable-next-line no-await-in-loop -- sampled until it settles
           await sleep(20);
         }
-        await expect(crashing).resolves.toMatchObject({ verdict: "crashed" });
+        await expect(crashing).resolves.toMatchObject({ verdict: "memory" });
         expect(placeless).toStrictEqual([]);
       } finally {
         await small.stop();
@@ -625,6 +626,32 @@ describe("a session on the on-prem sandbox", () => {
     expect(Math.max(...answers)).toBeLessThan(ANSWER_MS);
     expect(supervisor.stats().cpu).toBeGreaterThanOrEqual(1);
   });
+
+  /** How a session of `owner` that asks for `memory` MiB and allocates without end was ended. */
+  const hogEnding = async (owner: string, memory: number) => {
+    const response = await fetch(
+      `${coreUrl}run?case=hogs&owner=${owner}&memory=${memory}`
+    );
+    const { verdict, message } = outcomeSchema.parse(await response.json());
+    return { verdict, message };
+  };
+
+  it("gives more memory only to the platform's own sessions that ask, at most its most", async () => {
+    // An App's session that asks for more stays at what App code gets.
+    await expect(hogEnding("app-stand-in", 512)).resolves.toStrictEqual({
+      verdict: "memory",
+      message: "The App's code used more than 256 MiB of memory.",
+    });
+    await expect(hogEnding("platform:builder", 512)).resolves.toStrictEqual({
+      verdict: "memory",
+      message: "The App's code used more than 512 MiB of memory.",
+    });
+    // Asked for past the supervisor's most: held to it.
+    await expect(hogEnding("platform:builder", 4096)).resolves.toStrictEqual({
+      verdict: "memory",
+      message: "The App's code used more than 1024 MiB of memory.",
+    });
+  }, 90_000);
 
   it("doesn't count time spent waiting on core against the CPU budget", async () => {
     await expect(run("waits")).resolves.toMatchObject({
