@@ -532,3 +532,22 @@ export const outbox = sqliteTable(
       .where(sql`settled_at IS NULL`),
   ]
 );
+
+/**
+ * Which consumer made each commit another App or a workflow made through
+ * the store's public operations (core's store-operations.ts): its ID and
+ * version, the person it acted for and the receipt it committed under,
+ * written in the commit's own transaction. Unlike the receipt, which
+ * retention turns into a tombstone, it stays while the store does: who
+ * changed the store's records through a shared operation is always on
+ * record. A commit of the store's own App names no consumer and adds none.
+ */
+export const commitWriters = sqliteTable("sdk_commit_writers", {
+  /** The commit's place in the store's order of commits. */
+  commit: integer().primaryKey(),
+  receiptId: text("receipt_id").notNull(),
+  resourceId: text("resource_id").notNull(),
+  resourceVersion: integer("resource_version").notNull(),
+  principal: text().notNull(),
+  committedAt: integer("committed_at").notNull(),
+});

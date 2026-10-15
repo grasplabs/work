@@ -3927,6 +3927,10 @@ msgstr "none now"
 msgid "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
 msgstr "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
 
+#: src/engines/resource-bindings.tsx
+msgid "None of the domain's store permissions serves every operation it declares, exactly as declared. Grant one first."
+msgstr "None of the domain's store permissions serves every operation it declares, exactly as declared. Grant one first."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "None stated"
 msgstr "None stated"
@@ -5629,7 +5633,12 @@ msgstr "Stopped following what changes at a connection"
 msgid "Stopped."
 msgstr "Stopped."
 
+#: src/engines/resource-bindings.tsx
+msgid "Store"
+msgstr "Store"
+
 #: src/activity/pending.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Store {store}"
 msgstr "Store {store}"
 

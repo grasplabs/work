@@ -21,13 +21,10 @@ import { submissionErrors } from "@grasp-os/shared/submissions";
 import { DurableObject } from "cloudflare:workers";
 
 import { operationRoles } from "./app-access.ts";
-import {
-  invokeAppAction,
-  refusalOf,
-  requireNotRevoked,
-} from "./app-functions.ts";
+import { invokeAppAction, refusalOf } from "./app-functions.ts";
 import type { FunctionRequest } from "./app-functions.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
+import { requireNotRevoked } from "./release-runner.ts";
 
 // One foreground action's invocation, in a Durable Object of its own,
 // named by who runs it, which App, version and contract, and the caller's

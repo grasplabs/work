@@ -3,6 +3,10 @@ import { z } from "zod";
 import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema } from "./ids.ts";
+import {
+  storeOperationPathMaxLength,
+  storeOperationPathPattern,
+} from "./operation-limits.ts";
 
 // Independent workflows (platform specification 3, 13.2 and 24): a
 // workflow is a resource of its own, with its own owner, members and
@@ -203,6 +207,11 @@ const deciderSchema = z.string().regex(/^(?:person|team|role):[\w.-]{1,128}$/u);
  *   or `composio.<toolkit>@1`) whose actions serve the catalog contract;
  * - `operation`: an exact version of an App's export, through one of the
  *   workflow's own permissions on that App's exports;
+ * - `storeOperation`: a business store's public operation, by its path,
+ *   through one of the workflow's own store permissions, run by the App
+ *   that owns the store as its current version serves it (core's
+ *   store-operations.ts). It serves an `operation` binding, as an export
+ *   does;
  * - `decision`: who answers it.
  */
 export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
@@ -226,11 +235,30 @@ export const workflowBindingTargetSchema = z.discriminatedUnion("kind", [
     export: z.string().regex(/^[A-Za-z][\w]{0,63}$/u),
   }),
   z.strictObject({
+    kind: z.literal("storeOperation"),
+    permissionId: identifierSchema,
+    operation: z
+      .string()
+      .max(storeOperationPathMaxLength)
+      .regex(storeOperationPathPattern),
+    /**
+     * The operation's kind, as the admin approves it: a query only reads,
+     * a mutation writes. One that becomes the other serves nothing.
+     */
+    operationKind: z.enum(["query", "mutation"]),
+  }),
+  z.strictObject({
     kind: z.literal("decision"),
     deciders: z.array(deciderSchema).min(1).max(16),
   }),
 ]);
 export type WorkflowBindingTarget = z.infer<typeof workflowBindingTargetSchema>;
+
+/** The catalog binding kind a target serves: a store operation an `operation`. */
+export const servedKindOf = (
+  target: WorkflowBindingTarget
+): CatalogBindingKind =>
+  target.kind === "storeOperation" ? "operation" : target.kind;
 
 /**
  * An admin's approval of a workflow's binding: the alias, its target, and

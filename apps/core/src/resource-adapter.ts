@@ -166,6 +166,15 @@ export interface BindingCaller {
    * gate (`authorize`) only.
    */
   readonly requireHolds?: () => void;
+  /**
+   * The invocation's own gate (`Invocation.authorize`): throws once the
+   * caller may no longer act (the release revoked, a role lost, an
+   * agent's permission or a step's lease gone). The operation host runs
+   * it before each request; an adapter whose request commits later, a
+   * shared store's mutation (resource-store.ts), runs it again just
+   * before that commit.
+   */
+  readonly admit?: () => Promise<unknown>;
 }
 
 /** A declaration of one kind, as an adapter is given it. */

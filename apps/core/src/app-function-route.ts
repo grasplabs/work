@@ -37,7 +37,6 @@ import {
   callAppFunction,
   readFunctionRequest,
   refusalOf,
-  requireNotRevoked,
 } from "./app-functions.ts";
 import type { FunctionAnswer, FunctionRequest } from "./app-functions.ts";
 import { checkAppToken } from "./auth/app-tokens.ts";
@@ -45,6 +44,7 @@ import type { TokenCheck } from "./auth/app-tokens.ts";
 import { identify } from "./auth/identity.ts";
 import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
+import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { delivering, leasedArtifact, requireDelivery } from "./screen-trust.ts";
 import { admitted } from "./screens-rpc.ts";

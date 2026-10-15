@@ -35,7 +35,10 @@ const modelNameSchema = z
  *   call, through connect;
  * - `knowledge`: one of the App's collection permissions for each
  *   collection the declaration names, read as a delegate on every call;
- * - `template`: one immutable version of a published template.
+ * - `template`: one immutable version of a published template;
+ * - `store`: one of the App's store permissions: another business store's
+ *   public operations, run by the App that owns the store, checked on
+ *   every call (core's store-operations.ts).
  */
 export const bindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("model"), model: modelNameSchema }),
@@ -59,6 +62,10 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
     kind: z.literal("template"),
     templateId: identifierSchema,
     version: z.int().min(1),
+  }),
+  z.strictObject({
+    kind: z.literal("store"),
+    permissionId: permissionIdSchema,
   }),
 ]);
 export type BindingTarget = z.infer<typeof bindingTargetSchema>;
@@ -202,6 +209,12 @@ export interface CollectionChoice {
   name: string | null;
 }
 
+/** One of the App's store permissions, as a store resource's choice. */
+export interface StoreChoice {
+  permissionId: string;
+  storeId: string;
+}
+
 /**
  * What an admin may bind a declared resource to now, by its kind:
  *
@@ -210,7 +223,9 @@ export interface CollectionChoice {
  *   the declared contract and allow the tool of every declared action;
  * - `knowledge`: the App's own active permissions to read a collection,
  *   one for each declared collection;
- * - `template`: the published versions of the declared contract.
+ * - `template`: the published versions of the declared contract;
+ * - `store`: the App's own active store permissions whose store serves
+ *   every declared operation, of exactly the declared shape, and allows it.
  *
  * Approving checks the choice again: one that stopped serving since is
  * refused (`resource.target_invalid`). `truncated` says some were left
@@ -222,6 +237,7 @@ export type BindingChoices = { truncated: boolean } & (
   | { kind: "connector"; permissions: ConnectorChoice[] }
   | { kind: "knowledge"; permissions: CollectionChoice[] }
   | { kind: "template"; versions: PublishedTemplate[] }
+  | { kind: "store"; permissions: StoreChoice[] }
 );
 
 /**
@@ -249,7 +265,10 @@ export interface DeclaredResource {
   contract: string | null;
   /** A connector's declared actions; empty for the other kinds. */
   actions: string[];
-  /** Knowledge's declared operations; empty for the other kinds. */
+  /**
+   * Knowledge's declared operations, or a store's, by path; empty for the
+   * other kinds.
+   */
   operations: string[];
   /** Knowledge's declared collections, by the names App code uses. */
   collections: string[];

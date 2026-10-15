@@ -5,9 +5,13 @@ import type { ConnectorContract } from "@grasp-os/shared/connect";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
+import { operationErrors } from "@grasp-os/shared/operations";
+import type { Authority } from "@grasp-os/shared/permissions";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
+  servedKindOf,
   workflowBindingApprovalSchema,
   workflowBindingTargetSchema,
   workflowResourceErrors,
@@ -34,6 +38,17 @@ import {
 } from "./db/core/schema.ts";
 import { gatewaySettings } from "./models.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
+import { isRestricted } from "./restricted.ts";
+import {
+  auditStoreRefusal,
+  callStoreOperation,
+  storeOperationFor,
+} from "./store-operations.ts";
+import type {
+  ServedStoreOperation,
+  StoreConsumer,
+  StoreOperationCaller,
+} from "./store-operations.ts";
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import {
   bindingsOf,
@@ -80,6 +95,14 @@ import type { PinnedBinding } from "./workflow-resources.ts";
 //   what it doesn't take or reads back what it doesn't return. There is no
 //   looser compatibility rule to apply yet, so anything but the same shape
 //   is refused.
+// - A store operation serving more, or other, than was approved: a
+//   `storeOperation` target names one of the workflow's own store
+//   permissions and one path. It serves only a public query or mutation
+//   of the store's owning App's current release whose shapes are exactly
+//   the catalog contract's, checked at approval, at each start and on each
+//   call (`callApprovedStoreOperation`); the call runs as
+//   store-operations.ts runs it, as the person the run acts for, never
+//   with the store owner's privileges.
 // - An operation's code going away under an approval: it names an exact,
 //   sealed release of the App, which the approval pins (`approval` in
 //   `sdk_release_pins`) while it is active, so retention keeps that
@@ -326,6 +349,197 @@ const requireOperationServes = async (
 };
 
 /**
+ * The store operation `target` names, if workflow `id` may call it now
+ * and it takes and returns exactly what the catalog contract `key` says:
+ * the workflow's own store permission lists it, and the store's owning
+ * App's current release serves it as a public query or mutation
+ * (store-operations.ts), its arguments' and return's JSON Schemas the
+ * contract's, exactly. Refused (`workflow.binding_invalid`) otherwise.
+ * Unlike an export, no release is pinned: the store's App serves its
+ * operations from whichever version is current, so each start, and each
+ * call, checks the shape again.
+ */
+const requireStoreOperationServes = async (
+  env: Env,
+  id: string,
+  key: string,
+  target: Extract<WorkflowBindingTarget, { kind: "storeOperation" }>,
+  version: number
+): Promise<{ served: ServedStoreOperation; consumer: StoreConsumer }> => {
+  const forWorkflow: StoreConsumer = {
+    version,
+    subject: { type: "workflow", id },
+    permissionId: target.permissionId,
+  };
+  const served = await storeOperationFor(env, forWorkflow, target.operation);
+  if (served === undefined) {
+    throw invalid(
+      "target.operation: The workflow holds no store permission listing it, or the store serves no such public query or mutation."
+    );
+  }
+  // The kind approved: a query that became a mutation, its shapes the same,
+  // writes where the admin approved a read.
+  if (served.operation.kind !== target.operationKind) {
+    throw invalid("target.operationKind: The store serves it as another kind.");
+  }
+  const contracts = await resolveCatalogKeys(env, [key]);
+  const contract = contracts.get(key)?.contract;
+  if (
+    !sameShape(
+      jsonSchemaOf(served.operation.args, { exact: true }),
+      schemaOfDescriptor(contract?.input)
+    ) ||
+    !sameShape(
+      jsonSchemaOf(served.operation.returns, { exact: true }),
+      schemaOfDescriptor(contract?.output)
+    )
+  ) {
+    throw invalid(
+      "target.operation: Its arguments and return aren't the operation contract's."
+    );
+  }
+  return { served, consumer: forWorkflow };
+};
+
+/**
+ * Refuses (`resource.unavailable`) unless approval `approvalId` is still
+ * active, for version `version` of workflow `id`.
+ */
+const requireApprovalActive = async (
+  env: Env,
+  id: string,
+  version: number,
+  approvalId: string
+): Promise<void> => {
+  const row = await drizzle(env.DB)
+    .select({ id: workflowBindingApprovals.id })
+    .from(workflowBindingApprovals)
+    .where(
+      and(
+        eq(workflowBindingApprovals.id, approvalId),
+        eq(workflowBindingApprovals.workflowResourceId, id),
+        eq(workflowBindingApprovals.reviewedVersion, version),
+        eq(workflowBindingApprovals.status, "active")
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw operationErrors.create("resource.unavailable");
+  }
+};
+
+/**
+ * Calls the store operation approval `approval` of version `version` of
+ * workflow `id` names, with `args`, for `caller`: for a run whose start
+ * froze that approval (workflow-starts.ts). The workflow's store
+ * permission, the store, the operation and its exact shape are all read
+ * again for the call (`requireStoreOperationServes`); anything that no
+ * longer serves is `resource.unavailable`, and nothing runs. The call
+ * itself runs as store-operations.ts runs it, as `caller.principal`, its
+ * receipts scoped to the workflow. An independent workflow keeps no
+ * restricted mode of its own yet (a work context is a chat, an App or an
+ * App's run), so it gets nothing from a store whose App is restricted:
+ * the call is refused, and recorded, before it runs or before its answer
+ * reaches the workflow. Once workflows keep the flag, this carries it as
+ * an App's store resource does (resource-store.ts).
+ */
+export const callApprovedStoreOperation = async (
+  env: Env,
+  {
+    id,
+    version,
+    approval,
+  }: { id: string; version: number; approval: WorkflowBindingApproval },
+  args: Json,
+  caller: StoreOperationCaller
+): Promise<Json> => {
+  const { target } = approval;
+  if (target.kind !== "storeOperation" || approval.status !== "active") {
+    throw operationErrors.create("resource.unavailable");
+  }
+  let resolved: Awaited<ReturnType<typeof requireStoreOperationServes>>;
+  try {
+    resolved = await requireStoreOperationServes(
+      env,
+      id,
+      approval.contractId,
+      target,
+      version
+    );
+  } catch (error) {
+    if (isExpectedError(error)) {
+      // Recorded, as an App's binding that no longer serves is: its grant
+      // lost, or the store serving another kind or shape now.
+      await auditStoreRefusal(env, {
+        actor: caller.actor,
+        consumer: {
+          subject: { type: "workflow", id },
+          version,
+          permissionId: target.permissionId,
+        },
+        operation: target.operation,
+        storeId: null,
+        reason: error.code,
+        requestId: caller.requestId,
+      });
+      throw operationErrors.create("resource.unavailable");
+    }
+    throw error;
+  }
+  // An independent workflow keeps no restricted mode, so it may not hold
+  // what a restricted store App read: refused while the store's App is
+  // restricted, before the call and again before its answer, or refusal,
+  // reaches the workflow (where its connectors would carry it out).
+  const { owner, release } = resolved.served;
+  const ownerAuthority: Authority = {
+    subject: { type: "app", appId: owner },
+    onBehalfOf: caller.principal,
+    mode: "workflow",
+    appVersion: release.manifest.resourceVersion,
+  };
+  const requireUnrestricted = async (): Promise<void> => {
+    if (
+      await isRestricted(env, ownerAuthority, { type: "app", appId: owner })
+    ) {
+      await auditStoreRefusal(env, {
+        actor: caller.actor,
+        consumer: resolved.consumer,
+        operation: target.operation,
+        storeId: resolved.served.storeId,
+        reason: "store.restricted",
+        requestId: caller.requestId,
+      });
+      throw operationErrors.create("resource.unavailable");
+    }
+  };
+  await requireUnrestricted();
+  let answer: Json;
+  try {
+    answer = await callStoreOperation(
+      env,
+      resolved.consumer,
+      resolved.served,
+      args,
+      {
+        ...caller,
+        // Before each protected step, the approval as it stands now, then
+        // the caller's own gate (its step's lease): one revoked or replaced
+        // since the run froze it stops the next commit.
+        stillAllowed: async () => {
+          await requireApprovalActive(env, id, version, approval.id);
+          await caller.stillAllowed?.();
+        },
+      }
+    );
+  } catch (error) {
+    await requireUnrestricted();
+    throw error;
+  }
+  await requireUnrestricted();
+  return answer;
+};
+
+/**
  * Releases the pins of workflow `id`'s approvals that no longer serve: as
  * a statement for the batch that revokes them.
  */
@@ -355,7 +569,7 @@ export const requireTargetServes = async (
   declared: Extract<PinnedBinding, { resourceId: null }>,
   target: WorkflowBindingTarget
 ): Promise<void> => {
-  if (target.kind !== declared.kind) {
+  if (servedKindOf(target) !== declared.kind) {
     throw invalid("target: Its kind isn't the binding's.");
   }
   switch (target.kind) {
@@ -373,12 +587,65 @@ export const requireTargetServes = async (
       await requireOperationServes(env, id, declared.contractId, target);
       return;
     }
+    case "storeOperation": {
+      await requireStoreOperationServes(
+        env,
+        id,
+        declared.contractId,
+        target,
+        1
+      );
+      return;
+    }
     case "decision": {
       await requireDeciders(env, target.deciders);
       return;
     }
     default: {
       target satisfies never;
+    }
+  }
+};
+
+/**
+ * What the audit log records of an approval's target: what serves the
+ * binding, by its IDs, never a decision's deciders.
+ */
+const targetDetail = (
+  target: WorkflowBindingTarget
+): Record<string, string | number> => {
+  switch (target.kind) {
+    case "model": {
+      return { targetKind: target.kind, model: target.model };
+    }
+    case "connector": {
+      return {
+        targetKind: target.kind,
+        permissionId: target.permissionId,
+        targetContract: target.contract,
+      };
+    }
+    case "operation": {
+      return {
+        targetKind: target.kind,
+        permissionId: target.permissionId,
+        appVersion: target.appVersion,
+        export: target.export,
+      };
+    }
+    case "storeOperation": {
+      return {
+        targetKind: target.kind,
+        permissionId: target.permissionId,
+        operation: target.operation,
+        operationKind: target.operationKind,
+      };
+    }
+    case "decision": {
+      return { targetKind: target.kind, deciders: target.deciders.length };
+    }
+    default: {
+      return target satisfies never;
     }
   }
 };
@@ -478,6 +745,7 @@ export const approveWorkflowBinding = async (
         contract: row.contractId,
         fingerprint: row.fingerprint,
         reviewedVersion: reviewed.version,
+        ...targetDetail(target),
       },
     }),
     nextGeneration(

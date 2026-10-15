@@ -161,6 +161,9 @@ export const objectOf = (
       msg`Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it`
     );
   }
+  if (object.type === "store") {
+    return i18n._(msg`Store ${ph({ store: object.storeId })}`);
+  }
   return i18n._(msg`Workflow ${ph({ workflow: object.workflowId })}`);
 };
 
