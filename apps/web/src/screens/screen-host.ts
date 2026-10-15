@@ -13,7 +13,7 @@ import {
 } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 
-import type { CoreLink } from "./core-link.ts";
+import type { CoreLink, LinkEnded } from "./core-link.ts";
 import {
   inTime,
   isMounted,
@@ -25,7 +25,8 @@ import type { ExpectedStart } from "./frame-stages.ts";
 import { openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
 import { cancelStream, followStream } from "./screen-stream.ts";
-import { frameLinks } from "./tab-link.ts";
+import { frameLinks, ownLink } from "./tab-link.ts";
+import type { Joined } from "./tab-link.ts";
 
 // The page's side of an App's screen. The screen runs in a sandboxed frame
 // (core's screen-frame.ts) with no network, whose document core serves for
@@ -525,6 +526,11 @@ interface Connected {
 interface FrameSource<Bundle extends FrameCode> {
   open: (session: Session) => Promise<Bundle>;
   /**
+   * The link the frame goes over: the tab's (`frameLinks`) unless given,
+   * or one of its own, closed with the frame.
+   */
+  join?: (onEnded: (why: LinkEnded) => void) => Joined<CoreLink>;
+  /**
    * What the frame's bridge reaches on the tab's `link`: `refused` stops
    * the frame (core no longer hands its build the data, or the browser's
    * session is someone else's), and `cleanups` stop what it starts.
@@ -586,7 +592,10 @@ const runFrame = <Bundle extends FrameCode>(
   // The link ending stops the frame, signed out or not, as it stops every
   // frame of the tab: nothing of the person's stays on the page, in a
   // frame or its bridge, for whoever uses the browser next.
-  const joined = frameLinks.join((why) => {
+  const join =
+    source.join ??
+    ((onEnded: (why: LinkEnded) => void) => frameLinks.join(onEnded));
+  const joined = join((why) => {
     fail(
       why === "signed-out"
         ? { status: "signed-out" }
@@ -784,6 +793,11 @@ export const runPreview = (
     frame,
     {
       open: async (session) => await session.chats.preview(chatId, app, screen),
+      // A connection of its own: core keeps a preview's callbacks (its
+      // server calls') per connection, with no way of the frame's own to
+      // let go of them, so only closing the connection when the preview
+      // stops releases them (GRA-623).
+      join: ownLink,
       // A preview reads no real data, so no approval decides it.
       connect: (link, bundle) => ({
         target: previewTarget(link, chatId, bundle),

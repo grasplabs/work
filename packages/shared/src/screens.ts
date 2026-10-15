@@ -400,7 +400,7 @@ export interface ScreensApi {
    * waits for a decision, has it answered or closed, or ends, for as long
    * as the person may use the App and until the screen releases the
    * subscription it answers. Core lets go of `onChange` when it stops
-   * calling it, which tells the screen to follow again. One screen's
+   * calling it, which tells the screen to follow again. One tab's
    * connection holds at most 20 subscriptions at once.
    */
   watchRuns: (

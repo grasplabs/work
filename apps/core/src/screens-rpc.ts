@@ -110,9 +110,11 @@ import { runSummary } from "./workflows/summary.ts";
 
 /**
  * Most run subscriptions (`watchRuns`) one connection keeps at once. A
- * connection is one open screen, which follows a workflow or two: this
- * only bounds what a screen that subscribes over and over keeps in its
- * App's host.
+ * connection is one browser tab, shared by every App frame it runs
+ * (`ScreensApi.frame`), so this bounds the whole tab, as spec 11.4 sets
+ * its limits per tab: each screen follows a workflow or two, and this
+ * only bounds what screens that subscribe over and over keep in their
+ * Apps' hosts.
  */
 const maxRunSubscriptions = 20;
 
@@ -655,9 +657,12 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
   }
 
   async delivery(): Promise<ScreenDelivery> {
-    await this.#person();
+    const by = await this.#person();
     const { env, app, artifact } = this.#connection;
-    return deliveryOf(await standingOf(env, app, artifact));
+    // The person's role in the App first, as every call's: someone who
+    // lost it hears that, never how the App's build stands.
+    const { id } = await getApp(env, by, app);
+    return deliveryOf(await standingOf(env, id, artifact));
   }
 
   async call(method: string, args: unknown[]): Promise<unknown> {

@@ -129,6 +129,25 @@ export class TabLinks<Link extends SharedLink> {
 }
 
 /**
+ * A link of one frame's own, closed when the frame leaves: for a frame
+ * whose hold in core only closing its connection lets go of (a draft's
+ * preview, screen-host.ts).
+ */
+export const ownLink = (onEnded: Ended): Joined<CoreLink> => {
+  const link = new CoreLink(onEnded);
+  return {
+    link,
+    end: (why) => {
+      link.close();
+      onEnded(why);
+    },
+    leave: () => {
+      link.close();
+    },
+  };
+};
+
+/**
  * The tab's link to core for its App frames. A module, so the tab keeps
  * it while pages come and go; a development reload of the page's other
  * modules (screen-host.ts, a page) keeps it too, as only what changed and

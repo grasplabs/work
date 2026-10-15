@@ -14,6 +14,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
+import { pastAccessRecheck } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -227,6 +228,62 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
       closedCall: "screen.invalid",
       closedFollow: "screen.invalid",
     });
+  });
+
+  it("lets go at once of a callback whose call was still being admitted when its frame closed", async () => {
+    const builder = await personApi("builder");
+    const admin = await personApi("admin");
+    const { app } = await twoScreenApp(builder, admin);
+    const { screens } = builder.api;
+    const notes = await screens.open(app, "notes");
+    const frame = await screens.frame(app, notes.lease);
+    const state = { released: false };
+    const callback = Object.assign(
+      (): void => {
+        // The App never pushes in this test.
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          state.released = true;
+        },
+      }
+    );
+
+    // Sent one after the other: the close arrives while core still
+    // admits the call, before the call hands its callback to the App.
+    const call = outcome(frame.call("watchNotes", [callback]));
+    await frame.close();
+    const answered = await call;
+
+    // Nothing is pushed: only the frame having closed lets go of it.
+    await vi.waitFor(
+      () => {
+        expect(state.released).toBeTruthy();
+      },
+      { timeout: 5000, interval: 50 }
+    );
+    expect(answered).toBe("ok");
+  });
+
+  it("answers a frame's delivery only to someone who still has a role in the App", async () => {
+    const builder = await personApi("builder");
+    const admin = await personApi("admin");
+    const member = await personApi("builder");
+    const { app } = await twoScreenApp(builder, admin);
+    const them = { type: "person", id: member.userId } as const;
+    await builder.api.apps.members.add(app, { ...them, role: "user" });
+    const notes = await member.api.screens.open(app, "notes");
+    const frame = await member.api.screens.frame(app, notes.lease);
+    const before = await frame.delivery();
+
+    await builder.api.apps.members.remove(app, them);
+
+    expect({
+      before,
+      after: await pastAccessRecheck(
+        async () => await outcome(frame.delivery())
+      ),
+    }).toStrictEqual({ before: "open", after: "app.not_found" });
   });
 });
 
