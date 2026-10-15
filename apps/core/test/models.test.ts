@@ -717,6 +717,26 @@ describe("model gateway", { timeout: 30_000 }, () => {
     }
   );
 
+  it("tells a call whose last request was lost that it failed, not that it was rate-limited before", async () => {
+    const { gatewayEnv } = withGateway([
+      { status: 429, errorType: "rate_limit_error" },
+      { hang: true },
+    ]);
+
+    await expect(
+      outcome(
+        models(gatewayEnv).call({
+          model: workersAi,
+          input: "Hello.",
+          timeoutMs: 5000,
+          purpose: "chat.turn",
+          trigger: newPerson(),
+          work: work(),
+        })
+      )
+    ).resolves.toBe("model.failed");
+  });
+
   it("answers when the provider refuses for a moment, then answers", async () => {
     const trigger = newPerson();
     const { gateway, gatewayEnv } = withGateway([

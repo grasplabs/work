@@ -1021,15 +1021,38 @@ const pause = async (ms: number, signal: AbortSignal): Promise<void> => {
   await scheduler.wait(ms, { signal }).catch(() => null);
 };
 
-/** Tells `route`'s caller where its wait stands; never fails the call. */
+/**
+ * The longest the gateway waits for a caller's `onQueued` before going on
+ * without it: a best-effort note, which never holds up an admission, a
+ * place given up or a request admitted.
+ */
+const queuedHookMs = 2000;
+
+/** Tells `route`'s caller where its wait stands; never fails, nor holds up, the call. */
 const told = async (
   route: Route,
   queued: Parameters<QueuedHook>[0]
 ): Promise<void> => {
+  const { onQueued } = route;
+  if (onQueued === undefined) {
+    return;
+  }
+  const timer = new AbortController();
   try {
-    await route.onQueued?.(queued);
+    await Promise.race([
+      onQueued(queued),
+      scheduler
+        .wait(queuedHookMs, { signal: timer.signal })
+        .then(() => {
+          log.warn("model.queued_hook_slow", { waitedMs: queuedHookMs });
+        })
+        // Stopped once the hook answered first.
+        .catch(() => null),
+    ]);
   } catch (error) {
     log.error("model.queued_hook_failed", errorFields(error));
+  } finally {
+    timer.abort();
   }
 };
 
@@ -1320,7 +1343,7 @@ const askUntilServed = async (
   }: { endsAt: number; signal: AbortSignal; maxWaitMs: number },
   waiting: Waiting
 ): Promise<Admission | { held: Refusal }> => {
-  let waitedMs = 0;
+  const startedAt = Date.now();
   let last: { held: Refusal } | undefined = undefined;
   for (;;) {
     if (last !== undefined && signal.aborted) {
@@ -1328,15 +1351,21 @@ const askUntilServed = async (
     }
     // oxlint-disable-next-line no-await-in-loop -- asked again after each wait
     const admitted = await admitRequest(route, body, endsAt);
+    // A ledger whose answer was lost may have kept a place for it all the
+    // same: given up on the way out, as one it was told of.
+    waiting.placed ||=
+      "held" in admitted && admitted.held.code === "model.ledger_unavailable";
     if (!("held" in admitted) || admitted.held.code !== "model.queued") {
       return admitted;
     }
     last = admitted;
     waiting.placed ||= admitted.held.placed === true;
+    // Every moment since it began counts, its asks and notes too, not
+    // only its sleeps.
     const ms = askAgainMs({
       waited: waiting.rounds,
       retryAfterSeconds: admitted.held.retryAfterSeconds ?? maxAskAgainSeconds,
-      waitedMs,
+      waitedMs: Date.now() - startedAt,
       maxWaitMs,
     });
     // The caller's word: a workflow attempt let go of stops waiting (it
@@ -1360,7 +1389,6 @@ const askUntilServed = async (
     // oxlint-disable-next-line no-await-in-loop -- each round
     await pause(ms, signal);
     waiting.rounds += 1;
-    waitedMs += ms;
   }
 };
 
@@ -1484,6 +1512,8 @@ const open = (
     response.sentChars = typeof init?.body === "string" ? init.body.length : 0;
     let answered;
     try {
+      // Only this request's own answer says whether it was rate-limited.
+      response.rateLimited = undefined;
       answered = await transport(input, withRequestId(init, admitted.id));
     } catch (error) {
       response.settled.push(

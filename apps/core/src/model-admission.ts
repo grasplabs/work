@@ -303,8 +303,12 @@ const resourceOf = ({ trigger, work, binding }: FairInput): string | null => {
   return null;
 };
 
-/** The person a call is made by or for, if any, a guest's aside. */
-const personOf = ({ trigger, work }: FairInput): string | undefined => {
+/**
+ * The person a call is made by or for, if any, a guest's aside (a guest is
+ * no one's person): the one rule its shares and its budgets both count by
+ * (model-budgets.ts adds a guest's member for budgets).
+ */
+export const personOf = ({ trigger, work }: FairInput): string | undefined => {
   if (trigger.type === "person" || trigger.type === "staff") {
     return trigger.userId;
   }

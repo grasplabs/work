@@ -784,6 +784,84 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     });
   });
 
+  it("gives up a place the ledger kept though its answer was lost", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const { fake, call } = gatewayWith([
+      paused(release.promise),
+      paused(release.promise),
+    ]);
+    // The ledger takes each admission, and its answer never comes back.
+    const lossy = new Proxy(env.MODEL_LEDGER, {
+      get: (namespace, name): unknown => {
+        if (name !== "getByName") {
+          return Reflect.get(namespace, name, namespace);
+        }
+        return (id: string) => {
+          const stub = namespace.getByName(id);
+          return new Proxy(stub, {
+            get: (target, member): unknown =>
+              member === "admit"
+                ? async (admission: Admission) => {
+                    await target.admit(admission);
+                    throw new Error("The ledger's answer was lost");
+                  }
+                : Reflect.get(target, member, target),
+          });
+        };
+      },
+    });
+    const lost = gatewayWith([], { MODEL_LEDGER: lossy });
+    const ada = newPerson().userId;
+    const running = [
+      outcome(call(callBy(newPerson().userId, 0))),
+      outcome(call(callBy(newPerson().userId, 0))),
+    ];
+    await until(() => fake.requests.length === 2);
+    const told = await outcome(lost.call(callBy(ada, 0)));
+    const places = await placesOf(ada);
+    release.resolve(true);
+    await Promise.all(running);
+
+    expect({ told, places }).toStrictEqual({
+      told: "model.ledger_unavailable",
+      places: 0,
+    });
+  });
+
+  it("goes on without a caller's note of its wait that never answers", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const { fake, call } = gatewayWith([
+      paused(release.promise),
+      paused(release.promise),
+      answered,
+    ]);
+    const ada = newPerson().userId;
+    const running = [
+      outcome(call(callBy(ada, 0))),
+      outcome(call(callBy(ada, 0))),
+    ];
+    await until(() => fake.requests.length === 2);
+    let noted = 0;
+    const waiting = outcome(
+      call(
+        callBy(ada, 0, {
+          onQueued: async () => {
+            noted += 1;
+            // Never answers, as a stalled database wouldn't.
+            await Promise.withResolvers<null>().promise;
+          },
+        })
+      )
+    );
+    await until(() => noted > 0);
+    release.resolve(true);
+
+    expect({
+      waiting: await Promise.race([waiting, stillWaiting(20_000)]),
+      running: await Promise.all(running),
+    }).toStrictEqual({ waiting: "ok", running: ["ok", "ok"] });
+  });
+
   it("asks nothing more for a call cancelled while it waits", async () => {
     const release = Promise.withResolvers<boolean>();
     const { fake, call } = gatewayWith([
