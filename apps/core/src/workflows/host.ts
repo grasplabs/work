@@ -231,12 +231,15 @@ interface StepAttempt {
 
 /**
  * Why a run waits before running a step again: a side effect held for its
- * person, or its step queued for a share of the client's attempts running
- * at once (admission.ts), with the share and the seconds until it asks
- * again at the latest.
+ * person (`held`); a side effect of unknown outcome, until its person says
+ * what became of it (`outcome_unknown`, listed for them with their held
+ * actions); or its step queued for a share of the client's attempts
+ * running at once (admission.ts), with the share and the seconds until it
+ * asks again at the latest.
  */
 export type WaitReason =
   | { reason: "held" }
+  | { reason: "outcome_unknown" }
   | { reason: "queued"; waitingFor: Share; retryAfterSeconds: number };
 
 /** The code a held side effect answers a run's call with (connect). */
@@ -1414,17 +1417,31 @@ export class RunHost extends RpcTarget {
     unknownSince?: number
   ): Promise<boolean> {
     const first = waitMsOf(this.#env);
+    const wakeType = await heldWakeType(step);
     if (unknownSince !== undefined) {
       // Never run again at once on an unknown outcome: should connect
       // and the step's call disagree on whether it may be recovered now,
-      // the step would come back held at once, again and again.
-      await this.#step.sleep(`${prefix}:first`, first);
+      // the step would come back held at once, again and again. Only its
+      // person's resolution, which wakes the step (wakes.ts), cuts this
+      // first wait short, so the run acts on their word within seconds.
+      // This wait replaced a plain sleep of the same name, with no branch
+      // for a run suspended in one: Grasp has no release yet, so no such
+      // run outlives a deploy.
+      try {
+        await this.#step.waitForEvent(`${prefix}:first`, {
+          type: wakeType,
+          timeout: first,
+        });
+      } catch (error) {
+        if (!isTimeout(error)) {
+          throw error;
+        }
+      }
     }
     const deadline =
       unknownSince === undefined
         ? undefined
         : unknownSince + unknownHoldMsOf(this.#env);
-    const wakeType = await heldWakeType(step);
     for (let checks = 0; ; checks += 1) {
       // Its answer is recorded, so a replay asks connect nothing, and a
       // failing connect is tried again rather than failing the step.
@@ -1462,9 +1479,13 @@ export class RunHost extends RpcTarget {
         return checks > 0;
       }
       if (checks === 0) {
+        // The reason is the wait's, fixed for all of it: an unknown
+        // outcome's wait (`unknownSince`) never turns into a held one's.
+        // The step's name stays as it was for either reason: a replay
+        // finds it recorded, whatever reason it was recorded with.
         // oxlint-disable-next-line no-await-in-loop -- once per wait
         await this.#recordWaiting(`${prefix}:waiting:held`, {
-          reason: "held",
+          reason: unknownSince === undefined ? "held" : "outcome_unknown",
         });
       }
       // Until its person decides, which wakes the step (wakes.ts), or the

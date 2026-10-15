@@ -51,29 +51,39 @@ export const readWaiting = async (
   core: CoreConnection,
   identity: Identity
 ): Promise<Waiting> => {
-  const [held, failed, integrations, requests, dependencies, screens] =
-    await Promise.all([
-      loadFromCore(
-        core,
-        async (session) => await session.pendingActions.list()
-      ),
-      loadFromCore(core, readNotifications),
-      loadFromCore(core, readIntegrations),
-      decidesRequests(identity)
-        ? loadFromCore(core, readPendingRequests)
-        : undefined,
-      loadFromCore(
-        core,
-        async (session) => await session.dependencies.waiting()
-      ),
-      decidesRequests(identity)
-        ? loadFromCore(
-            core,
-            async (session) => await session.screenTrust.waiting()
-          )
-        : undefined,
-    ]);
-  return { held, failed, integrations, requests, dependencies, screens };
+  const [
+    held,
+    outcomes,
+    failed,
+    integrations,
+    requests,
+    dependencies,
+    screens,
+  ] = await Promise.all([
+    loadFromCore(core, async (session) => await session.pendingActions.list()),
+    loadFromCore(core, async (session) => await session.unknownOutcomes.list()),
+    loadFromCore(core, readNotifications),
+    loadFromCore(core, readIntegrations),
+    decidesRequests(identity)
+      ? loadFromCore(core, readPendingRequests)
+      : undefined,
+    loadFromCore(core, async (session) => await session.dependencies.waiting()),
+    decidesRequests(identity)
+      ? loadFromCore(
+          core,
+          async (session) => await session.screenTrust.waiting()
+        )
+      : undefined,
+  ]);
+  return {
+    held,
+    outcomes,
+    failed,
+    integrations,
+    requests,
+    dependencies,
+    screens,
+  };
 };
 
 /**

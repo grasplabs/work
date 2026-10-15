@@ -961,12 +961,48 @@ export interface UnknownOutcome {
   origin: UnknownOutcomeOrigin | null;
 }
 
+/** Most calls of unknown outcome one list answers: the newest. */
+export const unknownOutcomeListLimit = 200;
+
+/**
+ * A call of unknown outcome as an organization's admin sees it, to follow
+ * up with the person it acted for: whose it is, what and where, and when.
+ * Never what was sent, nor its key (App code chooses keys), its claim or
+ * its origin: only that person resolves it, and only they see its input.
+ */
+export interface UnknownOutcomeListing {
+  /**
+   * For telling rows apart, unique within one listing: a digest of what
+   * the listing shows anyway, never of the call's key.
+   */
+  id: string;
+  /** The person it acted for: theirs to resolve. */
+  onBehalfOf: string;
+  subject: CodeSubject;
+  connectionId: string;
+  /** As `PendingAction.connectionName`. */
+  connectionName: string | null;
+  action: string;
+  /** What the action does, as its tool names it, such as "Send an email". */
+  title?: string;
+  resource: string | null;
+  /** When it was first sent, ISO 8601. */
+  sentAt: string;
+}
+
 /**
  * The calls of unknown outcome of a signed-in person, over `/rpc`: only
  * their own. Grasp staff have none, and resolve none.
  */
 export interface UnknownOutcomesApi {
   list: () => Promise<UnknownOutcome[]>;
+  /**
+   * Every person's open calls of unknown outcome, newest first, for the
+   * organization's own admins only (never Grasp staff), to follow up
+   * with each call's person: read only, as `UnknownOutcomeListing` shows
+   * them. An admin resolves only their own, with `resolve`.
+   */
+  listAll: () => Promise<UnknownOutcomeListing[]>;
   /**
    * Says what became of the call `key` names: `happened` keeps it from
    * ever being sent again; `not_happened` lets it be sent once more, with
@@ -1213,6 +1249,14 @@ export interface ConnectApi extends PackageRegistryApi {
    * for Grasp staff.
    */
   listUnknownOutcomes: (person: ConnectionPerson) => Promise<UnknownOutcome[]>;
+  /**
+   * Every person's calls of unknown outcome, newest first (at most 200), as
+   * an admin sees them: for `admin`, one of the organization's own admins
+   * as core read them now, never Grasp staff; refused to anyone else.
+   */
+  listAllUnknownOutcomes: (
+    admin: ConnectionPerson
+  ) => Promise<UnknownOutcomeListing[]>;
   /** One call of unknown outcome of the person's, or `null`. */
   unknownOutcome: (
     request: UnknownOutcomeRequest
@@ -1386,6 +1430,8 @@ export const connectErrors = defineErrorFamily({
     "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it took effect: it won't be sent again, and what it returned isn't known.",
   "connect.resolved_not_done":
     "A call with this idempotency key was interrupted after it was sent, and the person it acted for said it didn't take effect: it may be sent once more, with the same input.",
+  "connect.outcome_not_kept":
+    "What this call sent is no longer kept, so nobody can read what saying it didn't happen would let go out again: only that it happened can be said.",
   "connect.outcome_not_found":
     "There's no call of unknown outcome like that for you to resolve: it was resolved or recovered, or it isn't yours.",
   "connect.action_failed": "The action reported an error.",
