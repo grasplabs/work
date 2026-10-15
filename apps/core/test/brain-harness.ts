@@ -950,7 +950,7 @@ export interface BrainRunOptions {
   seed?: number;
   /** The model provider; the stub by default. */
   respond?: typeof stubReader;
-  /** The provider's name in the run's identity. */
+  /** The provider's name in the run's identity; required with `respond`. */
   providerName?: string;
 }
 
@@ -1011,11 +1011,16 @@ export const runBrainBaseline = async (
     openSealed = false,
     seed = 295,
     respond = stubReader,
-    providerName = brainStubModel,
+    providerName,
   }: BrainRunOptions
 ): Promise<BrainReport> => {
   const tasks = tasksOf(split, { openSealed });
   checkRun(tasks, repeats, controls, controlTasks);
+  // Another provider names itself: the stub's name is the stub's only.
+  if (respond !== stubReader && providerName === undefined) {
+    throw new RangeError("A run with another model provider needs its name");
+  }
+  const providerId = providerName ?? brainStubModel;
   const random = seededRandom(seed);
   const provider = providerOf(respond);
   const places = new Map<BrainPersona, Workspace>();
@@ -1152,7 +1157,7 @@ export const runBrainBaseline = async (
       sources,
       model: {
         id: model,
-        provider: providerName,
+        provider: providerId,
         gateway: gatewayConfig.gateway,
       },
       tools: await contracts((request) => fieldOf(request, "tools")),
