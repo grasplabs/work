@@ -1004,12 +1004,22 @@ export const grantPermission = async (
     // More access for an App is more for every App that reaches it
     // through exports or workflows: their data, if an admin had said it
     // may go to code nobody approved, is sensitive again, and their
-    // screens' policy moves on (screen-trust.ts).
+    // screens' policy moves on (screen-trust.ts). More for a workflow is
+    // more for every App that starts it, or a workflow that binds it.
     ...(isApp
       ? widenedByGrant(
           db,
           by,
-          appIdSchema.parse(found.subjectId),
+          { type: "app", appId: appIdSchema.parse(found.subjectId) },
+          storedEvent(event.id),
+          { permission: found.id }
+        )
+      : []),
+    ...(found.subjectType === "workflow"
+      ? widenedByGrant(
+          db,
+          by,
+          { type: "workflow", workflowId: found.subjectId },
           storedEvent(event.id),
           { permission: found.id }
         )

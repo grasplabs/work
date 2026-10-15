@@ -422,6 +422,21 @@ const checkedManifest = async (
 };
 
 /**
+ * Refuses `app`'s `version` unless it loads as a release (`loadRelease`'s
+ * own manifest checks): sealed, not revoked, its manifest intact
+ * (`version.not_sealed`, `version.revoked`, `version.manifest_corrupt`).
+ * For what names a release to call later, such as a workflow binding's
+ * approval: its artifacts are verified when it is loaded to run.
+ */
+export const requireReleaseLoads = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<void> => {
+  await checkedManifest(env, app, version);
+};
+
+/**
  * The sealed release of `app`'s `version`, verified: its manifest's text
  * against its hash, then every artifact's bytes against theirs, the
  * contracts against the manifest's contract hash and the registration
