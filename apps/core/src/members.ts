@@ -145,6 +145,28 @@ const appsReachedBy = async (
   return rows.map(({ id }) => appIdSchema.parse(id));
 };
 
+/**
+ * Tells the Apps `reached` before the change, and those `userId` reaches
+ * in role `role` now (an App shared with them while it ran), that their
+ * role there may have dropped. Never throws: the change has committed,
+ * and what follows it must still run; a second look that fails tells
+ * the first look's Apps all the same.
+ */
+const tellReached = async (
+  env: Env,
+  reached: readonly AppId[],
+  userId: string,
+  role: string
+): Promise<void> => {
+  let since: AppId[] = [];
+  try {
+    since = await appsReachedBy(env, userId, role);
+  } catch (error) {
+    log.error("app.access_revocation_failed", errorFields(error));
+  }
+  await accessMayHaveDropped(env, [...reached, ...since], [userId]);
+};
+
 /** Whether going from role `from` to `to` can take a role in an App away. */
 const lowers = (from: string, to: Role): boolean =>
   (isAdmin(from) && !isAdmin(to)) || (canBuild(from) && !canBuild(to));
@@ -328,9 +350,7 @@ const removeMember = async (
       throw refusal(by, roleErrors.create("role.forbidden"));
     }
     if (removedNow) {
-      // And again now: an App shared with them while this ran.
-      const since = await appsReachedBy(env, target, membership.role);
-      await accessMayHaveDropped(env, [...reached, ...since], [target]);
+      await tellReached(env, reached, target, membership.role);
     }
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
@@ -439,9 +459,7 @@ const setMemberRole = async (
   ]);
   if (changed) {
     if (lowers(membership.role, newRole)) {
-      // And again now: an App shared with them while this ran.
-      const since = await appsReachedBy(env, target.data, membership.role);
-      await accessMayHaveDropped(env, [...reached, ...since], [target.data]);
+      await tellReached(env, reached, target.data, membership.role);
     }
     return;
   }
