@@ -477,8 +477,11 @@ export interface QuotaAttempt {
    * `askAgainSeconds`).
    */
   waited?: number;
-  /** When its step first waited for load, if it has (host.ts). */
-  waitingSince?: number;
+  /**
+   * How long its step has waited for load since its last admission, if it
+   * has: its rounds' waits added up, not the time between them (host.ts).
+   */
+  waitedMs?: number;
   /** When the engine gives up on it (ms since the epoch). */
   deadline: number;
 }
@@ -801,8 +804,8 @@ const admitAttemptOnce = async (
   // whatever cap the step waited under: it fails before taking a lease,
   // so none of its code runs.
   if (
-    attempt.waitingSince !== undefined &&
-    now - attempt.waitingSince >= policy.limits.workflowQueuedStepMs
+    attempt.waitedMs !== undefined &&
+    attempt.waitedMs >= policy.limits.workflowQueuedStepMs
   ) {
     throw workflowErrors.create("workflow.queue_timeout", {
       maxWaitMs: policy.limits.workflowQueuedStepMs,
@@ -965,7 +968,7 @@ const admitAttemptOnce = async (
   // refused it read them.
   throw await queuedRefusal(db, owner, place, now, shares, sharesFound, {
     waited: attempt.waited ?? 0,
-    since: attempt.waitingSince ?? now,
+    waitedMs: attempt.waitedMs ?? 0,
     maxWaitMs: policy.limits.workflowQueuedStepMs,
   });
 };
