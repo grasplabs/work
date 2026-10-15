@@ -9,13 +9,14 @@ import {
   kitModules,
   screenRuntime,
   limitErrors,
+  openWorkflowErrors,
   serverFiles,
-  startScreenCompiler,
   workflowFiles,
 } from "@grasp-os/compiler";
 import type {
   AppCodeBuild,
   Diagnostic,
+  OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
   WorkflowBuild,
@@ -28,8 +29,11 @@ import {
   screenNameSchema,
   screenPath,
 } from "@grasp-os/shared/screens";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 
-import { requireBoundedHere } from "./sandboxed.ts";
+import { PlatformBoundError, platformRunner } from "./platform-sandbox.ts";
+import type { PlatformEnv, PlatformRunner } from "./platform-sandbox.ts";
 import type { FrameCode } from "./screen-frame.ts";
 
 /**
@@ -84,8 +88,19 @@ type AppFiles = Record<string, string>;
  * a version that changed only its screens, takes the server build it
  * already has.
  */
-const buildKey = async (files: AppFiles): Promise<string> =>
+export const buildKey = async (files: AppFiles): Promise<string> =>
   `${compilerVersion}/${await hashOf(files)}`;
+
+/** What a build of `kind` takes, as its errors past it. */
+const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
+  // An App's server code carries the host's generated modules, held to
+  // their own allowance, so they never count against the App's limits.
+  if (kind === "app") {
+    return appCodeLimitErrors;
+  }
+  // A JSON workflow's generated module: one file, held to its own bound.
+  return kind === "open-workflow" ? openWorkflowErrors : limitErrors;
+};
 
 /** A build refused before it started, or one that failed. */
 interface FailedBuild {
@@ -93,52 +108,147 @@ interface FailedBuild {
   diagnostics: Diagnostic[];
 }
 
+/** What building reads from core's env. */
+export type BuildEnv = PlatformEnv & {
+  /** Where builds are cached: core's R2 bucket, in the EU. */
+  FILES: Pick<R2Bucket, "get" | "put">;
+};
+
+/** The compiler's methods, by what they build. */
+const compilerMethods = {
+  screen: "build",
+  server: "buildServer",
+  workflow: "buildWorkflows",
+  app: "buildAppCode",
+  "app-tests": "buildAppTests",
+  "open-workflow": "buildOpenWorkflow",
+} as const;
+
+/** The kinds of build, by the compiler's method each runs. */
+type BuildKind = keyof typeof compilerMethods;
+
+/**
+ * Whether the compiler's answer is shaped as a build: its code is core's
+ * own, which reads the App's source and never runs it, so its answer is
+ * trusted as the Loader's is; only a broken one is refused.
+ */
+const isBuildShaped = (value: unknown): boolean =>
+  typeof value === "object" &&
+  value !== null &&
+  "ok" in value &&
+  (value.ok === true ||
+    (value.ok === false &&
+      "diagnostics" in value &&
+      Array.isArray(value.diagnostics)));
+
+/**
+ * A build of `files` by the compiler, wherever the runner runs it, and
+ * whether to cache it: the compiler's answer, or a failed build when it
+ * was stopped at a bound (a type built to recurse, say). A stop the files
+ * reach whatever the load (CPU time, memory, an answer too large) is
+ * cached as the failed build it is, so an App whose screen holds the
+ * checker can't make the compiler run on every view, on Cloudflare or
+ * on-prem. A stop the load can cause (the wall-clock deadline, a process
+ * killed) isn't: the next view builds again.
+ *
+ * Code the host generated (a JSON workflow's module) is never stopped by
+ * its author: the generator, not a builder, writes its types, so no stop
+ * is a verdict on it. Any stop of its build is thrown as it is, never a
+ * failed build and never cached, for its publication to be tried again
+ * (`workflow.build_slow`, workflow-builds.ts).
+ */
+const compiled = async (
+  runner: PlatformRunner,
+  kind: BuildKind,
+  files: AppFiles
+): Promise<{ built: unknown; cache: boolean }> => {
+  try {
+    const built = await runner.run("compiler", compilerMethods[kind], [files]);
+    return { built, cache: true };
+  } catch (error) {
+    if (!(error instanceof PlatformBoundError) || kind === "open-workflow") {
+      throw error;
+    }
+    const failed: FailedBuild = {
+      ok: false,
+      diagnostics: [
+        {
+          rule: "compile",
+          severity: "error",
+          message: `The compiler was stopped before it finished: ${error.message} Simplify the App's types (a type that recurses without end holds the type checker).`,
+        },
+      ],
+    };
+    return { built: failed, cache: error.own };
+  }
+};
+
+/**
+ * The builds running now in this isolate, by their cache key: a build
+ * asked for while the same one runs waits for it rather than start the
+ * compiler again, so views of one App's screen take one place in the
+ * sandbox, not one each. A build whose request was cancelled never
+ * settles, so it is waited for only as long as a build may take
+ * (`sharedRun`).
+ */
+const buildsRunning = new Map<string, SharedRun<unknown>>();
+
 /**
  * A build of the files `select` picks, the only ones it reads: limited
  * first, so the limits bound the hashing and sending too. From R2 (in the
- * EU), or built in the compiler's isolate and stored there. A failed build
- * is cached too: the same files fail the same way with the same compiler,
- * so an App that doesn't build can't start the compiler on every request.
- * A build that throws isn't cached. Two requests for a build that isn't
- * cached yet may both build it; they build the same thing.
+ * EU), or built by the compiler and stored there. A failed build is
+ * cached too, where the files alone failed it (`compiled`): the same
+ * files fail the same way with the same compiler, so an App that doesn't
+ * build can't start the compiler on every request. A build that throws
+ * isn't cached. Two requests in one isolate for a build that isn't cached
+ * yet share one (`buildsRunning`); in two isolates they may both build
+ * it, and build the same thing.
  */
 const cachedBuild = async <Build>(
-  env: Env,
-  kind: "screen" | "server" | "workflow" | "app" | "app-tests",
+  env: BuildEnv,
+  kind: BuildKind,
   appFiles: AppFiles,
-  select: (files: AppFiles) => AppFiles,
-  build: (
-    compiler: ReturnType<typeof startScreenCompiler>,
-    files: AppFiles
-  ) => Promise<Build>
+  select: (files: AppFiles) => AppFiles
 ): Promise<Build | FailedBuild> => {
   const files = select(appFiles);
-  // An App's server code carries the host's generated modules, held to
-  // their own allowance, so they never count against the App's limits.
-  const tooMuch =
-    kind === "app" ? appCodeLimitErrors(files) : limitErrors(files);
+  const tooMuch = limitsOf(kind)(files);
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
-  // The compiler parses, transforms and type-checks App source in a
-  // Dynamic Worker of core's own, which plain workerd (on-prem) doesn't
-  // bound: TypeScript's checker alone can be held for good by a type built
-  // to recurse, whatever the source's size. It doesn't go to the sandbox
-  // host yet, which takes only JavaScript modules and no `nodejs_compat`
-  // (the compiler needs `nodejs_compat`, and a JSON module for its kit),
-  // and would load the whole compiler for every build; until it does, it
-  // runs only where
-  // `requireBoundedHere` allows. Refused before the cache is read: a
-  // deployment where nothing compiles has nothing cached to serve.
-  requireBoundedHere(env, "the screen compiler");
+  // The compiler parses, transforms and type-checks App source, and
+  // TypeScript's checker alone can be held for good by a type built to
+  // recurse, whatever the source's size: it runs only where it is bounded
+  // (platform-sandbox.ts). Where nothing bounds it, refused before the
+  // cache is read: a deployment where nothing compiles has nothing cached
+  // to serve.
+  const runner = platformRunner(env);
   const cacheKey = `${kind}-builds/${await buildKey(files)}.json`;
+  const isBuild = (value: unknown): value is Build | FailedBuild =>
+    isBuildShaped(value);
   const cached = await env.FILES.get(cacheKey);
   if (cached) {
     return await cached.json<Build>();
   }
-  const compiler = startScreenCompiler(env.LOADER, env.ASSETS);
-  const built = await build(compiler, files);
-  await env.FILES.put(cacheKey, JSON.stringify(built));
+  const built = await sharedRun(
+    buildsRunning,
+    cacheKey,
+    runner.callMs("compiler"),
+    async () => {
+      const answer = await compiled(runner, kind, files);
+      if (!isBuild(answer.built)) {
+        throw new TypeError(
+          "The compiler answered something else than a build."
+        );
+      }
+      if (answer.cache) {
+        await env.FILES.put(cacheKey, JSON.stringify(answer.built));
+      }
+      return answer.built;
+    }
+  );
+  if (!isBuild(built)) {
+    throw new TypeError("The compiler answered something else than a build.");
+  }
   return built;
 };
 
@@ -149,32 +259,20 @@ const cachedBuild = async <Build>(
  * cached in R2.
  */
 export const buildScreens = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<ScreenBuild> =>
-  await cachedBuild(
-    env,
-    "screen",
-    appFiles,
-    buildFiles,
-    async (compiler, files) => await compiler.build(files)
-  );
+  await cachedBuild<ScreenBuild>(env, "screen", appFiles, buildFiles);
 
 /**
  * Builds an App's server code (`app/**.ts`) into ES modules, in the
  * compiler's isolate. A build is cached in R2, like the screens'.
  */
 export const buildServer = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<ServerBuild> =>
-  await cachedBuild(
-    env,
-    "server",
-    appFiles,
-    serverFiles,
-    async (compiler, files) => await compiler.buildServer(files)
-  );
+  await cachedBuild<ServerBuild>(env, "server", appFiles, serverFiles);
 
 /**
  * Builds an App's server code of spec 8's layout (its schema, values,
@@ -184,16 +282,10 @@ export const buildServer = async (
  * generated modules are among the files the key hashes.
  */
 export const buildAppCode = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<AppCodeBuild> =>
-  await cachedBuild(
-    env,
-    "app",
-    appFiles,
-    appCodeFiles,
-    async (compiler, files) => await compiler.buildAppCode(files)
-  );
+  await cachedBuild<AppCodeBuild>(env, "app", appFiles, appCodeFiles);
 
 /**
  * Builds an App's tests (`tests/**.ts`) into ES modules, in the
@@ -202,31 +294,37 @@ export const buildAppCode = async (
  * release (app-tests.ts). Cached in R2 like the others.
  */
 export const buildAppTests = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<AppCodeBuild> =>
-  await cachedBuild(
-    env,
-    "app-tests",
-    appFiles,
-    appTestFiles,
-    async (compiler, files) => await compiler.buildAppTests(files)
-  );
+  await cachedBuild<AppCodeBuild>(env, "app-tests", appFiles, appTestFiles);
 
 /**
  * Builds an App's workflows (`workflows/**.ts`) into ES modules, in the
  * compiler's isolate. A build is cached in R2, like the server's.
  */
 export const buildWorkflows = async (
-  env: Env,
+  env: BuildEnv,
   appFiles: AppFiles
 ): Promise<WorkflowBuild> =>
-  await cachedBuild(
+  await cachedBuild<WorkflowBuild>(env, "workflow", appFiles, workflowFiles);
+
+/**
+ * Builds the module the host generated from a JSON workflow
+ * (`.grasp/workflow.ts`, workflow-builds.ts) into one ES module, in the
+ * compiler's isolate, type-checked against its SDK. Cached in R2 like the
+ * others: the same generated module builds the same with the same
+ * compiler, so identical definitions share one build.
+ */
+export const buildOpenWorkflow = async (
+  env: BuildEnv,
+  files: AppFiles
+): Promise<OpenWorkflowBuild> =>
+  await cachedBuild<OpenWorkflowBuild>(
     env,
-    "workflow",
-    appFiles,
-    workflowFiles,
-    async (compiler, files) => await compiler.buildWorkflows(files)
+    "open-workflow",
+    files,
+    (all) => all
   );
 
 /** The details of a `*.build_failed` error: the version (null for a draft), and why. */

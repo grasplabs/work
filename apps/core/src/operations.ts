@@ -28,6 +28,8 @@ import {
   operationInputMaxBytes,
   operationResultMaxBytes,
   stagedReadMaxBytes,
+  streamMaxEmits,
+  streamProgressMaxBytes,
 } from "@grasp-os/shared/operation-limits";
 import {
   categoryOf,
@@ -134,6 +136,28 @@ import { readConsistently, StoreReader } from "./store-reader.ts";
 //   request is admitted by the same `authorize` a mutation's commit is
 //   (`admit`), whatever it checks (the release not revoked, the caller's
 //   roles, what admitted the caller), so the two gates can't drift apart.
+// - A streaming action's progress (spec 10.7.6) is a way out of its
+//   contract: a streaming action runs only through the streaming path,
+//   and any other only through the single-answer one, refused the other
+//   way round (`operation.mode_mismatch`), nested calls included; each
+//   snapshot is read as JSON, measured (`streamProgressMaxBytes`),
+//   validated by the action's `stream` descriptor and must already be
+//   normalized, as a return is (`contract.invalid_progress`), and one
+//   invocation emits at most `streamMaxEmits`. Only the invocation the
+//   caller named emits: a streaming action can't be nested, and the
+//   channel of anything it calls has no `emit`.
+// - A cancelled stream goes on acting: cancellation stops the run as its
+//   deadline does (its channel ends, so nothing more it starts is
+//   admitted, and nothing it staged commits) and refuses every later
+//   emit; every mutation it runs checks for it just before its commit,
+//   and every resource request just before it is sent. What it already
+//   committed or dispatched stays, and its derived keys answer those again
+//   to a call under the same key, never twice.
+// - A cancel claims an outcome it can't know: one that lands while an
+//   effect the run started is still under way (a nested mutation
+//   committing, a request out) answers the uncertain
+//   `operation.outcome_unknown`, never a definite `operation.cancelled`
+//   that would invite running it again under a new key.
 // - A failure leaks what it shouldn't: a caller gets an `AppErrorPayload`
 //   and nothing more. An `AppError` App code threw keeps its code (never
 //   a platform one), message and bounded details; a platform error
@@ -167,6 +191,12 @@ export interface Invocation {
   readonly authorize: () => Promise<WriterRoles>;
   /** How core binds the App's resources for this call; none bound without it. */
   readonly resources?: ResourceBindings;
+  /**
+   * Told what a query the caller named read, once its reads stand as one
+   * state of the store (`readConsistently`): the generation of each table
+   * it read, which a live query watches (query-subscriptions.ts).
+   */
+  readonly observeReads?: (readSet: Record<string, number>) => void;
 }
 
 /**
@@ -203,6 +233,18 @@ export interface OperationReference {
   readonly kind: string;
 }
 
+/**
+ * Where a streaming action's progress goes (spec 10.7.6): the caller's,
+ * for the one invocation it named.
+ */
+export interface ProgressSink {
+  /**
+   * Takes one snapshot, validated and normalized: the caller keeps only
+   * the latest, so a snapshot no one read yet is replaced, never queued.
+   */
+  readonly publish: (progress: Json) => void;
+}
+
 /** What a caller may pass along with a call. */
 export interface CallOptions {
   /** A mutation's submission key: one per logical submission, reused by retries. */
@@ -213,6 +255,24 @@ export interface CallOptions {
    * child (`CallTree.parentSession`).
    */
   readonly parentSession?: string;
+  /**
+   * For a streaming action, and only for one: where its progress goes.
+   * Without it a streaming action is refused, and with it any other.
+   */
+  readonly progress?: ProgressSink;
+  /**
+   * Aborted once the caller cancels the call: every run in it stops as at
+   * its deadline, and what it answers says what is known (`stoppedCode`).
+   */
+  readonly cancelled?: AbortSignal;
+  /**
+   * Told of each effect the call made, or may have made, at any depth: a
+   * mutation or an action it called, a resource request. A request a
+   * busy model budget refused before sending it isn't one. A caller that
+   * keeps the call's outcome keeps it once one was told, since running it
+   * again would act on what that effect changed.
+   */
+  readonly onEffect?: () => void;
 }
 
 /** A table of the App's schema, as staged writes are checked against it. */
@@ -232,6 +292,8 @@ interface Compiled {
   readonly contracts: Map<string, Promise<string>>;
   readonly args: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
   readonly returns: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
+  /** Each streaming action's progress snapshot. */
+  readonly streams: ReadonlyMap<string, ValueSchema<unknown, unknown>>;
   readonly tables: ReadonlyMap<string, CheckedTable>;
 }
 
@@ -259,9 +321,13 @@ const compiledOf = (manifest: AppManifest): Compiled => {
   }
   const args = new Map<string, ValueSchema<unknown, unknown>>();
   const returns = new Map<string, ValueSchema<unknown, unknown>>();
+  const streams = new Map<string, ValueSchema<unknown, unknown>>();
   for (const [path, operation] of Object.entries(manifest.operations)) {
     args.set(path, schemaOfDescriptor(operation.args));
     returns.set(path, schemaOfDescriptor(operation.returns));
+    if (operation.stream !== null) {
+      streams.set(path, schemaOfDescriptor(operation.stream));
+    }
   }
   const tables = new Map<string, CheckedTable>();
   for (const [name, table] of Object.entries(manifest.schema.tables)) {
@@ -275,6 +341,7 @@ const compiledOf = (manifest: AppManifest): Compiled => {
     contracts: new Map(),
     args,
     returns,
+    streams,
     tables,
   };
   compiledApps.set(manifest, compiled);
@@ -365,7 +432,8 @@ const fromApp = <Answer>(work: () => Answer): Answer => {
  */
 const publicOperation = (
   manifest: AppManifest,
-  reference: OperationReference
+  reference: OperationReference,
+  streaming: boolean
 ): OperationManifest => {
   const { path, kind } = reference;
   const operation =
@@ -378,10 +446,10 @@ const publicOperation = (
   if (operation.kind !== kind) {
     throw operationErrors.create("operation.kind_mismatch");
   }
-  // A stream's progress is delivered by the streaming runtime (spec
-  // 10.7.6): refused rather than run without it.
-  if (operation.stream !== null) {
-    throw operationErrors.create("operation.unsupported");
+  // A streaming action runs only where its progress has somewhere to go,
+  // and any other only where it answers once (spec 10.7.6).
+  if ((operation.stream !== null) !== streaming) {
+    throw operationErrors.create("operation.mode_mismatch");
   }
   return operation;
 };
@@ -472,6 +540,48 @@ const checkedReturn = (
         issues: ["The value isn't in the form its contract normalizes it to"],
       })
     );
+  }
+  return json;
+};
+
+/**
+ * A progress snapshot a streaming action emitted, if its `stream`
+ * descriptor allows it exactly, as `checkedReturn` reads a return: JSON
+ * within `streamProgressMaxBytes`, valid, and already normalized. It
+ * arrives over the channel as the channel's own JSON copy, so reading it
+ * runs no App code. Refused as the expected error the channel raises to
+ * App code, which `ctx.emit` rejects with.
+ */
+const checkedProgress = (
+  compiled: Compiled,
+  operation: OperationManifest,
+  value: unknown
+): Json => {
+  const read = jsonWithin(value, streamProgressMaxBytes);
+  if (read === "too_large") {
+    throw operationErrors.create("contract.progress_too_large", {
+      maxBytes: streamProgressMaxBytes,
+    });
+  }
+  const json = read?.json;
+  const result =
+    json === undefined
+      ? undefined
+      : compiled.streams.get(operation.path)?.["~standard"].validate(json);
+  if (result === undefined || result.issues !== undefined) {
+    throw operationErrors.create("contract.invalid_progress", {
+      issues: issuesOf(result?.issues ?? [{ message: "The value isn't JSON" }]),
+    });
+  }
+  const normalized = jsonOf(result.value);
+  if (
+    json === undefined ||
+    normalized === undefined ||
+    canonicalJson(normalized) !== canonicalJson(json)
+  ) {
+    throw operationErrors.create("contract.invalid_progress", {
+      issues: ["The value isn't in the form its schema normalizes it to"],
+    });
   }
   return json;
 };
@@ -656,7 +766,15 @@ const sandboxFailureOf = (
       depth,
       ...errorFields(thrown),
     });
-    return hostError(operationErrors.create("operation.sandbox_unavailable"));
+    // Only a call that surely never started ran nothing, to try again; one
+    // that may have started is an unknown outcome, never to repeat blindly.
+    return hostError(
+      operationErrors.create(
+        thrown.started
+          ? "operation.sandbox_lost"
+          : "operation.sandbox_unavailable"
+      )
+    );
   }
   const verdict = sandboxVerdictOf(thrown);
   if (!isSandboxVerdict(verdict)) {
@@ -1249,6 +1367,17 @@ const resourceResultMaxBytes = platformLimits.stepPayloadBytes;
  * error the adapter raised (`effect.outcome_unknown` among them), never
  * as its message.
  */
+/**
+ * Refuses, with `operation.cancelled`, once `run`'s call is cancelled:
+ * checked just before an effect (a mutation's commit, a resource request)
+ * so a cancel that lands first stops it for certain.
+ */
+const requireNotCancelled = (run: Run): void => {
+  if (run.cancelled?.aborted === true) {
+    throw hostError(operationErrors.create("operation.cancelled"));
+  }
+};
+
 const resourceCall = async (
   run: Run,
   operation: OperationManifest,
@@ -1297,6 +1426,8 @@ const resourceCall = async (
   ) {
     throw operationErrors.create("resource.unavailable");
   }
+  // Cancelled meanwhile: nothing is sent.
+  requireNotCancelled(run);
   let answered: unknown;
   try {
     answered = await bound.call(method, args, {
@@ -1380,6 +1511,15 @@ interface Run {
   readonly budget: CallBudget;
   /** The caller's call, as its runner knows it: the same at any depth. */
   readonly call: CallTree;
+  /**
+   * Aborted once the caller cancels its call (`CallOptions.cancelled`):
+   * every run in the call stops as at its deadline.
+   */
+  readonly cancelled?: AbortSignal;
+  /** Told of each effect the call makes (`CallOptions.onEffect`). */
+  readonly onEffect?: () => void;
+  /** Where its progress goes: only for the streaming action the caller named. */
+  readonly progress?: ProgressSink;
 }
 
 /** The most resource requests one call may make, at any depth. */
@@ -1502,6 +1642,7 @@ const trackedCalls = (
       write: track(capabilities.write),
       call: track(capabilities.call),
       resource: track(capabilities.resource),
+      emit: track(capabilities.emit),
     },
     settle: async () => {
       handlerSettled = true;
@@ -1538,17 +1679,50 @@ const trackedCalls = (
  */
 const untilDeadline = async <Answer>(
   work: Promise<Answer>,
-  at: number
-): Promise<Answer | "expired"> => {
+  at: number,
+  cancelled?: AbortSignal
+): Promise<Answer | "expired" | "cancelled"> => {
   const limit = timeLimit(Math.max(0, at - Date.now()));
   try {
     return await Promise.race([
       work,
       whenAborted(limit.signal).catch(() => "expired" as const),
+      ...(cancelled === undefined
+        ? []
+        : [whenAborted(cancelled).catch(() => "cancelled" as const)]),
     ]);
   } finally {
     limit.clear();
   }
+};
+
+/** `work`'s value, or "cancelled" once `cancelled` aborts first. */
+const untilCancelled = async <Answer>(
+  work: Promise<Answer>,
+  cancelled: AbortSignal | undefined
+): Promise<{ readonly value: Answer } | "cancelled"> => {
+  // Never rejecting: a failure that comes after the cancel won is dropped,
+  // not left unhandled.
+  const settled = (async () => {
+    try {
+      return { value: await work };
+    } catch (error) {
+      return { error };
+    }
+  })();
+  const first = await Promise.race([
+    settled,
+    ...(cancelled === undefined
+      ? []
+      : [whenAborted(cancelled).catch(() => "cancelled" as const)]),
+  ]);
+  if (first === "cancelled") {
+    return first;
+  }
+  if ("error" in first) {
+    throw first.error;
+  }
+  return first;
 };
 
 /** Thrown by a run whose failure came from stale reads: run it again. */
@@ -1558,7 +1732,7 @@ const staleRun = new Error("A run's reads went stale");
 interface Capabilities {
   /** Told of every refused or failed use, as the channel's `refused`. */
   readonly onRefused?: (
-    name: "read" | "write" | "call" | "resource",
+    name: "read" | "write" | "call" | "resource" | "emit",
     error: Error
   ) => void;
   readonly read?: (request: unknown) => Promise<unknown>;
@@ -1573,6 +1747,13 @@ interface Capabilities {
     method: unknown,
     args: unknown
   ) => Promise<unknown>;
+  readonly emit?: (progress: unknown) => Promise<unknown>;
+  /**
+   * Whether an effect it started (a mutation or action it called, a
+   * resource request) is still under way: a cancel that lands then can't
+   * say what happened (`operation.outcome_unknown`).
+   */
+  readonly effectsInFlight?: () => boolean;
 }
 
 /** Why each kind's channel refuses what it hasn't. */
@@ -1581,13 +1762,36 @@ const refusalsOf = {
     write: "operation.read_only",
     call: "operation.read_only",
     resource: "operation.no_resources",
+    emit: "operation.no_stream",
   },
-  mutation: { resource: "operation.no_resources" },
+  mutation: { resource: "operation.no_resources", emit: "operation.no_stream" },
   action: {
     read: "operation.no_database",
     write: "operation.no_database",
+    emit: "operation.no_stream",
   },
 } as const;
+
+/**
+ * Why a run stopped early: its deadline, or a cancel. A cancel that lands
+ * while an effect it started is still under way (a mutation committing, a
+ * request out) can't say whether that effect happened: uncertain, never
+ * a definite `operation.cancelled` that would invite running it again.
+ */
+const stoppedCode = (
+  outcome: "expired" | "cancelled",
+  capabilities: Capabilities
+):
+  | "operation.deadline_exceeded"
+  | "operation.cancelled"
+  | "operation.outcome_unknown" => {
+  if (outcome === "expired") {
+    return "operation.deadline_exceeded";
+  }
+  return capabilities.effectsInFlight?.() === true
+    ? "operation.outcome_unknown"
+    : "operation.cancelled";
+};
 
 /** How long a run stopped at its deadline gets to let go of what it held. */
 const letGoMs = 1000;
@@ -1636,17 +1840,31 @@ const runHandler = async (
   );
   let expired = false;
   try {
-    const outcome = await untilDeadline(ran, run.invocation.deadline);
-    if (outcome === "expired") {
+    const outcome = await untilDeadline(
+      ran,
+      run.invocation.deadline,
+      run.cancelled
+    );
+    if (outcome === "expired" || outcome === "cancelled") {
       expired = true;
-      // Stopped at its deadline: its channel ends as this returns (the
-      // `finally` below), so nothing it still does reaches the store, and
-      // what it staged never commits.
-      throw hostError(operationErrors.create("operation.deadline_exceeded"));
+      // Stopped at its deadline, or cancelled: its channel ends as this
+      // returns (the `finally` below), so nothing it still does reaches
+      // the store, and what it staged never commits.
+      throw hostError(
+        operationErrors.create(stoppedCode(outcome, capabilities))
+      );
     }
     // What it started and didn't wait for still runs: the run ends once
-    // that has settled, and fails with what failed of it.
-    const unfinished = await calls.settle();
+    // that has settled, and fails with what failed of it. A cancel stops
+    // that wait too, saying what is known of what still ran.
+    const left = await untilCancelled(calls.settle(), run.cancelled);
+    if (left === "cancelled") {
+      expired = true;
+      throw hostError(
+        operationErrors.create(stoppedCode("cancelled", capabilities))
+      );
+    }
+    const unfinished = left.value;
     if ("thrown" in outcome) {
       if (stale !== undefined && (await stale())) {
         throw staleRun;
@@ -1813,12 +2031,17 @@ const startNested = async (
       maxDepth: callMaxDepth,
     });
   }
+  // A streaming action runs only for a screen following it (spec 10.7.6):
+  // nested, its progress would have no one to go to.
   if (callee.stream !== null) {
-    throw operationErrors.create("operation.unsupported");
+    throw operationErrors.create("operation.mode_mismatch");
   }
   spendCall(run.budget, "nested");
   const admitted = admittedArgs(run.compiled, callee, args);
-  const nested: Run = { ...run, depth: run.depth + 1 };
+  // Cancelled with the call, but never emitting: its progress would be
+  // another function's to send.
+  const { progress: _progress, ...inherited } = run;
+  const nested: Run = { ...inherited, depth: run.depth + 1 };
   try {
     if (within.type === "mutation") {
       return await stagedQuery(
@@ -1868,15 +2091,20 @@ const runQuery = async (
   );
   return await trusted(
     async () =>
-      await readConsistently(invocation.store, scope, async (reader) => {
-        const budget = runReads(run);
-        return await runHandler(run, operation, args, {
-          read: async (request) => {
-            spendRead(budget, 0);
-            return await readFor(operation, reader, request);
-          },
-        });
-      })
+      await readConsistently(
+        invocation.store,
+        scope,
+        async (reader) => {
+          const budget = runReads(run);
+          return await runHandler(run, operation, args, {
+            read: async (request) => {
+              spendRead(budget, 0);
+              return await readFor(operation, reader, request);
+            },
+          });
+        },
+        run.depth === 0 ? invocation.observeReads : undefined
+      )
   );
 };
 
@@ -1979,6 +2207,8 @@ const runMutation = async (
       roles = current;
       continue;
     }
+    // Cancelled meanwhile: nothing it staged commits.
+    requireNotCancelled(run);
     try {
       // oxlint-disable-next-line no-await-in-loop -- see above
       const committed = await trusted(
@@ -2008,6 +2238,36 @@ const runMutation = async (
 };
 
 /**
+ * A streaming action's `emit` (`ctx.emit`): the snapshot checked
+ * (`checkedProgress`) and handed to `sink`, unless the call is cancelled
+ * or has emitted `streamMaxEmits` already. It waits for nothing: the sink
+ * keeps the latest snapshot only, so an action emitting faster than its
+ * screen reads costs it nothing more than that one snapshot.
+ */
+const emitProgress = async (
+  compiled: Compiled,
+  operation: OperationManifest,
+  sink: ProgressSink,
+  {
+    emitted,
+    progress,
+    cancelled,
+  }: { emitted: number; progress: unknown; cancelled?: AbortSignal }
+): Promise<null> => {
+  await Promise.resolve();
+  if (cancelled?.aborted === true) {
+    throw operationErrors.create("operation.cancelled");
+  }
+  if (emitted > streamMaxEmits) {
+    throw operationErrors.create("operation.emit_limit", {
+      maxEmits: streamMaxEmits,
+    });
+  }
+  sink.publish(checkedProgress(compiled, operation, progress));
+  return null;
+};
+
+/**
  * Runs an action: authorized as the call starts, with no database, its
  * calls of the App's functions each an invocation of its own and its
  * resources each one call of the binding core resolved (`resourceCall`).
@@ -2023,7 +2283,7 @@ const runAction = async (
   args: Json,
   key: readonly string[]
 ): Promise<Json> => {
-  const { invocation, compiled } = run;
+  const { invocation, compiled, progress: sink } = run;
   await admit(invocation);
   // What every key this action derives is bound to: who calls it, through
   // which App, which action's contract with which input, under the call's
@@ -2043,6 +2303,28 @@ const runAction = async (
   // has it, moves no later place.
   let changes = 0;
   let requests = 0;
+  let emitted = 0;
+  // Effects under way: mutations and actions it called, resource requests.
+  let inFlight = 0;
+  const effect = async <Answer>(
+    work: () => Promise<Answer>
+  ): Promise<Answer> => {
+    inFlight += 1;
+    try {
+      const answer = await work();
+      run.onEffect?.();
+      return answer;
+    } catch (error) {
+      // Refused before it was sent, for a budget busy with requests under
+      // way: nothing went out. Anything else may have.
+      if (operationErrors.codeOf(error) !== "resource.budget_busy") {
+        run.onEffect?.();
+      }
+      throw error;
+    } finally {
+      inFlight -= 1;
+    }
+  };
   const derived = async (
     what: "call" | "resource",
     count: number
@@ -2050,30 +2332,58 @@ const runAction = async (
     "derived",
     await sha256Hex(canonicalJson([scope, what, count])),
   ];
+  const callNested = async (
+    kind: unknown,
+    path: unknown,
+    callArgs: unknown
+  ): Promise<Json> =>
+    await nestedCall(
+      run,
+      operation,
+      { kind, path, args: callArgs },
+      {
+        type: "action",
+        derived: async () => {
+          changes += 1;
+          return await derived("call", changes);
+        },
+      }
+    );
   return await runHandler(run, operation, args, {
+    // A query changes nothing: only what may is an effect under way.
     call: async (kind, path, callArgs) =>
-      await nestedCall(
-        run,
-        operation,
-        { kind, path, args: callArgs },
-        {
-          type: "action",
-          derived: async () => {
-            changes += 1;
-            return await derived("call", changes);
-          },
-        }
-      ),
+      kind === "query"
+        ? await callNested(kind, path, callArgs)
+        : await effect(async () => await callNested(kind, path, callArgs)),
     resource: async (alias, method, callArgs) => {
       spendCall(run.budget, "requests");
       requests += 1;
-      return await resourceCall(
-        run,
-        operation,
-        { alias, method, args: callArgs },
-        await derived("resource", requests)
+      const resourceKey = await derived("resource", requests);
+      return await effect(
+        async () =>
+          await resourceCall(
+            run,
+            operation,
+            { alias, method, args: callArgs },
+            resourceKey
+          )
       );
     },
+    effectsInFlight: () => inFlight > 0,
+    ...(sink === undefined
+      ? {}
+      : {
+          emit: async (progress) => {
+            emitted += 1;
+            return await emitProgress(compiled, operation, sink, {
+              emitted,
+              progress,
+              ...(run.cancelled === undefined
+                ? {}
+                : { cancelled: run.cancelled }),
+            });
+          },
+        }),
   });
 };
 
@@ -2124,7 +2434,11 @@ export const callOperation = async (
   try {
     const { compiled, operation, admitted, key } = await trusted(() => {
       const known = compiledOf(app.manifest);
-      const found = publicOperation(app.manifest, reference);
+      const found = publicOperation(
+        app.manifest,
+        reference,
+        options.progress !== undefined
+      );
       return {
         compiled: known,
         operation: found,
@@ -2139,6 +2453,10 @@ export const callOperation = async (
               ),
       };
     });
+    const { progress, cancelled } = options;
+    if (cancelled?.aborted === true) {
+      throw hostError(operationErrors.create("operation.cancelled"));
+    }
     const value = await execute(
       {
         app,
@@ -2147,6 +2465,11 @@ export const callOperation = async (
         depth: 0,
         budget: callBudget(),
         call: new CallTree(options.parentSession),
+        ...(progress === undefined ? {} : { progress }),
+        ...(cancelled === undefined ? {} : { cancelled }),
+        ...(options.onEffect === undefined
+          ? {}
+          : { onEffect: options.onEffect }),
       },
       operation,
       admitted,

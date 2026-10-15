@@ -99,7 +99,10 @@ const Status = ({ workflow }: { workflow: WorkflowSummary }) => {
       {workflow.lastRun === null ? (
         <span className="text-muted-foreground">–</span>
       ) : (
-        <RunResult status={workflow.lastRun.status} />
+        <RunResult
+          queued={workflow.lastRun.queued}
+          status={workflow.lastRun.status}
+        />
       )}
       {waiting === 0 ? null : (
         <RunCount

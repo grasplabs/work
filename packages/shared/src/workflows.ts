@@ -51,6 +51,12 @@ export const workflowErrors = defineErrorFamily({
     "This workflow run, with the runs it started, has reached a limit it may have: how many steps a run takes, how deep its runs nest, how many runs it starts, how long its steps run in all, how many calls its steps make, or how old it is. No more of it can be admitted.",
   "workflow.lineage_busy":
     "Steps still running in this workflow run, or in runs it started, hold what's left of its run time. Try again once they finish.",
+  "workflow.queued":
+    "Workflow steps already running take this App's, this person's or the organization's share of the steps that may run at once. This one waits its turn and runs once a share comes free.",
+  "workflow.queue_timeout":
+    "This workflow step waited its turn to run for as long as a step may wait, so it was stopped. Steps already running kept the organization, this person or this App busy throughout: try again later.",
+  "workflow.queue_full":
+    "As many of this person's, or this App's, workflow steps are already waiting for their turn to run as may wait at once. Try again once some have run.",
   "workflow.idempotency_key_invalid":
     "A workflow's connection calls take their step's own idempotency key (the `idempotencyKey` a side-effect step gets), or none: the platform keeps side effects to once per step and run.",
   "workflow.param_not_found":
@@ -425,6 +431,10 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "model.budget_busy",
   // Nothing ran; room comes back as the lineage's attempts under way settle.
   "workflow.lineage_busy",
+  // Nothing ran; a share comes back as attempts running at once settle.
+  "workflow.queued",
+  // Nothing ran, nor was queued; places come free as waiting steps run.
+  "workflow.queue_full",
   "internal.unexpected",
   "workflow.invalid_model_output",
 ]);
@@ -486,10 +496,12 @@ export interface RunFailure {
 }
 
 /**
- * Where a run is: running (a step, or a sleep), waiting for a decision,
- * paused (its engine instance is), or ended.
+ * Where a run is: running (a step, or a sleep), queued for a share of the
+ * attempts that run at once (`RunQueue`), waiting for a decision, paused
+ * (its engine instance is), or ended.
  */
 export type RunStatus =
+  | "queued"
   | "running"
   | "waiting"
   | "paused"
@@ -532,6 +544,12 @@ export interface RunSummary {
   error?: { code: string; message: string };
   /** The decisions it waits for now: none once it has ended. */
   waits: { kind: "decision"; name: string; expiresAt: number }[];
+  /**
+   * While it is `queued` for a share of the attempts that run at once (its
+   * App's, its person's or the organization's): which, and when it asks
+   * again at the latest. Throttling, not a fault of the workflow.
+   */
+  queued?: { waitingFor: "client" | "person" | "app"; retryAt: number };
   /**
    * What the person asking may do now, as the host would admit it, and a
    * control the host admitted that the engine is still applying.
@@ -707,6 +725,18 @@ export interface RunControl {
   state: "admitted" | "applied" | "superseded";
 }
 
+/**
+ * What a `queued` run waits for: a share of the attempts that run at once
+ * of its App (`app`), of the person it counts for (`person`) or of the
+ * whole organization (`client`), and when it asks again at the latest
+ * (ISO 8601). Throttling, not a fault of the workflow. It names the share
+ * only: never who else holds it, nor their runs.
+ */
+export interface RunQueue {
+  waitingFor: "client" | "person" | "app";
+  retryAt: string;
+}
+
 /** One run of a workflow. */
 export interface WorkflowRun {
   id: RunId;
@@ -717,6 +747,8 @@ export interface WorkflowRun {
   /** A person started it (and it acts for them), or a trigger did. */
   startedBy: { type: "person"; userId: string } | { type: "trigger" };
   status: RunStatus;
+  /** While it is `queued`: the share it waits for, and when it asks again. */
+  queued?: RunQueue;
   createdAt: string;
   endedAt: string | null;
   /**
@@ -962,6 +994,12 @@ export interface RunsPage {
 /** How many days back a workflow's failed runs are counted. */
 export const failedRunDays = 7;
 
+/**
+ * How many days back the runs a workflow handled are counted: a week, so
+ * its count reads as what it handles a week.
+ */
+export const handledRunDays = 7;
+
 /** A workflow of an App's current version, as the Workflows page lists it. */
 export interface WorkflowSummary {
   app: AppId;
@@ -975,11 +1013,22 @@ export interface WorkflowSummary {
    * Its latest run, of any version, `waiting` while it waits for a
    * decision; null before its first.
    */
-  lastRun: { id: RunId; status: RunStatus; createdAt: string } | null;
+  lastRun: {
+    id: RunId;
+    status: RunStatus;
+    /** While it is `queued`: the share it waits for. */
+    queued?: RunQueue;
+    createdAt: string;
+  } | null;
   /** Its runs waiting for a decision now. */
   waiting: number;
   /** Its runs that failed in the last {@link failedRunDays} days. */
   failed: number;
+  /**
+   * The items it handled a week: its runs, of any version, that completed
+   * in the last {@link handledRunDays} days.
+   */
+  handled: number;
   /**
    * A schedule of it stopped: its run failed to start
    * {@link maxFailedStarts} times in a row. It starts again once its
@@ -1041,8 +1090,10 @@ export const runActivityMaxDays = 90;
 export const runActivityDefaultDays = 7;
 
 /**
- * What `WorkflowsApi.activity` reads: the last `days` UTC days, today
- * included, {@link runActivityDefaultDays} unless given.
+ * What `WorkflowsApi.activity` reads: `days` UTC days up to `to`, both
+ * included, {@link runActivityDefaultDays} unless given. `to` is today
+ * unless given, and never after it (`workflow.invalid`): a week that
+ * closed is read as it was, not with the days after it.
  */
 export const runActivityQuerySchema = z
   .strictObject({
@@ -1051,6 +1102,8 @@ export const runActivityQuerySchema = z
       .min(1)
       .max(runActivityMaxDays)
       .default(runActivityDefaultDays),
+    /** The window's last UTC day, `YYYY-MM-DD`. */
+    to: z.iso.date().optional(),
   })
   .default({ days: runActivityDefaultDays });
 
@@ -1155,6 +1208,12 @@ export interface WorkflowsApi {
    * name and workflow.
    */
   overview: () => Promise<WorkflowSummary[]>;
+  /**
+   * The workflows of the Apps the person can open that use `connection`:
+   * each one whose App holds an active permission on it and whose code
+   * calls that permission's binding, summed up as in `overview`.
+   */
+  ofConnection: (connection: string) => Promise<WorkflowSummary[]>;
   /**
    * Runs of the Apps the person can open, as `filter` narrows them:
    * waiting first (latest to wait first), then failed (latest ended

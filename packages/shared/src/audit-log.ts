@@ -118,6 +118,11 @@ const typeRules: readonly {
   // refused the data because its build isn't approved.
   { action: "app.artifact.refused", type: "action" },
   { action: "app.artifact", type: "decision" },
+  // A portable host's access to an App (core's app-token-route.ts and
+  // app-function-route.ts): a person minting an App token grants that
+  // host access, and its calls, recorded once a window, act on the App.
+  { action: "app.token.issued", type: "permission" },
+  { action: "app.portable.called", type: "action" },
   { action: "app", type: "config" },
   { action: "member", type: "config" },
   { action: "team", type: "config" },

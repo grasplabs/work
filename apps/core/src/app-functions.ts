@@ -4,7 +4,8 @@ import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
-import type { AppId, RunId, WorkflowId } from "@grasp-os/shared/ids";
+import { storeIdSchema } from "@grasp-os/shared/ids";
+import type { AppId, RunId, StoreId, WorkflowId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import {
   appErrorDetailsMaxBytes,
@@ -49,6 +50,7 @@ import { callOperation } from "./operations.ts";
 import type {
   HostedApp,
   Invocation,
+  ProgressSink,
   ResourceBindings,
   Runner,
 } from "./operations.ts";
@@ -139,6 +141,7 @@ const channelOf = (remote) => ({
   write: async (request) => rebuilt(await remote.write(request)),
   call: async (kind, path, args) => rebuilt(await remote.call(kind, path, args)),
   resource: async (alias, method, args) => rebuilt(await remote.resource(alias, method, args)),
+  emit: async (progress) => rebuilt(await remote.emit(progress)),
 });
 
 const bounded = (value, max) =>
@@ -255,7 +258,7 @@ const settled = async (
 };
 
 /**
- * What an App's isolate holds of its invocation's channel: the same four
+ * What an App's isolate holds of its invocation's channel: the same
  * calls, each answering a settled value or failure as data, so the
  * failures the host raised (copies it keeps its own of) reach App code
  * whole, whatever RPC does with an error. Bounded as the channel is.
@@ -282,6 +285,7 @@ interface ArrivingChannel {
     method: unknown,
     args: unknown
   ) => Promise<unknown>;
+  readonly emit: (progress: unknown) => Promise<unknown>;
 }
 
 class IsolateChannel extends IsolateChannelTarget {
@@ -317,6 +321,10 @@ class IsolateChannel extends IsolateChannelTarget {
     return await settled(
       async () => await this.#channel.resource(alias, method, args)
     );
+  }
+
+  async emit(progress: unknown): Promise<unknown> {
+    return await settled(async () => await this.#channel.emit(progress));
   }
 }
 
@@ -542,7 +550,7 @@ export const noStore = (): OpenStore => ({
 });
 
 /** Refuses with `version.revoked` once release `version` of `app` is revoked. */
-const requireNotRevoked = async (
+export const requireNotRevoked = async (
   env: Env,
   app: AppId,
   version: number
@@ -911,24 +919,30 @@ export const refusalOf = (
   };
 };
 
-/**
- * Calls a public function of App `app` for `by` (spec 32.6): `request`
- * is the call as its caller sent it, as text, bounded before it is read.
- * It runs only against the release of the App's current version, and
- * only if its reference names exactly a public function there (see the
- * header); then through the operation host, which decides the rest.
- * Never throws.
- */
-export const callAppFunction = async (
+/** How a call of an App's function is made, beyond who and what. */
+interface FunctionCallOptions {
+  readonly deadline: number;
+  readonly stillAllowed?: () => Promise<void>;
+  /** The sandbox session (its call ID) of the Code Mode run that calls. */
+  readonly parentSession?: string;
+  /** Only this kind of function may be called (a live query's). */
+  readonly kind?: FunctionRequest["reference"]["kind"];
+  /** Told the store a query read and its read set (`Invocation.observeReads`). */
+  readonly observeReads?: (
+    storeId: StoreId,
+    readSet: Record<string, number>
+  ) => void;
+}
+
+/** `callAppFunction`, with all of its options. */
+const callFunction = async (
   env: Env,
   by: Pick<Identity, "userId" | "role" | "teams">,
   app: unknown,
   request: unknown,
-  deadline = Date.now() + platformLimits.serverInvocationWallMs,
-  stillAllowed?: () => Promise<void>,
-  /** The sandbox session (its call ID) of the Code Mode run that calls. */
-  parentSession?: string
+  options: FunctionCallOptions
 ): Promise<FunctionAnswer> => {
+  const { deadline, stillAllowed, parentSession, kind, observeReads } = options;
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
     result: { ok: false, error: refusalOf(error, requestId) },
@@ -939,6 +953,9 @@ export const callAppFunction = async (
   let call: FunctionRequest;
   try {
     call = readFunctionRequest(request);
+    if (kind !== undefined && call.reference.kind !== kind) {
+      throw operationErrors.create("contract.invalid_request");
+    }
   } catch (error) {
     return refused(error);
   }
@@ -966,9 +983,17 @@ export const callAppFunction = async (
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
       sources,
     });
+    const { store } = release;
     const result = await callOperation(
       hostedRelease(env, release),
-      invocation,
+      observeReads === undefined || store === null
+        ? invocation
+        : {
+            ...invocation,
+            observeReads: (readSet) => {
+              observeReads(storeIdSchema.parse(store.storeId), readSet);
+            },
+          },
       { path, kind: call.reference.kind },
       call.input,
       {
@@ -986,6 +1011,138 @@ export const callAppFunction = async (
     };
   } catch (error) {
     return refused(error);
+  }
+};
+
+/**
+ * Calls a public function of App `app` for `by` (spec 32.6): `request`
+ * is the call as its caller sent it, as text, bounded before it is read.
+ * It runs only against the release of the App's current version, and
+ * only if its reference names exactly a public function there (see the
+ * header); then through the operation host, which decides the rest.
+ * Never throws.
+ */
+export const callAppFunction = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: unknown,
+  request: unknown,
+  deadline = Date.now() + platformLimits.serverInvocationWallMs,
+  stillAllowed?: () => Promise<void>,
+  /** The sandbox session (its call ID) of the Code Mode run that calls. */
+  parentSession?: string
+): Promise<FunctionAnswer> =>
+  await callFunction(env, by, app, request, {
+    deadline,
+    ...(stillAllowed === undefined ? {} : { stillAllowed }),
+    ...(parentSession === undefined ? {} : { parentSession }),
+  });
+
+/** What a live query's evaluation answered, and what it read. */
+export interface EvaluatedQuery {
+  readonly answer: FunctionAnswer;
+  /**
+   * The store it read and the generation of each table it read, once its
+   * reads stood as one state of the store; none when it read no store
+   * (it failed before it ran, or its App has none).
+   */
+  readonly reads:
+    | { readonly storeId: StoreId; readonly readSet: Record<string, number> }
+    | undefined;
+}
+
+/**
+ * Evaluates a public query of App `app` for `by`, as `callAppFunction`
+ * calls it, refusing any other kind (`contract.invalid_request`), and
+ * answers what it read with its answer: a live query's evaluation
+ * (query-subscriptions.ts). Never throws.
+ */
+export const evaluateAppQuery = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: unknown,
+  request: string,
+  deadline: number
+): Promise<EvaluatedQuery> => {
+  let reads: EvaluatedQuery["reads"];
+  const answer = await callFunction(env, by, app, request, {
+    deadline,
+    kind: "query",
+    observeReads: (storeId, readSet) => {
+      reads = { storeId, readSet };
+    },
+  });
+  return { answer, reads };
+};
+
+/**
+ * Runs a public action of App `app` for `by` once, for the invocation
+ * object that holds it (action-invocation.ts), as `callAppFunction` runs
+ * any call: what it returned, or why it failed, and whether the operation
+ * host was reached at all (a refusal before it ran nothing of the App's). A streaming action
+ * (spec 10.7.6) gets `progress`, where its snapshots go, and only one
+ * does; `cancelled` stops either. Never throws.
+ */
+export const invokeAppAction = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: string,
+  call: FunctionRequest,
+  {
+    progress,
+    cancelled,
+    deadline,
+  }: {
+    readonly progress?: ProgressSink;
+    readonly cancelled: AbortSignal;
+    readonly deadline: number;
+  }
+): Promise<{
+  readonly result: OperationResult;
+  /** Whether the operation host was reached: App code may have run. */
+  readonly reached: boolean;
+  /** How many effects it made, or may have made (`CallOptions.onEffect`). */
+  readonly effects: number;
+}> => {
+  const requestId = crypto.randomUUID();
+  let reached = false;
+  let effects = 0;
+  try {
+    const found = await appFor(env, by, app, "user");
+    if (found.currentVersion === null) {
+      throw versionErrors.create("version.not_sealed");
+    }
+    const release = await loadRelease(env, found.id, found.currentVersion);
+    const path = publicOperationOf(release, call.reference);
+    const invocation = await invocationFor(env, release, {
+      by,
+      requestId,
+      deadline,
+    });
+    reached = true;
+    const result = await callOperation(
+      hostedRelease(env, release),
+      invocation,
+      { path, kind: call.reference.kind },
+      call.input,
+      {
+        ...(call.idempotencyKey === undefined
+          ? {}
+          : { idempotencyKey: call.idempotencyKey }),
+        ...(progress === undefined ? {} : { progress }),
+        cancelled,
+        onEffect: () => {
+          effects += 1;
+        },
+      }
+    );
+    return { result, reached, effects };
+  } catch (error) {
+    return {
+      result: { ok: false, error: refusalOf(error, requestId) },
+      reached,
+      effects,
+    };
   }
 };
 
