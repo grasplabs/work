@@ -1606,6 +1606,39 @@ export const workflowDecisions = sqliteTable(
 );
 
 /**
+ * One-use confirmations of a person's answer to a decision
+ * (src/decisions/confirmations.ts), minted by the trusted host decision UI
+ * once the person confirmed exactly what they answer, and taken by the
+ * answer that uses it, in the same batch. Only the token's SHA-256 is
+ * kept. Each binds the person, the decision, the review context they saw
+ * (`context_fingerprint`) and the normalized response they confirmed
+ * (`response_fingerprint`), until `expires_at`.
+ */
+export const workflowDecisionConfirmations = sqliteTable(
+  "workflow_decision_confirmations",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    decisionId: text("decision_id")
+      .notNull()
+      .references(() => workflowDecisions.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    contextFingerprint: text("context_fingerprint").notNull(),
+    responseFingerprint: text("response_fingerprint").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+  },
+  (table) => [
+    // Minting again replaces the person's earlier one for the decision.
+    index("workflow_decision_confirmations_decision_user_idx").on(
+      table.decisionId,
+      table.userId
+    ),
+    // Minting drops the expired ones.
+    index("workflow_decision_confirmations_expires_idx").on(table.expiresAt),
+  ]
+);
+
+/**
  * npm packages proposed for an App (src/dependencies/requests.ts), one row
  * per request. What was asked never changes: the App, where the packages
  * would run (`targets`, a sorted JSON array), the graph's hash, the whole

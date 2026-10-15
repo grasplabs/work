@@ -1,7 +1,11 @@
 // oxlint-disable max-classes-per-file -- a connection's screens, and each frame's own way to its App on that connection, which shares its checks
 import { appErrors, appVersionSchema } from "@grasp-os/shared/apps";
 import type { App } from "@grasp-os/shared/apps";
-import type { DecisionView } from "@grasp-os/shared/decisions";
+import type {
+  DecisionConfirmation,
+  DecisionReview,
+  DecisionView,
+} from "@grasp-os/shared/decisions";
 import { authErrors, isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -59,7 +63,9 @@ import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
 import { controlScreenRun } from "./workflows/controls.ts";
 import {
+  confirmScreenDecision,
   decideScreenRun,
+  reviewScreenDecision,
   screenRun,
   screenRuns,
   screenWorkflow,
@@ -743,15 +749,52 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     );
   }
 
-  async decide(
+  async reviewDecision(
     run: string,
     decision: string,
     answer: unknown
+  ): Promise<DecisionReview> {
+    const { env, app } = this.#connection;
+    return await this.#delivered(
+      "reviewDecision",
+      async (by) =>
+        await reviewScreenDecision(env, by, app, run, decision, answer)
+    );
+  }
+
+  async confirmDecision(
+    run: string,
+    decision: string,
+    revision: string,
+    answer: unknown
+  ): Promise<DecisionConfirmation> {
+    const { env, app } = this.#connection;
+    return await this.#delivered(
+      "confirmDecision",
+      async (by) =>
+        await confirmScreenDecision(
+          env,
+          by,
+          app,
+          run,
+          decision,
+          revision,
+          answer
+        )
+    );
+  }
+
+  async decide(
+    run: string,
+    decision: string,
+    answer: unknown,
+    confirmation?: string
   ): Promise<DecisionView> {
     const { env, app } = this.#connection;
     return await this.#delivered(
       "decide",
-      async (by) => await decideScreenRun(env, by, app, run, decision, answer)
+      async (by) =>
+        await decideScreenRun(env, by, app, run, decision, answer, confirmation)
     );
   }
 
@@ -1049,11 +1092,59 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     );
   }
 
-  async decide(
+  async reviewDecision(
     app: string,
     run: string,
     decision: string,
     answer: unknown
+  ): Promise<DecisionReview> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await this.#delivered(
+          by,
+          app,
+          "reviewDecision",
+          async (id) =>
+            await reviewScreenDecision(this.#env, by, id, run, decision, answer)
+        )
+    );
+  }
+
+  async confirmDecision(
+    app: string,
+    run: string,
+    decision: string,
+    revision: string,
+    answer: unknown
+  ): Promise<DecisionConfirmation> {
+    return await withPerson(
+      this.#check,
+      async (by) =>
+        await this.#delivered(
+          by,
+          app,
+          "confirmDecision",
+          async (id) =>
+            await confirmScreenDecision(
+              this.#env,
+              by,
+              id,
+              run,
+              decision,
+              revision,
+              answer
+            )
+        )
+    );
+  }
+
+  async decide(
+    app: string,
+    run: string,
+    decision: string,
+    answer: unknown,
+    confirmation?: string
   ): Promise<DecisionView> {
     return await withPerson(
       this.#check,
@@ -1063,7 +1154,15 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
           app,
           "decide",
           async (id) =>
-            await decideScreenRun(this.#env, by, id, run, decision, answer)
+            await decideScreenRun(
+              this.#env,
+              by,
+              id,
+              run,
+              decision,
+              answer,
+              confirmation
+            )
         )
     );
   }

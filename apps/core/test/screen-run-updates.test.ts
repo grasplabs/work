@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { appHost } from "../src/durable-objects.ts";
 import { pastAccessRecheck } from "./apps.ts";
-import { approvalApp, week } from "./decisions.ts";
+import { approvalApp, confirmedDecide, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns } from "./runs.ts";
@@ -164,7 +164,7 @@ describe("run status on screens", { timeout: 60_000 }, () => {
       byAdmins
     );
     await screen.saw(run, "waiting");
-    await admin.api.screens.decide(app, run, "review", { approved: true });
+    await confirmedDecide(admin, app, run, "review", { approved: true });
     await screen.saw(run, "completed");
 
     expect({

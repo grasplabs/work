@@ -13,6 +13,7 @@ import { startRun } from "../src/workflows/runs.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { grantReviewed, outlook, release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
+import { confirmedAnswer } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import {
@@ -253,7 +254,7 @@ describe("workflow runs", { timeout: 60_000 }, () => {
       { timeout: 10_000 }
     );
     answering.mockRestore();
-    await reviewer.api.decisions.answer(decision, { approved: true });
+    await confirmedAnswer(reviewer, decision, { approved: true });
     await finished(run.id);
     const logged = await allEvents();
     const audited = logged.filter(({ target }) => target?.id === run.id);

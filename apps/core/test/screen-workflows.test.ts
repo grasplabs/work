@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { toScreenRun } from "../src/workflows/screen-runs.ts";
 import { allEvents } from "./audit-events.ts";
-import { approvalApp, week } from "./decisions.ts";
+import { approvalApp, confirmedDecide, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, sleeping } from "./runs.ts";
@@ -78,7 +78,7 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
         builder.api.screens.decide(app, run, "review", { approved: true })
       ),
     };
-    const answered = await admin.api.screens.decide(app, run, "review", {
+    const answered = await confirmedDecide(admin, app, run, "review", {
       approved: true,
       payload: { comment: "Matches the PO" },
     });
@@ -195,7 +195,7 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
         user.api.screens.decide(app, run.id, "review", { approved: true })
       ),
       named: await outcome(
-        builder.api.screens.decide(app, run.id, "review", { approved: false })
+        confirmedDecide(builder, app, run.id, "review", { approved: false })
       ),
       again: await outcome(
         builder.api.screens.decide(app, run.id, "review", { approved: true })
@@ -213,6 +213,155 @@ describe("workflows from screens", { timeout: 60_000 }, () => {
       starter: "decision.forbidden",
       named: "ok",
       again: "decision.closed",
+    });
+  });
+
+  it("answer only with the confirmation the page minted, never one the screen holds, makes up or sends inside its answer", async () => {
+    const builder = await personApi("builder");
+    const admin = await personApi("admin");
+    const otherAdmin = await personApi("admin");
+    const app = await approvalApp(builder);
+    const run = await builder.api.screens.startRun(app, "approval", byAdmins);
+    const second = await builder.api.screens.startRun(
+      app,
+      "approval",
+      byAdmins
+    );
+    await waiting(admin, app, run.id);
+    await waiting(admin, app, second.id);
+    const reviewOf = async (person: Person, of: string, approved: boolean) => {
+      const review = await person.api.screens.reviewDecision(
+        app,
+        of,
+        "review",
+        { approved }
+      );
+      if (review.state !== "review") {
+        throw new Error("Already recorded");
+      }
+      return review;
+    };
+    const confirmed = async (person: Person, of: string, approved: boolean) => {
+      const { decision } = await reviewOf(person, of, approved);
+      const { confirmation } = await person.api.screens.confirmDecision(
+        app,
+        of,
+        "review",
+        decision.revision,
+        { approved }
+      );
+      return confirmation;
+    };
+    const rejecting = await confirmed(admin, run.id, false);
+    const forSecond = await confirmed(admin, second.id, true);
+    const otherAdmins = await confirmed(otherAdmin, run.id, true);
+    const decide = async (answer: unknown, confirmation?: string) =>
+      await outcome(
+        admin.api.screens.decide(
+          app,
+          run.id,
+          "review",
+          unchecked(answer),
+          confirmation
+        )
+      );
+
+    const refused = {
+      // What a screen can send on its own: no confirmation, one it made
+      // up, or one tucked into its answer.
+      none: await decide({ approved: true }),
+      madeUp: await decide({ approved: true }, "c2NyZWVuLW1hZGUtdGhpcw"),
+      inTheAnswer: await decide({ approved: true, confirmation: rejecting }),
+      // Confirmed by the person, but for another answer, another decision
+      // or by someone else.
+      otherAnswer: await decide({ approved: true }, rejecting),
+      otherDecision: await decide({ approved: true }, forSecond),
+      otherPerson: await decide({ approved: true }, otherAdmins),
+      // Nor confirmed against a review the decision no longer matches.
+      staleReview: await outcome(
+        admin.api.screens.confirmDecision(app, run.id, "review", "stale", {
+          approved: true,
+        })
+      ),
+      // Nor reviewed through another App.
+      elsewhere: await outcome(
+        admin.api.screens.reviewDecision(
+          await approvalApp(builder),
+          run.id,
+          "review",
+          { approved: true }
+        )
+      ),
+    };
+    const { status: stillWaiting } = await admin.api.screens.run(app, run.id);
+    const answered = await decide({ approved: false }, rejecting);
+    // Asked again after it was recorded, as after a lost answer: nothing
+    // more to confirm, and the same answer is given back.
+    const recorded = await admin.api.screens.reviewDecision(
+      app,
+      run.id,
+      "review",
+      { approved: false }
+    );
+    const again = await decide({ approved: false });
+    await finished(run.id);
+    const events = await allEvents();
+    const refusals = events
+      .filter(
+        ({ action, detail }) =>
+          action === "workflow.decision.answer_refused" && detail.run === run.id
+      )
+      .map(
+        ({ detail }) =>
+          `${detail.errorCode} ${detail.via}${detail.stage === undefined ? "" : ` ${detail.stage}`}`
+      );
+    const confirmations = events
+      .filter(
+        ({ action, detail }) =>
+          action === "workflow.decision.confirmed" && detail.run === run.id
+      )
+      .map(({ actor, detail }) => ({
+        actor,
+        via: detail.via,
+        keys: Object.keys(detail).toSorted(),
+      }));
+
+    expect({
+      refused,
+      stillWaiting,
+      answered,
+      recorded: recorded.state,
+      again,
+      refusals: refusals.toSorted(),
+      confirmations,
+    }).toStrictEqual({
+      refused: {
+        none: "decision.unconfirmed",
+        madeUp: "decision.unconfirmed",
+        inTheAnswer: "decision.invalid",
+        otherAnswer: "decision.unconfirmed",
+        otherDecision: "decision.unconfirmed",
+        otherPerson: "decision.unconfirmed",
+        staleReview: "decision.conflict",
+        elsewhere: "decision.not_found",
+      },
+      stillWaiting: "waiting",
+      answered: "ok",
+      recorded: "recorded",
+      again: "ok",
+      // Each refused answer or confirmation audited as tried on a screen;
+      // the invalid one never got that far.
+      refusals: [
+        ...Array.from({ length: 5 }, () => "decision.unconfirmed screen"),
+        "decision.conflict screen confirm",
+      ].toSorted(),
+      // Each confirmation audited as given for a screen: who, until when,
+      // never the token nor the answer.
+      confirmations: [admin, otherAdmin].map(({ userId }) => ({
+        actor: { type: "person", userId },
+        via: "screen",
+        keys: ["app", "expiresAt", "run", "step", "version", "via", "workflow"],
+      })),
     });
   });
 

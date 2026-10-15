@@ -632,6 +632,14 @@ describe("screen trust", { timeout: 60_000 }, () => {
           outcome(screens.startRun(app, "invoices")),
           outcome(screens.runs(app, "invoices")),
           outcome(screens.run(app, "run-1")),
+          outcome(
+            screens.reviewDecision(app, "run-1", "approve", { approved: true })
+          ),
+          outcome(
+            screens.confirmDecision(app, "run-1", "approve", "revision", {
+              approved: true,
+            })
+          ),
           outcome(screens.decide(app, "run-1", "approve", { approved: true })),
           outcome(screens.watchRuns(app, "invoices", noop)),
         ]),
@@ -644,7 +652,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
           )
         ),
       }).toStrictEqual({
-        gated: Array.from({ length: 6 }, () => "screen.unreviewed"),
+        gated: Array.from({ length: 8 }, () => "screen.unreviewed"),
         version: 1,
         report: "ok",
       });
@@ -652,7 +660,9 @@ describe("screen trust", { timeout: 60_000 }, () => {
 
     expect(refusals(events).toSorted()).toStrictEqual([
       "call/admission: unreviewed",
+      "confirmDecision/admission: unreviewed",
       "decide/admission: unreviewed",
+      "reviewDecision/admission: unreviewed",
       "run/admission: unreviewed",
       "runs/admission: unreviewed",
       "startRun/admission: unreviewed",

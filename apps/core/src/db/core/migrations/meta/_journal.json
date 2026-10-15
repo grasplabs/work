@@ -610,6 +610,13 @@
       "when": 1792075940314,
       "tag": "0086_workflow_model_waits",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1792086150823,
+      "tag": "0087_workflow_decision_confirmations",
+      "breakpoints": true
     }
   ]
 }

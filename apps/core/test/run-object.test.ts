@@ -9,7 +9,7 @@ import { cancelRun } from "../src/workflows/controls.ts";
 import { markRunCancelled } from "../src/workflows/engine.ts";
 import { busyRefusalsIn } from "../src/workflows/run-object.ts";
 import { allEvents } from "./audit-events.ts";
-import { asking } from "./decisions.ts";
+import { asking, confirmedAnswer } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import {
   aroundEngine,
@@ -397,7 +397,7 @@ describe("a run's object", { timeout: 60_000 }, () => {
     // The answer wakes the run: its activation finishes the cancel, well
     // before the object's repair would.
     const answered = await outcome(
-      decider.api.decisions.answer(decision, { approved: true })
+      confirmedAnswer(decider, decision, { approved: true })
     );
     await rowEnded(run.id, 2500);
 
