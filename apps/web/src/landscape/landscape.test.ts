@@ -320,6 +320,9 @@ const entries = [
     name: "Microsoft 365",
     categories: ["Productivity"],
     toolCount: 12,
+    logo: null,
+    description: null,
+    group: "Email and calendar" as const,
     offered: true,
   },
   {
@@ -328,6 +331,9 @@ const entries = [
     name: "Google Workspace",
     categories: ["Productivity"],
     toolCount: 9,
+    logo: null,
+    description: null,
+    group: "Email and calendar" as const,
     offered: true,
   },
 ];
