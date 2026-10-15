@@ -25,7 +25,11 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
-import { handleConnectionCallback } from "./connections.ts";
+import {
+  catalogLogoResponse,
+  handleConnectionCallback,
+  isCatalogLogoPath,
+} from "./connections.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
@@ -157,6 +161,25 @@ const frameCodeResponse = async (
 };
 
 /**
+ * The connection routes: a provider's OAuth callback, and a catalog app's
+ * logo. Undefined for any other path, and for a callback that isn't one.
+ */
+const connectionRouteResponse = async (
+  request: Request,
+  env: Env,
+  pathname: string,
+  requestId: string
+): Promise<Response | undefined> => {
+  if (pathname === connectionCallbackPath) {
+    return await handleConnectionCallback(request, env);
+  }
+  if (isCatalogLogoPath(pathname)) {
+    return await catalogLogoResponse(request, env, pathname, requestId);
+  }
+  return undefined;
+};
+
+/**
  * A call of an App's functions, from a screen's page or a portable host,
  * or a portable host's token request; `undefined` for any other path.
  */
@@ -212,11 +235,14 @@ const route = async (
   if (isUnder(pathname, authBasePath)) {
     return await handleAuthRequest(request, env, requestId);
   }
-  if (pathname === connectionCallbackPath) {
-    const response = await handleConnectionCallback(request, env);
-    if (response !== undefined) {
-      return response;
-    }
+  const connection = await connectionRouteResponse(
+    request,
+    env,
+    pathname,
+    requestId
+  );
+  if (connection !== undefined) {
+    return connection;
   }
   if (pathname === auditExportPath) {
     return await auditExportResponse(request, env, requestId);
