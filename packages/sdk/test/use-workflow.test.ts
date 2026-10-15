@@ -1079,6 +1079,32 @@ describe("controlling the selected run", () => {
     });
   });
 
+  it("shows no control still awaiting its answer once the run has ended", async () => {
+    const page = host();
+    const pauseAnswer = Promise.withResolvers<Reply>();
+    page.answer(async (command) =>
+      command.command === "pause"
+        ? await pauseAnswer.promise
+        : { value: { kind: "cancel", state: "admitted", revision: 2 } }
+    );
+    const hook = await showing(page);
+    const paused = hook.store.pause();
+    await hook.store.cancel();
+    page
+      .one("run-1")
+      .push(
+        3,
+        snapshotOf({ status: "cancelled", finishedAt: 3000, ...controlOf({}) })
+      );
+    expect(hook.view()).toMatchObject({
+      status: "cancelled",
+      pendingControl: null,
+    });
+    pauseAnswer.resolve({ failed: "workflow.control_refused" });
+    const code = await codeOf(paused);
+    expect(code).toBe("workflow.control_refused");
+  });
+
   it("keeps showing an unanswered cancel over a pause asked for after it", async () => {
     const page = host();
     const cancelAnswer = Promise.withResolvers<Reply>();

@@ -531,6 +531,11 @@ export class WorkflowStore {
     runId: string,
     run: WatchState<RunSnapshot> | undefined
   ): PendingControl | null {
+    // An ended run has nothing left to control: a request still awaiting
+    // its answer was overtaken, and its caller alone hears how it ends.
+    if (run?.value !== undefined && hasEnded(run.value.status)) {
+      return null;
+    }
     const mine = this.#intents.filter(
       (intent) => intent.runId === runId && !this.#settled(intent)
     );
