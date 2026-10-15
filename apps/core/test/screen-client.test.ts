@@ -12,7 +12,7 @@ import {
   screenLeaseHeader,
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -951,6 +951,52 @@ describe("live queries", { timeout: 120_000 }, () => {
       value: list.now().value,
       code: list.now().error?.code,
     }).toStrictEqual({ value: undefined, code: "app.not_found" });
+  });
+
+  it("lets the store drop a watch core let go of, even when telling it so failed", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const store = storeObjectOf(opened);
+    // The store stays up, but core's word that it let go of a watch never
+    // arrives.
+    let undo: (() => void) | undefined;
+    await runInDurableObject(store, (instance) => {
+      // SAFETY: a store's object's prototype holds its methods.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const methods = Object.getPrototypeOf(instance) as Record<
+        string,
+        unknown
+      >;
+      const original = methods.unwatch;
+      methods.unwatch = () => {
+        throw new Error("Lost on the way.");
+      };
+      undo = () => {
+        methods.unwatch = original;
+      };
+    });
+    try {
+      const { client } = clientFor(opened);
+      const list = reading(client, api.list, { pagination: {} });
+      await eventually(() => {
+        expect(shown(list.now())).toStrictEqual([]);
+      });
+      list.stop();
+      await scheduler.wait(500);
+
+      // The store's sweep asks each watcher whether it is still there:
+      // one core let go of says no, so the next sweep finds none left to
+      // keep its alarm for.
+      await runDurableObjectAlarm(store);
+      await runDurableObjectAlarm(store);
+      const alarm = await runInDurableObject(
+        store,
+        async (_instance, state) => await state.storage.getAlarm()
+      );
+      expect(alarm).toBeNull();
+    } finally {
+      undo?.();
+    }
   });
 
   it("follows again after the store restarts, and shows a change saved just before", async () => {

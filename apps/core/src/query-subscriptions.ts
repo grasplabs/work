@@ -583,6 +583,12 @@ export class QuerySubscriptions {
       evaluation.watch?.id === made.id;
     return Object.assign(
       (tables: string[]): void => {
+        // Once its query closed or moved to another watch, it says it is
+        // gone, so the store drops the watch even if core's own word that
+        // it let go of it never arrived (`#unwatch`).
+        if (made.id !== undefined && !current()) {
+          throw new Error("This watch is no longer followed.");
+        }
         // Called with none to see whether it is still here.
         if (tables.length === 0) {
           return;
@@ -591,7 +597,7 @@ export class QuerySubscriptions {
           // Told before `watch` answered (a write landed after the read):
           // kept until the watch is installed (`#keepWatched`).
           made.early = true;
-        } else if (current()) {
+        } else {
           this.#changed(evaluation);
         }
       },
