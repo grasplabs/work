@@ -40,7 +40,7 @@ const observed = (changes: Partial<TrialObservation>): TrialObservation => {
     answer: "ANSWER: Marta Ruiz\nFrom [handbook/contracts.md#Lease]",
     modelInput,
     transcript: [{ by: "source", text: modelInput }],
-    corpus: ["# Contract register\n## Lease\nOwner: Marta Ruiz."],
+    readTexts: ["## Lease\nOwner: Marta Ruiz."],
     forbidden: ["CANARY-1"],
     stateChanged: false,
     latencyMs: 10,
@@ -118,6 +118,14 @@ describe("scoring a trial", () => {
           { by: "tool", text: `Returned: ${line}` },
         ],
       }).evidenceRecall,
+      // Its code built the line from pieces and read nothing.
+      constructed: verdict(contract, {
+        transcript: [
+          { by: "model", text: 'return ["Owner: ", "Marta Ruiz."].join("");' },
+          { by: "tool", text: `Returned: ${line}` },
+        ],
+        readTexts: [],
+      }).evidenceRecall,
       // Its code returned the words but not the line they stand in.
       wordsOnly: verdict(contract, {
         transcript: [{ by: "tool", text: `Returned: ${marker} (probably)` }],
@@ -149,6 +157,7 @@ describe("scoring a trial", () => {
       },
       read: 1,
       guessedThenRead: 1,
+      constructed: 0,
       wordsOnly: 0,
       quoted: 1,
       dropped: true,

@@ -37,6 +37,7 @@ import { gatewayConfig, model, pointAtGateway } from "./agent-chat.ts";
 import { answeringGateway } from "./ai-gateway.ts";
 import type { GatewayRequest } from "./ai-gateway.ts";
 import { grantReviewed } from "./apps.ts";
+import { eventsAfter, logHead } from "./audit-events.ts";
 import {
   compareArms,
   gateViolations,
@@ -627,12 +628,75 @@ const changeState = async (
   });
 };
 
+/**
+ * The reads that return a document's text: one section, or the whole
+ * document. Following links, listing and history return none of it.
+ */
+const contentRead = z.union([
+  z.object({ read: z.literal("section"), section: z.int().min(0) }),
+  z.object({ read: z.literal("document") }),
+]);
+
+/**
+ * What the persona's agent read through Knowledge since audit position
+ * `after`, as the audit log records each read (a document, or one of its
+ * sections) and as the document holds it, read again as the person it
+ * acted for: where a tool result's evidence must come from. Read after
+ * the trial's state is taken, as the reads are recorded too.
+ */
+/**
+ * What the persona's agent read through Knowledge since audit position
+ * `after`, as the audit log records each read that returns text (a
+ * document, or one of its sections), read again as the person it acted
+ * for. Read after the trial's state is taken, as reads are recorded too.
+ */
+const readTextsOf = async (
+  person: Person,
+  place: Workspace,
+  after: number
+): Promise<string[]> => {
+  const events = await eventsAfter(after);
+  // Explicit reads only: a search's snippets aren't recorded, so nothing
+  // shows what it returned, and the evidence an answer needs is a whole
+  // section, which the agent reads.
+  const reads = events.flatMap(({ action, actor, target, detail }) => {
+    const read = contentRead.safeParse(detail).data;
+    return action === "knowledge.read" &&
+      actor.type === "agent" &&
+      actor.agentId === place.agent.agentId &&
+      target?.type === "document" &&
+      read !== undefined
+      ? [
+          {
+            id: target.id,
+            section: "section" in read ? read.section : undefined,
+          },
+        ]
+      : [];
+  });
+  // A read the log recorded but Knowledge refused (a section that isn't
+  // there) returned nothing: it backs no evidence.
+  const texts = await Promise.all(
+    reads.map(async ({ id, section }) => {
+      try {
+        const read = await person.api.knowledge.read(
+          id,
+          section === undefined ? {} : { section }
+        );
+        return [read.text];
+      } catch {
+        return [];
+      }
+    })
+  );
+  return texts.flat();
+};
+
 const runTrial = async (
   company: BrainCompany,
   place: Workspace,
   provider: Provider,
-  plan: TrialPlan,
-  corpus: readonly string[]
+  plan: TrialPlan
 ): Promise<TrialObservation> => {
   const { task, arm, repeat, cold } = plan;
   const person = company.people[task.persona];
@@ -657,6 +721,7 @@ const runTrial = async (
     return state;
   };
   const stateBefore = await stateNow();
+  const auditBefore = await logHead();
   const firstRequest = gateway.requests.length;
   let spentBefore = await charged(company);
   let answer = "";
@@ -712,7 +777,7 @@ const runTrial = async (
     // Every request in order: a long turn's last request may leave out
     // earlier results, which the model still read.
     transcript: requests.flatMap(({ body }) => transcriptOf(body)),
-    corpus,
+    readTexts: await readTextsOf(person, place, auditBefore),
     forbidden: forbiddenIn(task),
     stateChanged: changedTables.length > 0,
     changedTables,
@@ -829,6 +894,43 @@ const counts = (values: readonly string[]): Record<string, number> => {
   return counted;
 };
 
+/**
+ * Refuses a run that couldn't be compared: no repeat, or controls with no
+ * task fit to run on. Controls run last, on the corpus as the last window
+ * left it: only on tasks of the first window whose documents no window
+ * changes.
+ */
+const checkRun = (
+  tasks: readonly BrainTask[],
+  repeats: number,
+  controls: readonly BrainControl[],
+  controlTasks: readonly string[]
+) => {
+  if (!Number.isInteger(repeats) || repeats < 1) {
+    throw new RangeError("The baseline needs at least one repeat");
+  }
+  if (controls.length === 0) {
+    return;
+  }
+  if (controlTasks.length === 0) {
+    throw new RangeError("Controls need at least one task to run on");
+  }
+  const changing = new Set(brainUpdates.map(({ document }) => document));
+  const unfit = controlTasks.filter((id) => {
+    const task = tasks.find((each) => each.id === id);
+    return (
+      task === undefined ||
+      task.window !== "t0" ||
+      task.documents.some((document) => changing.has(document))
+    );
+  });
+  if (unfit.length > 0) {
+    throw new RangeError(
+      `Controls can't run on ${unfit.join(", ")}: not a first-window task of this split whose documents stay the same`
+    );
+  }
+};
+
 /** Runs the baseline on a company loaded at `t0`, window by window. */
 export const runBrainBaseline = async (
   company: BrainCompany,
@@ -844,26 +946,8 @@ export const runBrainBaseline = async (
     providerName = brainStubModel,
   }: BrainRunOptions
 ): Promise<BrainReport> => {
-  if (!Number.isInteger(repeats) || repeats < 1) {
-    throw new RangeError("The baseline needs at least one repeat");
-  }
   const tasks = tasksOf(split, { openSealed });
-  // Controls run last, on the corpus as the last window left it: only on
-  // tasks of the first window whose documents no window changes.
-  const changing = new Set(brainUpdates.map(({ document }) => document));
-  const unfit = controlTasks.filter((id) => {
-    const task = tasks.find((each) => each.id === id);
-    return (
-      task === undefined ||
-      task.window !== "t0" ||
-      task.documents.some((document) => changing.has(document))
-    );
-  });
-  if (controls.length > 0 && unfit.length > 0) {
-    throw new RangeError(
-      `Controls can't run on ${unfit.join(", ")}: not a first-window task of this split whose documents stay the same`
-    );
-  }
+  checkRun(tasks, repeats, controls, controlTasks);
   const random = seededRandom(seed);
   const provider = providerOf(respond);
   const places = new Map<BrainPersona, Workspace>();
@@ -888,7 +972,6 @@ export const runBrainBaseline = async (
   }
   const observations: TrialObservation[] = [];
   const sources: RunIdentity["sources"] = {};
-  let corpus: string[] = [];
   const updates: BrainReport["costs"]["updates"] = [];
   for (const window of brainWindows) {
     if (window !== "t0") {
@@ -907,7 +990,6 @@ export const runBrainBaseline = async (
     // oxlint-disable-next-line no-await-in-loop -- windows in order
     const snapshot = await sourceSnapshot(company);
     sources[window] = snapshot.digest;
-    corpus = snapshot.texts;
     const inWindow = tasks.filter((task) => task.window === window);
     const plans: TrialPlan[] = [];
     for (let repeat = 1; repeat <= repeats; repeat += 1) {
@@ -921,13 +1003,7 @@ export const runBrainBaseline = async (
     for (const plan of plans) {
       observations.push(
         // oxlint-disable-next-line no-await-in-loop -- trials one at a time, so latency and state are each trial's own
-        await runTrial(
-          company,
-          held(places, plan.task.persona),
-          provider,
-          plan,
-          corpus
-        )
+        await runTrial(company, held(places, plan.task.persona), provider, plan)
       );
     }
   }
@@ -937,13 +1013,12 @@ export const runBrainBaseline = async (
     for (const arm of controls) {
       observations.push(
         // oxlint-disable-next-line no-await-in-loop -- trials one at a time
-        await runTrial(
-          company,
-          held(places, task.persona),
-          provider,
-          { arm, task, repeat: 1, cold: true },
-          corpus
-        )
+        await runTrial(company, held(places, task.persona), provider, {
+          arm,
+          task,
+          repeat: 1,
+          cold: true,
+        })
       );
     }
   }

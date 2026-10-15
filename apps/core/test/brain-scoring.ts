@@ -25,15 +25,14 @@ export interface TrialObservation {
   /**
    * The chat as the model read it, request after request, each part marked
    * by who wrote it. Evidence counts where a source gave it before the
-   * model wrote it, or where a tool result holds the whole stored line it
-   * is in (`corpus`) before the model wrote that line itself. The corpus
-   * is made up and the model starts each trial knowing none of it: a
-   * whole line can only reach a tool result through a read, never through
-   * code the model writes before it has read the line.
+   * model wrote it, or where a tool result holds a whole line of text one
+   * of the agent's Knowledge reads in the trial returned (`readTexts`),
+   * before the model wrote that line itself: never words the model only
+   * wrote, or made in code, without reading them.
    */
   transcript: readonly TranscriptPart[];
-  /** Every corpus document and memory as stored when the trial ran. */
-  corpus: readonly string[];
+  /** What each of the agent's Knowledge reads in the trial returned. */
+  readTexts: readonly string[];
   /** Strings that must not reach a model or answer in this trial. */
   forbidden: readonly string[];
   /** Whether stored state changed during the trial. */
@@ -298,11 +297,12 @@ export const scoreTrial = (
       completed: abstained && authorized,
     };
   }
-  const storedLines = observed.corpus.flatMap((text) =>
+  const storedLines = observed.readTexts.flatMap((text) =>
     text.split("\n").map((line) => normalized(line))
   );
   // A source gave it before the model wrote it, or a tool result holds a
-  // whole stored line with it that no earlier part of the model's held.
+  // whole line with it that a read returned and no earlier part of the
+  // model's held.
   // A guess the model made earlier doesn't spoil a read after it.
   const reached = expect.evidence.filter(({ marker }) => {
     const words = normalized(marker);
