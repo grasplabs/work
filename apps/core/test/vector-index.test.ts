@@ -60,6 +60,7 @@ const fakeVectorize = (dimensions = generation.dimensions) => {
     failQueries: false,
     hang: false,
     failUpsertAfterBatches: Number.POSITIVE_INFINITY,
+    afterQuery: (): void => undefined,
   };
   let upsertBatches = 0;
   const never = Promise.withResolvers<never>().promise;
@@ -112,7 +113,15 @@ const fakeVectorize = (dimensions = generation.dimensions) => {
       }
       await Promise.resolve();
       filters.push(options?.filter);
-      const matches = [...vectors]
+      // The index as this read saw it, before anything changes it.
+      const answeredFrom = [...vectors].map(
+        ([id, stored]): [string, Stored] => [
+          id,
+          { values: stored.values, metadata: { ...stored.metadata } },
+        ]
+      );
+      behaviour.afterQuery();
+      const matches = answeredFrom
         .filter(([, stored]) => matchesFilter(stored, options?.filter))
         .map(([id, stored]) => ({
           id,
@@ -260,7 +269,7 @@ describe("a search", () => {
     expect(provider.filters).toHaveLength(maxPolicyBatches);
   });
 
-  it("refuses a vector of another generation's dimensions", async () => {
+  it("refuses input the generation or the provider can't hold exactly", async () => {
     const index = vectorIndexOf(fakeVectorize().binding, generation);
 
     await expect(
@@ -281,6 +290,37 @@ describe("a search", () => {
     await expect(
       vectorIndexOf(fakeVectorize().binding, generation).status()
     ).resolves.toMatchObject({ generation: generation.id, dimensions: 3 });
+  });
+});
+
+describe("a search while records change", () => {
+  it("counts a record moved between two policy batches once", async () => {
+    const provider = fakeVectorize();
+    const index = vectorIndexOf(provider.binding, generation);
+    const policies = Array.from({ length: 150 }, (_, n) => `policy:team-${n}`);
+    // Batches split the sorted keys: these two are in the first and last.
+    const [first = "", last = ""] = [
+      policies.toSorted((a, b) => a.localeCompare(b))[0],
+      policies.toSorted((a, b) => a.localeCompare(b)).at(-1),
+    ];
+    await index.upsert([
+      record("moving", first),
+      record("other", first, [0.8, 0.2, 0]),
+    ]);
+    // Re-indexed under the last batch's policy after the first batch was read.
+    provider.behaviour.afterQuery = () => {
+      const moving = provider.vectors.get("moving");
+      if (moving !== undefined) {
+        moving.metadata.p = last;
+      }
+    };
+
+    const found = await index.query([1, 0, 0], { policies, topK: 2 });
+
+    expect(found.matches.map(({ id }) => id)).toStrictEqual([
+      "moving",
+      "other",
+    ]);
   });
 });
 

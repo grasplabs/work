@@ -47,6 +47,7 @@ export interface VectorRecord {
   values: readonly number[];
   /** The opaque read-policy key; at most {@link maxPolicyKeyBytes} bytes. */
   policy: string;
+  /** At most {@link maxSourceVersionBytes} bytes. */
   sourceVersion: string;
 }
 
@@ -128,6 +129,11 @@ export const maxIdBytes = 64;
  * longer key is refused rather than truncated.
  */
 export const maxPolicyKeyBytes = 64;
+/**
+ * Keeps a vector's metadata (the policy key, this and their field names)
+ * far below Vectorize's 10 KiB.
+ */
+export const maxSourceVersionBytes = 256;
 /** Without values or metadata returned. */
 export const maxTopK = 100;
 /** A filter's compact JSON must be shorter than this. */
@@ -214,18 +220,29 @@ const checkVector = (
   }
 };
 
-const checkRecord = (
-  generation: VectorGeneration,
-  record: VectorRecord
-): void => {
-  const idBytes = bytesOf(record.id);
+const checkId = (id: string): void => {
+  const idBytes = bytesOf(id);
   if (idBytes === 0 || idBytes > maxIdBytes) {
     throw new VectorIndexError(
       "invalid",
       `A vector ID must be 1 to ${maxIdBytes} bytes.`
     );
   }
+};
+
+const checkRecord = (
+  generation: VectorGeneration,
+  record: VectorRecord
+): void => {
+  checkId(record.id);
   checkPolicyKey(record.policy);
+  const versionBytes = bytesOf(record.sourceVersion);
+  if (versionBytes === 0 || versionBytes > maxSourceVersionBytes) {
+    throw new VectorIndexError(
+      "invalid",
+      `A source version must be 1 to ${maxSourceVersionBytes} bytes.`
+    );
+  }
   checkVector(generation, record.values);
 };
 
@@ -327,12 +344,17 @@ export const vectorizeIndex = (
           )
       )
     );
-    const matches = answers
-      .flatMap(({ matches: found }) =>
-        found.map(({ id, score }) => ({ id, score }))
-      )
-      .toSorted(nearestFirst(generation.metric))
-      .slice(0, topK);
+    // A record whose policy changed between two batches' reads can be in
+    // both answers: it counts once, at its nearest.
+    const nearest = new Map<string, VectorMatch>();
+    for (const { id, score } of answers
+      .flatMap(({ matches: found }) => found)
+      .toSorted(nearestFirst(generation.metric))) {
+      if (!nearest.has(id)) {
+        nearest.set(id, { id, score });
+      }
+    }
+    const matches = [...nearest.values()].slice(0, topK);
     return { matches, complete };
   };
 
@@ -361,6 +383,9 @@ export const vectorizeIndex = (
   };
 
   const remove = async (ids: readonly string[]): Promise<void> => {
+    for (const id of ids) {
+      checkId(id);
+    }
     for (const batch of inBatches([...new Set(ids)])) {
       // oxlint-disable-next-line no-await-in-loop -- one batch at a time, so a failure leaves the later ones unsent
       await fromProvider(
