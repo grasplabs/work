@@ -172,6 +172,7 @@ msgid "{count, plural, one {{date}: # entry} other {{date}: # entries}}"
 msgstr "{count, plural, one {{date}: # Eintrag} other {{date}: # Einträge}}"
 
 #: src/dashboard/to-do.tsx
+#: src/inbox/items.ts
 msgid "{count, plural, one {{name} has # app whose code nobody approved} other {{name} has # apps whose code nobody approved}}"
 msgstr "{count, plural, one {{name} hat # App, deren Code niemand genehmigt hat} other {{name} hat # Apps, deren Code niemand genehmigt hat}}"
 
@@ -218,6 +219,10 @@ msgstr "{count, plural, one {# eingeladenes Team noch nicht interviewt: {teams}.
 #: src/dashboard/widget-board.tsx
 msgid "{count, plural, one {# more domain with no workflows to show} other {# more domains with no workflows to show}}"
 msgstr "{count, plural, one {# weitere Domäne ohne Workflows zum Anzeigen} other {# weitere Domänen ohne Workflows zum Anzeigen}}"
+
+#: src/inbox/items.ts
+msgid "{count, plural, one {# package} other {# packages}}"
+msgstr "{count, plural, one {# Paket} other {# Pakete}}"
 
 #: src/brain/brain-atlas.ts
 msgid "{count, plural, one {# piece of time-consuming work came up in what people said.} other {# pieces of time-consuming work came up in what people said.}}"
@@ -334,6 +339,10 @@ msgstr "{failed, plural, one {# fehlgeschlagen in den letzten {days} Tagen} othe
 #: src/workflows/workflows-table.tsx
 msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
 msgstr "{failed, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene Läufe}} von {name}"
+
+#: src/inbox/items.ts
+msgid "{failures, plural, one {Once} other {# times}}"
+msgstr "{failures, plural, one {Einmal} other {# Mal}}"
 
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "{fileName}, brought in on {when}. Bring it in again to read it again."
@@ -712,7 +721,12 @@ msgstr "{status, select, drawn {Als Workflow skizziert} designed {Als Workflow n
 msgid "{subject} gets this permission from now on."
 msgstr "{subject} erhält diese Berechtigung ab jetzt."
 
+#: src/inbox/items.ts
+msgid "{subject} gets this permission once it is granted."
+msgstr "{subject} erhält diese Berechtigung, sobald sie erteilt ist."
+
 #: src/dashboard/pile-cards.tsx
+#: src/inbox/items.ts
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject}: {actions} auf {object}"
 
@@ -757,6 +771,7 @@ msgid "{title} is now in place {place} of {count}."
 msgstr "{title} steht jetzt an Stelle {place} von {count}."
 
 #: src/chat/held-writes.tsx
+#: src/inbox/items.ts
 msgid "{title} on {connection}"
 msgstr "{title} auf {connection}"
 
@@ -805,12 +820,17 @@ msgid "{waiting, plural, one {All three in place, or no link goes out: # link wa
 msgstr "{waiting, plural, one {Erst wenn alle drei stehen, geht ein Link raus: # Link wartet.} other {Erst wenn alle drei stehen, geht ein Link raus: # Links warten.}}"
 
 #: src/dashboard/pile-cards.tsx
+#: src/inbox/item-detail.tsx
 msgid "{who} can't be granted later: it has to ask again."
 msgstr "{who} kann später nicht mehr erteilt werden: es muss erneut angefragt werden."
 
 #: src/connections/connection-list.tsx
 msgid "{who} consented to this before connecting it:"
 msgstr "{who} hat vor dem Verbinden hier zugestimmt:"
+
+#: src/inbox/items.ts
+msgid "{workflow} in {appName} failed"
+msgstr "{workflow} in {appName} ist fehlgeschlagen"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{workflowId} in {domain}"
@@ -1014,6 +1034,11 @@ msgctxt "dashboard: what Grasp and people did"
 msgid "Activity"
 msgstr "Aktivität"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox tab: what Grasp and people did"
+msgid "Activity"
+msgstr "Aktivität"
+
 #: src/activity/audit-log.tsx
 msgid "Actor ID"
 msgstr "Akteur-ID"
@@ -1141,6 +1166,11 @@ msgstr "KI"
 msgid "AI spend"
 msgstr "KI-Ausgaben"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "AI tool"
+msgstr "KI-Tool"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "Alert"
 msgstr "Warnung"
@@ -1154,6 +1184,11 @@ msgid "Alert at"
 msgstr "Warnen bei"
 
 #: src/routes/_shell.workflows.index.tsx
+msgid "All"
+msgstr "Alle"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "activity filter: everyone"
 msgid "All"
 msgstr "Alle"
 
@@ -1247,6 +1282,10 @@ msgstr "In einer App arbeitet das Team dieser Domäne, gestützt auf ihre Workfl
 msgid "An app nobody approved was refused the domain's data"
 msgstr "Einer App, die niemand genehmigt hat, wurden die Daten der Domäne verweigert"
 
+#: src/inbox/items.ts
+msgid "An app runs only once an admin approved its code. That happens on the domain's page."
+msgstr "Eine App läuft erst, wenn ein Admin ihren Code genehmigt hat. Das geschieht auf der Seite der Domäne."
+
 #: src/activity/pending.tsx
 msgid "Another domain already keeps {type} records here: this domain's won't apply."
 msgstr "Eine andere Domäne führt hier bereits Datensätze vom Typ {type}: die dieser Domäne gelten nicht."
@@ -1304,6 +1343,11 @@ msgctxt "the App being built, beside its chat"
 msgid "App"
 msgstr "App"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "App approval"
+msgstr "App-Genehmigung"
+
 #: src/dashboard/to-do.tsx
 msgctxt "kind of thing that waits"
 msgid "App approval"
@@ -1327,11 +1371,17 @@ msgstr "Genehmigung zurückgenommen"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Approve"
 msgstr "Genehmigen"
 
+#: src/inbox/items.ts
+msgid "Approve {name}?"
+msgstr "{name} genehmigen?"
+
 #: src/dashboard/pile-cards.tsx
+#: src/inbox/item-detail.tsx
 msgid "Approve {who}"
 msgstr "{who} genehmigen"
 
@@ -1340,8 +1390,13 @@ msgid "Approve the apps of version {version}"
 msgstr "Die Apps von Version {version} genehmigen"
 
 #: src/dashboard/dependency-requests.tsx
+#: src/inbox/item-detail.tsx
 msgid "Approve the packages for {domain}"
 msgstr "Die Pakete für {domain} genehmigen"
+
+#: src/inbox/items.ts
+msgid "Approve the packages for {domain}?"
+msgstr "Die Pakete für {domain} genehmigen?"
 
 #: src/dashboard/runs-widget.tsx
 #: src/engines/package-approvals.tsx
@@ -1372,6 +1427,7 @@ msgstr "Genehmigt: {approved}"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/inbox/item-detail.tsx
 msgid "Approved: {who}."
 msgstr "Genehmigt: {who}."
 
@@ -1379,9 +1435,15 @@ msgstr "Genehmigt: {who}."
 msgid "Approver for new tools named"
 msgstr "Freigabe für neue Tools benannt"
 
+#: src/inbox/items.ts
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Apps"
 msgstr "Apps"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter"
+msgid "Apps and connections"
+msgstr "Apps und Verbindungen"
 
 #: src/chat/studio.tsx
 msgid "Apps being built in this chat"
@@ -1432,6 +1494,7 @@ msgstr "Bitten Sie Grasp, eine zu erstellen. Während es daran arbeitet, steht d
 msgid "Ask the {role}"
 msgstr "Nachfragen bei: {role}"
 
+#: src/inbox/item-detail.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "Ask the agent to fix"
 msgstr "Agenten um Behebung bitten"
@@ -1444,6 +1507,10 @@ msgstr "Fragen Sie den Sponsor nach: {title}."
 msgid "Ask the sponsor: {ask}"
 msgstr "Fragen Sie den Sponsor: {ask}"
 
+#: src/inbox/items.ts
+msgid "Asked"
+msgstr "Angefragt"
+
 #: src/activity/pending.tsx
 msgid "Asked again (previously granted by {person} on {date})"
 msgstr "Erneut angefragt (zuvor erteilt von {person} am {date})"
@@ -1451,6 +1518,10 @@ msgstr "Erneut angefragt (zuvor erteilt von {person} am {date})"
 #: src/activity/pending.tsx
 msgid "Asked again after version {version} was made current (previously granted by {person} on {date})"
 msgstr "Erneut angefragt, nachdem Version {version} aktuell wurde (zuvor erteilt von {person} am {date})"
+
+#: src/inbox/items.ts
+msgid "Asked by"
+msgstr "Angefragt von"
 
 #: src/dashboard/pile-cards.tsx
 msgid "Asked by {requester} on {date}"
@@ -1510,6 +1581,10 @@ msgstr "Wieder wie am Anfang"
 msgid "Back to the current version"
 msgstr "Zurück zur aktuellen Version"
 
+#: src/inbox/item-detail.tsx
+msgid "Back to the list"
+msgstr "Zurück zur Liste"
+
 #: src/chat/chat-dock.tsx
 msgid "Back to the small chat"
 msgstr "Zurück zum kleinen Chat"
@@ -1531,6 +1606,10 @@ msgstr "Im Aufbau"
 msgid "Bind {alias}"
 msgstr "{alias} binden"
 
+#: src/inbox/items.ts
+msgid "Binding"
+msgstr "Bindung"
+
 #: src/brain/brain.ts
 msgid "Blocker"
 msgstr "Hindernis"
@@ -1546,6 +1625,11 @@ msgstr "Gebunden"
 #: src/engines/resource-bindings.tsx
 msgid "Bound to"
 msgstr "Gebunden an"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter"
+msgid "Brain"
+msgstr "Gehirn"
 
 #: src/frame/site-header.tsx
 msgid "Breadcrumb"
@@ -1622,6 +1706,7 @@ msgid "Came up in {source}"
 msgstr "Erwähnt in {source}"
 
 #: src/engines/package-approvals.tsx
+#: src/inbox/item-detail.tsx
 #: src/knowledge/document.tsx
 msgid "Cancel"
 msgstr "Abbrechen"
@@ -1650,6 +1735,11 @@ msgstr "Obergrenzen, die ein Admin für das Modell einer Domäne auf ihrem Tab �
 #: src/routes/_shell.integrations.index.tsx
 msgid "Categories"
 msgstr "Kategorien"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Change"
+msgstr "Änderung"
 
 #: src/chat/builds.tsx
 msgid "Changed"
@@ -1799,6 +1889,16 @@ msgstr "Chats"
 #: src/brain/brain.ts
 msgid "Chats with Grasp"
 msgstr "Chats mit Grasp"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Check a proposal"
+msgstr "Vorschlag prüfen"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Check a workflow"
+msgstr "Workflow prüfen"
 
 #: src/activity/audit-words.ts
 msgid "Checked the audit trail's chain"
@@ -2011,6 +2111,12 @@ msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "Das Verbinden hat nicht funktioniert. Versuchen Sie es erneut oder fragen Sie einen Admin."
 
 #: src/engines/resource-bindings.tsx
+#: src/inbox/items.ts
+msgid "Connection"
+msgstr "Verbindung"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
 msgid "Connection"
 msgstr "Verbindung"
 
@@ -2055,6 +2161,11 @@ msgstr "Zustimmen und anmelden"
 #: src/engines/resource-bindings.tsx
 msgid "Content, as JSON"
 msgstr "Inhalt, als JSON"
+
+#: src/inbox/item-detail.tsx
+msgctxt "inbox item section"
+msgid "Context"
+msgstr "Kontext"
 
 #: src/engines/resource-bindings.tsx
 msgid "Contract"
@@ -2306,6 +2417,7 @@ msgid "Doesn't build now"
 msgstr "Lässt sich gerade nicht bauen"
 
 #: src/dashboard/runs-widget.tsx
+#: src/inbox/items.ts
 #: src/routes/_shell.domains.$engine.apps.$screen.tsx
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.settings.models.tsx
@@ -2313,6 +2425,11 @@ msgstr "Lässt sich gerade nicht bauen"
 #: src/workflows/workflows-table.tsx
 msgid "Domain"
 msgstr "Domäne"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Domain"
+msgstr "Domain"
 
 #: src/engines/store-changes.tsx
 msgid "domain {app}, version {version}"
@@ -2357,6 +2474,11 @@ msgstr "erledigt"
 #: src/routes/_shell.workflows.index.tsx
 msgid "Done"
 msgstr "Fertig"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox tab: what someone dealt with"
+msgid "Done"
+msgstr "Erledigt"
 
 #: src/knowledge/uploads.tsx
 msgid "Download {name}"
@@ -2521,6 +2643,11 @@ msgstr "Alle"
 msgid "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
 msgstr "Alle anderen, in den Teams, deren Zahlen gezeigt werden dürfen: {talked} von {asked}"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter"
+msgid "Everything"
+msgstr "Alles"
+
 #: src/routes/_shell.settings.audit.tsx
 msgid "Everything done in Grasp, by whom and when, kept in a chain nobody can change unseen."
 msgstr "Alles, was in Grasp getan wurde, von wem und wann, in einer Kette, die niemand unbemerkt ändern kann."
@@ -2536,6 +2663,11 @@ msgstr "Alles, was Grasp über {company} gelernt hat, jede Tatsache zurückverfo
 #: src/dashboard/widget-block.tsx
 msgid "Everything this widget shows, in full."
 msgstr "Alles, was dieses Widget zeigt, vollständig."
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Exception"
+msgstr "Ausnahme"
 
 #: src/chat/chat-list.tsx
 msgid "Expand the chats"
@@ -2605,6 +2737,7 @@ msgstr "Wird ausgelesen"
 
 #: src/chat/thread.tsx
 #: src/dashboard/runs-widget.tsx
+#: src/inbox/items.ts
 #: src/knowledge/uploads.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
@@ -2620,6 +2753,11 @@ msgstr "Fehlgeschlagen"
 msgctxt "an attempt of a step"
 msgid "Failed"
 msgstr "Fehlgeschlagen"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Failed run"
+msgstr "Fehlgeschlagener Lauf"
 
 #: src/dashboard/failed-workflows.tsx
 msgid "Failed while acting for you"
@@ -2656,6 +2794,11 @@ msgid "Filling in the new fields stopped making progress, and trying again didn'
 msgstr "Das Ausfüllen der neuen Felder kam nicht mehr voran, und erneute Versuche haben nicht geholfen."
 
 #: src/activity/audit-log.tsx
+msgid "Filter"
+msgstr "Filter"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox: filter button"
 msgid "Filter"
 msgstr "Filter"
 
@@ -2709,6 +2852,14 @@ msgstr "Navigation einklappen"
 msgid "Fold the sections"
 msgstr "Bereiche einklappen"
 
+#: src/inbox/item-detail.tsx
+msgid "For {person}"
+msgstr "Für {person}"
+
+#: src/inbox/item-detail.tsx
+msgid "For an admin"
+msgstr "Für Admins"
+
 #: src/connections/connect-dialog.tsx
 msgid "For everyone"
 msgstr "Für alle"
@@ -2716,6 +2867,10 @@ msgstr "Für alle"
 #: src/routes/_shell.onboarding.notes.tsx
 msgid "For Grasp's staff on this onboarding alone; the company doesn't see them."
 msgstr "Nur für das Grasp-Team bei diesem Onboarding; das Unternehmen sieht sie nicht."
+
+#: src/inbox/item-detail.tsx
+msgid "For the {role}"
+msgstr "Für: {role}"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -2768,6 +2923,11 @@ msgstr "Das Go geben"
 msgid "Give the go again"
 msgstr "Das Go wieder geben"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Go live"
+msgstr "Livegang"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Go to Grasp"
 msgstr "Zu Grasp"
@@ -2788,6 +2948,10 @@ msgstr "Ziele, und warum jetzt KI"
 #: src/brain/brain.ts
 msgid "Google sign-in"
 msgstr "Google-Anmeldung"
+
+#: src/inbox/items.ts
+msgid "Grant {who}?"
+msgstr "{who} erteilen?"
 
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
@@ -2998,6 +3162,10 @@ msgctxt "note property: the drawn version of this workflow on the Workflows page
 msgid "In Workflows"
 msgstr "In Workflows"
 
+#: src/inbox/inbox-page.tsx
+msgid "Inbox"
+msgstr "Posteingang"
+
 #: src/engines/resource-bindings.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Integration"
@@ -3065,6 +3233,10 @@ msgstr "sie hat nicht bestanden"
 #: src/chat/builds-state.ts
 msgid "It failed on its fixtures when the version was sealed: it runs on no records, and the version can't be made current"
 msgstr "Sie ist an ihren Testdatensätzen gescheitert, als die Version versiegelt wurde: Sie läuft auf keinem Datensatz, und die Version kann nicht aktuell gemacht werden"
+
+#: src/inbox/items.ts
+msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
+msgstr "Er ist fehlgeschlagen, als in Ihrem Namen gehandelt wurde. Bitten Sie den Agenten um Behebung: Ein neuer Chat beginnt, mit dem Fehlerbericht des Laufs im Anhang."
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "It has no parameters."
@@ -3259,6 +3431,10 @@ msgstr "Sprachen"
 msgid "Languages he interviews in"
 msgstr "Sprachen, in denen er interviewt"
 
+#: src/inbox/items.ts
+msgid "Last"
+msgstr "Zuletzt"
+
 #: src/chat/chat-list.tsx
 msgctxt "chats from the past week"
 msgid "Last 7 days"
@@ -3282,6 +3458,7 @@ msgid "later"
 msgstr "später"
 
 #: src/dashboard/activity.tsx
+#: src/inbox/inbox-page.tsx
 msgid "Latest activity"
 msgstr "Neueste Aktivität"
 
@@ -3597,9 +3774,19 @@ msgstr "Neu seit der letzten Genehmigung: {added}"
 msgid "New: failed while acting for you"
 msgstr "Neu: fehlgeschlagen, als in Ihrem Namen gehandelt wurde"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox sort"
+msgid "Newest first"
+msgstr "Neueste zuerst"
+
 #: src/workflows/triggers.tsx
 msgid "Next run: {next}"
 msgstr "Nächster Lauf: {next}"
+
+#: src/inbox/item-detail.tsx
+msgctxt "inbox: the action that settles an item"
+msgid "Next step"
+msgstr "Nächster Schritt"
 
 #: src/routes/_shell.domains.$engine.index.tsx
 #: src/routes/_shell.domains.index.tsx
@@ -3939,6 +4126,10 @@ msgstr "Notizen"
 msgid "Nothing connected yet."
 msgstr "Noch nichts verbunden."
 
+#: src/inbox/inbox-page.tsx
+msgid "Nothing dealt with yet. What you decide here shows up in this list, and in the audit trail."
+msgstr "Noch nichts erledigt. Was Sie hier entscheiden, erscheint in dieser Liste und im Prüfprotokoll."
+
 #: src/routes/_shell.onboarding.log.tsx
 msgid "Nothing happened that matches."
 msgstr "Nichts Passendes ist passiert."
@@ -3966,6 +4157,10 @@ msgstr "Für {contract} ist noch nichts veröffentlicht. Veröffentliche zuerst 
 #: src/workflows/history-view.tsx
 msgid "Nothing is recorded for this run."
 msgstr "Für diesen Lauf ist nichts aufgezeichnet."
+
+#: src/inbox/items.ts
+msgid "Nothing is sent or changed on {connection} until you approve it, with exactly what is shown."
+msgstr "Auf {connection} wird nichts gesendet oder geändert, bis Sie es genehmigen, mit genau dem, was angezeigt wird."
 
 #: src/dashboard/pile-cards.tsx
 msgid "Nothing is sent or changed on {connection}."
@@ -3995,6 +4190,14 @@ msgstr "Nichts startet ihn von selbst: Er läuft, wenn jemand ihn startet."
 #: src/dashboard/signals.tsx
 msgid "Nothing to make better right now."
 msgstr "Gerade gibt es nichts zu verbessern."
+
+#: src/inbox/inbox-page.tsx
+msgid "Nothing waits on you"
+msgstr "Nichts wartet auf Sie"
+
+#: src/inbox/inbox-page.tsx
+msgid "Nothing waits on you."
+msgstr "Nichts wartet auf Sie."
 
 #: src/brain/brain.ts
 msgid "Nothing yet"
@@ -4041,6 +4244,15 @@ msgstr "Ihrer Organisation angeboten"
 #: src/dashboard/signals.tsx
 msgid "Often corrected"
 msgstr "Oft korrigiert"
+
+#: src/inbox/inbox-page.tsx
+msgid "Older workflows that failed are on the <0>dashboard</0>."
+msgstr "Ältere fehlgeschlagene Workflows finden Sie im <0>Dashboard</0>."
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox sort"
+msgid "Oldest first"
+msgstr "Älteste zuerst"
 
 #: src/chat/held-writes.tsx
 msgid "On {where}"
@@ -4116,6 +4328,10 @@ msgstr "Nur Sie können es nutzen."
 msgid "Only your organization's admins can abandon a change to a store."
 msgstr "Nur die Admins Ihrer Organisation können eine Änderung an einem Speicher verwerfen."
 
+#: src/inbox/item-detail.tsx
+msgid "Open"
+msgstr "Öffnen"
+
 #: src/workflows/history-view.tsx
 msgctxt "a wait of a run"
 msgid "Open"
@@ -4175,6 +4391,11 @@ msgstr "Jetzt offen"
 msgid "Open question"
 msgstr "Offene Frage"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Open question"
+msgstr "Offene Frage"
+
 #: src/brain/brain.ts
 msgid "Open since {date}. Until it is answered, this stays unknown, never zero."
 msgstr "Offen seit {date}. Bis zur Antwort bleibt das unbekannt, nie null."
@@ -4196,6 +4417,10 @@ msgstr "Domäne {name} öffnen"
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Offen bis"
+
+#: src/inbox/item-detail.tsx
+msgid "Open where it lives"
+msgstr "Dort öffnen, wo es liegt"
 
 #: src/dashboard/report.ts
 msgid "Open: {open}"
@@ -4269,12 +4494,23 @@ msgstr "Verantwortlich"
 msgid "Package"
 msgstr "Paket"
 
+#: src/inbox/items.ts
+msgid "package approvers"
+msgstr "Paket-Genehmigende"
+
 #: src/engines/package-approvals.tsx
+#: src/inbox/items.ts
 #: src/routes/_shell.domains.$engine.index.tsx
 msgid "Packages"
 msgstr "Pakete"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Packages"
+msgstr "Pakete"
+
 #: src/dashboard/dependency-requests.tsx
+#: src/inbox/items.ts
 msgid "Packages for {domain}"
 msgstr "Pakete für {domain}"
 
@@ -4328,6 +4564,11 @@ msgstr "PDF"
 msgid "Pending"
 msgstr "Ausstehend"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "activity filter: what people did"
+msgid "People"
+msgstr "Personen"
+
 #: src/onboarding/staff-words.ts
 msgctxt "onboarding stage"
 msgid "People"
@@ -4370,6 +4611,11 @@ msgstr "Pro Anfrage, in US-Dollar"
 msgid "Permission"
 msgstr "Berechtigung"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Permission"
+msgstr "Berechtigung"
+
 #: src/engines/resource-bindings.tsx
 msgid "Permission {permission}"
 msgstr "Berechtigung {permission}"
@@ -4394,6 +4640,16 @@ msgstr "Plattformstatistiken. Diese Domäne kann die Anzahl der Läufe und Signa
 #: src/activity/audit-log.tsx
 msgid "Platform update"
 msgstr "Plattform-Update"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter"
+msgid "Policies"
+msgstr "Richtlinien"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Policy"
+msgstr "Richtlinie"
 
 #: src/activity/audit-log.tsx
 msgid "Position"
@@ -4598,6 +4854,7 @@ msgstr "Registry und Hash"
 #: src/chat/held-writes.tsx
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/inbox/item-detail.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Ablehnen"
@@ -4607,6 +4864,7 @@ msgid "Reject {what}"
 msgstr "{what} ablehnen"
 
 #: src/dashboard/pile-cards.tsx
+#: src/inbox/item-detail.tsx
 msgid "Reject {who}"
 msgstr "{who} ablehnen"
 
@@ -4615,10 +4873,12 @@ msgid "Reject all"
 msgstr "Alle ablehnen"
 
 #: src/dashboard/dependency-requests.tsx
+#: src/inbox/item-detail.tsx
 msgid "Reject the packages for {domain}"
 msgstr "Die Pakete für {domain} ablehnen"
 
 #: src/dashboard/pile-cards.tsx
+#: src/inbox/item-detail.tsx
 msgid "Reject this request?"
 msgstr "Diese Anfrage ablehnen?"
 
@@ -4636,6 +4896,7 @@ msgstr "Abgelehnt: {rejected}"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/inbox/item-detail.tsx
 msgid "Rejected: {who}."
 msgstr "Abgelehnt: {who}."
 
@@ -4754,6 +5015,11 @@ msgctxt "column: what happened in a run"
 msgid "Result"
 msgstr "Ergebnis"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Result"
+msgstr "Ergebnis"
+
 #: src/brain/brain.ts
 msgid "Result: not measured yet"
 msgstr "Ergebnis: noch nicht gemessen"
@@ -4787,6 +5053,7 @@ msgid "return a month, measured"
 msgstr "Ertrag pro Monat, gemessen"
 
 #: src/dashboard/to-do.tsx
+#: src/inbox/item-detail.tsx
 msgid "Review"
 msgstr "Prüfen"
 
@@ -4858,6 +5125,11 @@ msgid "Roles"
 msgstr "Rollen"
 
 #: src/brain/brain.ts
+msgid "Rule"
+msgstr "Regel"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
 msgid "Rule"
 msgstr "Regel"
 
@@ -4967,6 +5239,7 @@ msgid "Runs by the day they started"
 msgstr "Läufe nach dem Tag, an dem sie starteten"
 
 #: src/engines/package-approvals.tsx
+#: src/inbox/items.ts
 msgid "Runs in"
 msgstr "Läuft in"
 
@@ -5131,6 +5404,10 @@ msgstr "Gemeinsamer Code geändert"
 msgid "Shared with"
 msgstr "Geteilt mit"
 
+#: src/inbox/inbox-page.tsx
+msgid "Show activity by"
+msgstr "Aktivität anzeigen von"
+
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Alle {count} Zeilen anzeigen ({characters} Zeichen)"
@@ -5191,6 +5468,7 @@ msgstr "Anmelden"
 #: src/connections/integration-row.tsx
 #: src/connections/integrations-banner.tsx
 #: src/dashboard/to-do.tsx
+#: src/inbox/item-detail.tsx
 msgid "Sign in again"
 msgstr "Erneut anmelden"
 
@@ -5201,6 +5479,7 @@ msgstr "Bei {app} anmelden"
 #: src/connections/connect-dialog.tsx
 #: src/connections/integration-row.tsx
 #: src/dashboard/to-do.tsx
+#: src/inbox/items.ts
 msgid "Sign in to {app} again"
 msgstr "Erneut bei {app} anmelden"
 
@@ -5315,6 +5594,11 @@ msgstr "Jemand, der nicht mehr da ist"
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Etwas ist schiefgelaufen."
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox: sort button"
+msgid "Sort"
+msgstr "Sortieren"
 
 #: src/brain/brain.ts
 msgid "Source"
@@ -5661,6 +5945,7 @@ msgstr "Die {top} mit den höchsten Ausgaben; weitere haben weniger ausgegeben."
 msgid "The agent looked something up"
 msgstr "Der Agent hat etwas nachgeschlagen"
 
+#: src/inbox/item-detail.tsx
 #: src/workflows/fix-in-chat.tsx
 msgid "The agent wasn't asked: {reason}"
 msgstr "Der Agent wurde nicht gefragt: {reason}"
@@ -5731,6 +6016,10 @@ msgstr "Der Blick des Unternehmens auf die Risiken für seine Leute, die Datensc
 #: src/routes/_shell.onboarding.open.tsx
 msgid "The company's platform stays closed until Grasp gives its go. Closing it signs out everyone but its admins and Grasp's staff."
 msgstr "Die Plattform des Unternehmens bleibt geschlossen, bis Grasp das Go gibt. Beim Schließen werden alle außer den Admins und dem Team von Grasp abgemeldet."
+
+#: src/inbox/items.ts
+msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
+msgstr "Die Verbindung funktioniert nicht mehr. Workflows, die sie nutzen, warten, bis sich jemand erneut anmeldet."
 
 #: src/onboarding/kickoff-errors.ts
 msgid "The conversation couldn't be read just now. Try again in a moment."
@@ -5810,6 +6099,7 @@ msgid "the fixture's row doesn't fit what the migration takes"
 msgstr "die Zeile des Testdatensatzes passt nicht zu dem, was die Migration annimmt"
 
 #: src/dashboard/activity.tsx
+#: src/inbox/inbox-page.tsx
 msgid "The full audit trail"
 msgstr "Der vollständige Audit-Trail"
 
@@ -6232,6 +6522,11 @@ msgctxt "dashboard: what waits on you"
 msgid "To do"
 msgstr "Zu erledigen"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox tab: what waits on you"
+msgid "To do"
+msgstr "Zu erledigen"
+
 #: src/dashboard/report.ts
 msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 msgstr "Damit privat bleibt, wer gesprochen hat, fehlt ein Team, bis fünf seiner Leute gefragt wurden, und seine Zahl, bis drei gehört wurden. Beides heißt nicht, dass niemand teilgenommen hat."
@@ -6316,6 +6611,11 @@ msgstr "Erneut versuchen"
 msgid "Trying again…"
 msgstr "Neuer Versuch…"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind: two sources disagree"
+msgid "Two answers"
+msgstr "Zwei Antworten"
+
 #: src/activity/audit-log.tsx
 msgid "Type"
 msgstr "Typ"
@@ -6356,6 +6656,7 @@ msgstr "Unbekannte Quelle"
 
 #: src/activity/audit-log.tsx
 #: src/dashboard/activity.tsx
+#: src/inbox/inbox-page.tsx
 msgid "Unreadable event"
 msgstr "Unlesbares Ereignis"
 
@@ -6425,6 +6726,7 @@ msgid "Verified"
 msgstr "Verifiziert"
 
 #: src/engines/screen-approval.tsx
+#: src/inbox/items.ts
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Version"
@@ -6607,6 +6909,11 @@ msgctxt "log filter"
 msgid "What"
 msgstr "Was"
 
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox sort"
+msgid "What blocks first, then newest"
+msgstr "Was blockiert zuerst, dann neueste"
+
 #: src/knowledge/document.tsx
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "What changed"
@@ -6629,6 +6936,10 @@ msgstr "Was die Modellaufrufe jedes Workflows diesen Monat gekostet haben, die h
 msgid "What every agent has in its context, all the time."
 msgstr "Was jeder Agent ständig im Kontext hat."
 
+#: src/inbox/inbox-page.tsx
+msgid "What Grasp and its agents do by themselves is under Activity."
+msgstr "Was Grasp und seine Agenten selbst tun, steht unter Aktivität."
+
 #: src/connections/connect-dialog.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What Grasp may do"
@@ -6637,6 +6948,11 @@ msgstr "Was Grasp tun darf"
 #: src/dashboard/dependency-requests.tsx
 msgid "What Grasp refuses to run"
 msgstr "Was Grasp nicht ausführt"
+
+#: src/inbox/item-detail.tsx
+msgctxt "inbox item section"
+msgid "What happened"
+msgstr "Was passiert ist"
 
 #: src/routes/_shell.onboarding.log.tsx
 msgid "What happened at the company and what Grasp's staff did, the newest first."
@@ -6736,6 +7052,10 @@ msgstr "Was die Aktionen der Domäne über diese Bindung ausgeben dürfen, zusä
 msgid "What the models cost that work for you in Grasp this month ({month}, UTC), in US dollars, as they are priced."
 msgstr "Was die Modelle, die in Grasp für Sie arbeiten, diesen Monat ({month}, UTC) kosten, in US-Dollar, wie sie bepreist sind."
 
+#: src/inbox/inbox-page.tsx
+msgid "What waits on you"
+msgstr "Was auf Sie wartet"
+
 #: src/routes/_shell.dashboard.tsx
 msgid "What waits on you, each with its next step, and what could be better."
 msgstr "Was auf Sie wartet, jeweils mit dem nächsten Schritt, und was besser gehen könnte."
@@ -6789,6 +7109,10 @@ msgstr "Welche Domänen und Agenten Berechtigungen haben: {why}"
 #: src/routes/_shell.onboarding.open.tsx
 msgid "While paused, no link opens and none goes out, whatever was agreed."
 msgstr "Solange pausiert ist, öffnet sich kein Link und keiner geht raus, egal was vereinbart wurde."
+
+#: src/inbox/item-detail.tsx
+msgid "Who"
+msgstr "Wer"
 
 #: src/routes/_shell.onboarding.log.tsx
 msgctxt "log filter"
@@ -6926,6 +7250,11 @@ msgstr "Workflows"
 
 #: src/brain/brain.ts
 msgctxt "a group of notes in the brain: work worth turning into workflows"
+msgid "Workflows"
+msgstr "Workflows"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "inbox filter"
 msgid "Workflows"
 msgstr "Workflows"
 
@@ -7090,804 +7419,3 @@ msgstr "Ihre Sitzung ist abgelaufen. Melden Sie sich erneut an, um fortzufahren.
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Ihr Arbeitsbereich, wer darin was tun darf, und Ihr eigenes Konto."
-
-
-#: src/dashboard/widget-board.tsx
-msgid "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
-msgstr "{count, plural, one {# weitere Engine ohne Workflows zum Anzeigen} other {# weitere Engines ohne Workflows zum Anzeigen}}"
-
-#: src/inbox/items.ts
-msgid "{count, plural, one {# package} other {# packages}}"
-msgstr "{count, plural, one {# Paket} other {# Pakete}}"
-
-#: src/activity/pending.tsx
-msgid "{engine} already keeps {type} records here: this engine's won't apply."
-msgstr "{engine} führt hier bereits Datensätze vom Typ {type}: die dieser Engine gelten nicht."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{engine} doesn't get these packages."
-msgstr "{engine} erhält diese Pakete nicht."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{engine} may use exactly these packages from now on."
-msgstr "{engine} darf ab jetzt genau diese Pakete verwenden."
-
-#: src/activity/audit-log.tsx
-msgid "{engine}: run of {workflowId}"
-msgstr "{engine}: Lauf von {workflowId}"
-
-#: src/engines/store-changes.tsx
-msgid "{engineName}, version {version}"
-msgstr "{engineName}, Version {version}"
-
-#: src/inbox/items.ts
-msgid "{failures, plural, one {Once} other {# times}}"
-msgstr "{failures, plural, one {Einmal} other {# Mal}}"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label}: {count}"
-msgstr "{label}: {count}"
-
-#: src/dashboard/widget-board.tsx
-msgid "{name} in {engine}"
-msgstr "{name} in {engine}"
-
-#: src/dashboard/report.ts
-msgid "{name} in {engine}: {started} started, {completed} completed, {failed} failed"
-msgstr "{name} in {engine}: {started} gestartet, {completed} abgeschlossen, {failed} fehlgeschlagen"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the engine's data (write → read)"
-msgstr "{name} ändert die Daten der Engine nicht mehr (schreiben → lesen)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the engine's data (read → write)"
-msgstr "{name} ändert jetzt die Daten der Engine (lesen → schreiben)"
-
-#: src/inbox/items.ts
-msgid "{subject} gets this permission once it is granted."
-msgstr "{subject} erhält diese Berechtigung, sobald sie erteilt ist."
-
-#: src/connections/integration-row.tsx
-msgid "{toolCount, plural, one {# tool} other {# tools}}"
-msgstr "{toolCount, plural, one {# Werkzeug} other {# Werkzeuge}}"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
-msgstr "{total, plural, one {# Integration angezeigt} other {# Integrationen angezeigt}}"
-
-#: src/inbox/items.ts
-msgid "{workflow} in {appName} failed"
-msgstr "{workflow} in {appName} ist fehlgeschlagen"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "{workflowId} in {engine}"
-msgstr "{workflowId} in {engine}"
-
-#: src/engines/store-change-errors.ts
-msgid "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
-msgstr "Eine Datenmigration hat die Datensätze dieser Engine nach dieser Version umgestellt, daher kann sie nicht wieder aktuell gemacht werden, und keine aufbewahrte Version passt jetzt zu ihnen. Bauen Sie stattdessen eine neue Version."
-
-#: src/engines/store-change-errors.ts
-msgid "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
-msgstr "Eine Datenmigration hat die Datensätze dieser Engine nach dieser Version umgestellt, daher kann sie nicht wieder aktuell gemacht werden. Aufbewahrte Versionen, die noch zu ihnen passen: {versions}."
-
-#: src/screens/screen-frame.tsx
-msgid "A new version of this engine is available."
-msgstr "Eine neue Version dieser Engine ist verfügbar."
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox tab: what Grasp and people did"
-msgid "Activity"
-msgstr "Aktivität"
-
-#: src/activity/audit-words.ts
-msgid "Added a member to an engine"
-msgstr "Ein Mitglied zu einer Engine hinzugefügt"
-
-#: src/chat/builds.tsx
-msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Hinzugefügt: Er handelt für jeden, der die Engine nutzt, mit allem, was die Engine hat"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "AI tool"
-msgstr "KI-Tool"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "activity filter: everyone"
-msgid "All"
-msgstr "Alle"
-
-#: src/chat/side-panel.tsx
-msgid "All engines"
-msgstr "Alle Engines"
-
-#: src/engines/store-change-errors.ts
-msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
-msgstr "Ein Admin hat die Datenänderung verworfen, die diese Version braucht, daher kann sie nie aktuell gemacht werden. Lassen Sie die Engine neu bauen."
-
-#: src/engines/store-change-errors.ts
-msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
-msgstr "Ein Admin sieht auf der Seite der Engine den Datensatz, der sie aufhält, und kann die Änderung verwerfen."
-
-#: src/engines/store-change-errors.ts
-msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
-msgstr "Ein Admin kann auf der Seite der Engine sehen, was schiefging, und die Änderung verwerfen."
-
-#: src/engines/screen-approval.tsx
-msgid "An admin said this engine's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
-msgstr "Ein Admin hat festgelegt, dass die Daten dieser Engine an Apps gehen dürfen, die niemand freigegeben hat. Ihre Apps laufen daher ohne Freigabe, außer ihre Freigabe wurde zurückgenommen."
-
-#: src/engines/screen-approval.tsx
-msgid "An app is code that runs in people's browsers. It gets this engine's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
-msgstr "Eine App ist Code, der im Browser der Nutzer läuft. Sie erhält die Daten dieser Engine erst, wenn ein Admin genau diesen Code genehmigt hat, und eine Änderung am Code braucht eine neue Genehmigung. Lesen Sie zuerst den Code: Genehmigter Code kann das, was er erhält, weiterhin anderswohin senden. Mit der Genehmigung sagen Sie also, dass Sie ihm vertrauen."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "An app is what this engine's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
-msgstr "In einer App arbeitet das Team dieser Engine, gestützt auf ihre Workflows und Integrationen. Bitten Sie Grasp im Chat, eine zu bauen."
-
-#: src/activity/audit-words.ts
-msgid "An app nobody approved was refused the engine's data"
-msgstr "Einer App, die niemand genehmigt hat, wurden die Daten der Engine verweigert"
-
-#: src/inbox/items.ts
-msgid "An app runs only once an admin approved its code. That happens on the engine's page."
-msgstr "Eine App läuft erst, wenn ein Admin ihren Code genehmigt hat. Das geschieht auf der Seite der Engine."
-
-#: src/activity/pending.tsx
-msgid "Another engine already keeps {type} records here: this engine's won't apply."
-msgstr "Eine andere Engine führt hier bereits Datensätze vom Typ {type}: die dieser Engine gelten nicht."
-
-#: src/activity/pending.tsx
-msgid "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
-msgstr "Seit diese Liste geladen wurde, ist eine andere Version dieser Engine aktuell geworden. Die Liste zeigt sie jetzt: Prüfen Sie diese Version und genehmigen Sie dann erneut."
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "App approval"
-msgstr "App-Genehmigung"
-
-#: src/inbox/items.ts
-msgid "Approve {name}?"
-msgstr "{name} genehmigen?"
-
-#: src/dashboard/dependency-requests.tsx
-#: src/inbox/item-detail.tsx
-msgid "Approve the packages for {engine}"
-msgstr "Die Pakete für {engine} genehmigen"
-
-#: src/inbox/items.ts
-msgid "Approve the packages for {engine}?"
-msgstr "Die Pakete für {engine} genehmigen?"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Apps and connections"
-msgstr "Apps und Verbindungen"
-
-#: src/chat/side-panel.tsx
-msgid "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
-msgstr "Bitten Sie Grasp, eine zu erstellen. Während es daran arbeitet, steht die Engine neben dem Chat zur Vorschau, bevor sie vorgeschlagen wird."
-
-#: src/inbox/items.ts
-msgid "Asked"
-msgstr "Angefragt"
-
-#: src/inbox/items.ts
-msgid "Asked by"
-msgstr "Angefragt von"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Available"
-msgstr "Verfügbar"
-
-#: src/inbox/item-detail.tsx
-msgid "Back to the list"
-msgstr "Zurück zur Liste"
-
-#: src/inbox/items.ts
-msgid "Binding"
-msgstr "Bindung"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Brain"
-msgstr "Gehirn"
-
-#: src/activity/audit-words.ts
-msgid "Called another engine"
-msgstr "Eine andere Engine aufgerufen"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
-msgstr "Obergrenzen, die ein Admin für das Modell einer Engine auf ihrem Tab „Ressourcen“ festgelegt hat, zusätzlich zu den Budgets der Bereitstellung, und was die Aktionen der Engine darüber ausgegeben haben. Die eigenen KI-Schritte eines Workflows zählen hier nicht."
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Change"
-msgstr "Änderung"
-
-#: src/activity/audit-words.ts
-msgid "Changed an engine"
-msgstr "Eine Engine geändert"
-
-#: src/activity/audit-words.ts
-msgid "Changed whether an engine's data needs approved apps"
-msgstr "Geändert, ob die Daten einer Engine genehmigte Apps erfordern"
-
-#: src/chat/builds.tsx
-msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Geändert: Er handelt für jeden, der die Engine nutzt, mit allem, was die Engine hat"
-
-#: src/chat/builds-state.ts
-msgid "changes the engine's data"
-msgstr "ändert die Daten der Engine"
-
-#: src/chat/builds.tsx
-msgid "Changes the engine's data"
-msgstr "Ändert die Daten der Engine"
-
-#: src/engines/store-changes.tsx
-msgid "Changes to the engine's stores"
-msgstr "Änderungen an den Speichern der Engine"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Check a proposal"
-msgstr "Vorschlag prüfen"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Check a workflow"
-msgstr "Workflow prüfen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Connected"
-msgstr "Verbunden"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Connection"
-msgstr "Verbindung"
-
-#: src/inbox/item-detail.tsx
-msgctxt "inbox item section"
-msgid "Context"
-msgstr "Kontext"
-
-#: src/routes/_shell.workflows.index.tsx
-msgid "Couldn't load this engine's workflows."
-msgstr "Die Workflows dieser Engine konnten nicht geladen werden."
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Domain"
-msgstr "Domain"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox tab: what someone dealt with"
-msgid "Done"
-msgstr "Erledigt"
-
-#: src/routes/_shell.engines.index.tsx
-msgid "Each engine runs one part of the business: its workflows, apps and connections."
-msgstr "Jede Engine steuert einen Teil des Geschäfts: ihre Workflows, Apps und Verbindungen."
-
-#: src/dashboard/runs-widget.tsx
-#: src/inbox/items.ts
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.settings.models.tsx
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
-msgid "Engine"
-msgstr "Engine"
-
-#: src/engines/store-changes.tsx
-msgid "engine {app}, version {version}"
-msgstr "Engine {app}, Version {version}"
-
-#: src/connections/connection-list.tsx
-msgid "Engine {engine}"
-msgstr "Engine {engine}"
-
-#: src/screens/screen-frame.tsx
-msgid "Engine app"
-msgstr "Engine-App"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Engine budgets"
-msgstr "Engine-Budgets"
-
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "Engine not found"
-msgstr "Engine nicht gefunden"
-
-#: src/chat/side-panel.tsx
-#: src/dashboard/widget-board.tsx
-#: src/frame/app-sidebar.tsx
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.engines.index.tsx
-msgid "Engines"
-msgstr "Engines"
-
-#: src/connections/connection-list.tsx
-msgid "Engines and agents with a permission"
-msgstr "Engines und Agenten mit einer Berechtigung"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Everything"
-msgstr "Alles"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Exception"
-msgstr "Ausnahme"
-
-#: src/activity/pending.tsx
-msgid "Exports of {engine}: {covered}"
-msgstr "Exporte von {engine}: {covered}"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Failed run"
-msgstr "Fehlgeschlagener Lauf"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox: filter button"
-msgid "Filter"
-msgstr "Filter"
-
-#: src/inbox/item-detail.tsx
-msgid "For {person}"
-msgstr "Für {person}"
-
-#: src/inbox/item-detail.tsx
-msgid "For an admin"
-msgstr "Für Admins"
-
-#: src/inbox/item-detail.tsx
-msgid "For the {role}"
-msgstr "Für: {role}"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Go live"
-msgstr "Livegang"
-
-#: src/inbox/items.ts
-msgid "Grant {who}?"
-msgstr "{who} erteilen?"
-
-#: src/activity/pending.tsx
-msgid "Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Gast-Chats. Diese Engine kann Personen, die keine Mitglieder sind, über einen Link zu einem kurzen Chat mit einem Modell einladen und lesen, was sie schreiben. Gäste erreichen sonst nichts; ihre Chats verbrauchen das Modellbudget der einladenden Person"
-
-#: src/activity/audit-log.tsx
-msgid "Guest of {engine}, invited for {person}"
-msgstr "Gast von {engine}, eingeladen für {person}"
-
-#: src/inbox/inbox-page.tsx
-msgid "Inbox"
-msgstr "Posteingang"
-
-#: src/inbox/items.ts
-msgid "It failed while acting for you. Ask the agent to fix it: a new chat starts, with the run's failure report attached."
-msgstr "Er ist fehlgeschlagen, als in Ihrem Namen gehandelt wurde. Bitten Sie den Agenten um Behebung: Ein neuer Chat beginnt, mit dem Fehlerbericht des Laufs im Anhang."
-
-#: src/connections/connection-list.tsx
-msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
-msgstr "Der Zugriff ist abgelaufen. Melden Sie sich mit demselben Konto erneut an: Engines und Agenten behalten ihre Berechtigungen dafür."
-
-#: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the engine is made current."
-msgstr "Sein Zeitplan wurde gestoppt: Sein Lauf konnte {maxFailedStarts}-mal hintereinander nicht starten. Er startet wieder, wenn der Zeitplan unter Parameter gesetzt wird oder eine neue Version der Engine aktuell wird."
-
-#: src/connections/connection-list.tsx
-msgid "Its tokens are deleted, every engine and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
-msgstr "Ihre Tokens werden gelöscht, jede Engine und jeder Agent verliert sie, und Aktionen, die auf sie warten, werden verworfen. Verbinden Sie sie erneut, um sie wieder zu nutzen."
-
-#: src/inbox/items.ts
-msgid "Last"
-msgstr "Zuletzt"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox sort"
-msgid "Newest first"
-msgstr "Neueste zuerst"
-
-#: src/inbox/item-detail.tsx
-msgctxt "inbox: the action that settles an item"
-msgid "Next step"
-msgstr "Nächster Schritt"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "No engine has a model bound to it."
-msgstr "An keine Engine ist ein Modell gebunden."
-
-#: src/chat/side-panel.tsx
-#: src/routes/_shell.engines.index.tsx
-msgid "No engines yet"
-msgstr "Noch keine Engines"
-
-#: src/dashboard/widget-board.tsx
-msgid "No engines yet. Engines are made in chat."
-msgstr "Noch keine Engines. Engines entstehen im Chat."
-
-#: src/engines/package-approvals.tsx
-msgid "No packages are approved for this engine."
-msgstr "Für diese Engine sind keine Pakete genehmigt."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "No packages were approved for this engine before."
-msgstr "Für diese Engine wurden bisher keine Pakete genehmigt."
-
-#: src/engines/store-change-errors.ts
-msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
-msgstr "Kein Datensatz ist schuld, daher kann ein Admin die Änderung auf der Seite der Engine nur verwerfen."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "No workflow in this engine yet."
-msgstr "In dieser Engine gibt es noch keinen Workflow."
-
-#: src/screens/screen-frame.tsx
-msgid "Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page."
-msgstr "Noch hat niemand den Code dieser App für die Daten der Engine genehmigt. Ein Admin kann das auf der Seite der Engine tun."
-
-#: src/engines/resource-bindings.tsx
-msgid "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
-msgstr "Keine Integrationsberechtigung der Engine bedient {contract} mit allen deklarierten Aktionen. Erteile zuerst eine."
-
-#: src/inbox/inbox-page.tsx
-msgid "Nothing dealt with yet. What you decide here shows up in this list, and in the audit trail."
-msgstr "Noch nichts erledigt. Was Sie hier entscheiden, erscheint in dieser Liste und im Prüfprotokoll."
-
-#: src/inbox/items.ts
-msgid "Nothing is sent or changed on {connection} until you approve it, with exactly what is shown."
-msgstr "Auf {connection} wird nichts gesendet oder geändert, bis Sie es genehmigen, mit genau dem, was angezeigt wird."
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Nothing needs attention."
-msgstr "Nichts braucht Aufmerksamkeit."
-
-#: src/chat/builds.tsx
-msgid "Nothing runs yet: this would be the engine's first current version."
-msgstr "Noch läuft nichts: Dies wäre die erste aktuelle Version der Engine."
-
-#: src/inbox/inbox-page.tsx
-msgid "Nothing waits on you"
-msgstr "Nichts wartet auf Sie"
-
-#: src/inbox/inbox-page.tsx
-msgid "Nothing waits on you."
-msgstr "Nichts wartet auf Sie."
-
-#: src/inbox/inbox-page.tsx
-msgid "Older workflows that failed are on the <0>dashboard</0>."
-msgstr "Ältere fehlgeschlagene Workflows finden Sie im <0>Dashboard</0>."
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox sort"
-msgid "Oldest first"
-msgstr "Älteste zuerst"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, engine or run that read one."
-msgstr "Nur die als geeignet für sensible Daten markierten Modelle dürfen Daten aus einer sensiblen Sammlung (markiert unter Wissen) oder einer sensiblen Verbindung erhalten, oder aus einem Chat, einer Engine oder einem Lauf, der eine davon gelesen hat."
-
-#: src/connections/integration-row.tsx
-msgid "Only you"
-msgstr "Nur Sie"
-
-#: src/inbox/item-detail.tsx
-msgid "Open"
-msgstr "Öffnen"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Open question"
-msgstr "Offene Frage"
-
-#: src/workflows/workflows-table.tsx
-msgid "Open the engine {name}"
-msgstr "Engine {name} öffnen"
-
-#: src/inbox/item-detail.tsx
-msgid "Open where it lives"
-msgstr "Dort öffnen, wo es liegt"
-
-#: src/chat/builds-state.ts
-msgid "Other engines may no longer call {name}"
-msgstr "Andere Engines dürfen {name} nicht mehr aufrufen"
-
-#: src/chat/builds-state.ts
-msgid "Other engines may now call {name}"
-msgstr "Andere Engines dürfen jetzt {name} aufrufen"
-
-#: src/chat/builds-state.ts
-msgid "Other engines may now call {name}, which {does}"
-msgstr "Andere Engines dürfen jetzt {name} aufrufen, das {does}"
-
-#: src/inbox/items.ts
-msgid "package approvers"
-msgstr "Paket-Genehmigende"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Packages"
-msgstr "Pakete"
-
-#: src/dashboard/dependency-requests.tsx
-#: src/inbox/items.ts
-msgid "Packages for {engine}"
-msgstr "Pakete für {engine}"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "activity filter: what people did"
-msgid "People"
-msgstr "Personen"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Permission"
-msgstr "Berechtigung"
-
-#: src/activity/pending.tsx
-msgid "Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it"
-msgstr "Plattformstatistiken. Diese Engine kann die Anzahl der Läufe und Signale jeder Engine lesen und sie allen zeigen, die sie nutzen"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Policies"
-msgstr "Richtlinien"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Policy"
-msgstr "Richtlinie"
-
-#: src/activity/audit-words.ts
-msgid "Read an engine's statistics"
-msgstr "Die Statistiken einer Engine gelesen"
-
-#: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using an engine, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "„Nur lesen“ ist angehakt, wo Composio angibt, dass ein Werkzeug nur liest; Grasp prüft das nicht. Ein Werkzeug, das nur liest, läuft ohne Nachfrage. Ein Aufruf jedes anderen Werkzeugs aus einem Chat oder durch eine Person, die eine Engine nutzt, wartet auf deren Bestätigung; ein Workflow-Lauf führt ihn als einen seiner Schritte aus. Markieren Sie ein Werkzeug nur als „Nur lesen“, wenn es nichts ändert: Falsch markiert, ändert es Dinge ohne Nachfrage."
-
-#: src/chat/builds-state.ts
-msgid "reads the engine's data"
-msgstr "liest die Daten der Engine"
-
-#: src/dashboard/dependency-requests.tsx
-#: src/inbox/item-detail.tsx
-msgid "Reject the packages for {engine}"
-msgstr "Die Pakete für {engine} ablehnen"
-
-#: src/chat/builds.tsx
-msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Entfernt: Er handelte für jeden, der die Engine nutzt, mit allem, was die Engine hat"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Result"
-msgstr "Ergebnis"
-
-#: src/engines/package-approvals.tsx
-msgid "Retire the packages for {engine}"
-msgstr "Pakete für {engine} stilllegen"
-
-#: src/engines/package-approvals.tsx
-msgid "Retire the packages for {engine}?"
-msgstr "Pakete für {engine} stilllegen?"
-
-#: src/engines/package-approvals.tsx
-msgid "Revoke the packages for {engine}"
-msgstr "Pakete für {engine} widerrufen"
-
-#: src/engines/package-approvals.tsx
-msgid "Revoke the packages for {engine}?"
-msgstr "Pakete für {engine} widerrufen?"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Rule"
-msgstr "Regel"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
-msgstr "Lauf {shortId} von {workflowId} in {engine}, gestartet {started}"
-
-#: src/inbox/inbox-page.tsx
-msgid "Show activity by"
-msgstr "Aktivität anzeigen von"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Show the packages for {engine}"
-msgstr "Die Pakete für {engine} anzeigen"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Showing the first {count} of {total}. Refine your search to find others."
-msgstr "Die ersten {count} von {total} werden angezeigt. Verfeinern Sie Ihre Suche, um weitere zu finden."
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox: sort button"
-msgid "Sort"
-msgstr "Sortieren"
-
-#: src/screens/screen-frame.tsx
-msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page."
-msgstr "Die Genehmigung für den Code dieser App wurde zurückgenommen, und die App wurde gestoppt. Ein Admin kann ihn auf der Seite der Engine erneut genehmigen."
-
-#: src/inbox/items.ts
-msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
-msgstr "Die Verbindung funktioniert nicht mehr. Workflows, die sie nutzen, warten, bis sich jemand erneut anmeldet."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine has no permission to read a collection. Grant one first."
-msgstr "Die Engine hat keine Berechtigung, eine Sammlung zu lesen. Erteile zuerst eine."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
-msgstr "Die Engine hat zu viele Integrationen, um sie auf dieser Seite alle zu prüfen, daher wurde diese Bindung nicht geprüft. Ihre nächste Anfrage wird wie immer geprüft."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions can't use it until an admin binds it."
-msgstr "Die Aktionen der Engine können sie erst nutzen, wenn ein Admin sie bindet."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "Die Aktionen der Engine erreichen ein Modell, eine Integration, Wissen oder eine Vorlage nur über eine Bindung, die ein Admin hier genehmigt. Eine Deklaration gewährt nichts, und das Widerrufen einer Bindung stoppt die nächste Anfrage darüber."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-msgstr "Die Aktionen der Engine erreichen ein Modell, eine Integration, Wissen oder eine Vorlage nur über eine Bindung, die ein Admin deiner Organisation genehmigt."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's current version declares no resource for its actions."
-msgstr "Die aktuelle Version der Engine deklariert keine Ressource für ihre Aktionen."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
-msgstr "Die nächste Anfrage der Engine darüber wird abgelehnt, und Aktionen, die darauf warten, werden verworfen. Binde sie erneut, um sie wieder zu nutzen."
-
-#: src/chat/builds.tsx
-msgid "The engines this chat builds didn't load."
-msgstr "Die Engines, die dieser Chat erstellt, wurden nicht geladen."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "The first {shown} by engine; more engines have models bound."
-msgstr "Die ersten {shown} nach Engine; an weitere Engines sind Modelle gebunden."
-
-#: src/engines/store-change-errors.ts
-msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
-msgstr "Die Migration {migration} ist an ihrem Testdatensatz {fixture} gescheitert, als diese Version versiegelt wurde: {reason}. Sie läuft auf keinem Datensatz, daher kann die Version nicht aktuell gemacht werden: Korrigieren Sie die Migration oder ihren Testdatensatz und lassen Sie die Engine neu bauen."
-
-#: src/engines/store-change-errors.ts
-msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
-msgstr "Die Migration {migration} ist an ihren Testdatensätzen gescheitert, als diese Version versiegelt wurde: {reason}. Sie läuft auf keinem Datensatz, daher kann die Version nicht aktuell gemacht werden: Korrigieren Sie die Migration oder ihre Testdatensätze und lassen Sie die Engine neu bauen."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
-msgstr "Die für diese Engine genehmigten Pakete. Sie sehen sie, weil Sie Pakete genehmigen dürfen; der Rest der Engine ist für ihre Mitglieder."
-
-#: src/engines/store-changes.tsx
-msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-msgstr "Der Speicher behält seine Tabellen, wie sie sind, und nimmt wieder Änderungen an. Die Release, die diese Änderung brauchte, kann nie aktuell gemacht werden, weder in dieser Engine noch in einer anderen, die den Speicher nutzt: Sie muss neu gebaut werden. Die neuen Felder bleiben mit der Bedeutung reserviert, die diese Änderung ihnen gegeben hat: Eine spätere Version kann sie nur genau so wieder hinzufügen. Die bereits ausgefüllten Werte bleiben unsichtbar in den Datensätzen. Das lässt sich nicht rückgängig machen."
-
-#: src/routes/_shell.engines.index.tsx
-msgid "There are no engines you can open yet. Engines are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
-msgstr "Es gibt noch keine Engines, die Sie öffnen können. Engines entstehen im Chat: Beschreiben Sie einen Teil Ihrer Arbeit, und Grasp baut die Workflows und Apps dazu."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "This engine doesn't use an integration yet."
-msgstr "Diese Engine nutzt noch keine Integration."
-
-#: src/screens/screen-frame.tsx
-msgid "This engine has no such app."
-msgstr "Diese Engine hat keine solche App."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/screens/screen-frame.tsx
-msgid "This engine has no version to run yet."
-msgstr "Diese Engine hat noch keine Version zum Ausführen."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
-msgstr "Diese Version ändert die Daten der Engine mit einer Migration, und diese kann nicht abgeschlossen werden: Ihre Umwandlung ist fehlgeschlagen oder hat etwas geliefert, das die Tabelle nicht annimmt."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
-msgstr "Diese Version ändert die Daten der Engine, und die Änderung lässt sich nicht anwenden: Ein Datensatz enthält bereits einen Wert, den eines ihrer neuen Felder nicht akzeptiert."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
-msgstr "Diese Version ändert die Daten der Engine, und die Änderung lässt sich nicht anwenden: Das Ausfüllen ihrer neuen Felder kam nicht mehr voran."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
-msgstr "Diese Version ändert die Daten der Engine, und die Änderung lässt sich nicht anwenden: Das Ausfüllen eines ihrer neuen Felder würde einen Datensatz größer machen, als ein Datensatz sein darf."
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox tab: what waits on you"
-msgid "To do"
-msgstr "Zu erledigen"
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind: two sources disagree"
-msgid "Two answers"
-msgstr "Zwei Antworten"
-
-#: src/engines/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
-msgstr "Bis das gelöst ist, kann keine Release, die die Tabellen dieses Speichers ändert, aktuell gemacht werden, weder in dieser Engine noch in einer anderen, die den Speicher nutzt. Korrigieren Sie den Datensatz über die Engine, dann wird die Änderung erneut versucht, oder verwerfen Sie sie."
-
-#: src/engines/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
-msgstr "Bis das gelöst ist, kann keine Release, die die Tabellen dieses Speichers ändert, aktuell gemacht werden, weder in dieser Engine noch in einer anderen, die den Speicher nutzt. Kein Datensatz ist schuld, es gibt also nichts zu korrigieren: Verwerfen Sie die Änderung, damit der Speicher wieder Änderungen annimmt."
-
-#: src/activity/audit-words.ts
-msgid "Was called by another engine"
-msgstr "Wurde von einer anderen Engine aufgerufen"
-
-#: src/activity/audit-words.ts
-msgid "Was refused adding a member to an engine"
-msgstr "Durfte kein Mitglied zu einer Engine hinzufügen"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox sort"
-msgid "What blocks first, then newest"
-msgstr "Was blockiert zuerst, dann neueste"
-
-#: src/inbox/inbox-page.tsx
-msgid "What Grasp and its agents do by themselves is under Activity."
-msgstr "Was Grasp und seine Agenten selbst tun, steht unter Aktivität."
-
-#: src/inbox/item-detail.tsx
-msgctxt "inbox item section"
-msgid "What happened"
-msgstr "Was passiert ist"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
-msgstr "Was die Tools tun, wie der Anbieter sie angibt. Engines und Agenten nutzen nur, was ihnen erlaubt ist, und ein Tool, das etwas ändert, wartet auf die Bestätigung seiner Person."
-
-#: src/chat/builds.tsx
-msgid "What other engines may call"
-msgstr "Was andere Engines aufrufen dürfen"
-
-#: src/chat/builds.tsx
-msgid "What the engine holds"
-msgstr "Was die Engine hat"
-
-#: src/engines/resource-bindings.tsx
-msgid "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
-msgstr "Was die Aktionen der Engine über diese Bindung ausgeben dürfen, zusätzlich zu den Budgets der Bereitstellung. Lassen Sie eine Obergrenze leer, wenn es keine geben soll. Die eigenen KI-Schritte eines Workflows laufen nicht über sie."
-
-#: src/inbox/inbox-page.tsx
-msgid "What waits on you"
-msgstr "Was auf Sie wartet"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Which engines and agents hold permissions: {why}"
-msgstr "Welche Engines und Agenten Berechtigungen haben: {why}"
-
-#: src/inbox/item-detail.tsx
-msgid "Who"
-msgstr "Wer"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Workflows"
-msgstr "Workflows"
-
-#: src/workflows/workflows-table.tsx
-msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
-msgstr "Workflows entstehen im Chat: Beschreiben Sie, was von selbst laufen soll, und Grasp baut es in eine Engine."
-
-#: src/screens/screen-frame.tsx
-msgid "You can't open this engine's apps: your role doesn't allow it, or the engine has read data you can't read."
-msgstr "Sie können die Apps dieser Engine nicht öffnen: Ihre Rolle erlaubt es nicht, oder die Engine hat Daten gelesen, die Sie nicht lesen dürfen."
