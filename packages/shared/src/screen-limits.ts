@@ -16,6 +16,18 @@ export const screenFramePath = "/screen-frame";
  */
 export const appFunctionPath = "/api/app-functions";
 
+/**
+ * What a running App's screen does with one of its streaming actions
+ * (spec 10.7.6), each `POST <appFunctionPath>/<app ID>/<what>` with the
+ * call as the body: start it (or join it under the same key), attach to
+ * it again after a lost connection without ever starting it, or cancel
+ * it. The first two answer its frames, one JSON line each.
+ */
+export const streamCallActions = ["stream", "attach", "cancel"] as const;
+
+/** One of `streamCallActions`. */
+export type StreamCallAction = (typeof streamCallActions)[number];
+
 /** The header that carries the frame's lease on a function call. */
 export const screenLeaseHeader = "x-grasp-screen-lease";
 

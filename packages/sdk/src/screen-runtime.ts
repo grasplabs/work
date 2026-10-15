@@ -47,6 +47,22 @@ export interface ScreenBridge {
    * client builds on, not a call for screen code itself.
    */
   callFunction: (request: string) => Promise<unknown>;
+  /**
+   * Follows one of the App's streaming actions (spec 10.7.6): `what` is
+   * `stream` (start it, or join it under the same key) or `attach` (read
+   * it again, never starting it), `request` as for `callFunction`.
+   * `onFrame` gets each frame core sent, one at a time, the next only once
+   * it has answered, then `{ type: "closed" }` once the connection ends
+   * without a result. Answers the subscription, to `release()` once the
+   * screen stops following it. The transport the screen client builds on.
+   */
+  streamFunction: (
+    what: string,
+    request: string,
+    onFrame: (frame: unknown) => Promise<void>
+  ) => Promise<{ release: () => void }>;
+  /** Cancels the streaming action's invocation `request` names, for everyone. */
+  cancelStream: (request: string) => Promise<unknown>;
   /** Adds a problem to the App's error log. */
   report: (problem: ScreenProblem) => void;
   /** Calls `onTheme` with the page's theme now and whenever it changes. */
@@ -167,6 +183,24 @@ export const bridgeTransport = (
       },
     };
   },
+  stream: async (what, request, onFrame) => {
+    const link = await page().streamFunction(what, request, async (frame) => {
+      await Promise.resolve();
+      onFrame(frame);
+    });
+    return {
+      // Released, then let go of: the page holds the subscription's stub
+      // until it is disposed, whatever became of the stream.
+      release: async () => {
+        try {
+          await link.release();
+        } finally {
+          link[Symbol.dispose]();
+        }
+      },
+    };
+  },
+  cancelStream: async (request) => await page().cancelStream(request),
 });
 
 /**

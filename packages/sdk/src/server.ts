@@ -110,9 +110,18 @@ type RunMutation<Uses extends readonly Use[]> = <
   args: ArgsOf<Reference>
 ) => Promise<ReturnOf<Reference>>;
 
-/** `ctx.runAction`: one of the actions `Uses` lists. */
+/**
+ * A streaming action, as a definition or a generated reference: run only
+ * in the foreground, by a screen (spec 10.7.6), never by another function.
+ */
+type Streaming = { readonly stream: AnySchema } | { readonly mode: "stream" };
+
+/**
+ * `ctx.runAction`: one of the actions `Uses` lists that answers once. A
+ * streaming one isn't callable here: its progress has no one to go to.
+ */
 type RunAction<Uses extends readonly Use[]> = <
-  Reference extends UsedOfKind<Uses, "action">,
+  Reference extends Exclude<UsedOfKind<Uses, "action">, Streaming>,
 >(
   reference: Reference,
   args: ArgsOf<Reference>
@@ -171,6 +180,27 @@ export interface ActionCtx<Uses extends readonly Use[] = readonly []> {
   readonly resources: Resources<Uses>;
 }
 
+/**
+ * What a streaming action's handler has (spec 10.7.6): an action's
+ * context, and `emit`.
+ */
+export interface StreamActionCtx<
+  Uses extends readonly Use[] = readonly [],
+  Progress = unknown,
+> extends ActionCtx<Uses> {
+  /**
+   * Publishes `progress` as the action's latest snapshot, for the screen
+   * that runs it: validated against the action's `stream` schema, and no
+   * larger than an operation's result. Each snapshot is complete, so the
+   * host may skip one a slow screen hasn't read yet for a newer one: emit
+   * the whole state (the text so far), never a delta, and keep critical
+   * events in a mutation or a workflow, never in progress. Rejects once
+   * the action is cancelled or has ended (`operation.cancelled`,
+   * `operation.ended`).
+   */
+  readonly emit: (progress: Progress) => Promise<void>;
+}
+
 /** A handler's answer: its return, or a promise of it. */
 type Answer<Returns extends AnySchema> =
   | Infer<Returns>
@@ -183,12 +213,13 @@ export interface ServerFunction<
   Shape extends ValueShape,
   Returns extends AnySchema,
   Ctx,
+  Stream extends AnySchema | null = null,
 > extends FunctionReference<Kind, Vis, ObjectInput<Shape>, Infer<Returns>> {
   readonly args: ObjectSchema<Shape>;
   readonly returns: Returns;
   readonly uses: readonly Use[];
   /** An action's progress snapshots (spec 10.7.6), or null. */
-  readonly stream: AnySchema | null;
+  readonly stream: Stream;
   readonly handler: (ctx: Ctx, args: ObjectOutput<Shape>) => unknown;
 }
 
@@ -245,13 +276,33 @@ export interface ActionDefinition<
   readonly returns: Returns;
   /** The functions and resources it calls; none unless listed. */
   readonly uses?: Uses;
-  /**
-   * Its progress snapshots, when it streams them (spec 10.7.6): declared
-   * here, delivered by the streaming runtime.
-   */
-  readonly stream?: AnySchema;
+  /** Declared only by a streaming action (`StreamActionDefinition`). */
+  readonly stream?: undefined;
   readonly handler: (
     ctx: ActionCtx<Uses>,
+    args: ObjectOutput<Shape>
+  ) => Answer<Returns>;
+}
+
+/**
+ * A streaming action's declaration (spec 10.7.6): an action's, and the
+ * schema of the progress snapshots its handler emits (`ctx.emit`). It
+ * runs only in the foreground, for a screen following it (`useStream`).
+ */
+export interface StreamActionDefinition<
+  Shape extends ValueShape,
+  Returns extends AnySchema,
+  Uses extends readonly Use[],
+  Stream extends AnySchema,
+> {
+  readonly args: Shape;
+  readonly returns: Returns;
+  /** The functions and resources it calls; none unless listed. */
+  readonly uses?: Uses;
+  /** Its progress snapshots: each one whole, bounded like a result. */
+  readonly stream: Stream;
+  readonly handler: (
+    ctx: StreamActionCtx<Uses, Infer<Stream>>,
     args: ObjectOutput<Shape>
   ) => Answer<Returns>;
 }
@@ -406,6 +457,35 @@ type ManagedShape<TableName extends string> = ReturnType<
   typeof managedShape<TableName>
 >;
 
+/**
+ * `action` and `internalAction`: a streaming action when the declaration
+ * has `stream` (its handler's context has `emit`), any other otherwise.
+ */
+export interface ActionConstructor<Vis extends Visibility> {
+  <
+    const Shape extends ValueShape,
+    Returns extends AnySchema,
+    Stream extends AnySchema,
+    const Uses extends readonly Use[] = readonly [],
+  >(
+    declaration: StreamActionDefinition<Shape, Returns, Uses, Stream>
+  ): ServerFunction<
+    "action",
+    Vis,
+    Shape,
+    Returns,
+    StreamActionCtx<Uses, Infer<Stream>>,
+    Stream
+  >;
+  <
+    const Shape extends ValueShape,
+    Returns extends AnySchema,
+    const Uses extends readonly Use[] = readonly [],
+  >(
+    declaration: ActionDefinition<Shape, Returns, Uses>
+  ): ServerFunction<"action", Vis, Shape, Returns, ActionCtx<Uses>>;
+}
+
 /** The server constructors and `doc`, specialized to one schema. */
 export interface ServerModule<Tables extends AnyTables> {
   readonly query: <const Shape extends ValueShape, Returns extends AnySchema>(
@@ -443,20 +523,8 @@ export interface ServerModule<Tables extends AnyTables> {
     Returns,
     MutationCtx<Tables, Uses>
   >;
-  readonly action: <
-    const Shape extends ValueShape,
-    Returns extends AnySchema,
-    const Uses extends readonly Use[] = readonly [],
-  >(
-    declaration: ActionDefinition<Shape, Returns, Uses>
-  ) => ServerFunction<"action", "public", Shape, Returns, ActionCtx<Uses>>;
-  readonly internalAction: <
-    const Shape extends ValueShape,
-    Returns extends AnySchema,
-    const Uses extends readonly Use[] = readonly [],
-  >(
-    declaration: ActionDefinition<Shape, Returns, Uses>
-  ) => ServerFunction<"action", "internal", Shape, Returns, ActionCtx<Uses>>;
+  readonly action: ActionConstructor<"public">;
+  readonly internalAction: ActionConstructor<"internal">;
   /**
    * The schema of a whole record of `table` under this schema: its
    * managed fields and its declared fields, for a function's `returns`.

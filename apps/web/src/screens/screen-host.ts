@@ -24,6 +24,7 @@ import {
 import type { ExpectedStart } from "./frame-stages.ts";
 import { openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
+import { cancelStream, followStream } from "./screen-stream.ts";
 
 // The page's side of an App's screen. The screen runs in a sandboxed frame
 // (core's screen-frame.ts) with no network, whose document core serves for
@@ -302,6 +303,42 @@ const appTarget = (
         throw error;
       }
     },
+    streamFunction: async (what, request, onFrame, onEnded) => {
+      // As `callFunction`: never sent once the connection is someone else's.
+      const person = await link.person();
+      try {
+        return await followStream(
+          app,
+          { lease, person },
+          what,
+          request,
+          onFrame,
+          onEnded
+        );
+      } catch (error) {
+        if (refusedForBuild(error)) {
+          void checkDeliveryNow(link, bundle, refused);
+        }
+        if (authErrors.codeOf(error) === "auth.principal_changed") {
+          refused("principal-changed");
+        }
+        throw error;
+      }
+    },
+    cancelStream: async (request) => {
+      const person = await link.person();
+      try {
+        return await cancelStream(app, { lease, person }, request);
+      } catch (error) {
+        if (refusedForBuild(error)) {
+          void checkDeliveryNow(link, bundle, refused);
+        }
+        if (authErrors.codeOf(error) === "auth.principal_changed") {
+          refused("principal-changed");
+        }
+        throw error;
+      }
+    },
     report: async (problem) => {
       await on(link, async ({ screens }) => {
         await screens.report(app, { version, screen }, problem);
@@ -374,6 +411,8 @@ const previewTarget = (
       ),
     // A draft's functions aren't sealed, so its preview has none to call.
     callFunction: refusedInPreview,
+    streamFunction: refusedInPreview,
+    cancelStream: refusedInPreview,
     report: async (problem) => {
       await on(link, async ({ chats }) => {
         await chats.previewReport(chatId, app, revision, screen, problem);
