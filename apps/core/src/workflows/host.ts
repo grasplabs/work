@@ -1424,6 +1424,9 @@ export class RunHost extends RpcTarget {
       // the step would come back held at once, again and again. Only its
       // person's resolution, which wakes the step (wakes.ts), cuts this
       // first wait short, so the run acts on their word within seconds.
+      // This wait replaced a plain sleep of the same name, with no branch
+      // for a run suspended in one: Grasp has no release yet, so no such
+      // run outlives a deploy.
       try {
         await this.#step.waitForEvent(`${prefix}:first`, {
           type: wakeType,
