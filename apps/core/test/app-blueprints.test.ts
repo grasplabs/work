@@ -158,6 +158,8 @@ describe("blueprints", { timeout: 60_000 }, () => {
       ...outlook(source, "MAIL"),
       object: { type: "connection", connectionId: mail.id },
     });
+    // An independent workflow the owner may start: the creator may not see it.
+    const flow = await owner.api.workflowResources.create(`report-${unique()}`);
     const asked: PermissionRequest[] = [
       {
         ...outlook(source, "MAILBOX"),
@@ -165,15 +167,9 @@ describe("blueprints", { timeout: 60_000 }, () => {
       },
       {
         subject: { type: "app", appId: source },
-        object: { type: "workflow", appId: source, workflowId: "report" },
+        object: { type: "workflow", workflowId: flow.id },
         actions: ["start"],
         binding: "REPORT",
-      },
-      {
-        subject: { type: "app", appId: source },
-        object: { type: "workflow", appId: hidden, workflowId: "report" },
-        actions: ["start"],
-        binding: "HIDDEN_FLOW",
       },
       {
         subject: { type: "app", appId: source },
@@ -226,8 +222,9 @@ describe("blueprints", { timeout: 60_000 }, () => {
           grantedBy,
         })
       ),
-      // Nothing it answers or lists names another App or a connection.
-      names: [hidden, mail.id, mailbox].filter(
+      // Nothing it answers or lists names another App, a connection or a
+      // workflow.
+      names: [hidden, mail.id, mailbox, flow.id].filter(
         (id) =>
           JSON.stringify(created).includes(id) ||
           JSON.stringify(theirs).includes(id)

@@ -6,7 +6,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { sessions, users } from "../db/core/schema.ts";
-import { authFor } from "./auth.ts";
+import { authFor, tokenKeysOf } from "./auth.ts";
 import { signInConfig } from "./config.ts";
 import { sessionIdentity } from "./identity.ts";
 import type { SignedInSession } from "./identity.ts";
@@ -137,6 +137,8 @@ const claimsSchema = z.object({
 export type TokenCheck =
   | { ok: true; person: Identity; sessionId: string }
   | { ok: false; reason: "invalid" }
+  /** Signed, maybe, by a key another isolate made since this one read them. */
+  | { ok: false; reason: "keys_pending" }
   | {
       ok: false;
       reason: "another_app" | "session_ended" | "no_access";
@@ -167,7 +169,12 @@ export const checkAppToken = async (
   const { payload } = await auth.api.verifyJWT({ body: { token } });
   const read = claimsSchema.safeParse(payload);
   if (!read.success) {
-    return invalid;
+    // A key made in another isolate within the last few seconds isn't
+    // read here yet (token-keys.ts): its holder tries again, it isn't
+    // told to sign in, which would clear what its screens hold.
+    return tokenKeysOf(env).takeStale(token)
+      ? { ok: false, reason: "keys_pending" }
+      : invalid;
   }
   const { sub: userId, sid: sessionId } = read.data;
   if (read.data.app !== app) {

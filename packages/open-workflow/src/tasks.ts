@@ -913,9 +913,19 @@ const kindChecks: Readonly<Record<string, (check: KindCheck) => void>> = {
     checkTry(checker, task, pointer, site, record, walkList);
   },
   wait: ({ checker, task, pointer, site }) => {
-    durationAt(checker, task.wait, pointerJoin(pointer, "wait"), site, {
+    const waitPointer = pointerJoin(pointer, "wait");
+    const ms = durationAt(checker, task.wait, waitPointer, site, {
       stage: taskDefinition,
     });
+    // Refused here, not when the run reaches it: no run could wait longer.
+    if (ms !== undefined && ms > profileLimits.maxWaitMs) {
+      checker.report.error(
+        "profile.invalid_value",
+        at(site, waitPointer),
+        "Wait at most 365 days; for longer, use a schedule trigger.",
+        { expected: "at most 365 days" }
+      );
+    }
   },
 };
 

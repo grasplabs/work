@@ -153,6 +153,17 @@ export const flaky = action({
   },
 });
 
+/** Streams its progress: only a screen following it runs it. */
+export const streamed = action({
+  args: {},
+  returns: v.null(),
+  stream: v.object({ done: v.number() }),
+  handler: async (ctx) => {
+    await ctx.emit({ done: 1 });
+    return null;
+  },
+});
+
 /** Two requests in one call; says how the second ended. */
 export const twice = action({
   args: {},
@@ -170,14 +181,14 @@ export const twice = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { draft, flaky, secret, twice, writer } from "./operations/assist.ts";
+import { draft, flaky, secret, streamed, twice, writer } from "./operations/assist.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Assistant",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { assist: { draft, twice, flaky } },
+  operations: { assist: { draft, twice, flaky, streamed } },
   internalOperations: { hidden: { secret } },
   screens: [],
   uses: [writer],
@@ -966,6 +977,20 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
       },
       sent: true,
     });
+  });
+
+  it("refuse a streaming action: it runs only for a screen following it", async () => {
+    const asleep = await sleepingRun(modelFiles());
+    const result = await callRunFunction(
+      env,
+      stepOf(asleep, { holds: true }),
+      { contractId: "assist.streamed", kind: "action" },
+      {},
+      `step:${crypto.randomUUID()}`
+    );
+    expect(result.ok ? null : result.error.code).toBe(
+      "operation.mode_mismatch"
+    );
   });
 
   it("refuse a resource request whose attempt was let go of while the gate read", async () => {

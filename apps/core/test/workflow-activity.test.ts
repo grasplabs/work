@@ -250,7 +250,50 @@ describe("runs over time", () => {
     });
   });
 
-  it("refuses a window of other than 1 to 90 whole days", async () => {
+  it("reads a window that ended before today as it was: its own days, and none after it", async () => {
+    const owner = await personApi("builder");
+    const { id: app } = await owner.api.apps.create({
+      name: `Invoices ${unique()}`,
+    });
+    await Promise.all([
+      seedRun(app, { workflow: "approve", status: "completed", ago: 9 }),
+      seedRun(app, { workflow: "approve", status: "completed", ago: 7 }),
+      seedRun(app, { workflow: "approve", status: "failed", ago: 3 }),
+      seedRun(app, { workflow: "approve", status: "completed", ago: 2 }),
+      seedRun(app, { workflow: "approve", status: "completed", ago: 0 }),
+    ]);
+    // Five days, from 7 days ago to 3 days ago.
+    const activity = await owner.api.workflows.activity({
+      days: 5,
+      to: dateOf(3),
+    });
+    expect({
+      from: activity.from,
+      to: activity.to,
+      days: activity.days,
+      runs: activity.runs,
+      workflows: activity.workflows.map(({ started, completed, failed }) => ({
+        started,
+        completed,
+        failed,
+      })),
+    }).toStrictEqual({
+      from: dateOf(7),
+      to: dateOf(3),
+      days: Array.from({ length: 5 }, (_, index) => {
+        const ago = 7 - index;
+        return {
+          ...none(ago),
+          ...(ago === 7 ? { completed: 1 } : {}),
+          ...(ago === 3 ? { failed: 1 } : {}),
+        };
+      }),
+      runs: { total: 2, withPerson: 0, withoutPerson: 2 },
+      workflows: [{ started: 2, completed: 1, failed: 1 }],
+    });
+  });
+
+  it("refuses a window of other than 1 to 90 whole days, or one that ends after today", async () => {
     const { api } = await personApi("builder");
     const read = async (query?: unknown) =>
       await outcome(
@@ -270,6 +313,10 @@ describe("runs over time", () => {
       part: await read({ days: 1.5 }),
       text: await read({ days: "7" }),
       more: await read({ days: 7, app: "other" }),
+      past: await read({ days: 7, to: dateOf(10) }),
+      today: await read({ days: 7, to: dateOf(0) }),
+      future: await read({ days: 7, to: dateOf(-1) }),
+      notADate: await read({ days: 7, to: "last week" }),
     }).toStrictEqual({
       none: "ok",
       one: "ok",
@@ -279,6 +326,10 @@ describe("runs over time", () => {
       part: "workflow.invalid",
       text: "workflow.invalid",
       more: "workflow.invalid",
+      past: "ok",
+      today: "ok",
+      future: "workflow.invalid",
+      notADate: "workflow.invalid",
     });
   });
 

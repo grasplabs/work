@@ -1,3 +1,4 @@
+import { chunkBytes } from "@grasp-os/shared/chunks";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import type {
   HeldPool,
@@ -122,12 +123,6 @@ export interface SessionCall {
 }
 
 /**
- * How much the sandbox host reads at a time of what a session hands it in
- * chunks: well within a session's message once Cap'n Web has encoded it.
- */
-export const sessionChunkBytes = 1024 * 1024;
-
-/**
  * A reader of `parts`' bytes, for the sandbox host to call as
  * `read(name, offset)`: a chunk at a time, the parts in their order and
  * each from where its last chunk ended, never again. So a session reads
@@ -145,7 +140,7 @@ export const inOrderReader = (
       throw new RangeError("Each part is read once, in order.");
     }
     const [, bytes] = part;
-    const chunk = bytes.slice(next, next + sessionChunkBytes);
+    const chunk = bytes.slice(next, next + chunkBytes);
     next += chunk.byteLength;
     if (next >= bytes.byteLength) {
       index += 1;
@@ -377,11 +372,36 @@ export const sandboxVerdictOf = (error: unknown): string | undefined =>
   error instanceof Error ? verdicts.get(error) : undefined;
 
 /**
+ * Whether the sandbox refused a call before any of it ran, for want of a
+ * place: its owner at its share (`busy`, or 429 once `runPlatformCode`
+ * in platform-sandbox.ts said so), or the pool full (503).
+ */
+export const noPlaceOf = (error: unknown): boolean =>
+  sandboxVerdictOf(error) === "busy" ||
+  (error instanceof SandboxUnavailableError &&
+    !error.started &&
+    (error.status === 429 || error.status === 503));
+
+/**
  * How long core waits for the supervisor's verdict on a call that failed
  * while its session looked open, and how often it asks meanwhile.
  */
 const verdictWaitMs = 1000;
 const verdictPollMs = 100;
+
+/**
+ * The longest `runInSession` may take for a call of `wallMs`, from asking
+ * for a session to settling, every bound and wait of its own included:
+ * the supervisor's answer to the upgrade (`openSession`), the call's
+ * backstop, the wait for a verdict, and telling the supervisor the
+ * session is over, twice at most, before and after.
+ */
+export const sessionCallMs = (wallMs: number): number =>
+  2 * sandboxWaitMs +
+  backstopMs +
+  (sandboxWaitMs + wallMs + backstopMs) +
+  verdictWaitMs +
+  2 * (2 * backstopMs);
 
 /** Whether `signal` has aborted, read as it is now. */
 const isAborted = (signal: AbortSignal | undefined): boolean =>
@@ -558,6 +578,23 @@ const openSession = async (
 };
 
 /**
+ * What a call whose `run` never went out fails with, for `error`: the
+ * sandbox unavailable, the call surely not started, whatever ended it (a
+ * session that ended, a transport that took nothing, an argument no
+ * session carries).
+ */
+const unsentError = (error: unknown): SandboxUnavailableError =>
+  new SandboxUnavailableError(
+    error instanceof Error ? error.message : String(error),
+    {
+      cause: error,
+      status:
+        error instanceof SandboxUnavailableError ? error.status : undefined,
+      started: false,
+    }
+  );
+
+/**
  * What a session's call ended with, as `runInSession` throws it: the
  * cancel, the App's failure (what it threw or sent, or the supervisor's
  * verdict), or the sandbox being unavailable.
@@ -569,18 +606,25 @@ const failureOf = async (
     id,
     isClosed,
     signal,
+    sent = true,
   }: {
     host: Fetcher;
     id: string;
     /** Whether the session's socket has closed, read when it's needed. */
     isClosed: () => boolean;
     signal: AbortSignal | undefined;
+    /** Whether the call's `run` went out: a nested call's always did. */
+    sent?: boolean;
   }
 ): Promise<unknown> => {
   if (signal?.aborted === true) {
     // Cancelled, or past a deadline core keeps: the socket closes, and with
     // it the call's process.
     return signal.reason;
+  }
+  if (!sent) {
+    // Nothing to ask the supervisor of a call that never reached it.
+    return unsentError(error);
   }
   if (
     sandboxVerdictOf(error) !== undefined ||
@@ -672,6 +716,10 @@ export const runInSession = async (
 ): Promise<unknown> => {
   signal?.throwIfAborted();
   const id = crypto.randomUUID();
+  // Until the call's `run` has gone out on its socket, nothing of it ran:
+  // a stop before then (no socket, a session refused or ended, a transport
+  // that took nothing) is `started: false`. Once it went out the call may
+  // have run, so every failure from then on is one that may have.
   const socket = await openSession(host, call, id, signal);
   // Every capability by a name of the session's own: the isolate never
   // sees these, only what the sandbox host makes of them.
@@ -695,8 +743,22 @@ export const runInSession = async (
   const whenRefused = (async (): Promise<never> => {
     throw await refusedWith;
   })();
+  // The first message to pass the socket's `send` is the call's own `run`:
+  // Cap'n Web sends nothing before it, and nothing nests in a call before
+  // it runs.
+  let runSent = false;
+  const socketTransport = new WebSocketTransport(socket);
   const transport = accountedTransport(
-    new WebSocketTransport(socket),
+    {
+      send: (message) => {
+        socketTransport.send(message);
+        runSent = true;
+      },
+      receive: async () => await socketTransport.receive(),
+      abort: (reason) => {
+        socketTransport.abort(reason);
+      },
+    },
     sessionAccounting,
     (refusal, direction) => {
       // Every session's holdings together past the isolate's pool: the
@@ -706,7 +768,7 @@ export const runInSession = async (
       let error: Error;
       if (refusal === "isolate") {
         error = new SandboxUnavailableError(
-          "Core holds as much for calls in the sandbox as it may. Try again shortly."
+          "Core holds as much for calls in the sandbox as it may."
         );
       } else if (direction === "sent") {
         error = new SandboxUnavailableError(
@@ -883,6 +945,7 @@ export const runInSession = async (
       id,
       isClosed: () => closed,
       signal,
+      sent: runSent,
     });
   } finally {
     giveUp();

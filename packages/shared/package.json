@@ -14,6 +14,7 @@
     "./audit-log": "./src/audit-log.ts",
     "./capability": "./src/capability.ts",
     "./chat": "./src/chat.ts",
+    "./chunks": "./src/chunks.ts",
     "./client-secrets": "./src/client-secrets.ts",
     "./config": "./src/config.ts",
     "./connect": "./src/connect.ts",
@@ -43,6 +44,7 @@
     "./onboarding": "./src/onboarding.ts",
     "./operation-limits": "./src/operation-limits.ts",
     "./operations": "./src/operations.ts",
+    "./organization": "./src/organization.ts",
     "./onboarding-documents": "./src/onboarding-documents.ts",
     "./onboarding-gate": "./src/onboarding-gate.ts",
     "./onboarding-staff": "./src/onboarding-staff.ts",
@@ -67,6 +69,7 @@
     "./screen-port": "./src/screen-port.ts",
     "./screen-trust": "./src/screen-trust.ts",
     "./screens": "./src/screens.ts",
+    "./shared-runs": "./src/shared-runs.ts",
     "./sign-in": "./src/sign-in.ts",
     "./signals": "./src/signals.ts",
     "./statistics": "./src/statistics.ts",
@@ -79,6 +82,7 @@
     "./uploads": "./src/uploads.ts",
     "./value-bounds": "./src/value-bounds.ts",
     "./value-depth": "./src/value-depth.ts",
+    "./workflow-resources": "./src/workflow-resources.ts",
     "./workflows": "./src/workflows.ts"
   },
   "dependencies": {

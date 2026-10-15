@@ -108,8 +108,12 @@ const disposeOf = (value: unknown): void => {
   }
 };
 
-/** Calls `method` on a stub, as an RPC stub answers any method name. */
-const callStub = async (stub: unknown, method: string): Promise<unknown> => {
+/** Calls `method` on a stub with `args`, as an RPC stub answers any method name. */
+export const callStub = async (
+  stub: unknown,
+  method: string,
+  args: readonly unknown[] = []
+): Promise<unknown> => {
   const fn: unknown =
     isRecord(stub) || typeof stub === "function"
       ? Reflect.get(stub, method)
@@ -117,7 +121,7 @@ const callStub = async (stub: unknown, method: string): Promise<unknown> => {
   if (typeof fn !== "function") {
     throw new TypeError(`The entrypoint has no method ${method}.`);
   }
-  const call: unknown = Reflect.apply(fn, stub, []);
+  const call: unknown = Reflect.apply(fn, stub, [...args]);
   try {
     return await call;
   } catch (error) {
