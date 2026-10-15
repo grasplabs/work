@@ -343,7 +343,8 @@ export const brainTasks: readonly BrainTask[] = [
           source: "handbook/contracts.md#CR-2024-118 Rotterdam depot lease",
           marker: "Owner from 2026-10-01: Marta Ruiz",
         },
-      ]
+      ],
+      { forbidden: ["Tomas Okafor", "Ilse Vermeer"] }
     ),
     documents: ["contracts"],
   },

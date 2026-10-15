@@ -139,6 +139,12 @@ describe("scoring a trial", () => {
       contradicted: verdict(contract, {
         answer: "ANSWER: Marta Ruiz or Tomas Okafor [handbook/contracts.md]",
       }).completed,
+      joined: verdict(
+        { ...contract, forbidden: [] },
+        {
+          answer: "ANSWER: Marta Ruiz and Ilse Vermeer [handbook/contracts.md]",
+        }
+      ).completed,
       staleInExplanation: verdict(contract, {
         answer:
           "ANSWER: Marta Ruiz\nShe took over from Tomas Okafor. [handbook/contracts.md#Lease]",
@@ -147,6 +153,7 @@ describe("scoring a trial", () => {
       explained: false,
       denied: false,
       contradicted: false,
+      joined: false,
       staleInExplanation: true,
     });
   });
@@ -297,6 +304,7 @@ describe("scoring a trial", () => {
       extra: completed(fleet, "37 trucks; 12 electric; 4 on order", trucks),
       eitherOrder: completed(conflict, "3 euro; gratis", parking),
       hedged: completed(conflict, "gratis of 3 euro; 3 euro", parking),
+      added: completed(fleet, "37 and 99 trucks; 12 electric", trucks),
     }).toStrictEqual({
       reversed: false,
       unsplit: false,
@@ -304,6 +312,7 @@ describe("scoring a trial", () => {
       extra: false,
       eitherOrder: true,
       hedged: false,
+      added: false,
     });
   });
 
