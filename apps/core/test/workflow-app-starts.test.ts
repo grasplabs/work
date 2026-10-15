@@ -1326,6 +1326,60 @@ describe("what a start rechecks, and records", () => {
     }).toStrictEqual({ raced: true, answer: "delivered", receipts: 1 });
   });
 
+  it("hands a refused start back to its outbox when what it was decided on can't be read again", async () => {
+    const fx = await fixture();
+    const real = env.DB;
+    const seen = { decided: false, failed: false };
+    const deciding = /config_revision[\s\S]*as holds/iu;
+    const rereading = /left join "workflow_resource_versions"/iu;
+    // The decision refuses, then D1 fails for a moment as what it was
+    // decided on is read again.
+    const db: D1Database = {
+      prepare: (statement) => {
+        if (!seen.decided && deciding.test(statement)) {
+          seen.decided = true;
+          const refusing = real.prepare("SELECT 0 AS holds");
+          const prepared = real.prepare(statement);
+          return new Proxy(prepared, {
+            get: (target, property) => {
+              if (property === "bind") {
+                return () => refusing;
+              }
+              const value: unknown = Reflect.get(target, property);
+              return typeof value === "function"
+                ? (...rest: unknown[]): unknown =>
+                    Reflect.apply(value, target, rest)
+                : value;
+            },
+          });
+        }
+        if (seen.decided && !seen.failed && rereading.test(statement)) {
+          seen.failed = true;
+          return real.prepare("SELECT * FROM d1_unavailable_for_a_moment");
+        }
+        return real.prepare(statement);
+      },
+      batch: async (statements) => await real.batch(statements),
+      exec: async (statement) => await real.exec(statement),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    const first = await dispatched({ ...env, DB: db }, entryOf(fx, fx.bob));
+    const again = await dispatched(env, entryOf(fx, fx.bob));
+    expect({
+      failed: seen.failed,
+      settled: typeof first === "object" && first !== null,
+      again,
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({
+      failed: true,
+      settled: false,
+      again: "delivered",
+      receipts: 1,
+    });
+  });
+
   it("hands a start back to its outbox while every decision goes stale, and starts it once the edits stop", async () => {
     const fx = await fixture();
     const edits = { revision: 0 };

@@ -733,9 +733,17 @@ const deniedAt = async (
   let now: Awaited<ReturnType<typeof pinned>> | undefined;
   try {
     now = await pinned(env, id, version);
-  } catch {
-    // Gone or never published: no fresh decision would start it.
-    return refused;
+  } catch (error) {
+    // Gone or never published: no fresh decision would start it. Anything
+    // else (D1 failing for a moment) isn't a decision, and is retried.
+    const code = workflowResourceErrors.codeOf(error);
+    if (
+      code === "workflow.resource_unavailable" ||
+      code === "workflow.version_not_found"
+    ) {
+      return refused;
+    }
+    throw error;
   }
   if (
     now.generation !== decided.generation ||
