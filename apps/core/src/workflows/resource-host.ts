@@ -671,6 +671,10 @@ export class ResourceRunHost
             });
           }
           const value = z.json().parse(JSON.parse(written.text));
+          // Its record's checks, as the host makes them, spend the
+          // activation's fuel as an evaluation of it would.
+          this.#activationFuel -=
+            evaluationFuel + fuelPerByte * written.text.length;
           this.#acceptRecord(attempt, value);
           return value;
         });
@@ -1014,6 +1018,19 @@ export class ResourceRunHost
     attempt.checked.add(kind.data);
     this.#requireCurrent(attempt);
     const data = boundedJson(value);
+    // Charged as an evaluation of what it reads, so checks spend the
+    // attempt's share of the activation's fuel as expressions do.
+    attempt.budget.fuel -= evaluationFuel + fuelPerByte * (data?.size ?? 0);
+    if (attempt.budget.fuel <= 0) {
+      throw expressionError(
+        "expression.budget_exhausted",
+        {
+          pointer: task?.pointer ?? "",
+          ...(task === undefined ? {} : { taskId: task.id }),
+        },
+        { remedy: "Check less data in the task, or split the task." }
+      );
+    }
     conform(schema, data?.value);
   }
 

@@ -498,7 +498,9 @@ const hostOf = async (
   id: string,
   params?: Record<string, unknown>,
   /** The attempt's lease at each read of it, by count: held unless given. */
-  lease?: (read: number) => AttemptLease | undefined
+  lease?: (read: number) => AttemptLease | undefined,
+  /** The activation's fuel, if not the host's own. */
+  activationFuel?: number
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -539,6 +541,7 @@ const hostOf = async (
           : lease(reads);
       },
       tampered: () => {},
+      ...(activationFuel === undefined ? {} : { activationFuel }),
     }
   );
 };
@@ -676,6 +679,43 @@ describe("a run's host, against a forged module", () => {
       honest: "ok",
       badOutput: "workflow.task_data_invalid",
       badInput: "workflow.task_data_invalid",
+    });
+  });
+
+  it("spends the activation's fuel on a step's schema checks, as on its expressions", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, typedOutput)
+    );
+    // One attempt's share: a step that checks much leaves less than one.
+    const host = await hostOf(by, workflow.id, undefined, undefined, 2 ** 27);
+    const status = "x".repeat(900_000);
+    const checked = await host.do(
+      "task:typed",
+      { input: { input: { who: "Ada" }, context: {} } },
+      async (attempt) => {
+        attempt.check("output", { status });
+        return await Promise.resolve({
+          ok: true,
+          value: { output: { status } },
+        });
+      }
+    );
+    const ran = { module: false };
+    await host.do(
+      "task:gated",
+      { input: { input: { status: "typed" }, context: {} } },
+      async () => {
+        ran.module = true;
+        return await Promise.resolve({
+          ok: true,
+          value: { output: { status: "gated" } },
+        });
+      }
+    );
+    expect({ checked: codeOf(checked), next: ran.module }).toStrictEqual({
+      checked: "ok",
+      next: false,
     });
   });
 
