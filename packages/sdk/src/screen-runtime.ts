@@ -43,7 +43,8 @@ export interface ScreenBridge {
    * Calls one of the App's functions (spec 32.6), for the person using the
    * screen: `request` is the call as JSON text (its reference, input and
    * idempotency key), passed to core as it is; the answer is core's
-   * `{ result, fingerprint, manifestHash }`. The transport the screen
+   * `{ result, fingerprint, manifestHash }`, the last null for an action
+   * answered by its invocation, which keeps no release. The transport the screen
    * client builds on, not a call for screen code itself.
    */
   callFunction: (request: string) => Promise<unknown>;

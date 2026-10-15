@@ -88,7 +88,7 @@ const clientErrors = {
   },
   "submission.outcome_unknown": {
     message:
-      "Whether this finished is unknown, so it wasn't sent again. Sending it again with the same idempotency key gets a change's outcome; an action runs again, though steps it already completed aren't repeated.",
+      "Whether this finished is unknown: no answer came back in time. Sending it again with the same idempotency key gets its outcome, and never runs it a second time.",
     category: "uncertain",
   },
   "stream.cancelled": {
@@ -281,6 +281,47 @@ export const settlesSubmission = (failure: GraspError): boolean =>
 export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([
   "screen.rate_limited",
 ]);
+
+/**
+ * The refusal of the person or the build that `error` is, or carries: its
+ * own code, or the code an outcome withheld for it names
+ * (`details.refusal`, as core sends an action's answer it withheld after
+ * the run). The client fences on it either way. Only that wrapper's
+ * `details.refusal` counts: an App's own error may carry any details.
+ */
+export const fencingRefusalOf = (error: GraspError): GraspError | undefined => {
+  if (fences(error.code)) {
+    return error;
+  }
+  if (error.code !== "submission.outcome_unknown") {
+    return undefined;
+  }
+  const { details } = error;
+  const refusal: unknown =
+    typeof details === "object" && details !== null
+      ? Reflect.get(details, "refusal")
+      : undefined;
+  if (typeof refusal !== "string" || !fences(refusal)) {
+    return undefined;
+  }
+  return new GraspError({
+    code: refusal,
+    message: "You no longer have access to this App's data.",
+    category: "authorization",
+    retryable: false,
+    requestId: error.requestId,
+  });
+};
+
+/**
+ * Refusals that withhold an outcome rather than tell it: the person or
+ * the build lost access, the access changed, or the receipt expired.
+ * After a lost answer, one of these leaves what the call did unknown.
+ */
+export const hidesOutcome = (code: string): boolean =>
+  fences(code) ||
+  code === "operation.access_changed" ||
+  code === "submission.expired";
 
 /** The category of a refusal the page or core sent before any call ran. */
 const refusalCategory = (code: string): ErrorCategory => {
