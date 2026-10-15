@@ -23,7 +23,7 @@ import {
 } from "@grasp-os/ui/components/dialog";
 import { Progress } from "@grasp-os/ui/components/progress";
 import type { I18n } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
+import { msg, ph, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
@@ -124,7 +124,7 @@ const spenderName = (of: ModelSpender, i18n: I18n): string => {
   if (of.type === "workflow") {
     const { workflowId } = of;
     const engine = of.appName ?? of.appId;
-    return i18n._(msg`${workflowId} in ${engine}`);
+    return i18n._(msg`${workflowId} in ${ph({ domain: engine })}`);
   }
   if (of.type === "run") {
     const { runId } = of;
@@ -137,7 +137,7 @@ const spenderName = (of: ModelSpender, i18n: I18n): string => {
     const started = formatDateTime(of.startedAt);
     const shortId = runId.slice(0, shortRunId);
     return i18n._(
-      msg`Run ${shortId} of ${workflowId} in ${engine}, started ${started}`
+      msg`Run ${shortId} of ${workflowId} in ${ph({ domain: engine })}, started ${started}`
     );
   }
   return of.name ?? of.userId;

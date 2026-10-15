@@ -55,6 +55,7 @@ import { queuedRuns, runDequeued } from "./admission.ts";
 import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
+import { ownerOf } from "./owners.ts";
 import { admitChild, lineageCreated } from "./quotas.ts";
 import type { ChildPlace } from "./quotas.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
@@ -244,10 +245,10 @@ export const runActor = (
  * The statements that record a run's failure, after the one that marks it
  * failed in the same batch: its `workflow.run.failed` event, stored only
  * if that statement changed the row, so a run that ended otherwise records
- * nothing; and the notice to the person
- * it acted for (notifications.ts), only if the event was stored. That
- * person is who started it, or for a triggered run the App's owner, read
- * now.
+ * nothing; and the notice to the person who answers for it
+ * (notifications.ts), only if the event was stored. That person is who
+ * started it, or for a triggered run the workflow's owner (owners.ts),
+ * read now: its App's owner unless someone set another.
  */
 const failureRecorded = async (
   env: Env,
@@ -261,11 +262,9 @@ const failureRecorded = async (
     "core"
   );
   const stored = outboxedEventWhere(db, failed, sql`changes() > 0 AND ${also}`);
-  let personId = row.startedBy;
-  if (personId === null) {
-    const app = await appRecord(env, appIdSchema.parse(row.appId));
-    personId = app.ownerId;
-  }
+  const personId =
+    row.startedBy ??
+    (await ownerOf(env, appIdSchema.parse(row.appId), row.workflowId));
   return [
     stored,
     ...failureNoticed(db, {

@@ -184,7 +184,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     failDrafts = true;
     await page.reload();
     await expect(
-      thread.getByText("The engines this chat builds didn't load.")
+      thread.getByText("The domains this chat builds didn't load.")
     ).toBeVisible();
     await expect(studio).toHaveCount(0);
     failDrafts = false;
@@ -192,7 +192,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     // Named by its top row's heading: the App's name.
     await expect(studio).toBeVisible();
     await expect(
-      thread.getByText("The engines this chat builds didn't load.")
+      thread.getByText("The domains this chat builds didn't load.")
     ).toHaveCount(0);
     await expect(studio).toContainText(
       "1 file changed in this chat, not proposed yet"
@@ -255,7 +255,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
 
     // View app opens the App itself.
     await studio.getByRole("link", { name: "View app" }).click();
-    await expect(page).toHaveURL(new RegExp(`/engines/${app.id}$`, "u"));
+    await expect(page).toHaveURL(new RegExp(`/domains/${app.id}$`, "u"));
     await expect(
       page.getByRole("heading", { level: 1, name, exact: true })
     ).toBeVisible();

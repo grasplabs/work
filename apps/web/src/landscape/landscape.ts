@@ -192,7 +192,7 @@ export const sortedExposure = (
 export type QuickFilter = "unused" | "core" | "unowned";
 
 export const quickFilterLabel: Record<QuickFilter, MessageDescriptor> = {
-  unused: msg`Not in an engine yet`,
+  unused: msg`Not in a domain yet`,
   core: msg`AI tools`,
   unowned: msg`No owner`,
 };

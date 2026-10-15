@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
 
-// The body of a page as the prototype lays it out (`components/page.tsx`):
-// centred, with generous whitespace, a title with one quiet line under it,
-// and its actions on the right, which go under the title when there's no
-// room beside it.
+// A page's body and heading, as the prototype has them
+// (`components/page.tsx`).
 
-/** The page body: centred, `wide` for tables and boards. */
+/**
+ * The page body: centred, generous whitespace. Its foot leaves room for
+ * the chat box, so the last row of a page is never under it.
+ */
 export const Page = ({
   children,
   wide = false,
@@ -16,8 +17,8 @@ export const Page = ({
   <div
     className={
       wide
-        ? "mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 py-7 text-sm"
-        : "mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-7 text-sm"
+        ? "pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7 text-sm"
+        : "pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7 text-sm"
     }
   >
     {children}

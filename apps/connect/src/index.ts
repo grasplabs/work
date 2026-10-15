@@ -14,6 +14,7 @@ import {
 } from "@grasp-os/shared/connect";
 import type {
   Catalog,
+  CatalogLogo,
   CatalogTool,
   ConnectorContract,
   ConnectApi,
@@ -57,6 +58,7 @@ import {
   syncEventSources,
   takeConnectorEvents,
 } from "./events.ts";
+import { catalogLogo } from "./logos.ts";
 import { npmMetadata, npmTarball } from "./npm.ts";
 import {
   abandonFlow,
@@ -334,6 +336,10 @@ export default class Connect
 
   async catalogTools(request: unknown): Promise<CatalogTool[]> {
     return await catalogTools(this.env, request);
+  }
+
+  async catalogLogo(request: unknown): Promise<CatalogLogo | null> {
+    return await catalogLogo(this.env, request);
   }
 
   // Generated connector contracts (src/contracts.ts): what an App's

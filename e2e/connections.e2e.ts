@@ -41,22 +41,23 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   const { mine, expired } = seededConnections();
   const page = await pageOf(browser, user);
 
-  // The list: Microsoft 365 is connected for them, and needs attention.
+  // The list: Microsoft 365 is among its kind of app, connected for them,
+  // and needs signing in again; it stays so under Connected.
   await page.goto("/integrations");
   const search = page.getByRole("searchbox", { name: "Search integrations" });
   await search.fill("micro");
   await expect(page).toHaveURL(/[?&]q=micro/u);
-  const connected = page.getByRole("region", { name: "Connected" });
+  const mail = page.getByRole("region", { name: /^Email and calendar/u });
   await expect(
-    connected.getByRole("link", { name: "Microsoft 365", exact: true })
+    mail.getByRole("link", { name: "Microsoft 365", exact: true })
   ).toBeVisible();
   await page
     .getByRole("complementary", { name: "Filter integrations" })
-    .getByRole("link", { name: /^Needs attention/u })
+    .getByRole("link", { name: /^Connected/u })
     .click();
-  await expect(page).toHaveURL(/show=attention/u);
+  await expect(page).toHaveURL(/show=connected/u);
   await expect(
-    connected.getByRole("button", { name: "Sign in to Microsoft 365 again" })
+    mail.getByRole("button", { name: "Sign in to Microsoft 365 again" })
   ).toBeVisible();
   // A search that matches nothing says so.
   await search.fill("no such app at all");
@@ -77,7 +78,6 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
   await expect(
     page.getByRole("status").filter({ hasText: "Connected." })
   ).toBeVisible();
-  await expect(page.getByText("Native", { exact: true })).toBeVisible();
 
   await page.getByRole("tab", { name: /^Account/u }).click();
   const mineCard = cardOf(page, "Microsoft 365", mine);
@@ -273,14 +273,17 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   const page = await pageOf(browser, admin);
   // The engine's Integrations tab lists the integrations of the
   // connections it may use, in those connections' state.
-  await page.goto(`/engines/${appId}`);
+  await page.goto(`/domains/${appId}`);
   await page.getByRole("tab", { name: "Integrations" }).click();
   const used = page
     .getByRole("tabpanel")
     .getByRole("listitem")
     .filter({ hasText: "Microsoft 365" });
-  await expect(used).toContainText("For everyone");
-  await expect(used).toContainText("Connected");
+  await expect(
+    used.getByRole("button", {
+      name: "Manage Microsoft 365, connected for everyone",
+    })
+  ).toBeVisible();
   await expect(page.getByRole("tabpanel").getByRole("listitem")).toHaveCount(1);
 
   await accountOf(page, "native:microsoft");
@@ -290,11 +293,11 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   );
   const holder = mailboxCard.getByRole("listitem").filter({ hasText: appName });
   await expect(holder).toContainText(
-    `Engine ${appName}: mail.read on the whole connection`
+    `Domain ${appName}: mail.read on the whole connection`
   );
   await expect(holder).toHaveCount(1);
   await holder
-    .getByRole("button", { name: `Revoke Engine ${appName}'s permission` })
+    .getByRole("button", { name: `Revoke Domain ${appName}'s permission` })
     .click();
   await expect(holder).toHaveCount(0);
   await expect(mailboxCard.getByText("None.")).toBeVisible();
@@ -303,7 +306,6 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   // tools. The test stack lists no Composio toolkits, so its ID stands in
   // for its name.
   await accountOf(page, "composio:hubspot");
-  await expect(page.getByText("Via Composio")).toBeVisible();
   const toolkitCard = cardOf(page, "hubspot", toolkit);
   await expect(toolkitCard.getByText(composioConsentText)).toBeVisible();
   await expect(toolkitCard).toContainText(

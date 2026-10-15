@@ -23,6 +23,7 @@ const workflow = (
   workflow: workflowIdSchema.parse(name),
   version: 1,
   owner: { userId: "owner", name: null },
+  changesOwner: false,
   lastRun: {
     id: runIdSchema.parse(`run-${name}`),
     status: "completed",

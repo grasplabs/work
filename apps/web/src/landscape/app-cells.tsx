@@ -171,7 +171,7 @@ export const ProcessesCell = ({ use }: { use: AppUse }) => {
   if (use.engines === null) {
     return (
       <span className="text-muted-foreground">
-        <Trans context="engines that use an app, which couldn't be read">
+        <Trans context="domains that use an app, which couldn't be read">
           Unknown
         </Trans>
       </span>
@@ -186,8 +186,8 @@ export const ProcessesCell = ({ use }: { use: AppUse }) => {
       </span>
     );
   }
-  const kind = t`Engine`;
-  const detail = t`Holds a permission on one of its connections. Opens the engine.`;
+  const kind = t`Domain`;
+  const detail = t`Holds a permission on one of its connections. Opens the domain.`;
   return (
     <div className="flex items-center gap-1">
       <HoverCard>
@@ -197,7 +197,7 @@ export const ProcessesCell = ({ use }: { use: AppUse }) => {
             <Badge
               className="relative z-10 max-w-32"
               render={
-                <Link params={{ engine: first.id }} to="/engines/$engine" />
+                <Link params={{ engine: first.id }} to="/domains/$engine" />
               }
               variant="outline"
             />
@@ -217,14 +217,14 @@ export const ProcessesCell = ({ use }: { use: AppUse }) => {
         <MoreBadge
           count={rest.length}
           description={t`Where this app comes up`}
-          title={t`Engines`}
+          title={t`Domains`}
         >
           <ItemGroup spacing="tight">
             {engines.map((engine) => (
               <Item
                 key={engine.id}
                 render={
-                  <Link params={{ engine: engine.id }} to="/engines/$engine" />
+                  <Link params={{ engine: engine.id }} to="/domains/$engine" />
                 }
                 size="xs"
               >
