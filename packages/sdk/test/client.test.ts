@@ -361,6 +361,40 @@ describe("the session client and lost access", () => {
     });
   });
 
+  it("fences on core's refusal of a resend as someone else's, and never sends the key again", async () => {
+    const sent: string[] = [];
+    const { client } = network(async (_call, request) => {
+      await Promise.resolve();
+      sent.push(request);
+      if (sent.length === 1) {
+        throw new Error("The connection was reset.");
+      }
+      // The page relays core's refusal: the browser's session is someone
+      // else's than the screen's now.
+      throw Object.assign(new Error("Someone else signed in."), {
+        code: "auth.principal_changed",
+      });
+    });
+    const lost = await failureOf(client.action(api.notes.tally));
+    const { details } = lost;
+    const key: unknown =
+      typeof details === "object" && details !== null
+        ? Reflect.get(details, "idempotencyKey")
+        : undefined;
+    const keyed = { idempotencyKey: String(key) };
+    const refused = await failureOf(client.action(api.notes.tally, {}, keyed));
+    const after = await failureOf(client.action(api.notes.tally, {}, keyed));
+    expect({
+      refused: refused.code,
+      after: after.code,
+      sent: sent.length,
+    }).toStrictEqual({
+      refused: "auth.principal_changed",
+      after: "auth.principal_changed",
+      sent: 2,
+    });
+  });
+
   it("keeps whose a key left unknown is for its operation, whatever another operation under the key does", async () => {
     let signedOut = false;
     const tallies: string[] = [];
