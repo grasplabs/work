@@ -2143,15 +2143,17 @@ const readPolicy = async (env: ModelsEnv): Promise<QuotaPolicy> => {
  * isolate read, else the platform's own (its ceilings): for a call's
  * shares, which a policy only lowers, and which bound no spend.
  */
-const policyOrPlatform = async (env: ModelsEnv): Promise<QuotaPolicy> => {
+const policyOrPlatform = async (
+  env: ModelsEnv
+): Promise<{ policy: QuotaPolicy; read: boolean }> => {
   try {
-    return await readPolicy(env);
+    return { policy: await readPolicy(env), read: true };
   } catch (error) {
     log.error("model.quota_policy_failed", {
       ...errorFields(error),
       fallback: lastPolicyRead === undefined ? "platform" : "last_read",
     });
-    return lastPolicyRead ?? quotaPolicyOf();
+    return { policy: lastPolicyRead ?? quotaPolicyOf(), read: false };
   }
 };
 
@@ -2240,7 +2242,11 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
         call.trigger.type === "workflow" ? await readPolicy(env) : undefined;
       // The shares, as the policy stands too; for a call with no lineage,
       // the platform's own should the policy not be read, never more.
-      const policy = lineage ?? (await policyOrPlatform(env));
+      const shared =
+        lineage === undefined
+          ? await policyOrPlatform(env)
+          : { policy: lineage, read: true };
+      const { policy } = shared;
       // One clock for both, so a request at a month's last instant never
       // counts its day in one month and its month in the next.
       const { month, day } = budgetPeriods(env);
@@ -2250,7 +2256,11 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
           day,
           lineage?.limits.lineageModelRequests ?? lineageModelRequests
         ),
-        policyGeneration: lineage?.generation,
+        // The generation of the policy its shares come from, read now, so
+        // the ledger refuses shares from a policy older than one it saw
+        // (`policyBehind`), and the request reads it again. A fallback
+        // carries none: it never lifts a share above the platform's.
+        policyGeneration: shared.read ? policy.generation : undefined,
         fair: { place, subject, resource, shares: modelSharesOf(policy) },
       };
     },
@@ -2299,7 +2309,9 @@ const answerCall = async <Output>(
       await record(env, request, sent, attempt, "failed", failure);
       // Turned away by the provider's rate limit, retries and all: it
       // took nothing on, and asking again after the wait may get through.
-      if (sent.rateLimited !== undefined) {
+      // Not one cut off meanwhile, by its deadline or its caller: that is
+      // what it failed of then.
+      if (sent.rateLimited !== undefined && limit.stopped() === undefined) {
         throw modelErrors.create("model.rate_limited", {
           model: call.model,
           retryAfterSeconds: sent.rateLimited,
@@ -2449,7 +2461,7 @@ const relayEvents = async (
         failure
       );
       const rateLimited =
-        response.rateLimited === undefined
+        response.rateLimited === undefined || stopped !== undefined
           ? undefined
           : `The model's provider is taking no more requests for now. Try again in ${response.rateLimited} seconds.`;
       out.push({

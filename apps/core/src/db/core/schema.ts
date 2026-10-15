@@ -1313,6 +1313,8 @@ export const workflowModelWaits = sqliteTable(
   {
     runId: text("run_id").notNull(),
     stepHash: text("step_hash").notNull(),
+    /** The call of the step that wrote it: only it clears it (model-waits.ts). */
+    owner: text().notNull(),
     /** Which share its call waits for: `client`, `person` or `app`. */
     waitingFor: text("waiting_for", {
       enum: ["client", "person", "app"],

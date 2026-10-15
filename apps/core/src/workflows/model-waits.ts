@@ -43,22 +43,31 @@ const pruned = (db: DrizzleD1Database, now: number) => {
 };
 
 /**
- * Records where step `step` of run `runId` stands as its model call waits
- * for a share: `queued`, the share and when it asks again (ms since the
- * epoch), or `null` once it stopped waiting. The run's summary takes its
- * next revision with each change.
+ * Records where step `step` of run `runId` stands as its model call
+ * `owner` (an ID each call of the step takes) waits for a share: `queued`,
+ * the share and when it asks again (ms since the epoch), or `null` once it
+ * stopped waiting. The run's summary takes its next revision with each
+ * change.
+ *
+ * A call's notes can land late (the gateway waits for a note a moment at
+ * most), after a newer call of the step wrote its own: a call clears only
+ * its own row, and overwrites another call's only with a note asking no
+ * sooner than that call's, so a late note of an older call never changes
+ * a newer call's standing.
  */
 export const modelWaitRecorded = async (
   db: DrizzleD1Database,
   runId: string,
   step: string,
+  owner: string,
   queued: { waitingFor: ModelShare; retryAt: number } | null
 ): Promise<void> => {
   const now = Date.now();
   const stepHash = await sha256Hex(step);
   const mine = and(
     eq(workflowModelWaits.runId, runId),
-    eq(workflowModelWaits.stepHash, stepHash)
+    eq(workflowModelWaits.stepHash, stepHash),
+    eq(workflowModelWaits.owner, owner)
   );
   const moved = db
     .update(workflowRuns)
@@ -80,6 +89,7 @@ export const modelWaitRecorded = async (
     ]);
     return;
   }
+  const retryAt = new Date(queued.retryAt);
   await db.batch([
     ...pruned(db, now),
     db
@@ -87,17 +97,20 @@ export const modelWaitRecorded = async (
       .values({
         runId,
         stepHash,
+        owner,
         waitingFor: queued.waitingFor,
-        retryAt: new Date(queued.retryAt),
+        retryAt,
         seenAt: new Date(now),
       })
       .onConflictDoUpdate({
         target: [workflowModelWaits.runId, workflowModelWaits.stepHash],
         set: {
+          owner,
           waitingFor: queued.waitingFor,
-          retryAt: new Date(queued.retryAt),
+          retryAt,
           seenAt: new Date(now),
         },
+        setWhere: sql`${workflowModelWaits.owner} = ${owner} OR ${workflowModelWaits.retryAt} <= ${retryAt.getTime()}`,
       }),
     moved,
   ]);

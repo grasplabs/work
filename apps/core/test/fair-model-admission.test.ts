@@ -5,6 +5,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
+import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -13,6 +14,8 @@ import { modelLedger } from "../src/model-ledger.ts";
 import type { Admission } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall, ModelsEnv } from "../src/models.ts";
+import { queuedRuns } from "../src/workflows/admission.ts";
+import { modelWaitRecorded } from "../src/workflows/model-waits.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { mockIdp } from "./idp.ts";
@@ -1022,6 +1025,37 @@ describe("fair model admission", { timeout: 60_000 }, () => {
         waitingFor: "client",
         retryAfterSeconds: 5,
       },
+    });
+  });
+
+  it("keeps a step's newer call's wait whatever an older call's late notes say", async () => {
+    const db = drizzle(env.DB);
+    const runId = `run-${crypto.randomUUID()}`;
+    const shown = async () => {
+      const queued = await queuedRuns(db, [runId], Date.now());
+      return queued.get(runId);
+    };
+    const now = Date.now();
+    // The newer call of the step waits, asking again in five seconds.
+    await modelWaitRecorded(db, runId, "extract", "newer", {
+      waitingFor: "client",
+      retryAt: now + 5000,
+    });
+    // The older call's notes land late: one it wrote before, and its last.
+    await modelWaitRecorded(db, runId, "extract", "older", {
+      waitingFor: "app",
+      retryAt: now + 1000,
+    });
+    await modelWaitRecorded(db, runId, "extract", "older", null);
+    const whileNewerWaits = await shown();
+    await modelWaitRecorded(db, runId, "extract", "newer", null);
+
+    expect({ whileNewerWaits, after: await shown() }).toStrictEqual({
+      whileNewerWaits: {
+        waitingFor: "client",
+        retryAt: new Date(now + 5000).toISOString(),
+      },
+      after: undefined,
     });
   });
 

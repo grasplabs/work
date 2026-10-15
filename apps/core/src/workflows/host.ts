@@ -2119,6 +2119,8 @@ export class RunHost extends RpcTarget {
             // for every attempt, so one revoked or changed meanwhile stops
             // the next.
             const bound = await this.#hooks.modelBinding(binding);
+            // This call of the step, whose notes of its wait are its own.
+            const owner = crypto.randomUUID();
             // Last, after every read: an attempt the engine gave up on
             // meanwhile asks the gateway nothing.
             await this.#requireCurrent(attempt, "model");
@@ -2164,6 +2166,7 @@ export class RunHost extends RpcTarget {
                     drizzle(this.#env.DB),
                     this.#run.runId,
                     attempt.step,
+                    owner,
                     queued
                   );
                 },
