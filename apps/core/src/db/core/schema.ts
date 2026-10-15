@@ -1789,6 +1789,28 @@ export const hiddenConnectors = sqliteTable(
 );
 
 /**
+ * Apps people asked Grasp to add, as the catalog doesn't have them
+ * (app-requests.ts): one row each, by its name in lower case, so the
+ * same app asked for twice is one request.
+ */
+export const appRequests = sqliteTable(
+  "app_requests",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    nameKey: text("name_key").notNull(),
+    why: text(),
+    url: text(),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("app_requests_name_key_idx").on(table.nameKey),
+    index("app_requests_requested_at_idx").on(table.requestedAt),
+  ]
+);
+
+/**
  * Each computation of the improvement signals (src/signals.ts), one a UTC
  * day: `started_at` claims it, `finished_at` is set once all its signals
  * are written. The signals people read are those of the finished one

@@ -233,6 +233,37 @@ export interface ConnectionOwner {
 }
 
 /**
+ * A person's request for an app the catalog doesn't have, as they type
+ * it: its name, what Grasp should do in it, and where it lives.
+ */
+export const appRequestSchema = z.strictObject({
+  name: z.string().trim().min(1).max(128),
+  why: z.string().trim().max(2000).optional(),
+  url: z
+    .url({ protocol: /^https?$/u })
+    .max(2048)
+    .optional(),
+});
+export type AppRequestInput = z.input<typeof appRequestSchema>;
+
+/** An app someone asked Grasp to add, as the catalog doesn't have it. */
+export interface AppRequest {
+  id: string;
+  /** As the first person to ask for it typed it. */
+  name: string;
+  /** What Grasp should do in it, in their words. */
+  why: string | null;
+  /** Where the app lives, as they gave it. */
+  url: string | null;
+  /** Who asked first; `name` is null once they are gone. */
+  requestedBy: { userId: string; name: string | null };
+  requestedAt: string;
+}
+
+/** Most app requests listed at once: the latest. */
+export const appRequestsListed = 200;
+
+/**
  * A signed-in person's connections, over `/rpc`. Starting one returns the
  * provider URL to send the browser to; the provider sends it back to
  * core's callback, which returns it to `returnTo` (a path on this origin)
@@ -290,6 +321,14 @@ export interface ConnectionsApi {
     consent: string;
     returnTo?: string;
   }) => Promise<{ url: string }>;
+  /**
+   * Asks for an app the catalog doesn't have, audited. An app asked for
+   * already, by its name in any case, isn't asked for again: that
+   * request is returned.
+   */
+  requestApp: (request: AppRequestInput) => Promise<AppRequest>;
+  /** The apps people asked for, latest first, at most {@link appRequestsListed}. */
+  appRequests: () => Promise<AppRequest[]>;
 }
 
 // The catalog: everything an admin can connect, in one list. Native
