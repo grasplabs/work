@@ -432,6 +432,10 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
       from: `person:${decider.userId}`,
       timeout: week,
     });
+    const expiring = await asking(builder, {
+      from: `person:${decider.userId}`,
+      timeout: week,
+    });
     let fresh = "";
 
     const answers = {
@@ -463,9 +467,21 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
             .bind(extended.decision)
             .run()
       ),
+      // The confirmation runs out while the answer is on its way: what
+      // counts is the time the write runs, not the time it was read.
+      expiring: await racing(expiring.decision, async (db) => {
+        // Well after core read the time it answers at.
+        await scheduler.wait(20);
+        return await db
+          .prepare(
+            "UPDATE workflow_decision_confirmations SET expires_at = ? WHERE decision_id = ?"
+          )
+          .bind(Date.now() - 5, expiring.decision)
+          .run();
+      }),
     };
     const statuses = await Promise.all(
-      [reminted, emptied, extended].map(async ({ decision }) => {
+      [reminted, emptied, extended, expiring].map(async ({ decision }) => {
         const { status } = await decider.api.decisions.get(decision);
         return status;
       })
@@ -480,8 +496,9 @@ describe("decision confirmations", { timeout: 60_000 }, () => {
         reminted: "decision.unconfirmed",
         emptied: "decision.conflict",
         extended: "decision.conflict",
+        expiring: "decision.unconfirmed",
       },
-      statuses: ["open", "open", "open"],
+      statuses: ["open", "open", "open", "open"],
       withFresh: "ok",
     });
   });

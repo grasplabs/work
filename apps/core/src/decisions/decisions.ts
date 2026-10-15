@@ -600,6 +600,13 @@ const allowedDecision = async (
   return found;
 };
 
+/**
+ * The database's own time as a statement runs, in milliseconds: what a
+ * write checks a deadline or an expiry against, so time spent between
+ * reading and writing never stretches either.
+ */
+const databaseNow = sql`CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER)`;
+
 /** Statuses of a run that hasn't ended. */
 const unended: ReadonlySet<string> = new Set(["starting", "running", "paused"]);
 
@@ -1056,6 +1063,8 @@ export const answerDecision = async (
         and(
           eq(workflowDecisions.id, row.id),
           stillOpen(workflowDecisions, now),
+          // Before the deadline as the write runs, not only as it was read.
+          sql`${workflowDecisions.expiresAt} > ${databaseNow}`,
           runUnended(),
           mayAnswer(db, by.userId, row.deciders),
           // The review context the confirmation was given against, as it
@@ -1073,7 +1082,7 @@ export const answerDecision = async (
                   eq(workflowDecisionConfirmations.userId, by.userId),
                   eq(workflowDecisionConfirmations.contextFingerprint, context),
                   eq(workflowDecisionConfirmations.responseFingerprint, given),
-                  gt(workflowDecisionConfirmations.expiresAt, now)
+                  sql`${workflowDecisionConfirmations.expiresAt} > ${databaseNow}`
                 )
               )
           )
