@@ -15,7 +15,7 @@ import { toCard } from "./pile.ts";
 // completes without sending it again. The run's page says why it waited.
 // The local stack reaches no Microsoft 365, so the lost answer is written
 // into connect's local database as a lost send leaves it, under the run's
-// step's key, while the run waits for its person's go-ahead before that
+// step's key, while the run waits for a reviewer's go-ahead before that
 // step (a decision, answered only once both are written); connect then answers
 // the step's call as for any lost answer, and the run waits on its person.
 // What connect and core do with it (who may resolve it, what each choice
@@ -30,7 +30,7 @@ const mail = {
 };
 
 /**
- * Waits for an admin's go-ahead, so the test can lose its send's
+ * Waits for its reviewer's go-ahead, so the test can lose its send's
  * answer first, however long that takes, then sends the mail under its
  * step's key; said to have happened, the send answers
  * `connect.resolved_done`, and the step says so.
@@ -175,6 +175,14 @@ test("a run's lost answer shows up for its person, and saying it happened comple
       binding: "MAIL",
     });
     await api.permissions.grant(permissionId, { version: 1 });
+    // One admin decides, not every admin: the suite signs in more of them,
+    // once for each attempt, than a decision may ask (`maxDeciders`).
+    await api.workflows.params.set(
+      app,
+      "mailer",
+      "reviewer",
+      `person:${other.userId}`
+    );
     ({ id: run } = await api.workflows.start(app, "mailer"));
     await loseSend({ admin, app, run, connectionId, permissionId });
     // An earlier send of the run's, whose input retention removed.
@@ -187,8 +195,7 @@ test("a run's lost answer shows up for its person, and saying it happened comple
       step: "earlier",
       kept: false,
     });
-    // Both written, the run may go on to its send: another admin says so,
-    // as its starter isn't asked.
+    // Both written, the run may go on to its send: the other admin says so.
     let go = "";
     await expect(async () => {
       const { items } = await api.workflows.history(run, { pageSize: 100 });
