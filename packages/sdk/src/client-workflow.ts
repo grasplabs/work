@@ -45,7 +45,14 @@ import { v } from "./values.ts";
 //   result the run's snapshot (`RunSnapshot`) or a refusal, one revision of
 //   the run each, status and what the person may do with it together.
 // - `{ workflow, watch: "binding" }`: pushes `{ revision, result }`, the
-//   result `{ canRun }` for the person and binding in force.
+//   result `{ canRun }` for the person and binding in force; `revision`
+//   moves on with the binding's policy generation, never back.
+//
+// A value is shown only if its revision is newer than the subscription's
+// last and not older than what is shown. A refusal is heard whatever its
+// revision: one that fences (revocation, expiry, a role taken away)
+// clears the whole client; a binding's refusal that doesn't fence only
+// turns `canRun` off, and never hides a run being shown.
 //
 // A command's key is the client's, sent again unchanged while its answer
 // is lost, so the host answers the same receipt rather than admit it
@@ -849,32 +856,33 @@ export class WorkflowChannel {
 
   /** Shows a push of `live`'s, unless older than what is shown. */
   #pushed(entry: Watched<unknown>, live: Live, push: unknown): void {
-    if (
-      !isPlainObject(push) ||
-      typeof push.revision !== "number" ||
-      !Number.isSafeInteger(push.revision) ||
-      push.revision < 1 ||
-      push.revision <= live.revision
-    ) {
+    if (!isPlainObject(push)) {
       return;
     }
-    live.revision = push.revision;
     const settled = readAnswer({ result: push.result });
     if (settled.kind === "lost") {
       return;
     }
-    // A refusal is of the access or the request, not an older snapshot:
-    // it is heard whatever revision it carries, so a revocation always
-    // fences.
+    // A refusal is of the access or the request, not a snapshot: it is
+    // heard whatever revision it carries (one already sent, an older one
+    // or none), so a revocation always fences.
     if (settled.kind === "failed") {
       this.#refused(entry, live, settled.error);
       return;
     }
-    // Each value is one revision of the run or binding: one older than
-    // what is shown, from an earlier subscription, never replaces it.
-    if (push.revision < entry.state.revision) {
+    // Each value is one revision of the run or binding: within this
+    // subscription only a newer one, and from an earlier subscription
+    // never one older than what is shown.
+    if (
+      typeof push.revision !== "number" ||
+      !Number.isSafeInteger(push.revision) ||
+      push.revision < 1 ||
+      push.revision <= live.revision ||
+      push.revision < entry.state.revision
+    ) {
       return;
     }
+    live.revision = push.revision;
     try {
       const value = entry.read(settled.value);
       WorkflowChannel.#show(entry, {

@@ -20,8 +20,10 @@
  * value directly, or `undefined` while loading or skipped (`"skip"`): a
  * `null` result is the App's data. A query's failure is thrown while
  * rendering, to the platform's error boundary; a mutation's or action's
- * rejects its promise. A workflow the App binds is started, followed and
- * controlled with `useWorkflow`.
+ * rejects its promise. `useWorkflow` is the client side of starting,
+ * following and controlling a workflow the App binds; generated workflow
+ * references and the host's side of it are still to come (GRA-625,
+ * GRA-626), so no App reaches it yet.
  */
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {

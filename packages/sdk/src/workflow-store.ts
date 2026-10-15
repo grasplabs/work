@@ -1,4 +1,4 @@
-import { clientError } from "./client-error.ts";
+import { clientError, fences } from "./client-error.ts";
 import type { GraspError } from "./client-error.ts";
 import { hasEnded, invalidSnapshot } from "./client-workflow.ts";
 import type {
@@ -296,8 +296,16 @@ export class WorkflowStore {
   ): (() => void) => {
     this.#listeners.add(onChange);
     if (this.#committed !== selection) {
+      const before =
+        this.#committed === undefined
+          ? undefined
+          : this.#runIdOf(this.#committed);
       this.#committed = selection;
-      this.#generation += 1;
+      // The generation moves on only when the run shown does: selecting
+      // the same run another way keeps its controls.
+      if (this.#runIdOf(selection) !== before) {
+        this.#generation += 1;
+      }
       this.#version += 1;
     }
     this.#binding ??= this.#channel.followBinding(this.#read, this.#changed);
@@ -342,7 +350,15 @@ export class WorkflowStore {
       runId === undefined
         ? undefined
         : this.#channel.peekRun(this.#read, runId);
-    return run?.error ?? this.#channel.peekBinding(this.#read).error;
+    if (run?.error !== undefined) {
+      return run.error;
+    }
+    // A binding's refusal only turns `canRun` off; only one that fences
+    // (the person or build lost access) is thrown over what is shown.
+    const bindingError = this.#channel.peekBinding(this.#read).error;
+    return bindingError !== undefined && fences(bindingError.code)
+      ? bindingError
+      : undefined;
   };
 
   readonly run = async (input: unknown): Promise<RunHandle> => {
@@ -357,9 +373,10 @@ export class WorkflowStore {
       // one's run. It is shown only while the hook selects automatically;
       // an explicit selection is the caller's alone.
       if (seq > this.#admittedSeq) {
+        const before = this.#autoRunId;
         this.#admittedSeq = seq;
         this.#autoRunId = handle.runId;
-        if (this.#committed === null) {
+        if (this.#committed === null && handle.runId !== before) {
           this.#generation += 1;
           this.#attach();
         }
@@ -488,18 +505,16 @@ export class WorkflowStore {
             }
           }
         );
-        if (receipt.state === "admitted") {
-          // Applying until a snapshot newer than the one shown now settles
-          // it: the host admitted it, the run hasn't got there yet.
-          intent.stage = "applying";
-          // The receipt names the revision that admitted it: a snapshot
-          // that arrived before this answer may have settled it already.
-          intent.settleAfter = receipt.revision;
-        } else {
-          // Settled already, or overtaken by a cancel: the run's snapshot
-          // is what says where it stands.
-          drop();
-        }
+        // Applying until the run's snapshot shows where it stands: one
+        // newer than the revision that admitted it, or, for a receipt
+        // already applied or superseded, the revision that settled it.
+        // A snapshot that arrived before this answer may have done so
+        // already; an older one never does.
+        intent.stage = "applying";
+        intent.settleAfter =
+          receipt.state === "admitted"
+            ? receipt.revision
+            : receipt.revision - 1;
       } catch (error) {
         drop();
         throw error;

@@ -956,6 +956,73 @@ describe("controlling the selected run", () => {
     });
   });
 
+  it("keeps a receipt already applied applying until the snapshot of its revision arrives", async () => {
+    const page = host();
+    page.answer(() => ({
+      value: { kind: "pause", state: "applied", revision: 3 },
+    }));
+    const hook = await showing(page);
+    await hook.store.pause();
+    expect(hook.view()).toMatchObject({
+      pendingControl: { kind: "pause", stage: "applying" },
+      canPause: false,
+    });
+    page.one("run-1").push(2, snapshotOf());
+    expect(hook.view().pendingControl).toStrictEqual({
+      kind: "pause",
+      stage: "applying",
+    });
+    page.one("run-1").push(
+      3,
+      snapshotOf({
+        status: "paused",
+        ...controlOf({ resume: true, cancel: true }),
+      })
+    );
+    expect(hook.view()).toMatchObject({
+      pendingControl: null,
+      canResume: true,
+    });
+  });
+
+  it("refuses a receipt for another control than the one asked for", async () => {
+    const page = host();
+    page.answer(() => ({
+      value: { kind: "cancel", state: "admitted", revision: 2 },
+    }));
+    const hook = await showing(page);
+    const refusing = codeOf(hook.store.pause());
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    await expect(refusing).resolves.toBe("submission.outcome_unknown");
+    expect(hook.view().pendingControl).toBeNull();
+  });
+
+  it("keeps the shown run's applying control when a start is admitted beside it", async () => {
+    const page = host();
+    const hook = await showing(page);
+    await hook.store.pause();
+    page.answer(() => ({ value: handleOf("run-2") }));
+    await hook.store.run({ noteId });
+    expect(hook.view()).toMatchObject({
+      runId: "run-1",
+      pendingControl: { kind: "pause", stage: "applying" },
+    });
+  });
+
+  it("keeps an applying control when the same run is selected another way", async () => {
+    const page = host();
+    const hook = mount(page, null);
+    await hook.store.run({ noteId });
+    await flush();
+    page.one("run-1").push(1, snapshotOf());
+    await hook.store.pause();
+    hook.select("run-1");
+    expect(hook.view().pendingControl).toStrictEqual({
+      kind: "pause",
+      stage: "applying",
+    });
+  });
+
   it("joins an identical control still unanswered", async () => {
     const page = host();
     const answered = Promise.withResolvers<Reply>();
@@ -1098,6 +1165,36 @@ describe("losing access", () => {
       }).toStrictEqual({ open: [], commands: [] });
     }
   );
+
+  it("hears a revocation pushed at the revision already shown", async () => {
+    const page = host();
+    const hook = await showing(page, snapshotOf(), 7);
+    page.one("run-1").refuse(7, "screen.revoked", "authorization");
+    expect(hook.error()?.code).toBe("screen.revoked");
+    expect(hook.view()).toMatchObject({ status: "loading", canCancel: false });
+  });
+
+  it("hears a role taken away on the binding at the revision already sent", async () => {
+    const page = host();
+    const hook = await showing(page);
+    page.one().push(1, { canRun: true });
+    page.one().refuse(1, "role.forbidden", "authorization");
+    expect(hook.error()?.code).toBe("role.forbidden");
+    expect(hook.view()).toMatchObject({ canRun: false, canPause: false });
+  });
+
+  it("turns only canRun off for a binding refusal that doesn't fence, and keeps the run shown", async () => {
+    const page = host();
+    const hook = await showing(page);
+    page.one().push(1, { canRun: true });
+    page.one().refuse(2, "workflow.binding_unavailable", "contract");
+    expect(hook.error()).toBeUndefined();
+    expect(hook.view()).toMatchObject({
+      status: "running",
+      canRun: false,
+      canPause: true,
+    });
+  });
 
   it("hears a revocation pushed after following again, whatever revision it carries", async () => {
     const page = host();
