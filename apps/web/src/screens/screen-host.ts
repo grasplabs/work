@@ -423,6 +423,12 @@ const appTarget = (
         // core's answer to the page.
         void checkDeliveryNow(hold, refused);
       }
+      // Never acted on as `auth.principal_changed`: what a call comes back
+      // with may be the App server's own error, worded as it likes, and
+      // ending the session reloads the tab for every frame. The frame's
+      // capability is bound to its connection's session, whose person
+      // never changes; someone else's cookie shows on a connection made
+      // again (core-connection.ts) or a plain request (`plain`).
       throw error;
     }
   };
