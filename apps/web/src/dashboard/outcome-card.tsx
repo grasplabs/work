@@ -32,6 +32,14 @@ const useOutcomeName = (outcome: UnknownOutcome): string => {
   return t`${title} on ${connection}`;
 };
 
+/**
+ * Whether core can't check the call's permission, so can't resolve it:
+ * where it came from isn't known, or an App's call names no version
+ * (`resolutionCapability` in core refuses both).
+ */
+const isUnresolvable = ({ key, origin }: UnknownOutcome): boolean =>
+  origin === null || (key.subject.type === "app" && origin.appVersion === null);
+
 /** Where it acted and when it was sent, and what was sent, while kept. */
 const OutcomeDetails = ({
   outcome,
@@ -107,7 +115,7 @@ const OutcomeDetails = ({
           />
         </>
       )}
-      {outcome.origin === null ? (
+      {isUnresolvable(outcome) ? (
         <p className="text-muted-foreground" id={unresolvableId}>
           <Trans>
             Grasp doesn&apos;t know where this came from, so it can&apos;t be
@@ -148,7 +156,7 @@ export const OutcomeCard = ({
   const removedId = useId();
   const who = useOutcomeName(outcome);
   const connection = outcome.connectionName ?? outcome.key.connectionId;
-  const unresolvable = outcome.origin === null;
+  const unresolvable = isUnresolvable(outcome);
   // What was sent is no longer kept, so the person can't read what saying
   // it didn't happen would let go out again: only "It happened" is theirs
   // to say. `summaryOf` leaves out the description too, so nothing reads
