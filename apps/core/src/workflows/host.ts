@@ -74,6 +74,7 @@ import type { Settled, StepError } from "./code.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import { heldWakeType } from "./wakes.ts";
 
 // The engine a run's workflow code runs on, as core's side of it: the SDK's
 // `WorkflowEngine` (`@grasp-os/sdk/engine`) on the engine's `step` API
@@ -1385,11 +1386,14 @@ export class RunHost extends RpcTarget {
    * Waits, before running the step `step` again, while a side effect it
    * asked for is held for the person the run acts for: each check a step
    * of its own (retried, and replayed without asking connect again), then
-   * a durable sleep, a minute first (`waitMsOf`), doubling up to 15
-   * minutes, in steps named after `prefix`. The wait is recorded once, in
-   * a step of its own. Each check and sleep is a step of the run's budget,
-   * so a run waits about five days at the platform's limit. A decline or a drop
-   * ends the wait too: the step's next run fails with `connect.declined`.
+   * a durable wait that the person's decision ends (`heldWakeType`,
+   * wakes.ts), or else the next check: a minute first (`waitMsOf`),
+   * doubling up to 15 minutes, in steps named after `prefix`, for holds
+   * connect ends by itself. A wake only makes the step check again: what
+   * connect says decides. The wait is recorded once, in a step of its
+   * own. Each check and wait is a step of the run's budget, so a run waits
+   * about five days at the platform's limit. A decline or a drop ends the
+   * wait too: the step's next run fails with `connect.declined`.
    */
   async #waitWhileHeld(
     step: string,
@@ -1408,6 +1412,7 @@ export class RunHost extends RpcTarget {
       unknownSince === undefined
         ? undefined
         : unknownSince + unknownHoldMsOf(this.#env);
+    const wakeType = await heldWakeType(step);
     for (let checks = 0; ; checks += 1) {
       // Its answer is recorded, so a replay asks connect nothing, and a
       // failing connect is tried again rather than failing the step.
@@ -1450,14 +1455,22 @@ export class RunHost extends RpcTarget {
           reason: "held",
         });
       }
-      // oxlint-disable-next-line no-await-in-loop -- one check at a time
-      await this.#step.sleep(
-        `${prefix}:${checks}`,
-        Math.min(
-          first * 2 ** checks,
-          first * (unknownSince === undefined ? maxWaits : maxUnknownWaits)
-        )
-      );
+      // Until its person decides, which wakes the step (wakes.ts), or the
+      // next check is due: the backstop for holds connect ends by itself.
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+        await this.#step.waitForEvent(`${prefix}:${checks}`, {
+          type: wakeType,
+          timeout: Math.min(
+            first * 2 ** checks,
+            first * (unknownSince === undefined ? maxWaits : maxUnknownWaits)
+          ),
+        });
+      } catch (error) {
+        if (!isTimeout(error)) {
+          throw error;
+        }
+      }
     }
   }
 
@@ -2745,6 +2758,9 @@ export class RunHost extends RpcTarget {
    * event that wakes the run carries nothing it takes. With `last`, a
    * decision still open is closed, timed out, unless an answer lands
    * first. An answer that came before the wait began is taken at once.
+   * A wake that finds nothing answered (an event of the decision's type
+   * sent by anyone else) ends nothing: the run looks, and waits again for
+   * the time it had left.
    */
   async waitForDecision(
     name: unknown,
@@ -2755,42 +2771,49 @@ export class RunHost extends RpcTarget {
       const step = checked(stepNameSchema, name);
       await this.#requireStepReviewed(step);
       const { decision, timeout, last } = checked(decisionWaitSchema, options);
-      // Whether it was answered when the run first got here, and when that
-      // was: recorded, so every replay decides as the first activation did
+      // Whether it was answered when the run looked, and when that was:
+      // recorded, so every replay decides as the first activation did
       // whether to wait, and for how long. The engine journals a wait's
       // timeout when it is first reached, and stops a run whose replay
       // asks for another (or skips a wait it holds).
       const prefix = `${waitStepPrefix}${await waitKeyOf(step)}`;
-      const reached = reachedSchema.parse(
-        await this.#step.do(`${prefix}:reached`, {}, async () => {
-          const at = Date.now();
-          const { answered } = await decisionOutcome(
-            this.#env,
-            this.#run,
-            decision,
-            false
-          );
-          return { at, answered };
-        })
-      );
+      const look = async (lookStep: string) =>
+        reachedSchema.parse(
+          await this.#step.do(lookStep, {}, async () => {
+            const at = Date.now();
+            const { answered } = await decisionOutcome(
+              this.#env,
+              this.#run,
+              decision,
+              false
+            );
+            return { at, answered };
+          })
+        );
+      const reached = await look(`${prefix}:reached`);
       // The SDK worked `timeout` out from when it asked, but a pause or a
       // restart may have outlasted that: so never wait past the decision's
       // deadline, as its row has it, from when the wait was first reached.
       // Once that has passed, the decision is closed as timed out at once,
       // so a reminder that follows asks nobody.
       const deadline = await decisionDeadline(this.#env, this.#run, decision);
-      const left = Math.min(timeout, deadline - reached.at);
-      if (!reached.answered && left > 0) {
+      const end = Math.min(reached.at + timeout, deadline);
+      let seen = reached;
+      for (let round = 0; !seen.answered && seen.at < end; round += 1) {
         try {
-          await this.#step.waitForEvent(step, {
-            type: decisionEventType(decision),
-            timeout: left,
-          });
+          // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+          await this.#step.waitForEvent(
+            round === 0 ? step : `${prefix}:again:${round}`,
+            { type: decisionEventType(decision), timeout: end - seen.at }
+          );
         } catch (error) {
           if (!isTimeout(error)) {
             throw error;
           }
+          break;
         }
+        // oxlint-disable-next-line no-await-in-loop -- one look per wake
+        seen = await look(`${prefix}:woken:${round}`);
       }
       // Recorded too: an answer that comes after this can't change what a
       // replay of the run hears it ended with.

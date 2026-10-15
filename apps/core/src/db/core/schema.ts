@@ -1440,6 +1440,37 @@ export const workflowRunControls = sqliteTable(
 );
 
 /**
+ * Wakes core owes waiting runs (src/workflows/wakes.ts): one row per
+ * outstanding wake, written in the same batch as what it wakes the run
+ * for (a decision's answer), or before it (a held side effect's
+ * decision, which connect keeps), and deleted once the engine took the
+ * event. `id` is the delivery's key, which the engine takes once, and
+ * `type` the event type the run's wait waits for.
+ */
+export const workflowRunWakes = sqliteTable(
+  "workflow_run_wakes",
+  {
+    id: text().primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id),
+    type: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+    /**
+     * When the repair next sends it, moved on further each time it does,
+     * so a wake the engine keeps refusing doesn't keep newer ones waiting.
+     */
+    retryAt: timestamp("retry_at").notNull(),
+    /** How often the repair sent it. */
+    retries: integer().notNull().default(0),
+  },
+  (table) => [
+    // The repair (src/workflows/wakes.ts): next due first.
+    index("workflow_run_wakes_due_idx").on(table.retryAt, table.id),
+  ]
+);
+
+/**
  * The triggers of the workflows in each App's current version
  * (src/workflows/trigger-registry.ts), written when a version is made
  * current and removed when another is. `position` is the trigger's place

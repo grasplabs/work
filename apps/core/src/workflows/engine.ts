@@ -163,7 +163,8 @@ export interface RunEngine {
    * Delivers the run an event of `type`, which ends a wait on that type: it
    * carries nothing (`RunHost.waitForDecision`). `key` names the delivery:
    * the same key again is the same event, taken once. A run that has
-   * ended takes none, and that is no error.
+   * ended, or that the engine has no record of, takes none, and that is
+   * no error: there is nothing left to wake (workflows/wakes.ts).
    */
   sendEvent: (id: string, type: string, key: string) => Promise<void>;
   /**
@@ -312,7 +313,8 @@ export const runEngine = (env: Env): RunEngine => ({
     if (
       outcome !== "accepted" &&
       outcome !== "duplicate" &&
-      outcome !== "ended"
+      outcome !== "ended" &&
+      outcome !== "missing"
     ) {
       throw new Error(`Run ${id} didn't take the event ${type}: ${outcome}`);
     }

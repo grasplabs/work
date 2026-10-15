@@ -1,5 +1,6 @@
 import { connectErrors, wasTaken } from "@grasp-os/shared/connect";
 import type {
+  ConnectionPerson,
   ConnectResult,
   PendingAction,
   PendingActionsApi,
@@ -29,6 +30,7 @@ import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { wakingHeld } from "./workflows/wakes.ts";
 import type { HeldOutcome } from "./workspace.ts";
 
 // Side effects that connect holds for their person (threat model R7, R12):
@@ -74,6 +76,18 @@ const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
 };
 
 /**
+ * What a held action's run waits on it by (`wakingHeld`): none but a
+ * workflow run's, of an App.
+ */
+const heldWaitOf = (held: PendingAction) => ({
+  appId:
+    held.mode === "workflow" && held.subject.type === "app"
+      ? held.subject.appId
+      : null,
+  idempotencyKey: held.idempotencyKey,
+});
+
+/**
  * Tells the chat a held action came from how it ended, for its agent's
  * next turn (`Workspace.heldDecided`): only the agent that asked for it, in
  * the chat it asked from, and only that chat's own person's decision. Right
@@ -102,39 +116,14 @@ const tellChat = async (
   }
 };
 
-/**
- * Runs the held action `id` for the signed-in person it waits for, with
- * the input they were shown (`inputHash`): its answer, as the call would
- * have had it. Refused like any call once the App's or agent's permission
- * is gone, its context is restricted, or the person has left; and by
- * connect for anyone the action doesn't wait for, Grasp staff included,
- * which it records. A chat's agent is told how it ended (`tellChat`).
- */
-export const confirmPendingAction = async (
+/** `confirmPendingAction`, for the held action connect found (`held`). */
+const confirmHeld = async (
   env: Env,
   identity: Identity,
-  id: unknown,
-  inputHash: unknown
+  held: PendingAction,
+  request: { person: ConnectionPerson; id: unknown; inputHash: unknown }
 ): Promise<ConnectResult> => {
-  const person = await personOf(env, identity);
-  const request = { person, id, inputHash };
-  // Connect finds none for staff, and only the person's own.
-  const parsedId = z.uuid().safeParse(id);
-  const held = parsedId.success
-    ? await env.CONNECT.pendingAction({ person, id: parsedId.data })
-    : null;
-  if (held === null) {
-    // Connect refuses it, and records who tried: nothing confirms it.
-    return await env.CONNECT.confirmAction({ ...request, capability: null });
-  }
-  // A run that has ended can't take the answer: its held action goes.
-  // Accepted: a run cancelled between this check and connect taking the
-  // action still gets it run, as the person confirmed exactly that action,
-  // and the window is one request long.
-  if (held.mode === "workflow" && (await runEnded(env, held))) {
-    await env.CONNECT.dropForEndedRun({ person, id: held.id });
-    throw connectErrors.create("connect.run_ended");
-  }
+  const { person } = request;
   let capability: string;
   // Set while the held call's binding is being checked: refused there, it
   // could never be confirmed, so it leaves the person's list.
@@ -234,6 +223,48 @@ export const confirmPendingAction = async (
 };
 
 /**
+ * Runs the held action `id` for the signed-in person it waits for, with
+ * the input they were shown (`inputHash`): its answer, as the call would
+ * have had it. Refused like any call once the App's or agent's permission
+ * is gone, its context is restricted, or the person has left; and by
+ * connect for anyone the action doesn't wait for, Grasp staff included,
+ * which it records. A chat's agent is told how it ended (`tellChat`).
+ */
+export const confirmPendingAction = async (
+  env: Env,
+  identity: Identity,
+  id: unknown,
+  inputHash: unknown
+): Promise<ConnectResult> => {
+  const person = await personOf(env, identity);
+  const request = { person, id, inputHash };
+  // Connect finds none for staff, and only the person's own.
+  const parsedId = z.uuid().safeParse(id);
+  const held = parsedId.success
+    ? await env.CONNECT.pendingAction({ person, id: parsedId.data })
+    : null;
+  if (held === null) {
+    // Connect refuses it, and records who tried: nothing confirms it.
+    return await env.CONNECT.confirmAction({ ...request, capability: null });
+  }
+  // A run that has ended can't take the answer: its held action goes.
+  // Accepted: a run cancelled between this check and connect taking the
+  // action still gets it run, as the person confirmed exactly that action,
+  // and the window is one request long.
+  if (held.mode === "workflow" && (await runEnded(env, held))) {
+    await env.CONNECT.dropForEndedRun({ person, id: held.id });
+    throw connectErrors.create("connect.run_ended");
+  }
+  // Its run's step waits on it: woken once the person decided, whatever
+  // happened (workflows/wakes.ts).
+  return await wakingHeld(
+    env,
+    heldWaitOf(held),
+    async () => await confirmHeld(env, identity, held, request)
+  );
+};
+
+/**
  * Drops the held action `id` for the signed-in person it waits for: it
  * never runs. Connect refuses anyone the action doesn't wait for, and
  * records it. A chat's agent is told (`tellChat`).
@@ -248,7 +279,11 @@ const declinePendingAction = async (
   const held = z.uuid().safeParse(id).success
     ? await env.CONNECT.pendingAction({ person, id })
     : null;
-  await env.CONNECT.declineAction({ person, id });
+  await (held === null
+    ? env.CONNECT.declineAction({ person, id })
+    : wakingHeld(env, heldWaitOf(held), async () => {
+        await env.CONNECT.declineAction({ person, id });
+      }));
   if (held !== null) {
     await tellChat(env, held, identity.userId, "declined");
   }
