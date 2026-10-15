@@ -323,7 +323,11 @@ const keyedAction = (
     return undefined;
   }
   const key = idempotencyKeySchema.safeParse(call.idempotencyKey);
-  return call.reference.kind === "action" && key.success
+  // One with a window is a query's or nothing: the plain call refuses it
+  // before anything runs.
+  return call.reference.kind === "action" &&
+    key.success &&
+    call.window === undefined
     ? { call, key: key.data }
     : undefined;
 };

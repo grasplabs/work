@@ -924,6 +924,43 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     list.stop();
   });
 
+  it("loads a window of a handler's short pages for what full pages cost, within the person's budget", async () => {
+    const notes = await notesApp({ files: pagedFiles });
+    const token = await tokenFor(notes.builder.session, notes.app);
+    hostNetwork();
+    const client = portableClient(() => token);
+    const seed = referenceTo<{ count: number }, null, "mutation">(
+      notes.release,
+      "notes.seed"
+    );
+    await client.mutation(seed, { count: 100 });
+    await client.mutation(seed, { count: 60 });
+    const listTen = referenceTo<
+      { pagination: { cursor?: string | null; pageSize?: number } },
+      unknown,
+      "query"
+    >(notes.release, "notes.listTen");
+    const list = listOf(client, notes, 10, listTen);
+    await vi.waitFor(() => {
+      expect(list.titles()).toHaveLength(10);
+    });
+    // The person's requests spent, then three back: eleven pages of ten
+    // cost two full pages, which the Load More pays up front.
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"], now });
+    for (let request = 0; request < 40; request += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      const response = await listWith(notes, token);
+      if (response.status === 429) {
+        break;
+      }
+    }
+    vi.setSystemTime(now + 1500);
+    await list.pager.loadMore(100);
+    expect(list.titles()).toHaveLength(110);
+    list.stop();
+  });
+
   it("fails a Load More, and throws a first load, when writes keep tearing the window, keeping the window shown", async () => {
     const notes = await notesApp();
     const token = await tokenFor(notes.builder.session, notes.app);
@@ -1030,8 +1067,8 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
       expect(list.titles()).toHaveLength(10);
     });
 
-    // The person's requests spent, then three back: a window of eleven
-    // pages pays for two up front and runs out partway.
+    // The person's requests spent, then one back: a window of eleven
+    // short pages costs what two full ones do, more than is left.
     const now = Date.now();
     vi.useFakeTimers({ toFake: ["Date"], now });
     for (let request = 0; request < 40; request += 1) {
@@ -1041,7 +1078,7 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
         break;
       }
     }
-    vi.setSystemTime(now + 1500);
+    vi.setSystemTime(now + 500);
     const sentBefore = network.sent.length;
     const loadMore = await failureOf(list.pager.loadMore(100));
     expect({

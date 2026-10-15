@@ -215,16 +215,43 @@ interface Spending {
   readonly budget: SharedBudget;
   /** Pages read so far, every read of the window together. */
   pages: number;
+  /** Records read so far, every read of the window together. */
+  items: number;
+  /** Pages charged so far past what the caller paid. */
+  charged: number;
 }
 
-/** Charges the page about to be read, past what the caller paid. */
+/**
+ * Pages of the shortest a handler may answer that cost one full page: a
+ * window's pages are charged by the records they read, at least one for
+ * every this many pages, however short (`windowMaxPages`).
+ */
+const pagesPerCharge = queryMaxResults / 10;
+
+/**
+ * Charges the page just read, past what the caller paid: one request
+ * for every full page's worth of records read, every read of the window
+ * together, and at least one for every `pagesPerCharge` pages. So a
+ * handler's short pages cost what a window of full pages would, and a
+ * window read again costs again.
+ */
 const chargePage = async (
   request: WindowRequest,
-  spending: Spending
+  spending: Spending,
+  read: number
 ): Promise<void> => {
   spending.pages += 1;
-  if (spending.pages > windowPages(request.extent)) {
-    await request.charge(1);
+  spending.items += read;
+  const owed =
+    Math.max(
+      Math.ceil(spending.items / queryMaxResults),
+      Math.ceil(spending.pages / pagesPerCharge)
+    ) -
+    windowPages(request.extent) -
+    spending.charged;
+  if (owed > 0) {
+    spending.charged += owed;
+    await request.charge(owed);
   }
 };
 
@@ -239,14 +266,12 @@ const readOnce = async (
   const readSet: Record<string, number> = {};
   let cursor: string | null = null;
   // Read until the window is full or the query ends: a handler may answer
-  // short pages, each charged as it is read past what was paid
+  // short pages, charged by the records they read past what was paid
   // (`chargePage`), all within the window's one read budget.
   for (let page = 0; page < windowMaxPages; page += 1) {
     const pageSize = Math.min(queryMaxResults, extent - items.length);
     let pageReads: Record<string, number> = {};
     // One page after the other: each starts at the cursor of the last.
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    await chargePage(request, spending);
     // oxlint-disable-next-line no-await-in-loop -- see above
     const result = await callOperation(
       app,
@@ -260,6 +285,10 @@ const readOnce = async (
       { ...input, pagination: { pageSize, cursor } },
       { budget: spending.budget }
     );
+    const answered = result.ok ? pageOf(result.value) : undefined;
+    // Every page read is charged, whatever it came to.
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await chargePage(request, spending, answered?.items.length ?? 0);
     if (!merged(readSet, pageReads)) {
       return { kind: "torn" };
     }
@@ -268,7 +297,6 @@ const readOnce = async (
         ? { kind: "torn" }
         : { kind: "failed", result, readSet };
     }
-    const answered = pageOf(result.value);
     if (answered === undefined) {
       throw operationErrors.create("contract.not_paginated");
     }
@@ -314,7 +342,12 @@ export const readWindow = async (
   // SAFETY: the input crossed as JSON text, parsed.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const json = input as Record<string, Json>;
-  const spending: Spending = { budget: sharedBudget(), pages: 0 };
+  const spending: Spending = {
+    budget: sharedBudget(),
+    pages: 0,
+    items: 0,
+    charged: 0,
+  };
   for (let attempt = 0; attempt < windowMaxReads; attempt += 1) {
     // One read after the other: another only once the last was torn.
     // oxlint-disable-next-line no-await-in-loop -- see above

@@ -1276,6 +1276,36 @@ describe(
       }
     });
 
+    it("refuses an action sent with a window, under a key or not, before it runs", async () => {
+      const opened = await openedApp();
+      const { call } = pageTransport(opened, opened.screens, { follows: 0 });
+      const reference = referenceTo<unknown, unknown, "action">(
+        opened.release,
+        "notes.echo"
+      );
+      const sent = (idempotencyKey?: string) =>
+        JSON.stringify({
+          reference: {
+            resourceId: reference.resourceId,
+            resourceVersion: reference.resourceVersion,
+            contractId: reference.contractId,
+            fingerprint: reference.fingerprint,
+            kind: reference.kind,
+          },
+          input: { word: "ran" },
+          window: { extent: 10 },
+          ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+        });
+      const answers = [
+        answerOf(await call(sent(), opened.app)),
+        answerOf(await call(sent(crypto.randomUUID()), opened.app)),
+      ];
+      expect(answers).toStrictEqual([
+        "contract.invalid_request",
+        "contract.invalid_request",
+      ]);
+    });
+
     it("reads a window again when the person's roles change between its pages, rather than refuse its cursor", async () => {
       const opened = await openedApp();
       const member = await personApi("builder");

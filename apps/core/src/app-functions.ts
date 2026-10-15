@@ -435,12 +435,20 @@ export const refusalOf = (
   const expected = isExpectedError(error)
     ? error
     : internalErrors.create("internal.unexpected", { requestId });
+  // Of its details, only how long to wait before asking again: what a
+  // caller needs to wait for its budget (a window's pages, say).
+  const details: unknown = Reflect.get(expected, "details");
+  const retryAfterMs: unknown =
+    typeof details === "object" && details !== null
+      ? Reflect.get(details, "retryAfterMs")
+      : undefined;
   return {
     code: expected.code,
     message: expected.message,
     category: categoryOf(expected.code),
     retryable: isRetryableCode(expected.code),
     requestId,
+    ...(typeof retryAfterMs === "number" ? { details: { retryAfterMs } } : {}),
   };
 };
 
