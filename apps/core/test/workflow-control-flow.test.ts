@@ -1,4 +1,5 @@
 /* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
@@ -676,6 +677,31 @@ describe("a run's host, against a forged module", () => {
       badOutput: "workflow.task_data_invalid",
       badInput: "workflow.task_data_invalid",
     });
+  });
+
+  it("refuses an answer past what a step records before reading it", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, typedOutput)
+    );
+    const host = await hostOf(by, workflow.id);
+    // Off its schema too: read first, it would be refused as that.
+    const answer = await host.do(
+      "task:typed",
+      { input: { input: { who: "Ada" }, context: {} } },
+      async () =>
+        await Promise.resolve({
+          ok: true,
+          value: {
+            output: {
+              status: 5,
+              filler: "x".repeat(platformLimits.stepPayloadBytes + 1),
+            },
+          },
+        })
+    );
+    // A step failing as too large, never reaching the schema check.
+    expect(codeOf(answer)).toBe("internal.unexpected");
   });
 
   it("takes a task as skipped only once its if answered false", async () => {

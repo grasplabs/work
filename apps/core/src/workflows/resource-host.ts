@@ -651,22 +651,28 @@ export class ResourceRunHost
           if (!result.ok) {
             throw toStepError(result.error);
           }
-          const value = z.json().safeParse(result.value);
-          if (!value.success) {
+          // Written once by the bounded writer before anything else reads
+          // it: an answer past what a step records is refused having cost
+          // core no more than that much.
+          const written = writeJson(result.value, {
+            maxBytes: maxResultBytes,
+            maxDepth: evaluatorLimits.maxJsonDepth + 2,
+            maxNodes: maxResultBytes,
+            sortKeys: false,
+            safeIntegers: false,
+          });
+          if (!written.ok) {
             throw toStepError({
               name: "Error",
-              message: `Step "${stepName}" answered something that isn't JSON`,
+              message:
+                written.refusal === "too_large"
+                  ? `Step "${stepName}" answered more than a step may record`
+                  : `Step "${stepName}" answered something that isn't JSON`,
             });
           }
-          this.#acceptRecord(attempt, value.data);
-          const recorded = JSON.stringify(value.data);
-          if (new TextEncoder().encode(recorded).byteLength > maxResultBytes) {
-            throw toStepError({
-              name: "Error",
-              message: `Step "${stepName}" answered more than a step may record`,
-            });
-          }
-          return value.data;
+          const value = z.json().parse(JSON.parse(written.text));
+          this.#acceptRecord(attempt, value);
+          return value;
         });
       });
     } finally {
