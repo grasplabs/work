@@ -403,8 +403,13 @@ describe("the Workflows page", buildTime, () => {
         handled: 0,
       },
     ];
-    await expect(listed(owner)).resolves.toStrictEqual(invoiceWorkflows);
-    await expect(listed(user)).resolves.toStrictEqual(invoiceWorkflows);
+    // Only its builders may change who owns each.
+    await expect(listed(owner)).resolves.toStrictEqual(
+      invoiceWorkflows.map((row) => ({ ...row, changesOwner: true }))
+    );
+    await expect(listed(user)).resolves.toStrictEqual(
+      invoiceWorkflows.map((row) => ({ ...row, changesOwner: false }))
+    );
     const asAdmin = await listed(admin);
     expect(asAdmin.map(({ app, workflow }) => [app, workflow])).toStrictEqual([
       [invoices, "approve"],

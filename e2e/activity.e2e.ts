@@ -189,7 +189,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
     await release(builds.api, appId, { "README.md": "Three" }, "Third");
     await card.getByRole("button", { name: /^Approve /u }).click();
     await expect(card.getByRole("alert")).toHaveText(
-      "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
+      "Another version of this domain was made current since this list was read. The list now shows it: review that version, then approve again."
     );
     await expect(card).toContainText("Version to review: 3");
     await expect(card).toContainText("Asked again after version 3");
