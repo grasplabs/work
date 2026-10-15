@@ -289,8 +289,9 @@ describe("JSON workflow builds", () => {
         name,
         [
           {
+            // A nested list's timeout would bound more than one attempt.
             check: {
-              set: { status: "checking" },
+              do: [{ inner: { set: { status: "checking" } } }],
               timeout: { after: { seconds: 5 } },
               then: "finish",
             },
@@ -316,7 +317,11 @@ describe("JSON workflow builds", () => {
       version.build.executable ? [] : version.build.unsupported
     ).toStrictEqual([
       { pointer: "/timeout", taskId: null, feature: "timeout" },
-      { pointer: "/do/0/check/timeout", taskId: "check", feature: "timeout" },
+      {
+        pointer: "/do/0/check/timeout",
+        taskId: "check",
+        feature: "timeout:do",
+      },
       { pointer: "/do/1/stop", taskId: "stop", feature: "raise" },
     ]);
     // Nothing generated, nothing sealed: the export is the definition alone.

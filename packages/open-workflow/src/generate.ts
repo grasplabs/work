@@ -47,8 +47,9 @@ import { literalDurationMs } from "./values.ts";
  *   `@grasp-os/sdk/open-workflow` and nothing else; the compiler refuses
  *   any other import of generated code all the same.
  * - Lowering something it doesn't implement. Every construct is checked
- *   against what this generator lowers: anything else (other task kinds,
- *   timeouts, expression waits, limits, reusable definitions) is reported
+ *   against what this generator lowers: anything else (other task kinds
+ *   and named calls, a workflow's own timeout, a nested list's or a wait's
+ *   timeout, reusable definitions) is reported
  *   as unsupported, with its pointer, and nothing is generated. Nothing is
  *   approximated, skipped or left to run time.
  * - A task that makes core spend without bound. A run evaluates each
@@ -57,10 +58,29 @@ import { literalDurationMs } from "./values.ts";
  *   evaluates) more than {@link maxStepExpressions}; one with more isn't
  *   lowered.
  * - Sensitive parameters leaving through a run's output. No expression may
- *   read one (`sensitiveReads`): publication refuses it. They are for the
- *   bindings that need them, which named calls bring later (GRA-566). The
- *   build seals the names of the others (`params`), and a run's host gives
- *   expressions only those, so a gap in that analysis reads nothing.
+ *   read one (`sensitiveReads`): publication refuses it. A sensitive
+ *   parameter reaches a call only as a binding argument: a value of a
+ *   connector call's `arguments` that is exactly `${ $params.<name> }`
+ *   becomes a `param` node of the call's template (`templateOf`), never an
+ *   expression, so no jq sees it and no isolate holds it: the host puts
+ *   the value in as it sends the call to connect. The build seals the
+ *   names of the others (`params`), and a run's host gives expressions
+ *   only those, so a gap in that analysis reads nothing.
+ * - A named call reaching what its source didn't name. A call's binding
+ *   and operation are literals the generator seals in the task table
+ *   (`GeneratedCall`), never values of the generated code, and its
+ *   arguments a template of literals, sealed expressions and binding
+ *   arguments (`CallTemplate`) that the host builds itself: the generated
+ *   code only asks for the task's call, by its task, and can't change what
+ *   is called or with what. The host refuses a binding the run's start
+ *   didn't freeze, and checks each call's authority again as it makes it
+ *   (core's workflows/resource-calls.ts).
+ * - Limits raising the host's ceilings. `document.metadata.grasp.limits`
+ *   and a task's `timeout` (inline or from `use.timeouts`) are sealed as
+ *   numbers, which the host only ever applies as the lower of them and its
+ *   own ceiling; validation refuses a limit above the host's ceilings
+ *   besides. A limit nothing would hold (`maxActiveMs`, until GRA-567)
+ *   is reported as unsupported, never sealed and ignored.
  */
 
 /**
@@ -83,7 +103,7 @@ export const maxTaskExpressions = 64;
 export const maxStepExpressions = 128;
 
 /** The generator's identity: part of every build it makes. */
-export const generatorVersion = "grasp-open-workflow-ts/2";
+export const generatorVersion = "grasp-open-workflow-ts/3";
 
 /** Where the generated module is among a version's files. */
 export const generatedPath = ".grasp/workflow.ts";
@@ -91,8 +111,12 @@ export const generatedPath = ".grasp/workflow.ts";
 /** The module generated code imports, and the only one. */
 export const generatedImport = "@grasp-os/sdk/open-workflow";
 
-/** The type an expression's result must have where it sits. */
-export type ExpressionResult = "boolean" | "json";
+/**
+ * The type an expression's result must have where it sits: a condition a
+ * boolean, a wait's duration whole milliseconds or a fixed ISO 8601
+ * duration (the evaluator's `duration`), anything else one JSON value.
+ */
+export type ExpressionResult = "boolean" | "duration" | "json";
 
 /** One expression of the sealed table, by its number (`slot`). */
 export interface SealedExpression {
@@ -107,7 +131,58 @@ export interface SealedExpression {
 }
 
 /** The task kinds this generator lowers. */
-export type LoweredKind = "do" | "set" | "switch" | "wait";
+export type LoweredKind = "call" | "do" | "set" | "switch" | "wait";
+
+/**
+ * A value the host builds itself when a task's call is made, or its
+ * deadline resolved: a literal, the result of a sealed expression (by its
+ * slot, of the task's own `taskDefinition` stage), a sensitive parameter's
+ * value as a binding argument (only in a connector call's `arguments`), or
+ * an object or array of those. An object is its entries in order, so no
+ * key, not even `__proto__`, is ever a property of the template itself.
+ */
+export type CallTemplate =
+  | { readonly literal: JsonValue }
+  | { readonly slot: number }
+  | { readonly param: string }
+  | { readonly object: readonly (readonly [string, CallTemplate])[] }
+  | { readonly array: readonly CallTemplate[] };
+
+/** A task's named call, as the build seals it and the host makes it. */
+export type GeneratedCall =
+  | { readonly name: "grasp.now" }
+  | { readonly name: "grasp.random" }
+  | {
+      readonly name: "grasp.operation";
+      readonly binding: string;
+      readonly arguments: CallTemplate;
+    }
+  | {
+      readonly name: "grasp.connector";
+      readonly binding: string;
+      readonly operation: string;
+      readonly arguments: CallTemplate;
+    }
+  | {
+      readonly name: "grasp.model";
+      readonly binding: string;
+      readonly instructions: CallTemplate;
+      readonly input: CallTemplate;
+      /** The descriptor of `outputSchema`: the model's answer must match. */
+      readonly outputSchema: ValueDescriptor;
+      readonly model?: CallTemplate;
+      readonly maxOutputTokens?: CallTemplate;
+    }
+  | { readonly name: "grasp.sleepUntil"; readonly timestamp: CallTemplate };
+
+/** The named calls this generator lowers. */
+export type LoweredCall = GeneratedCall["name"];
+
+/** A workflow's own limits, as its metadata lowers the host's ceilings. */
+export interface WorkflowLimits {
+  readonly maxSteps?: number;
+  readonly maxModelCalls?: number;
+}
 
 /** A step a task runs as, besides a `wait`'s sleep. */
 export type TaskStep = "task" | "enter" | "leave";
@@ -124,12 +199,32 @@ export interface GeneratedTask {
   readonly pointer: string;
   /** Its first line in the generated module, from 1. */
   readonly line: number;
-  /** How long a `wait` task waits, as its statement says. */
+  /** How long a `wait` task of a literal duration waits, as its statement says. */
   readonly milliseconds?: number;
   /**
-   * Its durable steps (`task:<id>` for a `set` or `switch`; `enter:<id>`
-   * and `leave:<id>` around a `wait`'s sleep or a `do`'s list, when it has
-   * stages there).
+   * The duration of a `wait` task whose duration is an expression: the
+   * host resolves it once, in the task's enter step, to an absolute
+   * deadline, which the step records.
+   */
+  readonly duration?: CallTemplate;
+  /** A `call` task's named call. */
+  readonly call?: GeneratedCall;
+  /**
+   * A `call` task's `input.from`, as a template of the expressions its
+   * module evaluates for it (their slots) and its literals: the host
+   * builds the transformed input from its own evaluations and makes the
+   * call only with that (resource-host.ts).
+   */
+  readonly inputFrom?: CallTemplate;
+  /**
+   * The most each attempt of its steps may take, in milliseconds, from its
+   * `timeout`: the host applies the lower of this and its own ceiling.
+   */
+  readonly timeoutMs?: number;
+  /**
+   * Its durable steps (`task:<id>` for a `set`, `switch` or call; `enter:<id>`
+   * and `leave:<id>` around a wait's sleep or a `do`'s list, when it has
+   * stages there, and always an `enter:<id>` that resolves a deadline).
    */
   readonly steps: readonly TaskStep[];
   /** The descriptors of its input, output and export schemas. */
@@ -159,33 +254,62 @@ export type Generation =
       readonly workflow: WorkflowFlow;
       /** The parameters expressions may read: those not sensitive. */
       readonly params: readonly string[];
+      /** The workflow's own limits, which may only lower the host's. */
+      readonly limits: WorkflowLimits;
     }
   | { readonly ok: false; readonly unsupported: readonly Unsupported[] };
 
 /** Most unsupported constructs reported: the rest are the same kind of news. */
 const maxUnsupported = 20;
 
-/** What the top level may hold: upstream's, less `use` and `timeout`. */
+/**
+ * What the top level may hold: upstream's, less `timeout` (a workflow's
+ * own timeout: the host's age limits hold its runs), and `use` only for
+ * its `timeouts`.
+ */
 const supportedRoot = new Set([
   "document",
   "evaluate",
   "input",
   "output",
+  "use",
   "do",
 ]);
 
-/** What a lowered task may hold besides its kind. */
+/** What `use` may hold: reusable timeouts, which tasks name. */
+const supportedUse = new Set(["timeouts"]);
+
+/** What a lowered task may hold besides its kind (`with`: a call's). */
 const supportedTaskKeys = new Set([
+  "with",
   "if",
   "input",
   "output",
   "export",
+  "timeout",
   "then",
   "metadata",
 ]);
 
 /** Task kinds lowered here; the profile's others come later. */
-const loweredKinds = new Set<string>(["do", "set", "switch", "wait"]);
+const loweredKinds = new Set<string>(["call", "do", "set", "switch", "wait"]);
+
+/** Named calls lowered here; compute and decisions come later. */
+const loweredCalls = new Set<string>([
+  "grasp.operation",
+  "grasp.connector",
+  "grasp.model",
+  "grasp.now",
+  "grasp.random",
+  "grasp.sleepUntil",
+]);
+
+/**
+ * The task kinds a `timeout` bounds: those whose own work runs as one
+ * attempt of a step. A wait has no attempt to bound while it waits, and a
+ * nested list's tasks have timeouts of their own.
+ */
+const timedKinds = new Set<string>(["call", "set", "switch"]);
 
 /** Transitions that don't name a task. */
 const directives = new Set(["continue", "exit", "end"]);
@@ -262,6 +386,14 @@ class Refusals {
   }
 }
 
+/** The definition's `document.metadata.grasp`, as validation left it. */
+const graspOf = (definition: JsonObject): JsonObject | undefined => {
+  const { document } = definition;
+  const metadata = isObject(document) ? document.metadata : undefined;
+  const grasp = isObject(metadata) ? metadata.grasp : undefined;
+  return isObject(grasp) ? grasp : undefined;
+};
+
 /** Refuses what the definition's own parts hold beyond what is lowered. */
 const checkRoot = (definition: JsonObject, refusals: Refusals): void => {
   for (const key of Object.keys(definition)) {
@@ -269,20 +401,133 @@ const checkRoot = (definition: JsonObject, refusals: Refusals): void => {
       refusals.add(pointerJoin("", key), key);
     }
   }
-  const { document } = definition;
-  const grasp =
-    isObject(document) && isObject(document.metadata)
-      ? document.metadata.grasp
-      : undefined;
-  if (isObject(grasp) && Object.hasOwn(grasp, "limits")) {
-    refusals.add("/document/metadata/grasp/limits", "limits");
+  // Nothing holds these runs to an active time yet (GRA-567): a limit of
+  // it would be sealed and ignored, so it isn't lowered.
+  const limits = graspOf(definition)?.limits;
+  if (isObject(limits) && Object.hasOwn(limits, "maxActiveMs")) {
+    refusals.add(
+      "/document/metadata/grasp/limits/maxActiveMs",
+      "limits.maxActiveMs"
+    );
   }
+  const { use } = definition;
+  if (isObject(use)) {
+    for (const key of Object.keys(use)) {
+      if (!supportedUse.has(key)) {
+        refusals.add(pointerJoin("/use", key), `use.${key}`);
+      }
+    }
+  }
+};
+
+/** The workflow's own limits, each a positive safe integer validation checked. */
+const limitsOf = (definition: JsonObject): WorkflowLimits => {
+  const limits = graspOf(definition)?.limits;
+  const own: Record<string, number> = {};
+  for (const key of ["maxSteps", "maxModelCalls"] as const) {
+    const limit = isObject(limits) ? limits[key] : undefined;
+    if (typeof limit === "number" && Number.isSafeInteger(limit) && limit > 0) {
+      own[key] = limit;
+    }
+  }
+  return Object.freeze(own);
+};
+
+/**
+ * The parameters of `definition` that are sensitive: every one that
+ * doesn't say `sensitive: false`, as a parameter's contract has it.
+ */
+const sensitiveParams = (definition: JsonValue): ReadonlySet<string> => {
+  const params = isObject(definition) ? graspOf(definition)?.params : undefined;
+  return new Set(
+    Object.entries(isObject(params) ? params : {}).flatMap(([name, entry]) =>
+      isObject(entry) && entry.sensitive === false ? [] : [name]
+    )
+  );
+};
+
+/** A value that is exactly one parameter's read, and nothing more. */
+const bareParam = /^\$\{\s*\$params\.(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\}$/u;
+
+/**
+ * The sensitive parameter `value` is a binding argument of, if it is one:
+ * exactly `${ $params.<name> }`, of a parameter in `sensitive`.
+ */
+const bindingArgumentOf = (
+  value: JsonValue,
+  sensitive: ReadonlySet<string>
+): string | undefined => {
+  const name =
+    typeof value === "string" ? bareParam.exec(value)?.groups?.name : undefined;
+  return name !== undefined && sensitive.has(name) ? name : undefined;
+};
+
+/** The value of `root` at JSON Pointer `pointer`, if there is one. */
+const valueAt = (root: JsonValue, pointer: string): JsonValue | undefined => {
+  let value: JsonValue | undefined = root;
+  for (const raw of pointer.split("/").slice(1)) {
+    const key = raw.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (Array.isArray(value)) {
+      value = /^(?:0|[1-9]\d*)$/u.test(key) ? value[Number(key)] : undefined;
+    } else if (isObject(value) && Object.hasOwn(value, key)) {
+      value = value[key];
+    } else {
+      return undefined;
+    }
+  }
+  return value;
+};
+
+/**
+ * The pointers of every binding argument of `checked`: each value of a
+ * `grasp.connector` task's `with.arguments`, at any depth in its literal
+ * objects and arrays, that reads exactly one sensitive parameter. Only
+ * tasks the validator found, at their own pointers: never data that looks
+ * like a call. Those values are never expressions (`templateOf`), so
+ * `sensitiveReads` lets them be.
+ */
+const bindingArguments = (checked: CheckedWorkflow): ReadonlySet<string> => {
+  const sensitive = sensitiveParams(checked.definition);
+  const found = new Set<string>();
+  if (sensitive.size === 0) {
+    return found;
+  }
+  const inArguments = (value: JsonValue, pointer: string): void => {
+    if (bindingArgumentOf(value, sensitive) !== undefined) {
+      found.add(pointer);
+    } else if (Array.isArray(value)) {
+      for (const [index, item] of value.entries()) {
+        inArguments(item, pointerJoin(pointer, index));
+      }
+    } else if (isObject(value)) {
+      for (const [key, item] of Object.entries(value)) {
+        inArguments(item, pointerJoin(pointer, key));
+      }
+    }
+  };
+  for (const { kind, pointer } of checked.tasks) {
+    const task = kind === "call" ? valueAt(checked.definition, pointer) : null;
+    if (
+      isObject(task) &&
+      task.call === "grasp.connector" &&
+      isObject(task.with) &&
+      Object.hasOwn(task.with, "arguments")
+    ) {
+      inArguments(
+        task.with.arguments ?? null,
+        pointerJoin(pointerJoin(pointer, "with"), "arguments")
+      );
+    }
+  }
+  return found;
 };
 
 /** What one generation builds as it walks. */
 interface Emitter {
   readonly checked: CheckedWorkflow;
   readonly refusals: Refusals;
+  /** The definition's sensitive parameters, for binding arguments. */
+  readonly sensitive: ReadonlySet<string>;
   readonly lines: string[];
   readonly expressions: SealedExpression[];
   readonly tasks: GeneratedTask[];
@@ -365,6 +610,186 @@ const stageCode = (
   // An object literal as an arrow's body needs parentheses.
   const body = code.startsWith("{") ? `(${code})` : code;
   return `async (${count > 0 ? "task" : ""}) => ${body}`;
+};
+
+/** Whether `template` is a literal: nothing of it is built at call time. */
+const isLiteral = (
+  template: CallTemplate
+): template is { readonly literal: JsonValue } => "literal" in template;
+
+/**
+ * The most entries one array or object of a call's template holds, where
+ * anything in it is built at call time, and the longest key of such an
+ * object: what the sealed build's schema reads back (workflow-builds.ts).
+ * A literal part, sealed as one value, isn't bound by them.
+ */
+export const maxTemplateItems = 1024;
+export const maxTemplateKeyLength = 1024;
+
+/**
+ * Whether a template's array or object at `pointer`, of `items` entries
+ * and keys at most `keyLength` long, fits what a build seals; refused as
+ * `with:too_large` otherwise, so publication reports what a run could
+ * never load.
+ */
+const withinTemplateBounds = (
+  emitter: Emitter,
+  pointer: string,
+  taskId: string,
+  items: number,
+  keyLength = 0
+): boolean => {
+  if (items <= maxTemplateItems && keyLength <= maxTemplateKeyLength) {
+    return true;
+  }
+  emitter.refusals.add(pointer, "with:too_large", taskId);
+  return false;
+};
+
+/**
+ * `value` at `pointer`, a part of task `taskId`'s call, as a template the
+ * host builds at call time (`CallTemplate`): literals as they are, each
+ * `${ … }` string its sealed expression's slot, of result `result`, and,
+ * with `sensitive`, each binding argument its parameter. A part whose
+ * every value is literal is one literal.
+ */
+const templateOf = (
+  emitter: Emitter,
+  value: JsonValue,
+  pointer: string,
+  taskId: string,
+  result: ExpressionResult,
+  sensitive?: ReadonlySet<string>
+): CallTemplate => {
+  if (typeof value === "string") {
+    if (parseSlot(value).kind !== "expression") {
+      return { literal: value };
+    }
+    const param =
+      sensitive === undefined ? undefined : bindingArgumentOf(value, sensitive);
+    if (param !== undefined) {
+      return { param };
+    }
+    const compiled = emitter.checked.expressions.get(pointer);
+    if (compiled === undefined) {
+      throw new Error(`The checked workflow has no expression at ${pointer}`);
+    }
+    const slot = emitter.expressions.length;
+    emitter.expressions.push({
+      slot,
+      pointer,
+      taskId,
+      stage: compiled.stage,
+      result,
+      source: compiled.source,
+    });
+    return { slot };
+  }
+  if (value === null || typeof value !== "object") {
+    return { literal: value };
+  }
+  if (Array.isArray(value)) {
+    const items = value.map((item, index) =>
+      templateOf(
+        emitter,
+        item,
+        pointerJoin(pointer, index),
+        taskId,
+        result,
+        sensitive
+      )
+    );
+    if (items.every((item) => isLiteral(item))) {
+      return { literal: value };
+    }
+    return withinTemplateBounds(emitter, pointer, taskId, items.length)
+      ? { array: items }
+      : { literal: null };
+  }
+  const entries = Object.entries(value).map(
+    ([key, item]) =>
+      [
+        key,
+        templateOf(
+          emitter,
+          item,
+          pointerJoin(pointer, key),
+          taskId,
+          result,
+          sensitive
+        ),
+      ] as const
+  );
+  if (entries.every(([, item]) => isLiteral(item))) {
+    return { literal: value };
+  }
+  let longest = 0;
+  for (const [key] of entries) {
+    longest = Math.max(longest, key.length);
+  }
+  return withinTemplateBounds(emitter, pointer, taskId, entries.length, longest)
+    ? { object: entries }
+    : { literal: null };
+};
+
+/**
+ * `value` at `pointer`, task `taskId`'s `input.from`, as a template of the
+ * slots its stage already evaluates (`stagesOf`, by pointer) and its
+ * literals: no new expression, so what the host builds from it is what
+ * the module's own evaluations make.
+ */
+const slotTemplateOf = (
+  emitter: Emitter,
+  value: JsonValue,
+  pointer: string,
+  taskId: string
+): CallTemplate => {
+  if (typeof value === "string") {
+    if (parseSlot(value).kind !== "expression") {
+      return { literal: value };
+    }
+    const evaluated = emitter.expressions.find(
+      (expression) =>
+        expression.taskId === taskId &&
+        expression.stage === "taskInputFrom" &&
+        expression.pointer === pointer
+    );
+    if (evaluated === undefined) {
+      throw new Error(`The task's input.from has no expression at ${pointer}`);
+    }
+    return { slot: evaluated.slot };
+  }
+  if (value === null || typeof value !== "object") {
+    return { literal: value };
+  }
+  if (Array.isArray(value)) {
+    const items = value.map((item, index) =>
+      slotTemplateOf(emitter, item, pointerJoin(pointer, index), taskId)
+    );
+    if (items.every((item) => isLiteral(item))) {
+      return { literal: value };
+    }
+    return withinTemplateBounds(emitter, pointer, taskId, items.length)
+      ? { array: items }
+      : { literal: null };
+  }
+  const entries = Object.entries(value).map(
+    ([key, item]) =>
+      [
+        key,
+        slotTemplateOf(emitter, item, pointerJoin(pointer, key), taskId),
+      ] as const
+  );
+  if (entries.every(([, item]) => isLiteral(item))) {
+    return { literal: value };
+  }
+  let longest = 0;
+  for (const [key] of entries) {
+    longest = Math.max(longest, key.length);
+  }
+  return withinTemplateBounds(emitter, pointer, taskId, entries.length, longest)
+    ? { object: entries }
+    : { literal: null };
 };
 
 /** A task's `input`, `output` or `export`, as the validator left it. */
@@ -626,22 +1051,24 @@ const lowerDurable = (
   item: ListTask,
   stages: Stages,
   place: ListPlace,
-  body: (indent: string) => void
+  body: (indent: string, entered: string) => void,
+  until = false
 ): TaskStep[] => {
   const steps: TaskStep[] = [];
   const hasLeave = stages.leave.length > 0;
-  // A leave step's `$task.startedAt` is the time its enter step recorded,
+  // A deadline is resolved, once, in the enter step, which records it; and
+  // a leave step's `$task.startedAt` is the time its enter step recorded,
   // so a task with stages after its body always enters, with nothing to
   // evaluate if it has nothing before it.
-  const hasEnter = stages.enter.length > 0 || hasLeave;
-  if (!hasEnter && !hasLeave) {
-    body(place.indent);
-    return steps;
-  }
+  const hasEnter = until || stages.enter.length > 0 || hasLeave;
   emitter.counter += 1;
   // Of this task alone: a nested task's are numbered after it.
   const raw = `raw${emitter.counter}`;
   const entered = `entered${emitter.counter}`;
+  if (!hasEnter && !hasLeave) {
+    body(place.indent, entered);
+    return steps;
+  }
   const { indent } = place;
   const id = literal(item.id);
   emitter.lines.push(`${indent}{`);
@@ -651,14 +1078,15 @@ const lowerDurable = (
   let inner = `${indent}  `;
   if (hasEnter) {
     steps.push("enter");
+    const plan = planCode([...stages.enter, ...(until ? ["until: true"] : [])]);
     emitter.lines.push(
-      `${inner}const ${entered} = await flow.enter(${id}, { input: output, context }, ${planCode(stages.enter)});`,
+      `${inner}const ${entered} = await flow.enter(${id}, { input: output, context }, ${plan});`,
       `${inner}if (!${entered}.skipped) {`,
       `${inner}  output = ${entered}.input;`
     );
     inner += "  ";
   }
-  body(inner);
+  body(inner, entered);
   if (hasLeave) {
     steps.push("leave");
     const enteredInput = hasEnter ? `${entered}.input` : raw;
@@ -673,6 +1101,261 @@ const lowerDurable = (
   return steps;
 };
 
+/** What every task the generator seals has, whatever its kind. */
+type TaskBase = Pick<
+  GeneratedTask,
+  "id" | "pointer" | "line" | "schemas" | "timeoutMs"
+>;
+
+/**
+ * The milliseconds of a task's `timeout`, as validation left it: its own
+ * `{ after }`, or the one of `use.timeouts` it names; `undefined` for none.
+ */
+const timeoutOf = (
+  definition: JsonValue,
+  timeout: JsonValue | undefined
+): number | undefined => {
+  let resolved = timeout;
+  if (typeof timeout === "string") {
+    const use = isObject(definition) ? definition.use : undefined;
+    const timeouts = isObject(use) ? use.timeouts : undefined;
+    resolved =
+      isObject(timeouts) && Object.hasOwn(timeouts, timeout)
+        ? timeouts[timeout]
+        : undefined;
+  }
+  if (resolved === undefined) {
+    return undefined;
+  }
+  const ms = isObject(resolved) ? literalDurationMs(resolved.after) : undefined;
+  if (ms === undefined) {
+    throw new Error("The checked workflow has a timeout of no duration");
+  }
+  return ms;
+};
+
+/**
+ * The template of a part of a call's `with`, refused as
+ * `with:expressions` (and `undefined`) when it holds more expressions than
+ * a stage may. Binding arguments only where `sensitive` is given.
+ */
+const callPart = (
+  emitter: Emitter,
+  item: ListTask,
+  key: string,
+  result: ExpressionResult = "json",
+  sensitive?: ReadonlySet<string>
+): CallTemplate | undefined => {
+  const args = isObject(item.task.with) ? item.task.with : {};
+  const before = emitter.expressions.length;
+  const template = templateOf(
+    emitter,
+    args[key] ?? null,
+    pointerJoin(pointerJoin(item.pointer, "with"), key),
+    item.id,
+    result,
+    sensitive
+  );
+  if (emitter.expressions.length - before > maxTaskExpressions) {
+    emitter.refusals.add(
+      pointerJoin(pointerJoin(item.pointer, "with"), key),
+      "with:expressions",
+      item.id
+    );
+    return undefined;
+  }
+  return template;
+};
+
+/**
+ * Task `item`'s named call, as the build seals it: its binding and
+ * operation as the literals validation checked, its arguments templates
+ * the host builds. `undefined` once a part was refused.
+ */
+const callOf = (
+  emitter: Emitter,
+  item: ListTask
+): GeneratedCall | undefined => {
+  const args = isObject(item.task.with) ? item.task.with : {};
+  const binding = typeof args.binding === "string" ? args.binding : "";
+  const part = (
+    key: string,
+    result?: ExpressionResult,
+    sensitive?: ReadonlySet<string>
+  ): CallTemplate | undefined =>
+    callPart(emitter, item, key, result, sensitive);
+  const name = typeof item.task.call === "string" ? item.task.call : "";
+  switch (name) {
+    case "grasp.now":
+    case "grasp.random": {
+      return { name };
+    }
+    case "grasp.operation": {
+      const operationArguments = part("arguments");
+      return operationArguments === undefined
+        ? undefined
+        : { name: "grasp.operation", binding, arguments: operationArguments };
+    }
+    case "grasp.connector": {
+      // The only call a sensitive parameter may reach, as a binding
+      // argument the host gives connect.
+      const connectorArguments = part("arguments", "json", emitter.sensitive);
+      return connectorArguments === undefined ||
+        typeof args.operation !== "string"
+        ? undefined
+        : {
+            name: "grasp.connector",
+            binding,
+            operation: args.operation,
+            arguments: connectorArguments,
+          };
+    }
+    case "grasp.model": {
+      const instructions = part("instructions");
+      const input = part("input");
+      const model = Object.hasOwn(args, "model") ? part("model") : null;
+      const tokens = Object.hasOwn(args, "maxOutputTokens")
+        ? part("maxOutputTokens")
+        : null;
+      if (
+        instructions === undefined ||
+        input === undefined ||
+        model === undefined ||
+        tokens === undefined
+      ) {
+        return undefined;
+      }
+      return {
+        name: "grasp.model",
+        binding,
+        instructions,
+        input,
+        outputSchema: descriptorAt(
+          emitter,
+          pointerJoin(pointerJoin(item.pointer, "with"), "outputSchema")
+        ),
+        ...(model === null ? {} : { model }),
+        ...(tokens === null ? {} : { maxOutputTokens: tokens }),
+      };
+    }
+    default: {
+      throw new Error(
+        `The checked workflow has no named call at ${item.pointer}`
+      );
+    }
+  }
+};
+
+/**
+ * The statement of a call task that makes its call within its step (every
+ * named call but `grasp.sleepUntil`): the host makes the call, from what
+ * the build sealed, as the step's own work.
+ */
+const lowerCall = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase
+): void => {
+  const call = callOf(emitter, item);
+  if (call === undefined) {
+    return;
+  }
+  const input = flowPart(item.task, "input");
+  const inputFrom =
+    input !== undefined && Object.hasOwn(input, "from")
+      ? slotTemplateOf(
+          emitter,
+          input.from ?? null,
+          pointerJoin(pointerJoin(item.pointer, "input"), "from"),
+          item.id
+        )
+      : undefined;
+  emitter.tasks.push({
+    ...sealed,
+    kind: "call",
+    call,
+    steps: ["task"],
+    ...(inputFrom === undefined ? {} : { inputFrom }),
+  });
+  const plan = planCode([...stages.enter, ...stages.leave]);
+  emitter.lines.push(
+    `${place.indent}({ output, context } = await flow.call(${literal(item.id)}, { input: output, context }, ${plan}));`
+  );
+};
+
+/**
+ * The statements of a task that sleeps: a `wait` of a literal duration,
+ * its sleep exactly that long; a `wait` whose duration is an expression,
+ * or a `grasp.sleepUntil` call, its deadline resolved once, by the host,
+ * in its enter step, which records it, and its sleep until then.
+ */
+const lowerSleep = (
+  emitter: Emitter,
+  item: ListTask,
+  stages: Stages,
+  place: ListPlace,
+  sealed: TaskBase
+): void => {
+  const { id, task, pointer } = item;
+  const steps: TaskStep[] = ["task"];
+  const ms = task.call === undefined ? literalDurationMs(task.wait) : undefined;
+  if (ms !== undefined) {
+    emitter.tasks.push({ ...sealed, kind: "wait", milliseconds: ms, steps });
+    steps.push(
+      ...lowerDurable(emitter, item, stages, place, (indent) => {
+        emitter.lines.push(
+          `${indent}await flow.wait(${literal(id)}, ${literal(ms)});`
+        );
+      })
+    );
+    return;
+  }
+  const before = emitter.expressions.length;
+  let sleeping: GeneratedTask;
+  if (task.call === undefined) {
+    const duration = templateOf(
+      emitter,
+      task.wait ?? null,
+      pointerJoin(pointer, "wait"),
+      id,
+      "duration"
+    );
+    sleeping = { ...sealed, kind: "wait", duration, steps };
+  } else {
+    const timestamp = callPart(emitter, item, "timestamp");
+    if (timestamp === undefined) {
+      return;
+    }
+    sleeping = {
+      ...sealed,
+      kind: "call",
+      call: { name: "grasp.sleepUntil", timestamp },
+      steps,
+    };
+  }
+  // The enter step evaluates its stages and the deadline's expressions.
+  if (emitter.expressions.length - before > maxTaskExpressions) {
+    emitter.refusals.add(pointer, "step:expressions", id);
+  }
+  emitter.tasks.push(sleeping);
+  steps.push(
+    ...lowerDurable(
+      emitter,
+      item,
+      stages,
+      place,
+      (indent, entered) => {
+        emitter.lines.push(
+          `${indent}await flow.sleepUntil(${literal(id)}, ${entered}.until);`
+        );
+      },
+      true
+    )
+  );
+};
+
 /** Lowers a task list: `lowerList`, passed to the tasks it lowers. */
 type ListLowerer = (
   emitter: Emitter,
@@ -681,6 +1364,48 @@ type ListLowerer = (
   indent: string,
   list: { label: string; number: number }
 ) => void;
+
+/** Whether task `item` sleeps: a wait, or a `grasp.sleepUntil` call. */
+const sleepsOf = (task: JsonObject, kind: string): boolean =>
+  kind === "wait" || (kind === "call" && task.call === "grasp.sleepUntil");
+
+/**
+ * Refuses, by pointer, what of task `item` (of `kind`) isn't lowered: its
+ * kind or named call, a property, a timeout where none bounds anything.
+ * Whether anything was.
+ */
+const refusedOf = (emitter: Emitter, item: ListTask, kind: string): boolean => {
+  const { id, task, pointer } = item;
+  const callName = typeof task.call === "string" ? task.call : "";
+  let refused = false;
+  if (
+    !loweredKinds.has(kind) ||
+    (kind === "call" && !loweredCalls.has(callName))
+  ) {
+    emitter.refusals.add(
+      pointer,
+      kind === "call" ? `call:${callName}` : kind,
+      id
+    );
+    refused = true;
+  }
+  for (const key of Object.keys(task)) {
+    if (key !== kind && !supportedTaskKeys.has(key)) {
+      emitter.refusals.add(pointerJoin(pointer, key), key, id);
+      refused = true;
+    }
+  }
+  const timed = timedKinds.has(kind) && !sleepsOf(task, kind);
+  if (Object.hasOwn(task, "timeout") && !timed) {
+    emitter.refusals.add(
+      pointerJoin(pointer, "timeout"),
+      `timeout:${kind}`,
+      id
+    );
+    refused = true;
+  }
+  return refused;
+};
 
 /** Lowers one task, or says why it can't be. */
 const lowerTask = (
@@ -694,61 +1419,38 @@ const lowerTask = (
   if (kind === undefined) {
     throw new Error(`The checked workflow has a task of no kind at ${pointer}`);
   }
-  let refused = false;
-  if (!loweredKinds.has(kind)) {
-    const { call } = task;
-    emitter.refusals.add(
-      pointer,
-      kind === "call" && typeof call === "string" ? `call:${call}` : kind,
-      id
-    );
-    refused = true;
-  }
-  for (const key of Object.keys(task)) {
-    if (key !== kind && !supportedTaskKeys.has(key)) {
-      emitter.refusals.add(pointerJoin(pointer, key), key, id);
-      refused = true;
-    }
-  }
-  if (refused) {
+  if (refusedOf(emitter, item, kind)) {
     return;
   }
+  const sleeps = sleepsOf(task, kind);
   const line = emitter.lines.length + 1;
   const before = emitter.expressions.length;
   const stages = stagesOf(emitter, id, task, pointer);
+  const timeoutMs = timeoutOf(emitter.checked.definition, task.timeout);
   const sealed = {
     id,
     pointer,
     line,
     schemas: Object.freeze({ ...stages.schemas }),
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
   };
-  if (kind === "set" || kind === "switch") {
-    emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
+  if (kind === "set" || kind === "switch" || (kind === "call" && !sleeps)) {
     if (kind === "set") {
+      emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
       lowerSet(emitter, item, stages, place);
-    } else {
+    } else if (kind === "switch") {
+      emitter.tasks.push({ ...sealed, kind, steps: ["task"] });
       lowerSwitch(emitter, item, stages, place);
+    } else {
+      lowerCall(emitter, item, stages, place, sealed);
     }
     // One step evaluates all of these. A durable task's enter and leave
     // steps hold two stages each, so never more than this.
     if (emitter.expressions.length - before > maxStepExpressions) {
       emitter.refusals.add(pointer, "step:expressions", id);
     }
-  } else if (kind === "wait") {
-    const ms = literalDurationMs(task.wait);
-    if (ms === undefined) {
-      emitter.refusals.add(pointerJoin(pointer, "wait"), "wait:expression", id);
-      return;
-    }
-    const steps: TaskStep[] = ["task"];
-    emitter.tasks.push({ ...sealed, kind, milliseconds: ms, steps });
-    steps.push(
-      ...lowerDurable(emitter, item, stages, place, (indent) => {
-        emitter.lines.push(
-          `${indent}await flow.wait(${literal(id)}, ${literal(ms)});`
-        );
-      })
-    );
+  } else if (sleeps) {
+    lowerSleep(emitter, item, stages, place, sealed);
   } else {
     const steps: TaskStep[] = [];
     emitter.tasks.push({ ...sealed, kind: "do", steps });
@@ -854,26 +1556,23 @@ const lowerList: ListLowerer = (
  * or `$params` as a whole (with a computed key, say), which could reach
  * any. A parameter that doesn't say counts as sensitive, as its contract
  * does. A run's output goes back to whoever started it, who needn't build
- * the workflow, so no expression may read one until bindings use them.
+ * the workflow, so no expression may read one: a sensitive parameter
+ * reaches a call only as a binding argument (`bindingArguments`), which is
+ * never an expression.
  */
 export const sensitiveReads = (
   checked: CheckedWorkflow
 ): readonly Unsupported[] => {
-  const { definition } = checked;
-  const document = isObject(definition) ? definition.document : undefined;
-  const metadata = isObject(document) ? document.metadata : undefined;
-  const grasp = isObject(metadata) ? metadata.grasp : undefined;
-  const params = isObject(grasp) ? grasp.params : undefined;
-  const sensitive = new Set(
-    Object.entries(isObject(params) ? params : {}).flatMap(([name, entry]) =>
-      isObject(entry) && entry.sensitive === false ? [] : [name]
-    )
-  );
+  const sensitive = sensitiveParams(checked.definition);
   if (sensitive.size === 0) {
     return [];
   }
+  const passed = bindingArguments(checked);
   const reads: Unsupported[] = [];
   for (const [pointer, compiled] of checked.expressions) {
+    if (passed.has(pointer)) {
+      continue;
+    }
     const paths = compiled.paths.filter(
       ({ variable }) => variable === "params"
     );
@@ -901,10 +1600,7 @@ export const sensitiveReads = (
  * `sensitive: false`. A parameter that doesn't say counts as sensitive.
  */
 const readableParams = (definition: JsonObject): string[] => {
-  const { document } = definition;
-  const metadata = isObject(document) ? document.metadata : undefined;
-  const grasp = isObject(metadata) ? metadata.grasp : undefined;
-  const params = isObject(grasp) ? grasp.params : undefined;
+  const params = graspOf(definition)?.params;
   return Object.entries(isObject(params) ? params : {})
     .flatMap(([name, entry]) =>
       isObject(entry) && entry.sensitive === false ? [name] : []
@@ -947,6 +1643,7 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
   const emitter: Emitter = {
     checked,
     refusals,
+    sensitive: sensitiveParams(definition),
     lines: [],
     expressions: [],
     tasks: [],
@@ -1007,5 +1704,6 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
       output: outputAs !== undefined,
     }),
     params: Object.freeze(readableParams(definition)),
+    limits: limitsOf(definition),
   };
 };

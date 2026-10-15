@@ -563,6 +563,18 @@ export type Admission =
        * its deadline, its code's generation and what let it in.
        */
       from?: { app: AppId; token: string };
+    }
+  | {
+      /**
+       * A run of an independent workflow calling this App's export
+       * through its binding `alias` (workflows/resource-calls.ts): the
+       * run's call is decided again, on authority as it is now, before
+       * each stub call (workflows/resource-authority.ts).
+       */
+      type: "workflowRun";
+      workflow: string;
+      run: string;
+      alias: string;
     };
 
 /**

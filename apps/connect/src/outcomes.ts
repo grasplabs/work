@@ -25,7 +25,11 @@ import type {
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { codeSubjectSchema } from "@grasp-os/shared/permissions";
+import {
+  codeSubjectId,
+  codeSubjectOf,
+  codeSubjectSchema,
+} from "@grasp-os/shared/permissions";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
@@ -90,10 +94,7 @@ const listOrder = [
 /** The key of the call `row` records, as a list and a resolution name it. */
 const keyOf = (row: Row): UnknownOutcomeKey =>
   unknownOutcomeKeySchema.parse({
-    subject:
-      row.subjectType === "app"
-        ? { type: "app", appId: row.subjectId }
-        : { type: "agent", agentId: row.subjectId },
+    subject: codeSubjectOf(row.subjectType, row.subjectId),
     connectionId: row.connectionId,
     action: row.action,
     idempotencyKey: row.idempotencyKey,
@@ -152,10 +153,7 @@ const summaryOf = ({
 const underKey = (key: UnknownOutcomeKey) =>
   and(
     eq(idempotentCalls.subjectType, key.subject.type),
-    eq(
-      idempotentCalls.subjectId,
-      key.subject.type === "app" ? key.subject.appId : key.subject.agentId
-    ),
+    eq(idempotentCalls.subjectId, codeSubjectId(key.subject)),
     eq(idempotentCalls.connectionId, key.connectionId),
     eq(idempotentCalls.action, key.action),
     eq(idempotentCalls.idempotencyKey, key.idempotencyKey)
@@ -352,8 +350,7 @@ const detailOf = async (
 ): Promise<Record<string, AuditDetailValue>> => ({
   action: key.action,
   subjectType: key.subject.type,
-  subjectId:
-    key.subject.type === "app" ? key.subject.appId : key.subject.agentId,
+  subjectId: codeSubjectId(key.subject),
   // App code chooses keys, so the log gets a hash, as for the call.
   idempotencyKeyHash: await sha256Hex(key.idempotencyKey),
   choice,

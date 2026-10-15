@@ -573,13 +573,17 @@ const hostOf = async (
     sleep: async () => {
       await Promise.resolve();
     },
+    sleepUntil: async () => {
+      await Promise.resolve();
+    },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
   };
+  const runId = crypto.randomUUID();
   return new ResourceRunHost(
     env,
     step,
     {
-      runId: crypto.randomUUID(),
+      runId,
       workflowId: id,
       version: 1,
       principal: by.userId,
@@ -587,6 +591,15 @@ const hostOf = async (
       params: z.record(z.string(), z.json()).parse(params ?? { limit: 5 }),
       createdAt: Date.now(),
       build,
+      calling: {
+        runId,
+        workflowId: id,
+        version: 1,
+        principal: by.userId,
+        invoker: { type: "person", id: by.userId, appVersion: null },
+        bindings: new Map(),
+      },
+      maxModelCalls: 1,
     },
     {
       leaseOf: () => {

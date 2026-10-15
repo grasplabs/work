@@ -913,14 +913,18 @@ const evaluatedWith = async (
     sleep: async () => {
       await Promise.resolve();
     },
+    sleepUntil: async () => {
+      await Promise.resolve();
+    },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
   };
   let reads = 0;
+  const runId = crypto.randomUUID();
   const host = new ResourceRunHost(
     env,
     step,
     {
-      runId: crypto.randomUUID(),
+      runId,
       workflowId: id,
       version: 1,
       principal: by.userId,
@@ -928,6 +932,15 @@ const evaluatedWith = async (
       params: { greeting: "Hello" },
       createdAt: Date.now(),
       build,
+      calling: {
+        runId,
+        workflowId: id,
+        version: 1,
+        principal: by.userId,
+        invoker: { type: "person", id: by.userId, appVersion: null },
+        bindings: new Map(),
+      },
+      maxModelCalls: 1,
     },
     {
       leaseOf: () => {
@@ -1024,16 +1037,20 @@ describe("an activation's share of core's CPU", () => {
       sleep: async () => {
         await Promise.resolve();
       },
+      sleepUntil: async () => {
+        await Promise.resolve();
+      },
       waitForEvent: async () =>
         await Promise.reject(new Error("No waits here")),
     };
     // Room for one attempt's worth: the first runs and spends some of it.
-    const hostWithOneShare = () =>
-      new ResourceRunHost(
+    const hostWithOneShare = () => {
+      const runId = crypto.randomUUID();
+      return new ResourceRunHost(
         env,
         step,
         {
-          runId: crypto.randomUUID(),
+          runId,
           workflowId: workflow.id,
           version: 1,
           principal: by.userId,
@@ -1041,6 +1058,15 @@ describe("an activation's share of core's CPU", () => {
           params: { greeting: "Hello" },
           createdAt: Date.now(),
           build,
+          calling: {
+            runId,
+            workflowId: workflow.id,
+            version: 1,
+            principal: by.userId,
+            invoker: { type: "person", id: by.userId, appVersion: null },
+            bindings: new Map(),
+          },
+          maxModelCalls: 1,
         },
         {
           leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
@@ -1048,6 +1074,7 @@ describe("an activation's share of core's CPU", () => {
           activationFuel: 2 ** 27,
         }
       );
+    };
     // A module that leaves an evaluation running as its attempt returns:
     // the attempt's fuel goes back only once it settled, and it never runs.
     const leftRunning: Promise<unknown>[] = [];

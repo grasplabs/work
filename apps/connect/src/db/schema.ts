@@ -125,7 +125,9 @@ export const connections = sqliteTable(
 export const idempotentCalls = sqliteTable(
   "idempotent_calls",
   {
-    subjectType: text("subject_type", { enum: ["app", "agent"] }).notNull(),
+    subjectType: text("subject_type", {
+      enum: ["app", "agent", "workflow"],
+    }).notNull(),
     subjectId: text("subject_id").notNull(),
     onBehalfOf: text("on_behalf_of").notNull(),
     connectionId: text("connection_id").notNull(),
@@ -253,7 +255,9 @@ export const pendingActions = sqliteTable(
   "pending_actions",
   {
     id: text().primaryKey(),
-    subjectType: text("subject_type", { enum: ["app", "agent"] }).notNull(),
+    subjectType: text("subject_type", {
+      enum: ["app", "agent", "workflow"],
+    }).notNull(),
     subjectId: text("subject_id").notNull(),
     onBehalfOf: text("on_behalf_of").notNull(),
     /** Asked for with the person there (`interactive`), or by a run. */

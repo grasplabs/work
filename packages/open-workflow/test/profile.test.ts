@@ -488,6 +488,13 @@ describe("tasks and calls", () => {
       { code: "task.ambiguous_kind", pointer: "/do/0/both", taskId: "both" },
     ],
     [
+      "a reusable timeout that names another",
+      probe([{ quick: { set: { a: 1 }, timeout: "alias" } }], {
+        timeouts: { short: { after: "PT1S" }, alias: "short" },
+      }),
+      { code: "profile.invalid_value", pointer: "/use/timeouts/alias" },
+    ],
+    [
       "a literal wait longer than the engine sleeps",
       probe([{ pause: { wait: { days: 366 } } }]),
       {

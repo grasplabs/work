@@ -753,7 +753,8 @@ describe("approving an operation", () => {
     };
     const approval = await approve({ appVersion: 1, export: "lookup" });
     const whileServing = await pins();
-    const startsNow = await outcome(start(ada, workflow.id));
+    const first = await start(ada, workflow.id);
+    const startsNow = first.runId === null ? "no run" : "ok";
     await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
     const afterRevoke = await pins();
     const again = await approve({ appVersion: 1, export: "lookup" });
@@ -766,6 +767,15 @@ describe("approving an operation", () => {
       .run();
     const releaseRevoked = await outcome(start(ada, workflow.id));
     const beforeDelete = await pins();
+    // The run the first start admitted holds the workflow until it ends:
+    // its call is refused, its approval revoked since.
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, ada, workflow.id, first.runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
     await deleteWorkflowResource(env, ada, workflow.id);
     expect({
       tries,

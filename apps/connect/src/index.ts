@@ -39,6 +39,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import type { ErrorPayload } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { NpmMetadata } from "@grasp-os/shared/packages";
+import { codeSubjectId } from "@grasp-os/shared/permissions";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { ackAuditEvents, auditCall, takeAuditEvents } from "./audit.ts";

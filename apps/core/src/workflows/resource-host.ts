@@ -1,6 +1,5 @@
 import { kitModuleName } from "@grasp-os/compiler";
 import { generatedImport } from "@grasp-os/open-workflow/generate";
-import { schemaFromDescriptor } from "@grasp-os/sdk/host";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -9,6 +8,7 @@ import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import {
   executionErrors,
   maxAttemptTimeoutMs,
+  stepIdempotencyKey,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import { encode } from "@grasp-os/workerflow/codec";
@@ -31,11 +31,14 @@ import { memberRole } from "../auth/identity.ts";
 import { generatedModule } from "../workflow-builds.ts";
 import type {
   LoadedBuild,
+  SealedCall,
   SealedExpression,
   SealedTask,
+  SealedTemplate,
 } from "../workflow-builds.ts";
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled } from "./code.ts";
+import { takesExactly } from "./exact-values.ts";
 import {
   cpuLimitKill,
   forIsolate,
@@ -46,6 +49,9 @@ import {
 } from "./host.ts";
 import type { RunStep } from "./host.ts";
 import { ResourceAttemptHost } from "./resource-attempt-host.ts";
+import type { CallingRun } from "./resource-authority.ts";
+import { makeCall } from "./resource-calls.ts";
+import type { BuiltCall } from "./resource-calls.ts";
 
 // The host a run of an independent workflow's sealed build runs against
 // (resource-runs.ts): the calls the generated code's SDK makes
@@ -100,12 +106,38 @@ import { ResourceAttemptHost } from "./resource-attempt-host.ts";
 //   end. What
 //   a whole activation may spend is the lineage quotas' to bound (not yet
 //   kept for these runs: resource-runs.ts).
+// - A named call the isolate shapes. A call task's call is the build's:
+//   its binding, operation and argument template are sealed in the task
+//   table, and the host builds the arguments itself (`#built`), evaluating
+//   the template's expressions, which the isolate may not evaluate
+//   (`#hostSlots`), and putting in a binding argument's sensitive value,
+//   which never enters the isolate, an expression or a record. The
+//   isolate only asks for the call, once per attempt, inside the task's
+//   own step, and passes the task's transformed input. The call itself,
+//   its authority decided again as it is made, is resource-calls.ts's.
+// - An effect repeated. Each call is its task's step's work, recorded:
+//   a replay answers the record and calls nothing; a retry of the step
+//   calls again under the same key (`stepIdempotencyKey` of the step),
+//   and a model call's step isn't retried at all (`configOf`).
+// - Time, randomness and deadlines that change on replay. `grasp.now`,
+//   `grasp.random` and a deadline (an expression wait's, a
+//   `grasp.sleepUntil`'s) are made by the host within a step that records
+//   them; a sleep must be until exactly the deadline its task's enter step
+//   recorded (`#deadlines`), however it was reached.
+// - Limits raising the host's ceilings. A task's timeout and the
+//   workflow's model calls are held to the lower of the build's sealed
+//   limit and the host's own (`configOf`, `HostedResourceRun`).
 
 /** The main module of a run of a sealed build (`openRunMain`). */
 export const openRunModule = "grasp-open-run.js";
 
 /** The calls of an attempt's host (`ResourceAttemptHost`), for the sandbox. */
-export const resourceAttemptMethods = ["evaluate", "check"] as const;
+export const resourceAttemptMethods = [
+  "evaluate",
+  "check",
+  "call",
+  "until",
+] as const;
 
 /** The SDK module the generated code imports, by its flat name. */
 const sdkModule = kitModuleName(generatedImport);
@@ -148,9 +180,14 @@ export class Run extends WorkerEntrypoint {
                 check: async (which, value) => {
                   unwrapped(await attempt.check(which, value));
                 },
+                call: async (frame) => unwrapped(await attempt.call(frame)),
+                until: async (frame) => unwrapped(await attempt.until(frame)),
               })))),
         sleep: async (name, milliseconds) => {
           unwrapped(await host.sleep(name, milliseconds));
+        },
+        sleepUntil: async (name, timestamp) => {
+          unwrapped(await host.sleepUntil(name, timestamp));
         },
       };
       return await definition.run(engine, input);
@@ -174,6 +211,13 @@ export interface HostedResourceRun {
   createdAt: number;
   /** Its sealed build, verified. */
   build: LoadedBuild;
+  /** What its calls go by: its principal, invoker and frozen bindings. */
+  calling: CallingRun;
+  /**
+   * The most model calls it may make: the lower of its build's limit and
+   * the host's ceiling (resource-runs.ts).
+   */
+  maxModelCalls: number;
 }
 
 /** How the host reaches back into the dispatcher. */
@@ -213,9 +257,29 @@ interface StepOf {
   task: SealedTask | undefined;
 }
 
+/** Whether `task` sleeps: a wait, or a `grasp.sleepUntil` call. */
+const sleepsOf = (task: SealedTask): boolean =>
+  task.kind === "wait" ||
+  (task.kind === "call" && task.call.name === "grasp.sleepUntil");
+
 /**
- * The step of `build` that `name` names, as a `do` (`sleep` false) or a
- * wait's sleep; `undefined` when the build has no such step.
+ * The template of `task`'s deadline, which its enter step resolves: an
+ * expression wait's duration, a `grasp.sleepUntil` call's timestamp.
+ */
+const deadlineOf = (
+  task: SealedTask
+): { template: SealedTemplate; kind: "duration" | "timestamp" } | undefined => {
+  if (task.kind === "wait" && task.duration !== undefined) {
+    return { template: task.duration, kind: "duration" };
+  }
+  if (task.kind === "call" && task.call.name === "grasp.sleepUntil") {
+    return { template: task.call.timestamp, kind: "timestamp" };
+  }
+  return undefined;
+};
+
+/** The step of `build` that `name` names, as a `do` (`sleep` false) or a
+ * sleeping task's sleep; `undefined` when the build has no such step.
  */
 const sealedStep = (
   build: LoadedBuild,
@@ -235,8 +299,8 @@ const sealedStep = (
   if (!kind.success || task === undefined) {
     return undefined;
   }
-  // A wait's `task:` step is its sleep, never a `do`.
-  const isSleep = kind.data === "task" && task.kind === "wait";
+  // A sleeping task's `task:` step is its sleep, never a `do`.
+  const isSleep = kind.data === "task" && sleepsOf(task);
   const fits = sleep ? isSleep : task.steps.includes(kind.data) && !isSleep;
   return fits ? { kind: kind.data, task } : undefined;
 };
@@ -283,6 +347,7 @@ const recordSchema = z.union([
     output: z.json(),
     context: z.json().optional(),
     branch: z.int().min(0).optional(),
+    until: z.int().min(0).optional(),
   }),
 ]);
 
@@ -354,6 +419,39 @@ const timestampOf = (ms: number): Json => ({
 export const maxResultBytes = platformLimits.stepPayloadBytes;
 
 /**
+ * The calls whose step is tried once only (spec 13.7: at most one attempt
+ * for an effect not proven idempotent, and for a model): an App's export,
+ * which gets the step's key but needn't keep to it, and a model request.
+ * A connector's side effect is keyed in connect, so a retry finds its
+ * stored result; the time and a random number change nothing outside.
+ */
+const triedOnce = new Set<SealedCall["name"]>([
+  "grasp.operation",
+  "grasp.model",
+]);
+
+/**
+ * The config of `step`'s attempts: the platform's, its timeout lowered to
+ * its task's own (`timeout`, never above the host's ceiling), and no retry
+ * for a call `triedOnce`.
+ */
+const configOf = (step: StepOf) => {
+  const { task } = step;
+  const timeout = Math.min(
+    stepConfig.timeout,
+    task?.timeoutMs ?? stepConfig.timeout
+  );
+  const once =
+    step.kind === "task" &&
+    task?.kind === "call" &&
+    triedOnce.has(task.call.name);
+  return {
+    retries: once ? { ...stepConfig.retries, limit: 0 } : stepConfig.retries,
+    timeout,
+  };
+};
+
+/**
  * The fuel one attempt's evaluations may spend together: eight
  * expressions' worth of the evaluator's own per-expression fuel (2^24,
  * workflow-expressions' jq.ts, sized to about 140 ms of CPU at worst:
@@ -418,22 +516,34 @@ interface StepAttempt {
   checked: Set<DataCheck>;
   /** The size of what the step captured, charged to each evaluation. */
   capturedSize: number;
-  /** What its task's `if` answered in it, if it was evaluated. */
-  ifHeld: boolean | undefined;
+  /**
+   * What its task's `if` answered, as the host evaluated it in this
+   * attempt: not yet, true or false. A call opens only once it held, for a
+   * task that has one (`#call`), never on what the isolate says.
+   */
+  condition: "unevaluated" | "held" | "failed";
+  /** What the host's evaluations of its task's `input.from` answered, by slot. */
+  inputFrom: Map<number, Json>;
+  /** The input its task's input schema took in this attempt, as JSON text. */
+  checkedInput: string | undefined;
   /** The fuel its evaluations have left together (`attemptFuel`). */
   budget: { fuel: number };
   /** Its evaluations under way: waited for before its fuel goes back. */
   pending: Set<Promise<unknown>>;
+  /**
+   * Where its task's call is: not asked for, under way, answered, or
+   * failed. Asked for once per attempt; its step records only an answered
+   * one.
+   */
+  call: "none" | "pending" | "done" | "failed";
+  /** The deadline it resolved for its task, once (`until`). */
+  until: number | undefined;
 }
 
 /** Expressions compiled once per build, by build hash and slot. */
 const compiled = new Map<string, Promise<CompiledExpression>>();
 // Past the 128 slots of the largest step, so one step doesn't thrash it.
 const compiledMax = 512;
-
-/** Task schemas made once per build, by build hash, task and check. */
-const schemas = new Map<string, ReturnType<typeof schemaFromDescriptor>>();
-const schemasMax = 256;
 
 const remember = <T>(
   cache: Map<string, T>,
@@ -452,27 +562,151 @@ const remember = <T>(
 };
 
 /**
- * Requires `schema` to take `value` exactly as it is: a task's schema
- * checks its data, it never fills in or changes it
- * (`workflow.task_data_invalid` otherwise, and for no JSON at all).
+ * Requires the schema of `descriptor` (its JSON text) to take `value`
+ * exactly as it is: a task's schema checks its data, it never fills in or
+ * changes it (`workflow.task_data_invalid` otherwise, and for no JSON at
+ * all).
  */
-const conform = (
-  schema: ReturnType<typeof schemaFromDescriptor>,
-  value: Json | undefined
-): void => {
-  if (value === undefined) {
+const conform = (descriptor: string, value: Json | undefined): void => {
+  if (value === undefined || !takesExactly(descriptor, value)) {
     throw workflowResourceErrors.create("workflow.task_data_invalid");
   }
-  const snapshot = canonicalJson(value);
-  const validated = schema["~standard"].validate(JSON.parse(snapshot));
-  const accepted =
-    !("then" in validated) &&
-    validated.issues === undefined &&
-    z.json().safeParse(validated.value).success &&
-    canonicalJson(z.json().parse(validated.value)) === snapshot;
-  if (!accepted) {
-    throw workflowResourceErrors.create("workflow.task_data_invalid");
+};
+
+/** Every slot `template` names, nested ones included. */
+const slotsOf = (template: SealedTemplate, into: Set<number>): void => {
+  if ("slot" in template) {
+    into.add(template.slot);
+  } else if ("object" in template) {
+    for (const [, item] of template.object) {
+      slotsOf(item, into);
+    }
+  } else if ("array" in template) {
+    for (const item of template.array) {
+      slotsOf(item, into);
+    }
   }
+};
+
+/** The templates of a task's call, by what each builds. */
+const templatesOf = (call: SealedCall): SealedTemplate[] => {
+  switch (call.name) {
+    case "grasp.now":
+    case "grasp.random": {
+      return [];
+    }
+    case "grasp.operation":
+    case "grasp.connector": {
+      return [call.arguments];
+    }
+    case "grasp.model": {
+      return [
+        call.instructions,
+        call.input,
+        ...(call.model === undefined ? [] : [call.model]),
+        ...(call.maxOutputTokens === undefined ? [] : [call.maxOutputTokens]),
+      ];
+    }
+    case "grasp.sleepUntil": {
+      return [call.timestamp];
+    }
+    default: {
+      return call satisfies never;
+    }
+  }
+};
+
+/**
+ * `template` filled from `evaluated`, the values of its slots by number:
+ * undefined while one of them wasn't evaluated. It holds no binding
+ * argument: an `input.from` never names one (generate.ts).
+ */
+const filledFrom = (
+  template: SealedTemplate,
+  evaluated: ReadonlyMap<number, Json>
+): Json | undefined => {
+  if ("literal" in template) {
+    return template.literal;
+  }
+  if ("slot" in template) {
+    return evaluated.get(template.slot);
+  }
+  if ("param" in template) {
+    return undefined;
+  }
+  if ("array" in template) {
+    const items: Json[] = [];
+    for (const item of template.array) {
+      const value = filledFrom(item, evaluated);
+      if (value === undefined) {
+        return undefined;
+      }
+      items.push(value);
+    }
+    return items;
+  }
+  const entries: [string, Json][] = [];
+  for (const [key, item] of template.object) {
+    const value = filledFrom(item, evaluated);
+    if (value === undefined) {
+      return undefined;
+    }
+    entries.push([key, value]);
+  }
+  return Object.fromEntries(entries);
+};
+
+/** The slots of `build`'s call and deadline templates (`#hostSlots`). */
+const hostSlotsOf = (build: LoadedBuild): ReadonlySet<number> => {
+  const slots = new Set<number>();
+  for (const task of build.tasks) {
+    if (task.kind === "call") {
+      for (const template of templatesOf(task.call)) {
+        slotsOf(template, slots);
+      }
+    } else if (task.kind === "wait" && task.duration !== undefined) {
+      slotsOf(task.duration, slots);
+    }
+  }
+  return slots;
+};
+
+/** The furthest a deadline may be, as the engine sleeps: 365 days. */
+const maxDeadlineMs = 365 * 86_400_000;
+
+/**
+ * The deadline, in ms since the epoch, that a deadline template's `value`
+ * means at `now`: a duration (whole milliseconds, as the evaluator returns
+ * an expression wait's) from now, or a `grasp.sleepUntil` timestamp as it
+ * is, a past one due at once. At most a year ahead; anything else is
+ * `workflow.call_invalid`.
+ */
+const untilOf = (
+  kind: "duration" | "timestamp",
+  value: Json,
+  now: number
+): number => {
+  const ms =
+    typeof value === "number" && Number.isSafeInteger(value) ? value : -1;
+  const until = kind === "duration" ? now + ms : ms;
+  const valid = kind === "duration" ? ms > 0 : ms >= 0;
+  if (!valid || until - now > maxDeadlineMs) {
+    throw workflowResourceErrors.create("workflow.call_invalid", {
+      issues: [
+        kind === "duration"
+          ? "wait: Give a positive duration of at most a year."
+          : "timestamp: Give a time in milliseconds at most a year ahead.",
+      ],
+    });
+  }
+  return until;
+};
+
+/** A random number in [0, 1), from 53 random bits: never a credential. */
+const randomFraction = (): number => {
+  const [high = 0, low = 0] = crypto.getRandomValues(new Uint32Array(2));
+  // 21 bits of one and 32 of the other: 53, a double's whole mantissa.
+  return (Math.floor(high / 2 ** 11) * 2 ** 32 + low) / 2 ** 53;
 };
 
 /**
@@ -507,6 +741,26 @@ export class ResourceRunHost
    * the run's input and the readable parameters, charged to each.
    */
   readonly #inputSize: number;
+  /**
+   * The slots of the build's call and deadline templates: the host's to
+   * evaluate as it builds them, never the isolate's.
+   */
+  readonly #hostSlots: ReadonlySet<number>;
+  /**
+   * The deadline each sleeping task's enter step recorded, by task, as
+   * this activation reached it (fresh or replayed): its sleep is until
+   * exactly then.
+   */
+  readonly #deadlines = new Map<string, number>();
+  /**
+   * The model calls the run has made: those its replayed steps recorded,
+   * as this activation reached them, and those this activation made
+   * itself, each counted as it is asked for (`#made`), before anything is
+   * awaited. Each new one is held to `maxModelCalls`.
+   */
+  #modelCalls = 0;
+  /** The model tasks whose call this activation made, counted then. */
+  readonly #modelCallsMade = new Set<string>();
 
   constructor(
     env: Env,
@@ -530,6 +784,7 @@ export class ResourceRunHost
     this.#inputSize =
       JSON.stringify(run.input).length +
       JSON.stringify(this.#readableParams).length;
+    this.#hostSlots = hostSlotsOf(run.build);
   }
 
   /**
@@ -607,7 +862,7 @@ export class ResourceRunHost
             : undefined;
         const recorded = await this.#step.do(
           stepName,
-          stepConfig,
+          configOf(step),
           async (context) => {
             const told = attemptContextSchema.parse(context);
             const lease = this.#hooks.leaseOf(
@@ -629,9 +884,13 @@ export class ResourceRunHost
               evaluated: new Set(),
               checked: new Set(),
               capturedSize: bounded.size,
-              ifHeld: undefined,
+              condition: "unevaluated",
+              inputFrom: new Map(),
+              checkedInput: undefined,
               budget: { fuel: attemptFuel },
               pending: new Set(),
+              call: "none",
+              until: undefined,
             };
             // An activation that can't fund a whole attempt any more cuts it
             // off as the Loader does an isolate past its CPU time: its step
@@ -649,6 +908,8 @@ export class ResourceRunHost
                     evaluate: async (slot, frame) =>
                       await this.#evaluate(attempt, slot, frame),
                     check: (which, value) => this.#check(attempt, which, value),
+                    call: async (frame) => await this.#call(attempt, frame),
+                    until: async (frame) => await this.#until(attempt, frame),
                   })
                 )
               : Promise.reject(cpuLimitKill());
@@ -726,18 +987,47 @@ export class ResourceRunHost
             return journaled;
           }
         );
-        if (!entering) {
-          return recorded;
+        let outcome = recorded;
+        if (entering) {
+          // The host's own journal entry, fresh or replayed.
+          const journal = enteredSchema.parse(recorded);
+          outcome = journal.record;
+          if (step.task !== undefined) {
+            this.#taskStarts.set(step.task.id, journal.startedAt);
+          }
         }
-        // The host's own journal entry, fresh or replayed.
-        const { record, startedAt } = enteredSchema.parse(recorded);
-        if (step.task !== undefined) {
-          this.#taskStarts.set(step.task.id, startedAt);
-        }
-        return record;
+        // Fresh or replayed alike: what the run has reached, in order.
+        this.#noteRecorded(step, outcome);
+        return outcome;
       });
     } finally {
       stepDone.resolve(null);
+    }
+  }
+
+  /**
+   * Notes what step `step` recorded, as this activation reaches it, fresh
+   * or replayed: a sleeping task's deadline, which its sleep must be until
+   * exactly; a model call made, which counts against `maxModelCalls`.
+   * Every record was accepted as it was made (`#acceptRecord`).
+   */
+  #noteRecorded(step: StepOf, value: unknown): void {
+    const { task } = step;
+    const record = recordSchema.safeParse(value);
+    if (task === undefined || !record.success || "skipped" in record.data) {
+      return;
+    }
+    if (step.kind === "enter" && record.data.until !== undefined) {
+      this.#deadlines.set(task.id, record.data.until);
+    }
+    if (
+      step.kind === "task" &&
+      task.kind === "call" &&
+      task.call.name === "grasp.model" &&
+      // Made in this activation: counted as it was asked for.
+      !this.#modelCallsMade.has(task.id)
+    ) {
+      this.#modelCalls += 1;
     }
   }
 
@@ -745,13 +1035,43 @@ export class ResourceRunHost
   async sleep(name: unknown, duration: unknown): Promise<Settled<null>> {
     return await settle(async () => {
       const { task } = this.#stepOf(name, true);
-      if (task?.kind !== "wait" || duration !== task.milliseconds) {
+      if (
+        task?.kind !== "wait" ||
+        task.milliseconds === undefined ||
+        duration !== task.milliseconds
+      ) {
         return this.#refuse(
           `Task "${task?.id ?? ""}" waits as its build says.`
         );
       }
       await this.#requirePerson();
       await this.#step.sleep(`task:${task.id}`, task.milliseconds);
+      return null;
+    });
+  }
+
+  /**
+   * Runs a sleeping task whose deadline its enter step resolved (an
+   * expression wait, a `grasp.sleepUntil` call): a durable sleep until
+   * exactly the deadline it recorded, at once when that has passed.
+   */
+  async sleepUntil(name: unknown, timestamp: unknown): Promise<Settled<null>> {
+    return await settle(async () => {
+      const { task } = this.#stepOf(name, true);
+      const deadline =
+        task === undefined ? undefined : this.#deadlines.get(task.id);
+      if (
+        task === undefined ||
+        deadlineOf(task) === undefined ||
+        deadline === undefined ||
+        timestamp !== deadline
+      ) {
+        return this.#refuse(
+          `Task "${task?.id ?? ""}" sleeps until the deadline it recorded.`
+        );
+      }
+      await this.#requirePerson();
+      await this.#step.sleepUntil(`task:${task.id}`, deadline);
       return null;
     });
   }
@@ -785,8 +1105,16 @@ export class ResourceRunHost
     }
   }
 
-  /** The sealed expression `slot`, if `attempt`'s step evaluates it. */
-  #expressionOf(attempt: StepAttempt, slot: unknown): SealedExpression {
+  /**
+   * The sealed expression `slot`, if `attempt`'s step evaluates it: for the
+   * isolate, one of its stages' but a template's (`#hostSlots`); for the
+   * host building a template (`forHost`), a template's.
+   */
+  #expressionOf(
+    attempt: StepAttempt,
+    slot: unknown,
+    forHost = false
+  ): SealedExpression {
     const { build } = this.#run;
     const expression =
       typeof slot === "number" && Number.isSafeInteger(slot)
@@ -796,7 +1124,8 @@ export class ResourceRunHost
     if (
       expression === undefined ||
       expression.taskId !== owner ||
-      !stagesOf[attempt.step.kind].includes(expression.stage)
+      this.#hostSlots.has(expression.slot) !== forHost ||
+      (!forHost && !stagesOf[attempt.step.kind].includes(expression.stage))
     ) {
       return this.#refuse(
         `Step of "${owner ?? "the workflow"}" has no expression ${String(slot).slice(0, 20)}.`
@@ -987,49 +1316,361 @@ export class ResourceRunHost
           "An evaluation passes its task's data as JSON, within a step's size."
         );
       }
-      this.#requireCurrent(attempt);
-      this.#charge(attempt, expression, bounded.size);
-      const expressionCompiled = await this.#compiled(expression);
-      // Compiling awaited: an attempt over meanwhile evaluates nothing.
-      this.#requireCurrent(attempt);
-      const scope = this.#scopeOf(attempt, expression, passed.data);
-      const value = await evaluateExpression(
-        expressionCompiled,
-        // SAFETY: #scopeOf gives exactly the variables of the expression's
-        // stage, and evaluateExpression refuses any other set all the same.
-        scope as Parameters<typeof evaluateExpression>[1],
-        { kind: expression.result },
-        attempt.budget
+      const value = await this.#evaluated(
+        attempt,
+        expression,
+        passed.data,
+        bounded.size
       );
-      // Judged again as it returns: compiling and evaluating awaited, and
-      // an attempt the engine gave up on meanwhile gets nothing back.
-      this.#requireCurrent(attempt);
       if (expression.stage === "taskIf") {
-        attempt.ifHeld = value === true;
+        attempt.condition = value === true ? "held" : "failed";
+      }
+      if (expression.stage === "taskInputFrom") {
+        attempt.inputFrom.set(expression.slot, value);
       }
       return value;
     });
   }
 
-  /** The native schema of `task`'s `which` data, made once per build. */
-  #schemaOf(
-    task: SealedTask,
-    which: DataCheck
-  ): ReturnType<typeof schemaFromDescriptor> | undefined {
-    const descriptor = task.schemas[which];
-    if (descriptor === undefined) {
-      return undefined;
-    }
-    const key = `${this.#run.build.hash}:${task.id}:${which}`;
-    return (
-      schemas.get(key) ??
-      remember(
-        schemas,
-        schemasMax,
-        key,
-        schemaFromDescriptor(JSON.stringify(descriptor))
-      )
+  /**
+   * Evaluates `expression`, of `attempt`'s step, on `frame` (of `frameSize`
+   * code units), charged to the attempt's budget, while it holds.
+   */
+  async #evaluated(
+    attempt: StepAttempt,
+    expression: SealedExpression,
+    frame: { input: Json; output: Json },
+    frameSize: number
+  ): Promise<Json> {
+    this.#requireCurrent(attempt);
+    this.#charge(attempt, expression, frameSize);
+    const expressionCompiled = await this.#compiled(expression);
+    // Compiling awaited: an attempt over meanwhile evaluates nothing.
+    this.#requireCurrent(attempt);
+    const scope = this.#scopeOf(attempt, expression, frame);
+    const value = await evaluateExpression(
+      expressionCompiled,
+      // SAFETY: #scopeOf gives exactly the variables of the expression's
+      // stage, and evaluateExpression refuses any other set all the same.
+      scope as Parameters<typeof evaluateExpression>[1],
+      { kind: expression.result },
+      attempt.budget
     );
+    // Judged again as it returns: compiling and evaluating awaited, and
+    // an attempt the engine gave up on meanwhile gets nothing back.
+    this.#requireCurrent(attempt);
+    return value;
+  }
+
+  /**
+   * The value `template` builds, for `attempt`, on the task's transformed
+   * input: its literals as they are, each slot its expression's one
+   * result, evaluated here once each, and, where `sensitive` is given (a
+   * connector call's arguments), a binding argument's sensitive value
+   * from what the start froze, each also added to `sensitive`, so its
+   * echo can be refused. A parameter the run has no value of, or one
+   * where none may be, is refused: the build never seals one.
+   */
+  async #built(
+    attempt: StepAttempt,
+    template: SealedTemplate,
+    frame: { input: Json; output: Json },
+    frameSize: number,
+    sensitive?: Json[]
+  ): Promise<Json> {
+    const build = async (part: SealedTemplate): Promise<Json> =>
+      await this.#built(attempt, part, frame, frameSize, sensitive);
+    if ("literal" in template) {
+      return template.literal;
+    }
+    if ("slot" in template) {
+      const expression = this.#expressionOf(attempt, template.slot, true);
+      return await this.#evaluated(attempt, expression, frame, frameSize);
+    }
+    if ("param" in template) {
+      const { params: values } = this.#run;
+      if (sensitive === undefined || !Object.hasOwn(values, template.param)) {
+        return this.#refuse("A binding argument is a connector call's.");
+      }
+      const value = values[template.param] ?? null;
+      sensitive.push(value);
+      return value;
+    }
+    const built: Json[] = [];
+    const items = "array" in template ? template.array : template.object;
+    for (const item of items) {
+      // One at a time, in order: as the template lists them.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      built.push(await build(Array.isArray(item) ? item[1] : item));
+    }
+    if ("array" in template) {
+      return built;
+    }
+    // Defined as own data properties: no key, `__proto__` included, is
+    // anything else.
+    const object: Record<string, Json> = {};
+    for (const [index, [key]] of template.object.entries()) {
+      Object.defineProperty(object, key, {
+        value: built[index] ?? null,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+    return object;
+  }
+
+  /** The transformed input the isolate passes for a call or deadline. */
+  #callFrame(frame: unknown): { input: Json; output: Json; size: number } {
+    const bounded = boundedJson(frame);
+    const passed = z
+      .strictObject({ input: z.json() })
+      .safeParse(bounded?.value);
+    if (bounded === undefined || !passed.success) {
+      return this.#refuse(
+        "A call passes its task's input as JSON, within a step's size."
+      );
+    }
+    return { input: passed.data.input, output: null, size: bounded.size };
+  }
+
+  /**
+   * Refuses `attempt`'s call of call task `task` with `frame` unless what
+   * comes before it in the task held as the host itself saw it, in this
+   * attempt, never as the isolate says: its `if` (where it has one)
+   * evaluated and true, its raw input, as the step captured it, taken by
+   * its input schema (where it has one), and the input it calls with as
+   * its `input.from` (where it has one) made it, or that raw input. So a
+   * forged module can't send for a task the sealed workflow skips, or with
+   * input it never checked.
+   */
+  #requireCallOpen(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    frame: unknown
+  ): void {
+    const stages = new Set(
+      this.#run.build.expressions
+        .filter(({ taskId }) => taskId === task.id)
+        .map(({ stage }) => stage)
+    );
+    if (attempt.condition === "failed") {
+      return this.#refuse(`Task "${task.id}" is skipped.`);
+    }
+    if (stages.has("taskIf") && attempt.condition !== "held") {
+      return this.#refuse(
+        `Task "${task.id}" makes its call only once its if held.`
+      );
+    }
+    // Built by the host, from the task's sealed input.from and its own
+    // evaluations of it in this attempt; the raw input where it has none.
+    const expected =
+      task.inputFrom === undefined
+        ? attempt.data.input
+        : filledFrom(task.inputFrom, attempt.inputFrom);
+    if (expected === undefined) {
+      return this.#refuse(
+        `Task "${task.id}" makes its call only on the input its input.from made.`
+      );
+    }
+    const input = canonicalJson(expected);
+    if (canonicalJson(this.#callFrame(frame).input) !== input) {
+      return this.#refuse(
+        `Task "${task.id}" makes its call on its own transformed input.`
+      );
+    }
+    // The schema takes the raw input, before `input.from` transforms it.
+    if (
+      task.schemas.input !== undefined &&
+      attempt.checkedInput !== canonicalJson(attempt.data.input)
+    ) {
+      return this.#refuse(
+        `Task "${task.id}" makes its call only once its input schema took its input.`
+      );
+    }
+  }
+
+  /**
+   * `ResourceAttemptHost.call`, for `attempt`: its task's call, once,
+   * inside the task's own step, built from what the build sealed and the
+   * task's transformed input (`frame`): the time, a random number, or an
+   * effect resource-calls.ts makes. Its answer is the task's raw output,
+   * which the step records.
+   */
+  async #call(attempt: StepAttempt, frame: unknown): Promise<Settled<Json>> {
+    return await settle(async () => {
+      if (attempt.over) {
+        throw executionErrors.create("execution.stale_attempt");
+      }
+      const { step } = attempt;
+      const task = step.task?.kind === "call" ? step.task : undefined;
+      if (
+        step.kind !== "task" ||
+        task === undefined ||
+        task.call.name === "grasp.sleepUntil"
+      ) {
+        return this.#refuse(
+          `Step of "${step.task?.id ?? "the workflow"}" makes no call.`
+        );
+      }
+      if (attempt.call !== "none") {
+        return this.#refuse(`Task "${task.id}" makes its call once.`);
+      }
+      attempt.call = "pending";
+      this.#requireCallOpen(attempt, task, frame);
+      try {
+        const answer = await this.#made(attempt, task, frame);
+        attempt.call = "done";
+        return answer;
+      } catch (error) {
+        attempt.call = "failed";
+        throw error;
+      }
+    });
+  }
+
+  /**
+   * `#call`'s work, for `attempt` of call task `task`: the time, a random
+   * number, or the effect resource-calls.ts makes. A model call takes its
+   * place among the run's model calls synchronously, before anything is
+   * awaited, so steps run at once can't each find room for one more.
+   */
+  async #made(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    frame: unknown
+  ): Promise<Json> {
+    const passed = this.#callFrame(frame);
+    this.#requireCurrent(attempt);
+    const { call } = task;
+    if (call.name === "grasp.now") {
+      return Date.now();
+    }
+    if (call.name === "grasp.random") {
+      return randomFraction();
+    }
+    if (call.name === "grasp.sleepUntil") {
+      return this.#refuse(`Task "${task.id}" makes no call.`);
+    }
+    if (call.name === "grasp.model") {
+      if (this.#modelCalls >= this.#run.maxModelCalls) {
+        throw workflowResourceErrors.create("workflow.model_call_limit", {
+          limit: this.#run.maxModelCalls,
+        });
+      }
+      this.#modelCalls += 1;
+      this.#modelCallsMade.add(task.id);
+    }
+    const built = await this.#builtCall(attempt, call, passed);
+    return await makeCall(this.#env, this.#run.calling, task.id, built, {
+      key: stepIdempotencyKey(this.#run.runId, `task:${task.id}`),
+      deadline: attempt.deadline,
+      fence: {
+        run: this.#run.runId,
+        key: attempt.key,
+        number: attempt.number,
+        generation: attempt.generation,
+      },
+      requireHolds: () => {
+        this.#requireCurrent(attempt);
+      },
+    });
+  }
+
+  /** `call`'s parts built (`#built`), as resource-calls.ts makes it. */
+  async #builtCall(
+    attempt: StepAttempt,
+    call: Exclude<
+      SealedCall,
+      { name: "grasp.now" | "grasp.random" | "grasp.sleepUntil" }
+    >,
+    frame: { input: Json; output: Json; size: number }
+  ): Promise<BuiltCall> {
+    const part = async (template: SealedTemplate, sensitive?: Json[]) =>
+      await this.#built(attempt, template, frame, frame.size, sensitive);
+    switch (call.name) {
+      case "grasp.operation": {
+        return {
+          name: call.name,
+          binding: call.binding,
+          arguments: await part(call.arguments),
+        };
+      }
+      case "grasp.connector": {
+        const sensitive: Json[] = [];
+        return {
+          name: call.name,
+          binding: call.binding,
+          operation: call.operation,
+          // The only place a binding argument goes: to connect.
+          arguments: await part(call.arguments, sensitive),
+          sensitive,
+        };
+      }
+      case "grasp.model": {
+        return {
+          name: call.name,
+          binding: call.binding,
+          instructions: await part(call.instructions),
+          input: await part(call.input),
+          outputSchema: call.outputSchema,
+          ...(call.model === undefined
+            ? {}
+            : { model: await part(call.model) }),
+          ...(call.maxOutputTokens === undefined
+            ? {}
+            : { maxOutputTokens: await part(call.maxOutputTokens) }),
+        };
+      }
+      default: {
+        return call satisfies never;
+      }
+    }
+  }
+
+  /**
+   * `ResourceAttemptHost.until`, for `attempt`: its task's deadline, once,
+   * in its enter step: an expression wait's duration from now, or a
+   * `grasp.sleepUntil` call's timestamp, built from what the build sealed
+   * on the task's transformed input (`frame`). The step records it, so a
+   * replay sleeps until the same time.
+   */
+  async #until(attempt: StepAttempt, frame: unknown): Promise<Settled<number>> {
+    return await settle(async () => {
+      if (attempt.over) {
+        throw executionErrors.create("execution.stale_attempt");
+      }
+      const { step } = attempt;
+      const deadline =
+        step.kind === "enter" && step.task !== undefined
+          ? deadlineOf(step.task)
+          : undefined;
+      if (deadline === undefined) {
+        return this.#refuse(
+          `Step of "${step.task?.id ?? "the workflow"}" resolves no deadline.`
+        );
+      }
+      if (attempt.until !== undefined || attempt.condition === "failed") {
+        return this.#refuse(
+          `Task "${step.task?.id ?? ""}" resolves its deadline once.`
+        );
+      }
+      const passed = this.#callFrame(frame);
+      const value = await this.#built(
+        attempt,
+        deadline.template,
+        passed,
+        passed.size
+      );
+      attempt.until = untilOf(deadline.kind, value, Date.now());
+      return attempt.until;
+    });
+  }
+
+  /** The descriptor text of `task`'s `which` schema, if it has one. */
+  static #schemaOf(task: SealedTask, which: DataCheck): string | undefined {
+    const descriptor = task.schemas[which];
+    return descriptor === undefined ? undefined : JSON.stringify(descriptor);
   }
 
   /**
@@ -1049,6 +1690,27 @@ export class ResourceRunHost
     return settled;
   }
 
+  /**
+   * Charges a check of `size` code units to `attempt`, as an evaluation of
+   * what it reads, so checks spend the attempt's share of the activation's
+   * fuel as expressions do.
+   */
+  static #chargeCheck(attempt: StepAttempt, size: number): void {
+    attempt.budget.fuel -= evaluationFuel + fuelPerByte * size;
+    if (attempt.budget.fuel > 0) {
+      return;
+    }
+    const { task } = attempt.step;
+    throw expressionError(
+      "expression.budget_exhausted",
+      {
+        pointer: task?.pointer ?? "",
+        ...(task === undefined ? {} : { taskId: task.id }),
+      },
+      { remedy: "Check less data in the task, or split the task." }
+    );
+  }
+
   /** `#check`'s work: throws what refuses the value. */
   #checkNow(attempt: StepAttempt, which: unknown, value: unknown): void {
     // Its lease first, as for an evaluation: a stale attempt's check is
@@ -1060,7 +1722,7 @@ export class ResourceRunHost
       kind.success &&
       task !== undefined &&
       checksOf[attempt.step.kind].includes(kind.data)
-        ? this.#schemaOf(task, kind.data)
+        ? ResourceRunHost.#schemaOf(task, kind.data)
         : undefined;
     if (!kind.success || schema === undefined) {
       return this.#refuse(
@@ -1075,20 +1737,22 @@ export class ResourceRunHost
     attempt.checked.add(kind.data);
     this.#requireCurrent(attempt);
     const data = boundedJson(value);
-    // Charged as an evaluation of what it reads, so checks spend the
-    // attempt's share of the activation's fuel as expressions do.
-    attempt.budget.fuel -= evaluationFuel + fuelPerByte * (data?.size ?? 0);
-    if (attempt.budget.fuel <= 0) {
-      throw expressionError(
-        "expression.budget_exhausted",
-        {
-          pointer: task?.pointer ?? "",
-          ...(task === undefined ? {} : { taskId: task.id }),
-        },
-        { remedy: "Check less data in the task, or split the task." }
-      );
-    }
+    ResourceRunHost.#chargeCheck(attempt, data?.size ?? 0);
     conform(schema, data?.value);
+    if (kind.data === "input") {
+      attempt.checkedInput = canonicalJson(data?.value ?? null);
+    }
+  }
+
+  /** Whether `step`, of task `taskId`, evaluates the task's `if`. */
+  #hasIf(step: StepOf, taskId: string): boolean {
+    return (
+      stagesOf[step.kind].includes("taskIf") &&
+      this.#run.build.expressions.some(
+        (expression) =>
+          expression.taskId === taskId && expression.stage === "taskIf"
+      )
+    );
   }
 
   /**
@@ -1116,23 +1780,44 @@ export class ResourceRunHost
     const skipped = "skipped" in record;
     // A task with an `if` records an outcome only once the host evaluated
     // it in this step: leaving it out never takes the task past it.
-    const hasIf =
-      stagesOf[step.kind].includes("taskIf") &&
-      this.#run.build.expressions.some(
-        ({ taskId, stage }) => taskId === task.id && stage === "taskIf"
-      );
-    if (hasIf && attempt.ifHeld === undefined) {
+    if (this.#hasIf(step, task.id) && attempt.condition === "unevaluated") {
       return this.#refuse(
         `Task "${task.id}" records an outcome only once its if was evaluated.`
       );
     }
-    if (skipped !== (attempt.ifHeld === false)) {
+    if (skipped !== (attempt.condition === "failed")) {
       return this.#refuse(
         `Task "${task.id}" is skipped exactly when its if answered false.`
       );
     }
     if (skipped) {
       return;
+    }
+    // A deadline is recorded exactly as the host resolved it in this
+    // attempt, and only by an enter step that resolves one.
+    if (record.until !== attempt.until) {
+      return this.#refuse(
+        `Task "${task.id}"'s step records the deadline the host resolved.`
+      );
+    }
+    if (
+      step.kind === "enter" &&
+      deadlineOf(task) !== undefined &&
+      record.until === undefined
+    ) {
+      return this.#refuse(
+        `Task "${task.id}"'s enter step resolves its deadline.`
+      );
+    }
+    // A call task's step records its call's answer: a record without one,
+    // or after the call failed or before it answered, would let the
+    // isolate answer for the effect.
+    const callTask =
+      step.kind === "task" &&
+      task.kind === "call" &&
+      task.call.name !== "grasp.sleepUntil";
+    if (callTask && attempt.call !== "done") {
+      return this.#refuse(`Task "${task.id}"'s step makes its call.`);
     }
     const checks = checksOf[step.kind];
     const against: [DataCheck, Json][] = [
@@ -1143,7 +1828,7 @@ export class ResourceRunHost
     ];
     for (const [which, checked] of against) {
       const schema = checks.includes(which)
-        ? this.#schemaOf(task, which)
+        ? ResourceRunHost.#schemaOf(task, which)
         : undefined;
       if (schema !== undefined) {
         conform(schema, checked);

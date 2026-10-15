@@ -8,7 +8,7 @@ import type {
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { workContextSchema } from "@grasp-os/shared/permissions";
+import { codeSubjectId, workContextSchema } from "@grasp-os/shared/permissions";
 import type { CodeSubject } from "@grasp-os/shared/permissions";
 import { and, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -201,10 +201,10 @@ export interface StoredAnswer {
 
 const provenanceSchema = z.array(z.string());
 
-const subjectColumns = (subject: CodeSubject) =>
-  subject.type === "app"
-    ? { subjectType: subject.type, subjectId: subject.appId }
-    : { subjectType: subject.type, subjectId: subject.agentId };
+const subjectColumns = (subject: CodeSubject) => ({
+  subjectType: subject.type,
+  subjectId: codeSubjectId(subject),
+});
 
 const keyOf = (scope: IdempotencyScope) => {
   const { subjectType, subjectId } = subjectColumns(scope.subject);

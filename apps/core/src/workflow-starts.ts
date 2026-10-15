@@ -40,6 +40,7 @@ import { buildOf } from "./workflow-builds.ts";
 import type { SealedBuild } from "./workflow-builds.ts";
 import { frozenParams } from "./workflow-params.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
+import { workflowRoleSql } from "./workflow-roles.ts";
 import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 
 // Starting an independent workflow (platform specification 13.2, 15.1, 24):
@@ -228,28 +229,6 @@ const contractInputSchema = z.object({ input: z.json() });
 
 /** That `person` is an active member of the organization, as SQL. */
 const activeSql = (person: string): SQL => activeMember(person);
-
-/**
- * That `person` has a role in workflow `id` now, as SQL: an admin of the
- * organization, its owner, or someone it is shared with, as a person or
- * through a team they are in now (Better Auth's `team_members`, read in
- * this statement, never the session's list of teams). Only while they
- * are an active member.
- */
-const roleSql = (person: string, id: string): SQL => sql`(${activeSql(person)}
-  AND (${activeMember(person, ["admin"])}
-    OR EXISTS (SELECT 1 FROM workflow_resources AS owned
-      WHERE owned.id = ${id} AND owned.owner_id = ${person})
-    OR EXISTS (SELECT 1 FROM workflow_resource_members AS shared
-      WHERE shared.workflow_resource_id = ${id}
-        AND shared.member_type = 'person' AND shared.member_id = ${person})
-    OR EXISTS (SELECT 1 FROM workflow_resource_members AS shared
-      JOIN teams ON teams.id = shared.member_id
-        AND teams.organization_id = ${organizationId}
-      JOIN team_members ON team_members.team_id = shared.member_id
-        AND team_members.user_id = ${person}
-      WHERE shared.workflow_resource_id = ${id}
-        AND shared.member_type = 'team')))`;
 
 /**
  * That `person` has a role in App `app` now, as SQL: an admin of the
@@ -515,7 +494,7 @@ const ruleOf = async (
         triggerVersion: null,
         principal: person,
         actor: invoker.person.actor ?? actorOf(invoker.person),
-        holds: roleSql(person, id),
+        holds: workflowRoleSql(person, id),
       };
     }
     case "app": {
@@ -554,7 +533,7 @@ const ruleOf = async (
         triggerVersion: null,
         principal: onBehalfOf,
         actor: delegateActorOf(invoker.authority),
-        holds: sql`(${roleSql(onBehalfOf, id)} AND ${grantSql(
+        holds: sql`(${workflowRoleSql(onBehalfOf, id)} AND ${grantSql(
           allowingPermissionSql(subject, undefined, object, "start", true, {
             context: invoker.context,
             onBehalfOf,
@@ -584,7 +563,7 @@ const ruleOf = async (
         actor: { type: "system" },
         // Its principal must still have a role in the workflow: a trigger
         // never acts for someone the workflow is no longer shared with.
-        holds: sql`(${roleSql(trigger.principal, id)}
+        holds: sql`(${workflowRoleSql(trigger.principal, id)}
           AND EXISTS (SELECT 1 FROM trigger_resources AS live
             JOIN trigger_resource_versions AS current
               ON current.trigger_id = live.id AND current.version = live.current_version
