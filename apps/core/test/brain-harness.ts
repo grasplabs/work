@@ -59,7 +59,7 @@ import {
   transcriptOf,
   stubReader,
 } from "./brain-stub-model.ts";
-import type { StubTurn } from "./brain-stub-model.ts";
+import type { StubTurn, TranscriptPart } from "./brain-stub-model.ts";
 import {
   brainCollections,
   brainDocuments,
@@ -630,12 +630,12 @@ const readTextsOf = async (
   person: Person,
   place: Workspace,
   after: number
-): Promise<string[]> => {
+): Promise<{ at: number; text: string }[]> => {
   const events = await eventsAfter(after);
   // Explicit reads only: a search's snippets aren't recorded, so nothing
   // shows what it returned, and the evidence an answer needs is a whole
   // section, which the agent reads.
-  const reads = events.flatMap(({ action, actor, target, detail }) => {
+  const reads = events.flatMap(({ action, actor, target, detail, at }) => {
     const read = contentRead.safeParse(detail).data;
     return action === "knowledge.read" &&
       actor.type === "agent" &&
@@ -646,6 +646,7 @@ const readTextsOf = async (
           {
             id: target.id,
             section: "section" in read ? read.section : undefined,
+            at: Date.parse(at),
           },
         ]
       : [];
@@ -653,19 +654,48 @@ const readTextsOf = async (
   // A read the log recorded but Knowledge refused (a section that isn't
   // there) returned nothing: it backs no evidence.
   const texts = await Promise.all(
-    reads.map(async ({ id, section }) => {
+    reads.map(async ({ id, section, at }) => {
       try {
         const read = await person.api.knowledge.read(
           id,
           section === undefined ? {} : { section }
         );
-        return [read.text];
+        return [{ at, text: read.text }];
       } catch {
         return [];
       }
     })
   );
   return texts.flat();
+};
+
+/**
+ * Every request's parts, in order, each tool result backed by the reads
+ * its own code made: those after the request whose answer ran the code,
+ * and before the request that first carried its result back.
+ */
+const transcriptWithReads = (
+  requests: readonly GatewayRequest[],
+  reads: readonly { at: number; text: string }[]
+): TranscriptPart[] => {
+  const backings: string[][] = [];
+  return requests.flatMap(({ body, at }, index) => {
+    const since = requests[index - 1]?.at ?? Number.NEGATIVE_INFINITY;
+    let tool = 0;
+    return transcriptOf(body).map((part) => {
+      if (part.by !== "tool") {
+        return part;
+      }
+      // Each request carries the earlier results again: a result first
+      // seen here is the code's since the request before.
+      backings[tool] ??= reads
+        .filter((read) => read.at >= since && read.at < at)
+        .map(({ text }) => text);
+      const backing = backings[tool] ?? [];
+      tool += 1;
+      return { ...part, backing };
+    });
+  });
 };
 
 const runTrial = async (
@@ -750,8 +780,10 @@ const runTrial = async (
     modelInput: requests.flatMap(({ body }) => modelStrings(body)).join("\n"),
     // Every request in order: a long turn's last request may leave out
     // earlier results, which the model still read.
-    transcript: requests.flatMap(({ body }) => transcriptOf(body)),
-    readTexts: await readTextsOf(person, place, auditBefore),
+    transcript: transcriptWithReads(
+      requests,
+      await readTextsOf(person, place, auditBefore)
+    ),
     forbidden: forbiddenIn(task),
     stateChanged,
     ...(failure === undefined ? {} : { error: failure }),
@@ -886,6 +918,22 @@ export const runBrainBaseline = async (
     throw new RangeError("The baseline needs at least one repeat");
   }
   const tasks = tasksOf(split, { openSealed });
+  // Controls run last, on the corpus as the last window left it: only on
+  // tasks of the first window whose documents no window changes.
+  const changing = new Set(brainUpdates.map(({ document }) => document));
+  const unfit = controlTasks.filter((id) => {
+    const task = tasks.find((each) => each.id === id);
+    return (
+      task === undefined ||
+      task.window !== "t0" ||
+      task.documents.some((document) => changing.has(document))
+    );
+  });
+  if (controls.length > 0 && unfit.length > 0) {
+    throw new RangeError(
+      `Controls can't run on ${unfit.join(", ")}: not a first-window task of this split whose documents stay the same`
+    );
+  }
   const random = seededRandom(seed);
   const provider = providerOf(respond);
   const places = new Map<BrainPersona, Workspace>();

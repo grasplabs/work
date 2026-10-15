@@ -40,7 +40,6 @@ const observed = (changes: Partial<TrialObservation>): TrialObservation => {
     answer: "ANSWER: Marta Ruiz\nFrom [handbook/contracts.md#Lease]",
     modelInput,
     transcript: [{ by: "source", text: modelInput }],
-    readTexts: [],
     forbidden: ["CANARY-1"],
     stateChanged: false,
     latencyMs: 10,
@@ -115,30 +114,46 @@ describe("scoring a trial", () => {
       }).evidenceRecall,
       // Its code read the section through Knowledge and returned it.
       read: verdict(contract, {
-        transcript: [{ by: "tool", text: `Returned: ## Lease\n${marker}.` }],
-        readTexts: [`## Lease\n${marker}.`],
-      }).evidenceRecall,
-      // It made the marker in one step and read the section, unreturned,
-      // in another.
-      readUnreturned: verdict(contract, {
         transcript: [
-          { by: "tool", text: `Returned: ${marker}` },
-          { by: "tool", text: "Returned: done" },
+          {
+            by: "tool",
+            text: `Returned: ## Lease\n${marker}.`,
+            backing: [`## Lease\n${marker}.`],
+          },
         ],
-        readTexts: [`## Lease\n${marker} since 2026-10-01.`],
+      }).evidenceRecall,
+      // It made the marker in one step and read the section in a later
+      // one, returning nothing: the later read backs only its own step.
+      readLater: verdict(contract, {
+        transcript: [
+          { by: "tool", text: `Returned: ${marker}.`, backing: [] },
+          {
+            by: "tool",
+            text: "Returned: done",
+            backing: [`## Lease\n${marker}.`],
+          },
+        ],
       }).evidenceRecall,
       // It guessed in its code, then read the section that says it.
       guessedThenRead: verdict(contract, {
         transcript: [
           { by: "model", text: `search("${marker}")` },
-          { by: "tool", text: `Returned: ${marker}.` },
+          {
+            by: "tool",
+            text: `Returned: ${marker}.`,
+            backing: [`## Lease\n${marker}.`],
+          },
         ],
-        readTexts: [`## Lease\n${marker}.`],
       }).evidenceRecall,
       // It read another section of the document, then made the marker.
       readElsewhere: verdict(contract, {
-        transcript: [{ by: "tool", text: `Returned: ${marker}` }],
-        readTexts: ["## Renewals\nRenewed yearly."],
+        transcript: [
+          {
+            by: "tool",
+            text: `Returned: ${marker}`,
+            backing: ["## Renewals\nRenewed yearly."],
+          },
+        ],
       }).evidenceRecall,
       // It read it, then quoted it in its next code: still the source's.
       quoted: verdict(contract, {
@@ -150,10 +165,13 @@ describe("scoring a trial", () => {
       // Read in an earlier request, left out of the last one.
       dropped: verdict(contract, {
         transcript: [
-          { by: "tool", text: `Returned: ${marker}.` },
+          {
+            by: "tool",
+            text: `Returned: ${marker}.`,
+            backing: [`## Lease\n${marker}.`],
+          },
           { by: "source", text: "[earlier results left out]" },
         ],
-        readTexts: [`## Lease\n${marker}.`],
       }).completed,
       citationOnly: verdict(contract, {
         answer: "ANSWER: see [handbook/contracts.md#Marta Ruiz]",
@@ -168,7 +186,7 @@ describe("scoring a trial", () => {
       },
       constructed: 0,
       read: 1,
-      readUnreturned: 0,
+      readLater: 0,
       guessedThenRead: 1,
       readElsewhere: 0,
       quoted: 1,
