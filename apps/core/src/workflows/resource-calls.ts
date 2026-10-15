@@ -546,6 +546,13 @@ const callModel = async (
   // What refused the request, said as it was: the gateway reports any
   // failure of its own hooks as the model's.
   const refused: { by?: unknown } = {};
+  // Its attempt's deadline, as a signal: cleared once the call settles, so
+  // no timer outlives it.
+  const remaining = Math.max(1, Math.floor(effect.deadline - Date.now()));
+  const deadline = new AbortController();
+  const timer = setTimeout(() => {
+    deadline.abort(new DOMException("The attempt timed out", "TimeoutError"));
+  }, remaining);
   let answer: Awaited<ReturnType<ReturnType<typeof models>["call"]>>;
   try {
     answer = await models(env).call({
@@ -582,13 +589,13 @@ const callModel = async (
       // No longer than its attempt may run, from now through its admission
       // and its request: one past it is cut off, never left running (and
       // paid for) after the attempt timed out.
-      timeoutMs: Math.max(1, Math.floor(effect.deadline - Date.now())),
-      signal: AbortSignal.timeout(
-        Math.max(1, Math.floor(effect.deadline - Date.now()))
-      ),
+      timeoutMs: remaining,
+      signal: deadline.signal,
     });
   } catch (error) {
     throw refused.by ?? error;
+  } finally {
+    clearTimeout(timer);
   }
   return requireShape(descriptor, answer.output, "output");
 };
