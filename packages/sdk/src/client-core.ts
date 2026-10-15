@@ -810,6 +810,24 @@ const startAgain = (
 /** How often a client attaches again to a stream whose connection was lost. */
 const streamAttachAttempts = 8;
 
+/**
+ * How long a reconnect (`attach`) may take to open before it counts as one
+ * that failed: as long as the host keeps a run no one follows, so one that
+ * opens later finds nothing to follow anyway. A connection that arrives
+ * after it is let go of at once, its frames never delivered.
+ */
+const streamAttachOpenMs = streamIdleCancelMs;
+
+/**
+ * How long a stream whose connection was lost is recovered for, however
+ * the attempts go: past it, its outcome is unknown, with its key.
+ */
+const streamRecoverMs = 2 * 60_000;
+
+/** Whether recovering a stream stops, after `tries` since `since`. */
+const recoveryOver = (tries: number, since: number): boolean =>
+  tries > streamAttachAttempts || Date.now() - since >= streamRecoverMs;
+
 /** Whether `signal` was aborted, read afresh. */
 const isAborted = (signal: AbortSignal | undefined): boolean =>
   signal?.aborted === true;
@@ -1265,12 +1283,26 @@ export class GraspClient {
         }
       };
       let link: StreamLink;
+      // A reconnect that doesn't open in time is given up on: it counts as
+      // a failed attempt, never a wait without end.
+      const stalled = new AbortController();
+      const stall =
+        what === "attach"
+          ? setTimeout(() => {
+              stalled.abort();
+            }, streamAttachOpenMs)
+          : undefined;
       try {
         const opening = open(what, request, onFrame);
-        const arrived = await openedUnlessAborted(opening, signal);
+        const arrived = await openedUnlessAborted(
+          opening,
+          signal === undefined
+            ? stalled.signal
+            : AbortSignal.any([signal, stalled.signal])
+        );
         if (arrived === undefined) {
           live = false;
-          return { kind: "aborted" };
+          return isAborted(signal) ? { kind: "aborted" } : { kind: "lost" };
         }
         link = arrived;
         opened.resolve(true);
@@ -1281,6 +1313,8 @@ export class GraspClient {
           settled: readRejection(error),
           answered: false,
         };
+      } finally {
+        clearTimeout(stall);
       }
       if (what === "attach") {
         events?.onAttached();
@@ -1349,6 +1383,7 @@ export class GraspClient {
     let refused = 0;
     // Once a start may have reached the host, only ever attach.
     let what: "stream" | "attach" = "stream";
+    let recoveringSince: number | undefined;
     for (let tries = 1; ; tries += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one connection after another
       const followed = await follow(what);
@@ -1387,7 +1422,8 @@ export class GraspClient {
         }
       } else {
         what = "attach";
-        if (tries > streamAttachAttempts) {
+        recoveringSince ??= Date.now();
+        if (recoveryOver(tries, recoveringSince)) {
           // What it ran may have committed: the App's queries are read again.
           this.#changed(resourceId);
           throw clientError("stream.outcome_unknown", { idempotencyKey: key });

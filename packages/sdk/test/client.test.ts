@@ -615,13 +615,86 @@ describe("the session client and a streaming action's cancel", () => {
   });
 });
 
+describe("the session client and a reconnect that never opens", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("gives up on stalled reconnects, unknown with its key, and lets a late one go unheard", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    const stalled: PromiseWithResolvers<{ release: () => null }>[] = [];
+    let released = 0;
+    let heard = 0;
+    const late: ((frame: unknown) => void)[] = [];
+    const transport: ClientTransport = {
+      watch: unwatched,
+      call: async () => await Promise.reject(new Error("Not this.")),
+      stream: async (what, _request, onFrame) => {
+        if (what === "stream") {
+          await Promise.resolve();
+          // It started; its connection drops.
+          setTimeout(() => {
+            onFrame({ type: "closed" });
+          }, 0);
+          return { release: () => null };
+        }
+        // Every reconnect stops answering.
+        const opening = Promise.withResolvers<{ release: () => null }>();
+        stalled.push(opening);
+        late.push(onFrame);
+        return await opening.promise;
+      },
+      cancelStream: async () => await Promise.resolve({ requested: true }),
+    };
+    const client = new GraspClient(transport);
+    const outcome = failureOf(
+      client.stream(
+        api.notes.exportAll,
+        { format: "csv" },
+        {
+          onProgress: () => {
+            heard += 1;
+          },
+        }
+      )
+    );
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    const failure = await outcome;
+    expect(failure.code).toBe("stream.outcome_unknown");
+    expect(failure.details).toHaveProperty("idempotencyKey");
+    // The stalled reconnects open after all: let go of, never heard.
+    const release = (): null => {
+      released += 1;
+      return null;
+    };
+    for (const opening of stalled) {
+      opening.resolve({ release });
+    }
+    for (const onFrame of late) {
+      onFrame({ type: "progress", seq: 9, value: { done: 9 } });
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect({ released, heard }).toStrictEqual({
+      released: stalled.length,
+      heard: 0,
+    });
+  });
+});
+
 describe("the session client and a stream its caller stops following", () => {
-  it("reads the App's queries again once a stream that may have saved loses its follower", async () => {
+  it("never answers what was read before a stream that may have saved lost its follower", async () => {
+    const held = Promise.withResolvers<null>();
     let reads = 0;
     const transport: ClientTransport = {
+      watch: unwatched,
       call: async () => {
         reads += 1;
-        return await Promise.resolve(answered({ title: "Before" }));
+        if (reads === 1) {
+          // Read before the stream ran: answers what was there then.
+          await held.promise;
+          return answered({ title: "Before" });
+        }
+        return answered({ title: "After" });
       },
       // It started, and saved something its progress tells of; no result.
       stream: async (_what, _request, onFrame) => {
@@ -634,9 +707,7 @@ describe("the session client and a stream its caller stops following", () => {
       cancelStream: async () => await Promise.resolve({ requested: true }),
     };
     const client = new GraspClient(transport);
-    const internals = clientInternals(client);
-    const entry = internals.entry(api.notes.get, { id: noteId });
-    const unsubscribe = internals.subscribe(entry, unheard);
+    const before = client.query(api.notes.get, { id: noteId });
     await vi.waitFor(() => {
       expect(reads).toBe(1);
     });
@@ -659,11 +730,12 @@ describe("the session client and a stream its caller stops following", () => {
     await expect(stopped).resolves.toMatchObject({
       code: "stream.cancelled",
     });
-    // What it saved shows: the query read is read again.
-    await vi.waitFor(() => {
-      expect(reads).toBe(2);
-    });
-    unsubscribe();
+    // Asked after it stopped: a read sent after, never the one under way
+    // since before.
+    const after = client.query(api.notes.get, { id: noteId });
+    held.resolve(null);
+    await expect(before).resolves.toStrictEqual({ title: "Before" });
+    await expect(after).resolves.toStrictEqual({ title: "After" });
   });
 });
 
@@ -725,6 +797,7 @@ describe("the session client and a caller who leaves while a stream opens", () =
     const opening = Promise.withResolvers<null>();
     let released = 0;
     const transport: ClientTransport = {
+      watch: unwatched,
       call: async () => await Promise.reject(new Error("Not this.")),
       stream: async () => {
         await opening.promise;
@@ -760,6 +833,7 @@ describe("the session client and frames that arrive after the caller left", () =
     const opening = Promise.withResolvers<null>();
     const delivering = Promise.withResolvers<(frame: unknown) => void>();
     const transport: ClientTransport = {
+      watch: unwatched,
       call: async () => await Promise.reject(new Error("Not this.")),
       stream: async (_what, _request, onFrame) => {
         // The page relays frames as they come, before the open resolves.
