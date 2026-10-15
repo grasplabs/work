@@ -97,6 +97,25 @@ const approvedApp = async () => {
 
 type Approved = Awaited<ReturnType<typeof approvedApp>>;
 
+/**
+ * `approvedApp`, its data classified ordinary and shared with `other`: a
+ * screen of it runs without a lease of the caller's, so a lease signed
+ * for the frame's person is no fence on its own.
+ */
+const sharedOrdinaryApp = async () => {
+  const approved = await approvedApp();
+  const admin = await personApi("admin");
+  const { generation } = await admin.api.screenTrust.review(approved.app);
+  await admin.api.screenTrust.classify(approved.app, "ordinary", generation);
+  const other = await personApi("builder");
+  await approved.builder.api.apps.members.add(approved.app, {
+    type: "person",
+    id: other.userId,
+    role: "user",
+  });
+  return { approved, other };
+};
+
 /** A call's request, as the screen client writes it. */
 const requestFor = (
   { release }: Approved,
@@ -224,19 +243,8 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
     });
   });
 
-  it("refuses a call whose session is someone else's than the frame's, before it runs", async () => {
-    // Ordinary data, so a screen runs without a lease of the caller's: a
-    // lease signed for the frame's person is no fence on its own then.
-    const approved = await approvedApp();
-    const admin = await personApi("admin");
-    const { generation } = await admin.api.screenTrust.review(approved.app);
-    await admin.api.screenTrust.classify(approved.app, "ordinary", generation);
-    const other = await personApi("builder");
-    await approved.builder.api.apps.members.add(approved.app, {
-      type: "person",
-      id: other.userId,
-      role: "user",
-    });
+  it("refuses a call whose session is someone else's than the frame's, or that names nobody, before it runs", async () => {
+    const { approved, other } = await sharedOrdinaryApp();
     // The frame's person, and its save under a key whose answer was lost,
     // sent again once someone else's cookie is the browser's.
     const save = requestFor(
@@ -261,7 +269,8 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
       nobodyNamed: await refusalOf(await sentAs(other, null)),
     }).toStrictEqual({
       someoneElse: { status: 401, code: "auth.principal_changed" },
-      nobodyNamed: { status: 401, code: "auth.principal_changed" },
+      // A page older than the header: out of date, not someone else.
+      nobodyNamed: { status: 403, code: "screen.reload_required" },
     });
     await expect(titlesOf(approved)).resolves.toStrictEqual({
       ok: true,
@@ -283,6 +292,54 @@ describe("a screen calling its App's functions", { timeout: 120_000 }, () => {
       ok: true,
       value: ["Mine"],
     });
+  });
+
+  it("counts no call refused for its person against anyone's requests", async () => {
+    // As in the rate test below: the clock stopped, so what is admitted is
+    // exact.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    try {
+      const { approved, other } = await sharedOrdinaryApp();
+      const titles = requestFor(approved, "notes.titles", {});
+      const { lease } = approved;
+      const statuses = async (sent: Sent, count: number): Promise<number[]> => {
+        const seen: number[] = [];
+        for (let call = 0; call < count; call += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one request after another, as a page sends them
+          const response = await post(approved.app, titles, sent);
+          seen.push(response.status);
+          // oxlint-disable-next-line no-await-in-loop -- each body read so its request ends
+          await response.body?.cancel();
+        }
+        return seen;
+      };
+      const { burst } = screenLimits.requests;
+      const refused = {
+        someoneElse: await statuses(
+          { as: other, named: approved.builder.userId, lease },
+          burst
+        ),
+        nobodyNamed: await statuses(
+          { as: approved.builder, named: null, lease },
+          burst
+        ),
+      };
+      expect(refused).toStrictEqual({
+        someoneElse: Array.from({ length: burst }, () => 401),
+        nobodyNamed: Array.from({ length: burst }, () => 403),
+      });
+      // Each still has their whole budget: the builder's open of the
+      // screen counted one.
+      expect({
+        other: await statuses({ as: other, lease }, burst),
+        builder: await statuses({ as: approved.builder, lease }, burst - 1),
+      }).toStrictEqual({
+        other: Array.from({ length: burst }, () => 200),
+        builder: Array.from({ length: burst - 1 }, () => 200),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses another site, a body that isn't JSON, someone signed out and someone without a role", async () => {

@@ -14,7 +14,6 @@ import {
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 
 import { CoreLink } from "./core-link.ts";
-import type { LinkEnded } from "./core-link.ts";
 import {
   inTime,
   isMounted,
@@ -67,9 +66,9 @@ import type { FrameTarget } from "./screen-bridge.ts";
 // A frame is for the person its page's connection was first made for
 // (core-link.ts). When the browser's session turns out to be someone
 // else's (a connection made again, or a function call core refused with
-// `auth.principal_changed`), the frame is stopped and emptied, so nothing
-// the screen held for the first person, such as a save it would send
-// again, is held or sent as the next.
+// `auth.principal_changed`), or ends, the frame is stopped and emptied,
+// so nothing the screen held for the first person, such as their data or
+// a save it would send again, is left on the page or sent as the next.
 
 /** What the page shows about a screen besides the screen itself. */
 export type ScreenState =
@@ -116,6 +115,7 @@ const failures: Readonly<Record<string, FailureReason>> = {
   "screen.build_slow": "timed-out",
   "screen.unreviewed": "unreviewed",
   "screen.revoked": "revoked",
+  "auth.principal_changed": "principal-changed",
 };
 
 /** Why opening a screen failed, as the page says it. */
@@ -123,7 +123,8 @@ const failureOf = (error: unknown): FailureReason => {
   const code =
     roleErrors.codeOf(error) ??
     appErrors.codeOf(error) ??
-    screenErrors.codeOf(error);
+    screenErrors.codeOf(error) ??
+    authErrors.codeOf(error);
   return (code === undefined ? undefined : failures[code]) ?? "unknown";
 };
 
@@ -427,14 +428,13 @@ const runFrame = <Bundle extends FrameCode>(
 ): (() => void) => {
   const stopped = new AbortController();
   const cleanups: (() => void)[] = [];
-  const ended = Promise.withResolvers<LinkEnded>();
-  const link = new CoreLink(ended.resolve);
   const frameWindow = (): unknown => frame.contentWindow;
 
   /**
    * Stops it all, once: what waits for the frame stops waiting, the
    * bridge and its port close, timers end, and the page's connection for
-   * this frame closes, and with it what the frame followed in core.
+   * this frame closes (the first cleanup), and with it what the frame
+   * followed in core.
    */
   const stop = (): void => {
     if (stopped.signal.aborted) {
@@ -444,7 +444,6 @@ const runFrame = <Bundle extends FrameCode>(
     for (const cleanup of cleanups) {
       cleanup();
     }
-    link.close();
   };
 
   /**
@@ -461,16 +460,19 @@ const runFrame = <Bundle extends FrameCode>(
     onState(state);
   };
 
-  /** What the page shows once the link ends before the page closed it. */
-  const whenEnded = async (): Promise<void> => {
-    if ((await ended.promise) === "signed-out") {
-      onState({ status: "signed-out" });
-    } else {
-      // Nothing of the first person's stays, in the frame or its bridge.
-      fail({ status: "failed", reason: "principal-changed" });
-    }
-  };
-  void whenEnded();
+  // The link ending stops the frame, signed out or not: nothing of the
+  // person's stays on the page, in the frame or its bridge, for whoever
+  // uses the browser next.
+  const link = new CoreLink((why) => {
+    fail(
+      why === "signed-out"
+        ? { status: "signed-out" }
+        : { status: "failed", reason: "principal-changed" }
+    );
+  });
+  cleanups.push(() => {
+    link.close();
+  });
 
   // The frame loads one document: its own, which `ready` answers for. A
   // load after that is the screen sending its frame to another address,
@@ -567,14 +569,11 @@ const runFrame = <Bundle extends FrameCode>(
         fail({ status: "failed", reason: "timed-out" });
         return;
       }
-      const code = authErrors.codeOf(error);
-      if (code === "auth.unauthenticated") {
-        fail({ status: "signed-out" });
-      } else if (code === "auth.principal_changed") {
-        fail({ status: "failed", reason: "principal-changed" });
-      } else {
-        fail({ status: "failed", reason: failureOf(error) });
-      }
+      fail(
+        authErrors.codeOf(error) === "auth.unauthenticated"
+          ? { status: "signed-out" }
+          : { status: "failed", reason: failureOf(error) }
+      );
     }
   };
   void run();

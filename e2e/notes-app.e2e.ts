@@ -3,7 +3,14 @@ import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { notesAppFiles } from "./notes-app.ts";
-import { apiOf, pageOf, peopleIn, release, signInTo } from "./people.ts";
+import {
+  apiOf,
+  endSession,
+  pageOf,
+  peopleIn,
+  release,
+  signInTo,
+} from "./people.ts";
 
 // The Notes App end to end on the platform's own runtime and React SDK: a
 // builder's App of spec 8's layout, sealed and current, its screen in its
@@ -12,8 +19,9 @@ import { apiOf, pageOf, peopleIn, release, signInTo } from "./people.ts";
 // operation-bound create form and a record editor with explicit Save.
 // What a lost answer, a cancelled save or a reused key does is core's
 // own test, through the same client (apps/core/test/screen-client.test.ts).
-// A screen whose page connects again as someone else is stopped before
-// anything it holds is sent as them.
+// A screen whose page connects again as someone else, or calls core once
+// someone else signed in, is stopped before anything it holds is sent as
+// them; one whose person signed out is emptied too.
 
 /** A builder's new Notes App, released, and shared with `sharedWith`. */
 const notesApp = async (
@@ -233,4 +241,82 @@ test("a screen whose page connects again as someone else is stopped, and sends n
     timeout: 20_000,
   });
   expect(reached).toStrictEqual([]);
+});
+
+test("a screen whose function call core refuses as someone else's is stopped, while its connection holds", async ({
+  browser,
+}) => {
+  const { first, next } = peopleIn("notesAppTwoTabs");
+  const app = await notesApp(first, next);
+  const page = await pageOf(browser, first);
+  // What core answered each save: its status.
+  const answered: number[] = [];
+  page.on("response", (response) => {
+    if (
+      response.url().includes("/api/app-functions/") &&
+      (response.request().postData() ?? "").includes('"idempotencyKey"')
+    ) {
+      answered.push(response.status());
+    }
+  });
+  const screen = await openNotes(page, app);
+  await expect(screen.getByText("No notes yet.")).toBeVisible();
+
+  // Another tab signs in as someone else: the cookie changes, the page's
+  // connection doesn't. The first person's save goes with their cookie.
+  await signInTo(page.context(), next);
+  await createNote(screen, "Mine");
+
+  // Core refused it as someone else's, and the page stopped and emptied
+  // the frame.
+  await expect(
+    page.getByText("Someone else signed in on this browser")
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('iframe[title="notes app"]')).not.toHaveAttribute(
+    "src",
+    /./u
+  );
+  expect(answered.length).toBeGreaterThan(0);
+  expect(answered.every((status) => status === 401)).toBe(true);
+
+  // Tried again, the screen opens for the person signed in now, without
+  // the first person's note.
+  await page.getByRole("button", { name: "Try again" }).click();
+  const theirs = page.frameLocator('iframe[title="notes app"]');
+  await expect(theirs.getByText("No notes yet.")).toBeVisible({
+    timeout: 20_000,
+  });
+});
+
+test("a screen whose person signed out is emptied, so nothing of theirs stays on the page", async ({
+  browser,
+}) => {
+  const { first } = peopleIn("notesAppSignedOut");
+  const app = await notesApp(first);
+  const page = await pageOf(browser, first);
+  let drop: (() => Promise<void>) | undefined;
+  await page.routeWebSocket("**/rpc", (socket) => {
+    socket.connectToServer();
+    drop = async () => {
+      await socket.close();
+    };
+  });
+  const screen = await openNotes(page, app);
+  await createNote(screen, "Private");
+  await expect(
+    screen
+      .getByRole("list", { name: "Notes" })
+      .getByText("Private", { exact: true })
+  ).toBeVisible();
+
+  // Signed out elsewhere; the page hears of it when it connects again.
+  await endSession(first);
+  await drop?.();
+  await expect(page.getByText("Your session has ended")).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(page.locator('iframe[title="notes app"]')).not.toHaveAttribute(
+    "src",
+    /./u
+  );
 });

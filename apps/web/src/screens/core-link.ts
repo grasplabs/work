@@ -88,6 +88,8 @@ export class CoreLink {
   #delay = reconnectMs.first;
   /** Who the link is for, once it first connected. */
   #person: string | undefined;
+  /** Core's refusal that ended the link, once one did. */
+  #endedBy: Error | undefined;
   readonly #onEnded: (why: LinkEnded) => void;
 
   constructor(onEnded: (why: LinkEnded) => void) {
@@ -120,6 +122,9 @@ export class CoreLink {
    */
   async person(): Promise<string> {
     await this.#session;
+    if (this.#endedBy !== undefined) {
+      throw this.#endedBy;
+    }
     const person = this.#person;
     if (person === undefined || this.#closed) {
       throw closedError();
@@ -212,6 +217,8 @@ export class CoreLink {
         if (this.#closed || ended !== undefined) {
           if (ended !== undefined && !this.#closed) {
             // Closed first: the connection someone else's cookie made goes.
+            this.#endedBy =
+              code === undefined ? undefined : authErrors.create(code);
             this.close();
             this.#onEnded(ended);
           }
