@@ -778,15 +778,20 @@ export interface WorkflowLink {
   /**
    * Sends `request`, a command of the workflow `target` names, as a
    * mutation is sent: under `key`, sent again under it while its answer
-   * is lost (`onRecovering` told each time), resolving with the host's
-   * answer once it is durable, or rejecting with the host's refusal, or
-   * as uncertain with the key.
+   * is lost (`onRecovering` told each time) or isn't one `read` accepts,
+   * resolving with what `read` made of the host's answer once it is
+   * durable, or rejecting with the host's refusal, or as uncertain with
+   * the key.
    */
   readonly command: (
     target: SubmissionTarget,
     request: string,
     key: string,
-    onRecovering: () => void
+    events: {
+      readonly onRecovering: () => void;
+      /** The answer, read; undefined for one that isn't an answer. */
+      readonly read: (value: unknown) => unknown;
+    }
   ) => Promise<unknown>;
   /** Clears everything the client holds: the person or build lost access. */
   readonly fence: (refusal: GraspError) => void;
@@ -1013,6 +1018,21 @@ const withheldCode = (
   return lost || (isAction && ranUnderKeyCodes.has(code)) ? code : undefined;
 };
 
+/**
+ * `answered` with its value read by `read`, when given: one `read` doesn't
+ * accept is as good as lost.
+ */
+const readSettled = (
+  answered: Settled,
+  read: ((value: unknown) => unknown) | undefined
+): Settled => {
+  if (answered.kind !== "value" || read === undefined) {
+    return answered;
+  }
+  const value = read(answered.value);
+  return value === undefined ? { kind: "lost" } : { kind: "value", value };
+};
+
 /** What a submission does next after `settled` (see `#send`). */
 const submissionVerdict = (
   settled: Settled,
@@ -1189,13 +1209,13 @@ export class GraspClient {
         await client.#stream(reference, args, options, events),
       workflowLink: {
         watch: client.#transport?.watch,
-        command: async (target, request, key, onRecovering) =>
+        command: async (target, request, key, events) =>
           await client.#send(
             target,
             request,
             key,
             { scoped: canonicalJson([client.#generation, key]), input: "" },
-            onRecovering
+            events
           ),
         fence: (refusal) => {
           client.#fence(refusal);
@@ -2219,7 +2239,10 @@ export class GraspClient {
     request: string,
     key: string,
     held: { readonly scoped: string; readonly input: string },
-    onRecovering?: () => void
+    events?: {
+      readonly onRecovering: () => void;
+      readonly read: (value: unknown) => unknown;
+    }
   ): Promise<unknown> {
     const isAction = reference.kind === "action";
     // Bound to the person and the fence it was called under: one who signs
@@ -2233,7 +2256,11 @@ export class GraspClient {
       let lostSince: number | undefined;
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-        const settled = await this.#call(request, reference.resourceId, bound);
+        const answered = await this.#call(request, reference.resourceId, bound);
+        // An answer that isn't one says nothing of the outcome: it is
+        // recovered under the same key, as a lost one is, never taken for
+        // a refusal that would leave the caller to send it afresh.
+        const settled = readSettled(answered, events?.read);
         if (showsStale(settled, isAction)) {
           this.#changed(reference.resourceId);
         }
@@ -2262,7 +2289,7 @@ export class GraspClient {
         }
         if (verdict.unknown) {
           lostSince ??= now;
-          onRecovering?.();
+          events?.onRecovering();
         }
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
         await sleep(waitAfter(settled, tries));

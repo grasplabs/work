@@ -554,6 +554,8 @@ const nothingYet: WatchState<never> = Object.freeze({
 
 /** One subscription to the host, while something follows it. */
 interface Live {
+  /** How long a refusal pushed over it said to wait before following again. */
+  retryAfterMs: number;
   release: (() => void) | undefined;
   /** The revision of this subscription's latest push. */
   revision: number;
@@ -685,17 +687,17 @@ export class WorkflowChannel {
         idempotencyKey: key,
       }),
       key,
-      () => {
-        // A start shows only that it is under way (`isStarting`).
+      {
+        onRecovering: () => {
+          // A start shows only that it is under way (`isStarting`).
+        },
+        read: (value) => checked(descriptors.handle, value),
       }
     );
-    const handle = checked(descriptors.handle, answer);
-    if (handle === undefined) {
-      throw clientError("contract.invalid_receipt", { idempotencyKey: key });
-    }
-    // SAFETY: checked against `runHandleSchema` just above.
+    // SAFETY: the command resolves only with an answer `read` checked
+    // against `runHandleSchema`.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    return frozen(handle as RunHandle);
+    return frozen(answer as RunHandle);
   }
 
   /**
@@ -718,16 +720,21 @@ export class WorkflowChannel {
         idempotencyKey: key,
       }),
       key,
-      onRecovering
+      {
+        onRecovering,
+        read: (value) => {
+          // SAFETY: checked against `receiptSchema` as it is read.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          const receipt = checked(descriptors.receipt, value) as
+            | ControlReceipt
+            | undefined;
+          return receipt?.kind === kind ? receipt : undefined;
+        },
+      }
     );
-    const receipt = checked(descriptors.receipt, answer);
-    // SAFETY: checked against `receiptSchema` as it is read.
+    // SAFETY: the command resolves only with a receipt `read` accepted.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-    const typed = receipt as ControlReceipt | undefined;
-    if (typed === undefined || typed.kind !== kind) {
-      throw clientError("contract.invalid_receipt", { idempotencyKey: key });
-    }
-    return frozen(typed);
+    return frozen(answer as ControlReceipt);
   }
 
   #follow(
@@ -772,6 +779,7 @@ export class WorkflowChannel {
   #subscribe(entry: Watched<unknown>, failures: number): void {
     const live: Live = {
       release: undefined,
+      retryAfterMs: 0,
       revision: 0,
       failures,
       since: Date.now(),
@@ -893,6 +901,7 @@ export class WorkflowChannel {
       return;
     }
     if (entry.live === live) {
+      live.retryAfterMs = hintOf(error);
       // Worth following again (the request budget, say): what is shown
       // stays, its capabilities off until a fresh push.
       WorkflowChannel.#show(entry, { ...entry.state, fresh: false });
@@ -914,7 +923,11 @@ export class WorkflowChannel {
           this.#subscribe(entry, failures);
         }
       },
-      Math.max(atLeastMs, followDelay(Math.max(0, failures - 1)))
+      Math.max(
+        atLeastMs,
+        live.retryAfterMs,
+        followDelay(Math.max(0, failures - 1))
+      )
     );
   }
 

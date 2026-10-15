@@ -133,11 +133,6 @@ const clientErrors = {
       "The platform sent a run that doesn't fit its workflow's contract, so it isn't shown.",
     category: "contract",
   },
-  "contract.invalid_receipt": {
-    message:
-      "The platform admitted this, but answered something other than its receipt, so it can't be used. Whether it went through is recovered under its idempotency key.",
-    category: "uncertain",
-  },
   "contract.mismatch": {
     message:
       "This run belongs to another version of the workflow's contract than this screen was built for.",

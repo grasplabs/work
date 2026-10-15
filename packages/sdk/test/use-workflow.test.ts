@@ -48,7 +48,12 @@ interface Subscription {
   released: boolean;
   lost: boolean;
   readonly push: (revision: number, value: unknown) => void;
-  readonly refuse: (revision: number, code: string, category: string) => void;
+  readonly refuse: (
+    revision: number,
+    code: string,
+    category: string,
+    details?: Record<string, unknown>
+  ) => void;
   readonly lose: () => void;
 }
 
@@ -59,9 +64,20 @@ const fieldOf = (text: string, key: string): string | undefined => {
   return typeof value === "string" ? value : undefined;
 };
 
-const refusal = (code: string, category: string) => ({
+const refusal = (
+  code: string,
+  category: string,
+  details?: Record<string, unknown>
+) => ({
   ok: false,
-  error: { code, message: code, category, retryable: false, requestId: "r" },
+  error: {
+    code,
+    message: code,
+    category,
+    retryable: false,
+    requestId: "r",
+    ...(details === undefined ? {} : { details }),
+  },
 });
 
 const handleOf = (runId: string) => ({
@@ -118,8 +134,8 @@ const host = () => {
         push: (revision, value) => {
           onSnapshot({ revision, result: { ok: true, value } });
         },
-        refuse: (revision, code, category) => {
-          onSnapshot({ revision, result: refusal(code, category) });
+        refuse: (revision, code, category, details) => {
+          onSnapshot({ revision, result: refusal(code, category, details) });
         },
         lose: () => {
           subscription.lost = true;
@@ -388,6 +404,20 @@ describe("what a hook shows", () => {
     await vi.advanceTimersByTimeAsync(15_000);
     expect(page.open("run-1")).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(30_000);
+    expect(page.open("run-1")).toHaveLength(1);
+  });
+
+  it("waits as long as a refusal pushed over a subscription says once it is lost", async () => {
+    const page = host();
+    await showing(page);
+    const subscription = page.one("run-1");
+    subscription.refuse(2, "screen.rate_limited", "operational", {
+      retryAfterMs: 40_000,
+    });
+    subscription.lose();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(page.open("run-1")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(60_000);
     expect(page.open("run-1")).toHaveLength(1);
   });
 
@@ -665,15 +695,37 @@ describe("starting runs", () => {
     expect(hook.view()).toMatchObject({ status: "loading", runId: "run-7" });
   });
 
-  it("refuses an admission answer that isn't a run's handle, with its key to recover it", async () => {
+  it("recovers an admission answer that isn't a run's handle under the same key, never as a second start", async () => {
+    const page = host();
+    let attempts = 0;
+    page.answer(() => {
+      attempts += 1;
+      return attempts === 1
+        ? { value: { runId: 7 } }
+        : { value: handleOf("run-1") };
+    });
+    const hook = mount(page, null);
+    const started = hook.store.run({ noteId });
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(started).resolves.toStrictEqual(handleOf("run-1"));
+    const [sent, again] = page.commands;
+    expect(again?.idempotencyKey).toBe(sent?.idempotencyKey);
+    expect(hook.view()).toMatchObject({ runId: "run-1", isStarting: false });
+  });
+
+  it("leaves a start whose answers never fit uncertain, with its key, never retried afresh", async () => {
     const page = host();
     page.answer(() => ({ value: { runId: 7 } }));
     const hook = mount(page, null);
-    const refused = await failureOf(hook.store.run({ noteId }));
+    const refusing = failureOf(hook.store.run({ noteId }));
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    const refused = await refusing;
+    const keys = new Set(page.commands.map((sent) => sent.idempotencyKey));
     expect(refused).toMatchObject({
-      code: "contract.invalid_receipt",
+      code: "submission.outcome_unknown",
       details: { idempotencyKey: page.commands[0]?.idempotencyKey },
     });
+    expect(keys.size).toBe(1);
     expect(hook.view()).toMatchObject({ status: "idle", isStarting: false });
   });
 
