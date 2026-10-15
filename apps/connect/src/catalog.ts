@@ -1,8 +1,10 @@
 import {
+  catalogGroupOf,
   catalogLogoUrl,
   catalogToolsRequestSchema,
   composioToolkitSchema,
   connectErrors,
+  firstSentence,
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
 import type {
@@ -27,13 +29,28 @@ import { providers } from "./providers.ts";
 // for ten minutes (`cachedIn`), and only asked for while connect has its
 // key.
 
-/** How native providers are shown in the catalog. */
+/**
+ * How native providers are shown in the catalog. Both suites are first
+ * mail and calendar to the people connecting them, so that is their group,
+ * whatever their categories would say.
+ */
 const nativeShown: Record<
   OAuthProvider,
-  Pick<CatalogEntry, "name" | "categories">
+  Pick<CatalogEntry, "name" | "categories" | "description" | "group">
 > = {
-  microsoft: { name: "Microsoft 365", categories: ["Productivity"] },
-  google: { name: "Google Workspace", categories: ["Productivity"] },
+  microsoft: {
+    name: "Microsoft 365",
+    categories: ["Productivity"],
+    description:
+      "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+    group: "Email and calendar",
+  },
+  google: {
+    name: "Google Workspace",
+    categories: ["Productivity"],
+    description: "Gmail, Google Calendar, and files in Google Drive.",
+    group: "Email and calendar",
+  },
 };
 
 /**
@@ -208,6 +225,8 @@ const toolkitSchema = z.object({
     .object({
       categories: z.array(z.unknown()).default([]),
       tools_count: z.number().int().nonnegative().default(0),
+      /** Read on its own (`descriptionOf`): a bad one leaves the toolkit listed. */
+      description: z.unknown().optional(),
       /** Read on its own (`logoSourceOf`): a bad one leaves the toolkit listed. */
       logo: z.unknown().optional(),
     })
@@ -236,6 +255,18 @@ const logoSourceOf = (logo: unknown): URL | undefined => {
 };
 
 const categorySchema = z.object({ name: z.string().min(1).max(128) });
+
+/**
+ * Longest description of Composio's that is read: an entry carries only
+ * its first sentence, and anything longer than this is no description.
+ */
+const descriptionSchema = z.string().max(4096);
+
+/** A toolkit's description as its entry carries it, if it has one. */
+const descriptionOf = (description: unknown): string | null => {
+  const parsed = descriptionSchema.safeParse(description);
+  return parsed.success ? firstSentence(parsed.data) : null;
+};
 
 const toolSchema = z.object({
   slug: z.string().min(1).max(256),
@@ -318,18 +349,21 @@ const composioEntries = async (key: string): Promise<ListedToolkit[]> => {
   );
   return toolkits.filter(isListed).map(({ slug, name, meta }) => {
     const logoSource = logoSourceOf(meta.logo);
+    const categories = meta.categories.flatMap((category) => {
+      const parsed = categorySchema.safeParse(category);
+      return parsed.success ? [parsed.data.name] : [];
+    });
     return {
       entry: {
         source: "composio",
         id: slug,
         name,
-        categories: meta.categories.flatMap((category) => {
-          const parsed = categorySchema.safeParse(category);
-          return parsed.success ? [parsed.data.name] : [];
-        }),
+        categories,
         toolCount: meta.tools_count,
         logo:
           logoSource === undefined ? null : catalogLogoUrl("composio", slug),
+        description: descriptionOf(meta.description),
+        group: catalogGroupOf(categories),
       },
       logoSource,
     };

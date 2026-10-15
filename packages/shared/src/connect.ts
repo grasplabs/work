@@ -359,7 +359,142 @@ export interface CatalogEntry {
    * would call outside connect, and tell the provider who looks.
    */
   logo: string | null;
+  /**
+   * What it is for, in its provider's words: the first sentence of its
+   * description ({@link firstSentence}), or `null` when it has none.
+   */
+  description: string | null;
+  /** Which of Grasp's kinds of app it is ({@link catalogGroupOf}). */
+  group: CatalogGroup;
 }
+
+/**
+ * Grasp's kinds of app, in the order the Integrations page lists them. Each
+ * id is the group's English name, which the web app translates; `Other` is
+ * for an app none of the others fits.
+ */
+export const catalogGroups = [
+  "Email and calendar",
+  "Files and documents",
+  "Chat",
+  "CRM",
+  "Finance and accounting",
+  "HR",
+  "Signing",
+  "Marketing",
+  "Support",
+  "Projects and tasks",
+  "Forms and surveys",
+  "Data and analytics",
+  "AI",
+  "Commerce",
+  "Design and media",
+  "Developer tools",
+  "Other",
+] as const;
+export type CatalogGroup = (typeof catalogGroups)[number];
+
+/**
+ * Which group a category is in, by its words in lower case. The first
+ * group that fits wins, so the order is the precedence: "payroll" is HR
+ * before it is finance, "e-signature" signing before documents. These are
+ * the design prototype's words for Composio's categories.
+ */
+const groupWords: readonly (readonly [CatalogGroup, RegExp])[] = [
+  ["Signing", /signature/u],
+  ["HR", /human resources|hr talent|recruit|payroll/u],
+  [
+    "Finance and accounting",
+    /accounting|payment|invoic|tax|fundraising|banking|finance|proposal & invoice/u,
+  ],
+  ["CRM", /crm|contact management|sales/u],
+  ["Support", /customer support|help ?desk|customer appreciation|reviews/u],
+  [
+    "Marketing",
+    /marketing|newsletter|social media|ads|url shortener|seo|drip email|webinar/u,
+  ],
+  ["Email and calendar", /email|calendar|scheduling/u],
+  [
+    "Chat",
+    /chat|communication|phone|sms|notification|video conferencing|team collaboration/u,
+  ],
+  ["Forms and surveys", /form|survey/u],
+  [
+    "Projects and tasks",
+    /project|task|productivity|time tracking|event management|notes|bookmark/u,
+  ],
+  [
+    "Files and documents",
+    /document|file|spreadsheet|content|transcription|pdf/u,
+  ],
+  ["Data and analytics", /analytics|business intelligence|database|dashboard/u],
+  ["AI", /artificial intelligence|^ai |ai$|model context protocol/u],
+  ["Commerce", /commerce|fulfil|shipping|inventory/u],
+  [
+    "Design and media",
+    /image|design|video|audio|website builder|photo|music|gaming/u,
+  ],
+  [
+    "Developer tools",
+    /developer|server|it operations|security|internet of things|devops|app builder|cloud/u,
+  ],
+];
+
+/** The group one category is in, if any fits it. */
+const groupOfCategory = (category: string): CatalogGroup | undefined => {
+  const words = category.trim().toLowerCase();
+  return groupWords.find(([, pattern]) => pattern.test(words))?.[0];
+};
+
+/**
+ * The group of an app with these categories, as its provider names them
+ * (Composio's, its main one first): that of the first category a group
+ * fits, or `Other` when none does.
+ */
+export const catalogGroupOf = (categories: readonly string[]): CatalogGroup => {
+  for (const category of categories) {
+    const group = groupOfCategory(category);
+    if (group !== undefined) {
+      return group;
+    }
+  }
+  return "Other";
+};
+
+/** Longest description a catalog entry carries: one line a row can show. */
+const descriptionMaxLength = 140;
+
+const whitespace = /\s+/gu;
+/**
+ * Up to the first sentence's end: a stop, possibly inside closing quotes,
+ * followed by a space or the end, but not the stop of a common
+ * abbreviation ("Acme Inc. makes…").
+ */
+const firstSentenceOf =
+  /^.*?(?<!\b(?:Inc|Ltd|Co|Corp|LLC|etc|vs|e\.g|i\.e|approx|St|Dr|Mr|Mrs|Ms|No))[.!?]["'”’)]?(?= |$)/u;
+const lastWord = /\s+\S*$/u;
+const trailingPause = /[,;:]$/u;
+
+/**
+ * A description as a catalog entry carries it: its first sentence, its
+ * whitespace collapsed, cut at a word with an ellipsis where it is longer
+ * than {@link descriptionMaxLength}; `null` when nothing is left.
+ */
+export const firstSentence = (text: string): string | null => {
+  const clean = text.replaceAll(whitespace, " ").trim();
+  if (clean === "") {
+    return null;
+  }
+  const sentence = firstSentenceOf.exec(clean)?.[0] ?? clean;
+  if (sentence.length <= descriptionMaxLength) {
+    return sentence;
+  }
+  const cut = sentence
+    .slice(0, descriptionMaxLength - 2)
+    .replace(lastWord, "")
+    .replace(trailingPause, "");
+  return `${cut}…`;
+};
 
 /**
  * Where core serves catalog entries' logos, which connect fetches from
