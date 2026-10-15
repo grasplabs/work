@@ -29,7 +29,7 @@ import type {
   OutboxEntry,
 } from "./outbox-delivery.ts";
 import { grantedPermissions } from "./permissions.ts";
-import { receiptOf } from "./workflow-starts.ts";
+import { isStaleRefusal, receiptOf } from "./workflow-starts.ts";
 
 // Starting workflows from an App's server functions (spec 7.4, 9.5): an
 // action's `ctx.startWorkflow`, made as it runs, and a mutation's
@@ -60,8 +60,9 @@ import { receiptOf } from "./workflow-starts.ts";
 // - A benign change racing a dispatch (a parameter edit, a member added):
 //   the admitting statement refuses a start whose decision went stale as
 //   `workflow.start_denied`, so the dispatch decides again before it
-//   takes that for an answer; only a refusal a fresh decision repeats
-//   settles the entry.
+//   takes that for an answer; only a refusal a fresh decision makes
+//   settles the entry. Decisions that all went stale answer nothing: the
+//   entry is handed over again later (`isStaleRefusal`).
 // - An undeclared workflow: the operation host starts only an alias the
 //   function lists and the App declares (operations.ts); an alias the App
 //   doesn't bind is `workflow.app_binding_unavailable`.
@@ -295,15 +296,16 @@ export const dispatchStartIntent = async (
       return "delivered";
     } catch (error) {
       refusal = error;
-      if (
-        isTransient(error) ||
-        workflowResourceErrors.codeOf(error) !== "workflow.start_denied"
-      ) {
+      // Only a refusal of a decision gone stale is decided again; one a
+      // fresh decision made is the answer.
+      if (!isStaleRefusal(error)) {
         break;
       }
     }
   }
-  if (isTransient(refusal)) {
+  // Every decision went stale (edits racing each one): no answer yet, so
+  // the outbox hands it over again later, as for any transient refusal.
+  if (isTransient(refusal) || isStaleRefusal(refusal)) {
     if (!isExpectedError(refusal)) {
       log.error("workflow.start_intent_failed", {
         entry: entry.id,

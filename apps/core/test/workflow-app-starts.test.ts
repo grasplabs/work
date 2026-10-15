@@ -172,6 +172,30 @@ const flood = mutation({
   },
 });
 
+/**
+ * Stages starts whose inputs, each within its own bound, together take
+ * more than a commit holds, past every refusal: how many were refused.
+ */
+const bulky = mutation({
+  args: {},
+  returns: v.number(),
+  uses: [followUp],
+  handler: async (ctx) => {
+    let refused = 0;
+    for (let index = 0; index < 9; index += 1) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one start after the other
+        await ctx.afterCommit.start(followUp, {
+          who: `${index}`.padEnd(120 * 1024, "x"),
+        });
+      } catch {
+        refused += 1;
+      }
+    }
+    return refused;
+  },
+});
+
 const plainMutation = mutation({
   args: {},
   returns: v.string(),
@@ -189,6 +213,7 @@ const startsApp = registerApp({
       guarded,
       kickOff,
       flood,
+      bulky,
       plainAction,
       plainMutation,
     },
@@ -451,6 +476,7 @@ const kinds = {
   "requests.submit": "mutation",
   "requests.guarded": "mutation",
   "requests.flood": "mutation",
+  "requests.bulky": "mutation",
   "requests.kickOff": "action",
   "requests.plainAction": "action",
   "requests.plainMutation": "mutation",
@@ -1152,6 +1178,36 @@ describe("what a start rechecks, and records", () => {
     }).toStrictEqual({ answer: "delivered", receipts: 1 });
   });
 
+  it("hands a start back to its outbox while every decision goes stale, and starts it once the edits stop", async () => {
+    const fx = await fixture();
+    const edits = { revision: 0 };
+    const db = racingDb(
+      async () => {
+        await setWorkflowParams(env, fx.ada, fx.workflowId, {
+          expectedRevision: edits.revision,
+          values: { greeting: `Hi ${edits.revision}` },
+        });
+        edits.revision += 1;
+      },
+      /insert into "workflow_start_receipts"/iu,
+      Number.POSITIVE_INFINITY
+    );
+    const entry = entryOf(fx, fx.bob);
+    const busy = await dispatched({ ...env, DB: db }, entry);
+    const later = await dispatched(env, { ...entry, attempts: 1 });
+    expect({
+      busy,
+      later,
+      refused: await detailsOf("workflow.start_intent.refused", fx.app),
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({
+      busy: "workflow.start_denied",
+      later: "delivered",
+      refused: [],
+      receipts: 1,
+    });
+  });
+
   it("keys each commit's start by its outbox entry, so a later commit under a reused mutation key starts anew", async () => {
     const fx = await fixture();
     const receipt = unique();
@@ -1187,6 +1243,22 @@ describe("what a start rechecks, and records", () => {
       // The call's own, one per start a commit may hold, and the commit's.
       passes: gate.passes,
     }).toStrictEqual({ refused: 24, passes: 18 });
+  });
+
+  it("refuses a start its commit has no room for where the handler may catch it, and commits the rest", async () => {
+    const fx = await fixture();
+    const staged = await call(fx, fx.bob, "requests.bulky", {});
+    const refused = answerOf(staged);
+    const outbox = await settledOf(fx.store);
+    expect({
+      committed: staged.ok,
+      someRefused: typeof refused === "number" && refused > 0 && refused < 9,
+      stagedTheRest: outbox.length === 9 - Number(refused),
+    }).toStrictEqual({
+      committed: true,
+      someRefused: true,
+      stagedTheRest: true,
+    });
   });
 
   it("records an unreadable intent, and one whose last attempt fails, as it gives them up", async () => {

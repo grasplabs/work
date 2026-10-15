@@ -983,6 +983,11 @@ interface Staging {
   readonly stagedAt: number;
   /** The bytes of the writes staged so far, as UTF-8 JSON. */
   readonly bytes: () => number;
+  /**
+   * Counts an intent the commit carries against the bytes it stages, or
+   * refuses it (`mutation.too_large`) without counting it.
+   */
+  readonly reserve: (intent: Json) => void;
   readonly stage: (request: unknown) => Promise<unknown>;
   /**
    * The first write the host refused to stage, if any: App code may not
@@ -1046,18 +1051,22 @@ const stagingFor = (
   const writes: StagedWrites["writes"] = [];
   let staged = 2;
   /**
-   * Stages `write`, refused (`mutation.too_large`) when it would take the
-   * staged writes past `stagedMaxBytes`, so what a mutation stages always
-   * fits its commit, with its result.
+   * Counts `value`'s bytes as staged, refused (`mutation.too_large`) when
+   * they would take what the mutation stages (its writes and the intents
+   * its commit carries) past `stagedMaxBytes`, so it always fits its
+   * commit, with its result.
    */
-  const push = (write: StagedWrites["writes"][number]): void => {
-    const bytes = bytesOf(write) + 1;
+  const take = (value: Json): void => {
+    const bytes = bytesOf(value) + 1;
     if (staged + bytes > stagedMaxBytes) {
       throw operationErrors.create("mutation.too_large", {
         maxStagedBytes: stagedMaxBytes,
       });
     }
     staged += bytes;
+  };
+  const push = (write: StagedWrites["writes"][number]): void => {
+    take(write);
     writes.push(write);
   };
   let refused: Error | undefined;
@@ -1157,6 +1166,7 @@ const stagingFor = (
   return {
     stagedAt,
     bytes: () => staged,
+    reserve: take,
     stage,
     refused: () => refused,
     remember: (error: Error) => {
@@ -2598,20 +2608,25 @@ const runMutation = async (
               });
             }
             placed += 1;
+            let intent: NonNullable<Commit["intents"]>[number];
             try {
               // The one gate, as for a resource request: staged only while
               // the caller may still act. Its commit is admitted again, and
               // the start itself once more as it is dispatched.
               await admit(invocation);
+              // Its key is its outbox entry's ID, given as it commits.
+              intent = {
+                kind: "workflow.start",
+                data: starts.intent(start.alias, start.input),
+              };
+              // In the commit's bound with its writes, or refused here,
+              // where the handler may catch it, never by the commit.
+              staging.reserve(intent);
             } catch (error) {
               placed -= 1;
               throw error;
             }
-            // Its key is its outbox entry's ID, given as it commits.
-            intents.push({
-              kind: "workflow.start",
-              data: starts.intent(start.alias, start.input),
-            });
+            intents.push(intent);
             return null;
           },
         },

@@ -210,6 +210,19 @@ const refusedStart = async (
   ]);
 };
 
+/**
+ * The refusals of starts whose decision went stale before they were
+ * admitted: the admitting statement found what was decided no longer
+ * held. To the caller they are `workflow.start_denied` like any other (it
+ * learns nothing more), but a caller that decides again (a commit's
+ * dispatch) can tell them from a decision that denied.
+ */
+const staleRefusals = new WeakSet<object>();
+
+/** Whether `error` refused a start whose decision went stale. */
+export const isStaleRefusal = (error: unknown): boolean =>
+  typeof error === "object" && error !== null && staleRefusals.has(error);
+
 /** The input descriptor stored with a version's contract. */
 const contractInputSchema = z.object({ input: z.json() });
 
@@ -1016,11 +1029,14 @@ export const admitWorkflowStart = async (
     detail,
     reason
   );
-  throw limited
-    ? workflowResourceErrors.create("workflow.run_limit", {
-        limit: maxLiveRunsPerPrincipal,
-      })
-    : denied();
+  if (limited) {
+    throw workflowResourceErrors.create("workflow.run_limit", {
+      limit: maxLiveRunsPerPrincipal,
+    });
+  }
+  const refused = denied();
+  staleRefusals.add(refused);
+  throw refused;
 };
 
 /**
