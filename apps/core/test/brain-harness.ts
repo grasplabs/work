@@ -55,6 +55,7 @@ import {
   brainStubModel,
   modelStrings,
   searchedSections,
+  sourceStrings,
   stubReader,
 } from "./brain-stub-model.ts";
 import type { StubTurn } from "./brain-stub-model.ts";
@@ -621,6 +622,7 @@ const runTrial = async (
     cold,
     answer,
     modelInput: requests.flatMap(({ body }) => modelStrings(body)).join("\n"),
+    sourceInput: requests.flatMap(({ body }) => sourceStrings(body)).join("\n"),
     forbidden: forbiddenIn(task),
     stateChanged: (await stateFingerprint()) !== stateBefore,
     ...(failure === undefined ? {} : { error: failure }),

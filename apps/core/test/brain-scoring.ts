@@ -19,8 +19,14 @@ export interface TrialObservation {
   cold: boolean;
   /** The agent's last answer; empty when the trial failed. */
   answer: string;
-  /** Every string the model was sent in the trial, joined. */
+  /** Every string the model was sent in the trial, joined: for leaks. */
   modelInput: string;
+  /**
+   * What of that came from sources, not from the model itself: the
+   * instructions and memory, what the person said, the sources given and
+   * what tools returned. Evidence counts only when it is here.
+   */
+  sourceInput: string;
   /** Strings that must not reach a model or answer in this trial. */
   forbidden: readonly string[];
   /** Whether stored state changed during the trial. */
@@ -151,7 +157,11 @@ export const scoreTrial = (
 ): TrialScore => {
   const failed = observed.error !== undefined;
   const answer = normalized(observed.answer);
+  // What the answer says, its citations aside: a fact named only in a
+  // citation's label isn't an answer.
+  const said = normalized(observed.answer.replaceAll(citation, " "));
   const input = normalized(observed.modelInput);
+  const sources = normalized(observed.sourceInput);
   const leaks = observed.forbidden.filter((secret) => {
     const forbidden = normalized(secret);
     return input.includes(forbidden) || answer.includes(forbidden);
@@ -181,7 +191,7 @@ export const scoreTrial = (
     };
   }
   const reached = expect.evidence.filter(({ marker }) =>
-    input.includes(normalized(marker))
+    sources.includes(normalized(marker))
   ).length;
   const cited = citationsOf(observed.answer);
   const supported = cited.filter((source) =>
@@ -189,8 +199,8 @@ export const scoreTrial = (
   ).length;
   const answered = !failed && !abstained;
   const right =
-    expect.facts.every((fact) => says(answer, fact)) &&
-    !(expect.forbidden ?? []).some((stale) => holds(answer, normalized(stale)));
+    expect.facts.every((fact) => says(said, fact)) &&
+    !(expect.forbidden ?? []).some((stale) => holds(said, normalized(stale)));
   return {
     ...common,
     evidenceRecall: reached / expect.evidence.length,

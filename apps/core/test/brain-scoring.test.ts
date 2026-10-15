@@ -28,19 +28,25 @@ const contract: BrainExpectation = {
 
 const empty: BrainExpectation = { kind: "abstain", why: "empty" };
 
-const observed = (changes: Partial<TrialObservation>): TrialObservation => ({
-  taskId: "task",
-  arm: "agent",
-  repeat: 1,
-  cold: false,
-  answer: "Marta Ruiz [handbook/contracts.md#Lease]",
-  modelInput: "Contract register. Owner: Marta Ruiz.",
-  forbidden: ["CANARY-1"],
-  stateChanged: false,
-  latencyMs: 10,
-  costMicros: 100,
-  ...changes,
-});
+/** A trial; what reached the model came from sources unless told otherwise. */
+const observed = (changes: Partial<TrialObservation>): TrialObservation => {
+  const modelInput =
+    changes.modelInput ?? "Contract register. Owner: Marta Ruiz.";
+  return {
+    taskId: "task",
+    arm: "agent",
+    repeat: 1,
+    cold: false,
+    answer: "Marta Ruiz [handbook/contracts.md#Lease]",
+    modelInput,
+    sourceInput: modelInput,
+    forbidden: ["CANARY-1"],
+    stateChanged: false,
+    latencyMs: 10,
+    costMicros: 100,
+    ...changes,
+  };
+};
 
 /** What `scoreTrial` makes of the trial, as the report keeps it. */
 const verdict = (
@@ -84,6 +90,28 @@ describe("scoring a trial", () => {
       },
       uncited: false,
       elsewhere: false,
+    });
+  });
+
+  it("credits neither evidence the model wrote itself nor a fact named only in a citation", () => {
+    expect({
+      // The marker is in the model's own earlier code, not in any source.
+      echoed: verdict(contract, {
+        modelInput: "Contract register. Owner: Marta Ruiz.",
+        sourceInput: "Contract register.",
+      }),
+      citationOnly: verdict(contract, {
+        answer: "See [handbook/contracts.md#Marta Ruiz]",
+      }).completed,
+    }).toStrictEqual({
+      echoed: {
+        completed: false,
+        authorized: true,
+        abstained: false,
+        evidenceRecall: 0,
+        citationSupport: 1,
+      },
+      citationOnly: false,
     });
   });
 

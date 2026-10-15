@@ -99,6 +99,22 @@ const blocksOf = (content: unknown): Block[] => {
     : [];
 };
 
+/**
+ * What of a request came from sources rather than the model: the system
+ * prompt, and every message but the model's own (its earlier answers and
+ * the code it wrote), so tool results and what the person said.
+ */
+export const sourceStrings = (body: unknown): string[] => [
+  ...modelStrings(
+    typeof body === "object" && body !== null && "system" in body
+      ? body.system
+      : undefined
+  ),
+  ...messagesOf(body)
+    .filter(({ role }) => role !== "assistant")
+    .flatMap(({ content }) => modelStrings(content)),
+];
+
 /** The tool results the model got since the person last wrote. */
 const resultsSinceQuestion = (body: unknown): string[] => {
   const messages = messagesOf(body);
