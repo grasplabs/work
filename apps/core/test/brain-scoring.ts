@@ -29,7 +29,10 @@ export interface TrialObservation {
    * never where the model wrote it, or made it in code, itself.
    */
   transcript: readonly TranscriptPart[];
-  /** What each Knowledge read of the agent's in the trial returned. */
+  /**
+   * The text of what the agent's Knowledge reads and searches in the trial
+   * reached: each section read, each document read or found.
+   */
   readTexts: readonly string[];
   /** Strings that must not reach a model or answer in this trial. */
   forbidden: readonly string[];

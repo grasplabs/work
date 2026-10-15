@@ -614,29 +614,42 @@ const sectionDetail = z.object({ section: z.int().min(0) });
 
 /**
  * What the persona's agent read through Knowledge since audit position
- * `after`, as the audit log records each read (a document, or one of its
- * sections) and as the document holds it, read again as the person it
+ * `after`, as the audit log records each read (a document, one of its
+ * sections, or the documents a search found) and as the document holds it, read again as the person it
  * acted for: where a tool result's evidence must come from. Read after
  * the trial's state is taken, as the reads are recorded too.
  */
 const readTextsOf = async (
+  company: BrainCompany,
   person: Person,
   place: Workspace,
   after: number
 ): Promise<string[]> => {
   const events = await eventsAfter(after);
-  const reads = events.flatMap(({ action, actor, target, detail }) =>
-    action === "knowledge.read" &&
-    actor.type === "agent" &&
-    actor.agentId === place.agent.agentId &&
-    target?.type === "document"
-      ? [
+  const documentIds = new Set(
+    [...company.documents.values()].map(({ id }) => id)
+  );
+  const reads = events.flatMap(
+    ({ action, actor, target, detail, provenance }) => {
+      if (actor.type !== "agent" || actor.agentId !== place.agent.agentId) {
+        return [];
+      }
+      if (action === "knowledge.read" && target?.type === "document") {
+        return [
           {
             id: target.id,
             section: sectionDetail.safeParse(detail).data?.section,
           },
-        ]
-      : []
+        ];
+      }
+      // A search returns snippets of the documents it found, which its
+      // provenance names: their text may back what the search returned.
+      return action === "knowledge.search"
+        ? provenance
+            .filter((id) => documentIds.has(id))
+            .map((id) => ({ id, section: undefined }))
+        : [];
+    }
   );
   // A read the log recorded but Knowledge refused (a section that isn't
   // there) returned nothing: it backs no evidence.
@@ -739,7 +752,7 @@ const runTrial = async (
     // Every request in order: a long turn's last request may leave out
     // earlier results, which the model still read.
     transcript: requests.flatMap(({ body }) => transcriptOf(body)),
-    readTexts: await readTextsOf(person, place, auditBefore),
+    readTexts: await readTextsOf(company, person, place, auditBefore),
     forbidden: forbiddenIn(task),
     stateChanged,
     ...(failure === undefined ? {} : { error: failure }),
