@@ -19,6 +19,13 @@ export const appFunctionPath = "/api/app-functions";
 /** The header that carries the frame's lease on a function call. */
 export const screenLeaseHeader = "x-grasp-screen-lease";
 
+/**
+ * The header that names, on a function call, the person the page's frame
+ * was opened for: core refuses the call when the session cookie is
+ * someone else's (`auth.principal_changed`).
+ */
+export const screenPersonHeader = "x-grasp-screen-person";
+
 /** Where core serves a screen's modules to its frame, each by its hash. */
 export const screenModulePath = "/screen-modules";
 

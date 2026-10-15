@@ -18,6 +18,7 @@ const failureMessages: Readonly<Record<FailureReason, MessageDescriptor>> = {
   disconnected: msg`This app lost its connection to the page and was stopped.`,
   unreviewed: msg`Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page.`,
   revoked: msg`The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page.`,
+  "principal-changed": msg`Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now.`,
   unknown: msg`The app couldn't be loaded.`,
 };
 

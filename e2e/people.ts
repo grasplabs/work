@@ -160,6 +160,7 @@ const cast = {
   screenWorkflows: { builder: "builder", admin: "admin" },
   screenApproval: { builder: "builder", admin: "admin" },
   notesApp: { builder: "builder" },
+  notesAppSwitch: { first: "builder", next: "user" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },

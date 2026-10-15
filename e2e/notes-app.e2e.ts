@@ -3,7 +3,7 @@ import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { notesAppFiles } from "./notes-app.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, pageOf, peopleIn, release, signInTo } from "./people.ts";
 
 // The Notes App end to end on the platform's own runtime and React SDK: a
 // builder's App of spec 8's layout, sealed and current, its screen in its
@@ -12,16 +12,26 @@ import { apiOf, pageOf, peopleIn, release } from "./people.ts";
 // operation-bound create form and a record editor with explicit Save.
 // What a lost answer, a cancelled save or a reused key does is core's
 // own test, through the same client (apps/core/test/screen-client.test.ts).
+// A screen whose page connects again as someone else is stopped before
+// anything it holds is sent as them.
 
-/** A builder's new Notes App, released. */
+/** A builder's new Notes App, released, and shared with `sharedWith`. */
 const notesApp = async (
-  builder: Parameters<typeof apiOf>[0]
+  builder: Parameters<typeof apiOf>[0],
+  sharedWith?: { userId: string }
 ): Promise<string> => {
   const name = `Notes ${crypto.randomUUID().slice(0, 8)}`;
   const { core, api } = apiOf(builder);
   try {
     const { id } = await api.apps.create({ name });
     await release(api, id, notesAppFiles(), name);
+    if (sharedWith !== undefined) {
+      await api.apps.members.add(id, {
+        type: "person",
+        id: sharedWith.userId,
+        role: "user",
+      });
+    }
     return id;
   } finally {
     core[Symbol.dispose]();
@@ -146,4 +156,81 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
     .getByRole("button", { name: "Delete Send the invoice" })
     .click();
   await expect(reloaded.getByText("No notes yet.")).toBeVisible();
+});
+
+test("a screen whose page connects again as someone else is stopped, and sends nothing of the first person's as them", async ({
+  browser,
+}) => {
+  // Someone else may use the App and its data is ordinary, so a save sent
+  // again under their cookie would run, and commit, as them.
+  const { first, next } = peopleIn("notesAppSwitch");
+  const app = await notesApp(first, next);
+  const page = await pageOf(browser, first);
+
+  // The page's one connection (this route has no shell), dropped at will,
+  // and refused while the browser's cookie changes hands.
+  let drop: (() => Promise<void>) | undefined;
+  let refuse = false;
+  await page.routeWebSocket("**/rpc", async (socket) => {
+    if (refuse) {
+      await socket.close();
+      return;
+    }
+    socket.connectToServer();
+    drop = async () => {
+      await socket.close();
+    };
+  });
+  // Saves are lost on the way while the first person's save is uncertain;
+  // after that, every save that reaches core is counted.
+  let loseSaves = true;
+  let lost = 0;
+  const reached: string[] = [];
+  await page.route("**/api/app-functions/**", async (route) => {
+    const body = route.request().postData() ?? "";
+    if (body.includes('"idempotencyKey"')) {
+      if (loseSaves) {
+        lost += 1;
+        await route.abort();
+        return;
+      }
+      reached.push(body);
+    }
+    await route.continue();
+  });
+
+  const screen = await openNotes(page, app);
+  await expect(screen.getByText("No notes yet.")).toBeVisible();
+  // The first person's save: its answer lost, so the client sends it again
+  // under the same key until the host answers.
+  await createNote(screen, "Mine");
+  await expect.poll(() => lost).toBeGreaterThan(0);
+
+  // The connection drops, and the browser's cookie becomes someone else's
+  // (another tab signed in as them) before it connects again.
+  refuse = true;
+  await drop?.();
+  await signInTo(page.context(), next);
+  loseSaves = false;
+  refuse = false;
+
+  // Connected again as them: the screen is stopped and its frame emptied,
+  // and nothing the first person's screen held reached core.
+  await expect(
+    page.getByText("Someone else signed in on this browser")
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator('iframe[title="notes app"]')).not.toHaveAttribute(
+    "src",
+    /./u
+  );
+  expect(reached).toStrictEqual([]);
+
+  // Tried again, the screen opens for the person signed in now, without
+  // the first person's note.
+  await page.getByRole("button", { name: "Try again" }).click();
+  const theirs = page.frameLocator('iframe[title="notes app"]');
+  await expect(theirs.getByText("No notes yet.")).toBeVisible({
+    timeout: 20_000,
+  });
+  expect(reached).toStrictEqual([]);
 });

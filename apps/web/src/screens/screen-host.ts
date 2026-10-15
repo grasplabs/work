@@ -9,10 +9,12 @@ import {
   screenFramePath,
   screenLeaseHeader,
   screenLimits,
+  screenPersonHeader,
 } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 
 import { CoreLink } from "./core-link.ts";
+import type { LinkEnded } from "./core-link.ts";
 import {
   inTime,
   isMounted,
@@ -61,6 +63,13 @@ import type { FrameTarget } from "./screen-bridge.ts";
 // at the page's next check) the frame is emptied, and with it what the
 // screen had been handed. That is all the page can take back; what a
 // screen sent elsewhere before, it can't.
+//
+// A frame is for the person its page's connection was first made for
+// (core-link.ts). When the browser's session turns out to be someone
+// else's (a connection made again, or a function call core refused with
+// `auth.principal_changed`), the frame is stopped and emptied, so nothing
+// the screen held for the first person, such as a save it would send
+// again, is held or sent as the next.
 
 /** What the page shows about a screen besides the screen itself. */
 export type ScreenState =
@@ -85,6 +94,8 @@ export type FailureReason =
   | "unreviewed"
   /** The approval of the screen's code was taken back. */
   | "revoked"
+  /** Someone else signed in on the browser since the frame was opened. */
+  | "principal-changed"
   | "unknown";
 
 /**
@@ -138,8 +149,14 @@ const on = async <T>(
   return await run(session);
 };
 
-/** Why core no longer hands a frame's build its App's data. */
-type Refused = Extract<FailureReason, "unreviewed" | "revoked">;
+/**
+ * Why core's answer stops a frame: its build no longer gets the App's
+ * data, or the browser's session is someone else's now.
+ */
+type Refused = Extract<
+  FailureReason,
+  "unreviewed" | "revoked" | "principal-changed"
+>;
 
 /**
  * Asks core whether the frame's build still gets its App's data, and
@@ -190,13 +207,15 @@ const callFailed = (): Error =>
 
 /**
  * Calls one of `app`'s functions with `request`, as the frame sent it,
- * for the build `lease` names (core's app-function-route.ts): a plain
- * request, so core bounds its bytes as it reads them. Core's answer, or
- * its refusal as an error with its code.
+ * for the build `lease` names and the person the frame was opened for
+ * (core's app-function-route.ts): a plain request, so core bounds its
+ * bytes as it reads them. Core's answer, or its refusal as an error with
+ * its code: `auth.principal_changed` when the browser's session is no
+ * longer `person`'s.
  */
 export const callFunction = async (
   app: string,
-  lease: string,
+  { lease, person }: { lease: string; person: string },
   request: string
 ): Promise<unknown> => {
   let response: Response;
@@ -208,6 +227,7 @@ export const callFunction = async (
       headers: {
         "content-type": "application/json",
         [screenLeaseHeader]: lease,
+        [screenPersonHeader]: person,
       },
       body: request,
     });
@@ -266,11 +286,17 @@ const appTarget = (
     call: async (method, args) =>
       await framed(async (screens) => await screens.call(app, method, args)),
     callFunction: async (request) => {
+      // Waits for a connection being made again, which fails when it is
+      // someone else's: then nothing is sent.
+      const person = await link.person();
       try {
-        return await callFunction(app, lease, request);
+        return await callFunction(app, { lease, person }, request);
       } catch (error) {
         if (refusedForBuild(error)) {
           void checkDeliveryNow(link, bundle, refused);
+        }
+        if (authErrors.codeOf(error) === "auth.principal_changed") {
+          refused("principal-changed");
         }
         throw error;
       }
@@ -401,9 +427,8 @@ const runFrame = <Bundle extends FrameCode>(
 ): (() => void) => {
   const stopped = new AbortController();
   const cleanups: (() => void)[] = [];
-  const link = new CoreLink(() => {
-    onState({ status: "signed-out" });
-  });
+  const ended = Promise.withResolvers<LinkEnded>();
+  const link = new CoreLink(ended.resolve);
   const frameWindow = (): unknown => frame.contentWindow;
 
   /**
@@ -435,6 +460,17 @@ const runFrame = <Bundle extends FrameCode>(
     frame.removeAttribute("src");
     onState(state);
   };
+
+  /** What the page shows once the link ends before the page closed it. */
+  const whenEnded = async (): Promise<void> => {
+    if ((await ended.promise) === "signed-out") {
+      onState({ status: "signed-out" });
+    } else {
+      // Nothing of the first person's stays, in the frame or its bridge.
+      fail({ status: "failed", reason: "principal-changed" });
+    }
+  };
+  void whenEnded();
 
   // The frame loads one document: its own, which `ready` answers for. A
   // load after that is the screen sending its frame to another address,
@@ -531,11 +567,14 @@ const runFrame = <Bundle extends FrameCode>(
         fail({ status: "failed", reason: "timed-out" });
         return;
       }
-      fail(
-        authErrors.codeOf(error) === "auth.unauthenticated"
-          ? { status: "signed-out" }
-          : { status: "failed", reason: failureOf(error) }
-      );
+      const code = authErrors.codeOf(error);
+      if (code === "auth.unauthenticated") {
+        fail({ status: "signed-out" });
+      } else if (code === "auth.principal_changed") {
+        fail({ status: "failed", reason: "principal-changed" });
+      } else {
+        fail({ status: "failed", reason: failureOf(error) });
+      }
     }
   };
   void run();

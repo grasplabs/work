@@ -5,7 +5,11 @@ import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
-import { appFunctionPath, screenLeaseHeader } from "@grasp-os/shared/screens";
+import {
+  appFunctionPath,
+  screenLeaseHeader,
+  screenPersonHeader,
+} from "@grasp-os/shared/screens";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
@@ -52,7 +56,13 @@ const openedApp = async () => {
   });
   const { lease } = await builder.api.screens.open(id, "notes");
   const release = await loadRelease(env, id, version);
-  return { app: id, lease, cookie: builder.session, release };
+  return {
+    app: id,
+    lease,
+    cookie: builder.session,
+    userId: builder.userId,
+    release,
+  };
 };
 
 type Opened = Awaited<ReturnType<typeof openedApp>>;
@@ -60,9 +70,15 @@ type Opened = Awaited<ReturnType<typeof openedApp>>;
 /**
  * What the page does with a call the frame sends (apps/web's
  * screen-host.ts): posts it to core's function route under the screen's
- * lease, answers core's answer, and rejects a refusal with its code.
+ * lease, naming the person it was opened for, answers core's answer, and
+ * rejects a refusal with its code.
  */
-const pageTransport = ({ app, lease, cookie }: Opened): ClientTransport => ({
+const pageTransport = ({
+  app,
+  lease,
+  cookie,
+  userId,
+}: Opened): ClientTransport => ({
   call: async (request) => {
     const response = await routed(`${appFunctionPath}/${app}`, {
       method: "POST",
@@ -71,6 +87,7 @@ const pageTransport = ({ app, lease, cookie }: Opened): ClientTransport => ({
         "content-type": "application/json",
         cookie,
         [screenLeaseHeader]: lease,
+        [screenPersonHeader]: userId,
       },
       body: request,
     });

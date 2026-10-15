@@ -20,6 +20,7 @@ import {
   screenErrors,
   screenLeaseHeader,
   screenLimits,
+  screenPersonHeader,
 } from "@grasp-os/shared/screens";
 
 import { callAppFunction } from "./app-functions.ts";
@@ -49,6 +50,14 @@ import { admitted } from "./screens-rpc.ts";
 // - Someone without a role in the App, or who lost it: the session is read
 //   on every request, the role checked by the call itself
 //   (`callAppFunction`), and the App named only by the path.
+// - The page's frame was opened for one person and the browser's cookie
+//   is now someone else's (they signed in in another tab): the page names
+//   the person its frame is for (`screenPersonHeader`), and a call whose
+//   session is anyone else's is refused (`auth.principal_changed`) before
+//   it is counted or read, so what the frame sends again, such as a save
+//   under an idempotency key whose answer was lost, never runs as them.
+//   A lease is signed for one person too, but a screen of ordinary data
+//   runs without a valid one, so the lease alone doesn't hold this.
 // - Code nobody approved gets the App's data: the frame's lease, signed
 //   by core for exactly this person and App, says which build calls; the
 //   call runs only inside `delivering`, which checks that build's trust
@@ -309,6 +318,13 @@ export const appFunctionResponse = async (
     return errorResponse(
       401,
       authErrors.create("auth.unauthenticated"),
+      requestId
+    );
+  }
+  if (request.headers.get(screenPersonHeader) !== person.userId) {
+    return errorResponse(
+      401,
+      authErrors.create("auth.principal_changed"),
       requestId
     );
   }

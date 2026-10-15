@@ -24,6 +24,24 @@ const startRetryMs = [
 const closedError = (): Error =>
   new Error("The page closed its connection to core.");
 
+/** Why a link ended for good, before anyone closed it. */
+export type LinkEnded = "signed-out" | "principal-changed";
+
+/** Core's refusals of a connection that end the link, and how. */
+const endings: Readonly<Record<string, LinkEnded>> = {
+  "auth.unauthenticated": "signed-out",
+  "auth.principal_changed": "principal-changed",
+};
+
+/** The person `whoami` answered, or `undefined` for an answer without one. */
+const personOf = (identity: unknown): string | undefined => {
+  const userId: unknown =
+    typeof identity === "object" && identity !== null
+      ? Reflect.get(identity, "userId")
+      : undefined;
+  return typeof userId === "string" && userId.length > 0 ? userId : undefined;
+};
+
 /** Waits for `promise` to settle, whichever way. */
 const settled = async (promise: Promise<unknown>): Promise<void> => {
   try {
@@ -38,16 +56,42 @@ const settled = async (promise: Promise<unknown>): Promise<void> => {
  * connects again when it drops, until the person's session has ended.
  * Stubs passed over the old connection (a screen's callbacks) break with
  * it; their owners subscribe again on the new one.
+ *
+ * A link is for one person: the one core says is signed in when it first
+ * connects. Connecting again sends whatever session cookie the browser
+ * holds by then, which may be someone else's: another tab signed out and
+ * in as them. Then the link ends (`principal-changed`) before anyone gets
+ * the new connection, so nothing its owner holds for the first person
+ * (a screen's data, a save whose answer was lost) is ever sent as the
+ * next. Threat model:
+ *
+ * - Two tabs: the other tab's sign-in changes the cookie, not this
+ *   connection. A call on it still goes as the first person; only a
+ *   connection made again is someone else's, and it is checked before
+ *   it is handed out. What goes by plain request instead (a screen's
+ *   function calls) names the link's person, and core refuses it for
+ *   anyone else's cookie (core's app-function-route.ts).
+ * - A reconnect racing a call: a call made while the link connects again
+ *   waits for the new connection, and gets the refusal instead of it.
+ *   One sent on the old connection breaks with it.
+ * - The same person on a new session, or signed out and in again: still
+ *   the link's person, so it goes on. Keys are the person's, so a save
+ *   sent again is still theirs, once.
+ * - Signed out: the link ends (`signed-out`).
+ * - `whoami` failing: tried again, as any failure that may pass; an
+ *   answer that names nobody counts as signed out.
  */
 export class CoreLink {
   #session: Promise<Session>;
   #core: ReturnType<typeof connectCore> | undefined;
   #closed = false;
   #delay = reconnectMs.first;
-  readonly #onSignedOut: () => void;
+  /** Who the link is for, once it first connected. */
+  #person: string | undefined;
+  readonly #onEnded: (why: LinkEnded) => void;
 
-  constructor(onSignedOut: () => void) {
-    this.#onSignedOut = onSignedOut;
+  constructor(onEnded: (why: LinkEnded) => void) {
+    this.#onEnded = onEnded;
     // Core failing or out of reach is tried again on the first connection
     // too, a few times: only a connection that worked reconnects when it
     // breaks. A refusal, such as the session having ended, is core's answer.
@@ -68,6 +112,19 @@ export class CoreLink {
   /** The signed-in session, once connected. */
   async session(): Promise<Session> {
     return await this.#session;
+  }
+
+  /**
+   * Who the link is for, once connected: waits for a connection being
+   * made again, and fails when it turned out to be someone else's.
+   */
+  async person(): Promise<string> {
+    await this.#session;
+    const person = this.#person;
+    if (person === undefined || this.#closed) {
+      throw closedError();
+    }
+    return person;
   }
 
   /**
@@ -110,9 +167,17 @@ export class CoreLink {
     const core = connectCore();
     this.#core = core;
     const session = core.authenticate();
-    // Core's own answer, never an App's: the session holds, or it ended.
-    await session.whoami();
+    // Core's own answer, never an App's: the session holds, or it ended,
+    // and for whom. Checked before the connection is handed to anyone.
+    const person = personOf(await session.whoami());
     const ready = await session;
+    if (person === undefined) {
+      throw authErrors.create("auth.unauthenticated");
+    }
+    this.#person ??= person;
+    if (person !== this.#person) {
+      throw authErrors.create("auth.principal_changed");
+    }
     this.#delay = reconnectMs.first;
     // Only a connection that worked starts a reconnect when it breaks, and
     // only once: a failed attempt is retried by the loop that made it, so
@@ -142,11 +207,13 @@ export class CoreLink {
         // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
         return await this.#connect();
       } catch (error) {
-        const signedOut = authErrors.codeOf(error) === "auth.unauthenticated";
-        if (this.#closed || signedOut) {
-          if (signedOut) {
+        const code = authErrors.codeOf(error);
+        const ended = code === undefined ? undefined : endings[code];
+        if (this.#closed || ended !== undefined) {
+          if (ended !== undefined && !this.#closed) {
+            // Closed first: the connection someone else's cookie made goes.
             this.close();
-            this.#onSignedOut();
+            this.#onEnded(ended);
           }
           throw error;
         }

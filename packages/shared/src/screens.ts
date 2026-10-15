@@ -28,6 +28,7 @@ export {
   screenLeaseHeader,
   screenLimits,
   screenModulePath,
+  screenPersonHeader,
 } from "./screen-limits.ts";
 
 /** A value the page or core made up: never longer than a hash in hex. */
