@@ -2107,13 +2107,17 @@ export class GraspClient {
   /**
    * The person's roles in App `resourceId` dropped (`screen.access_changed`,
    * pushed as a followed query's last result): what any query of the App
-   * shows was read under the old roles, kept or not, so none of it is
-   * shown again. Followed queries get their own push and follow again;
-   * the rest read afresh when next read.
+   * shows that nobody follows was read under the old roles, so it is
+   * shown no more and read afresh when next read. A followed query is
+   * left to its own pushes: core ends each with this, and one that
+   * followed again since shows what it read under the new roles.
    */
   #accessChanged(resourceId: string, error: GraspError): void {
     for (const entry of this.#queries.values()) {
-      if (entry.reference.resourceId === resourceId) {
+      if (
+        entry.reference.resourceId === resourceId &&
+        entry.live === undefined
+      ) {
         entry.shown = entry.sent;
         entry.stale = true;
         entry.changes += 1;
