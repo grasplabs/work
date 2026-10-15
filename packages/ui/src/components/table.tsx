@@ -67,21 +67,24 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
 /*
  * `card`: a table in a card of its own, as the Grasp design lists
  * workflows and runs: wider cells, and quiet column names.
+ * `section`: a table in a section of a card whose rows start 1.25rem in,
+ * as Settings lists them: its first and last columns line up with them.
  */
 function TableHead({
   className,
   variant = "default",
   ...props
-}: React.ComponentProps<"th"> & { variant?: "default" | "card" }) {
+}: React.ComponentProps<"th"> & { variant?: "default" | "card" | "section" }) {
   return (
     <th
       data-slot="table-head"
       data-variant={variant}
       className={cn(
         "h-10 text-left align-middle whitespace-nowrap [&:has([role=checkbox])]:pr-0",
-        variant === "card"
-          ? "text-muted-foreground px-4 font-normal"
-          : "text-foreground px-2 font-medium",
+        variant === "card" && "text-muted-foreground px-4 font-normal",
+        variant === "section" &&
+          "text-muted-foreground px-2 font-normal first:px-5 last:pr-5",
+        variant === "default" && "text-foreground px-2 font-medium",
         className
       )}
       {...props}
@@ -89,12 +92,14 @@ function TableHead({
   );
 }
 
-/** `card` as for `TableHead`; `roomy` also gives each row more height. */
+/** `card` and `section` as for `TableHead`; `roomy` also gives each row more height. */
 function TableCell({
   className,
   variant = "default",
   ...props
-}: React.ComponentProps<"td"> & { variant?: "default" | "card" | "roomy" }) {
+}: React.ComponentProps<"td"> & {
+  variant?: "default" | "card" | "roomy" | "section";
+}) {
   return (
     <td
       data-slot="table-cell"
@@ -104,6 +109,7 @@ function TableCell({
         variant === "default" && "p-2",
         variant === "card" && "px-4 py-2",
         variant === "roomy" && "px-4 py-3",
+        variant === "section" && "p-2 first:px-5 last:pr-5",
         className
       )}
       {...props}

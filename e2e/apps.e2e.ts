@@ -257,7 +257,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     const sections = page
       .getByRole("navigation", { name: "Settings" })
       .getByRole("link");
-    await expect(sections.last()).toHaveText("Profile");
+    await expect(sections.last()).toHaveText("Security");
     return {
       // Without how many wait.
       nav: texts.map((text) => text.replace(/\d+ things? waiting$/u, "")),
@@ -268,6 +268,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   const [chat, ...rest] = everyone;
   const nav = [chat, "Dashboard", ...rest];
   const menu = ["Settings", "Sign out"];
+  const account = ["Profile", "Notifications", "Security"];
   expect({
     admin: await sidebarOf(admin),
     builder: await sidebarOf(builder),
@@ -277,15 +278,18 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
       nav,
       menu,
       settings: [
+        "Workspace",
         "Members and roles",
         "Models",
         "AI spend",
+        "Pulse",
         "Audit trail",
-        "Profile",
+        "Billing",
+        ...account,
       ],
     },
-    builder: { nav, menu, settings: ["Profile"] },
-    user: { nav, menu, settings: ["Profile"] },
+    builder: { nav, menu, settings: account },
+    user: { nav, menu, settings: account },
   });
 });
 
