@@ -763,7 +763,42 @@ export interface ClientInternals {
     options: unknown,
     events: StreamEvents
   ) => Promise<unknown>;
+  /** How workflow runs reach the host (client-workflow.ts). */
+  readonly workflowLink: WorkflowLink;
 }
+
+/**
+ * What the workflow channel (client-workflow.ts) reaches of the client:
+ * the transport's subscriptions, submissions under the client's own key
+ * and fence rules, and its fences.
+ */
+export interface WorkflowLink {
+  /** Follows a request, as queries are followed; none on a portable host. */
+  readonly watch: ClientTransport["watch"] | undefined;
+  /**
+   * Sends `request`, a command of the workflow `target` names, as a
+   * mutation is sent: under `key`, sent again under it while its answer
+   * is lost (`onRecovering` told each time), resolving with the host's
+   * answer once it is durable, or rejecting with the host's refusal, or
+   * as uncertain with the key.
+   */
+  readonly command: (
+    target: SubmissionTarget,
+    request: string,
+    key: string,
+    onRecovering: () => void
+  ) => Promise<unknown>;
+  /** Clears everything the client holds: the person or build lost access. */
+  readonly fence: (refusal: GraspError) => void;
+  /** Calls `listener` at every fence; answers what stops calling it. */
+  readonly onFence: (listener: (refusal: GraspError) => void) => () => void;
+}
+
+/** What a submission is scoped by: its App, contract and kind. */
+export type SubmissionTarget = Pick<
+  ReadReference,
+  "kind" | "resourceId" | "contractId"
+>;
 
 /** How a streaming action's call goes, beyond its progress and result. */
 export interface StreamEvents {
@@ -949,7 +984,7 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
  * the host scopes a key's receipt; not by the App's version, so a resend
  * after a new release is still checked.
  */
-const uncertainScope = (reference: ReadReference, key: string): string =>
+const uncertainScope = (reference: SubmissionTarget, key: string): string =>
   canonicalJson([reference.resourceId, reference.contractId, key]);
 
 /**
@@ -1118,6 +1153,8 @@ export class GraspClient {
   readonly #uncertainKeys = new Map<string, number>();
   /** How many subscriptions the client made: each is numbered by it. */
   #attempts = 0;
+  /** Told of every fence (`WorkflowLink.onFence`). */
+  readonly #fenceListeners = new Set<(refusal: GraspError) => void>();
 
   /**
    * A portable host's client (`{ url, getToken }`, spec 10.7.1): its
@@ -1150,6 +1187,26 @@ export class GraspClient {
       readReference,
       stream: async (reference, args, options, events) =>
         await client.#stream(reference, args, options, events),
+      workflowLink: {
+        watch: client.#transport?.watch,
+        command: async (target, request, key, onRecovering) =>
+          await client.#send(
+            target,
+            request,
+            key,
+            { scoped: canonicalJson([client.#generation, key]), input: "" },
+            onRecovering
+          ),
+        fence: (refusal) => {
+          client.#fence(refusal);
+        },
+        onFence: (listener) => {
+          client.#fenceListeners.add(listener);
+          return () => {
+            client.#fenceListeners.delete(listener);
+          };
+        },
+      },
     });
   }
 
@@ -1982,6 +2039,14 @@ export class GraspClient {
         this.#refresh(entry);
       }
     }
+    this.#tellFence(this.#fencedBy);
+  }
+
+  /** Tells the fence's listeners (`WorkflowLink.onFence`) of `refusal`. */
+  #tellFence(refusal: GraspError): void {
+    for (const listener of this.#fenceListeners) {
+      listener(refusal);
+    }
   }
 
   /**
@@ -2006,6 +2071,7 @@ export class GraspClient {
       entry.stale = true;
       show(entry, { value: undefined, error: refusal });
     }
+    this.#tellFence(refusal);
   }
 
   /**
@@ -2149,10 +2215,11 @@ export class GraspClient {
    * settles.
    */
   async #send(
-    reference: ReadReference,
+    reference: SubmissionTarget,
     request: string,
     key: string,
-    held: { readonly scoped: string; readonly input: string }
+    held: { readonly scoped: string; readonly input: string },
+    onRecovering?: () => void
   ): Promise<unknown> {
     const isAction = reference.kind === "action";
     // Bound to the person and the fence it was called under: one who signs
@@ -2195,6 +2262,7 @@ export class GraspClient {
         }
         if (verdict.unknown) {
           lostSince ??= now;
+          onRecovering?.();
         }
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
         await sleep(waitAfter(settled, tries));

@@ -20,7 +20,8 @@
  * value directly, or `undefined` while loading or skipped (`"skip"`): a
  * `null` result is the App's data. A query's failure is thrown while
  * rendering, to the platform's error boundary; a mutation's or action's
- * rejects its promise.
+ * rejects its promise. A workflow the App binds is started, followed and
+ * controlled with `useWorkflow`.
  */
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {
@@ -45,6 +46,7 @@ import type {
   SubmitOptions,
 } from "./client-core.ts";
 import { clientError, GraspError } from "./client-error.ts";
+import { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
 import { useGraspForm } from "./form.ts";
 import type {
   AnswersRecord,
@@ -56,7 +58,17 @@ import type {
   RecordFormOptions,
   SchemaFormOptions,
 } from "./form.ts";
-import type { ArgsOf, ProgressOf, ReturnOf } from "./references.ts";
+import type {
+  AnyWorkflowReference,
+  ArgsOf,
+  ProgressOf,
+  ReturnOf,
+  WorkflowInputOf,
+  WorkflowOutputOf,
+  WorkflowWaitOf,
+} from "./references.ts";
+import { WorkflowStore } from "./workflow-store.ts";
+import type { WorkflowView } from "./workflow-store.ts";
 
 export { GraspError } from "./client-error.ts";
 export type { ErrorCategory } from "./client-error.ts";
@@ -65,6 +77,20 @@ export type {
   StreamOptions,
   SubmitOptions,
 } from "./client-core.ts";
+export type {
+  ObservedRun,
+  PendingControl,
+  WorkflowCommands,
+  WorkflowRunView,
+  WorkflowView,
+} from "./workflow-store.ts";
+export type {
+  AppErrorPayload,
+  RunHandle,
+  WorkflowEventReference,
+  WorkflowReference,
+  WorkflowWait,
+} from "./references.ts";
 export type {
   FormFailure,
   FormStatus,
@@ -447,4 +473,87 @@ export const useStream = <Reference extends StreamReference>(
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const typed = view as StreamView<ProgressOf<Reference>, ReturnOf<Reference>>;
   return { ...typed, run, cancel };
+};
+
+/** The view `useWorkflow` answers for `Reference`. */
+export type WorkflowViewOf<Reference> = WorkflowView<
+  WorkflowInputOf<Reference>,
+  WorkflowOutputOf<Reference>,
+  WorkflowWaitOf<Reference>
+>;
+
+/** The longest run ID a selection takes, as the host's IDs are. */
+const maxRunIdLength = 256;
+
+/**
+ * One workflow the App binds and one run of it (spec 10.4): the run's
+ * view, narrowed by `status`, and stable `run`, `pause`, `resume` and
+ * `cancel`, with what may be done now (`canRun`, `canPause`, `canResume`,
+ * `canCancel`), whether a start is under way (`isStarting`) and a control
+ * still settling (`pendingControl`).
+ *
+ * ```tsx
+ * const summary = useWorkflow(workflows.summarizeNote);
+ * // In a handler: await summary.run({ noteId });
+ * if (summary.status === "completed") summary.output.summary;
+ * if (summary.status === "failed") summary.error.message;
+ *
+ * const existing = useWorkflow(workflows.summarizeNote, { runId });
+ * // In a handler: await existing.cancel();
+ * ```
+ *
+ * Without `runId` it shows the run of its latest admitted start, idle
+ * until the first; with one, exactly that run, whatever it starts.
+ * Nothing runs or is controlled but by those calls: never on render,
+ * remount or reconnect. Unmounting stops following; the run goes on. A
+ * run the person may not see, or one of another contract, is thrown
+ * while rendering, as a query's failure is; a command's failure rejects
+ * its own promise and is never the run's `error`.
+ */
+export const useWorkflow = <Reference extends AnyWorkflowReference>(
+  reference: Reference,
+  options?: { readonly runId: string }
+): WorkflowViewOf<Reference> => {
+  const client = useClient();
+  const read = readWorkflowReference(reference);
+  if (
+    options !== undefined &&
+    (typeof options.runId !== "string" ||
+      options.runId.length === 0 ||
+      options.runId.length > maxRunIdLength)
+  ) {
+    throw new TypeError("useWorkflow takes { runId }, a run's ID.");
+  }
+  // One store per client and workflow contract: another of either starts
+  // afresh, and the last one's selection, starts and controls show nothing
+  // here (its admitted starts still answer their callers).
+  const [bound, setBound] = useState(() => ({
+    client,
+    key: read.key,
+    store: new WorkflowStore(workflowChannel(client), read),
+  }));
+  let current = bound;
+  if (bound.client !== client || bound.key !== read.key) {
+    current = {
+      client,
+      key: read.key,
+      store: new WorkflowStore(workflowChannel(client), read),
+    };
+    setBound(current);
+  }
+  const { store } = current;
+  const selection = options === undefined ? null : options.runId;
+  const view = useSyncExternalStore(
+    (onChange) => store.subscribe(selection, onChange),
+    () => store.view(selection)
+  );
+  const error = store.error(selection);
+  if (error !== undefined) {
+    throw error;
+  }
+  // SAFETY: the view holds what the host sent, validated against the
+  // reference's own input and output descriptors, which `Reference`
+  // carries as its types.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return view as WorkflowViewOf<Reference>;
 };

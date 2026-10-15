@@ -41,6 +41,9 @@ export type {
 // References (spec 8, 32.1): what the generated `#grasp` modules hold.
 export type {
   AnyOperationReference,
+  AnyWorkflowReference,
+  AppErrorCategory,
+  AppErrorPayload,
   ArgsOf,
   FilesOperation,
   FilesReference,
@@ -51,6 +54,13 @@ export type {
   ReferenceKind,
   ReferenceVisibility,
   ReturnOf,
+  RunHandle,
   ScreenInputOf,
   ScreenReference,
+  WorkflowEventReference,
+  WorkflowInputOf,
+  WorkflowOutputOf,
+  WorkflowReference,
+  WorkflowWait,
+  WorkflowWaitOf,
 } from "./references.ts";
