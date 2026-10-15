@@ -157,8 +157,10 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       sealed: identity.suite.sealedDigest,
       // The corpus changes in each window, and each snapshot is recorded.
       windows: new Set(Object.values(identity.sources)).size,
-      // One tool contract across every arm, person and repeat.
+      // One tool contract, and one set of instructions and API
+      // declarations, across every arm, person and repeat.
       tools: identity.tools.length,
+      prompt: identity.prompt.length,
       model: identity.model,
       pinned: [identity.skills, identity.policy].every((value) =>
         digest.test(value)
@@ -170,6 +172,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       sealed: brainSealedDigests[brainSuiteVersion],
       windows: 3,
       tools: 1,
+      prompt: 1,
       model: {
         id: "anthropic/claude-sonnet-4-5",
         provider: "brain-stub-reader/2026-10-15",

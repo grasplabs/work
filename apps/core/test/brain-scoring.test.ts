@@ -68,6 +68,25 @@ describe("scoring a trial", () => {
     });
   });
 
+  it("doesn't complete a right answer the evidence never reached, or one that cites none of it", () => {
+    expect({
+      unseen: verdict(contract, { modelInput: "Contract register." }),
+      uncited: verdict(contract, { answer: "Marta Ruiz" }).completed,
+      elsewhere: verdict(contract, { answer: "Marta Ruiz [hr/notes.md]" })
+        .completed,
+    }).toStrictEqual({
+      unseen: {
+        completed: false,
+        authorized: true,
+        abstained: false,
+        evidenceRecall: 0,
+        citationSupport: 1,
+      },
+      uncited: false,
+      elsewhere: false,
+    });
+  });
+
   it("doesn't complete a stale answer, a missing fact, or an answer that cites nothing it should", () => {
     expect({
       stale: verdict(contract, {

@@ -624,13 +624,27 @@ const runTrial = async (
   };
 };
 
-/** The tools each agent request offered the model: the tool contract. */
-const toolsOf = (request: GatewayRequest): unknown =>
+/** A field of a request's body, or `null` without it. */
+const fieldOf = (request: GatewayRequest, field: string): unknown =>
   typeof request.body === "object" &&
   request.body !== null &&
-  "tools" in request.body
-    ? request.body.tools
+  field in request.body
+    ? Reflect.get(request.body, field)
     : null;
+
+/** The person's memory and the listed skills: theirs and this run's own. */
+const ownSections = /<(?<section>memory|skills)>[\s\S]*?<\/\k<section>>/gu;
+
+/**
+ * What each request told the model before the chat: the agent's
+ * instructions and the API declarations, as the system prompt carries
+ * them, without the memory and skills sections, which differ by person
+ * and run and are pinned apart (sources and skills).
+ */
+const promptOf = (request: GatewayRequest): string =>
+  modelStrings(fieldOf(request, "system"))
+    .join("\n")
+    .replaceAll(ownSections, "<$<section>/>");
 
 /** A seeded shuffle, so arms take turns going first without luck deciding. */
 const shuffled = <T>(items: readonly T[], random: () => number): T[] => {
@@ -654,6 +668,8 @@ export interface RunIdentity {
   model: { id: string; provider: string; gateway: string };
   /** Each distinct tool contract the agent's requests carried. */
   tools: string[];
+  /** Each distinct set of instructions and API declarations they carried. */
+  prompt: string[];
   /** The skills the personas' catalogs list. */
   skills: string;
   /** Access, grants, gateway, protocol and budgets. */
@@ -796,11 +812,16 @@ export const runBrainBaseline = async (
     ["fullText", "agent"],
     ["fullContext", "fullText"],
   ];
-  const toolContracts = await Promise.all(
-    provider.gateway.requests.map(
-      async (request) => await digestOf(toolsOf(request))
-    )
-  );
+  const contracts = async (of: (request: GatewayRequest) => unknown) =>
+    [
+      ...new Set(
+        await Promise.all(
+          provider.gateway.requests.map(
+            async (request) => await digestOf(of(request))
+          )
+        )
+      ),
+    ].toSorted();
   const catalogs = await Promise.all(
     brainPersonas.map(async (persona) => {
       const { skills } = await company.people[persona].api.knowledge.catalog();
@@ -829,7 +850,8 @@ export const runBrainBaseline = async (
         provider: providerName,
         gateway: gatewayConfig.gateway,
       },
-      tools: [...new Set(toolContracts)].toSorted(),
+      tools: await contracts((request) => fieldOf(request, "tools")),
+      prompt: await contracts(promptOf),
       skills: await digestOf(catalogs),
       policy: await digestOf({
         collections: brainCollections,
