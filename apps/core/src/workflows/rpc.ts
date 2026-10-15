@@ -22,6 +22,7 @@ import { runHistory } from "./history.ts";
 import {
   dryRunWorkflow,
   listAllRuns,
+  setOwner,
   workflowDetail,
   workflowOverview,
 } from "./overview.ts";
@@ -124,6 +125,17 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await workflowDetail(this.#env, by, app, workflow)
+    );
+  }
+
+  async setOwner(
+    app: string,
+    workflow: string,
+    owner: string
+  ): Promise<WorkflowSummary> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setOwner(this.#env, by, app, workflow, owner)
     );
   }
 
