@@ -1,10 +1,10 @@
+import { bridgeTransport } from "@grasp-os/sdk/screen-runtime";
 import type { ScreenBridge } from "@grasp-os/sdk/screen-runtime";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { screenLimits } from "@grasp-os/shared/screen-limits";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import { valueDepth } from "@grasp-os/shared/value-depth";
-import { RpcSession, RpcTarget } from "capnweb";
-import type { RpcStub } from "capnweb";
+import { RpcSession, RpcStub, RpcTarget } from "capnweb";
 import {
   afterEach,
   beforeEach,
@@ -25,13 +25,17 @@ import type { FrameTarget } from "./screen-bridge.ts";
 /** Core's hold on a screen's subscription, which says when it's let go. */
 class Subscription extends RpcTarget {
   released = false;
+  /** Let go of by everything that held it: the page's end too. */
+  disposed = false;
 
-  release(): void {
+  async release(): Promise<void> {
     this.released = true;
+    await Promise.resolve();
   }
 
   [Symbol.dispose](): void {
     this.released = true;
+    this.disposed = true;
   }
 }
 
@@ -44,6 +48,8 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
   const functionCalls: string[] = [];
   const reports: string[] = [];
   const subscriptions: Subscription[] = [];
+  // The live queries' callbacks core keeps.
+  const kept: Disposable[] = [];
   const target: FrameTarget = {
     call: async (method, args) => {
       calls.push({ method, args });
@@ -64,6 +70,15 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
     control: async () => await Promise.resolve("controlled"),
     summary: async () => await Promise.resolve("summarised"),
     watchRuns: async () => {
+      const subscription = new Subscription();
+      subscriptions.push(subscription);
+      return await Promise.resolve(subscription);
+    },
+    watchQuery: async (_request, onSnapshot) => {
+      // Kept, as core keeps a live query's callback until it lets go.
+      if (onSnapshot instanceof RpcStub) {
+        kept.push(onSnapshot.dup());
+      }
       const subscription = new Subscription();
       subscriptions.push(subscription);
       return await Promise.resolve(subscription);
@@ -575,6 +590,19 @@ describe("the page's bridge to a screen", () => {
         .length,
       reachedCore: frame.subscriptions.length,
     }).toStrictEqual({ followed: 20, refused: 5, reachedCore: 20 });
+  });
+
+  it("lets go of a live query's subscription, through the page to core, once the screen's client releases it", async () => {
+    const frame = framed();
+    const transport = bridgeTransport(() => frame.page);
+    const followed = await transport.watch("{}", noop, noop);
+    followed.release();
+
+    await vi.waitFor(() => {
+      expect(frame.subscriptions).toMatchObject([
+        { released: true, disposed: true },
+      ]);
+    });
   });
 
   it("lets go of what the frame followed, and answers nothing more, once closed", async () => {
