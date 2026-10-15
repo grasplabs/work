@@ -185,6 +185,14 @@ type FrameApi = Awaited<ReturnType<Session["screens"]["frame"]>>;
  */
 interface FrameHold {
   use: <T>(run: (frame: FrameApi) => Promise<T>) => Promise<T>;
+  /**
+   * The link's person, for the frame's plain requests: refused once the
+   * frame is stopped, also when it stopped while the link connected
+   * again, so a stopped frame's call is never sent.
+   */
+  person: () => Promise<string>;
+  /** The link's session, refused as `person` is. */
+  session: () => Promise<Session>;
   close: () => void;
 }
 
@@ -221,16 +229,21 @@ const holdFrame = (
       throw error;
     }
   };
-  const current = async (): Promise<FrameApi> => {
+  /** `wait`'s answer, unless the frame is stopped before or meanwhile. */
+  const whileOpen = async <T>(wait: () => Promise<T>): Promise<T> => {
     if (closed) {
       throw frameClosedError();
     }
-    const session = await link.session();
+    const answer = await wait();
+    if (closed) {
+      throw frameClosedError();
+    }
+    return answer;
+  };
+  const current = async (): Promise<FrameApi> => {
     // Stopped while the link connected: nothing is asked for that would
     // never be closed.
-    if (closed) {
-      throw frameClosedError();
-    }
+    const session = await whileOpen(async () => await link.session());
     if (held?.session !== session) {
       // The last connection's broke with it, and core let go of it then.
       held = { session, frame: ask(session) };
@@ -239,6 +252,8 @@ const holdFrame = (
   };
   return {
     use: async (run) => await run(await current()),
+    person: async () => await whileOpen(async () => await link.person()),
+    session: async () => await whileOpen(async () => await link.session()),
     close: () => {
       closed = true;
       const last = held;
@@ -347,7 +362,6 @@ export const callFunction = async (
  * on the tab's connection run.
  */
 const appTarget = (
-  link: CoreLink,
   bundle: ScreenBundle,
   refused: (reason: Refused) => void,
   hold: FrameHold
@@ -373,7 +387,7 @@ const appTarget = (
     callFunction: async (request) => {
       // Waits for a connection being made again, which fails when it is
       // someone else's: then nothing is sent.
-      const person = await link.person();
+      const person = await hold.person();
       try {
         return await callFunction(app, { lease, person }, request);
       } catch (error) {
@@ -388,7 +402,7 @@ const appTarget = (
     },
     streamFunction: async (what, request, onFrame, onEnded) => {
       // As `callFunction`: never sent once the connection is someone else's.
-      const person = await link.person();
+      const person = await hold.person();
       try {
         return await followStream(
           app,
@@ -409,7 +423,7 @@ const appTarget = (
       }
     },
     cancelStream: async (request) => {
-      const person = await link.person();
+      const person = await hold.person();
       try {
         return await cancelStream(app, { lease, person }, request);
       } catch (error) {
@@ -423,9 +437,8 @@ const appTarget = (
       }
     },
     report: async (problem) => {
-      await on(link, async ({ screens }) => {
-        await screens.report(app, { version, screen }, problem);
-      });
+      const { screens } = await hold.session();
+      await screens.report(app, { version, screen }, problem);
     },
     startRun: async (workflow, input) =>
       await framed(async (frame) => await frame.startRun(workflow, input)),
@@ -748,7 +761,7 @@ export const runScreen = (
           hold.close();
         });
         return {
-          target: appTarget(link, bundle, refused, hold),
+          target: appTarget(bundle, refused, hold),
           running: (setState) => {
             const { version } = bundle;
             const check = async (): Promise<void> => {
@@ -757,7 +770,7 @@ export const runScreen = (
                 // was handed: this is when the page hears its approval is
                 // gone.
                 await checkDelivery(hold, refused);
-                const session = await link.session();
+                const session = await hold.session();
                 if ((await session.screens.version(app)) !== version) {
                   setState({ status: "updated" });
                 }
