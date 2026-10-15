@@ -49,10 +49,13 @@ import {
 import { policyGenerationSql } from "../dependencies/policy.ts";
 import { admitDependencies } from "../dependencies/requests.ts";
 import type { Admitted } from "../dependencies/requests.ts";
-import { PlatformBoundError } from "../platform-sandbox.ts";
 import { windowedAccessEnd } from "../screen-frame.ts";
 import { packageArtifactAddress } from "./address.ts";
-import { packageBuilder, requireBuilderBound } from "./builder.ts";
+import {
+  builderFailure,
+  packageBuilder,
+  requireBuilderBound,
+} from "./builder.ts";
 import { clearBuildCleanup, recordCleanup } from "./cleanup-records.ts";
 import { holdLockFor } from "./locks.ts";
 import { graphOfLock } from "./resolve.ts";
@@ -610,18 +613,16 @@ const lockedTarballs = async (
  * and the artifact's size.
  */
 const builtArtifact = async (env: Env, request: BuildRequest) => {
-  const builder = await packageBuilder(env);
+  const builder = packageBuilder(env);
   const started = Date.now();
   let answer: unknown;
   try {
     answer = await builder.build(request);
   } catch (error) {
-    if (error instanceof PlatformBoundError) {
-      throw packageErrors.create("package.refused", {
-        refusals: ["building the packages took more than the builder may"],
-      });
-    }
-    throw error;
+    throw builderFailure(
+      error,
+      "building the packages took more than the builder may"
+    );
   }
   const builtMs = Date.now() - started;
   const built = packageBuildAnswerSchema.parse(answer);

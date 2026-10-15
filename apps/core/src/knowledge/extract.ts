@@ -8,12 +8,15 @@ import { z } from "zod";
 import { deploymentStaysInEu } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
 import {
-  functionCapability,
-  runInSession,
-  sandboxVerdictOf,
-} from "../sandbox-session.ts";
-import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
-import { extractorAsset } from "./extractor/asset.ts";
+  boundedInCore,
+  noPlaceOf,
+  PlatformBoundError,
+  platformWallMs,
+  runPlatformCode,
+} from "../platform-sandbox.ts";
+import { functionCapability, inOrderReader } from "../sandbox-session.ts";
+import { sessionHost } from "../sandboxed.ts";
+import { extractedPart, extractorAsset } from "./extractor/asset.ts";
 import type ExtractorWorker from "./extractor/worker.ts";
 
 // Extracting an uploaded file's text as Markdown, by one of two
@@ -46,7 +49,9 @@ import type ExtractorWorker from "./extractor/worker.ts";
 // while a parser spins. Threat model on-prem, and how each is closed:
 // - A file exhausts a parser (CPU or memory), or takes it over and loops.
 //   With `SANDBOX_HOST` bound, the extraction runs on the sandbox host in
-//   a session (sandbox-session.ts), as App code does: the supervisor kills
+//   a session as the platform's other code does (`runPlatformCode`,
+//   platform-sandbox.ts), the extractor handed over a chunk at a time as
+//   the compiler is, and read the same way: the supervisor kills
 //   its process past `extractorCpuMs` of CPU time, its memory cap or
 //   `extractorWallMs`, and the upload fails as `upload.too_complex`.
 //   Chosen over bounding it here (a size limit doesn't bound how long
@@ -63,7 +68,7 @@ import type ExtractorWorker from "./extractor/worker.ts";
 //   read.
 // - A crafted file's extractor asks for the file without end. Reads are
 //   strictly in order, each from where the last ended, so an extraction
-//   reads at most `size / readChunkBytes` chunks, rounded up.
+//   reads at most `size / chunkBytes` chunks, rounded up.
 // - A deployment off Cloudflare forgets `SANDBOX_HOST`, and parsers run in
 //   core unbounded again. Refused, as `sessionHost` refuses App code (the
 //   extractor unavailable, retried and then failed), unless the
@@ -121,12 +126,6 @@ const isolateSettings = {
   globalOutbound: null,
   limits: { cpuMs: 20_000, subRequests: 0 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
-
-/**
- * How the runtime says it stopped an isolate over its limits: "Worker
- * exceeded CPU time limit." or "… memory limit."
- */
-const overLimit = /exceeded (?:its )?(?:CPU|memory)/iu;
 
 /**
  * The extractor's module, from core's static assets. They answer unknown
@@ -189,42 +188,6 @@ const extractorCpuMs = isolateSettings.limits.cpuMs;
  */
 const extractorWallMs = 60_000;
 
-/** The wall-clock time: {@link extractorWallMs}, or less where tests set it. */
-const wallMsOf = (env: Pick<Env, "SANDBOX_DEADLINE_MS">): number => {
-  const set = Number(env.SANDBOX_DEADLINE_MS);
-  return Number.isInteger(set) && set > 0 && set < extractorWallMs
-    ? set
-    : extractorWallMs;
-};
-
-/**
- * How much of the file the sandbox host's isolate reads at a time: well
- * within a session's message once Cap'n Web has encoded it.
- */
-const readChunkBytes = 1024 * 1024;
-
-/**
- * The supervisor's verdicts that say the file made the extractor run too
- * long, use too much, crash or answer too much (sandbox-session.ts): no
- * retry changes them. Any other (`busy` above all) means it couldn't try.
- */
-const fileVerdicts = new Set([
-  "deadline",
-  "cpu",
-  "memory",
-  "crashed",
-  "refused",
-]);
-
-/**
- * Whether the supervisor refused the session for a full pool: it answers
- * 503 to an upgrade it has no room for (or no process came free in time),
- * which `runInSession` reports as the sandbox unavailable with that
- * status. For an extraction it is a wait, as a taken share is.
- */
-const isPoolFull = (error: unknown): boolean =>
-  error instanceof SandboxUnavailableError && error.status === 503;
-
 /** What the extractor answers in a Dynamic Worker of core's own. */
 const extractedInCore = async (
   loader: WorkerLoader,
@@ -237,11 +200,14 @@ const extractedInCore = async (
     modules: { "extractor.js": source },
   });
   try {
-    return await worker
-      .getEntrypoint<ExtractorWorker>()
-      .extract({ mediaType, bytes });
+    return await boundedInCore(
+      async () =>
+        await worker
+          .getEntrypoint<ExtractorWorker>()
+          .extract({ mediaType, bytes })
+    );
   } catch (error) {
-    if (error instanceof Error && overLimit.test(error.message)) {
+    if (error instanceof PlatformBoundError) {
       throw uploadErrors.create("upload.too_complex");
     }
     throw new ExtractorUnavailableError({ cause: error });
@@ -255,41 +221,46 @@ const extractedOnHost = async (
   source: string,
   { mediaType, bytes }: Pick<ExtractInput, "mediaType" | "bytes">
 ): Promise<unknown> => {
-  // The isolate asks for the file a chunk at a time, each from where the
-  // last one ended and never again: at most as many reads as chunks.
-  let next = 0;
-  const read = (offset: unknown): Uint8Array => {
-    if (offset !== next || next >= bytes.byteLength) {
-      throw new RangeError("The file is read once, in order.");
-    }
-    const chunk = bytes.slice(next, next + readChunkBytes);
-    next += chunk.byteLength;
-    return chunk;
-  };
   try {
-    return await runInSession(host, {
-      mainModule: "extractor.js",
-      modules: { "extractor.js": source },
-      entrypoint: "default",
-      method: "extractRead",
-      args: [
-        { value: mediaType },
-        { value: bytes.byteLength },
-        { capability: functionCapability(read) },
-      ],
-      cpuMs: extractorCpuMs,
-      wallMs,
-      owner: extractorOwner,
-    });
+    return await runPlatformCode(
+      host,
+      {
+        mainModule: "extractor.js",
+        modules: {
+          "extractor.js": {
+            type: "js",
+            bytes: new TextEncoder().encode(source),
+          },
+        },
+        nodejsCompat: false,
+        cpuMs: extractorCpuMs,
+      },
+      {
+        method: "extractRead",
+        args: [
+          { value: mediaType },
+          { value: bytes.byteLength },
+          // The isolate asks for the file a chunk at a time, each from
+          // where the last one ended and never again: at most as many
+          // reads as chunks.
+          {
+            capability: functionCapability(
+              inOrderReader([[extractedPart, bytes]])
+            ),
+          },
+        ],
+        wallMs,
+        owner: extractorOwner,
+      }
+    );
   } catch (error) {
-    const verdict = sandboxVerdictOf(error);
-    if (verdict !== undefined && fileVerdicts.has(verdict)) {
+    if (error instanceof PlatformBoundError) {
       throw uploadErrors.create("upload.too_complex");
     }
-    if (verdict === "busy" || isPoolFull(error)) {
-      throw new ExtractorUnavailableError({ cause: error, busy: true });
-    }
-    throw new ExtractorUnavailableError({ cause: error });
+    throw new ExtractorUnavailableError({
+      cause: error,
+      busy: noPlaceOf(error),
+    });
   }
 };
 
@@ -325,10 +296,15 @@ export const localExtractor =
     const answer =
       host === undefined
         ? await extractedInCore(env.LOADER, source, { mediaType, bytes })
-        : await extractedOnHost(host, wallMsOf(env), source, {
-            mediaType,
-            bytes,
-          });
+        : await extractedOnHost(
+            host,
+            platformWallMs(env, extractorWallMs),
+            source,
+            {
+              mediaType,
+              bytes,
+            }
+          );
     const parsed = extractedSchema.safeParse(answer);
     if (!parsed.success) {
       throw new Error("The extractor answered what it may not");

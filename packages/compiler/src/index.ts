@@ -10,6 +10,8 @@
  * imports only the version.
  */
 import { isolateBase } from "@grasp-os/shared/runtime";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 
 import { version } from "#version";
 
@@ -220,30 +222,39 @@ export interface PlatformCode {
  * release's, so a build doesn't read 15 to 28 MB of it from the assets
  * before the sandbox has even taken it. Only a read that worked is kept.
  */
-const platformCodeRead = new WeakMap<
+const platformCodeRead = new WeakMap<Fetcher, Map<string, PlatformCode>>();
+
+/**
+ * The reads running now, by the same keys: builds that start together
+ * share one, for as long as a read may take (`sharedRun`), so one whose
+ * request was cancelled holds no other build.
+ */
+const platformCodeReading = new WeakMap<
   Fetcher,
-  Map<string, Promise<PlatformCode>>
+  Map<string, SharedRun<PlatformCode>>
 >();
+
+/** The longest a read of platform code from the assets may take. */
+const platformCodeReadMs = 10_000;
 
 const memoisedCode = async (
   assets: Fetcher,
   key: string,
   read: () => Promise<PlatformCode>
 ): Promise<PlatformCode> => {
-  const reads =
-    platformCodeRead.get(assets) ?? new Map<string, Promise<PlatformCode>>();
+  const reads = platformCodeRead.get(assets) ?? new Map<string, PlatformCode>();
   platformCodeRead.set(assets, reads);
-  let code = reads.get(key);
-  if (code === undefined) {
-    code = read();
-    reads.set(key, code);
+  const kept = reads.get(key);
+  if (kept !== undefined) {
+    return kept;
   }
-  try {
-    return await code;
-  } catch (error) {
-    reads.delete(key);
-    throw error;
-  }
+  const reading =
+    platformCodeReading.get(assets) ??
+    new Map<string, SharedRun<PlatformCode>>();
+  platformCodeReading.set(assets, reading);
+  const code = await sharedRun(reading, key, platformCodeReadMs, read);
+  reads.set(key, code);
+  return code;
 };
 
 /**
