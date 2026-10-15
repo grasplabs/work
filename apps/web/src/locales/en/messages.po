@@ -562,6 +562,10 @@ msgstr "{one} and {other} both name the same handover, each from their own side.
 msgid "{oneTeam} and {otherTeam} both name the same handover, each from their own side."
 msgstr "{oneTeam} and {otherTeam} both name the same handover, each from their own side."
 
+#: src/brain/region-marks.tsx
+msgid "{open, plural, one {# open question} other {# open questions}}"
+msgstr "{open, plural, one {# open question} other {# open questions}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{open} still open"
 msgstr "{open} still open"
@@ -1179,6 +1183,7 @@ msgstr "Alert admins at, in percent of a day's or month's cap"
 msgid "Alert at"
 msgstr "Alert at"
 
+#: src/brain/atlas-overlays.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
 msgstr "All"
@@ -1541,9 +1546,14 @@ msgstr "Available, direct"
 msgid "Available, via Composio"
 msgstr "Available, via Composio"
 
+#: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
 msgid "Back"
 msgstr "Back"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Back to {destination}"
+msgstr "Back to {destination}"
 
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
@@ -1592,6 +1602,7 @@ msgstr "Bound to"
 
 #: src/brain/brain-nav.tsx
 #: src/frame/app-sidebar.tsx
+#: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 msgid "Brain"
 msgstr "Brain"
@@ -2769,6 +2780,10 @@ msgstr "Findings"
 msgid "Finish"
 msgstr "Finish"
 
+#: src/brain/atlas-overlays.tsx
+msgid "Fit and center"
+msgstr "Fit and center"
+
 #: src/workflows/fix-in-chat.tsx
 msgid "Fix in chat"
 msgstr "Fix in chat"
@@ -3328,6 +3343,10 @@ msgstr "Kind of statement"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Knowledge"
 msgstr "Knowledge"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Known"
+msgstr "Known"
 
 #: src/onboarding/staff-words.ts
 msgid "Known: {known}% of the {threshold}% to open"
@@ -4341,6 +4360,10 @@ msgstr "Open: {open}"
 msgid "Opening the chat…"
 msgstr "Opening the chat…"
 
+#: src/brain/note-reveal.tsx
+msgid "Opening the note"
+msgstr "Opening the note"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Opens at {threshold}%"
 msgstr "Opens at {threshold}%"
@@ -5290,6 +5313,10 @@ msgstr "Shared code changed"
 msgid "Shared with"
 msgstr "Shared with"
 
+#: src/brain/atlas-overlays.tsx
+msgid "Show"
+msgstr "Show"
+
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Show all {count} lines ({characters} characters)"
@@ -5598,6 +5625,7 @@ msgid "Still deciding"
 msgstr "Still deciding"
 
 #: src/brain/atlas-map.ts
+#: src/brain/atlas-overlays.tsx
 #: src/brain/brain.ts
 msgid "Still open"
 msgstr "Still open"
@@ -5609,6 +5637,10 @@ msgstr "Still open: {question}"
 #: src/brain/brain-atlas.ts
 msgid "Still open: {question} {who} can answer it."
 msgstr "Still open: {question} {who} can answer it."
+
+#: src/brain/atlas-overlays.tsx
+msgid "Still waiting"
+msgstr "Still waiting"
 
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
@@ -7014,6 +7046,10 @@ msgstr "Where the documents live"
 msgid "Where the onboarding stands, stage by stage."
 msgstr "Where the onboarding stands, stage by stage."
 
+#: src/brain/atlas-overlays.tsx
+msgid "Where you are in the brain"
+msgstr "Where you are in the brain"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
 msgstr "Which domains and agents hold permissions: {why}"
@@ -7323,536 +7359,6 @@ msgstr "Your session has ended. Sign in again to go on."
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Your workspace, who may do what in it, and your own account."
 
-
-#: src/dashboard/widget-board.tsx
-msgid "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
-msgstr "{count, plural, one {# more engine with no workflows to show} other {# more engines with no workflows to show}}"
-
-#: src/activity/pending.tsx
-msgid "{engine} already keeps {type} records here: this engine's won't apply."
-msgstr "{engine} already keeps {type} records here: this engine's won't apply."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{engine} doesn't get these packages."
-msgstr "{engine} doesn't get these packages."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "{engine} may use exactly these packages from now on."
-msgstr "{engine} may use exactly these packages from now on."
-
-#: src/activity/audit-log.tsx
-msgid "{engine}: run of {workflowId}"
-msgstr "{engine}: run of {workflowId}"
-
-#: src/engines/store-changes.tsx
-msgid "{engineName}, version {version}"
-msgstr "{engineName}, version {version}"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "{label}: {count}"
-msgstr "{label}: {count}"
-
-#: src/dashboard/widget-board.tsx
-msgid "{name} in {engine}"
-msgstr "{name} in {engine}"
-
-#: src/dashboard/report.ts
-msgid "{name} in {engine}: {started} started, {completed} completed, {failed} failed"
-msgstr "{name} in {engine}: {started} started, {completed} completed, {failed} failed"
-
-#: src/chat/builds-state.ts
-msgid "{name} no longer changes the engine's data (write → read)"
-msgstr "{name} no longer changes the engine's data (write → read)"
-
-#: src/chat/builds-state.ts
-msgid "{name} now changes the engine's data (read → write)"
-msgstr "{name} now changes the engine's data (read → write)"
-
-#: src/brain/region-marks.tsx
-msgid "{open, plural, one {# open question} other {# open questions}}"
-msgstr "{open, plural, one {# open question} other {# open questions}}"
-
-#: src/connections/integration-row.tsx
-msgid "{toolCount, plural, one {# tool} other {# tools}}"
-msgstr "{toolCount, plural, one {# tool} other {# tools}}"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "{total, plural, one {# integration shown} other {# integrations shown}}"
-msgstr "{total, plural, one {# integration shown} other {# integrations shown}}"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "{workflowId} in {engine}"
-msgstr "{workflowId} in {engine}"
-
-#: src/engines/store-change-errors.ts
-msgid "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
-msgstr "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead."
-
-#: src/engines/store-change-errors.ts
-msgid "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
-msgstr "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: {versions}."
-
-#: src/screens/screen-frame.tsx
-msgid "A new version of this engine is available."
-msgstr "A new version of this engine is available."
-
-#: src/activity/audit-words.ts
-msgid "Added a member to an engine"
-msgstr "Added a member to an engine"
-
-#: src/chat/builds.tsx
-msgid "Added: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Added: it acts for whoever uses the engine, with everything the engine holds"
-
-#: src/chat/side-panel.tsx
-msgid "All engines"
-msgstr "All engines"
-
-#: src/engines/store-change-errors.ts
-msgid "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
-msgstr "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again."
-
-#: src/engines/store-change-errors.ts
-msgid "An admin can see the record that holds it back, and abandon the change, on the engine's page."
-msgstr "An admin can see the record that holds it back, and abandon the change, on the engine's page."
-
-#: src/engines/store-change-errors.ts
-msgid "An admin can see what went wrong, and abandon the change, on the engine's page."
-msgstr "An admin can see what went wrong, and abandon the change, on the engine's page."
-
-#: src/engines/screen-approval.tsx
-msgid "An admin said this engine's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
-msgstr "An admin said this engine's data may go to apps nobody approved, so its apps run without approval, unless their approval was taken back."
-
-#: src/engines/screen-approval.tsx
-msgid "An app is code that runs in people's browsers. It gets this engine's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
-msgstr "An app is code that runs in people's browsers. It gets this engine's data only once an admin has approved exactly that code, and a change to the code needs a new approval. Read the code first: approved code can still send what it gets somewhere else, so approving says you trust it."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "An app is what this engine's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
-msgstr "An app is what this engine's team works in, standing on its workflows and integrations. Ask Grasp in chat to build one."
-
-#: src/activity/audit-words.ts
-msgid "An app nobody approved was refused the engine's data"
-msgstr "An app nobody approved was refused the engine's data"
-
-#: src/activity/pending.tsx
-msgid "Another engine already keeps {type} records here: this engine's won't apply."
-msgstr "Another engine already keeps {type} records here: this engine's won't apply."
-
-#: src/activity/pending.tsx
-msgid "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
-msgstr "Another version of this engine was made current since this list was read. The list now shows it: review that version, then approve again."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Approve the packages for {engine}"
-msgstr "Approve the packages for {engine}"
-
-#: src/chat/side-panel.tsx
-msgid "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
-msgstr "Ask Grasp to build one. While it works, the engine stands beside the chat, to preview before it is proposed."
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Available"
-msgstr "Available"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Back to {destination}"
-msgstr "Back to {destination}"
-
-#: src/activity/audit-words.ts
-msgid "Called another engine"
-msgstr "Called another engine"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
-msgstr "Caps an admin set on an engine's model, on the engine's Resources tab, on top of the deployment's budgets, and what the engine's actions spent through it. A workflow's own AI steps don't count here."
-
-#: src/activity/audit-words.ts
-msgid "Changed an engine"
-msgstr "Changed an engine"
-
-#: src/activity/audit-words.ts
-msgid "Changed whether an engine's data needs approved apps"
-msgstr "Changed whether an engine's data needs approved apps"
-
-#: src/chat/builds.tsx
-msgid "Changed: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Changed: it acts for whoever uses the engine, with everything the engine holds"
-
-#: src/chat/builds-state.ts
-msgid "changes the engine's data"
-msgstr "changes the engine's data"
-
-#: src/chat/builds.tsx
-msgid "Changes the engine's data"
-msgstr "Changes the engine's data"
-
-#: src/engines/store-changes.tsx
-msgid "Changes to the engine's stores"
-msgstr "Changes to the engine's stores"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Connected"
-msgstr "Connected"
-
-#: src/routes/_shell.workflows.index.tsx
-msgid "Couldn't load this engine's workflows."
-msgstr "Couldn't load this engine's workflows."
-
-#: src/routes/_shell.engines.index.tsx
-msgid "Each engine runs one part of the business: its workflows, apps and connections."
-msgstr "Each engine runs one part of the business: its workflows, apps and connections."
-
-#: src/dashboard/runs-widget.tsx
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.settings.models.tsx
-#: src/routes/_shell.workflows.index.tsx
-#: src/workflows/workflows-table.tsx
-msgid "Engine"
-msgstr "Engine"
-
-#: src/engines/store-changes.tsx
-msgid "engine {app}, version {version}"
-msgstr "engine {app}, version {version}"
-
-#: src/connections/connection-list.tsx
-msgid "Engine {engine}"
-msgstr "Engine {engine}"
-
-#: src/screens/screen-frame.tsx
-msgid "Engine app"
-msgstr "Engine app"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Engine budgets"
-msgstr "Engine budgets"
-
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "Engine not found"
-msgstr "Engine not found"
-
-#: src/chat/side-panel.tsx
-#: src/dashboard/widget-board.tsx
-#: src/frame/app-sidebar.tsx
-#: src/routes/_shell.engines.$engine.apps.$screen.tsx
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/routes/_shell.engines.index.tsx
-msgid "Engines"
-msgstr "Engines"
-
-#: src/connections/connection-list.tsx
-msgid "Engines and agents with a permission"
-msgstr "Engines and agents with a permission"
-
-#: src/activity/pending.tsx
-msgid "Exports of {engine}: {covered}"
-msgstr "Exports of {engine}: {covered}"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Fit and center"
-msgstr "Fit and center"
-
-#: src/activity/pending.tsx
-msgid "Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-msgstr "Guest chats. This engine can invite people who aren't members to a short chat with a model through a link, and read back what they write. Guests reach nothing else; their chats spend the model budget of whoever invites them"
-
-#: src/activity/audit-log.tsx
-msgid "Guest of {engine}, invited for {person}"
-msgstr "Guest of {engine}, invited for {person}"
-
-#: src/connections/connection-list.tsx
-msgid "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
-msgstr "Its access ran out. Sign in again with the same account: engines and agents keep their permissions for it."
-
-#: src/routes/_shell.workflows.$app.$workflow.tsx
-msgid "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the engine is made current."
-msgstr "Its schedule stopped: its run failed to start {maxFailedStarts} times in a row. It starts again when its schedule is set under Parameters, or when a new version of the engine is made current."
-
-#: src/connections/connection-list.tsx
-msgid "Its tokens are deleted, every engine and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
-msgstr "Its tokens are deleted, every engine and agent loses it, and actions waiting on it are dropped. Connect it again to use it again."
-
-#: src/brain/atlas-overlays.tsx
-msgid "Known"
-msgstr "Known"
-
-#: src/routes/_shell.settings.models.tsx
-msgid "No engine has a model bound to it."
-msgstr "No engine has a model bound to it."
-
-#: src/chat/side-panel.tsx
-#: src/routes/_shell.engines.index.tsx
-msgid "No engines yet"
-msgstr "No engines yet"
-
-#: src/dashboard/widget-board.tsx
-msgid "No engines yet. Engines are made in chat."
-msgstr "No engines yet. Engines are made in chat."
-
-#: src/engines/package-approvals.tsx
-msgid "No packages are approved for this engine."
-msgstr "No packages are approved for this engine."
-
-#: src/dashboard/dependency-requests.tsx
-msgid "No packages were approved for this engine before."
-msgstr "No packages were approved for this engine before."
-
-#: src/engines/store-change-errors.ts
-msgid "No record is to blame, so an admin can only abandon the change, on the engine's page."
-msgstr "No record is to blame, so an admin can only abandon the change, on the engine's page."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "No workflow in this engine yet."
-msgstr "No workflow in this engine yet."
-
-#: src/screens/screen-frame.tsx
-msgid "Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page."
-msgstr "Nobody has approved this app's code for the engine's data yet. An admin can approve it on the engine's page."
-
-#: src/engines/resource-bindings.tsx
-msgid "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
-msgstr "None of the engine's integration permissions serves {contract} with every action it declares. Grant one first."
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Nothing needs attention."
-msgstr "Nothing needs attention."
-
-#: src/chat/builds.tsx
-msgid "Nothing runs yet: this would be the engine's first current version."
-msgstr "Nothing runs yet: this would be the engine's first current version."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, engine or run that read one."
-msgstr "Only the models marked as taking sensitive data may be sent data from a sensitive collection (marked in Knowledge) or a sensitive connection, or from a chat, engine or run that read one."
-
-#: src/connections/integration-row.tsx
-msgid "Only you"
-msgstr "Only you"
-
-#: src/workflows/workflows-table.tsx
-msgid "Open the engine {name}"
-msgstr "Open the engine {name}"
-
-#: src/brain/note-reveal.tsx
-msgid "Opening the note"
-msgstr "Opening the note"
-
-#: src/chat/builds-state.ts
-msgid "Other engines may no longer call {name}"
-msgstr "Other engines may no longer call {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other engines may now call {name}"
-msgstr "Other engines may now call {name}"
-
-#: src/chat/builds-state.ts
-msgid "Other engines may now call {name}, which {does}"
-msgstr "Other engines may now call {name}, which {does}"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Packages for {engine}"
-msgstr "Packages for {engine}"
-
-#: src/activity/pending.tsx
-msgid "Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it"
-msgstr "Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it"
-
-#: src/activity/audit-words.ts
-msgid "Read an engine's statistics"
-msgstr "Read an engine's statistics"
-
-#: src/connections/connect-dialog.tsx
-msgid "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using an engine, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Read-only is ticked where Composio says a tool only reads; Grasp doesn't check that. A read-only tool runs without asking. A call of any other tool from chat, or from a person using an engine, waits for that person to confirm it; a workflow's run makes it as one of its steps. Mark a tool read-only only if it changes nothing: marked wrongly, it changes things without asking."
-
-#: src/chat/builds-state.ts
-msgid "reads the engine's data"
-msgstr "reads the engine's data"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Reject the packages for {engine}"
-msgstr "Reject the packages for {engine}"
-
-#: src/chat/builds.tsx
-msgid "Removed: it acts for whoever uses the engine, with everything the engine holds"
-msgstr "Removed: it acts for whoever uses the engine, with everything the engine holds"
-
-#: src/engines/package-approvals.tsx
-msgid "Retire the packages for {engine}"
-msgstr "Retire the packages for {engine}"
-
-#: src/engines/package-approvals.tsx
-msgid "Retire the packages for {engine}?"
-msgstr "Retire the packages for {engine}?"
-
-#: src/engines/package-approvals.tsx
-msgid "Revoke the packages for {engine}"
-msgstr "Revoke the packages for {engine}"
-
-#: src/engines/package-approvals.tsx
-msgid "Revoke the packages for {engine}?"
-msgstr "Revoke the packages for {engine}?"
-
-#: src/routes/_shell.settings.spend.tsx
-msgid "Run {shortId} of {workflowId} in {engine}, started {started}"
-msgstr "Run {shortId} of {workflowId} in {engine}, started {started}"
-
-#: src/brain/atlas-overlays.tsx
-msgid "Show"
-msgstr "Show"
-
-#: src/dashboard/dependency-requests.tsx
-msgid "Show the packages for {engine}"
-msgstr "Show the packages for {engine}"
-
-#: src/routes/_shell.integrations.index.tsx
-msgid "Showing the first {count} of {total}. Refine your search to find others."
-msgstr "Showing the first {count} of {total}. Refine your search to find others."
-
-#: src/brain/atlas-overlays.tsx
-msgid "Still waiting"
-msgstr "Still waiting"
-
-#: src/screens/screen-frame.tsx
-msgid "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page."
-msgstr "The approval of this app's code was taken back, and the app was stopped. An admin can approve it again on the engine's page."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine has no permission to read a collection. Grant one first."
-msgstr "The engine has no permission to read a collection. Grant one first."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
-msgstr "The engine has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions can't use it until an admin binds it."
-msgstr "The engine's actions can't use it until an admin binds it."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-msgstr "The engine's actions reach a model, an integration, knowledge or a template only through a binding an admin of your organization approves."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's current version declares no resource for its actions."
-msgstr "The engine's current version declares no resource for its actions."
-
-#: src/engines/resource-bindings.tsx
-msgid "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
-msgstr "The engine's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
-
-#: src/chat/builds.tsx
-msgid "The engines this chat builds didn't load."
-msgstr "The engines this chat builds didn't load."
-
-#: src/routes/_shell.settings.models.tsx
-msgid "The first {shown} by engine; more engines have models bound."
-msgstr "The first {shown} by engine; more engines have models bound."
-
-#: src/engines/store-change-errors.ts
-msgid "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
-msgstr "The migration {migration} failed on its fixture {fixture} when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again."
-
-#: src/engines/store-change-errors.ts
-msgid "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
-msgstr "The migration {migration} failed on its fixtures when this version was sealed: {reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
-msgstr "The packages approved for this engine. You see them because you may approve packages; the rest of the engine is for its members."
-
-#: src/engines/store-changes.tsx
-msgid "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-msgstr "The store keeps its tables as they are, and takes changes again. The release that needed this change can never be made current, in this engine or any other engine using the store: it has to be built again. The new fields stay reserved with the meaning this change gave them: a later version can add them again only exactly as they were. The values already filled in stay in the records, unseen. This can't be undone."
-
-#: src/routes/_shell.engines.index.tsx
-msgid "There are no engines you can open yet. Engines are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
-msgstr "There are no engines you can open yet. Engines are made in chat: describe a part of your work, and Grasp builds its workflows and apps."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-msgid "This engine doesn't use an integration yet."
-msgstr "This engine doesn't use an integration yet."
-
-#: src/screens/screen-frame.tsx
-msgid "This engine has no such app."
-msgstr "This engine has no such app."
-
-#: src/routes/_shell.engines.$engine.index.tsx
-#: src/screens/screen-frame.tsx
-msgid "This engine has no version to run yet."
-msgstr "This engine has no version to run yet."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
-msgstr "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
-msgstr "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
-msgstr "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress."
-
-#: src/engines/store-change-errors.ts
-msgid "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
-msgstr "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be."
-
-#: src/engines/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
-msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. Mend the record through the engine and the change is tried again, or abandon it."
-
-#: src/engines/store-changes.tsx
-msgid "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
-msgstr "Until this is resolved, no release that changes this store's tables can be made current, in this engine or any other engine using the store. No record is to blame, so there is nothing to mend: abandon the change for the store to take changes again."
-
-#: src/activity/audit-words.ts
-msgid "Was called by another engine"
-msgstr "Was called by another engine"
-
-#: src/activity/audit-words.ts
-msgid "Was refused adding a member to an engine"
-msgstr "Was refused adding a member to an engine"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
-msgstr "What its tools do, as its provider declares them. Engines and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
-
-#: src/chat/builds.tsx
-msgid "What other engines may call"
-msgstr "What other engines may call"
-
-#: src/chat/builds.tsx
-msgid "What the engine holds"
-msgstr "What the engine holds"
-
-#: src/engines/resource-bindings.tsx
-msgid "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
-msgstr "What the engine's actions may spend through this binding, on top of the deployment's budgets. Leave a cap empty for none. A workflow's own AI steps don't go through it."
-
-#: src/brain/atlas-overlays.tsx
-msgid "Where you are in the brain"
-msgstr "Where you are in the brain"
-
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Which engines and agents hold permissions: {why}"
-msgstr "Which engines and agents hold permissions: {why}"
-
-#: src/workflows/workflows-table.tsx
-msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
-msgstr "Workflows are made in chat: describe what should run on its own, and Grasp builds it into an engine."
-
-#: src/screens/screen-frame.tsx
-msgid "You can't open this engine's apps: your role doesn't allow it, or the engine has read data you can't read."
-msgstr "You can't open this engine's apps: your role doesn't allow it, or the engine has read data you can't read."
-
 #: src/brain/atlas-overlays.tsx
 msgid "Zoom in"
 msgstr "Zoom in"
@@ -7860,4 +7366,3 @@ msgstr "Zoom in"
 #: src/brain/atlas-overlays.tsx
 msgid "Zoom out"
 msgstr "Zoom out"
-
