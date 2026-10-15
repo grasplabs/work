@@ -15,8 +15,8 @@ import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 
 import { operationRoles } from "./app-access.ts";
 import { evaluateAppQuery, refusalOf } from "./app-functions.ts";
+import type { EvaluatedQuery } from "./app-functions.ts";
 import { appHost, inJurisdiction } from "./durable-objects.ts";
-import type { PageCallback } from "./page-callbacks.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { delivering } from "./screen-trust.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -28,6 +28,14 @@ import type { SessionCheck } from "./session-check.ts";
 // changed a table the query read (store-watches.ts), and core reads it
 // again and pushes the new result. The screen never asks again, and no
 // App code subscribes or broadcasts.
+//
+// Who a connection reads for, and how, is its `LiveReads`: a page's are
+// the person behind its session, the App's current release and its
+// business store (`screenReads`); an App test principal's are the
+// fixture's, on the test's own store (app-tests.ts). Everything else
+// here (ordering, gathering, watching, the gate before each push, the
+// bounds and releasing) is the same for both: a test follows a query
+// through exactly what a screen follows it through.
 //
 // Delivery (spec 11.3): a query is read, then watched with the generation
 // of each table it read, compared on the spot with the store's own, so a
@@ -138,9 +146,20 @@ const rolesOf = async (
   }
 };
 
+/**
+ * Where a subscription's pushes go: a page's callback, or an App test's
+ * (app-tests.ts). Each `dup` is a hold of its own; disposing the last
+ * tells the subscriber core let go of it, so it follows again.
+ */
+export interface SnapshotCallback {
+  (push: QuerySnapshotPush): unknown;
+  dup: () => SnapshotCallback;
+  [Symbol.dispose]: () => void;
+}
+
 /** One screen's subscription to a query. */
 interface Listener {
-  readonly toPage: PageCallback;
+  readonly toPage: SnapshotCallback;
   /** The latest revision sent to it. */
   sent: number;
   inFlight: boolean;
@@ -190,11 +209,83 @@ interface Evaluation {
 }
 
 /** What the connection's access check says, before each push of data. */
-export type AccessCheck = (
-  by: Identity,
+export type AccessCheck<By = Identity> = (
+  by: By,
   app: AppId,
   artifact: string | undefined
 ) => Promise<"open" | "role" | "build">;
+
+/** Whoever a connection's live queries are read for, by `userId`. */
+export interface Reader {
+  readonly userId: string;
+}
+
+/** What one read of a live query answered, and the store state it read. */
+export interface LiveRead {
+  readonly result: Result;
+  readonly reads: EvaluatedQuery["reads"];
+}
+
+/**
+ * Who one connection's live queries are read for, and how they are read
+ * (see the header).
+ */
+export interface LiveReads<By extends Reader> {
+  /**
+   * Who reads, now: throws once nobody may (the session ended). The same
+   * object for as long as one reading holds, which the gate's cache is
+   * keyed by.
+   */
+  check: () => Promise<By>;
+  /** The access check before each push of data. */
+  access: AccessCheck<By>;
+  /**
+   * The roles `by` reads App `app`'s tables with, as a key: a result read
+   * under one is never pushed under another. None once they have none.
+   */
+  roles: (by: By, app: AppId) => Promise<string | undefined>;
+  /** Whether a read a write caused may run now, within `by`'s budget. */
+  admit: (by: By, app: AppId) => Promise<boolean>;
+  /**
+   * Reads the query `request` names as `by`, as build `artifact`, by
+   * `deadline`; a throw is a refusal that ends the subscription.
+   */
+  evaluate: (
+    by: By,
+    app: AppId,
+    artifact: string | undefined,
+    request: string,
+    deadline: number
+  ) => Promise<LiveRead>;
+}
+
+/**
+ * A page's live reads: as the person behind the connection's session
+ * (`check`), checked with `access` before each push, read from the App's
+ * current release inside the build's trust check, and charged to the
+ * person's live reads of the App.
+ */
+export const screenReads = (
+  env: Env,
+  check: SessionCheck,
+  access: AccessCheck
+): LiveReads<Identity> => ({
+  check,
+  access,
+  roles: async (by, app) => await rolesOf(env, by, app),
+  admit: async (by, app) => await appHost(env, app).admitLiveRead(by.userId),
+  evaluate: async (by, app, artifact, request, deadline) => {
+    const { answer, reads } = await delivering(
+      env,
+      by,
+      app,
+      artifact,
+      "watchQuery",
+      async () => await evaluateAppQuery(env, by, app, request, deadline)
+    );
+    return { result: answer.result, reads };
+  },
+});
 
 /** A store's object, for its watches. */
 const storeOf = (env: Env, storeId: StoreId) =>
@@ -240,10 +331,9 @@ const allHaveLatest = (evaluation: Evaluation): boolean =>
   );
 
 /** One connection's live queries. */
-export class QuerySubscriptions {
+export class QuerySubscriptions<By extends Reader = Identity> {
   readonly #env: Env;
-  readonly #check: SessionCheck;
-  readonly #access: AccessCheck;
+  readonly #reads: LiveReads<By>;
   readonly #evaluations = new Map<string, Evaluation>();
   /** Reads waiting their turn, oldest first. */
   readonly #queue: Evaluation[] = [];
@@ -257,17 +347,16 @@ export class QuerySubscriptions {
   readonly #cleared = new Map<
     string,
     {
-      readonly by: Identity;
+      readonly by: By;
       readonly until: number;
-      readonly access: ReturnType<AccessCheck>;
+      readonly access: ReturnType<AccessCheck<By>>;
       readonly roles: Promise<string | undefined>;
     }
   >();
 
-  constructor(env: Env, check: SessionCheck, access: AccessCheck) {
+  constructor(env: Env, reads: LiveReads<By>) {
     this.#env = env;
-    this.#check = check;
-    this.#access = access;
+    this.#reads = reads;
   }
 
   /**
@@ -277,11 +366,11 @@ export class QuerySubscriptions {
    * request and checked the build's trust.
    */
   subscribe(
-    by: Identity,
+    by: By,
     app: AppId,
     artifact: string | undefined,
     request: string,
-    onSnapshot: PageCallback
+    onSnapshot: SnapshotCallback
   ): RunSubscription {
     if (this.#count >= querySubscriptionLimits.perConnection) {
       throw screenErrors.create("screen.too_many_queries");
@@ -421,17 +510,14 @@ export class QuerySubscriptions {
 
   async #readAndPush(evaluation: Evaluation): Promise<void> {
     const { app, artifact, request } = evaluation;
-    let by: Identity;
+    let by: By;
     try {
-      by = await this.#check();
+      by = await this.#reads.check();
     } catch (error) {
       await this.#end(evaluation, refusalResult(error));
       return;
     }
-    if (
-      evaluation.charged &&
-      !(await appHost(this.#env, app).admitLiveRead(by.userId))
-    ) {
+    if (evaluation.charged && !(await this.#reads.admit(by, app))) {
       // Past the person's budget: read later, gathering every change
       // meanwhile, waiting longer each time it is still spent.
       evaluation.budgetWaitMs = Math.min(
@@ -453,22 +539,14 @@ export class QuerySubscriptions {
       await this.#end(evaluation, before.refusal);
       return;
     }
-    let evaluated: Awaited<ReturnType<typeof evaluateAppQuery>>;
+    let evaluated: LiveRead;
     try {
-      evaluated = await delivering(
-        this.#env,
+      evaluated = await this.#reads.evaluate(
         by,
         app,
         artifact,
-        "watchQuery",
-        async () =>
-          await evaluateAppQuery(
-            this.#env,
-            by,
-            app,
-            request,
-            Date.now() + evaluationMs
-          )
+        request,
+        Date.now() + evaluationMs
       );
     } catch (error) {
       await this.#end(evaluation, refusalResult(error));
@@ -477,7 +555,7 @@ export class QuerySubscriptions {
     if (evaluation.closed) {
       return;
     }
-    const { result } = evaluated.answer;
+    const { result } = evaluated;
     if (!result.ok && endsSubscription(result.error.code)) {
       await this.#end(evaluation, result);
       return;
@@ -527,9 +605,9 @@ export class QuerySubscriptions {
     evaluation: Evaluation
   ): Promise<{ refusal: Result } | { roles: string }> {
     const { app, artifact } = evaluation;
-    let by: Identity;
+    let by: By;
     try {
-      by = await this.#check();
+      by = await this.#reads.check();
     } catch (error) {
       return { refusal: refusalResult(error) };
     }
@@ -540,12 +618,12 @@ export class QuerySubscriptions {
       cached = {
         by,
         until: now + accessCacheMs,
-        access: this.#access(by, app, artifact),
-        roles: rolesOf(this.#env, by, app),
+        access: this.#reads.access(by, app, artifact),
+        roles: this.#reads.roles(by, app),
       };
       this.#cleared.set(key, cached);
     }
-    let access: Awaited<ReturnType<AccessCheck>>;
+    let access: Awaited<ReturnType<AccessCheck<By>>>;
     let roles: string | undefined;
     try {
       access = await cached.access;
@@ -621,7 +699,7 @@ export class QuerySubscriptions {
    */
   async #keepWatched(
     evaluation: Evaluation,
-    by: Identity,
+    by: By,
     reads: {
       readonly storeId: StoreId;
       readonly readSet: Record<string, number>;
@@ -872,7 +950,7 @@ export class QuerySubscriptions {
    * anything is awaited: nothing queued for them goes out after this.
    * Answers the subscriptions' callbacks, still to be disposed of.
    */
-  #close(evaluation: Evaluation): PageCallback[] {
+  #close(evaluation: Evaluation): SnapshotCallback[] {
     evaluation.closed = true;
     evaluation.latest = undefined;
     if (this.#evaluations.get(evaluation.key) === evaluation) {
@@ -880,7 +958,7 @@ export class QuerySubscriptions {
     }
     clearTimeout(evaluation.timer);
     clearTimeout(evaluation.liveness);
-    const callbacks: PageCallback[] = [];
+    const callbacks: SnapshotCallback[] = [];
     for (const listener of evaluation.listeners) {
       callbacks.push(this.#detach(listener));
     }
@@ -889,7 +967,7 @@ export class QuerySubscriptions {
   }
 
   /** Marks `listener` released, dropping what waited for it. */
-  #detach(listener: Listener): PageCallback {
+  #detach(listener: Listener): SnapshotCallback {
     listener.released = true;
     listener.behind = false;
     if (listener.pending !== undefined) {
@@ -921,7 +999,7 @@ export class QuerySubscriptions {
 
   /** Pushes `push` to `toPage`, then lets go of it, waiting `finalPushMs` at most. */
   static async #pushLast(
-    toPage: PageCallback,
+    toPage: SnapshotCallback,
     push: QuerySnapshotPush
   ): Promise<void> {
     const { promise, resolve } = Promise.withResolvers<null>();
