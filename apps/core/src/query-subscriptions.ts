@@ -1185,16 +1185,14 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       gate.roles !== evaluation.roles
     ) {
       // What its screens show was read under roles the person no longer
-      // has: cleared now, by a result that carries nothing and ends
-      // nothing, not only once a read under their roles succeeds (one
-      // that fails to try again keeps what was last pushed). Then read
-      // again, admitted as the person's own look, so not charged.
-      this.#publish(
+      // has: ended with a result that carries nothing, pushed as the last
+      // however much waited (`#end`), so it clears the screen whatever a
+      // later read answers. It is no refusal of the person: the screen
+      // keeps following and follows again, from a read under their roles.
+      await this.#end(
         evaluation,
-        refusalResult(screenErrors.create("screen.access_changed")),
-        gate.roles
+        refusalResult(screenErrors.create("screen.access_changed"))
       );
-      this.#enqueue(evaluation, false);
     }
   }
 
