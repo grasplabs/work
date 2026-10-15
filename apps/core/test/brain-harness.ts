@@ -569,10 +569,10 @@ const runTrial = async (
     person.userId,
     place.agent.agentId
   );
-  // The gate covers the whole trial, earlier turns too; requests, cost and
-  // latency are the question's own, from where its timer starts.
+  // The gate and what reached the model cover the whole trial, earlier
+  // turns too; cost and latency are the question's own.
   const stateBefore = await stateFingerprint();
-  let firstRequest = gateway.requests.length;
+  const firstRequest = gateway.requests.length;
   let spentBefore = await charged(company);
   let answer = "";
   let failure: string | undefined;
@@ -583,7 +583,6 @@ const runTrial = async (
       // oxlint-disable-next-line no-await-in-loop -- in order, as said
       await place.stub.ask(chat.id, { text: said, model });
     }
-    firstRequest = gateway.requests.length;
     spentBefore = await charged(company);
     // A cold question starts in a just-evicted object, its caches and
     // memory gone, after any earlier turns of its chat. Its timer starts
