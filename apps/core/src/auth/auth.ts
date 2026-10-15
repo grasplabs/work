@@ -26,6 +26,7 @@ import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
+import { teamAccessMayHaveDropped } from "../access-revocations.ts";
 import {
   auditedBatch,
   keepAuditEvent,
@@ -701,6 +702,19 @@ const createAuth = (
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
         teams: { enabled: true },
+        // Leaving a team, or the team's deletion, can take a role in each
+        // App shared with it away: their hosts tell the open screens to
+        // look again (access-revocations.ts).
+        organizationHooks: {
+          afterRemoveTeamMember: async ({ teamMember }) => {
+            await teamAccessMayHaveDropped(env, teamMember.teamId, [
+              teamMember.userId,
+            ]);
+          },
+          afterDeleteTeam: async ({ team }) => {
+            await teamAccessMayHaveDropped(env, team.id, null);
+          },
+        },
       }),
       sso({
         // Providers come only from deployment config, never from the

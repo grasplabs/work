@@ -21,18 +21,20 @@ import { actionInvocation, invocationName } from "../src/action-invocation.ts";
 import { readFunctionRequest } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { versionFiles } from "../src/apps.ts";
-import { inJurisdiction } from "../src/durable-objects.ts";
+import { appHost, inJurisdiction } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { withScreenReferences } from "../src/screen-references.ts";
 import { buildScreens } from "../src/screens.ts";
+import { sessionRecheckMs } from "../src/session-check.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeMaxWatches } from "../src/store-watches.ts";
 import { pastAccessRecheck } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { newTeam } from "./knowledge.ts";
 import { apiOf, notesFiles as files, referenceTo } from "./notes-client-app.ts";
 import { person as sealedPerson } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { openRpc, outcome, routed, signedInApi } from "./sign-in.ts";
+import { callAuth, openRpc, outcome, routed, signedInApi } from "./sign-in.ts";
 
 // The session client a screen's queries, mutations and actions go through
 // (spec 10.1, 10.7.1), against core's real function route, as an approved
@@ -2271,3 +2273,329 @@ describe(
     });
   }
 );
+
+// Revocation (spec 11.4): when a write takes a person's role in an App
+// away, their open screens are cleared without waiting for anything to
+// commit to what they read, on every tab, and nothing more reaches them;
+// anyone whose access holds keeps their screen, whatever the event says.
+
+/**
+ * How long a screen may take to be cleared once access is gone: shorter
+ * than the window a connection's session reading holds, so what clears it
+ * is the event, never that reading running out.
+ */
+const deliveryWait = { timeout: sessionRecheckMs - 1000, interval: 50 };
+
+/** A raw subscription to the notes list over `screens`, once its first result arrived. */
+const followedList = async (
+  opened: Opened,
+  screens: Screens,
+  lease: string
+) => {
+  const follower = pageFollower();
+  await screens.watchQuery(
+    opened.app,
+    lease,
+    requestOf(apiOf(opened.release).list, { pagination: {} }),
+    follower.callback
+  );
+  await eventually(() => {
+    expect(follower.received.at(-1)?.result.ok).toBeTruthy();
+  });
+  return follower;
+};
+
+type Follower = Awaited<ReturnType<typeof followedList>>;
+
+/** A cleared screen: its last push a refusal, and core let go of it. */
+const refusedAndLetGo = { last: "app.not_found", released: true };
+
+/**
+ * What `follower` was last sent once core let go of it, which it must
+ * within `deliveryWait`.
+ */
+const whenLetGo = async (follower: Follower) => {
+  await vi.waitFor(() => {
+    expect(follower.state.released).toBeTruthy();
+  }, deliveryWait);
+  return {
+    last: titlesOf(follower.received.at(-1)),
+    released: follower.state.released,
+  };
+};
+
+/** How long `slowToFollow` holds each connection the App's host takes on. */
+const followDelayMs = 2000;
+
+/** Undoes nothing. */
+const nothingToUndo = (): void => {
+  // Nothing done yet.
+};
+
+/**
+ * Has the opened App's host take each connection on as followers of its
+ * revocations only `followDelayMs` late, as a busy host would. Answers
+ * how to undo it.
+ */
+const slowToFollow = async (opened: Opened) => {
+  let undo = nothingToUndo;
+  await runInDurableObject(appHost(env, opened.app), (instance) => {
+    // SAFETY: an App's object's prototype holds its methods.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const methods = Object.getPrototypeOf(instance) as Record<
+      string,
+      (...args: unknown[]) => Promise<unknown>
+    >;
+    const original = methods.followAccess;
+    if (original === undefined) {
+      throw new Error("An App's object follows access");
+    }
+    methods.followAccess = async function followAccess(this: unknown, ...args) {
+      await scheduler.wait(followDelayMs);
+      return await original.apply(this, args);
+    };
+    undo = () => {
+      methods.followAccess = original;
+    };
+  });
+  return undo;
+};
+
+/** What reaches `follower` once someone commits to what it read. */
+const afterACommit = async (opened: Opened, follower: Follower) => {
+  const before = follower.received.length;
+  await clientFor(opened).client.mutation(apiOf(opened.release).create, {
+    title: "Committed after",
+  });
+  await scheduler.wait(1500);
+  return follower.received.slice(before);
+};
+
+describe("live queries when access is revoked", { timeout: 180_000 }, () => {
+  it("clears a screen as soon as the person is unshared, with no commit after, and sends nothing more", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+
+    await opened.builder.api.apps.members.remove(opened.app, them);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+    await expect(afterACommit(opened, follower)).resolves.toStrictEqual([]);
+  });
+
+  it("clears the screen of someone who leaves the team the App is shared with", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const member = await personApi("user");
+    const team = await newTeam(admin, [member]);
+    await admin.api.apps.members.add(opened.app, {
+      type: "team",
+      id: team,
+      role: "user",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, member.api.screens, lease);
+
+    await callAuth("/organization/remove-team-member", admin.session, {
+      teamId: team,
+      userId: member.userId,
+    });
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears an admin's screen once they are demoted out of the App, on a session read just before", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const demoted = await personApi("admin");
+    const { lease } = await demoted.api.screens.open(opened.app, "notes");
+    await demoted.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, demoted.api.screens, lease);
+
+    await admin.api.members.setRole(demoted.userId, "user");
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("keeps the screens of everyone whose access holds, when others of the App lose theirs", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const leaving = await personApi("user");
+    const team = await newTeam(admin, [leaving]);
+    const unshared = { type: "team", id: team } as const;
+    await admin.api.apps.members.add(opened.app, { ...unshared, role: "user" });
+    const { lease } = await leaving.api.screens.open(opened.app, "notes");
+    await leaving.api.screens.present(opened.app, lease);
+    const theirs = await followedList(opened, leaving.api.screens, lease);
+    const staying = await memberOf(opened);
+    const kept = await followedList(
+      opened,
+      staying.member.api.screens,
+      staying.lease
+    );
+
+    // Everyone the App's host knows of looks again.
+    await admin.api.apps.members.remove(opened.app, unshared);
+    await expect(whenLetGo(theirs)).resolves.toStrictEqual(refusedAndLetGo);
+    await staying.client.mutation(apiOf(opened.release).create, {
+      title: "Still mine",
+    });
+
+    await eventually(() => {
+      expect(titlesOf(kept.received.at(-1))).toStrictEqual(["Still mine"]);
+    });
+    expect({
+      released: kept.state.released,
+      refused: kept.received.some(({ result }) => !result.ok),
+    }).toStrictEqual({ released: false, refused: false });
+  });
+
+  it("changes nothing for someone whose access holds, whoever says it was revoked", async () => {
+    const opened = await openedApp();
+    const { lease, member, client } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+
+    await appHost(env, opened.app).accessRevoked([member.userId]);
+    await appHost(env, opened.app).accessRevoked(null);
+    await scheduler.wait(1500);
+    await client.mutation(apiOf(opened.release).create, { title: "Mine" });
+
+    await eventually(() => {
+      expect(titlesOf(follower.received.at(-1))).toStrictEqual(["Mine"]);
+    });
+    expect({
+      released: follower.state.released,
+      refused: follower.received.some(({ result }) => !result.ok),
+    }).toStrictEqual({ released: false, refused: false });
+  });
+
+  it("clears every tab of the person, each on its own connection", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const { core } = await openRpc(member.session);
+    const otherTab = core.authenticate().screens;
+    await otherTab.present(opened.app, lease);
+    const first = await followedList(opened, member.api.screens, lease);
+    const second = await followedList(opened, otherTab, lease);
+
+    await opened.builder.api.apps.members.remove(opened.app, them);
+
+    await expect(whenLetGo(first)).resolves.toStrictEqual(refusedAndLetGo);
+    await expect(whenLetGo(second)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears what a frame of the tab follows through its own handle", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const frame = await member.api.screens.frame(opened.app, lease);
+    const follower = pageFollower();
+    await frame.watchQuery(
+      requestOf(apiOf(opened.release).list, { pagination: {} }),
+      follower.callback
+    );
+    await eventually(() => {
+      expect(follower.received.at(-1)?.result.ok).toBeTruthy();
+    });
+
+    await opened.builder.api.apps.members.remove(opened.app, them);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("never shows a query followed right after the revocation, on a session read before it", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const demoted = await personApi("admin");
+    const { lease } = await demoted.api.screens.open(opened.app, "notes");
+    // A tab that reads the session now, and follows nothing of the App yet.
+    const { core } = await openRpc(demoted.session);
+    const tab = core.authenticate().screens;
+    await tab.present(opened.app, lease);
+
+    await admin.api.members.setRole(demoted.userId, "user");
+    // The App's host is slow to take the tab on: the event went out
+    // before, and the tab's reads must wait for it either way.
+    const undo = await slowToFollow(opened);
+    try {
+      const follower = pageFollower();
+      await tab.watchQuery(
+        opened.app,
+        lease,
+        requestOf(apiOf(opened.release).list, { pagination: {} }),
+        follower.callback
+      );
+
+      await vi.waitFor(
+        () => {
+          expect(follower.state.released).toBeTruthy();
+        },
+        { ...deliveryWait, timeout: deliveryWait.timeout + followDelayMs }
+      );
+      expect(follower.received.map(({ result }) => result.ok)).toStrictEqual([
+        false,
+      ]);
+    } finally {
+      undo();
+    }
+  });
+
+  it("clears the screen even when the App's host restarted and lost who follows it", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+    await runInDurableObject(appHost(env, opened.app), (_app, state) => {
+      state.abort("Restarted by the test");
+    }).catch(() => {
+      // Aborting fails the call that aborted: that is the restart.
+    });
+
+    await opened.builder.api.apps.members.remove(opened.app, them);
+
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("reads again for someone who is now only a user, rather than keep showing what builders read", async () => {
+    const opened = await openedApp(withSecrets());
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "builder",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = pageFollower();
+    await member.api.screens.watchQuery(
+      opened.app,
+      lease,
+      requestOf(secrets, {}),
+      follower.callback
+    );
+    const showsSecret = () =>
+      JSON.stringify(follower.received.at(-1)?.result).includes(
+        "Builders only"
+      );
+    await eventually(() => {
+      expect(showsSecret()).toBeTruthy();
+    });
+
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "user",
+    });
+
+    await vi.waitFor(() => {
+      expect(showsSecret()).toBeFalsy();
+    }, deliveryWait);
+  });
+});

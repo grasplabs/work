@@ -5,11 +5,17 @@ import {
   oauthFlowLifetimeMs,
 } from "@grasp-os/shared/connect";
 import type { CodedError } from "@grasp-os/shared/errors";
-import { identifierSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type { Invitation, Member, MembersApi } from "@grasp-os/shared/members";
-import { isAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
+import {
+  canBuild,
+  isAdmin,
+  roleErrors,
+  roleSchema,
+} from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
@@ -17,6 +23,8 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { accessMayHaveDropped } from "./access-revocations.ts";
+import { appsFoundBy } from "./app-access.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   activeAdminExists,
@@ -28,9 +36,11 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
+import { teamsOf } from "./auth/identity.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
+  apps,
   invitations,
   memberRemovals,
   members,
@@ -106,6 +116,38 @@ const membershipOf = async (
     .where(currentMembership(userId));
   return membership;
 };
+
+/**
+ * The Apps `userId` has a role in as a member in role `role`, with the
+ * teams they are in now (app-access.ts): what removing them or lowering
+ * their role can take away, for those Apps' hosts to tell their open
+ * screens (access-revocations.ts). Read before the change.
+ */
+const appsReachedBy = async (
+  env: Env,
+  userId: string,
+  role: string
+): Promise<AppId[]> => {
+  const known = roleSchema.safeParse(role);
+  if (!known.success) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: apps.id })
+    .from(apps)
+    .where(
+      appsFoundBy(env, {
+        userId,
+        role: known.data,
+        teams: await teamsOf(env.DB, userId),
+      })
+    );
+  return rows.map(({ id }) => appIdSchema.parse(id));
+};
+
+/** Whether going from role `from` to `to` can take a role in an App away. */
+const lowers = (from: string, to: Role): boolean =>
+  (isAdmin(from) && !isAdmin(to)) || (canBuild(from) && !canBuild(to));
 
 /** That `userId` is an admin of the organization now, as a SQL condition. */
 const isActiveAdmin = (userId: string): SQL => activeMember(userId, ["admin"]);
@@ -278,11 +320,15 @@ const removeMember = async (
   const target = targetOf(by, userId);
   const membership = await membershipOf(env, target);
   if (membership) {
+    const reached = await appsReachedBy(env, target, membership.role);
     const removedNow = await recordRemoval(env, by, target, membership.id);
     // Someone else's removal of them may have landed first; otherwise the
     // admin stopped being one since their session was checked.
     if (!(removedNow || (await isRemoved(env, target)))) {
       throw refusal(by, roleErrors.create("role.forbidden"));
+    }
+    if (removedNow) {
+      await accessMayHaveDropped(env, reached, [target]);
     }
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
@@ -359,6 +405,9 @@ const setMemberRole = async (
   if (membership.role === newRole) {
     return;
   }
+  const reached = lowers(membership.role, newRole)
+    ? await appsReachedBy(env, target.data, membership.role)
+    : [];
   const db = drizzle(env.DB);
   const keepsAnAdmin =
     newRole === "admin" ? sql`1` : activeAdminExists(target.data);
@@ -387,6 +436,7 @@ const setMemberRole = async (
     }),
   ]);
   if (changed) {
+    await accessMayHaveDropped(env, reached, [target.data]);
     return;
   }
   const now = await membershipOf(env, target.data);

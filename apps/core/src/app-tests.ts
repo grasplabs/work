@@ -644,6 +644,10 @@ class FixtureSession extends TestTarget {
         await Promise.resolve(this.#closed ? ("role" as const) : "open"),
       roles: async () => await Promise.resolve(roles),
       admit: async () => await Promise.resolve(true),
+      revocable: false,
+      forget: () => {
+        // The reader is fixed for the session's life.
+      },
       evaluate: async (
         _by,
         _app,

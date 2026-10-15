@@ -54,6 +54,30 @@ import type { SessionCheck } from "./session-check.ts";
 //   screen drop what it holds, and the subscription ends: its readers are
 //   let go of before anything is awaited, so nothing that waited to be
 //   pushed goes out after the refusal.
+// - A snapshot stays on screen after access is lost, because nothing
+//   commits to what it read (spec 11.4): every write that can take a role
+//   in an App away tells the App's host once it committed
+//   (access-revocations.ts), and the host tells every connection of those
+//   people that follows the App (`#follow`), on every tab and isolate.
+//   The connection reads the session again now (`forget`), then passes
+//   each of the App's queries through the gate: a refusal ends it as
+//   above, clearing the screen; roles that changed read it again. No
+//   periodic recheck. How each way this can fail is closed:
+//   - An event that names someone else, arrives twice or late, or that
+//     anyone forged closes nothing: it only makes the connection look,
+//     and its own session and the database decide. Only core reaches an
+//     App's host, and the person a connection follows for is its
+//     session's, never the page's word.
+//   - An event missed while the host restarted: the host lets go of every
+//     callback with it, and a connection let go of looks at once and
+//     follows again, then looks once more, so an event sent in between
+//     is found by that look. A connection that can't follow at all stops
+//     its queries of the App, as when its store can't be watched.
+//   - A query followed just before the event lands, or right after it on
+//     a session read before it: nothing of the App is read on a
+//     connection until it follows the App's revocations, and then the
+//     session is read again, so a read either sees the change or is
+//     followed when the event arrives.
 // - A subscription outlives its session or the App's version: a session
 //   that ended refuses the read (`check`) and ends it; a reference to a
 //   version that is no longer current is refused (`version.*`) and ends
@@ -208,6 +232,18 @@ interface Evaluation {
   /** How long it waited for budget last, to wait longer next time. */
   budgetWaitMs: number;
   closed: boolean;
+  /** The roles its latest result was read under (`rolesOf`). */
+  roles?: string;
+}
+
+/**
+ * This connection's place among those an App's host tells of revocations
+ * (`followAccess`): its ID there once the host answered, and the wait for
+ * that answer, which every read of the App waits for first.
+ */
+interface Following {
+  id: string | undefined;
+  ready: Promise<void>;
 }
 
 /** What the connection's access check says, before each push of data. */
@@ -249,6 +285,14 @@ export interface LiveReads<By extends Reader> {
   /** Whether a read a write caused may run now, within `by`'s budget. */
   admit: (by: By, app: AppId) => Promise<boolean>;
   /**
+   * Whether the connection follows each App's revocations (`#follow`):
+   * a page's do, for the person behind its session; a test's fixtures
+   * hold no role a write could take away.
+   */
+  readonly revocable: boolean;
+  /** Drops the latest reading of who reads, so `check` reads now. */
+  forget: () => void;
+  /**
    * Reads the query `request` names as `by`, as build `artifact`, by
    * `deadline`; a throw is a refusal that ends the subscription.
    */
@@ -276,6 +320,10 @@ export const screenReads = (
   access,
   roles: async (by, app) => await rolesOf(env, by, app),
   admit: async (by, app) => await appHost(env, app).admitLiveRead(by.userId),
+  revocable: true,
+  forget: () => {
+    check.forget?.();
+  },
   evaluate: async (by, app, artifact, request, deadline) => {
     const { answer, reads } = await delivering(
       env,
@@ -356,6 +404,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
   >();
 
+  /** The Apps whose revocations this connection follows (`#follow`). */
+  readonly #following = new Map<AppId, Following>();
+
   constructor(env: Env, reads: LiveReads<By>) {
     this.#env = env;
     this.#reads = reads;
@@ -398,6 +449,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     };
     evaluation.listeners.add(listener);
     this.#count += 1;
+    if (this.#reads.revocable && !this.#following.has(app)) {
+      this.#follow(by.userId, app);
+    }
     // A result kept for another subscription that hasn't taken it yet
     // goes to this one too; otherwise a read on its way answers it, or a
     // fresh one, admitted as the person's request, so not charged.
@@ -519,6 +573,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
 
   async #readAndPush(evaluation: Evaluation): Promise<void> {
     const { app, artifact, request } = evaluation;
+    // Nothing of the App is read before the connection follows its
+    // revocations (see the header).
+    await this.#following.get(app)?.ready;
+    if (evaluation.closed) {
+      return;
+    }
     let by: By;
     try {
       by = await this.#reads.check();
@@ -831,6 +891,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
     const snapshot: Snapshot = { push, bytes, roles };
     evaluation.latest = snapshot;
+    evaluation.roles = roles;
     for (const listener of evaluation.listeners) {
       this.#offer(evaluation, listener, snapshot);
     }
@@ -972,7 +1033,131 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       callbacks.push(this.#detach(listener));
     }
     evaluation.listeners.clear();
+    if (!this.#follows(evaluation.app)) {
+      this.#unfollow(evaluation.app);
+    }
     return callbacks;
+  }
+
+  /** Whether the connection still follows a query of `app`. */
+  #follows(app: AppId): boolean {
+    return [...this.#evaluations.values()].some(
+      (evaluation) => evaluation.app === app
+    );
+  }
+
+  /**
+   * Has `app`'s host tell this connection when `userId`'s role in it may
+   * have dropped (`followAccess`), until the connection follows no query
+   * of it (`#unfollow`). Once the host answered, looks once (`#revoked`):
+   * whatever changed before it followed is seen by that look. Let go of
+   * by the host (restarted), it looks at once and follows again; when it
+   * can't follow, the App's queries stop, as when a store can't be
+   * watched, and the screens follow again later.
+   */
+  #follow(userId: string, app: AppId): void {
+    const following: Following = { id: undefined, ready: Promise.resolve() };
+    this.#following.set(app, following);
+    const current = (): boolean => this.#following.get(app) === following;
+    const watcher = Object.assign(
+      (revoked: boolean): void => {
+        // Once it no longer follows, it says it is gone, so the host drops
+        // it even if core's word that it let go never arrived.
+        if (!current()) {
+          throw new Error("This App's revocations are no longer followed.");
+        }
+        if (revoked) {
+          this.#revoked(app);
+        }
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          if (!current() || following.id === undefined) {
+            return;
+          }
+          this.#following.delete(app);
+          this.#revoked(app);
+          if (this.#follows(app)) {
+            this.#follow(userId, app);
+          }
+        },
+      }
+    );
+    const answered = async (): Promise<void> => {
+      try {
+        following.id = await appHost(this.#env, app).followAccess(
+          userId,
+          watcher
+        );
+      } catch (error) {
+        log.warn("query.follow_access_failed", errorFields(error));
+        if (current()) {
+          this.#following.delete(app);
+          await Promise.all(
+            [...this.#evaluations.values()]
+              .filter((evaluation) => evaluation.app === app)
+              .map(async (evaluation) => {
+                await this.#lose(evaluation);
+              })
+          );
+        }
+        return;
+      }
+      if (current()) {
+        this.#revoked(app);
+      } else {
+        await this.#leave(app, following.id);
+      }
+    };
+    following.ready = answered();
+  }
+
+  /** Stops following `app`'s revocations: no query of it is followed. */
+  #unfollow(app: AppId): void {
+    const following = this.#following.get(app);
+    this.#following.delete(app);
+    // Not answered yet: `#follow` leaves once it is.
+    if (following?.id !== undefined) {
+      void this.#leave(app, following.id);
+    }
+  }
+
+  async #leave(app: AppId, id: string): Promise<void> {
+    try {
+      await appHost(this.#env, app).unfollowAccess(id);
+    } catch (error) {
+      // The host drops it at its next telling.
+      log.warn("query.unfollow_access_failed", errorFields(error));
+    }
+  }
+
+  /**
+   * The person's role in `app` may have dropped: reads the session again
+   * now, and passes each of the App's queries through the gate, ending
+   * those it refuses (which clears their screens) and reading again those
+   * whose roles changed. Changes nothing for someone whose access holds.
+   */
+  #revoked(app: AppId): void {
+    this.#reads.forget();
+    this.#cleared.clear();
+    for (const evaluation of this.#evaluations.values()) {
+      if (evaluation.app === app) {
+        void this.#recheck(evaluation);
+      }
+    }
+  }
+
+  async #recheck(evaluation: Evaluation): Promise<void> {
+    const gate = await this.#gate(evaluation);
+    if ("refusal" in gate) {
+      await this.#end(evaluation, gate.refusal);
+    } else if (
+      evaluation.roles !== undefined &&
+      gate.roles !== evaluation.roles
+    ) {
+      // Admitted as the person's own look, so not charged.
+      this.#enqueue(evaluation, false);
+    }
   }
 
   /** Marks `listener` released, dropping what waited for it. */
