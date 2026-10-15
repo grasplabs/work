@@ -8,8 +8,9 @@ import type { Person } from "./people.ts";
 
 // Screens and workflows in one App, end to end, with the sample invoice
 // App: a screen starts the intake workflow and sees its run change live;
-// its reviewer answers on the same screen, open elsewhere, and
-// everyone with it open sees "waiting" go; and what the workflow's steps
+// its reviewer answers on the same screen, open elsewhere, confirming the
+// answer in Grasp's own dialog outside the screen (a cancelled one records
+// nothing), and everyone with it open sees "waiting" go; and what the workflow's steps
 // write to the App's data reaches every open screen without a refresh.
 
 /**
@@ -89,7 +90,31 @@ test("a screen starts a run and follows it live, and an answer on another screen
     ])
   );
 
+  // The screen asks to approve; Grasp's own dialog, outside the frame,
+  // shows the reviewer what is asked and what would be recorded. Cancelled,
+  // nothing is: the run still waits for its review.
   await reviewer.getByRole("button", { name: "Approve review" }).click();
+  const confirmation = second.getByRole("alertdialog", {
+    name: "Confirm your approval",
+  });
+  await expect(confirmation).toBeVisible(live);
+  await expect(confirmation).toContainText("Approve INV-7");
+  await expect(confirmation).toContainText("Your answerApprove");
+  await confirmation.getByRole("button", { name: "Cancel" }).click();
+  await expect(confirmation).toBeHidden();
+  await expect(runsOn(reviewer)).toHaveText(["waitingApprove review"], live);
+
+  // Asked again at once, the screen is refused for a while, so it can't
+  // keep the reviewer behind the dialog; asked again after that, and
+  // confirmed, the answer is recorded.
+  await reviewer.getByRole("button", { name: "Approve review" }).click();
+  await expect(confirmation).toBeHidden();
+  await expect(async () => {
+    await reviewer.getByRole("button", { name: "Approve review" }).click();
+    await expect(confirmation).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 20_000 });
+  await confirmation.getByRole("button", { name: "Confirm" }).click();
+  await expect(confirmation).toBeHidden();
 
   // The run goes on: nobody sees it waiting any more, it completes, and
   // its last step books the invoice, on every screen.

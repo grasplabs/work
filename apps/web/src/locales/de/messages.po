@@ -1327,6 +1327,7 @@ msgstr "Genehmigung zurückgenommen"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Approve"
 msgstr "Genehmigen"
@@ -1443,6 +1444,11 @@ msgstr "Fragen Sie den Sponsor nach: {title}."
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Ask the sponsor: {ask}"
 msgstr "Fragen Sie den Sponsor: {ask}"
+
+#: src/decision-confirmation.tsx
+msgctxt "what a decision asks"
+msgid "Asked"
+msgstr "Gefragt"
 
 #: src/activity/pending.tsx
 msgid "Asked again (previously granted by {person} on {date})"
@@ -1621,6 +1627,7 @@ msgstr "Eingegangen"
 msgid "Came up in {source}"
 msgstr "Erwähnt in {source}"
 
+#: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
 #: src/knowledge/document.tsx
 msgid "Cancel"
@@ -1874,6 +1881,11 @@ msgstr "Sammlungen"
 msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 msgstr "Sammlungen enthalten die Dokumente, die Grasp und seine Agenten lesen dürfen. Ein Admin teilt sie mit Ihnen, oder Sie legen eigene an."
 
+#: src/decision-confirmation.tsx
+msgctxt "a comment on an answer to a decision"
+msgid "Comment"
+msgstr "Kommentar"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Comment (optional)"
 msgstr "Kommentar (optional)"
@@ -1935,9 +1947,22 @@ msgstr "Konfiguration"
 msgid "Confirm"
 msgstr "Bestätigen"
 
+#: src/decision-confirmation.tsx
+msgctxt "confirm an answer to a decision"
+msgid "Confirm"
+msgstr "Bestätigen"
+
 #: src/chat/held-writes.tsx
 msgid "Confirm {what}"
 msgstr "{what} bestätigen"
+
+#: src/decision-confirmation.tsx
+msgid "Confirm your approval"
+msgstr "Genehmigung bestätigen"
+
+#: src/decision-confirmation.tsx
+msgid "Confirm your rejection"
+msgstr "Ablehnung bestätigen"
 
 #: src/brain/brain.ts
 msgid "Confirmed by {person}"
@@ -2227,6 +2252,11 @@ msgstr "Neu gestaltet"
 
 #: src/activity/audit-log.tsx
 #: src/knowledge/document.tsx
+msgid "Details"
+msgstr "Details"
+
+#: src/decision-confirmation.tsx
+msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Details"
 
@@ -2730,6 +2760,7 @@ msgstr "Gefunden in {source}"
 msgid "From"
 msgstr "Aus"
 
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "where a decision comes from"
 msgid "From"
@@ -2835,6 +2866,10 @@ msgstr "Grasp öffnet"
 #: src/sign-in-errors.ts
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp öffnet bald für alle, sobald Stephen mit den Teams gesprochen hat. Wenn Sie einen Interviewlink haben, finden Sie ihn in Ihrer E-Mail."
+
+#: src/decision-confirmation.tsx
+msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
+msgstr "Grasp speichert diese Antwort erst, wenn Sie sie hier bestätigen. Prüfen Sie, was gefragt ist und was Sie antworten."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
@@ -4192,6 +4227,7 @@ msgstr "Chat öffnen"
 msgid "Open the domain {name}"
 msgstr "Domäne {name} öffnen"
 
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
@@ -4598,6 +4634,7 @@ msgstr "Registry und Hash"
 #: src/chat/held-writes.tsx
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Ablehnen"
@@ -4878,6 +4915,7 @@ msgstr "Regeln warten auf eine Entscheidung"
 msgid "Run"
 msgstr "Lauf"
 
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
@@ -5083,6 +5121,11 @@ msgstr "Sensibel"
 #: src/routes/_shell.settings.models.tsx
 msgid "Sensitive connections: {connections}."
 msgstr "Sensible Verbindungen: {connections}."
+
+#: src/decision-confirmation.tsx
+msgctxt "what an App's screen sends with an answer to a decision"
+msgid "Sent by the app"
+msgstr "Von der App mitgesendet"
 
 #: src/brain/brain.ts
 msgid "Served by"
@@ -7053,6 +7096,11 @@ msgstr "Sie lesen Version {number}, gespeichert am {saved}. Die aktuelle Version
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Ihr Konto"
+
+#: src/decision-confirmation.tsx
+msgctxt "the answer a person gives a decision"
+msgid "Your answer"
+msgstr "Ihre Antwort"
 
 #: src/chat/chat-list.tsx
 msgid "Your chats show up here."

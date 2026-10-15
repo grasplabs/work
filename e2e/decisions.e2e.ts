@@ -6,8 +6,9 @@ import { apiOf, pageOf, peopleIn, release, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
 
 // A decision a workflow run waits for, answered from the link its ask
-// sent: the person it was sent to opens it, signs in, and approves, and
-// the run goes on with their answer. Anyone else who opens the same link
+// sent: the person it was sent to opens it, signs in, approves, and
+// confirms that answer in Grasp's dialog (cancelling first records
+// nothing), and the run goes on with their answer. Anyone else who opens the same link
 // only sees that it isn't for them.
 
 /** Keeps each ask's recipients, as a workflow that mails them would. */
@@ -133,6 +134,33 @@ test("the person a decision link was sent to approves it, and the run goes on", 
   ).toBeVisible(pageRead);
   await page.getByLabel("Comment (optional)").fill("Matches the PO");
   await page.getByRole("button", { name: "Approve" }).click();
+  // Grasp asks to confirm exactly what is answered, to exactly what is
+  // asked; cancelled, nothing is recorded and the comment stays.
+  const confirmation = page.getByRole("alertdialog", {
+    name: "Confirm your approval",
+  });
+  await expect(confirmation).toBeVisible(pageRead);
+  // Confirm waits a moment, so a click already on its way confirms nothing.
+  await expect(
+    confirmation.getByRole("button", { name: "Confirm" })
+  ).toBeDisabled();
+  await expect(confirmation).toContainText("Approve invoice INV-7");
+  await expect(confirmation).toContainText("CommentMatches the PO");
+  await confirmation.getByRole("button", { name: "Cancel" }).click();
+  await expect(confirmation).toBeHidden();
+  await expect(page.getByLabel("Comment (optional)")).toHaveValue(
+    "Matches the PO"
+  );
+  await expect(page.getByRole("button", { name: "Approve" })).toBeEnabled();
+  await page.getByRole("button", { name: "Approve" }).click();
+  await expect(confirmation).toBeVisible(pageRead);
+  await expect(
+    confirmation.getByRole("button", { name: "Confirm" })
+  ).toBeDisabled();
+  await expect(
+    confirmation.getByRole("button", { name: "Confirm" })
+  ).toBeEnabled();
+  await confirmation.getByRole("button", { name: "Confirm" }).click();
   await expect(page.getByRole("status")).toHaveText(
     /^Approved by Person on /u,
     pageRead

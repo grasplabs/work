@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
 import { projectStatus } from "../src/workflows/runs.ts";
-import { approvalApp, week } from "./decisions.ts";
+import { approvalApp, confirmedAnswer, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished } from "./runs.ts";
@@ -103,7 +103,7 @@ describe("a run's summary", { timeout: 60_000 }, () => {
       }
       return found.id;
     });
-    await admin.api.decisions.answer(decision, { approved: true });
+    await confirmedAnswer(admin, decision, { approved: true });
     const answered = await summaryWhen(
       builder,
       app,

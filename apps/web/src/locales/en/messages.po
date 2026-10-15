@@ -1327,6 +1327,7 @@ msgstr "Approval taken back"
 
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Approve"
 msgstr "Approve"
@@ -1443,6 +1444,11 @@ msgstr "Ask the sponsor about {title}."
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "Ask the sponsor: {ask}"
 msgstr "Ask the sponsor: {ask}"
+
+#: src/decision-confirmation.tsx
+msgctxt "what a decision asks"
+msgid "Asked"
+msgstr "Asked"
 
 #: src/activity/pending.tsx
 msgid "Asked again (previously granted by {person} on {date})"
@@ -1621,6 +1627,7 @@ msgstr "Came in"
 msgid "Came up in {source}"
 msgstr "Came up in {source}"
 
+#: src/decision-confirmation.tsx
 #: src/engines/package-approvals.tsx
 #: src/knowledge/document.tsx
 msgid "Cancel"
@@ -1874,6 +1881,11 @@ msgstr "Collections"
 msgid "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 msgstr "Collections hold the documents Grasp and its agents may read. An admin shares them with you, or you add your own."
 
+#: src/decision-confirmation.tsx
+msgctxt "a comment on an answer to a decision"
+msgid "Comment"
+msgstr "Comment"
+
 #: src/routes/decisions.$decision.tsx
 msgid "Comment (optional)"
 msgstr "Comment (optional)"
@@ -1935,9 +1947,22 @@ msgstr "Configuration"
 msgid "Confirm"
 msgstr "Confirm"
 
+#: src/decision-confirmation.tsx
+msgctxt "confirm an answer to a decision"
+msgid "Confirm"
+msgstr "Confirm"
+
 #: src/chat/held-writes.tsx
 msgid "Confirm {what}"
 msgstr "Confirm {what}"
+
+#: src/decision-confirmation.tsx
+msgid "Confirm your approval"
+msgstr "Confirm your approval"
+
+#: src/decision-confirmation.tsx
+msgid "Confirm your rejection"
+msgstr "Confirm your rejection"
 
 #: src/brain/brain.ts
 msgid "Confirmed by {person}"
@@ -2227,6 +2252,11 @@ msgstr "Designed"
 
 #: src/activity/audit-log.tsx
 #: src/knowledge/document.tsx
+msgid "Details"
+msgstr "Details"
+
+#: src/decision-confirmation.tsx
+msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Details"
 
@@ -2730,6 +2760,7 @@ msgstr "Found in {source}"
 msgid "From"
 msgstr "From"
 
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "where a decision comes from"
 msgid "From"
@@ -2835,6 +2866,10 @@ msgstr "Grasp opens"
 #: src/sign-in-errors.ts
 msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 msgstr "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
+
+#: src/decision-confirmation.tsx
+msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
+msgstr "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 
 #: src/dashboard/dependency-requests.tsx
 msgid "Grasp resolved these packages from the npm registry and checked each one's files against the registry's hash. A licence is as the package states it."
@@ -4192,6 +4227,7 @@ msgstr "Open the chat"
 msgid "Open the domain {name}"
 msgstr "Open the domain {name}"
 
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
@@ -4598,6 +4634,7 @@ msgstr "Registry and hash"
 #: src/chat/held-writes.tsx
 #: src/dashboard/dependency-requests.tsx
 #: src/dashboard/pile-cards.tsx
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Reject"
 msgstr "Reject"
@@ -4878,6 +4915,7 @@ msgstr "Rules waiting for a decision"
 msgid "Run"
 msgstr "Run"
 
+#: src/decision-confirmation.tsx
 #: src/routes/decisions.$decision.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
@@ -5083,6 +5121,11 @@ msgstr "Sensitive"
 #: src/routes/_shell.settings.models.tsx
 msgid "Sensitive connections: {connections}."
 msgstr "Sensitive connections: {connections}."
+
+#: src/decision-confirmation.tsx
+msgctxt "what an App's screen sends with an answer to a decision"
+msgid "Sent by the app"
+msgstr "Sent by the app"
 
 #: src/brain/brain.ts
 msgid "Served by"
@@ -7053,6 +7096,11 @@ msgstr "You're reading version {number}, saved {saved}. The current version is {
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
 msgstr "Your account"
+
+#: src/decision-confirmation.tsx
+msgctxt "the answer a person gives a decision"
+msgid "Your answer"
+msgstr "Your answer"
 
 #: src/chat/chat-list.tsx
 msgid "Your chats show up here."
