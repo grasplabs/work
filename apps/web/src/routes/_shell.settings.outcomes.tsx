@@ -140,14 +140,21 @@ export const Route = createFileRoute("/_shell/settings/outcomes")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: UnknownOutcomes,
-  loader: async ({ context: { core } }): Promise<Loaded<Outcomes>> => {
-    // Each page of the listing within its own few seconds.
+  loader: async ({
+    abortController,
+    context: { core },
+  }): Promise<Loaded<Outcomes>> => {
+    // Each page of the listing within its own few seconds, and no more
+    // pages once the page is left.
+    const left = abortController.signal;
     const [listed, people] = await Promise.all([
       loadEveryPage(
         core,
-        async (session, before) => await session.unknownOutcomes.listAll(before)
+        async (session, before) =>
+          await session.unknownOutcomes.listAll(before),
+        left
       ),
-      loadFromCore(core, readPeople),
+      loadFromCore(core, readPeople, left),
     ]);
     if (listed.state !== "ready") {
       return listed;
