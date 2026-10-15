@@ -562,15 +562,8 @@ const runTrial = async (
   const person = company.people[task.persona];
   const { gateway, setTurn } = provider;
   // Every object of the class may share one env, and an evicted one gets
-  // a new one: pointed at the provider before each trial. A cold trial
-  // starts in a just-evicted object, its caches and memory gone; pointing
-  // it constructs it again, so a fake provider's cold start leaves out the
-  // constructor itself, which a run against a deployment measures.
+  // a new one: pointed at the provider before each trial.
   await pointAtGateway(place.stub, gateway);
-  if (cold) {
-    await evictDurableObject(place.stub);
-    await pointAtGateway(place.stub, gateway);
-  }
   const chat = await place.stub.createChat(
     `Baseline ${task.id}`,
     person.userId,
@@ -581,14 +574,23 @@ const runTrial = async (
   const spentBefore = await charged(company);
   let answer = "";
   let failure: string | undefined;
-  let latencyMs = 0;
+  let started = performance.now();
   try {
     setTurn({ phase: "prior" });
     for (const said of task.priorTurns ?? []) {
       // oxlint-disable-next-line no-await-in-loop -- in order, as said
       await place.stub.ask(chat.id, { text: said, model });
     }
-    const started = performance.now();
+    // A cold question starts in a just-evicted object, its caches and
+    // memory gone, after any earlier turns of its chat. Pointing it
+    // constructs it again, so a fake provider's cold start leaves out the
+    // constructor itself, which a run against a deployment measures.
+    if (cold) {
+      await evictDurableObject(place.stub);
+      await pointAtGateway(place.stub, gateway);
+    }
+    // Timed from here, failed questions too: retrieval, then the agent.
+    started = performance.now();
     const sources = await sourcesFor(company, plan);
     if (arm === "changesState") {
       await changeState(company, task.persona);
@@ -598,7 +600,6 @@ const runTrial = async (
       text: renderPrompt(task.question, sources),
       model,
     });
-    latencyMs = performance.now() - started;
     ({ answer } = reply);
     if (reply.outcome !== "answered") {
       failure = `${reply.outcome}: ${reply.error ?? ""}`;
@@ -606,6 +607,7 @@ const runTrial = async (
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
   }
+  const latencyMs = performance.now() - started;
   const requests = gateway.requests.slice(firstRequest);
   return {
     taskId: task.id,
@@ -722,6 +724,9 @@ export const runBrainBaseline = async (
     providerName = brainStubModel,
   }: BrainRunOptions
 ): Promise<BrainReport> => {
+  if (!Number.isInteger(repeats) || repeats < 1) {
+    throw new RangeError("The baseline needs at least one repeat");
+  }
   const tasks = tasksOf(split, { openSealed });
   const random = seededRandom(seed);
   const provider = providerOf(respond);

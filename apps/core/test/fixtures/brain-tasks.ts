@@ -215,7 +215,7 @@ export const brainTasks: readonly BrainTask[] = [
     question: "When does route plan RP-2026-44 depart?",
     query: "RP-2026-44",
     expect: answer(
-      [["Tuesday"], ["05:30"]],
+      [["Tuesday", "Tuesdays"], ["05:30"]],
       [
         {
           source: "planning/route-plans.md#RP-2026-44",

@@ -71,8 +71,32 @@ export const citationsOf = (answer: string): string[] =>
     ({ groups }) => groups?.cited?.trim() ?? ""
   );
 
+const wordCharacter = /[\p{L}\p{N}]/u;
+
+/**
+ * Whether `text` holds `words` as whole words: "37" isn't in "137 trucks",
+ * nor "23 cent" in "123 cent". Both are normalized.
+ */
+const holds = (text: string, words: string): boolean => {
+  if (words === "") {
+    return false;
+  }
+  for (
+    let at = text.indexOf(words);
+    at !== -1;
+    at = text.indexOf(words, at + 1)
+  ) {
+    const before = text.charAt(at - 1);
+    const after = text.charAt(at + words.length);
+    if (!wordCharacter.test(before) && !wordCharacter.test(after)) {
+      return true;
+    }
+  }
+  return false;
+};
+
 const says = (text: string, fact: BrainFact): boolean =>
-  fact.some((words) => text.includes(normalized(words)));
+  fact.some((words) => holds(text, normalized(words)));
 
 /** Whether `cited` names `source`: the same path is enough, whatever heading. */
 const names = (cited: string, source: string): boolean => {
@@ -130,9 +154,7 @@ export const scoreTrial = (
   const answered = !failed && !abstained;
   const right =
     expect.facts.every((fact) => says(answer, fact)) &&
-    !(expect.forbidden ?? []).some((stale) =>
-      answer.includes(normalized(stale))
-    );
+    !(expect.forbidden ?? []).some((stale) => holds(answer, normalized(stale)));
   return {
     ...common,
     evidenceRecall: reached / expect.evidence.length,
@@ -391,6 +413,30 @@ const completionByTask = (scores: readonly TrialScore[]): Map<string, number> =>
   );
 
 /**
+ * A comparison's decision: blocked by a security failure, inconclusive
+ * with no task to pair, else what the interval says.
+ */
+const decisionOf = ({
+  blocked,
+  differences,
+  interval,
+  gain,
+}: {
+  blocked: boolean;
+  differences: readonly number[];
+  interval: readonly [number, number];
+  gain: number;
+}): ComparisonDecision => {
+  if (blocked) {
+    return "blocked";
+  }
+  if (differences.length === 0) {
+    return "inconclusive";
+  }
+  return decide(mean(differences) ?? 0, interval, gain);
+};
+
+/**
  * Compares two arms' completion on the tasks both ran, paired by task, with
  * a bootstrap interval over tasks and a decision against `gain`.
  */
@@ -420,7 +466,7 @@ export const compareArms = (
     interval,
     sdDifference,
     requiredTasks: requiredTasks(sdDifference, gain),
-    decision: blocked ? "blocked" : decide(meanDifference, interval, gain),
+    decision: decisionOf({ blocked, differences, interval, gain }),
   };
 };
 

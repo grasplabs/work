@@ -141,6 +141,30 @@ describe("scoring a trial", () => {
     });
   });
 
+  it("takes exact values as whole words, never inside a longer number", () => {
+    const fleet: BrainExpectation = {
+      kind: "answer",
+      facts: [["37"], ["12"]],
+      forbidden: ["23 cent"],
+      evidence: [{ source: "fleet.md#Size", marker: "37 trucks" }],
+    };
+    const input = { modelInput: "The fleet has 37 trucks." };
+    expect({
+      inside: verdict(fleet, {
+        ...input,
+        answer: "137 trucks, 112 electric [fleet.md]",
+      }).completed,
+      whole: verdict(fleet, {
+        ...input,
+        answer: "37 trucks, 12 electric [fleet.md]",
+      }).completed,
+      staleInside: verdict(fleet, {
+        ...input,
+        answer: "37 and 12, at 123 cent [fleet.md]",
+      }).completed,
+    }).toStrictEqual({ inside: false, whole: true, staleInside: true });
+  });
+
   it("measures evidence recall as the share of the evidence that reached the model", () => {
     const two: BrainExpectation = {
       kind: "answer",
@@ -273,7 +297,7 @@ describe("summarising and comparing arms", () => {
     ]);
   });
 
-  it("pairs arms by task, and blocks a comparison when either arm broke the gate", () => {
+  it("pairs arms by task, blocks a comparison when either arm broke the gate, and decides nothing unpaired", () => {
     const better = compareArms(
       {
         arm: "fullContext",
@@ -304,16 +328,23 @@ describe("summarising and comparing arms", () => {
       },
       0.05
     );
+    const unpaired = compareArms(
+      { arm: "fullText", scores: [trial("fullText", "a", true)] },
+      { arm: "agent", scores: [trial("agent", "b", true)] },
+      0.05
+    );
     expect({
       tasks: better.tasks,
       mean: better.meanDifference,
       decision: better.decision,
       leaked: leaked.decision,
+      unpaired: [unpaired.tasks, unpaired.decision],
     }).toStrictEqual({
       tasks: 4,
       mean: 0.75,
       decision: "better",
       leaked: "blocked",
+      unpaired: [0, "inconclusive"],
     });
   });
 });
