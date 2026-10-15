@@ -131,12 +131,20 @@ export interface RunHandle {
   readonly version: number;
 }
 
+/**
+ * What a start of `Workflow` takes: the workflow and its input, which may
+ * be left out where the input schema takes none (its default, say).
+ */
+type StartArgs<Workflow> =
+  undefined extends WorkflowInput<Workflow>
+    ? [workflow: Workflow, input?: WorkflowInput<Workflow>]
+    : [workflow: Workflow, input: WorkflowInput<Workflow>];
+
 /** `ctx.startWorkflow`: one of the workflows `Uses` lists, with its input. */
 type StartWorkflow<Uses extends readonly Use[]> = <
   Workflow extends UsedWorkflow<Uses>,
 >(
-  workflow: Workflow,
-  input: WorkflowInput<Workflow>
+  ...args: StartArgs<Workflow>
 ) => Promise<RunHandle>;
 
 /**
@@ -151,8 +159,7 @@ export interface AfterCommit<Uses extends readonly Use[]> {
    * mutation that fails, is rolled back or is superseded starts nothing.
    */
   readonly start: <Workflow extends UsedWorkflow<Uses>>(
-    workflow: Workflow,
-    input: WorkflowInput<Workflow>
+    ...args: StartArgs<Workflow>
   ) => Promise<void>;
 }
 

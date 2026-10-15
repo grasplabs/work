@@ -1720,12 +1720,14 @@ const workflowStart = (
     method !== "start" ||
     args === undefined ||
     !isJsonArray(args) ||
-    args.length !== 1
+    args.length > 1
   ) {
     throw operationErrors.create("resource.not_allowed");
   }
-  const [given = null] = args;
-  if (bytesOf(given) > operationInputMaxBytes) {
+  // No argument is no input, which JSON can't carry: the declared schema
+  // decides it, its default included.
+  const given = args.length === 0 ? undefined : args[0];
+  if (given !== undefined && bytesOf(given) > operationInputMaxBytes) {
     throw operationErrors.create("contract.input_too_large", {
       maxBytes: operationInputMaxBytes,
     });

@@ -88,7 +88,8 @@ const { query, mutation, action } = serverModule(schema);
 
 /** The workflow the App declares, by the alias its builders bind. */
 const followUp = resource.workflow("followUp", {
-  input: v.object({ who: v.string().trim().min(1) }),
+  // Started with no input, it takes its declared default.
+  input: v.object({ who: v.string().trim().min(1) }).default({ who: "Anyone" }),
 });
 
 const handleSchema = v.object({
@@ -145,6 +146,25 @@ const kickOff = action({
   uses: [followUp],
   handler: async (ctx, args) =>
     await ctx.startWorkflow(followUp, { who: args.who }),
+});
+
+/** Starts the follow-up now, with no input: its default. */
+const kickOffPlain = action({
+  args: {},
+  returns: handleSchema,
+  uses: [followUp],
+  handler: async (ctx) => await ctx.startWorkflow(followUp),
+});
+
+/** Has the follow-up started once it commits, with no input. */
+const submitPlain = mutation({
+  args: {},
+  returns: v.null(),
+  uses: [followUp],
+  handler: async (ctx) => {
+    await ctx.afterCommit.start(followUp);
+    return null;
+  },
 });
 
 /** An action and a mutation that list no workflow, for rogue code. */
@@ -212,6 +232,8 @@ const startsApp = registerApp({
       submit,
       guarded,
       kickOff,
+      kickOffPlain,
+      submitPlain,
       flood,
       bulky,
       plainAction,
@@ -478,6 +500,8 @@ const kinds = {
   "requests.flood": "mutation",
   "requests.bulky": "mutation",
   "requests.kickOff": "action",
+  "requests.kickOffPlain": "action",
+  "requests.submitPlain": "mutation",
   "requests.plainAction": "action",
   "requests.plainMutation": "mutation",
 } as const;
@@ -1224,6 +1248,30 @@ describe("what a start rechecks, and records", () => {
       later: "delivered",
       refused: [],
       receipts: 1,
+    });
+  });
+
+  it("starts with the workflow's declared default when an action or a commit gives no input", async () => {
+    const fx = await fixture();
+    const started = await call(fx, fx.bob, "requests.kickOffPlain", {});
+    const staged = await call(fx, fx.bob, "requests.submitPlain", {});
+    await runDurableObjectAlarm(objectOf(fx.store));
+    const { results } = await env.DB.prepare(
+      "SELECT input FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ? ORDER BY created_at, id"
+    )
+      .bind(fx.app)
+      .all<{ input: string }>();
+    expect({
+      started: started.ok,
+      staged: staged.ok,
+      inputs: results.map(({ input }) => input),
+    }).toStrictEqual({
+      started: true,
+      staged: true,
+      inputs: [
+        JSON.stringify({ who: "Anyone" }),
+        JSON.stringify({ who: "Anyone" }),
+      ],
     });
   });
 

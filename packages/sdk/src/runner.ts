@@ -134,7 +134,13 @@ const usedWorkflow = (fn: AnyFunction, workflow: unknown): string => {
 const startOf =
   (fn: AnyFunction, channel: OperationChannel) =>
   async (workflow: unknown, input: unknown): Promise<unknown> =>
-    await channel.resource(usedWorkflow(fn, workflow), "start", [input]);
+    await channel.resource(
+      usedWorkflow(fn, workflow),
+      "start",
+      // No input travels as no argument, which JSON can carry: the host
+      // applies the workflow's declared default.
+      input === undefined ? [] : [input]
+    );
 
 /**
  * The one method of each kind of resource's client but knowledge's and
