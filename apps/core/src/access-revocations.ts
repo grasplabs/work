@@ -138,41 +138,11 @@ export const teamAccessMayHaveDropped = async (
 };
 
 /**
- * The people of each team about to be deleted, read before Better Auth
- * deletes the team with its members (`teamAboutToGo`), for `teamGone` to
- * tell once it has. Before and after run in the same request.
+ * `teamAccessMayHaveDropped` once team `teamId` is deleted, for everyone:
+ * who was in it can't be read now, and a snapshot read before could miss
+ * someone who joined meanwhile. A team is deleted rarely; every App
+ * shared with anyone looks again.
  */
-const leavingTeams = new Map<string, readonly string[]>();
-
-/**
- * Reads who is in team `teamId`, which is about to be deleted. Never
- * throws: a read that failed leaves `teamGone` telling everyone.
- */
-export const teamAboutToGo = async (
-  env: Env,
-  teamId: string
-): Promise<void> => {
-  // What an earlier deletion of it read, one that failed before its
-  // `teamGone`, is stale: never told in place of this read.
-  leavingTeams.delete(teamId);
-  try {
-    const rows = await drizzle(env.DB)
-      .select({ userId: teamMembers.userId })
-      .from(teamMembers)
-      .where(eq(teamMembers.teamId, teamId));
-    leavingTeams.set(
-      teamId,
-      rows.map(({ userId }) => userId)
-    );
-  } catch (error) {
-    log.error("app.access_revocation_failed", errorFields(error));
-  }
-};
-
-/** `teamAccessMayHaveDropped` for everyone team `teamId` had, now it is gone. */
 export const teamGone = async (env: Env, teamId: string): Promise<void> => {
-  // Unread (the read before failed): everyone the App knows of looks.
-  const userIds = leavingTeams.get(teamId) ?? null;
-  leavingTeams.delete(teamId);
-  await teamAccessMayHaveDropped(env, teamId, userIds);
+  await teamAccessMayHaveDropped(env, teamId, null);
 };
