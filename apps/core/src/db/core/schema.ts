@@ -308,21 +308,24 @@ export const auditOutboxRejected = sqliteTable(
 );
 
 /**
- * What each App and agent may use: one row per permission, never deleted,
- * so who asked, who granted and who revoked stays readable. Only its status
- * and the grant and revoke columns ever change.
+ * What each App, agent, independent workflow, business store and trigger
+ * may use: one row per permission, never deleted, so who asked, who
+ * granted and who revoked stays readable. Only its status and the grant
+ * and revoke columns ever change.
  *
  * The object is stored by type: a connection is `object_id`, with
  * `resource` naming one resource in it or null for all of it; a collection
- * is `object_id`; a workflow is its App's ID in `object_id` and the
- * workflow's in `resource`; another App's exports are that App's ID in
- * `object_id`. `actions` is a JSON array of action names.
+ * is `object_id`; a workflow is its workflow resource's ID in `object_id`;
+ * another App's exports are that App's ID in `object_id`. `actions` is a
+ * JSON array of action names.
  */
 export const permissions = sqliteTable(
   "permissions",
   {
     id: text().primaryKey(),
-    subjectType: text("subject_type", { enum: ["app", "agent"] }).notNull(),
+    subjectType: text("subject_type", {
+      enum: ["app", "agent", "workflow", "store", "trigger"],
+    }).notNull(),
     subjectId: text("subject_id").notNull(),
     objectType: text("object_type", {
       enum: ["connection", "collection", "workflow", "app", "platform"],
@@ -2126,6 +2129,13 @@ export const workflowResources = sqliteTable("workflow_resources", {
   currentVersion: integer("current_version"),
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
+  /**
+   * Moves on with every change of who may start or follow it: its members,
+   * and grants and revocations of permissions on it or of it
+   * (workflow-starts.ts). A start admitted under one generation is refused
+   * once it moved, so no start lands on authority that changed under it.
+   */
+  policyGeneration: integer("policy_generation").notNull().default(1),
 });
 
 /**
@@ -2193,6 +2203,104 @@ export const workflowResourceMembers = sqliteTable(
     index("workflow_resource_members_member_idx").on(
       table.memberType,
       table.memberId
+    ),
+  ]
+);
+
+/**
+ * Independent triggers (spec 15, 24; src/trigger-resources.ts): what
+ * starts one exact workflow version on its own (a system event, a
+ * connector event, a webhook, a schedule), owned by whoever created it,
+ * never by the workflow's owner or an App. `current_version` names the
+ * version (`trigger_resource_versions`) future starts use; `enabled` false,
+ * or `deleted_at`, stops future starts, never runs already started. Its
+ * starts need a permission of its own (`start` on the workflow) like any
+ * other subject's.
+ */
+export const triggerResources = sqliteTable("trigger_resources", {
+  id: text().primaryKey(),
+  ownerId: text("owner_id").notNull(),
+  kind: text({
+    enum: ["system", "connector", "webhook", "schedule"],
+  }).notNull(),
+  currentVersion: integer("current_version").notNull(),
+  enabled: integer({ mode: "boolean" }).notNull(),
+  createdAt: timestamp("created_at").notNull(),
+  deletedAt: timestamp("deleted_at"),
+});
+
+/**
+ * Each version of a trigger, written once: the exact workflow version it
+ * starts (never "the latest": a new workflow version changes no trigger
+ * until one is explicitly updated to it), the SHA-256 of its
+ * configuration, and the person its starts act for (`principal_binding`,
+ * a user ID the host bound at creation: who created it, never the
+ * workflow's owner).
+ */
+export const triggerResourceVersions = sqliteTable(
+  "trigger_resource_versions",
+  {
+    triggerId: text("trigger_id")
+      .notNull()
+      .references(() => triggerResources.id),
+    version: integer().notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    configHash: text("config_hash").notNull(),
+    principalBinding: text("principal_binding").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.triggerId, table.version] })]
+);
+
+/**
+ * Each start of an independent workflow the host admitted
+ * (src/workflow-starts.ts): its durable receipt, written in one statement
+ * with the authorization it was admitted on, read again as the statement
+ * ran. One per invoker, person it acts for and idempotency key, so the
+ * same start sent again is the same start, and one person's key never
+ * reaches another's start. It pins the exact workflow version and manifest, who
+ * invoked it (a person, an App, an agent or a trigger, with the App
+ * version or trigger version), the person it acts for, the workflow's
+ * policy generation it was admitted under and its validated input
+ * (canonical JSON, with its SHA-256). Never changed after.
+ */
+export const workflowStartReceipts = sqliteTable(
+  "workflow_start_receipts",
+  {
+    id: text().primaryKey(),
+    invokerType: text("invoker_type", {
+      enum: ["person", "app", "agent", "trigger"],
+    }).notNull(),
+    invokerId: text("invoker_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    workflowResourceVersion: integer("workflow_resource_version").notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    /** The App version, for an App's start; null otherwise. */
+    originAppVersion: integer("origin_app_version"),
+    /** The trigger version, for a trigger's start; null otherwise. */
+    triggerVersion: integer("trigger_version"),
+    principalId: text("principal_id").notNull(),
+    authorityGeneration: integer("authority_generation").notNull(),
+    input: text().notNull(),
+    inputHash: text("input_hash").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("workflow_start_receipts_key").on(
+      table.invokerType,
+      table.invokerId,
+      table.principalId,
+      table.idempotencyKey
+    ),
+    index("workflow_start_receipts_workflow").on(
+      table.workflowResourceId,
+      table.createdAt
     ),
   ]
 );
