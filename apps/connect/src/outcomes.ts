@@ -24,6 +24,7 @@ import type {
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { codeSubjectSchema } from "@grasp-os/shared/permissions";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -166,6 +167,23 @@ export const listUnknownOutcomes = async (
 };
 
 /**
+ * The columns an admin's listing reads (`listingOf`): never the input,
+ * which may be large, nor the key or origin, which it never shows.
+ */
+const listingColumns = {
+  subjectType: idempotentCalls.subjectType,
+  subjectId: idempotentCalls.subjectId,
+  onBehalfOf: idempotentCalls.onBehalfOf,
+  connectionId: idempotentCalls.connectionId,
+  action: idempotentCalls.action,
+  claimedAt: idempotentCalls.claimedAt,
+  resource: idempotentCalls.resource,
+  createdAt: idempotentCalls.createdAt,
+};
+
+type ListingRow = Pick<Row, keyof typeof listingColumns>;
+
+/**
  * What `row` shows an admin: never its input, key, claim or origin
  * (`UnknownOutcomeListing`). Its title is its tool's, which names the
  * action, never a value of what was sent.
@@ -174,7 +192,7 @@ const listingOf = async ({
   row,
   connection,
 }: {
-  row: Row;
+  row: ListingRow;
   connection: ShownConnection;
 }): Promise<UnknownOutcomeListing> => {
   const title = descriptionOf(
@@ -198,7 +216,11 @@ const listingOf = async ({
       ])
     ),
     onBehalfOf: row.onBehalfOf,
-    subject: keyOf(row).subject,
+    subject: codeSubjectSchema.parse(
+      row.subjectType === "app"
+        ? { type: "app", appId: row.subjectId }
+        : { type: "agent", agentId: row.subjectId }
+    ),
     connectionId: row.connectionId,
     connectionName: nameOf(connection),
     action: row.action,
@@ -241,7 +263,7 @@ export const listAllUnknownOutcomes = async (
     throw roleErrors.create("role.forbidden");
   }
   const rows = await drizzle(env.DB)
-    .select({ row: idempotentCalls, connection: shownConnection })
+    .select({ row: listingColumns, connection: shownConnection })
     .from(idempotentCalls)
     .leftJoin(connections, eq(connections.id, idempotentCalls.connectionId))
     .where(unknownNow(Date.now()))
