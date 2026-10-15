@@ -617,6 +617,13 @@
       "when": 1792086150823,
       "tag": "0087_workflow_decision_confirmations",
       "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1792097656050,
+      "tag": "0088_access_revocations",
+      "breakpoints": true
     }
   ]
 }
