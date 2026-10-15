@@ -638,8 +638,12 @@ const followed = async (
       const ended = end();
       run.closers.delete(drop);
       if (ended?.handle !== undefined) {
-        await ended.handle.release();
-        disposed(ended.handle);
+        try {
+          await ended.handle.release();
+        } finally {
+          // Nothing else holds it now, even if core couldn't be told.
+          disposed(ended.handle);
+        }
       }
     },
   };

@@ -393,10 +393,16 @@ const testCallback = (
       },
       {
         dup: (): SnapshotCallback => {
-          kept ??= {
-            snapshot: keptCallback(onSnapshot),
-            lost: keptCallback(onLost),
-          };
+          if (kept === undefined) {
+            const snapshot = keptCallback(onSnapshot);
+            try {
+              kept = { snapshot, lost: keptCallback(onLost) };
+            } catch (error) {
+              // Neither is kept: the one already duplicated is let go of.
+              disposeStub(snapshot);
+              throw error;
+            }
+          }
           return hold();
         },
         [Symbol.dispose]: (): void => {
