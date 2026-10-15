@@ -254,7 +254,14 @@ const holdFrame = (
     return await whileOpen(async () => await frame);
   };
   return {
-    use: async (run) => await run(await current()),
+    use: async (run) => {
+      const frame = await current();
+      if (closed) {
+        throw frameClosedError();
+      }
+      // In this same turn, as `asPerson`: nothing stops the frame between.
+      return await run(frame);
+    },
     asPerson: async (send) => {
       if (closed) {
         throw frameClosedError();
