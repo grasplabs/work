@@ -1377,11 +1377,13 @@ const askUntilServed = async (
     });
   let last: { held: Refusal } | undefined = undefined;
   for (;;) {
-    // Cancelled or out of time since it last asked: it asks no more.
-    if (
-      last !== undefined &&
-      (signal.aborted || Date.now() - startedAt >= maxWaitMs)
-    ) {
+    // Cancelled since it last asked: it asks no more, and stops as
+    // cancelled, not as queued (its place given up on the way out).
+    if (last !== undefined) {
+      signal.throwIfAborted();
+    }
+    // Out of time since it last asked: told it is queued.
+    if (last !== undefined && Date.now() - startedAt >= maxWaitMs) {
       return last;
     }
     // oxlint-disable-next-line no-await-in-loop -- asked again after each wait
@@ -1399,14 +1401,12 @@ const askUntilServed = async (
     // The caller's word: a workflow attempt let go of stops waiting (it
     // throws).
     route.beforeSend?.();
-    // Out of time, cancelled, or given no place (its person's, its App's
-    // or the client's places all taken): told so at once, and the ledger
-    // asked nothing more for it.
-    if (
-      msLeft(retryAfter) <= 0 ||
-      signal.aborted ||
-      admitted.held.placed === false
-    ) {
+    // Cancelled: it stops as cancelled.
+    signal.throwIfAborted();
+    // Out of time, or given no place (its person's, its App's or the
+    // client's places all taken): told so at once, and the ledger asked
+    // nothing more for it.
+    if (msLeft(retryAfter) <= 0 || admitted.held.placed === false) {
       return admitted;
     }
     const { waitingFor = "client" } = admitted.held;

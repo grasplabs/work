@@ -621,7 +621,8 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
     // Told once that it stopped waiting, and nothing else after.
     expect({ told, after: queue.seen.slice(before) }).toStrictEqual({
-      told: "model.queued",
+      // Stopped as cancelled, not told it is queued: nothing to retry.
+      told: "model.failed",
       after: [null],
     });
   });
@@ -976,7 +977,7 @@ describe("fair model admission", { timeout: 60_000 }, () => {
 
     // Admitted nothing after it was cancelled: only Ada's two requests.
     expect({ told, admitted: await requestsOf(ada) }).toStrictEqual({
-      told: "model.queued",
+      told: "model.failed",
       admitted: 2,
     });
   });
