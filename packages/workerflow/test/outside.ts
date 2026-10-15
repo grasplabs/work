@@ -132,6 +132,20 @@ export const effect = async (
  */
 export const hostNotifications: RunNotification[] = [];
 
+/**
+ * Each batch of notifications the host took, with the activation fence as
+ * the run stood when it took it (`WorkflowRun.generationOver`).
+ */
+export const hostFences: {
+  run: string;
+  statuses: string[];
+  over: number | undefined;
+}[] = [];
+
+/** The fences the host was told with `run`'s batches, in order. */
+export const fencesOf = (run: string) =>
+  hostFences.filter((fence) => fence.run === run);
+
 /** How many more deliveries the host fails, by instance ID. */
 export const notifyFailures = new Map<string, number>();
 

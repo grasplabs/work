@@ -24,7 +24,13 @@ type Answer =
       readonly details?: unknown;
     }
   | { readonly refused: string }
-  | "lost";
+  | "lost"
+  /**
+   * An outcome the host itself can't tell (`operation.sandbox_lost`):
+   * what leaves an action's key unknown, as a lost answer is sent again
+   * for the action's receipt.
+   */
+  | "unknown";
 
 /** One request the host was sent, as the client wrote it. */
 interface Sent {
@@ -66,6 +72,20 @@ const host = (answer: (sent: Sent) => Answer | Promise<Answer>) => {
       const answered = await answer(call);
       if (answered === "lost") {
         throw new Error("The connection was reset.");
+      }
+      if (answered === "unknown") {
+        return {
+          result: {
+            ok: false,
+            error: {
+              code: "operation.sandbox_lost",
+              message: "operation.sandbox_lost",
+              category: "uncertain",
+              retryable: false,
+              requestId: "r",
+            },
+          },
+        };
       }
       if ("refused" in answered) {
         throw Object.assign(new Error(answered.refused), {
@@ -157,9 +177,11 @@ const noteId =
 
 describe("a form whose submission's outcome is unknown", () => {
   it("locks its fields and sends it again under the client's key, until the person discards it", async () => {
-    // An action's answers are lost twice: its outcome is unknown each time.
+    // The host can't tell an action's outcome, twice: unknown each time.
     const { client, sent } = host(({ contractId }) =>
-      contractId === "notes.tally" && sent.length <= 2 ? "lost" : { value: 3 }
+      contractId === "notes.tally" && sent.length <= 2
+        ? "unknown"
+        : { value: 3 }
     );
     const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
 
@@ -188,7 +210,7 @@ describe("a form whose submission's outcome is unknown", () => {
           ? { refused: "auth.unauthenticated" }
           : { value: null };
       }
-      return sent.length === 1 ? "lost" : { value: 3 };
+      return sent.length === 1 ? "unknown" : { value: 3 };
     });
     const { binding } = formOf(client, api.notes.tally, { defaultValues: {} });
     await settle(binding.submit());
@@ -214,7 +236,7 @@ describe("a form whose submission's outcome is unknown", () => {
     let signedOut = false;
     const { client, sent } = host(() => {
       if (sent.length === 1) {
-        return "lost";
+        return "unknown";
       }
       return signedOut ? { refused: "auth.unauthenticated" } : { value: 3 };
     });
@@ -261,7 +283,7 @@ describe("a form whose submission's outcome is unknown", () => {
             : { value: null };
         }
         if (sent.length === 1) {
-          return "lost";
+          return "unknown";
         }
         return sent.filter((call) => call.contractId === "notes.tally")
           .length === 2
@@ -300,7 +322,7 @@ describe("a form whose submission's outcome is unknown", () => {
   it("sends it again under its key after a resend refused before it ran, never anew", async () => {
     const { client, sent } = host(() => {
       if (sent.length === 1) {
-        return "lost";
+        return "unknown";
       }
       // The host has no token to give for a moment: nothing ran.
       return sent.length === 2

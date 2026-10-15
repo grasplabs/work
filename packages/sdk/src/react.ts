@@ -155,8 +155,9 @@ export const useMutation = <Reference extends MutationReference>(
 };
 
 /**
- * The action `reference` names, as a stable function, resolving with its
- * declared result. A lost response is never sent again on its own.
+ * The action `reference` names, as a stable function: each call is one
+ * logical submission, resolving with its declared result. A lost
+ * response is recovered from the action's receipt, never run again.
  */
 export const useAction = <Reference extends ActionReference>(
   reference: Reference
