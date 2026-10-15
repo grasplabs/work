@@ -108,17 +108,6 @@ export class PlatformBoundError extends Error {
 }
 
 /**
- * Whether the sandbox refused a call before any of it ran, for want of a
- * place: its owner at its share (`busy`, or 429 once `runPlatformCode`
- * said so), or the pool full (503).
- */
-export const noPlaceOf = (error: unknown): boolean =>
-  sandboxVerdictOf(error) === "busy" ||
-  (error instanceof SandboxUnavailableError &&
-    !error.started &&
-    (error.status === 429 || error.status === 503));
-
-/**
  * The wall-clock time a call may take on the sandbox host: `defaultMs`,
  * or less where tests set `SANDBOX_DEADLINE_MS`.
  */

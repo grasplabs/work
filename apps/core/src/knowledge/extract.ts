@@ -9,12 +9,15 @@ import { deploymentStaysInEu } from "../models.ts";
 import type { ModelsEnv } from "../models.ts";
 import {
   boundedInCore,
-  noPlaceOf,
   PlatformBoundError,
   platformWallMs,
   runPlatformCode,
 } from "../platform-sandbox.ts";
-import { functionCapability, inOrderReader } from "../sandbox-session.ts";
+import {
+  functionCapability,
+  inOrderReader,
+  noPlaceOf,
+} from "../sandbox-session.ts";
 import { sessionHost } from "../sandboxed.ts";
 import { extractedPart, extractorAsset } from "./extractor/asset.ts";
 import type ExtractorWorker from "./extractor/worker.ts";

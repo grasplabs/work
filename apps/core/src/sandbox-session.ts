@@ -372,6 +372,17 @@ export const sandboxVerdictOf = (error: unknown): string | undefined =>
   error instanceof Error ? verdicts.get(error) : undefined;
 
 /**
+ * Whether the sandbox refused a call before any of it ran, for want of a
+ * place: its owner at its share (`busy`, or 429 once `runPlatformCode`
+ * in platform-sandbox.ts said so), or the pool full (503).
+ */
+export const noPlaceOf = (error: unknown): boolean =>
+  sandboxVerdictOf(error) === "busy" ||
+  (error instanceof SandboxUnavailableError &&
+    !error.started &&
+    (error.status === 429 || error.status === 503));
+
+/**
  * How long core waits for the supervisor's verdict on a call that failed
  * while its session looked open, and how often it asks meanwhile.
  */
