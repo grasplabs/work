@@ -465,7 +465,7 @@ interface FunctionCallOptions {
    * charges the person for its pages past what the caller paid
    * (`WindowRequest.charge`).
    */
-  readonly chargeWindow?: (pages: number) => Promise<void>;
+  readonly chargeWindow?: (pages: number, whole: number) => Promise<void>;
   /** Told the store a query read and its read set (`Invocation.observeReads`). */
   readonly observeReads?: (
     storeId: StoreId,
@@ -621,7 +621,7 @@ export const callScreenFunction = async (
   app: unknown,
   request: unknown,
   deadline: number,
-  chargeWindow: (pages: number) => Promise<void>
+  chargeWindow: (pages: number, whole: number) => Promise<void>
 ): Promise<FunctionAnswer> =>
   await callFunction(env, by, app, request, { deadline, chargeWindow });
 
@@ -663,7 +663,7 @@ export const evaluateAppQuery = async (
   app: unknown,
   request: string,
   deadline: number,
-  chargeWindow: (pages: number) => Promise<void>
+  chargeWindow: (pages: number, whole: number) => Promise<void>
 ): Promise<EvaluatedQuery> => {
   let reads: EvaluatedQuery["reads"];
   const answer = await callFunction(env, by, app, request, {

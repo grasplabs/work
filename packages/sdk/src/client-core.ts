@@ -1908,6 +1908,15 @@ export class GraspClient {
         } else if (entry.live === undefined) {
           this.#follow(entry, 0);
         }
+      } else if (
+        // A window shown whose refresh failed in a way that may pass: it
+        // stays shown, and old, until it is tried again (`#settleWindow`).
+        this.#transport === undefined &&
+        entry.stale &&
+        entry.reading === undefined &&
+        entry.listeners.size > 0
+      ) {
+        this.#refresh(entry);
       }
     }
     for (const pager of this.#pagers.values()) {

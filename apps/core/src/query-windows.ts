@@ -205,9 +205,10 @@ export interface WindowRequest {
   /**
    * Charges `pages` more pages to the person's budget, past the
    * `windowPages(extent)` the caller paid: throws the caller's own
-   * refusal (`screen.rate_limited`) once it is spent.
+   * refusal (`screen.rate_limited`) once it is spent, saying to wait for
+   * `whole`, what reading the window again from its start costs.
    */
-  readonly charge: (pages: number) => Promise<void>;
+  readonly charge: (pages: number, whole: number) => Promise<void>;
 }
 
 /** What one read of a window spends, beside its own pages. */
@@ -251,7 +252,8 @@ const chargePage = async (
     spending.charged;
   if (owed > 0) {
     spending.charged += owed;
-    await request.charge(owed);
+    // Asked again, the window is read from its start, paid for again.
+    await request.charge(owed, windowPages(request.extent) + spending.charged);
   }
 };
 
@@ -300,14 +302,19 @@ const readOnce = async (
     if (answered === undefined) {
       throw operationErrors.create("contract.not_paginated");
     }
-    items.push(...answered.items);
-    // A handler that answered more than it was asked: the window ends at
-    // its extent, and more follow.
+    // Taken item by item, no further than the window: a handler may
+    // answer far more than it was asked, which ends the window at its
+    // extent, more following.
+    const room = extent - items.length;
+    for (const item of answered.items.slice(0, room)) {
+      items.push(item);
+    }
+    const beyond = answered.items.length > room;
     if (!answered.hasMore || items.length >= extent) {
       return {
         kind: "window",
-        items: items.slice(0, extent),
-        hasMore: answered.hasMore || items.length > extent,
+        items,
+        hasMore: answered.hasMore || beyond,
         readSet,
       };
     }

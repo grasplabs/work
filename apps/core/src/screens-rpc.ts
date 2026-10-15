@@ -163,10 +163,10 @@ export const admitted = async (
  */
 export const windowCharger =
   (env: Env, by: Identity, app: AppId) =>
-  async (pages: number): Promise<void> => {
+  async (pages: number, whole = pages): Promise<void> => {
     if (!(await appHost(env, app).admitRequest(by.userId, pages))) {
       throw screenErrors.create("screen.rate_limited", {
-        retryAfterMs: rateLimitedRetryMs * (pages + 1),
+        retryAfterMs: rateLimitedRetryMs * (whole + 1),
       });
     }
   };

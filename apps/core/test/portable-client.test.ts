@@ -961,6 +961,48 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     list.stop();
   });
 
+  it("reads a shown window again when it is tried again after a refresh whose answer was lost", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    hostNetwork();
+    const client = portableClient(() => token);
+    await client.mutation(notes.api.create, { title: "One" });
+    const list = listOf(client, notes, 5);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["One"]);
+    });
+    // The refresh after the next save never reaches core.
+    const network = globalThis.fetch;
+    let dropNextRead = true;
+    vi.stubGlobal(
+      "fetch",
+      async (
+        input: RequestInfo | URL,
+        init?: RequestInit
+      ): Promise<Response> => {
+        const body = typeof init?.body === "string" ? init.body : "";
+        if (dropNextRead && body.includes('"window"')) {
+          dropNextRead = false;
+          throw new TypeError("Failed to fetch");
+        }
+        return await network(input, init);
+      }
+    );
+    await client.mutation(notes.api.create, { title: "Two" });
+    await vi.waitFor(() => {
+      expect(dropNextRead).toBeFalsy();
+    });
+    // Still the window before, old; tried again, it is read afresh.
+    await scheduler.wait(200);
+    const kept = list.titles();
+    clientInternals(client).retryFailed();
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Two", "One"]);
+    });
+    expect(kept).toStrictEqual(["One"]);
+    list.stop();
+  });
+
   it("fails a Load More, and throws a first load, when writes keep tearing the window, keeping the window shown", async () => {
     const notes = await notesApp();
     const token = await tokenFor(notes.builder.session, notes.app);
