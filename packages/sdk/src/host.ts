@@ -141,4 +141,4 @@ export type { JsonSchema, JsonSchemaOptions } from "./json-schema.ts";
 // `clientInternals` is what the screen runtime and the React hooks reach
 // of it: a component's reading of a query, as `useQuery` subscribes.
 export { clientInternals, GraspClient } from "./client-core.ts";
-export type { ClientTransport } from "./client-core.ts";
+export type { ClientTransport, StreamLink } from "./client-core.ts";

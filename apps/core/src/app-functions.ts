@@ -50,6 +50,7 @@ import { callOperation } from "./operations.ts";
 import type {
   HostedApp,
   Invocation,
+  ProgressSink,
   ResourceBindings,
   Runner,
 } from "./operations.ts";
@@ -140,6 +141,7 @@ const channelOf = (remote) => ({
   write: async (request) => rebuilt(await remote.write(request)),
   call: async (kind, path, args) => rebuilt(await remote.call(kind, path, args)),
   resource: async (alias, method, args) => rebuilt(await remote.resource(alias, method, args)),
+  emit: async (progress) => rebuilt(await remote.emit(progress)),
 });
 
 const bounded = (value, max) =>
@@ -256,7 +258,7 @@ const settled = async (
 };
 
 /**
- * What an App's isolate holds of its invocation's channel: the same four
+ * What an App's isolate holds of its invocation's channel: the same
  * calls, each answering a settled value or failure as data, so the
  * failures the host raised (copies it keeps its own of) reach App code
  * whole, whatever RPC does with an error. Bounded as the channel is.
@@ -283,6 +285,7 @@ interface ArrivingChannel {
     method: unknown,
     args: unknown
   ) => Promise<unknown>;
+  readonly emit: (progress: unknown) => Promise<unknown>;
 }
 
 class IsolateChannel extends IsolateChannelTarget {
@@ -318,6 +321,10 @@ class IsolateChannel extends IsolateChannelTarget {
     return await settled(
       async () => await this.#channel.resource(alias, method, args)
     );
+  }
+
+  async emit(progress: unknown): Promise<unknown> {
+    return await settled(async () => await this.#channel.emit(progress));
   }
 }
 
@@ -543,7 +550,7 @@ export const noStore = (): OpenStore => ({
 });
 
 /** Refuses with `version.revoked` once release `version` of `app` is revoked. */
-const requireNotRevoked = async (
+export const requireNotRevoked = async (
   env: Env,
   app: AppId,
   version: number
@@ -1066,6 +1073,77 @@ export const evaluateAppQuery = async (
     },
   });
   return { answer, reads };
+};
+
+/**
+ * Runs a public action of App `app` for `by` once, for the invocation
+ * object that holds it (action-invocation.ts), as `callAppFunction` runs
+ * any call: what it returned, or why it failed, and whether the operation
+ * host was reached at all (a refusal before it ran nothing of the App's). A streaming action
+ * (spec 10.7.6) gets `progress`, where its snapshots go, and only one
+ * does; `cancelled` stops either. Never throws.
+ */
+export const invokeAppAction = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: string,
+  call: FunctionRequest,
+  {
+    progress,
+    cancelled,
+    deadline,
+  }: {
+    readonly progress?: ProgressSink;
+    readonly cancelled: AbortSignal;
+    readonly deadline: number;
+  }
+): Promise<{
+  readonly result: OperationResult;
+  /** Whether the operation host was reached: App code may have run. */
+  readonly reached: boolean;
+  /** How many effects it made, or may have made (`CallOptions.onEffect`). */
+  readonly effects: number;
+}> => {
+  const requestId = crypto.randomUUID();
+  let reached = false;
+  let effects = 0;
+  try {
+    const found = await appFor(env, by, app, "user");
+    if (found.currentVersion === null) {
+      throw versionErrors.create("version.not_sealed");
+    }
+    const release = await loadRelease(env, found.id, found.currentVersion);
+    const path = publicOperationOf(release, call.reference);
+    const invocation = await invocationFor(env, release, {
+      by,
+      requestId,
+      deadline,
+    });
+    reached = true;
+    const result = await callOperation(
+      hostedRelease(env, release),
+      invocation,
+      { path, kind: call.reference.kind },
+      call.input,
+      {
+        ...(call.idempotencyKey === undefined
+          ? {}
+          : { idempotencyKey: call.idempotencyKey }),
+        ...(progress === undefined ? {} : { progress }),
+        cancelled,
+        onEffect: () => {
+          effects += 1;
+        },
+      }
+    );
+    return { result, reached, effects };
+  } catch (error) {
+    return {
+      result: { ok: false, error: refusalOf(error, requestId) },
+      reached,
+      effects,
+    };
+  }
 };
 
 /**

@@ -27,9 +27,12 @@ class Subscription extends RpcTarget {
   released = false;
   /** Let go of by everything that held it: the page's end too. */
   disposed = false;
+  /** Whether the page let go of it itself (`release`), not only its session. */
+  releasedByPage = false;
 
   async release(): Promise<void> {
     this.released = true;
+    this.releasedByPage = true;
     await Promise.resolve();
   }
 
@@ -50,6 +53,9 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
   const subscriptions: Subscription[] = [];
   // The live queries' callbacks core keeps.
   const kept: Disposable[] = [];
+  const streams: { subscription: Subscription; end: () => void }[] = [];
+  /** Holds each stream's opening until it resolves, when a test sets it. */
+  const opening: { gate: Promise<unknown> | undefined } = { gate: undefined };
   const target: FrameTarget = {
     call: async (method, args) => {
       calls.push({ method, args });
@@ -58,6 +64,17 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
     callFunction: async (request) => {
       functionCalls.push(request);
       return await Promise.resolve(answer);
+    },
+    streamFunction: async (_what, request, _onFrame, onEnded) => {
+      functionCalls.push(request);
+      const subscription = new Subscription();
+      streams.push({ subscription, end: onEnded });
+      await opening.gate;
+      return subscription;
+    },
+    cancelStream: async (request) => {
+      functionCalls.push(request);
+      return await Promise.resolve({ cancelled: true });
     },
     report: async (problem) => {
       reports.push(problem.message);
@@ -84,7 +101,15 @@ const coreStandIn = (answer: unknown = nullAnswer) => {
       return await Promise.resolve(subscription);
     },
   };
-  return { calls, functionCalls, reports, subscriptions, target };
+  return {
+    calls,
+    functionCalls,
+    opening,
+    reports,
+    streams,
+    subscriptions,
+    target,
+  };
 };
 
 /** A frame on its port, talking to the page's bridge as the runtime does. */
@@ -214,6 +239,11 @@ const noop = (): void => {
 const follow = async (page: RpcStub<ScreenBridge>): Promise<string> => {
   await page.watchRuns("invoices", noop);
   return "followed";
+};
+
+/** A frame callback that takes each frame in. */
+const ignoreFrame = async (): Promise<void> => {
+  await Promise.resolve();
 };
 
 describe("the page's bridge to a screen", () => {
@@ -603,6 +633,57 @@ describe("the page's bridge to a screen", () => {
         { released: true, disposed: true },
       ]);
     });
+  });
+
+  it("lets go of every stream the frame follows once closed", async () => {
+    const frame = framed();
+    const request = JSON.stringify({ reference: {}, input: {} });
+    await frame.page.streamFunction("stream", request, ignoreFrame);
+    await frame.page.streamFunction("stream", request, ignoreFrame);
+    await frame.page.streamFunction("stream", request, ignoreFrame);
+    frame.close();
+    await vi.waitFor(() => {
+      expect(
+        frame.streams.map(({ subscription }) => subscription.releasedByPage)
+      ).toStrictEqual([true, true, true]);
+    });
+  });
+
+  it("lets go of a stream still opening when the frame closes, as soon as it opens", async () => {
+    const frame = framed();
+    const gate = Promise.withResolvers<null>();
+    frame.opening.gate = gate.promise;
+    const request = JSON.stringify({ reference: {}, input: {} });
+    const pending = outcome(
+      frame.page.streamFunction("stream", request, ignoreFrame)
+    );
+    await vi.waitFor(() => {
+      expect(frame.streams).toHaveLength(1);
+    });
+    frame.close();
+    gate.resolve(null);
+    await pending;
+    await vi.waitFor(() => {
+      expect(frame.streams[0]?.subscription.releasedByPage).toBeTruthy();
+    });
+  });
+
+  it("lets go of a stream the frame followed as soon as it ends, not only once closed", async () => {
+    const frame = framed();
+    const request = JSON.stringify({ reference: {}, input: {} });
+    await frame.page.streamFunction("stream", request, ignoreFrame);
+    await frame.page.streamFunction("stream", request, ignoreFrame);
+    const [first, second] = frame.streams;
+    first?.end();
+    const whileOpen = frame.streams.map(
+      ({ subscription }) => subscription.released
+    );
+    frame.close();
+    await vi.waitFor(() => {
+      expect(second?.subscription.released).toBeTruthy();
+    });
+    // The one that ended was let go of then; the other only at the close.
+    expect(whileOpen).toStrictEqual([true, false]);
   });
 
   it("lets go of what the frame followed, and answers nothing more, once closed", async () => {

@@ -16,6 +16,10 @@ import {
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
+import {
+  actionMaxRunning,
+  streamMaxRunning,
+} from "@grasp-os/shared/operation-limits";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
@@ -771,6 +775,10 @@ const releaseAfter = async (
  * Core reaches it through `callApp`; the App's own code reaches it only
  * through its stubs.
  */
+/** Where the App's object keeps `userId`'s held places of one kind. */
+const invocationHoldsKey = (userId: string, streaming: boolean): string =>
+  `${streaming ? "stream" : "action"}-holds:${userId}`;
+
 export class App extends DurableObject<Env> {
   /**
    * The code the facet runs: its version, which read of the current
@@ -1244,6 +1252,57 @@ export class App extends DurableObject<Env> {
    */
   admitLiveRead(userId: string): boolean {
     return this.#liveReads.take(userId);
+  }
+
+  /**
+   * Whether `userId` may start the action invocation `name` now, which
+   * runs until `until` at most: holds a place for it if so. A person runs
+   * at most `streamMaxRunning` streaming actions and `actionMaxRunning`
+   * plain ones at once in the App, each kind counted apart. A hold past
+   * its time no longer counts, so a run whose end was never told frees its
+   * place by its deadline. Stored, not only in memory: a restart of this
+   * object while invocations run (each in an object of its own) must not
+   * give their places back.
+   */
+  holdInvocation(
+    userId: string,
+    name: string,
+    until: number,
+    streaming: boolean
+  ): boolean {
+    const now = Date.now();
+    const key = invocationHoldsKey(userId, streaming);
+    const held = Object.entries(this.#invocationHolds(key)).filter(
+      ([, end]) => end > now
+    );
+    const most = streaming ? streamMaxRunning : actionMaxRunning;
+    if (!held.some(([running]) => running === name) && held.length >= most) {
+      return false;
+    }
+    this.ctx.storage.kv.put(key, {
+      ...Object.fromEntries(held),
+      [name]: until,
+    });
+    return true;
+  }
+
+  /** Frees `userId`'s place for the invocation `name`, which has ended. */
+  releaseInvocation(userId: string, name: string, streaming: boolean): void {
+    const now = Date.now();
+    const key = invocationHoldsKey(userId, streaming);
+    const held = Object.entries(this.#invocationHolds(key)).filter(
+      ([running, end]) => running !== name && end > now
+    );
+    if (held.length === 0) {
+      this.ctx.storage.kv.delete(key);
+      return;
+    }
+    this.ctx.storage.kv.put(key, Object.fromEntries(held));
+  }
+
+  /** The places held under `key`, by invocation name, each until when. */
+  #invocationHolds(key: string): Readonly<Record<string, number>> {
+    return this.ctx.storage.kv.get<Record<string, number>>(key) ?? {};
   }
 
   /**
