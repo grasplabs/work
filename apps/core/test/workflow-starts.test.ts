@@ -34,10 +34,13 @@ import {
 } from "../src/workflow-resources.ts";
 import {
   admitWorkflowStart,
-  authorizeWorkflowStart,
+  decideWorkflowStart,
   startWorkflow,
 } from "../src/workflow-starts.ts";
-import type { StartInvoker } from "../src/workflow-starts.ts";
+import type {
+  StartAuthorization,
+  StartInvoker,
+} from "../src/workflow-starts.ts";
 import { allEvents } from "./audit-events.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
@@ -294,6 +297,26 @@ const appVersion = async (
     .run();
 };
 
+/**
+ * A new start `invoker` decided on, for version `version` of workflow
+ * `id`, with input of Ada's and a key of its own: admitted later, or not.
+ */
+const decide = async (
+  invoker: StartInvoker,
+  id: string,
+  version: number
+): Promise<StartAuthorization> => {
+  const decision = await decideWorkflowStart(env, invoker, id, {
+    version,
+    input: { who: "Ada" },
+    key: `key-${unique()}`,
+  });
+  if ("start" in decision) {
+    throw new Error("A new start was answered as one already admitted");
+  }
+  return decision.authorization;
+};
+
 describe("a person starting a workflow", () => {
   it("starts an exact version they have a role in, acting for themselves", async () => {
     const ada = await person("builder");
@@ -409,21 +432,16 @@ describe("authority changing under a start", () => {
       id: team,
       role: "user",
     });
-    const decided = await authorizeWorkflowStart(
-      env,
-      personOf(inTeam),
-      workflow.id,
-      1
-    );
+    const decided = await decide(personOf(inTeam), workflow.id, 1);
     // Better Auth removes them from the team; their session still lists it.
     await env.DB.prepare(
       "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
     )
       .bind(team, inTeam.userId)
       .run();
-    await expect(
-      outcome(admitWorkflowStart(env, decided, { who: "Ada" }, "k1"))
-    ).resolves.toBe("workflow.start_denied");
+    await expect(outcome(admitWorkflowStart(env, decided))).resolves.toBe(
+      "workflow.start_denied"
+    );
     const events = await allEvents();
     expect(
       events.some(
@@ -437,28 +455,16 @@ describe("authority changing under a start", () => {
     const ada = await person("builder");
     const bob = await person("builder");
     const workflow = await workflowOf(ada);
-    const before = await authorizeWorkflowStart(
-      env,
-      personOf(ada),
-      workflow.id,
-      1
-    );
+    const before = await decide(personOf(ada), workflow.id, 1);
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
       id: bob.userId,
       role: "user",
     });
-    const staleMembers = await outcome(
-      admitWorkflowStart(env, before, { who: "Ada" }, "k1")
-    );
+    const staleMembers = await outcome(admitWorkflowStart(env, before));
     // Sharing Bob with the role he has, or unsharing Carl, whom it isn't
     // shared with, changes nothing: a start decided before still lands.
-    const unchanged = await authorizeWorkflowStart(
-      env,
-      personOf(ada),
-      workflow.id,
-      1
-    );
+    const unchanged = await decide(personOf(ada), workflow.id, 1);
     await shareWorkflowResource(env, ada, workflow.id, {
       type: "person",
       id: bob.userId,
@@ -468,22 +474,13 @@ describe("authority changing under a start", () => {
       type: "person",
       id: crypto.randomUUID(),
     });
-    const sameShare = await outcome(
-      admitWorkflowStart(env, unchanged, { who: "Ada" }, "k3")
-    );
-    const decided = await authorizeWorkflowStart(
-      env,
-      personOf(ada),
-      workflow.id,
-      1
-    );
+    const sameShare = await outcome(admitWorkflowStart(env, unchanged));
+    const decided = await decide(personOf(ada), workflow.id, 1);
     await deleteWorkflowResource(env, ada, workflow.id);
     expect({
       staleMembers,
       sameShare,
-      deleted: await outcome(
-        admitWorkflowStart(env, decided, { who: "Ada" }, "k2")
-      ),
+      deleted: await outcome(admitWorkflowStart(env, decided)),
     }).toStrictEqual({
       staleMembers: "workflow.start_denied",
       sameShare: "ok",
@@ -548,17 +545,10 @@ describe("an agent starting a workflow", () => {
         workflow.id
       )
     );
-    const decided = await authorizeWorkflowStart(
-      env,
-      agentOf(ada.userId, agent),
-      workflow.id,
-      1
-    );
+    const decided = await decide(agentOf(ada.userId, agent), workflow.id, 1);
     await revokePermission(env, admin, grant);
     expect({
-      decidedBefore: await outcome(
-        admitWorkflowStart(env, decided, { who: "Ada" }, "k1")
-      ),
+      decidedBefore: await outcome(admitWorkflowStart(env, decided)),
       after: await outcome(
         startWorkflow(env, agentOf(ada.userId, agent), workflow.id, request())
       ),
@@ -742,25 +732,16 @@ describe("a trigger starting a workflow", () => {
     );
     const invoker: StartInvoker = { type: "trigger", triggerId: trigger.id };
     // Decided for version 1, then moved to 2 before it is admitted.
-    const beforeMove = await authorizeWorkflowStart(
-      env,
-      invoker,
-      workflow.id,
-      1
-    );
+    const beforeMove = await decide(invoker, workflow.id, 1);
     await updateTriggerVersion(env, bob, trigger.id, 2);
     const moved = {
-      decidedBefore: await outcome(
-        admitWorkflowStart(env, beforeMove, { who: "Ada" }, "k0")
-      ),
+      decidedBefore: await outcome(admitWorkflowStart(env, beforeMove)),
       old: await outcome(startWorkflow(env, invoker, workflow.id, request(1))),
       now: await outcome(startWorkflow(env, invoker, workflow.id, request(2))),
     };
-    const decided = await authorizeWorkflowStart(env, invoker, workflow.id, 2);
+    const decided = await decide(invoker, workflow.id, 2);
     await setTriggerEnabled(env, bob, trigger.id, false);
-    const disabled = await outcome(
-      admitWorkflowStart(env, decided, { who: "Ada" }, "k1")
-    );
+    const disabled = await outcome(admitWorkflowStart(env, decided));
     await setTriggerEnabled(env, bob, trigger.id, true);
     await leaves(bob);
     expect({

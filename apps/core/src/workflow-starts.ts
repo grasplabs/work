@@ -33,7 +33,9 @@ import {
 } from "./db/core/schema.ts";
 import { isUniqueViolation } from "./db/d1.ts";
 import { allowingPermissionSql } from "./permissions.ts";
-import { requireWorkflowRole } from "./workflow-resources.ts";
+import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
+import { frozenParams } from "./workflow-params.ts";
+import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
 
 // Starting an independent workflow (platform specification 13.2, 15.1, 24):
 // who may, for whom, and on which exact version. Every start is admitted
@@ -84,7 +86,11 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 //   and idempotency key; the same key with the same version, input and
 //   App or trigger version is the same start, with another is refused
 //   (`workflow.start_conflict`). One person never gets another's receipt
-//   through the same App, agent or trigger.
+//   through the same App, agent or trigger. A start sent again is
+//   answered with its receipt once the invoker's own access is checked
+//   again, before anything the workflow's configuration requires now: a
+//   retry after an approval was revoked, or a version published, is still
+//   the start that was admitted.
 // - Probing through code: an App, agent or trigger is checked against its
 //   own grant before anything is read of the workflow, and every refusal
 //   it gets is `workflow.start_denied`, so it can't learn which workflows
@@ -94,6 +100,27 @@ import { requireWorkflowRole } from "./workflow-resources.ts";
 // - Input the workflow doesn't accept: checked against the version's
 //   contract by the SDK's validator, within the operation input limit;
 //   refusals name paths, never values.
+// - A parameter edit racing a start: a start freezes the values of the
+//   revision in force as it is decided, and the admitting statement
+//   requires that revision still in force; an edit in between refuses it.
+// - A binding unapproved, approved for another contract, or approved for
+//   another version: a start freezes, for each catalog binding of its
+//   version, the active approval an admin gave for that exact version and
+//   declaration, and its target; the admitting statement requires each
+//   approval and the permission it names still active
+//   (`workflow.binding_unapproved` when there is none, or its target can't
+//   serve it now, workflow-bindings.ts's own answer). A version a
+//   builder published after the review, or one before it, is code nobody
+//   reviewed for that target, and serves nothing until approved itself.
+// - A binding to another workflow it may not start, or that is gone: the
+//   admitting statement requires the bound workflow live and an active
+//   `start` grant of this workflow's own on it.
+// - A frozen snapshot changed later: a receipt, with its frozen params and
+//   bindings and their hashes, is a row written once; the database refuses
+//   any change of it but retention removing its input and values, and any
+//   deletion. Its audit event names the bindings' hash, never a
+//   parameter's value nor a hash of the values, which a guess at a short
+//   sensitive one could be checked against.
 
 /** Who starts a workflow: what the host established, never the caller. */
 export type StartInvoker =
@@ -102,25 +129,70 @@ export type StartInvoker =
   | { type: "agent"; authority: Authority; context?: WorkContext }
   | { type: "trigger"; triggerId: string };
 
-/** A start the host decided on: what admitting it requires to still hold. */
+/**
+ * A new start the host decided on: what it freezes, and what admitting it
+ * requires to still hold.
+ */
 export interface StartAuthorization {
   workflowId: string;
   version: number;
   manifestHash: string;
-  /** The version's input descriptor, as JSON text. */
-  inputDescriptor: string;
   invoker: WorkflowStart["invoker"];
   originAppVersion: number | null;
   triggerVersion: number | null;
   principal: string;
   generation: number;
+  /** The invoker's idempotency key. */
+  key: string;
+  /** The validated input (canonical JSON), and its SHA-256. */
+  input: string;
+  inputHash: string;
+  /** The parameter values it froze (canonical JSON), and their revision. */
+  params: string;
+  paramsRevision: number;
+  /** The bindings it froze (canonical JSON). */
+  bindings: string;
   /** For the audit log: who started it. */
   actor: AuditActor;
-  /** That it still holds, as SQL, read as the admitting statement runs. */
+  /**
+   * That it still holds, as SQL, read as the admitting statement runs: of
+   * a fixed size whatever the version binds, as `required` holds the
+   * approvals, permissions and workflows its bindings need as one value.
+   */
   holds: SQL;
 }
 
+/**
+ * What deciding a start answers: the start already admitted under the
+ * invoker's key, or a new one to admit.
+ */
+export type StartDecision =
+  | { start: WorkflowStart }
+  | { authorization: StartAuthorization };
+
 const denied = () => workflowResourceErrors.create("workflow.start_denied");
+
+/**
+ * Audits a start of workflow `workflowId` refused for `reason`, by
+ * `actor`: what was decided (`detail`), never the input itself.
+ */
+const refusedStart = async (
+  env: Env,
+  actor: AuditActor,
+  workflowId: string,
+  detail: Record<string, string | number | null>,
+  reason: string
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  await auditedBatch(env, db, [
+    outboxed(db, {
+      actor,
+      action: "workflow.start.refused",
+      target: { type: "workflow_resource", id: workflowId },
+      detail: { ...detail, receipt: null, reason },
+    }),
+  ]);
+};
 
 /** The input descriptor stored with a version's contract. */
 const contractInputSchema = z.object({ input: z.json() });
@@ -188,12 +260,14 @@ const pinned = async (
   version: number
 ): Promise<{
   generation: number;
+  configRevision: number;
   manifestHash: string;
   inputDescriptor: string;
 }> => {
   const row = await drizzle(env.DB)
     .select({
       generation: workflowResources.policyGeneration,
+      configRevision: workflowResources.configRevision,
       manifestHash: workflowResourceVersions.manifestHash,
       contract: workflowResourceVersions.contract,
     })
@@ -218,9 +292,120 @@ const pinned = async (
   const { input } = contractInputSchema.parse(JSON.parse(row.contract));
   return {
     generation: row.generation,
+    configRevision: row.configRevision,
     manifestHash: row.manifestHash,
     inputDescriptor: JSON.stringify(input),
   };
+};
+
+/**
+ * What a start's bindings need to still hold as it is admitted: the
+ * approvals serving its catalog bindings, the permissions of the workflow
+ * they and its workflow bindings use, and the workflows it binds.
+ */
+interface Required {
+  approvals: string[];
+  permissions: string[];
+  workflows: string[];
+}
+
+/**
+ * That everything `required` (JSON text of `Required`) names still holds
+ * for version `version` of workflow `id`, as SQL: each approval active,
+ * given for this version; each permission active and the workflow's own;
+ * each bound workflow live. One bound value, read with `json_each`, so the
+ * statement stays within D1's bound parameters however many bindings a
+ * version declares.
+ */
+const requiredSql = (id: string, version: number, required: string): SQL =>
+  sql`(NOT EXISTS (SELECT 1 FROM json_each(${required}, '$.approvals') AS needed
+      WHERE NOT EXISTS (SELECT 1 FROM workflow_binding_approvals AS approval
+        WHERE approval.id = needed.value AND approval.workflow_resource_id = ${id}
+          AND approval.reviewed_version = ${version} AND approval.status = 'active'))
+    AND NOT EXISTS (SELECT 1 FROM json_each(${required}, '$.permissions') AS needed
+      WHERE NOT EXISTS (SELECT 1 FROM permissions AS held
+        WHERE held.id = needed.value AND held.status = 'active'
+          AND held.subject_type = 'workflow' AND held.subject_id = ${id}))
+    AND NOT EXISTS (SELECT 1 FROM json_each(${required}, '$.workflows') AS needed
+      WHERE NOT EXISTS (SELECT 1 FROM workflow_resources AS bound
+        WHERE bound.id = needed.value AND bound.deleted_at IS NULL)))`;
+
+/**
+ * The bindings version `version` of workflow `id` declares, as a start
+ * freezes them: each other workflow's exact version, with the permission
+ * of this workflow's own that lets it start it (`workflow.start_denied`
+ * without one); and for each catalog binding the active approval given
+ * for this version's exact declaration and its target
+ * (`workflow.binding_unapproved` naming the alias when there is none), as
+ * canonical JSON; and what of them must still hold as it is admitted.
+ */
+const frozenBindings = async (
+  env: Env,
+  id: string,
+  version: number
+): Promise<{ text: string; required: Required }> => {
+  const versions = await bindingsOf(env, id);
+  const declared = versions.get(version) ?? [];
+  const frozen: Record<string, unknown>[] = [];
+  const required: Required = { approvals: [], permissions: [], workflows: [] };
+  for (const binding of declared) {
+    if (binding.resourceId !== null) {
+      // This workflow's own grant to start it, never its builders'.
+      // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
+      const grant = await drizzle(env.DB)
+        .select({ id: permissions.id })
+        .from(permissions)
+        .where(
+          allowingPermissionSql(
+            {
+              type: "workflow",
+              workflowId: workflowResourceIdSchema.parse(id),
+            },
+            undefined,
+            {
+              type: "workflow",
+              workflowId: workflowResourceIdSchema.parse(binding.resourceId),
+            },
+            "start"
+          )
+        )
+        .get();
+      if (grant === undefined) {
+        throw denied();
+      }
+      frozen.push({ ...binding });
+      required.permissions.push(grant.id);
+      required.workflows.push(binding.resourceId);
+      continue;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one point lookup per binding
+    const approval = await approvalServing(env, id, version, binding);
+    if (approval === undefined) {
+      throw workflowResourceErrors.create("workflow.binding_unapproved", {
+        issues: [`${binding.alias}: No approval serves its contract.`],
+      });
+    }
+    // The approved target can still serve it now, as it could when it was
+    // approved: the same answer, so no approval outlives its target.
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one target per binding
+      await requireTargetServes(env, id, binding, approval.target);
+    } catch (error) {
+      if (isExpectedError(error)) {
+        throw workflowResourceErrors.create("workflow.binding_unapproved", {
+          issues: [`${binding.alias}: Its approved target can't serve it now.`],
+        });
+      }
+      throw error;
+    }
+    frozen.push({ ...binding, approval: approval.id, target: approval.target });
+    required.approvals.push(approval.id);
+    if ("permissionId" in approval.target) {
+      required.permissions.push(approval.target.permissionId);
+    }
+  }
+  frozen.sort((a, b) => (String(a.alias) < String(b.alias) ? -1 : 1));
+  return { text: canonicalJson(z.json().parse(frozen)), required };
 };
 
 /** The trigger `id`'s current version, if it is live and enabled. */
@@ -371,85 +556,6 @@ const ruleOf = async (
 };
 
 /**
- * Decides whether `invoker` may start version `version` of workflow `id`
- * (see the rules above): refused with `workflow.resource_unavailable`
- * (a person with no role, as for a workflow that doesn't exist),
- * `workflow.version_not_found`, `workflow.trigger_unavailable` or
- * `workflow.start_denied`. What it answers is admitted only while it
- * still holds (`admitWorkflowStart`).
- */
-export const authorizeWorkflowStart = async (
-  env: Env,
-  invoker: StartInvoker,
-  id: unknown,
-  version: unknown
-): Promise<StartAuthorization> => {
-  if (typeof id !== "string" || id.length === 0 || id.length > 128) {
-    throw workflowResourceErrors.create("workflow.resource_unavailable");
-  }
-  // A publication number, never an alias such as "latest".
-  if (
-    typeof version !== "number" ||
-    !Number.isSafeInteger(version) ||
-    version < 1
-  ) {
-    throw workflowResourceErrors.create("workflow.start_invalid", {
-      issues: ["version: Name an exact published version."],
-    });
-  }
-  const rule = await ruleOf(env, invoker, id, version);
-  if (invoker.type !== "person") {
-    // Code and triggers learn nothing of a workflow they may not start:
-    // their own rule first, and then any refusal is `start_denied`.
-    const allowed = await drizzle(env.DB).get<{ holds: number }>(
-      sql`SELECT ${rule.holds} AS holds`
-    );
-    if (allowed.holds === 0) {
-      throw denied();
-    }
-  }
-  let found: Awaited<ReturnType<typeof pinned>>;
-  try {
-    found = await pinned(env, id, version);
-  } catch (error) {
-    if (invoker.type !== "person" && isExpectedError(error)) {
-      throw denied();
-    }
-    throw error;
-  }
-  const { generation, manifestHash, inputDescriptor } = found;
-  // Read again as the admitting statement runs: the workflow live at the
-  // same policy generation, the same version and manifest, and the
-  // invoker's own rule.
-  const holds = sql`(EXISTS (SELECT 1 FROM workflow_resources AS live
-      WHERE live.id = ${id} AND live.deleted_at IS NULL
-        AND live.policy_generation = ${generation})
-    AND EXISTS (SELECT 1 FROM workflow_resource_versions AS pinned
-      WHERE pinned.workflow_resource_id = ${id} AND pinned.version = ${version}
-        AND pinned.manifest_hash = ${manifestHash})
-    AND ${rule.holds})`;
-  const decided = await drizzle(env.DB).get<{ holds: number }>(
-    sql`SELECT ${holds} AS holds`
-  );
-  if (decided.holds === 0) {
-    throw denied();
-  }
-  return {
-    workflowId: id,
-    version,
-    manifestHash,
-    inputDescriptor,
-    invoker: rule.invoker,
-    originAppVersion: rule.originAppVersion,
-    triggerVersion: rule.triggerVersion,
-    principal: rule.principal,
-    generation,
-    actor: rule.actor,
-    holds,
-  };
-};
-
-/**
  * `input` as the version's contract takes it, normalized, as canonical
  * JSON: `workflow.start_invalid` with its issues (paths, never values)
  * otherwise, or when it is over the operation input limit.
@@ -497,6 +603,8 @@ const startOf = (
   principal: row.principalId,
   authorityGeneration: row.authorityGeneration,
   inputHash: row.inputHash,
+  paramsRevision: row.paramsRevision,
+  bindingsHash: row.bindingsHash,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -527,15 +635,21 @@ const receiptOf = async (
 /** The same start as `row`, or `workflow.start_conflict`. */
 const sameStart = (
   row: typeof workflowStartReceipts.$inferSelect,
-  authorization: StartAuthorization,
+  start: {
+    workflowId: string;
+    version: number;
+    principal: string;
+    originAppVersion: number | null;
+    triggerVersion: number | null;
+  },
   inputHash: string
 ): WorkflowStart => {
   if (
-    row.workflowResourceId !== authorization.workflowId ||
-    row.workflowResourceVersion !== authorization.version ||
-    row.principalId !== authorization.principal ||
-    row.originAppVersion !== authorization.originAppVersion ||
-    row.triggerVersion !== authorization.triggerVersion ||
+    row.workflowResourceId !== start.workflowId ||
+    row.workflowResourceVersion !== start.version ||
+    row.principalId !== start.principal ||
+    row.originAppVersion !== start.originAppVersion ||
+    row.triggerVersion !== start.triggerVersion ||
     row.inputHash !== inputHash
   ) {
     throw workflowResourceErrors.create("workflow.start_conflict");
@@ -544,77 +658,164 @@ const sameStart = (
 };
 
 /**
- * Admits the start `authorization` decided on, with `input` and the
- * invoker's idempotency `key`: its receipt, written in one statement only
- * while the authorization still holds, with its audit event. A start
- * whose authority changed since is refused (`workflow.start_denied`); the
- * same key again answers the same start, and the key with other input is
- * `workflow.start_conflict`. Every refusal is audited, input never in it.
+ * Decides on `request` (`workflowStartSchema`: the exact version, the
+ * input and the invoker's idempotency key) to start workflow `id` for
+ * `invoker` (see the rules above). The invoker's own access is checked
+ * first, every time; then the version and the input; then a start already
+ * admitted under the key is answered as it was (`workflow.start_conflict`
+ * if the key was used for another); only a new start freezes the
+ * workflow's parameters and bindings and needs them to hold now.
+ *
+ * Refused with `workflow.resource_unavailable` (a person with no role, as
+ * for a workflow that doesn't exist), `workflow.version_not_found`,
+ * `workflow.start_invalid`, `workflow.trigger_unavailable`,
+ * `workflow.binding_unapproved`, `workflow.params_invalid` or
+ * `workflow.start_denied`. A new start is admitted only while it still
+ * holds (`admitWorkflowStart`).
+ */
+export const decideWorkflowStart = async (
+  env: Env,
+  invoker: StartInvoker,
+  id: unknown,
+  request: unknown
+): Promise<StartDecision> => {
+  const { version, input, key } = workflowResourceErrors.parse(
+    "workflow.start_invalid",
+    workflowStartSchema,
+    request
+  );
+  if (typeof id !== "string" || id.length === 0 || id.length > 128) {
+    throw workflowResourceErrors.create("workflow.resource_unavailable");
+  }
+  const rule = await ruleOf(env, invoker, id, version);
+  if (invoker.type !== "person") {
+    // Code and triggers learn nothing of a workflow they may not start:
+    // their own rule first, and then any refusal is `start_denied`.
+    const allowed = await drizzle(env.DB).get<{ holds: number }>(
+      sql`SELECT ${rule.holds} AS holds`
+    );
+    if (allowed.holds === 0) {
+      throw denied();
+    }
+  }
+  let found: Awaited<ReturnType<typeof pinned>>;
+  try {
+    found = await pinned(env, id, version);
+  } catch (error) {
+    if (invoker.type !== "person" && isExpectedError(error)) {
+      throw denied();
+    }
+    throw error;
+  }
+  const { generation, configRevision, manifestHash, inputDescriptor } = found;
+  const base = {
+    version,
+    manifestHash,
+    invokerType: rule.invoker.type,
+    invoker: rule.invoker.id,
+    principal: rule.principal,
+    generation,
+  };
+  let text: string;
+  try {
+    text = acceptedInput(inputDescriptor, input);
+  } catch (error) {
+    await refusedStart(
+      env,
+      rule.actor,
+      id,
+      { ...base, inputHash: null },
+      "workflow.start_invalid"
+    );
+    throw error;
+  }
+  const inputHash = await sha256Hex(text);
+  const existing = await receiptOf(env, rule.invoker, rule.principal, key);
+  if (existing !== undefined) {
+    try {
+      return {
+        start: sameStart(
+          existing,
+          { workflowId: id, version, ...rule },
+          inputHash
+        ),
+      };
+    } catch (error) {
+      await refusedStart(
+        env,
+        rule.actor,
+        id,
+        { ...base, inputHash },
+        "workflow.start_conflict"
+      );
+      throw error;
+    }
+  }
+  // Frozen now, from what was read above: the parameter values of the
+  // revision in force, and what serves each binding.
+  const params = await frozenParams(env, id, version, configRevision);
+  const bindings = await frozenBindings(env, id, version);
+  // Read again as the admitting statement runs: the workflow live at the
+  // same policy generation and parameter revision, the same version and
+  // manifest, everything its bindings need, and the invoker's own rule.
+  const holds = sql`(EXISTS (SELECT 1 FROM workflow_resources AS live
+      WHERE live.id = ${id} AND live.deleted_at IS NULL
+        AND live.policy_generation = ${generation}
+        AND live.config_revision = ${configRevision})
+    AND EXISTS (SELECT 1 FROM workflow_resource_versions AS pinned
+      WHERE pinned.workflow_resource_id = ${id} AND pinned.version = ${version}
+        AND pinned.manifest_hash = ${manifestHash})
+    AND ${requiredSql(id, version, JSON.stringify(bindings.required))}
+    AND ${rule.holds})`;
+  const decided = await drizzle(env.DB).get<{ holds: number }>(
+    sql`SELECT ${holds} AS holds`
+  );
+  if (decided.holds === 0) {
+    throw denied();
+  }
+  return {
+    authorization: {
+      workflowId: id,
+      version,
+      manifestHash,
+      invoker: rule.invoker,
+      originAppVersion: rule.originAppVersion,
+      triggerVersion: rule.triggerVersion,
+      principal: rule.principal,
+      generation,
+      key,
+      input: text,
+      inputHash,
+      params,
+      paramsRevision: configRevision,
+      bindings: bindings.text,
+      actor: rule.actor,
+      holds,
+    },
+  };
+};
+
+/**
+ * Admits the new start `authorization` decided on: its receipt, written in
+ * one statement only while the authorization, and `also` (what its caller
+ * requires besides, as SQL), still hold, with its audit event. A start
+ * whose authority changed since is refused (`workflow.start_denied`) and
+ * the refusal audited; the same key admitted meanwhile answers that start.
  */
 export const admitWorkflowStart = async (
   env: Env,
   authorization: StartAuthorization,
-  input: unknown,
-  key: string
+  also: SQL = sql`1`
 ): Promise<WorkflowStart> => {
-  const db = drizzle(env.DB);
-  const base = {
-    version: authorization.version,
-    manifestHash: authorization.manifestHash,
-    invokerType: authorization.invoker.type,
-    invoker: authorization.invoker.id,
-    principal: authorization.principal,
-    generation: authorization.generation,
-  };
-  const refuse = async (
-    reason: string,
-    inputHash: string | null
-  ): Promise<void> => {
-    await auditedBatch(env, db, [
-      outboxed(db, {
-        actor: authorization.actor,
-        action: "workflow.start.refused",
-        target: { type: "workflow_resource", id: authorization.workflowId },
-        detail: { ...base, receipt: null, inputHash, reason },
-      }),
-    ]);
-  };
-  // Settled the same way however the start is refused or answered.
-  const settled = async (
-    row: typeof workflowStartReceipts.$inferSelect,
-    inputHash: string
-  ): Promise<WorkflowStart> => {
-    try {
-      return sameStart(row, authorization, inputHash);
-    } catch (error) {
-      await refuse("workflow.start_conflict", inputHash);
-      throw error;
-    }
-  };
-  let text: string;
-  try {
-    text = acceptedInput(authorization.inputDescriptor, input);
-  } catch (error) {
-    await refuse("workflow.start_invalid", null);
-    throw error;
-  }
-  const inputHash = await sha256Hex(text);
-  const existing = await receiptOf(
-    env,
-    authorization.invoker,
-    authorization.principal,
-    key
-  );
-  if (existing !== undefined) {
-    return await settled(existing, inputHash);
-  }
   const id = crypto.randomUUID();
   const createdAt = new Date();
+  const bindingsHash = await sha256Hex(authorization.bindings);
+  const db = drizzle(env.DB);
   const values = [
     id,
     authorization.invoker.type,
     authorization.invoker.id,
-    key,
+    authorization.key,
     authorization.workflowId,
     authorization.version,
     authorization.manifestHash,
@@ -622,17 +823,35 @@ export const admitWorkflowStart = async (
     authorization.triggerVersion,
     authorization.principal,
     authorization.generation,
-    text,
-    inputHash,
+    authorization.input,
+    authorization.inputHash,
+    authorization.params,
+    authorization.paramsRevision,
+    authorization.bindings,
+    bindingsHash,
     createdAt.getTime(),
+    null,
   ].map((value) => (value === null ? sql`NULL` : sql`${value}`));
-  const detail = { ...base, receipt: id, inputHash };
+  const detail = {
+    receipt: id,
+    version: authorization.version,
+    manifestHash: authorization.manifestHash,
+    invokerType: authorization.invoker.type,
+    invoker: authorization.invoker.id,
+    principal: authorization.principal,
+    generation: authorization.generation,
+    inputHash: authorization.inputHash,
+    // The revision of the frozen values, never the values nor a hash of
+    // them: a sensitive one stays out.
+    paramsRevision: authorization.paramsRevision,
+    bindingsHash,
+  };
   try {
     await auditedBatch(env, db, [
       db
         .insert(workflowStartReceipts)
         .select(
-          sql`SELECT ${sql.join(values, sql`, `)} WHERE ${authorization.holds}`
+          sql`SELECT ${sql.join(values, sql`, `)} WHERE ${authorization.holds} AND ${also}`
         ),
       outboxedIfChanged(db, {
         actor: authorization.actor,
@@ -651,31 +870,45 @@ export const admitWorkflowStart = async (
     env,
     authorization.invoker,
     authorization.principal,
-    key
+    authorization.key
   );
   if (admitted !== undefined) {
-    return await settled(admitted, inputHash);
+    try {
+      return sameStart(admitted, authorization, authorization.inputHash);
+    } catch (error) {
+      await refusedStart(
+        env,
+        authorization.actor,
+        authorization.workflowId,
+        detail,
+        "workflow.start_conflict"
+      );
+      throw error;
+    }
   }
-  await refuse("workflow.start_denied", inputHash);
+  await refusedStart(
+    env,
+    authorization.actor,
+    authorization.workflowId,
+    detail,
+    "workflow.start_denied"
+  );
   throw denied();
 };
 
 /**
- * Starts workflow `id` for `invoker` with `request` (`workflowStartSchema`:
- * the exact version, the input and the invoker's idempotency key):
- * decided, then admitted.
+ * Starts workflow `id` for `invoker` with `request`: decided, then, for a
+ * new start, admitted while `also` holds too.
  */
 export const startWorkflow = async (
   env: Env,
   invoker: StartInvoker,
   id: unknown,
-  request: unknown
+  request: unknown,
+  also?: SQL
 ): Promise<WorkflowStart> => {
-  const { version, input, key } = workflowResourceErrors.parse(
-    "workflow.start_invalid",
-    workflowStartSchema,
-    request
-  );
-  const authorization = await authorizeWorkflowStart(env, invoker, id, version);
-  return await admitWorkflowStart(env, authorization, input, key);
+  const decision = await decideWorkflowStart(env, invoker, id, request);
+  return "start" in decision
+    ? decision.start
+    : await admitWorkflowStart(env, decision.authorization, also);
 };
