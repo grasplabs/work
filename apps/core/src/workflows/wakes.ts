@@ -20,8 +20,10 @@ import { runEngine } from "./engine.ts";
 //   moment the decision is recorded: its row is written in the same D1
 //   batch as a decision's answer, so no answer stands without it. A held
 //   side effect's decision is connect's, in another database: its wake is
-//   written before connect is asked, and sent after, so a crash between
-//   connect deciding and the send leaves the row. A wake whose decision
+//   written before connect is asked, and replaced by one that is sent
+//   once connect answered. A crash in between leaves the first, which
+//   the repair sends again, each time as a new delivery, for a day: it
+//   can't know when connect decided. A wake whose decision
 //   never happened (connect refused it) costs the run one look, nothing
 //   more.
 // - Each row is sent at once, and again by the per-minute repair
@@ -54,6 +56,12 @@ const repairAfterMs = 30_000;
 
 /** The longest the repair waits before sending a wake again. */
 const maxRepairMs = 60 * 60 * 1000;
+
+/**
+ * How long a wake owed before its decision is known (`resendUntil`) is
+ * sent again: past it, the run's timed checks are left to find it.
+ */
+const resendMs = 24 * 60 * 60 * 1000;
 
 /** Most wakes one repair sends. */
 const wakesPerRepair = 50;
@@ -94,18 +102,21 @@ export const oweWake = (
   db: DrizzleD1Database,
   wake: Wake,
   when: SQL,
-  now = Date.now()
+  { now = Date.now(), resend = false }: { now?: number; resend?: boolean } = {}
 ) =>
   db
     .insert(workflowRunWakes)
     .select(
-      sql`SELECT ${wake.id}, ${wake.runId}, ${wake.type}, ${now}, ${now + repairAfterMs}, 0 WHERE ${when}`
+      sql`SELECT ${wake.id}, ${wake.runId}, ${wake.type}, ${now}, ${now + repairAfterMs}, 0, ${resend ? now + resendMs : null} WHERE ${when}`
     )
     .onConflictDoNothing();
 
 /**
  * Sends the wake `id`, if it is still owed, and settles it once the
- * engine took it (or its run takes none). Never throws: a failure, of the
+ * engine took it (or its run takes none). One to send again until its
+ * decision is known (`resendUntil`) isn't settled, and goes as a new
+ * delivery each time, so an earlier one the run took doesn't swallow it.
+ * Never throws: a failure, of the
  * engine or of the database, is logged, and the row stays for the repair,
  * so the request that owed it answers as what it recorded.
  */
@@ -118,6 +129,14 @@ export const sendWake = async (env: Env, id: string): Promise<void> => {
       .where(eq(workflowRunWakes.id, id))
       .get();
     if (wake === undefined) {
+      return;
+    }
+    if (wake.resendUntil !== null) {
+      await runEngine(env).sendEvent(
+        wake.runId,
+        wake.type,
+        `${wake.id}:${wake.retries}`
+      );
       return;
     }
     await runEngine(env).sendEvent(wake.runId, wake.type, wake.id);
@@ -153,13 +172,14 @@ export const wakingHeld = async <T>(
   )})`;
   // Each decision its own deliveries: one that was refused, and then made
   // again, wakes again. Owed first for a crash while connect decides
-  // (`pending`), which the repair may send before `decide` is done (a slow
-  // connect): so once it is, a fresh wake takes its place (`decided`), in
-  // one batch, and that one is sent.
+  // (`pending`): the repair sends it again, each time anew, until a day
+  // has passed, as it can't know whether connect decided. Once `decide`
+  // is done, a wake that settles once taken takes its place (`decided`),
+  // in one batch, and that one is sent.
   const id = crypto.randomUUID();
   const pending: Wake = { id: `held:${id}`, runId: named.runId, type };
   const decided: Wake = { ...pending, id: `held:${id}:decided` };
-  await db.batch([oweWake(db, pending, runGoesOn)]);
+  await db.batch([oweWake(db, pending, runGoesOn, { resend: true })]);
   try {
     return await decide();
   } finally {
@@ -189,6 +209,10 @@ export const wakingHeld = async <T>(
 export const repairWakes = async (env: Env, at = new Date()): Promise<void> => {
   const db = drizzle(env.DB);
   const now = at.getTime();
+  // Wakes sent again for as long as they may be (`resendUntil`) are done.
+  await db
+    .delete(workflowRunWakes)
+    .where(lte(workflowRunWakes.resendUntil, new Date(now)));
   const due = await db
     .select()
     .from(workflowRunWakes)

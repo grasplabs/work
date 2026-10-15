@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "39303269-6892-409e-bbee-c2ef9d3d181d",
+  "id": "0d32367f-ce85-40b6-992f-c483052495a8",
   "prevId": "b693a9ef-190b-43ab-a8df-18390d750439",
   "tables": {
     "accounts": {
@@ -6261,6 +6261,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0
+        },
+        "resend_until": {
+          "name": "resend_until",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {

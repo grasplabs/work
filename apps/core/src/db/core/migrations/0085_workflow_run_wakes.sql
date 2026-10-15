@@ -5,6 +5,7 @@ CREATE TABLE `workflow_run_wakes` (
 	`created_at` integer NOT NULL,
 	`retry_at` integer NOT NULL,
 	`retries` integer DEFAULT 0 NOT NULL,
+	`resend_until` integer,
 	FOREIGN KEY (`run_id`) REFERENCES `workflow_runs`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint

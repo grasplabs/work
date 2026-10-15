@@ -1463,6 +1463,13 @@ export const workflowRunWakes = sqliteTable(
     retryAt: timestamp("retry_at").notNull(),
     /** How often the repair sent it. */
     retries: integer().notNull().default(0),
+    /**
+     * Set on a wake owed before what it is for is known to have happened
+     * (a held side effect's decision, still with connect): sent again by
+     * the repair, each time as a new delivery, until then, and dropped
+     * after. None on a wake the engine settles by taking it once.
+     */
+    resendUntil: timestamp("resend_until"),
   },
   (table) => [
     // The repair (src/workflows/wakes.ts): next due first.

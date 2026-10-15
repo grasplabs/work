@@ -748,7 +748,7 @@ export const answerDecision = async (
         eq(workflowDecisions.decidedBy, by.userId),
         eq(workflowDecisions.decidedAt, now)
       )})`,
-      now.getTime()
+      { now: now.getTime() }
     ),
   ]);
   if (!answered) {
