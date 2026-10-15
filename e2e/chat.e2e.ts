@@ -416,7 +416,14 @@ test("the chat dock on every other page carries on the open chat, which is the s
   // Asked from another page, it opens around the box and streams there.
   await page.goto("/domains");
   const box = page.getByRole("textbox", { name: "Ask Grasp" });
+  // The box takes a question once the dock has read the models core
+  // offers, as its Send shows: Enter before then sends nothing.
+  const send = page
+    .locator("form")
+    .filter({ has: box })
+    .getByRole("button", { name: "Send" });
   await box.fill(question);
+  await expect(send).toBeEnabled();
   await box.press("Enter");
   const dock = page.getByRole("region", { name: "Ask Grasp" });
   const messages = dock.getByRole("list", { name: "Messages" });
@@ -458,6 +465,8 @@ test("the chat dock on every other page carries on the open chat, which is the s
   await expect(dock).toContainText("Ask anything, or describe a process");
   const second = `Another from the dock ${tag}?`;
   await box.fill(second);
+  // A page load reads the models again.
+  await expect(send).toBeEnabled();
   await box.press("Enter");
   await expect(messages.getByRole("listitem").first()).toHaveText(second);
 
