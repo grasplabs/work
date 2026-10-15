@@ -152,6 +152,7 @@ import {
   journalSchemaVersion,
   readAttemptLease,
   readGeneration,
+  readGenerationOver,
   readJournal,
   readRollbackWorklist,
   maxEventPayloadBytes,
@@ -1302,6 +1303,29 @@ export abstract class WorkflowRun<Env = unknown> extends DurableObject<Env> {
   protected generation(): number | undefined {
     const { sql } = this.ctx.storage;
     return hasJournal(sql) ? readGeneration(sql) : undefined;
+  }
+
+  /**
+   * The newest generation of the run none of whose attempts holds any
+   * more (journal.ts, `readGenerationOver`): the activation fence as the
+   * run stands now, for the host to give back what it keeps for attempts
+   * (their share of the host's capacity, say). It only grows, so what the
+   * host gives back for it, however late, is never what a newer
+   * activation's attempt holds. None before the run has a journal. Read
+   * from the journal, in this object only.
+   */
+  protected generationOver(): number | undefined {
+    const { sql } = this.ctx.storage;
+    return hasJournal(sql) ? readGenerationOver(sql) : undefined;
+  }
+
+  /**
+   * The instance ID of the run this object holds (none before it has a
+   * journal): which run the host acts on for it, whatever a caller says.
+   * Read from the journal, in this object only.
+   */
+  protected instanceId(): string | undefined {
+    return this.#run()?.instance_id;
   }
 
   /**
