@@ -6,6 +6,7 @@ import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { log } from "@grasp-os/shared/log";
 import { appTokenMs, portableFunctionPath } from "@grasp-os/shared/portable";
+import { roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
@@ -19,7 +20,7 @@ import { jwt } from "better-auth/plugins/jwt";
 import type { Jwk } from "better-auth/plugins/jwt";
 import { organization } from "better-auth/plugins/organization";
 import { defaultAc } from "better-auth/plugins/organization/access";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
@@ -49,7 +50,8 @@ import { mayComeIn, staffMayStay } from "../onboarding/gate.ts";
 import { checkClaims } from "./claims.ts";
 import { devIdpOrigin, oidcProviders, providerIds } from "./config.ts";
 import type { OidcProvider } from "./config.ts";
-import { liveKeys } from "./token-keys.ts";
+import { keyIdOf, keyRing } from "./token-keys.ts";
+import type { KeyRing, KeyUse } from "./token-keys.ts";
 
 /** Better Auth's routes, under core's API. */
 export const authBasePath = "/api/auth";
@@ -224,12 +226,58 @@ const restoreAdmin = async (env: Env, userId: string): Promise<void> => {
 };
 
 /**
+ * That an invitation (a row of `invitations`) is open at `now`, as SQL: in
+ * the organization, nobody has taken it up or withdrawn it, it hasn't
+ * lapsed, and whoever made it is still an admin, so an admin's demotion or
+ * removal also ends what they invited. Listing, inviting and joining all
+ * read it (`members.ts`), and joining checks it again in the statements
+ * that act on it.
+ */
+export const openInvitationAt = (now: number): SQL =>
+  and(
+    eq(invitations.organizationId, organizationId),
+    eq(invitations.status, "pending"),
+    sql`${invitations.expiresAt} > ${now}`,
+    activeMember(invitations.inviterId, ["admin"])
+  ) ?? sql`0`;
+
+/** That invitation `id` is open at `now`, as SQL on its own. */
+const isOpenInvitation = (id: string, now: number): SQL => sql`EXISTS (
+  SELECT 1 FROM ${invitations}
+  WHERE ${invitations.id} = ${id} AND ${openInvitationAt(now)}
+)`;
+
+/** The open invitation of `email`, if any: the newest. */
+const openInvitation = async (
+  env: Env,
+  email: string,
+  now: number
+): Promise<{ id: string; role: string } | undefined> => {
+  const [invitation] = await drizzle(env.DB)
+    .select({ id: invitations.id, role: invitations.role })
+    .from(invitations)
+    .where(and(eq(invitations.email, email), openInvitationAt(now)))
+    .orderBy(desc(invitations.createdAt))
+    .limit(1);
+  const role = roleSchema.safeParse(invitation?.role);
+  return invitation && role.success
+    ? { id: invitation.id, role: role.data }
+    : undefined;
+};
+
+/**
  * Makes someone signing in from the client's IdP a member of the deployment's
  * organization, creating it on the first sign-in, unless an admin removed
  * them. Runs on every sign-in, so a membership whose creation failed is
  * created next time; an existing one, and its role, is kept, except that a
- * configured admin is made admin again when nobody else is one. Returns
- * whether they are a member.
+ * configured admin is made admin again when nobody else is one.
+ *
+ * Someone joining takes up their open invitation (`members.ts`), in one
+ * batch with the membership: the membership gets the invited role only if
+ * the invitation is still open as the insert runs, so one withdrawn, lapsed
+ * or orphaned since it was read gives nothing; and it is taken up, audited,
+ * only by the insert that made them a member, this one. A configured admin
+ * joins as admin, and takes up an invitation too.
  *
  * The removal check is part of the insert itself, one statement: a removal
  * records its marker before it deletes the membership (`members.ts`), so
@@ -247,9 +295,20 @@ const ensureMember = async (
     .from(users)
     .where(eq(users.id, userId));
   // Config emails are lowercased when parsed; Better Auth lowercases the IdP's.
-  const role =
-    user && config.admins.includes(user.email.toLowerCase()) ? "admin" : "user";
+  const email = user?.email.toLowerCase();
+  const configuredAdmin = email !== undefined && config.admins.includes(email);
   const now = new Date();
+  const invitation =
+    email === undefined
+      ? undefined
+      : await openInvitation(env, email, now.getTime());
+  const invited =
+    invitation === undefined
+      ? sql`0`
+      : isOpenInvitation(invitation.id, now.getTime());
+  const role = configuredAdmin
+    ? sql`'admin'`
+    : sql`CASE WHEN ${invited} THEN ${invitation?.role ?? "user"} ELSE 'user' END`;
   await db
     .insert(organizations)
     .values({
@@ -259,12 +318,36 @@ const ensureMember = async (
       createdAt: now,
     })
     .onConflictDoNothing();
-  await db.run(sql`
-    INSERT INTO ${members} (id, organization_id, user_id, role, created_at)
-    SELECT ${crypto.randomUUID()}, ${organizationId}, ${userId}, ${role}, ${now.getTime()}
-    WHERE ${notRemoved(userId)}
-    ON CONFLICT DO NOTHING`);
-  if (role === "admin") {
+  const memberId = crypto.randomUUID();
+  const join = db
+    .insert(members)
+    .select(
+      sql`SELECT ${memberId}, ${organizationId}, ${userId}, ${role}, ${now.getTime()}
+        WHERE ${notRemoved(userId)}`
+    )
+    .onConflictDoNothing();
+  await (invitation === undefined
+    ? join
+    : auditedBatch(env, db, [
+        join,
+        db
+          .update(invitations)
+          .set({ status: "accepted" })
+          .where(
+            and(
+              eq(invitations.id, invitation.id),
+              openInvitationAt(now.getTime()),
+              sql`EXISTS (SELECT 1 FROM ${members} WHERE ${members.id} = ${memberId})`
+            )
+          ),
+        outboxedIfChanged(db, {
+          actor: actorOf({ userId, staff: false }),
+          action: "member.invitation.accepted",
+          target: { type: "invitation", id: invitation.id },
+          detail: { userId, role: configuredAdmin ? "admin" : invitation.role },
+        }),
+      ]));
+  if (configuredAdmin) {
     await restoreAdmin(env, userId);
   }
   return !(await isRemoved(env, userId));
@@ -410,12 +493,41 @@ const auditedChanges: Record<
   }),
 };
 
+/** Each env's token keys, as its isolate holds them, whatever its providers. */
+const tokenRings = new WeakMap<Env, KeyRing<Jwk>>();
+
+/** The token keys `env`'s isolate holds (token-keys.ts). */
+export const tokenKeysOf = (env: Env): KeyRing<Jwk> => {
+  const ring = tokenRings.get(env) ?? keyRing<Jwk>();
+  tokenRings.set(env, ring);
+  return ring;
+};
+
+/**
+ * What the JWT plugin asks its keys for, by the call that asks: only
+ * `signJWT` sends a `payload`; every other call checks a token, naming
+ * the key its header does, if that can be read at all.
+ */
+const keyUseOf = (body: unknown): KeyUse => {
+  if (typeof body === "object" && body !== null && "payload" in body) {
+    return { sign: true };
+  }
+  const token: unknown =
+    typeof body === "object" && body !== null
+      ? Reflect.get(body, "token")
+      : undefined;
+  return typeof token === "string"
+    ? { kid: keyIdOf(token), token }
+    : { kid: undefined };
+};
+
 const createAuth = (
   env: Env,
   config: SignInConfig,
   providers: OidcProvider[]
 ) => {
   const db = drizzle(env.DB);
+  const tokenKeys = tokenKeysOf(env);
   return betterAuth({
     appName: "Grasp",
     // The deployment's own address from its config, never the request's:
@@ -630,13 +742,25 @@ const createAuth = (
         disableSettingJwtHeader: true,
         // Its own key rows, read through Better Auth's adapter, less the
         // keys that can't verify a current token any more: without this
-        // it verifies with every key it ever made (token-keys.ts).
+        // it verifies with every key it ever made. Held a minute per
+        // isolate to check tokens, so a token costs no D1 read before it
+        // is checked (token-keys.ts); a key it makes is read at once.
         adapter: {
           getJwks: async (context) =>
-            liveKeys(
-              await context.context.adapter.findMany<Jwk>({ model: "jwks" }),
+            await tokenKeys.keys(
+              async () =>
+                await context.context.adapter.findMany<Jwk>({ model: "jwks" }),
+              keyUseOf(context.body),
               Date.now()
             ),
+          createJwk: async (key, context) => {
+            const made = await context.context.adapter.create<
+              Omit<Jwk, "id">,
+              Jwk
+            >({ model: "jwks", data: { ...key, createdAt: new Date() } });
+            tokenKeys.forget();
+            return made;
+          },
         },
         // Its model is `jwks` already; plural table names would make it
         // `jwkss`.

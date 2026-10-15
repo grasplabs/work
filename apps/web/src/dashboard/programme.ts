@@ -61,6 +61,35 @@ export const nextReport = (start: string, today: string): NextReport => {
   };
 };
 
+/** `YYYY-MM-DD` of the day `days` days after `start`. */
+const dayAfter = (start: string, days: number): string =>
+  new Date(Date.parse(`${start}T00:00:00Z`) + days * dayMs)
+    .toISOString()
+    .slice(0, 10);
+
+/** The days a weekly report is about, as core's run activity reads them. */
+export interface ReportWindow {
+  /** Its last day, `YYYY-MM-DD`. */
+  to: string;
+  /** How many days, up to and with `to`. */
+  days: number;
+}
+
+/**
+ * What the next weekly report (`nextReport`) is about: its week's days up
+ * to today, so the week that just closed whole once it is ready, and the
+ * one that runs so far until then. Before the programme begins, today.
+ */
+export const reportWindow = (start: string, today: string): ReportWindow => {
+  const { week } = nextReport(start, today);
+  const first = (week - 1) * weekDays;
+  const last = Math.min(first + weekDays - 1, daysFrom(start, today));
+  if (last < first) {
+    return { to: today, days: 1 };
+  }
+  return { to: dayAfter(start, last), days: last - first + 1 };
+};
+
 /** Today in UTC, as the programme counts days: `YYYY-MM-DD`. */
 export const todayUtc = (now: Date = new Date()): string =>
   now.toISOString().slice(0, 10);

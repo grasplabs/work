@@ -201,8 +201,13 @@ export const useLive = <Value>(
 
 // The App's workflows
 
-/** Where a run is: running, waiting for a decision, paused, or ended. */
+/**
+ * Where a run is: queued for a share of the runs going at once (`queued`
+ * on the run says which), running, waiting for a decision, paused, or
+ * ended.
+ */
 export type RunStatus =
+  | "queued"
   | "running"
   | "waiting"
   | "paused"
@@ -286,6 +291,13 @@ export interface WorkflowRun {
   /** A person started it (and it acts for them), or a trigger did. */
   startedBy: { type: "person"; userId: string } | { type: "trigger" };
   status: RunStatus;
+  /**
+   * While it is `queued`: whose share of the runs going at once it waits
+   * for (its App's, its person's or the organization's), and when it tries
+   * again at the latest (ISO 8601). Throttling, not a fault; it goes on by
+   * itself.
+   */
+  queued?: { waitingFor: "client" | "person" | "app"; retryAt: string };
   /** ISO 8601. */
   createdAt: string;
   endedAt: string | null;
@@ -313,7 +325,8 @@ export interface WorkflowRun {
 
 /**
  * A run as a screen sees it: `waiting` while a decision of it is open, with
- * the decisions it waits for (none once it has ended).
+ * the decisions it waits for (none once it has ended), and otherwise
+ * `queued` while it waits for a share of the runs going at once.
  */
 export interface ScreenRun extends WorkflowRun {
   waitingFor: WaitingDecision[];

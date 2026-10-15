@@ -4,6 +4,7 @@ import type { DecisionView } from "@grasp-os/shared/decisions";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ScreenDelivery } from "@grasp-os/shared/screen-trust";
 import {
@@ -16,6 +17,7 @@ import {
 } from "@grasp-os/shared/screens";
 import type {
   AppErrorLog,
+  QuerySnapshotPush,
   RunChange,
   ScreenBundle,
   ScreenRun,
@@ -35,6 +37,7 @@ import { appFor, findVersion, getApp, versionFiles } from "./apps.ts";
 import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
+import { QuerySubscriptions } from "./query-subscriptions.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
@@ -535,10 +538,27 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
     },
   };
 
+  /** This connection's live queries (query-subscriptions.ts). */
+  readonly #queries: QuerySubscriptions;
+
   constructor(env: Env, check: SessionCheck) {
     super();
     this.#env = env;
     this.#check = check;
+    this.#queries = new QuerySubscriptions(
+      env,
+      check,
+      async (by, app, artifact) => {
+        if (!(await this.#stillOpen(app)())) {
+          return "role";
+        }
+        const open = await deliveryOpen(env, by, app, artifact, {
+          operation: "watchQuery",
+          stage: "push",
+        });
+        return open ? "open" : "build";
+      }
+    );
   }
 
   /**
@@ -739,5 +759,33 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
           this.#runSubscriptions
         )
     );
+  }
+
+  async watchQuery(
+    app: string,
+    lease: string,
+    request: string,
+    onSnapshot: (snapshot: QuerySnapshotPush) => void
+  ): Promise<RunSubscription> {
+    return await withPerson(this.#check, async (by) => {
+      // Following is a request like any other; what core then pushes is
+      // not counted (query-subscriptions.ts bounds it).
+      const id = await admitted(this.#env, by, app);
+      if (
+        typeof request !== "string" ||
+        request.length > functionRequestMaxBytes ||
+        !isStub(onSnapshot)
+      ) {
+        throw screenErrors.create("screen.invalid");
+      }
+      // The build of the frame that follows, by its own lease: never what
+      // another frame of the App on this connection presented last.
+      const artifact = await leasedArtifact(this.#env, by.userId, id, lease);
+      await requireDelivery(this.#env, by, id, artifact, {
+        operation: "watchQuery",
+        stage: "admission",
+      });
+      return this.#queries.subscribe(by, id, artifact, request, onSnapshot);
+    });
   }
 }

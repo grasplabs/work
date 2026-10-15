@@ -514,12 +514,15 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
       const hotWhenQuickDone = await Promise.all(
         hotRuns.map(async ({ id }) => await liveStatus(id))
       );
+      // The last of the hot App's runs may wait three rounds, five, ten
+      // and twenty seconds long (admission.ts, `askAgainSeconds`), before
+      // a share is its: some 35 seconds, and more on a loaded machine.
       await eventually(async () => {
         const statuses = await Promise.all(
           hotRuns.map(async ({ id }) => await liveStatus(id))
         );
         expect(statuses).toStrictEqual(["complete", "complete", "complete"]);
-      });
+      }, 60_000);
       return {
         queued,
         retryAt: z
@@ -1295,7 +1298,7 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
     expect(result).toStrictEqual({ places: 1, status: "queued" });
   });
 
-  it("count a step's wait for a share from when it first waited, through a wait for its person to confirm a side effect", async () => {
+  it("count a step's wait for a share only while it waits for one, starting over once it was admitted and held for its person", async () => {
     const admin = await signedInApi(idp, "admin");
     const mail = await mailConnection([]);
     // A pause first, so the send is the step that waits for a share.
@@ -1342,26 +1345,74 @@ describe("fair workflow admission", { timeout: 120_000 }, () => {
           expect(held).toBeDefined();
           return held;
         });
-        // The share is taken again before the person confirms: the send
-        // waits for it once more, with what was left of its ten seconds.
+        // The person takes longer than a step may wait for a share: none
+        // of it is a wait for one.
+        await scheduler.wait(12_000);
+        // The share is taken again before they confirm: the send waits for
+        // it once more, its ten seconds starting over.
         await admit(holder, "second holder");
-        const confirmedAt = Date.now();
         if (pending !== undefined) {
           await admin.api.pendingActions.confirm(pending.id, pending.inputHash);
         }
+        // Once its next check saw the confirmation, it queues again.
+        await eventually(async () => {
+          await expect(placesOf(run.id)).resolves.toBe(1);
+        });
+        const queuedAgainAt = Date.now();
         await finished(run.id);
         return {
-          code: await failedWith(run.id),
-          // Some five of its ten seconds went before it was held.
-          failedSoon: Date.now() - confirmedAt < 8000,
+          failed: await failedWith(run.id),
+          // Its whole ten seconds, not the five its first wait left.
+          waitedAfresh: Date.now() - queuedAgainAt >= 8000,
         };
       }
     );
 
     expect(result).toStrictEqual({
-      code: "workflow.queue_timeout",
-      failedSoon: true,
+      failed: "workflow.queue_timeout",
+      waitedAfresh: true,
     });
+  });
+
+  it("count none of a pause as a step's wait for a share, and run the step once resumed, however long the pause", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const app = await appWith(builder, {
+      ...workflowFiles("noop", "  return 1;"),
+      ...workflowFiles("work", `${working("work", 10)}\n  return 1;`, {
+        work: 1,
+      }),
+    });
+    const holderRun = await builder.api.workflows.start(app, "noop");
+    await finished(holderRun.id);
+    const holder = {
+      run: holderRun.id,
+      root: holderRun.id,
+      subject: builder.userId,
+      resource: app,
+    };
+
+    const result = await withShares(
+      { workflowClientAttempts: 2, workflowQueuedStepMs: 8000 },
+      async () => {
+        const held = await admit(holder, "holder");
+        const run = await builder.api.workflows.start(app, "work");
+        await eventually(async () => {
+          await expect(placesOf(run.id)).resolves.toBe(1);
+        });
+        // Paused for longer than a step may wait for a share.
+        await stopped(run.id);
+        await scheduler.wait(10_000);
+        await settled(held);
+        await resumed(run.id);
+        await finished(run.id);
+        return {
+          failed: (await failedWith(run.id)) ?? null,
+          status: await liveStatus(run.id),
+        };
+      }
+    );
+
+    expect(result).toStrictEqual({ failed: null, status: "complete" });
   });
 
   it("record that a run waits each time it joins the queue, as when it rejoins after a pause", async () => {

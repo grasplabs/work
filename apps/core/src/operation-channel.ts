@@ -12,11 +12,12 @@ import { commitMaxInputBytes } from "@grasp-os/shared/stores";
 
 // The one authority an App's code is handed for one invocation of one of
 // its server functions (operations.ts): a read, a staged write, a call of
-// another of its functions, a resource, each decided here, by the host,
-// for the invocation's kind. App code can hold on to the channel, or pass
-// it on, so:
+// another of its functions, a resource, a streaming action's progress
+// (`emit`), each decided here, by the host, for the invocation's kind. App
+// code can hold on to the channel, or pass it on, so:
 // - what it may do is fixed by the invocation that made it: a query's has
-//   no write, call or resource, a mutation's no resource, and asking
+//   no write, call or resource, a mutation's no resource, only a streaming
+//   action's has `emit`, and asking
 //   anyway is refused whatever the App code says (`operation.read_only`,
 //   `operation.no_resources`, ...);
 // - it stops working once its invocation ends (`operation.ended`), so a
@@ -28,8 +29,11 @@ import { commitMaxInputBytes } from "@grasp-os/shared/stores";
 //   with its own channel, are bounded by the call's budget (operations.ts).
 //   Staged writes aren't counted: a commit bounds them
 //   (`commitMaxWrites`), and counting them would leave a mutation that
-//   reads anything short of a whole commit. This holds an App's functions
-//   (queries, mutations, actions); Code Mode counts its own;
+//   reads anything short of a whole commit. Nor are a streaming action's
+//   progress snapshots (`emit`), which have a budget of their own
+//   (`streamMaxEmits`, operations.ts): a run that streams 1000 of them
+//   still has its 100 calls. This holds an App's functions (queries,
+//   mutations, actions); Code Mode counts its own;
 // - its methods take only what a request is (no scope, principal, role,
 //   schema hash or receipt): who the invocation is for was resolved by
 //   core before the channel existed;
@@ -41,6 +45,9 @@ import { commitMaxInputBytes } from "@grasp-os/shared/stores";
 // It remembers the expected errors it raised, so the host can tell one
 // App code rethrew from a code it made up (`raised`). A domain failure of
 // a function this one called passes through as the `AppError` it was.
+
+/** What a channel can be asked to do. */
+type CapabilityName = "read" | "write" | "call" | "resource" | "emit";
 
 /** One capability of a channel: how the host answers it. */
 type Capability = (...args: unknown[]) => Promise<unknown>;
@@ -54,6 +61,8 @@ export interface ChannelCapabilities {
   readonly write?: Capability;
   readonly call?: Capability;
   readonly resource?: Capability;
+  /** A streaming action's progress snapshot (operations.ts `runAction`). */
+  readonly emit?: Capability;
   /** Brands an expected error the channel raised as the host's. */
   readonly trust: (error: Error) => void;
   /**
@@ -61,20 +70,14 @@ export interface ChannelCapabilities {
    * failed (its arguments refused at the boundary included), with the
    * host's own copy of the error.
    */
-  readonly refused?: (
-    name: "read" | "write" | "call" | "resource",
-    error: CodedError
-  ) => void;
+  readonly refused?: (name: CapabilityName, error: CodedError) => void;
   /**
    * The refusal for each capability it hasn't (`operation.not_found` for
    * one without its own).
    */
   readonly refusals: Readonly<
     Partial<
-      Record<
-        "read" | "write" | "call" | "resource",
-        Parameters<typeof operationErrors.create>[0]
-      >
+      Record<CapabilityName, Parameters<typeof operationErrors.create>[0]>
     >
   >;
 }
@@ -128,7 +131,7 @@ interface ChannelState {
 }
 
 /**
- * The channel App code holds: its four methods and nothing else, so over
+ * The channel App code holds: its methods and nothing else, so over
  * RPC nothing but them can be called (ending it and reading what it raised
  * are the host's, on `OpenChannel`).
  */
@@ -172,13 +175,14 @@ class Channel extends ChannelTarget implements OperationChannel {
     return await this.#use("resource", [alias, method, args]);
   }
 
-  async #use(
-    name: "read" | "write" | "call" | "resource",
-    args: unknown[]
-  ): Promise<unknown> {
+  async emit(progress: unknown): Promise<unknown> {
+    return await this.#use("emit", [progress]);
+  }
+
+  async #use(name: CapabilityName, args: unknown[]): Promise<unknown> {
     const capability = this.#capabilities[name];
     try {
-      const counted = name !== "write";
+      const counted = name !== "write" && name !== "emit";
       if (counted) {
         this.#state.uses += 1;
       }
@@ -226,10 +230,7 @@ class Channel extends ChannelTarget implements OperationChannel {
    * so whatever App code does to the error it caught (its message, code or
    * details, now or after a later await) changes nothing the host answers.
    */
-  #raise(
-    name: "read" | "write" | "call" | "resource",
-    error: CodedError
-  ): Error {
+  #raise(name: CapabilityName, error: CodedError): Error {
     const kept = copyOf(error);
     this.#capabilities.trust(kept);
     this.#state.raised.set(kept.code, kept);

@@ -119,6 +119,9 @@
       // loaded per activation by App and pinned version, with an env
       // rebuilt from permissions every time (src/workflows/dispatcher.ts).
       { "name": "WORKFLOW_RUNS", "class_name": "WorkflowRuns" },
+      // One object per foreground action invocation, streaming or not, named
+      // by its person, App, contract and key (src/action-invocation.ts).
+      { "name": "ACTION_INVOCATIONS", "class_name": "ActionInvocation" },
     ],
   },
   "migrations": [
@@ -128,6 +131,7 @@
     { "tag": "v4", "new_sqlite_classes": ["ModelLedger"] },
     { "tag": "v5", "new_sqlite_classes": ["DataStore"] },
     { "tag": "v6", "new_sqlite_classes": ["WorkflowRuns"] },
+    { "tag": "v7", "new_sqlite_classes": ["ActionInvocation"] },
   ],
   // Runs App sandboxes and the screen compiler.
   "worker_loaders": [{ "binding": "LOADER" }],

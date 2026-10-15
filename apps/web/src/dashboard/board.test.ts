@@ -30,6 +30,7 @@ const workflow = (
   },
   waiting: 0,
   failed: 0,
+  handled: 0,
   scheduleStopped: false,
   ...change,
 });

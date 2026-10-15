@@ -28,7 +28,7 @@ import type {
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
-  permissionSubjectSchema,
+  codeSubjectSchema,
   workContextSchema,
 } from "@grasp-os/shared/permissions";
 import type { WorkContext } from "@grasp-os/shared/permissions";
@@ -86,7 +86,7 @@ type Row = typeof pendingActions.$inferSelect;
 export type HeldAction = Row;
 
 const subjectOf = (row: Row) =>
-  permissionSubjectSchema.parse(
+  codeSubjectSchema.parse(
     row.subjectType === "app"
       ? { type: "app", appId: row.subjectId }
       : { type: "agent", agentId: row.subjectId }

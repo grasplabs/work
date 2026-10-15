@@ -1,6 +1,8 @@
 import { z } from "zod";
 
+import type { ModelEffort, ModelEfforts } from "./models.ts";
 import type { ScreenBundle, ScreenProblem } from "./screens.ts";
+import { uploadNameSchema } from "./uploads.ts";
 
 // A person's chats with the organization's agent, as the frontend sees them
 // (core's chats-rpc.ts). Each chat belongs to the person who made it: only
@@ -17,6 +19,79 @@ export interface ChatSummary {
   createdAt: string;
   /** Whether its agent is working on a question now. */
   running: boolean;
+  /** The project it is in (`ChatsApi.projects`), or null for none. */
+  projectId: string | null;
+}
+
+// Projects: a person groups their chats, and tells each chat's agent what
+// the group is for, in a goal and a few text documents. A project is the
+// person's own, as their chats are. Its agent reads the goal and the
+// documents as data (`env.chat.project()`), never as its instructions.
+// Core enforces every limit here; the page shows them.
+
+/** A project's name. */
+export const projectNameSchema = z.string().trim().min(1).max(100);
+
+/** Longest goal a project has, in characters. */
+export const projectGoalMaxLength = 4000;
+
+/** A project's goal, in the person's own words; empty for none. */
+export const projectGoalSchema = z.string().trim().max(projectGoalMaxLength);
+
+/** The file types a project document may be, by extension. */
+export const projectDocumentTypes = ["md", "txt", "csv", "json"] as const;
+
+/** Largest project document, in bytes of UTF-8. */
+export const projectDocumentMaxBytes = 100 * 1024;
+
+const projectExtension = /\.(?<extension>[A-Za-z]+)$/u;
+
+/** Most documents one project has. */
+export const projectDocumentsMax = 10;
+
+/** Most projects a person keeps. */
+export const projectsMax = 100;
+
+/**
+ * A project document's file name: a file name (`uploadNameSchema`) with
+ * one of {@link projectDocumentTypes}' extensions.
+ */
+export const projectDocumentNameSchema = uploadNameSchema.refine(
+  (name) => {
+    const extension = projectExtension.exec(name)?.groups?.extension;
+    return projectDocumentTypes.some(
+      (type) => type === extension?.toLowerCase()
+    );
+  },
+  { message: "A project document is a .md, .txt, .csv or .json file" }
+);
+
+/** A document added to a project: its file name and its text. */
+export interface ProjectDocumentInput {
+  name: string;
+  content: string;
+}
+
+/** A project's document, as the person's list shows it. */
+export interface ProjectDocument {
+  id: string;
+  name: string;
+  /** Its size, in bytes of UTF-8. */
+  bytes: number;
+  /** When it was added (ISO 8601). */
+  createdAt: string;
+}
+
+/** One of the person's projects. */
+export interface ChatProject {
+  id: string;
+  name: string;
+  /** What the project is for, in the person's own words; empty for none. */
+  goal: string;
+  /** When it was made (ISO 8601). */
+  createdAt: string;
+  /** Its documents, in the order they were added. */
+  documents: ProjectDocument[];
 }
 
 /**
@@ -289,6 +364,14 @@ export interface ChatQuestion {
   text: string;
   /** One of `ChatsApi.models()`. */
   model: string;
+  /**
+   * How hard the model thinks before it answers: one of the levels
+   * `ChatsApi.efforts()` lists for `model`; without one, its default
+   * there. A level the model doesn't take becomes the next one up that it
+   * does, or its highest when it has none above; a model that doesn't
+   * think ignores it.
+   */
+  effort?: ModelEffort;
 }
 
 /**
@@ -303,10 +386,51 @@ export interface ChatSubscriptionApi {
 export interface ChatsApi {
   /** The models a question may name, the default first. */
   models: () => Promise<string[]>;
+  /**
+   * The efforts a question may name with each of `models()`, and the one
+   * it gets naming none: no levels for a model that doesn't think, so
+   * none is offered for it.
+   */
+  efforts: () => Promise<Record<string, ModelEfforts>>;
   /** The person's chats, newest first. */
   list: () => Promise<ChatSummary[]>;
-  create: (title: string) => Promise<ChatSummary>;
+  /** Makes a chat, in project `projectId` when one is named. */
+  create: (title: string, projectId?: string | null) => Promise<ChatSummary>;
+  /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
+  /**
+   * Moves one of the person's chats into project `projectId`, or out of
+   * any with `null`. Its agent reads the project's goal and documents from
+   * its next question on.
+   */
+  moveChat: (chatId: string, projectId: string | null) => Promise<void>;
+  /** The person's projects, newest first, each with its documents. */
+  projects: () => Promise<ChatProject[]>;
+  /** Makes a project, with no goal and no documents. */
+  createProject: (name: string) => Promise<ChatProject>;
+  /** Renames one of the person's projects. */
+  renameProject: (projectId: string, name: string) => Promise<void>;
+  /** Sets a project's goal; an empty one clears it. */
+  setProjectGoal: (projectId: string, goal: string) => Promise<void>;
+  /**
+   * Adds a text document to a project: a .md, .txt, .csv or .json file of
+   * at most {@link projectDocumentMaxBytes}, up to
+   * {@link projectDocumentsMax} documents, each name once.
+   */
+  addProjectDocument: (
+    projectId: string,
+    document: ProjectDocumentInput
+  ) => Promise<ProjectDocument>;
+  /** Removes a document from a project. */
+  removeProjectDocument: (
+    projectId: string,
+    documentId: string
+  ) => Promise<void>;
+  /**
+   * Deletes a project and its documents. Its chats stay, out of any
+   * project.
+   */
+  removeProject: (projectId: string) => Promise<void>;
   /**
    * Deletes the chat and its messages, rejecting every write its agent
    * holds; refused while its agent works.
