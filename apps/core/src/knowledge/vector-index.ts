@@ -100,6 +100,11 @@ export interface VectorIndexStatus {
 
 export interface VectorIndex {
   readonly profile: "vectorize" | "unsupported";
+  /**
+   * Fails `unavailable` until `status` proves the policy filter works on
+   * this index, which a search checks once per adapter before its first
+   * filtered request.
+   */
   query: (
     vector: readonly number[],
     query: VectorQuery
@@ -387,45 +392,6 @@ export const vectorizeIndex = (
   const queryDeadline = options.queryDeadlineMs ?? queryDeadlineMs;
   const writeDeadline = options.writeDeadlineMs ?? writeDeadlineMs;
 
-  const query = async (
-    vector: readonly number[],
-    { policies, topK }: VectorQuery
-  ): Promise<VectorSearch> => {
-    if (!Number.isInteger(topK) || topK < 1 || topK > maxTopK) {
-      throw new VectorIndexError("invalid", `topK is 1 to ${maxTopK}.`);
-    }
-    checkVector(generation, vector);
-    const { filters, complete } = policyFilters(policies);
-    const answers = await Promise.all(
-      filters.map(
-        async (filter) =>
-          await fromProvider(
-            "search",
-            queryDeadline,
-            async () =>
-              await binding.query([...vector], {
-                topK,
-                filter,
-                returnValues: false,
-                returnMetadata: "none",
-              })
-          )
-      )
-    );
-    // A record whose policy changed between two batches' reads can be in
-    // both answers: it counts once, at its nearest.
-    const nearest = new Map<string, VectorMatch>();
-    for (const { id, score } of answers
-      .flatMap(({ matches: found }) => found)
-      .toSorted(nearestFirst(generation.metric))) {
-      if (!nearest.has(id)) {
-        nearest.set(id, { id, score });
-      }
-    }
-    const matches = [...nearest.values()].slice(0, topK);
-    return { matches, complete };
-  };
-
   const upsert = async (records: readonly VectorRecord[]): Promise<void> => {
     for (const record of records) {
       checkRecord(generation, record);
@@ -532,6 +498,70 @@ export const vectorizeIndex = (
       ...(typeof applied === "number" ? { appliedUpTo: String(applied) } : {}),
       filtering: await probeFiltering(),
     };
+  };
+
+  // Whether this index's policy filter is proven, once per adapter: until
+  // it is, a search could answer "nothing" for a filter the index can't
+  // apply. A failed proof isn't kept, so a later search tries again.
+  let proven: Promise<void> | undefined;
+  const provenFiltering = async (): Promise<void> => {
+    proven ??= (async () => {
+      const { filtering } = await status();
+      if (filtering !== "working") {
+        throw new VectorIndexError(
+          "unavailable",
+          `The vector index's policy filter is ${filtering === "unproven" ? "not proven yet" : "failing"}, so it isn't searched.`
+        );
+      }
+    })();
+    try {
+      await proven;
+    } catch (error) {
+      proven = undefined;
+      throw error;
+    }
+  };
+
+  const query = async (
+    vector: readonly number[],
+    { policies, topK }: VectorQuery
+  ): Promise<VectorSearch> => {
+    if (!Number.isInteger(topK) || topK < 1 || topK > maxTopK) {
+      throw new VectorIndexError("invalid", `topK is 1 to ${maxTopK}.`);
+    }
+    checkVector(generation, vector);
+    const { filters, complete } = policyFilters(policies);
+    if (filters.length > 0) {
+      await provenFiltering();
+    }
+    const answers = await Promise.all(
+      filters.map(
+        async (filter) =>
+          await fromProvider(
+            "search",
+            queryDeadline,
+            async () =>
+              await binding.query([...vector], {
+                topK,
+                filter,
+                returnValues: false,
+                returnMetadata: "none",
+              })
+          )
+      )
+    );
+    // A record whose policy changed between two batches' reads can be in
+    // both answers: it counts once, at its nearest.
+    const nearest = new Map<string, VectorMatch>();
+    for (const { id, score } of answers
+      .flatMap(({ matches: found }) => found)
+      .toSorted(nearestFirst(generation.metric))) {
+      if (!nearest.has(id)) {
+        nearest.set(id, { id, score });
+      }
+    }
+    const matches = [...nearest.values()].slice(0, topK);
+    return { matches, complete };
   };
 
   return { profile: "vectorize", query, upsert, delete: remove, status };

@@ -11,6 +11,7 @@ import {
   VectorIndexError,
 } from "../src/knowledge/vector-index.ts";
 import type {
+  VectorIndex,
   VectorizeBinding,
   VectorGeneration,
   VectorRecord,
@@ -77,6 +78,10 @@ const fakeVectorize = (
   metric: VectorGeneration["metric"] = generation.metric
 ) => {
   const vectors = new Map<string, Stored>();
+  // The adapter's own sentinel, kept apart so a test sees only its records.
+  const reserved = new Map<string, Stored>();
+  const storeOf = (id: string) =>
+    id.startsWith(reservedPrefix) ? reserved : vectors;
   const filters: (VectorizeVectorMetadataFilter | undefined)[] = [];
   const behaviour: FakeBehaviour = {
     failQueries: false,
@@ -124,7 +129,7 @@ const fakeVectorize = (
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       const none = JSON.parse("null") as number;
       return {
-        vectorCount: vectors.size,
+        vectorCount: vectors.size + reserved.size,
         dimensions,
         processedUpToDatetime: 0,
         processedUpToMutation: behaviour.noAppliedMutation
@@ -145,9 +150,11 @@ const fakeVectorize = (
         );
       }
       await Promise.resolve();
-      filters.push(options?.filter);
+      if (!JSON.stringify(options?.filter ?? {}).includes(reservedPrefix)) {
+        filters.push(options?.filter);
+      }
       // The index as this read saw it, before anything changes it.
-      const answeredFrom = [...vectors].map(
+      const answeredFrom = [...vectors, ...reserved].map(
         ([id, stored]): [string, Stored] => [
           id,
           { ...stored, metadata: { ...stored.metadata } },
@@ -185,7 +192,7 @@ const fakeVectorize = (
       upsertBatches += 1;
       for (const vector of batch) {
         const metadata = vector.metadata ?? {};
-        vectors.set(vector.id, {
+        storeOf(vector.id).set(vector.id, {
           values: [...vector.values],
           metadata,
           filterable: new Set(
@@ -201,7 +208,7 @@ const fakeVectorize = (
     getByIds: async (ids: string[]) => {
       await Promise.resolve();
       return ids.flatMap((id) => {
-        const stored = vectors.get(id);
+        const stored = storeOf(id).get(id);
         return stored === undefined
           ? []
           : [{ id, values: stored.values, metadata: stored.metadata }];
@@ -217,6 +224,16 @@ const fakeVectorize = (
   };
 
   return { binding, vectors, filters, behaviour };
+};
+
+/** An index whose policy filter status has proven, as a deployment's is. */
+const provenIndex = async (
+  provider: ReturnType<typeof fakeVectorize>,
+  of: VectorGeneration = generation
+): Promise<VectorIndex> => {
+  const index = vectorIndexOf(provider.binding, of);
+  await index.status();
+  return index;
 };
 
 const record = (
@@ -240,7 +257,7 @@ const kindOf = async (promise: Promise<unknown>): Promise<string> => {
 describe("a search", () => {
   it("finds only vectors indexed under a policy the caller holds", async () => {
     const provider = fakeVectorize();
-    const index = vectorIndexOf(provider.binding, generation);
+    const index = await provenIndex(provider);
     await index.upsert([
       record("finance-plan", "policy:finance"),
       record("sales-plan", "policy:sales"),
@@ -292,7 +309,7 @@ describe("a search", () => {
 
   it("searches every policy of a large grant set when it fits the bounded batches", async () => {
     const provider = fakeVectorize();
-    const index = vectorIndexOf(provider.binding, generation);
+    const index = await provenIndex(provider);
     const policies = Array.from({ length: 150 }, (_, n) => `policy:team-${n}`);
     await index.upsert([
       record("first", policies[0] ?? ""),
@@ -315,7 +332,7 @@ describe("a search", () => {
 
   it("says it is incomplete when the caller holds more policies than a search covers, and searches the first", async () => {
     const provider = fakeVectorize();
-    const index = vectorIndexOf(provider.binding, generation);
+    const index = await provenIndex(provider);
     // Most important first: a key that sorts last still comes first.
     const policies = [
       "policy:z-priority",
@@ -449,6 +466,27 @@ describe("an index's status", () => {
     expect(filtering).toBe("failing");
   });
 
+  it("keeps searches off an index whose filter isn't proven", async () => {
+    const unproven = vectorIndexOf(fakeVectorize().binding, generation);
+    const broken = fakeVectorize();
+    broken.behaviour.metadataIndex = "none";
+    const failing = await provenIndex(broken);
+    await failing.upsert([record("plan", "policy:sales")]);
+    const search = { policies: ["policy:sales"], topK: 5 };
+
+    const kinds = await Promise.all([
+      kindOf(unproven.query([1, 0, 0], search)),
+      kindOf(failing.query([1, 0, 0], search)),
+    ]);
+    // Once the sentinel's write has applied, the proof holds.
+    const found = await unproven.query([1, 0, 0], search);
+
+    expect({ kinds, found }).toStrictEqual({
+      kinds: ["unavailable", "unavailable"],
+      found: { matches: [], complete: true },
+    });
+  });
+
   it("leaves out the last applied write when the index reports none", async () => {
     const provider = fakeVectorize();
     provider.behaviour.noAppliedMutation = true;
@@ -462,7 +500,7 @@ describe("an index's status", () => {
 describe("a search while records change", () => {
   it("counts a record moved between two policy batches once", async () => {
     const provider = fakeVectorize();
-    const index = vectorIndexOf(provider.binding, generation);
+    const index = await provenIndex(provider);
     const policies = Array.from({ length: 150 }, (_, n) => `policy:team-${n}`);
     // Batches keep the caller's order: these two are in the first and last.
     const [first = "", last = ""] = [policies[0], policies.at(-1)];
@@ -495,7 +533,7 @@ describe("a euclidean generation", () => {
       metric: "euclidean",
     };
     const provider = fakeVectorize(3, "euclidean");
-    const index = vectorIndexOf(provider.binding, euclidean);
+    const index = await provenIndex(provider, euclidean);
     const policies = Array.from({ length: 150 }, (_, n) => `policy:team-${n}`);
     const [first = "", last = ""] = [policies[0], policies.at(-1)];
     await index.upsert([
