@@ -6,3 +6,5 @@ CREATE TABLE `access_revocations` (
 	`created_at` integer NOT NULL,
 	FOREIGN KEY (`app_id`) REFERENCES `apps`(`id`) ON UPDATE no action ON DELETE cascade
 );
+--> statement-breakpoint
+CREATE INDEX `access_revocations_due` ON `access_revocations` (`attempts`,`created_at`);

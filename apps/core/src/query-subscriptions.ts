@@ -591,7 +591,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     const { app, artifact, request } = evaluation;
     // Nothing of the App is read before the connection follows its
     // revocations (see the header).
-    await this.#following.get(app)?.ready;
+    await this.#followed(app);
     if (evaluation.closed) {
       return;
     }
@@ -1071,6 +1071,25 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       this.#unfollow(evaluation.app);
     }
     return callbacks;
+  }
+
+  /**
+   * Once the connection follows `app`'s revocations, or can't: waits for
+   * whichever following is current when the last one answered, so a
+   * following its host let go of early and replaced is waited out too.
+   */
+  async #followed(app: AppId): Promise<void> {
+    for (;;) {
+      const following = this.#following.get(app);
+      if (following === undefined) {
+        return;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- until the current one answered
+      await following.ready;
+      if (this.#following.get(app) === following) {
+        return;
+      }
+    }
   }
 
   /** Whether the connection still follows a query of `app`. */

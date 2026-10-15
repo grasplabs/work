@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "3571ddc1-c607-42f7-b096-bac8c56f4fd9",
+  "id": "de68cc10-e0ba-4914-ae11-83aae8ef1fe6",
   "prevId": "aad6bf56-c238-4804-b77f-6fddf84c7996",
   "tables": {
     "access_revocations": {
@@ -44,7 +44,16 @@
           "autoincrement": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "access_revocations_due": {
+          "name": "access_revocations_due",
+          "columns": [
+            "attempts",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
       "foreignKeys": {
         "access_revocations_app_id_apps_id_fk": {
           "name": "access_revocations_app_id_apps_id_fk",

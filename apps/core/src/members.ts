@@ -26,6 +26,7 @@ import { z } from "zod";
 import {
   accessMayHaveDropped,
   appsSharedWithAnyone,
+  withRetries,
 } from "./access-revocations.ts";
 import { appsFoundBy } from "./app-access.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
@@ -183,8 +184,10 @@ const tellReached = async (
   role: string
 ): Promise<void> => {
   const looks = await Promise.allSettled([
-    appsReachedBy(env, userId, role),
-    reached === undefined ? appsSharedWithAnyone(env) : Promise.resolve([]),
+    withRetries(async () => await appsReachedBy(env, userId, role)),
+    reached === undefined
+      ? withRetries(async () => await appsSharedWithAnyone(env))
+      : Promise.resolve([]),
   ]);
   const found: AppId[] = [...(reached ?? [])];
   for (const look of looks) {
@@ -372,7 +375,6 @@ const removeMember = async (
   const target = targetOf(by, userId);
   const membership = await membershipOf(env, target);
   if (membership) {
-    const reached = await appsReachedBefore(env, target, membership.role);
     const removedNow = await recordRemoval(env, by, target, membership.id);
     // Someone else's removal of them may have landed first; otherwise the
     // admin stopped being one since their session was checked.
@@ -380,7 +382,10 @@ const removeMember = async (
       throw refusal(by, roleErrors.create("role.forbidden"));
     }
     if (removedNow) {
-      await tellReached(env, reached, target, membership.role);
+      // Every App shared with anyone, not only those a look before found:
+      // the removal deletes their teams, one joined meanwhile included,
+      // so no look before or after it finds every App they reached.
+      await tellReached(env, undefined, target, membership.role);
     }
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));

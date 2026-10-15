@@ -427,15 +427,22 @@ export const apps = sqliteTable("apps", {
  * longer than its retries still clears the screens of whoever lost a
  * role. `user_ids` is null for everyone the host knows of.
  */
-export const accessRevocations = sqliteTable("access_revocations", {
-  id: text().primaryKey(),
-  appId: text("app_id")
-    .notNull()
-    .references(() => apps.id, { onDelete: "cascade" }),
-  userIds: text("user_ids", { mode: "json" }).$type<string[] | null>(),
-  attempts: integer().notNull().default(0),
-  createdAt: timestamp("created_at").notNull(),
-});
+export const accessRevocations = sqliteTable(
+  "access_revocations",
+  {
+    id: text().primaryKey(),
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    userIds: text("user_ids", { mode: "json" }).$type<string[] | null>(),
+    attempts: integer().notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  // The cron trigger tells the least tried first, oldest first among them.
+  (table) => [
+    index("access_revocations_due").on(table.attempts, table.createdAt),
+  ]
+);
 
 /**
  * Whom each App is shared with (src/app-access.ts): a person

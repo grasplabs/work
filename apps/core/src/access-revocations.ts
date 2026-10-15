@@ -38,6 +38,27 @@ const toldAtOnce = 16;
 const retryDelaysMs = [100, 500] as const;
 
 /**
+ * `look`, run again after `retryDelaysMs` while it fails: which Apps a
+ * committed change reached is looked up once more when the database is
+ * away for a moment. Throws what the last attempt threw.
+ */
+export const withRetries = async <T>(look: () => Promise<T>): Promise<T> => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
+      return await look();
+    } catch (error) {
+      const delay = retryDelaysMs[attempt];
+      if (delay === undefined) {
+        throw error;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
+      await scheduler.wait(delay);
+    }
+  }
+};
+
+/**
  * Keeps a revocation `app`'s host couldn't be told of, for the cron
  * trigger to tell it again (`retryAccessRevocations`). A database away
  * too is logged: the screens then fall back on the check before each push.
@@ -159,13 +180,16 @@ const retryOne = async (
 
 /**
  * Tells the hosts again of the revocations they couldn't be told of
- * (`keepForLater`), oldest first. The cron trigger runs it every minute.
+ * (`keepForLater`), least tried first. The cron trigger runs it every
+ * minute.
  */
 export const retryAccessRevocations = async (env: Env): Promise<void> => {
   const kept = await drizzle(env.DB)
     .select()
     .from(accessRevocations)
-    .orderBy(asc(accessRevocations.createdAt))
+    // The least tried first: one whose host stays away moves behind
+    // those not tried yet, so it never holds them back.
+    .orderBy(asc(accessRevocations.attempts), asc(accessRevocations.createdAt))
     .limit(retriedAtOnce);
   for (let at = 0; at < kept.length; at += toldAtOnce) {
     // oxlint-disable-next-line no-await-in-loop -- a few hosts at a time
@@ -246,12 +270,15 @@ export const teamAccessMayHaveDropped = async (
   userIds: readonly string[] | null
 ): Promise<void> => {
   try {
-    const [shared, theirs] = await Promise.all([
-      appsSharedWith(env, teamId),
-      userIds === null
-        ? appsSharedWithAnyone(env)
-        : appsSharedWithPeople(env, userIds),
-    ]);
+    const [shared, theirs] = await withRetries(
+      async () =>
+        await Promise.all([
+          appsSharedWith(env, teamId),
+          userIds === null
+            ? appsSharedWithAnyone(env)
+            : appsSharedWithPeople(env, userIds),
+        ])
+    );
     await accessMayHaveDropped(env, [...shared, ...theirs], userIds);
   } catch (error) {
     log.error("app.access_revocation_failed", errorFields(error));
