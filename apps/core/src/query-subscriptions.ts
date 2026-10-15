@@ -412,6 +412,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
   >();
 
+  /**
+   * The roles the gate last saw the person read each followed App's
+   * tables with (`#recheck`).
+   */
+  readonly #rolesSeen = new Map<AppId, string>();
+
   /** The Apps whose revocations this connection follows (`#follow`). */
   readonly #following = new Map<AppId, Following>();
 
@@ -740,6 +746,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     const access = accessed.status === "fulfilled" ? accessed.value : "role";
     const roles = access === "open" ? read.value : undefined;
     if (access === "open" && roles !== undefined) {
+      this.#rolesSeen.set(app, roles);
       return { roles, by };
     }
     this.#cleared.delete(key);
@@ -1198,6 +1205,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // No read or push of the App is left to compare against it: a later
     // follow starts afresh, so a connection keeps nothing per App it left.
     this.#revocations.delete(app);
+    this.#rolesSeen.delete(app);
     // Not answered yet: `#follow` leaves once it is.
     if (following?.id !== undefined) {
       void this.#leave(app, following.id);
@@ -1221,23 +1229,29 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    */
   #revoked(app: AppId): void {
     this.#revocations.set(app, (this.#revocations.get(app) ?? 0) + 1);
+    // Before any look below moves it on.
+    const seen = this.#rolesSeen.get(app);
     this.#reads.forget();
     this.#cleared.clear();
     for (const evaluation of this.#evaluations.values()) {
       if (evaluation.app === app) {
-        void this.#recheck(evaluation);
+        void this.#recheck(evaluation, seen);
       }
     }
   }
 
-  async #recheck(evaluation: Evaluation): Promise<void> {
+  async #recheck(
+    evaluation: Evaluation,
+    seen: string | undefined
+  ): Promise<void> {
+    // The roles what it shows was read under, or for one that showed
+    // nothing yet, those the connection last saw: the client may keep
+    // results of the App read under them, which this tells it to drop.
+    const before = evaluation.roles ?? seen;
     const gate = await this.#gate(evaluation);
     if ("refusal" in gate) {
       await this.#end(evaluation, gate.refusal);
-    } else if (
-      evaluation.roles !== undefined &&
-      gate.roles !== evaluation.roles
-    ) {
+    } else if (before !== undefined && gate.roles !== before) {
       // What its screens show was read under roles the person no longer
       // has: ended with a result that carries nothing, pushed as the last
       // however much waited (`#end`), so it clears the screen whatever a

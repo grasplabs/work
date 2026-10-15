@@ -3148,6 +3148,60 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     }, deliveryWait);
   });
 
+  it("drops what a screen kept from before the person became only a user, while the query it follows shows nothing yet", async () => {
+    const opened = await openedApp(withSecrets());
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "builder",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const { client } = clientFor(
+      { ...opened, lease, cookie: member.session, userId: member.userId },
+      member.api.screens
+    );
+    const kept = reading(client, secrets, {});
+    await eventually(() => {
+      expect(JSON.stringify(kept.now().value)).toContain("Builders only");
+    });
+    // No longer shown: the client keeps it for a while.
+    kept.stop();
+    const pageSize = 9;
+    const reads = await holdPageReads(opened, pageSize);
+    try {
+      // Followed, its first read held: it has shown nothing yet.
+      const pending = reading(client, apiOf(opened.release).list, {
+        pagination: { pageSize },
+      });
+      await eventually(() => {
+        expect(reads.count()).toBe(1);
+      });
+
+      await opened.builder.api.apps.members.add(opened.app, {
+        ...them,
+        role: "user",
+      });
+
+      await vi.waitFor(() => {
+        expect(pending.now().error?.code).toBe("screen.access_changed");
+      }, deliveryWait);
+      expect(kept.now().value).toBeUndefined();
+    } finally {
+      reads.restore();
+    }
+  });
+
   it("shows nothing a screen kept from before the person became only a user, followed or not", async () => {
     const opened = await openedApp(withSecrets());
     const tell = referenceTo<{ text: string }, unknown, "mutation">(
