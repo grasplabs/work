@@ -609,30 +609,42 @@ const changeState = async (
   });
 };
 
+const sectionDetail = z.object({ section: z.int().min(0) });
+
 /**
- * The documents the persona's agent read through Knowledge since audit
- * position `after`, by path: the reads the audit log records, which is
- * where a tool result's evidence must come from.
+ * What the persona's agent read through Knowledge since audit position
+ * `after`, as the audit log records each read (a document, or one of its
+ * sections) and as the document holds it, read again as the person it
+ * acted for: where a tool result's evidence must come from. Read after
+ * the trial's state is taken, as the reads are recorded too.
  */
-const readPathsOf = async (
-  company: BrainCompany,
+const readTextsOf = async (
+  person: Person,
   place: Workspace,
   after: number
 ): Promise<string[]> => {
-  const paths = new Map(
-    Object.entries(brainDocuments).map(([key, { path }]) => [
-      held(company.documents, key).id,
-      path,
-    ])
-  );
   const events = await eventsAfter(after);
-  return events.flatMap(({ action, actor, target }) =>
+  const reads = events.flatMap(({ action, actor, target, detail }) =>
     action === "knowledge.read" &&
     actor.type === "agent" &&
     actor.agentId === place.agent.agentId &&
     target?.type === "document"
-      ? [paths.get(target.id) ?? target.id]
+      ? [
+          {
+            id: target.id,
+            section: sectionDetail.safeParse(detail).data?.section,
+          },
+        ]
       : []
+  );
+  return await Promise.all(
+    reads.map(async ({ id, section }) => {
+      const read = await person.api.knowledge.read(
+        id,
+        section === undefined ? {} : { section }
+      );
+      return read.text;
+    })
   );
 };
 
@@ -707,6 +719,7 @@ const runTrial = async (
     failure = error instanceof Error ? error.message : String(error);
   }
   const latencyMs = performance.now() - started;
+  const stateChanged = changedBetween(stateBefore, await stateNow()).length > 0;
   const requests = gateway.requests.slice(firstRequest);
   return {
     taskId: task.id,
@@ -718,9 +731,9 @@ const runTrial = async (
     // Every request in order: a long turn's last request may leave out
     // earlier results, which the model still read.
     transcript: requests.flatMap(({ body }) => transcriptOf(body)),
-    readPaths: await readPathsOf(company, place, auditBefore),
+    readTexts: await readTextsOf(person, place, auditBefore),
     forbidden: forbiddenIn(task),
-    stateChanged: changedBetween(stateBefore, await stateNow()).length > 0,
+    stateChanged,
     ...(failure === undefined ? {} : { error: failure }),
     latencyMs,
     costMicros: (await charged(company)) - spentBefore,

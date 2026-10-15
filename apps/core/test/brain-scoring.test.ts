@@ -40,7 +40,7 @@ const observed = (changes: Partial<TrialObservation>): TrialObservation => {
     answer: "ANSWER: Marta Ruiz\nFrom [handbook/contracts.md#Lease]",
     modelInput,
     transcript: [{ by: "source", text: modelInput }],
-    readPaths: [],
+    readTexts: [],
     forbidden: ["CANARY-1"],
     stateChanged: false,
     latencyMs: 10,
@@ -113,10 +113,15 @@ describe("scoring a trial", () => {
           { by: "tool", text: `Returned: ${marker}` },
         ],
       }).evidenceRecall,
-      // Its code read the document through Knowledge and returned it.
+      // Its code read the section through Knowledge and returned it.
       read: verdict(contract, {
         transcript: [{ by: "tool", text: `Returned: ${marker}` }],
-        readPaths: ["handbook/contracts.md"],
+        readTexts: [`## Lease\n${marker}.`],
+      }).evidenceRecall,
+      // It read another section of the document, then made the marker.
+      readElsewhere: verdict(contract, {
+        transcript: [{ by: "tool", text: `Returned: ${marker}` }],
+        readTexts: ["## Renewals\nRenewed yearly."],
       }).evidenceRecall,
       // It read it, then quoted it in its next code: still the source's.
       quoted: verdict(contract, {
@@ -131,7 +136,7 @@ describe("scoring a trial", () => {
           { by: "tool", text: `Returned: ${marker}` },
           { by: "source", text: "[earlier results left out]" },
         ],
-        readPaths: ["handbook/contracts.md"],
+        readTexts: [`## Lease\n${marker}.`],
       }).completed,
       citationOnly: verdict(contract, {
         answer: "ANSWER: see [handbook/contracts.md#Marta Ruiz]",
@@ -146,6 +151,7 @@ describe("scoring a trial", () => {
       },
       constructed: 0,
       read: 1,
+      readElsewhere: 0,
       quoted: 1,
       dropped: true,
       citationOnly: false,
