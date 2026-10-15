@@ -714,7 +714,11 @@ const changeState = async (
     return;
   }
   if (where === "changesFiles") {
-    await env.FILES.put(`brain-control/${crypto.randomUUID()}`, "changed");
+    // The same key and bytes each time, new metadata: the first run puts
+    // the file, a later one only overwrites its metadata.
+    await env.FILES.put("brain-control/file", "changed", {
+      customMetadata: { trial: crypto.randomUUID() },
+    });
     return;
   }
   if (where === "changesObject") {
@@ -832,14 +836,31 @@ const workspaceStateOf = async (
   );
 };
 
-/** Every object in R2's `FILES`, by key and etag. */
+/**
+ * Every object in R2's `FILES`: its key, version, etag, upload time and
+ * metadata, so an overwrite with the same bytes still shows.
+ */
 const filesDigest = async (): Promise<string> => {
   const objects: string[] = [];
   let cursor: string | undefined;
   do {
     // oxlint-disable-next-line no-await-in-loop -- page after page
-    const page = await env.FILES.list(cursor === undefined ? {} : { cursor });
-    objects.push(...page.objects.map(({ key, etag }) => `${key} ${etag}`));
+    const page = await env.FILES.list({
+      include: ["httpMetadata", "customMetadata"],
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    objects.push(
+      ...page.objects.map((object) =>
+        rowText({
+          key: object.key,
+          version: object.version,
+          etag: object.etag,
+          uploaded: object.uploaded.toISOString(),
+          http: object.httpMetadata ?? null,
+          custom: object.customMetadata ?? null,
+        })
+      )
+    );
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor !== undefined);
   return await sha256Hex(objects.toSorted().join("\n"));
