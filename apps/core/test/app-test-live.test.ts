@@ -430,6 +430,93 @@ describe("a test session's live queries", { timeout: 120_000 }, () => {
     await opened.close();
   });
 
+  it("keep following one subscription through one writer's writes, one after another", async () => {
+    const { release, opened } = await session();
+    const followed = follower();
+    await opened.subscribe(
+      "note-owner",
+      requestFor(release, "notes.list", { pagination: {} }),
+      followed.onSnapshot,
+      followed.onLost
+    );
+    await vi.waitFor(() => {
+      expect(followed.pushes).toHaveLength(1);
+    });
+    const writes = 20;
+    for (let round = 0; round < writes; round += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one writer, a write at a time
+      await opened.call(
+        "note-owner",
+        requestFor(release, "notes.create", { title: `Note ${round}` })
+      );
+    }
+    await vi.waitFor(
+      () => {
+        const last = pushOfNotes.safeParse(followed.pushes.at(-1));
+        expect(last.data?.result.value.items).toHaveLength(writes);
+      },
+      { timeout: 20_000 }
+    );
+
+    expect({
+      lost: followed.lost(),
+      released: followed.released(),
+    }).toStrictEqual({ lost: 0, released: 0 });
+    await opened.close();
+  });
+
+  it("let go of a subscription whose reads writes keep tearing, after a bounded number of reads", async () => {
+    // Every store answers as it does, but says each table moved on since
+    // any read of it: every read of the query is torn.
+    const stores = new Proxy(env.DATA_STORES, {
+      get: (namespace, key): unknown => {
+        const value: unknown = Reflect.get(namespace, key);
+        if (key !== "getByName" || typeof value !== "function") {
+          return typeof value === "function" ? value.bind(namespace) : value;
+        }
+        return (name: string) =>
+          new Proxy(namespace.getByName(name), {
+            get: (stub, method): unknown => {
+              if (method === "generations") {
+                return async () => {
+                  await Promise.resolve();
+                  return {};
+                };
+              }
+              // An RPC stub's methods call through it whatever `this` is.
+              return Reflect.get(stub, method);
+            },
+          });
+      },
+    });
+    const built = await appWith(appFiles);
+    await activateVersion(env, built.owner, built.app, 1);
+    const release = await loadRelease(env, built.app, 1);
+    const host = fixtureHostFor(
+      envWith({ DATA_STORES: stores }),
+      release,
+      appFiles
+    );
+    const opened = await host.open("notes", "torn");
+    const followed = follower();
+    await opened.subscribe(
+      "note-owner",
+      requestFor(release, "notes.list", { pagination: {} }),
+      followed.onSnapshot,
+      followed.onLost
+    );
+
+    await vi.waitFor(
+      () => {
+        expect(followed.lost()).toBe(1);
+      },
+      { timeout: 10_000 }
+    );
+    // Nothing torn pushed as though it were an answer.
+    expect(followed.pushes).toStrictEqual([]);
+    await opened.close();
+  });
+
   it("are released by the session when its test ends without closing them", async () => {
     const { release, opened } = await session();
     const list = requestFor(release, "notes.list", { pagination: {} });

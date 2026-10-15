@@ -95,6 +95,17 @@ const evaluationMs = 30_000;
 const accessCacheMs = 1000;
 
 /**
+ * How many reads of a live query in a row may find their reads torn by
+ * writes landing while they read (`query.concurrent_change`) before core
+ * lets go of it. Each is read again after a gathering window that doubles
+ * with every torn read, so a writer making one write after another, each
+ * landing while the last read was under way, is waited out rather than
+ * dropped; only writes that keep landing past that let go of the query,
+ * which the screen then follows again.
+ */
+const maxTornReads = 5;
+
+/**
  * How long core waits for a page to take a subscription's last result (a
  * refusal) before it lets go of the page's callback anyway.
  */
@@ -207,6 +218,8 @@ interface Evaluation {
   charged: boolean;
   /** How long it waited for budget last, to wait longer next time. */
   budgetWaitMs: number;
+  /** Reads in a row that writes tore (`maxTornReads`). */
+  torn: number;
   closed: boolean;
 }
 
@@ -437,6 +450,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       dirty: false,
       charged: false,
       budgetWaitMs: 0,
+      torn: 0,
       closed: false,
     };
     this.#evaluations.set(key, evaluation);
@@ -459,10 +473,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       return;
     }
     const waiting = this.#queue.length + this.#running;
+    // Longer after each read writes tore, so writes still landing one
+    // after another are over by the time it reads again.
     const windowMs = Math.min(
       querySubscriptionLimits.maxCoalesceMs,
       querySubscriptionLimits.coalesceMs *
-        (1 + Math.floor(waiting / querySubscriptionLimits.concurrentReads))
+        (1 + Math.floor(waiting / querySubscriptionLimits.concurrentReads)) *
+        2 ** evaluation.torn
     );
     evaluation.timer = setTimeout(() => {
       evaluation.timer = undefined;
@@ -569,10 +586,24 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       await this.#end(evaluation, result);
       return;
     }
+    // Writes landed while it read, each run of it (store-reader.ts): one
+    // writer's writes one after another do that as surely as concurrent
+    // ones. Its watch, if any, and what it pushed stay; it is read again
+    // once a longer window has passed (`#changed`), and let go of only
+    // once `maxTornReads` reads in a row were torn.
+    if (
+      !result.ok &&
+      result.error.code === "query.concurrent_change" &&
+      evaluation.torn + 1 < maxTornReads
+    ) {
+      evaluation.torn += 1;
+      evaluation.dirty = true;
+      return;
+    }
     // A failure the host would answer differently later (the sandbox
-    // busy or away, a concurrent change) is not pushed as though it were
-    // final, nor watched: what it read, if anything, isn't what an answer
-    // would read. The screen keeps what it shows and follows again.
+    // busy or away, writes that kept tearing it) is not pushed as though
+    // it were final, nor watched: what it read, if anything, isn't what an
+    // answer would read. The screen keeps what it shows and follows again.
     if (!result.ok && result.error.retryable) {
       await this.#lose(evaluation);
       return;
@@ -596,6 +627,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       evaluation.dirty = true;
       return;
     }
+    evaluation.torn = 0;
     this.#publish(evaluation, result, before.roles);
   }
 
