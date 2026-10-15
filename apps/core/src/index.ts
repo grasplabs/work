@@ -22,6 +22,10 @@ import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { repairControls } from "./workflows/controls.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
+import {
+  repairResourceStarts,
+  repairResourceTerminations,
+} from "./workflows/resource-runs.ts";
 import { sweepRunDetails } from "./workflows/retention.ts";
 import { repairStarts } from "./workflows/runs.ts";
 import { startDueSchedules } from "./workflows/triggers.ts";
@@ -79,7 +83,10 @@ export default {
   // a platform update (see src/platform-updates.ts), and workflows'
   // schedules due by the minute it runs for (see src/workflows/triggers.ts),
   // starts core stopped in the middle of, sent to the engine again (see
-  // `repairStarts`, src/workflows/runs.ts) and pauses, resumes and
+  // `repairStarts`, src/workflows/runs.ts, and `repairResourceStarts`,
+  // src/workflows/resource-runs.ts), terminations of runs cancelled while
+  // starting the engine is still to confirm (`repairResourceTerminations`,
+  // the same file), and pauses, resumes and
   // cancels the engine is still to confirm (see `repairControls`,
   // src/workflows/controls.ts), wakes owed to runs waiting on a person,
   // sent again (see `repairWakes`, src/workflows/wakes.ts), and connector
@@ -141,6 +148,8 @@ export default {
             recordPlatformUpdate(env),
             startDueSchedules(env, new Date(controller.scheduledTime)),
             repairStarts(env),
+            repairResourceStarts(env, new Date(controller.scheduledTime)),
+            repairResourceTerminations(env, new Date(controller.scheduledTime)),
             repairControls(env),
             repairWakes(env, new Date(controller.scheduledTime)),
             pumpConnectorEvents(env),

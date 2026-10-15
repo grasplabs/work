@@ -164,6 +164,9 @@ export default defineConfig({
         files: [
           "apps/core/src/workflows/host.ts",
           "apps/core/src/workflows/attempt-host.ts",
+          // The same for a run of an independent workflow's sealed build.
+          "apps/core/src/workflows/resource-host.ts",
+          "apps/core/src/workflows/resource-attempt-host.ts",
         ],
         rules: {
           "no-restricted-imports": [

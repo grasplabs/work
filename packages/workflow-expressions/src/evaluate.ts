@@ -6,7 +6,8 @@ import { writeJson, writeJsonArray } from "./bounded-json.ts";
 import { durationMs } from "./duration.ts";
 import { expressionError, expressionErrors } from "./errors.ts";
 import type { ExpressionSite } from "./errors.ts";
-import { runJq } from "./jq.ts";
+import { runFuel, runJq } from "./jq.ts";
+import type { JqRun } from "./jq.ts";
 import { evaluatorLimits, sizeText } from "./limits.ts";
 import { checkSource, isBindableVariable, stageVariables } from "./source.ts";
 import type { VariablePath } from "./source.ts";
@@ -56,6 +57,27 @@ export interface CompileOptions<S extends Stage = Stage> {
 
 // jq's exit codes: 3 for a compile error, 5 for a runtime one.
 const jqCompileError = 3;
+
+/**
+ * Runs `run` with `given` fuel drawn from `budget`: taken before it runs
+ * and what it didn't spend given back after, so evaluations sharing the
+ * budget at once can't each spend all of it.
+ */
+const drawing = async (
+  budget: { fuel: number } | undefined,
+  given: number,
+  run: () => Promise<JqRun>
+): Promise<JqRun> => {
+  if (budget === undefined) {
+    return await run();
+  }
+  budget.fuel -= given;
+  const ran = await run();
+  if (ran.kind === "completed") {
+    budget.fuel += given - ran.fuelUsed;
+  }
+  return ran;
+};
 
 const fail = (
   site: ExpressionSite,
@@ -561,7 +583,14 @@ const contextText = <S extends Stage>(
 export const evaluateExpression = async <S extends Stage>(
   expression: CompiledExpression<S>,
   scope: EvaluationScope<S>,
-  contract: ResultContract
+  contract: ResultContract,
+  /**
+   * Fuel shared by several evaluations (a workflow step's, say): this one
+   * gets no more than is left of it, and what it spends is taken from it.
+   * Running out of it is `expression.budget_exhausted`, never retried:
+   * the same expressions spend the same fuel every time.
+   */
+  budget?: { fuel: number }
 ): Promise<Json> => {
   if (!compiledExpressions.has(expression)) {
     throw expressionError(
@@ -578,10 +607,31 @@ export const evaluateExpression = async <S extends Stage>(
     () => contextText(expression, scope)
   );
 
-  const run = await runJq(
-    programFor(expression.source, variableNamesOf(expression)),
-    stdin
+  const given = Math.min(budget?.fuel ?? runFuel, runFuel);
+  if (given <= 0) {
+    return fail(
+      site,
+      "expression.budget_exhausted",
+      "Do less work in the task's expressions, or split the task."
+    );
+  }
+  const run = await drawing(
+    budget,
+    given,
+    async () =>
+      await runJq(
+        programFor(expression.source, variableNamesOf(expression)),
+        stdin,
+        given
+      )
   );
+  if (run.kind === "exhausted" && run.resource === "fuel" && given < runFuel) {
+    return fail(
+      site,
+      "expression.budget_exhausted",
+      "Do less work in the task's expressions, or split the task."
+    );
+  }
   if (run.kind === "exhausted") {
     return fail(
       site,

@@ -836,6 +836,7 @@ describe("what keeps a workflow from being deleted", () => {
       hidden: 1,
       triggers: { ids: [], hidden: 0 },
       appBindings: [],
+      liveRuns: 0,
     });
     const events = await allEvents();
     const refused = events.find(
@@ -868,6 +869,7 @@ describe("what keeps a workflow from being deleted", () => {
       hidden: 0,
       triggers: { ids: [], hidden: 0 },
       appBindings: [],
+      liveRuns: 0,
     });
   });
 

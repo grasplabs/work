@@ -11,6 +11,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Authority, WorkContext } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
+  maxLiveRunsPerPrincipal,
   workflowResourceErrors,
   workflowStartSchema,
 } from "@grasp-os/shared/workflow-resources";
@@ -20,7 +21,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import { auditedBatch, outboxed, outboxedWhere } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
@@ -34,8 +35,11 @@ import {
 import { isUniqueViolation } from "./db/d1.ts";
 import { allowingPermissionSql } from "./permissions.ts";
 import { approvalServing, requireTargetServes } from "./workflow-bindings.ts";
+import { buildOf } from "./workflow-builds.ts";
+import type { SealedBuild } from "./workflow-builds.ts";
 import { frozenParams } from "./workflow-params.ts";
 import { bindingsOf, requireWorkflowRole } from "./workflow-resources.ts";
+import { runAdmitted, startResourceRun } from "./workflows/resource-runs.ts";
 
 // Starting an independent workflow (platform specification 13.2, 15.1, 24):
 // who may, for whom, and on which exact version. Every start is admitted
@@ -152,6 +156,11 @@ export interface StartAuthorization {
   paramsRevision: number;
   /** The bindings it froze (canonical JSON). */
   bindings: string;
+  /**
+   * The executable identity of the version's build, which the start's run
+   * is admitted for; null for a version without one: no run is admitted.
+   */
+  buildHash: string | null;
   /** For the audit log: who started it. */
   actor: AuditActor;
   /**
@@ -263,6 +272,8 @@ const pinned = async (
   configRevision: number;
   manifestHash: string;
   inputDescriptor: string;
+  /** The executable identity of its build; null when it has none. */
+  buildHash: string | null;
 }> => {
   const row = await drizzle(env.DB)
     .select({
@@ -270,6 +281,7 @@ const pinned = async (
       configRevision: workflowResources.configRevision,
       manifestHash: workflowResourceVersions.manifestHash,
       contract: workflowResourceVersions.contract,
+      manifest: workflowResourceVersions.manifest,
     })
     .from(workflowResources)
     .leftJoin(
@@ -286,15 +298,28 @@ const pinned = async (
   if (row === undefined) {
     throw workflowResourceErrors.create("workflow.resource_unavailable");
   }
-  if (row.manifestHash === null || row.contract === null) {
+  if (
+    row.manifestHash === null ||
+    row.contract === null ||
+    row.manifest === null
+  ) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
   const { input } = contractInputSchema.parse(JSON.parse(row.contract));
+  // Read from the manifest the admitting statement pins by its hash: the
+  // run is admitted for the build that manifest seals.
+  let build: SealedBuild;
+  try {
+    build = buildOf(row.manifest);
+  } catch {
+    throw workflowResourceErrors.create("workflow.version_corrupt");
+  }
   return {
     generation: row.generation,
     configRevision: row.configRevision,
     manifestHash: row.manifestHash,
     inputDescriptor: JSON.stringify(input),
+    buildHash: build.executable ? build.hash : null,
   };
 };
 
@@ -605,6 +630,8 @@ const startOf = (
   inputHash: row.inputHash,
   paramsRevision: row.paramsRevision,
   bindingsHash: row.bindingsHash,
+  // Read with the run's own row, by `startWorkflow`.
+  runId: null,
   createdAt: row.createdAt.toISOString(),
 });
 
@@ -707,7 +734,13 @@ export const decideWorkflowStart = async (
     }
     throw error;
   }
-  const { generation, configRevision, manifestHash, inputDescriptor } = found;
+  const {
+    generation,
+    configRevision,
+    manifestHash,
+    inputDescriptor,
+    buildHash,
+  } = found;
   const base = {
     version,
     manifestHash,
@@ -807,11 +840,27 @@ export const decideWorkflowStart = async (
       params,
       paramsRevision: configRevision,
       bindings: bindings.text,
+      buildHash,
       actor: rule.actor,
       holds,
     },
   };
 };
+
+/**
+ * That the person a start acts for has fewer than
+ * `maxLiveRunsPerPrincipal` runs of the workflow that haven't ended, as
+ * SQL, for a start that admits a run (its version is executable). Until
+ * lineage quotas hold these runs (GRA-567), it bounds what one person's
+ * starts make core spend at once.
+ */
+const underRunLimit = (authorization: StartAuthorization): SQL =>
+  authorization.buildHash === null
+    ? sql`1`
+    : sql`((SELECT COUNT(*) FROM workflow_resource_runs AS live
+        WHERE live.workflow_resource_id = ${authorization.workflowId}
+          AND live.principal_id = ${authorization.principal}
+          AND live.status IN ('starting', 'running')) < ${maxLiveRunsPerPrincipal})`;
 
 /**
  * Admits the new start `authorization` decided on: its receipt, written in
@@ -869,14 +918,35 @@ export const admitWorkflowStart = async (
       db
         .insert(workflowStartReceipts)
         .select(
-          sql`SELECT ${sql.join(values, sql`, `)} WHERE ${authorization.holds} AND ${also}`
+          sql`SELECT ${sql.join(values, sql`, `)} WHERE ${authorization.holds} AND ${also} AND ${underRunLimit(authorization)}`
         ),
-      outboxedIfChanged(db, {
-        actor: authorization.actor,
-        action: "workflow.start.admitted",
-        target: { type: "workflow_resource", id: authorization.workflowId },
-        detail,
-      }),
+      // Its run, pinned to the version's build, with the receipt or not at
+      // all (resource-runs.ts): the engine is sent it once this commits.
+      ...(authorization.buildHash === null
+        ? []
+        : [
+            runAdmitted(db, {
+              receipt: id,
+              workflowId: authorization.workflowId,
+              version: authorization.version,
+              manifestHash: authorization.manifestHash,
+              buildHash: authorization.buildHash,
+              principal: authorization.principal,
+              createdAt: createdAt.getTime(),
+            }),
+          ]),
+      // Only once the receipt is written, read as such: never inferred from
+      // the statement just before it, whichever that is.
+      outboxedWhere(
+        db,
+        {
+          actor: authorization.actor,
+          action: "workflow.start.admitted",
+          target: { type: "workflow_resource", id: authorization.workflowId },
+          detail,
+        },
+        sql`EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${id})`
+      ),
     ]);
   } catch (error) {
     if (!isUniqueViolation(error)) {
@@ -904,14 +974,25 @@ export const admitWorkflowStart = async (
       throw error;
     }
   }
+  // Refused by the cap on live runs, or by authority that changed: said
+  // as which, the cap read again now.
+  const cap = await drizzle(env.DB).get<{ under: number }>(
+    sql`SELECT ${underRunLimit(authorization)} AS under`
+  );
+  const limited = cap.under === 0;
+  const reason = limited ? "workflow.run_limit" : "workflow.start_denied";
   await refusedStart(
     env,
     authorization.actor,
     authorization.workflowId,
     detail,
-    "workflow.start_denied"
+    reason
   );
-  throw denied();
+  throw limited
+    ? workflowResourceErrors.create("workflow.run_limit", {
+        limit: maxLiveRunsPerPrincipal,
+      })
+    : denied();
 };
 
 /**
@@ -926,7 +1007,11 @@ export const startWorkflow = async (
   also?: SQL
 ): Promise<WorkflowStart> => {
   const decision = await decideWorkflowStart(env, invoker, id, request);
-  return "start" in decision
-    ? decision.start
-    : await admitWorkflowStart(env, decision.authorization, also);
+  const start =
+    "start" in decision
+      ? decision.start
+      : await admitWorkflowStart(env, decision.authorization, also);
+  // Its run, sent to the engine while it is still starting: a start sent
+  // again finishes one core stopped in the middle of (resource-runs.ts).
+  return { ...start, runId: await startResourceRun(env, start.id) };
 };

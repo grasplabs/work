@@ -5,8 +5,16 @@ import {
   runRetentionDefaultDays,
   runRetentionSchema,
 } from "@grasp-os/shared/deployment-config";
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
-import type { AppId, WorkflowId } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  workflowIdSchema,
+  workflowResourceIdSchema,
+} from "@grasp-os/shared/ids";
+import type {
+  AppId,
+  WorkflowId,
+  WorkflowResourceId,
+} from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { Workflow } from "@grasp-os/workerflow/binding";
 import type { WorkflowOptions } from "@grasp-os/workerflow/binding";
@@ -64,9 +72,24 @@ export const internalWorkflows = ["extraction", "build", "backfill"] as const;
 
 export type InternalWorkflow = (typeof internalWorkflows)[number];
 
-/** What a run executes: an App's pinned workflow, or one of core's own. */
+/**
+ * What a run of an independent workflow is pinned to (resource-runs.ts):
+ * the workflow, its exact version, and the manifest that version sealed,
+ * which names the build it runs. The dispatcher loads nothing else.
+ */
+export interface PinnedResourceRun {
+  workflow: WorkflowResourceId;
+  version: number;
+  manifest: string;
+}
+
+/**
+ * What a run executes: an App's pinned workflow, an independent workflow's
+ * sealed version, or one of core's own.
+ */
 export type RunPin =
   | ({ type: "app" } & PinnedRun)
+  | ({ type: "resource" } & PinnedResourceRun)
   | { type: "internal"; workflow: InternalWorkflow };
 
 /** The one definition every run is a run of. */
@@ -87,17 +110,45 @@ const pinSchema = z.union([
       version,
     })),
   z
+    .tuple([
+      z.literal("resource"),
+      workflowResourceIdSchema,
+      z.int().positive(),
+      z.string().regex(/^[0-9a-f]{64}$/u),
+    ])
+    .transform(([, workflow, version, manifest]): RunPin => ({
+      type: "resource",
+      workflow,
+      version,
+      manifest,
+    })),
+  z
     .tuple([z.literal("internal"), z.enum(internalWorkflows)])
     .transform(([, workflow]): RunPin => ({ type: "internal", workflow })),
 ]);
 
 /** A pin as the engine keeps it: the run's opaque definition version. */
-const versionOf = (pin: RunPin): string =>
-  JSON.stringify(
-    pin.type === "app"
-      ? ["app", pin.app, pin.workflow, pin.version]
-      : ["internal", pin.workflow]
-  );
+const versionOf = (pin: RunPin): string => {
+  switch (pin.type) {
+    case "app": {
+      return JSON.stringify(["app", pin.app, pin.workflow, pin.version]);
+    }
+    case "resource": {
+      return JSON.stringify([
+        "resource",
+        pin.workflow,
+        pin.version,
+        pin.manifest,
+      ]);
+    }
+    case "internal": {
+      return JSON.stringify(["internal", pin.workflow]);
+    }
+    default: {
+      return pin satisfies never;
+    }
+  }
+};
 
 /**
  * What a run the engine activates is pinned to, from the definition and
@@ -125,6 +176,15 @@ export interface RunEngine {
     id: string;
     pinned: PinnedRun;
     input: Json | undefined;
+  }) => Promise<void>;
+  /**
+   * As `create`, for a run of an independent workflow, pinned to its
+   * version's sealed manifest.
+   */
+  createResource: (run: {
+    id: string;
+    pinned: PinnedResourceRun;
+    input: Json;
   }) => Promise<void>;
   /** As `create`, for a run of one of core's own workflows. */
   createInternal: (run: {
@@ -289,6 +349,9 @@ const admit = async (
 export const runEngine = (env: Env): RunEngine => ({
   create: async ({ id, pinned, input }) => {
     await admit(env, id, { type: "app", ...pinned }, input);
+  },
+  createResource: async ({ id, pinned, input }) => {
+    await admit(env, id, { type: "resource", ...pinned }, input);
   },
   createInternal: async ({ id, workflow, input }) => {
     await admit(env, id, { type: "internal", workflow }, input);

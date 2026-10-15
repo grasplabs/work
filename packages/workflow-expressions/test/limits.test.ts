@@ -454,3 +454,59 @@ describe("the kill path", () => {
     ).resolves.toStrictEqual({ result: 6_247_500 });
   });
 });
+
+/** What a loop of `count` steps evaluates to drawing on `budget`: its result, or its error's code. */
+const drawing = async (
+  count: number,
+  budget: { fuel: number }
+): Promise<Json | string> => {
+  const expression = await compileExpression(
+    `reduce range(0; ${count}) as $i (0; . + 1)`,
+    { stage: "taskDefinition", scope: ["loop"], pointer: "/do/0/loop/set" }
+  );
+  try {
+    return await evaluateExpression(
+      expression,
+      {
+        input: null,
+        variables: {
+          context: null,
+          input: null,
+          task: null,
+          workflow: null,
+          params: null,
+        },
+      },
+      json,
+      budget
+    );
+  } catch (error) {
+    return expressionErrors.codeOf(error) ?? String(error);
+  }
+};
+
+describe("a shared budget", () => {
+  it("lets evaluations spend it together, and refuses the one it can't cover", async () => {
+    const measured = { fuel: 2 ** 30 };
+    await drawing(50_000, measured);
+    const spent = 2 ** 30 - measured.fuel;
+    // Room for one and a half: the first runs, the second runs out.
+    const budget = { fuel: Math.floor(spent * 1.5) };
+    const sequential = [
+      await drawing(50_000, budget),
+      await drawing(50_000, budget),
+    ];
+    const shared = { fuel: Math.floor(spent * 1.5) };
+    const concurrent = await Promise.all([
+      drawing(50_000, shared),
+      drawing(50_000, shared),
+    ]);
+    expect({
+      sequential,
+      concurrent: concurrent.map(String).toSorted(),
+    }).toStrictEqual({
+      sequential: [50_000, "expression.budget_exhausted"],
+      concurrent: ["50000", "expression.budget_exhausted"],
+    });
+  });
+});
