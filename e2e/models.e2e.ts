@@ -80,8 +80,10 @@ test("an admin reads this month's AI spend against the budgets, and nobody else 
   await expect(sectionOf(page, "By person")).toContainText(
     "$20.00 a month for each, admins alerted at 80%."
   );
-  // The stack sets no budget for each workflow.
+  // The stack sets no budget for each workflow: what each spent shows
+  // without one.
   await expect(sectionOf(page, "By workflow")).toHaveCount(0);
+  await expect(sectionOf(page, "Workflows this month")).toBeVisible();
 
   const refused = await pageOf(browser, builder);
   await refused.goto("/settings/spend");
