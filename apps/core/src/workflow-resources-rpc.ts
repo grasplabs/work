@@ -8,6 +8,7 @@ import type {
   WorkflowResourcesApi,
   WorkflowResourceVersion,
   WorkflowStart,
+  WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
 
 import {
@@ -37,6 +38,7 @@ import {
   unshareWorkflowResource,
   workflowDefinition,
   workflowMembers,
+  workflowSource,
   workflowVersions,
 } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
@@ -98,6 +100,13 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await workflowDefinition(this.#env, person, id, version)
+    );
+  }
+
+  async source(id: string, version: number): Promise<WorkflowVersionSource> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowSource(this.#env, person, id, version)
     );
   }
 

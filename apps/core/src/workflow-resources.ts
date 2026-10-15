@@ -1,5 +1,9 @@
 import type { CatalogContract } from "@grasp-os/open-workflow/catalog";
 import type { Diagnostic } from "@grasp-os/open-workflow/diagnostics";
+import {
+  generatedPath,
+  sensitiveReads,
+} from "@grasp-os/open-workflow/generate";
 import { profileLimits } from "@grasp-os/open-workflow/limits";
 import { validateWorkflow } from "@grasp-os/open-workflow/validate";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
@@ -7,7 +11,7 @@ import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   canBuild,
   isAdmin,
@@ -33,6 +37,7 @@ import type {
   WorkflowRole,
   WorkflowBinders,
   WorkflowVersionBinding,
+  WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
 import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
 import {
@@ -68,6 +73,17 @@ import {
   stillMembers,
 } from "./sharing.ts";
 import type { MemberRef } from "./sharing.ts";
+import {
+  buildOf,
+  buildSummary,
+  compileWorkflow,
+  loadWorkflowBuild,
+  adoptReservations,
+  publicationReservation,
+  releaseBuild,
+  storeBuild,
+} from "./workflow-builds.ts";
+import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
 import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
@@ -116,6 +132,10 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   other content is refused (`workflow.version_exists`), and with the
 //   same content answers the version already published, so a retried
 //   publication is the same publication.
+// - A version running other code than its definition's. Publication
+//   generates SDK TypeScript from the checked definition, compiles it and
+//   seals it into the version's manifest, by hash (workflow-builds.ts):
+//   what a version runs is fixed with it, and nothing compiles later.
 // - Two publications racing. A publication names the current version it
 //   built on; its batch inserts the version only while that is still the
 //   current one and the workflow is live, and moves the current version in
@@ -730,6 +750,22 @@ const checkDefinition = async (
   ) {
     throw workflowResourceErrors.create("workflow.identity_mismatch");
   }
+  // A run's output reaches whoever started it, who may only use the
+  // workflow: a sensitive parameter stays out of every expression until
+  // bindings that need one come (GRA-566).
+  const sensitive = sensitiveReads(checked);
+  if (sensitive.length > 0) {
+    throw definitionInvalid(
+      sensitive.map((read) => ({
+        code: "expression.sensitive_param",
+        message:
+          "An expression reads a sensitive parameter, or all parameters at once, which could pass its value on.",
+        pointer: read.pointer,
+        ...(read.taskId === undefined ? {} : { taskId: read.taskId }),
+        remedy: "Read only parameters that aren't sensitive, each by its name.",
+      }))
+    );
+  }
   const bindings: PinnedBinding[] = [];
   for (const [alias, binding] of checked.bindings) {
     const contract = catalog.get(binding.contract);
@@ -763,6 +799,22 @@ const checkDefinition = async (
   return { checked, bindings };
 };
 
+/**
+ * The build version `version` of workflow `id` seals, from its manifest
+ * text (`workflow.version_corrupt` for one that seals none it can read).
+ */
+const sealedBuildOf = (
+  id: string,
+  version: number,
+  manifest: string
+): SealedBuild => {
+  try {
+    return buildOf(manifest);
+  } catch {
+    throw corrupt(id, version);
+  }
+};
+
 /** A version's row, as the registry answers it. */
 const versionOf = (
   row: typeof workflowResourceVersions.$inferSelect,
@@ -776,6 +828,9 @@ const versionOf = (
   contractHash: row.contractHash,
   manifestHash: row.manifestHash,
   bindings,
+  build: buildSummary(
+    sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
+  ),
   author: row.authorId,
   createdAt: row.createdAt.toISOString(),
 });
@@ -988,6 +1043,8 @@ interface Publication {
   definition: string;
   definitionHash: string;
   bindings: PinnedBinding[];
+  /** What it runs: the code generated from it, compiled (workflow-builds.ts). */
+  compiled: CompiledBuild;
 }
 
 /**
@@ -1001,7 +1058,7 @@ const writeVersion = async (
   by: Acting,
   publication: Publication
 ): Promise<WorkflowResourceVersion> => {
-  const { workflow, checked, definition, definitionHash, bindings } =
+  const { workflow, checked, definition, definitionHash, bindings, compiled } =
     publication;
   const contract = contractOf(checked);
   const contractText = canonicalJson(contract);
@@ -1032,6 +1089,9 @@ const writeVersion = async (
     evaluatorHash: jqProvenance.sha256,
     contractHash,
     bindings: bindings.map((binding) => ({ ...binding })),
+    // What the version runs, sealed with it: its build's artifacts by
+    // hash, and its executable identity (workflow-builds.ts).
+    build: compiled.build,
     artifactTrust: "unreviewed",
   });
   if (bytesOf(manifest) > manifestMaxBytes) {
@@ -1047,71 +1107,99 @@ const writeVersion = async (
   const manifestHash = await sha256Hex(manifest);
   const createdAt = new Date();
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db.insert(workflowResourceVersions).values({
-      // Only while the workflow is live and still at the version this
-      // publication built on: otherwise NULL, which fails the batch.
-      workflowResourceId: sql`(SELECT id FROM workflow_resources
+  // This publication's own reservations: another publishing the same
+  // version at once keeps its own, so neither gives back the other's.
+  const owner = publicationReservation(workflow.id);
+  try {
+    // Its build's bytes, reserved for this publication and stored, before
+    // the row that names them; inside the cleanup, so a store that fails
+    // halfway gives its reservations back too.
+    await storeBuild(env, { id: owner, version }, compiled);
+    await auditedBatch(env, db, [
+      db.insert(workflowResourceVersions).values({
+        // Only while the workflow is live and still at the version this
+        // publication built on: otherwise NULL, which fails the batch.
+        workflowResourceId: sql`(SELECT id FROM workflow_resources
         WHERE id = ${workflow.id} AND deleted_at IS NULL
           AND current_version IS ${workflow.currentVersion})`,
-      version,
-      definitionVersion,
-      definition,
-      definitionJsonHash: definitionHash,
-      profileVersion: checked.profile,
-      evaluatorHash: jqProvenance.sha256,
-      contract: contractText,
-      contractHash,
-      manifest,
-      manifestHash,
-      authorId: by.userId,
-      createdAt,
-    }),
-    db
-      .update(workflowResources)
-      .set({ currentVersion: version })
-      .where(eq(workflowResources.id, workflow.id)),
-    ...bindings.map((binding) =>
-      binding.kind === "workflow"
-        ? db.insert(sdkResourceBindings).values({
-            resourceId: workflow.id,
-            resourceVersion: version,
-            alias: binding.alias,
-            kind: "workflow" as const,
-            // Only while the target is live: otherwise NULL, which fails the
-            // batch, so a deletion and this binding never both land.
-            targetId: sql`(SELECT id FROM workflow_resources
-          WHERE id = ${binding.resourceId} AND deleted_at IS NULL)`,
-            targetVersion: binding.resourceVersion,
-            contractId: binding.contractId,
-            schemaHash: binding.fingerprint,
-            manifestHash,
-          })
-        : db.insert(sdkResourceBindings).values({
-            resourceId: workflow.id,
-            resourceVersion: version,
-            alias: binding.alias,
-            kind: binding.kind,
-            // A catalog contract, by its key: what serves it is an
-            // approval's (workflow-bindings.ts), never this row's.
-            targetId: binding.contractId,
-            targetVersion: null,
-            contractId: binding.contractId,
-            schemaHash: binding.fingerprint,
-            manifestHash,
-          })
-    ),
-    outboxed(
-      db,
-      entry(by, "workflow.version.published", workflow.id, {
         version,
         definitionVersion,
-        definitionHash,
+        definition,
+        definitionJsonHash: definitionHash,
+        profileVersion: checked.profile,
+        evaluatorHash: jqProvenance.sha256,
+        contract: contractText,
         contractHash,
-        manifestHash,
-      })
-    ),
-  ]);
+        manifest,
+        // The hash only while every artifact its build names is reserved for
+        // this publication: otherwise NULL, which the column refuses, and
+        // the whole publication with it. So no sweep deletes bytes a version
+        // names (release-retention.ts).
+        manifestHash: sql`(SELECT ${manifestHash} WHERE NOT EXISTS (
+        SELECT 1 FROM json_each(${manifest}, '$.build.artifacts') AS named
+        WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts AS reserved
+          WHERE reserved.app_id = ${owner} AND reserved.version = ${version}
+            AND reserved.sha256 = json_extract(named.value, '$.sha256'))))`,
+        authorId: by.userId,
+        createdAt,
+      }),
+      // The version's from now on, as long as it is.
+      ...adoptReservations(db, owner, workflow.id, version),
+      db
+        .update(workflowResources)
+        .set({ currentVersion: version })
+        .where(eq(workflowResources.id, workflow.id)),
+      ...bindings.map((binding) =>
+        binding.kind === "workflow"
+          ? db.insert(sdkResourceBindings).values({
+              resourceId: workflow.id,
+              resourceVersion: version,
+              alias: binding.alias,
+              kind: "workflow" as const,
+              // Only while the target is live: otherwise NULL, which fails the
+              // batch, so a deletion and this binding never both land.
+              targetId: sql`(SELECT id FROM workflow_resources
+          WHERE id = ${binding.resourceId} AND deleted_at IS NULL)`,
+              targetVersion: binding.resourceVersion,
+              contractId: binding.contractId,
+              schemaHash: binding.fingerprint,
+              manifestHash,
+            })
+          : db.insert(sdkResourceBindings).values({
+              resourceId: workflow.id,
+              resourceVersion: version,
+              alias: binding.alias,
+              kind: binding.kind,
+              // A catalog contract, by its key: what serves it is an
+              // approval's (workflow-bindings.ts), never this row's.
+              targetId: binding.contractId,
+              targetVersion: null,
+              contractId: binding.contractId,
+              schemaHash: binding.fingerprint,
+              manifestHash,
+            })
+      ),
+      outboxed(
+        db,
+        entry(by, "workflow.version.published", workflow.id, {
+          version,
+          definitionVersion,
+          definitionHash,
+          contractHash,
+          manifestHash,
+        })
+      ),
+    ]);
+  } catch (error) {
+    // Not written: what this publication reserved goes back, and only
+    // that: another's, and a saved version's, stay.
+    try {
+      await releaseBuild(env, { id: owner, version }, compiled);
+    } catch (releaseError) {
+      log.warn("workflow.build_release_failed", errorFields(releaseError));
+    }
+    throw error;
+  }
   return {
     resourceId: workflow.id,
     version,
@@ -1121,6 +1209,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
+    build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
   };
@@ -1217,6 +1306,8 @@ const publish = async (
   if (basedOn !== workflow.currentVersion) {
     throw workflowResourceErrors.create("workflow.version_conflict");
   }
+  // Generated and built once, here: no start or resume compiles anything.
+  const compiled = await compileWorkflow(env, checked, definition);
   try {
     return await writeVersion(env, by, {
       workflow,
@@ -1224,8 +1315,15 @@ const publish = async (
       definition,
       definitionHash,
       bindings,
+      compiled,
     });
   } catch (error) {
+    if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
+      // A reservation of its build went before the row could name it,
+      // which only a publication stalled past the sweep's grace sees:
+      // publishing again reserves afresh.
+      throw workflowResourceErrors.create("workflow.version_conflict");
+    }
     if (
       notNullFailed(error, "workflow_resource_versions.workflow_resource_id")
     ) {
@@ -1346,6 +1444,46 @@ export const workflowDefinition = async (
     throw corrupt(workflow.id, version);
   }
   return row.definition;
+};
+
+/**
+ * The portable source of version `version` of workflow `id`, for its
+ * builders: its definition exactly as published (`workflowDefinition`'s
+ * checks) and, for an executable version, the SDK TypeScript generated
+ * from it, read back from its sealed build with every hash checked. It
+ * goes one way: a version is only ever published from a definition, so
+ * edited generated code never comes back as one.
+ */
+export const workflowSource = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  version: unknown
+): Promise<WorkflowVersionSource> => {
+  const definition = await workflowDefinition(env, by, id, version);
+  // Both checked by `workflowDefinition`: a workflow `by` builds, and a
+  // version it published.
+  const workflowId = String(id);
+  const number = Number(version);
+  const row = await drizzle(env.DB)
+    .select({ manifest: workflowResourceVersions.manifest })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, workflowId),
+        eq(workflowResourceVersions.version, number)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  const files: Record<string, string> = { "workflow.json": definition };
+  if (sealedBuildOf(workflowId, number, row.manifest).executable) {
+    const build = await loadWorkflowBuild(env, workflowId, number);
+    files[generatedPath] = build.source;
+  }
+  return { files };
 };
 
 /**

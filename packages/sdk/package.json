@@ -17,6 +17,7 @@
     "./server": "./src/server.ts",
     "./runner": "./src/runner.ts",
     "./workflow": "./src/workflow.ts",
+    "./open-workflow": "./src/open-workflow.ts",
     "./engine": "./src/engine.ts",
     "./params": "./src/params.ts",
     "./describe": "./src/describe.ts",
