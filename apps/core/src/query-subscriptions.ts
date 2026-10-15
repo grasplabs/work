@@ -173,6 +173,8 @@ interface Listener {
    */
   behindBytes: number;
   released: boolean;
+  /** Told once it is let go of, however that happens. */
+  readonly ended: (() => void) | undefined;
 }
 
 /** One query read for the subscriptions that share it. */
@@ -370,7 +372,13 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     app: AppId,
     artifact: string | undefined,
     request: string,
-    onSnapshot: SnapshotCallback
+    onSnapshot: SnapshotCallback,
+    /**
+     * Told once the subscription ends, released or ended by core (a
+     * refusal, a store that can't be watched): what holds it for a frame
+     * forgets it then (screens-rpc.ts).
+     */
+    ended?: () => void
   ): RunSubscription {
     if (this.#count >= querySubscriptionLimits.perConnection) {
       throw screenErrors.create("screen.too_many_queries");
@@ -386,6 +394,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       behind: false,
       behindBytes: 0,
       released: false,
+      ended,
     };
     evaluation.listeners.add(listener);
     this.#count += 1;
@@ -975,6 +984,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       listener.pending = undefined;
     }
     this.#count -= 1;
+    listener.ended?.();
     return listener.toPage;
   }
 

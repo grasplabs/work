@@ -81,7 +81,7 @@ const answered = async (api: RpcStub<CoreApi>): Promise<Connected> => {
 /**
  * The tab's one connection to core, which everything the page asks of core
  * goes over: loaders, actions, its status, followed chats, notifications.
- * (A screen's frame keeps a connection of its own, screens/core-link.ts.)
+ * (A tab's App frames share one of their own, screens/tab-link.ts.)
  * It opens when first used (a guest's page never uses it) and connects
  * again whenever it drops, for as long as it takes. Whoever asks for it
  * meanwhile waits for the next connection, in the order they asked. A call

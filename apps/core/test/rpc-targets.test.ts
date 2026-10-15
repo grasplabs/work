@@ -228,6 +228,18 @@ const calls = {
     await page.pushed;
     return subscription;
   },
+  // A frame's own way to the App, with no lease of core's: decided as a
+  // build nobody approved, which the App's data allows here.
+  "authenticate.screens.frame": async (screens, { app, held }) =>
+    holding(held, await screens.frame(app, "")),
+  "authenticate.screens.frame.watchRuns": async (frame, { held }) =>
+    holding(held, await frame.watchRuns("approval", pageStub().stub)),
+  "authenticate.screens.frame.watchQuery": async (frame, { held }) => {
+    const page = pageStub();
+    const subscription = holding(held, await frame.watchQuery("{}", page.stub));
+    await page.pushed;
+    return subscription;
+  },
 } satisfies {
   [Path in CallableAnswers<CoreRpc>]: (
     owner: Owner<CoreRpc, Path>,

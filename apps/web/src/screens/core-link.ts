@@ -108,7 +108,30 @@ export class CoreLink {
       startRetryMs,
       (failure) => !this.#closed && isTransient(failure)
     );
-    void settled(this.#session);
+    void this.#started(this.#session);
+  }
+
+  /**
+   * Whether the link's first connection failed for good, or it was closed
+   * before it connected: it never connects then, and whoever wants core
+   * opens a new link (tab-link.ts).
+   */
+  get failedToStart(): boolean {
+    return this.#startFailed;
+  }
+
+  #startFailed = false;
+
+  /** Notes whether `first`, the first connection, failed. */
+  async #started(first: Promise<Session>): Promise<void> {
+    try {
+      await first;
+    } catch {
+      this.#startFailed = true;
+      // The last attempt's connection may still be open: a link that
+      // never connects holds none, whether or not anyone opens another.
+      this.close();
+    }
   }
 
   /** The signed-in session, once connected. */
