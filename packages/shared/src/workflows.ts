@@ -1090,8 +1090,10 @@ export const runActivityMaxDays = 90;
 export const runActivityDefaultDays = 7;
 
 /**
- * What `WorkflowsApi.activity` reads: the last `days` UTC days, today
- * included, {@link runActivityDefaultDays} unless given.
+ * What `WorkflowsApi.activity` reads: `days` UTC days up to `to`, both
+ * included, {@link runActivityDefaultDays} unless given. `to` is today
+ * unless given, and never after it (`workflow.invalid`): a week that
+ * closed is read as it was, not with the days after it.
  */
 export const runActivityQuerySchema = z
   .strictObject({
@@ -1100,6 +1102,8 @@ export const runActivityQuerySchema = z
       .min(1)
       .max(runActivityMaxDays)
       .default(runActivityDefaultDays),
+    /** The window's last UTC day, `YYYY-MM-DD`. */
+    to: z.iso.date().optional(),
   })
   .default({ days: runActivityDefaultDays });
 
