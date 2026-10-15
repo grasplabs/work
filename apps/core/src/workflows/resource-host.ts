@@ -394,9 +394,10 @@ export class ResourceRunHost
   /** `ResourceAttemptHost.evaluate`, for `attempt`. */
   async #evaluate(attempt: TaskAttempt, slot: unknown): Promise<Settled<Json>> {
     return await settle(async () => {
-      if (attempt.over) {
-        throw executionErrors.create("execution.stale_attempt");
-      }
+      // Its lease first: an attempt the engine let go of, still running in
+      // the isolate, is stale whatever it asks, and never taken for a
+      // forged module that taints the run.
+      this.#requireCurrent(attempt);
       const { build } = this.#run;
       const expression =
         typeof slot === "number" && Number.isSafeInteger(slot)
@@ -413,11 +414,12 @@ export class ResourceRunHost
         );
       }
       attempt.evaluated.add(expression.slot);
-      this.#requireCurrent(attempt);
       const key = `${build.hash}:${expression.slot}`;
       let compiling = compiled.get(key);
       if (compiling === undefined) {
-        // Compiling runs it too: on the attempt's budget, as evaluating is.
+        // Sealed: jq compiled it at publication, so it isn't run to compile
+        // it again, and every attempt spends only what evaluating it does,
+        // whether or not this isolate compiled it before.
         compiling = compileExpression(
           expression.source,
           {
@@ -425,7 +427,7 @@ export class ResourceRunHost
             scope: [expression.taskId],
             pointer: expression.pointer,
           },
-          attempt.budget
+          true
         );
         compiled.set(key, compiling);
         if (compiled.size > compiledMax) {

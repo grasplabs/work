@@ -667,7 +667,8 @@ const settledCode = (settled: Settled<unknown>): unknown =>
 const evaluatedWith = async (
   by: Acting,
   id: string,
-  lease: (read: number) => AttemptLease | undefined
+  lease: (read: number) => AttemptLease | undefined,
+  slot = 0
 ): Promise<unknown> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -710,7 +711,7 @@ const evaluatedWith = async (
     "task:greet",
     { input: { input: { who: "Ada" }, context: {} } },
     async (attempt) => {
-      evaluated = settledCode(await attempt.evaluate(0));
+      evaluated = settledCode(await attempt.evaluate(slot));
       return null;
     }
   );
@@ -1010,10 +1011,19 @@ describe("whose word a run's row takes, and whose clock", () => {
       takenOver: await evaluatedWith(by, workflow.id, (read) =>
         read < 3 ? holding : { ...holding, generation: 2 }
       ),
+      // Let go of, still running, it asks for an expression it has none
+      // of: stale, never a forged module that fails the run.
+      lostThenForged: await evaluatedWith(
+        by,
+        workflow.id,
+        (read) => (read < 2 ? holding : undefined),
+        999
+      ),
     }).toStrictEqual({
       holding: { ok: "Hello, Ada" },
       pastDeadline: "execution.stale_attempt",
       takenOver: "execution.stale_attempt",
+      lostThenForged: "execution.stale_attempt",
     });
   });
 });

@@ -224,8 +224,13 @@ const variableNamesOf = (expression: CompiledExpression): string[] => [
 export const compileExpression = async <S extends Stage>(
   source: string,
   options: CompileOptions<S>,
-  /** Fuel the compile draws on, as `evaluateExpression`'s `budget`. */
-  budget?: { fuel: number }
+  /**
+   * Whether it is an expression of a sealed build, which jq compiled as it
+   * was published: checked against the profile again, but not compiled by
+   * jq again. That runs it, and a run would spend fuel on it that depends
+   * on whether this isolate compiled it already.
+   */
+  sealed = false
 ): Promise<CompiledExpression<S>> => {
   const read = readCallerData(
     { pointer: "" },
@@ -314,20 +319,18 @@ export const compileExpression = async <S extends Stage>(
       );
     }
   }
-  // jq compiles it against nulls; only a compile error matters here. That
-  // runs it too, so a compile in a run draws on its budget like an
-  // evaluation (`budget`): never fuel past what the run's steps may spend.
-  const names = variableNamesOf(expression);
-  const run = await budgetedRun(
-    budget,
-    site,
-    programFor(source, names),
-    JSON.stringify(Array.from({ length: names.length + 1 }, () => null))
-  );
-  if (run.kind === "completed" && run.exitCode === jqCompileError) {
-    fail(site, "expression.invalid", "Fix the expression's jq syntax.", {
-      reason: compileMessage(run.stderr),
-    });
+  if (!sealed) {
+    // jq compiles it against nulls; only a compile error matters here.
+    const names = variableNamesOf(expression);
+    const run = await runJq(
+      programFor(source, names),
+      JSON.stringify(Array.from({ length: names.length + 1 }, () => null))
+    );
+    if (run.kind === "completed" && run.exitCode === jqCompileError) {
+      fail(site, "expression.invalid", "Fix the expression's jq syntax.", {
+        reason: compileMessage(run.stderr),
+      });
+    }
   }
   compiledExpressions.add(expression);
   return expression;

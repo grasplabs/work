@@ -510,20 +510,22 @@ describe("a shared budget", () => {
     });
   });
 
-  it("draws a compile, which runs the expression, on the budget too", async () => {
-    const budget = { fuel: 1000 };
-    const compiled = await compileExpression(
-      "reduce range(0; 50000) as $i (0; . + 1)",
-      { stage: "taskDefinition", scope: ["loop"], pointer: "/do/0/loop/set" },
-      budget
-    ).then(
-      () => "compiled",
-      (error: unknown) => expressionErrors.codeOf(error) ?? String(error)
-    );
-    expect({ compiled, left: budget.fuel }).toStrictEqual({
-      compiled: "expression.budget_exhausted",
-      left: 0,
-    });
+  it("compiles a sealed build's expression without running jq on it again, as a publication's does", async () => {
+    // The profile takes it; only jq's compile refuses it.
+    const options = {
+      stage: "taskDefinition",
+      scope: ["loop"],
+      pointer: "/do/0/loop/set",
+    } as const;
+    const outcomeOf = async (sealed: boolean) =>
+      await compileExpression("1 +", options, sealed).then(
+        () => "compiled",
+        (error: unknown) => expressionErrors.codeOf(error) ?? String(error)
+      );
+    expect({
+      published: await outcomeOf(false),
+      sealed: await outcomeOf(true),
+    }).toStrictEqual({ published: "expression.invalid", sealed: "compiled" });
   });
 
   it("runs evaluations at once on a budget that covers both, never failing one for what the other holds", async () => {
