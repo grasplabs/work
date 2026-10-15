@@ -261,7 +261,9 @@ export const startAppBinding = async (
    * What else must hold as the start is admitted, as SQL (the permission
    * of the agent that had it made), read by the admitting statement.
    */
-  requires: SQL = sql`1`
+  requires: SQL = sql`1`,
+  /** Asked just before the start is admitted: throws to start nothing. */
+  beforeAdmit?: () => void
 ): Promise<WorkflowStart> => {
   if (authority.subject.type !== "app" || typeof alias !== "string") {
     throw workflowResourceErrors.create("workflow.app_binding_unavailable");
@@ -292,6 +294,7 @@ export const startAppBinding = async (
     { version: row.workflowResourceVersion, input, key },
     sql`EXISTS (SELECT 1 FROM app_workflow_bindings
       WHERE id = ${row.id} AND status = 'active') AND ${requires}`,
-    noted
+    noted,
+    beforeAdmit
   );
 };

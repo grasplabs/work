@@ -202,7 +202,12 @@ export interface WorkflowStarts {
   readonly start: (
     alias: string,
     input: Json,
-    key: string
+    key: string,
+    /**
+     * Throws once the call may no longer start anything (cancelled, or
+     * past its deadline): asked again just before the start is admitted.
+     */
+    requireGoing?: () => void
   ) => Promise<RunHandle>;
   /**
    * What a mutation's commit stages in its outbox to start that workflow
@@ -1805,12 +1810,19 @@ const startCall = async (
   if (starts === undefined) {
     throw operationErrors.create("resource.unavailable");
   }
-  // Cancelled as the gate was read: nothing is started.
-  requireNotCancelled(run);
+  // Cancelled, or past its deadline, as the gate was read: nothing is
+  // started, and the start asks again just before it is admitted.
+  const requireGoing = (): void => {
+    requireNotCancelled(run);
+    if (Date.now() >= run.invocation.deadline) {
+      throw hostError(operationErrors.create("operation.deadline_exceeded"));
+    }
+  };
+  requireGoing();
   let handle: RunHandle;
   try {
     handle = await sending(
-      async () => await starts.start(alias, input, key.join(":"))
+      async () => await starts.start(alias, input, key.join(":"), requireGoing)
     );
   } catch (error) {
     throw startFailure(error, run.invocation.requestId);

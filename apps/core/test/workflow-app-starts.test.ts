@@ -1529,6 +1529,75 @@ describe("what a start rechecks, and records", () => {
     }).toStrictEqual({ stopped: true, receipts: [] });
   });
 
+  it("stops, starting nothing, once its hand-over's time runs out as the start is decided", async () => {
+    const fx = await fixture();
+    const timedOut = new AbortController();
+    const real = env.DB;
+    // The hand-over runs out as the start's binding is read, past every
+    // check before it.
+    const db: D1Database = {
+      prepare: (statement) => {
+        if (/from "app_workflow_bindings"/iu.test(statement)) {
+          timedOut.abort();
+        }
+        return real.prepare(statement);
+      },
+      batch: async (statements) => await real.batch(statements),
+      exec: async (statement) => await real.exec(statement),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    const answer = await dispatched(
+      { ...env, DB: db },
+      entryOf(fx, fx.bob, { signal: timedOut.signal })
+    );
+    expect({
+      stopped: answer !== "delivered",
+      receipts: await receiptsOf(fx.app),
+    }).toStrictEqual({ stopped: true, receipts: [] });
+  });
+
+  it("starts nothing for an action past its deadline as its start's gate was read", async () => {
+    const fx = await fixture();
+    const restores: (() => void)[] = [];
+    // The call's own gate, then the start's: the deadline passes as it is
+    // read.
+    const gate = {
+      passes: 0,
+      onPass: (passes: number) => {
+        if (passes === 2) {
+          const later = vi
+            .spyOn(Date, "now")
+            .mockReturnValue(Date.now() + 120_000);
+          restores.push(() => {
+            later.mockRestore();
+          });
+        }
+      },
+    };
+    let started: OperationResult;
+    try {
+      started = await call(
+        fx,
+        fx.bob,
+        "requests.kickOff",
+        { who: "Bob" },
+        {
+          gate,
+        }
+      );
+    } finally {
+      for (const restore of restores) {
+        restore();
+      }
+    }
+    expect({
+      refused: !started.ok,
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({ refused: true, receipts: 0 });
+  });
+
   it("stops once its hand-over's time is up, starting nothing", async () => {
     const fx = await fixture();
     const timedOut = new AbortController();

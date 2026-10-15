@@ -151,8 +151,8 @@ const requireLive = (signal: AbortSignal): void => {
 /**
  * Starts the workflow App `authority` binds under `alias`: refused while
  * the App is restricted (see the header), audited naming `agent`. Stops,
- * starting nothing, once `signal` (a dispatch's hand-over) is aborted
- * before it is admitted.
+ * starting nothing, once `requireGoing` (a call's cancel or deadline, a
+ * dispatch's hand-over) throws, asked again just before it is admitted.
  */
 const startAsApp = async (
   env: Env,
@@ -160,7 +160,7 @@ const startAsApp = async (
   alias: string,
   request: { input: Json; key: string },
   agent: CallingAgent | null,
-  signal?: AbortSignal
+  requireGoing?: () => void
 ): Promise<WorkflowStart> => {
   if (authority.subject.type !== "app") {
     throw workflowResourceErrors.create("workflow.start_denied");
@@ -168,9 +168,7 @@ const startAsApp = async (
   if (await appHost(env, authority.subject.appId).isRestricted()) {
     throw workflowResourceErrors.create("workflow.start_restricted");
   }
-  if (signal !== undefined) {
-    requireLive(signal);
-  }
+  requireGoing?.();
   return await startAppBinding(
     env,
     authority,
@@ -179,7 +177,8 @@ const startAsApp = async (
     notedOf(agent),
     agent === null
       ? undefined
-      : agentAllowedSql(authority.subject.appId, authority.onBehalfOf, agent)
+      : agentAllowedSql(authority.subject.appId, authority.onBehalfOf, agent),
+    requireGoing
   );
 };
 
@@ -194,14 +193,15 @@ export const appWorkflowStarts = (
   authority: Authority,
   agent: CallingAgent | null = null
 ): WorkflowStarts => ({
-  start: async (alias, input, key) =>
+  start: async (alias, input, key, requireGoing) =>
     handleOf(
       await startAsApp(
         env,
         authority,
         alias,
         { input, key: coreStartKey("action", key) },
-        agent
+        agent,
+        requireGoing
       )
     ),
   intent: (alias, input): Json => {
@@ -342,14 +342,9 @@ export const dispatchStartIntent = async (
       // Its hand-over may have run out as that was read.
       requireLive(entry.signal);
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await startAsApp(
-        env,
-        authority,
-        alias,
-        { input, key },
-        agent,
-        entry.signal
-      );
+      await startAsApp(env, authority, alias, { input, key }, agent, () => {
+        requireLive(entry.signal);
+      });
       return "delivered";
     } catch (error) {
       refusal = error;

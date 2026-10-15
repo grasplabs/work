@@ -1058,9 +1058,17 @@ export const startWorkflow = async (
   id: unknown,
   request: unknown,
   also?: SQL,
-  noted?: Readonly<Record<string, string>>
+  noted?: Readonly<Record<string, string>>,
+  /**
+   * Asked just before a new start is admitted, nothing awaited between:
+   * throws to start nothing (a caller that may no longer act).
+   */
+  beforeAdmit?: () => void
 ): Promise<WorkflowStart> => {
   const decision = await decideWorkflowStart(env, invoker, id, request);
+  if (!("start" in decision)) {
+    beforeAdmit?.();
+  }
   const start =
     "start" in decision
       ? decision.start
