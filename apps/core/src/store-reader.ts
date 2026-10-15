@@ -201,12 +201,15 @@ export class StoreReader {
  * reader it is handed) until its reads were one state of the store: at
  * most once and `queryMaxReruns` times again, each run with a reader of
  * its own; then `query.concurrent_change`, retryable. What a run returns
- * is answered only once its reads are known current.
+ * is answered only once its reads are known current. `observe`, if
+ * given, is told the read set of the run that stands, answered or failed:
+ * what a live query of it depends on (query-subscriptions.ts).
  */
 export const readConsistently = async <Answer>(
   store: OpenStore,
   scope: ReadScope,
-  operation: (reader: StoreReader) => Promise<Answer>
+  operation: (reader: StoreReader) => Promise<Answer>,
+  observe?: (readSet: Record<string, number>) => void
 ): Promise<Answer> => {
   for (let run = 0; run <= queryMaxReruns; run += 1) {
     const reader = new StoreReader(store, scope);
@@ -224,6 +227,7 @@ export const readConsistently = async <Answer>(
     // two reads, `unique` across an insert) is a stale run too.
     // oxlint-disable-next-line no-await-in-loop -- see above
     if (await reader.isCurrent()) {
+      observe?.(reader.readSet());
       if ("error" in answer) {
         throw answer.error;
       }

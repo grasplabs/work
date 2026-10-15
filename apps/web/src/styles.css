@@ -62,6 +62,10 @@
   }
 }
 
+@theme inline {
+  --color-brain-heat: var(--brain-heat);
+}
+
 /*
  * From the prototype (packages/grasp/src/index.css), the chat's own motion.
  */
@@ -433,6 +437,719 @@
   grid-template-rows: 0fr;
   opacity: 0;
   margin-bottom: calc(var(--spacing) * -6);
+}
+
+/*
+ * From the prototype (packages/grasp/src/index.css at ddd235d), the rest of its
+ * motion and surfaces: the document drop, workflow nodes and their wires and
+ * nerves, the agent's spark, threads, live marks, the canvas and the torn
+ * paper edge. Kept as the prototype has them, so ported components look
+ * the same.
+ */
+/* The document drop in the onboarding (components/onboarding/document-drop.tsx). While a file is
+   over it, a faint wash and a brighter stretch of the edge follow the pointer, at --drop-x and
+   --drop-y, set by the component; and the target breathes, slowly, while it waits. */
+@utility drop-wash {
+  background-image: radial-gradient(
+    260px circle at var(--drop-x, 50%) var(--drop-y, 50%),
+    color-mix(in oklch, var(--foreground) 5%, transparent),
+    transparent 70%
+  );
+}
+
+@utility drop-glow {
+  padding: 1.5px;
+  background-image: radial-gradient(
+    180px circle at var(--drop-x, 50%) var(--drop-y, 50%),
+    color-mix(in oklch, var(--foreground) 45%, transparent),
+    transparent 70%
+  );
+  /* Only the ring between the padding and the edge shows. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+}
+
+@utility drop-breathe {
+  animation: drop-breathe 2.2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes drop-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.012);
+  }
+}
+
+/* The workflow experiment's canvas (`components/workflow-inside/inside-canvas.tsx`). A step is a
+   small sheet lifted off the dotted ground: one soft shadow in the page's own ink and no hard
+   edge. `node-sheet-up` is the sheet a little higher, for the one pointed at; `node-sheet-open`
+   has ink around it, for the one whose panel is open; `node-sheet-live` has Grasp's warm light,
+   for the step it is working in. */
+@utility node-sheet {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent),
+    0 1px 2px -1px color-mix(in oklch, var(--foreground) 12%, transparent),
+    0 10px 22px -12px color-mix(in oklch, var(--foreground) 24%, transparent);
+}
+
+@utility node-sheet-up {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--foreground) 12%, transparent),
+    0 2px 4px -2px color-mix(in oklch, var(--foreground) 14%, transparent),
+    0 18px 32px -14px color-mix(in oklch, var(--foreground) 32%, transparent);
+}
+
+@utility node-sheet-open {
+  box-shadow:
+    0 0 0 1.5px var(--foreground),
+    0 18px 32px -14px color-mix(in oklch, var(--foreground) 32%, transparent);
+}
+
+@utility node-sheet-live {
+  box-shadow:
+    0 0 0 1.5px color-mix(in oklch, var(--brain-heat) 75%, transparent),
+    0 0 26px -4px color-mix(in oklch, var(--brain-heat) 40%, transparent),
+    0 14px 28px -14px color-mix(in oklch, var(--foreground) 28%, transparent);
+}
+
+/* An agent's step carries the brain's print: a field of dots in its top right corner that fades
+   into the sheet. A person's step is plain paper. */
+@utility node-print {
+  background-image: radial-gradient(
+    circle at center,
+    color-mix(in oklch, var(--foreground) 22%, transparent) 0.9px,
+    transparent 1.3px
+  );
+  background-size: 7px 7px;
+  background-position: top right;
+  mask-image: radial-gradient(115% 125% at 100% 0%, #000 0%, transparent 56%);
+}
+
+/* The agent's mark is a spark printed in dots. Its dots go out from the middle: once when its
+   step is pointed at (`agent-spark-once`), and on and on while the agent works (`agent-spark-live`). */
+@utility agent-spark {
+  & circle {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  & circle:nth-child(n + 2) {
+    animation-delay: 0.1s;
+  }
+  & circle:nth-child(n + 6) {
+    animation-delay: 0.2s;
+  }
+}
+
+@utility agent-spark-once {
+  & circle {
+    animation-name: agent-dot;
+    animation-duration: 0.7s;
+    animation-timing-function: ease-out;
+    animation-fill-mode: both;
+    @media (prefers-reduced-motion: reduce) {
+      animation-name: none;
+    }
+  }
+}
+
+@utility agent-spark-live {
+  & circle {
+    animation-name: agent-dot;
+    animation-duration: 1.3s;
+    animation-timing-function: ease-in-out;
+    animation-iteration-count: infinite;
+    @media (prefers-reduced-motion: reduce) {
+      animation-name: none;
+    }
+  }
+}
+
+@keyframes agent-dot {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  30% {
+    transform: scale(0.4);
+    opacity: 0.35;
+  }
+  62% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
+}
+
+/* Room at the foot of whatever scrolls up and down into the bottom right corner, where the chat
+   box floats over the page: what is last on a page can then always be moved clear of it. */
+@utility pb-chat {
+  padding-bottom: calc(var(--spacing) * 24);
+}
+
+/* The Integrations banner: a band of soft light in the palette's own greys, behind the brain and its nerves. */
+@utility banner-light {
+  background-image:
+    radial-gradient(
+      38% 120% at 50% 50%,
+      color-mix(in oklch, var(--card) 90%, transparent),
+      transparent 75%
+    ),
+    linear-gradient(110deg, var(--muted), var(--accent) 50%, var(--muted));
+}
+
+/* The lines of the experiment's chain. A drawing says how its lines are printed (`data-lines`)
+   and whether its workflow is live (`data-live`), and every line in it follows (`WireLine` in
+   `inside-flow.tsx`: `wire-base` is the line, `wire-grain` every third dot again a little larger,
+   `wire-pulse` and `wire-nerve` what travels along it). A line's length is handed over as
+   `--total`, for what is drawn along the whole of it.
+   - nerve: dots of two sizes, as a fibre of the brain is printed. A signal runs along the line
+     now and then, as one runs into the brain: it goes from dot to dot, and the dots it passes
+     swell and warm, the middle one most, and cool again behind it. On a workflow that is not
+     live it comes seldom (`nerve-rest`); while live, often.
+   - dots: round dots, running on while live.
+   - dashes: short dashes that march while live.
+   - pulse: a thin unbroken line; while live a green pulse travels along it.
+   - spark: still dots; while live one warm spark slides along them. */
+[data-ground] {
+  --wire: var(--muted-foreground);
+}
+
+[data-ground][data-live] {
+  --wire: var(--status-agreed);
+}
+
+[data-ground][data-live][data-lines="spark"],
+[data-ground][data-live][data-lines="nerve"] {
+  --wire: var(--muted-foreground);
+}
+
+.wire-base {
+  fill: none;
+  stroke: var(--wire);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 0.5 6;
+}
+
+.wire-grain,
+.wire-pulse,
+.wire-nerve {
+  display: none;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A line that is new grows from its start to its end: `wire-grow` is the mask that uncovers it,
+   `wire-tip` the warm point that runs at its tip. `--grow-wait` is how long it waits for its turn.
+   A line that is no longer there fades where it was (`wire-leave`). */
+.wire-grow {
+  fill: none;
+  stroke: white;
+  stroke-width: 18;
+  stroke-dasharray: var(--total, 2000px);
+  stroke-dashoffset: var(--total, 2000px);
+  animation: wire-grow 0.6s cubic-bezier(0.3, 0.7, 0.2, 1) var(--grow-wait, 0s)
+    forwards;
+}
+
+.wire-tip {
+  fill: none;
+  stroke: var(--brain-heat);
+  stroke-width: 4.5;
+  stroke-linecap: round;
+  stroke-dasharray: 0.01px calc(var(--total, 2000px) * 2);
+  opacity: 0;
+  animation: wire-tip 0.6s cubic-bezier(0.3, 0.7, 0.2, 1) var(--grow-wait, 0s)
+    both;
+}
+
+.wire-leave {
+  animation: wire-leave 0.2s ease-out forwards;
+}
+
+@keyframes wire-grow {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes wire-tip {
+  0% {
+    stroke-dashoffset: 0;
+    opacity: 0;
+  }
+  8%,
+  88% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: calc(var(--total, 2000px) * -1);
+    opacity: 0;
+  }
+}
+
+@keyframes wire-leave {
+  to {
+    opacity: 0;
+  }
+}
+
+.wire-hot .wire-base,
+.wire-hot .wire-grain {
+  stroke: var(--foreground);
+}
+
+/* A line a step can be added on: a wide print of it that nobody sees takes the pointer
+   (`wire-hit`), and while the pointer is on it the line is ink (`data-near`), so it is seen which
+   line the plus is for. */
+.wire-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 22;
+  /* Not at its two ends, where it would lie over the edges of the blocks it joins. */
+  stroke-dasharray: 0 14px calc(var(--total, 100px) - 28px) 14px;
+  pointer-events: stroke;
+}
+
+[data-near] > g > .wire-base,
+[data-near] > g > .wire-grain {
+  stroke: var(--foreground);
+}
+
+/* A run that plays on a drawing (`data-run`: a test run, or one real item). A line the item has
+   still to come along stands back (`wire-waiting`), one it does not come along is faint
+   (`wire-off`). A line it takes (`wire-reached`) fires once: a warm signal runs along it from dot
+   to dot, larger than the one a live workflow carries, and when it is through the line is ink
+   and goes on carrying a signal now and then, so the part the run is through is seen at work.
+   The item goes from one block into the next in `--arrive`; where that way is several lines each
+   has its share of that time (`--fire-from` to `--fire-to`), so the signal is seen to run the
+   whole way, one line after another, and lands as the block wakes. */
+[data-run] .wire-base,
+[data-run] .wire-grain {
+  transition:
+    stroke 0.18s,
+    opacity 0.3s;
+}
+
+.wire-waiting .wire-base,
+.wire-waiting .wire-grain {
+  opacity: 0.38;
+}
+
+.wire-off .wire-base,
+.wire-off .wire-grain {
+  opacity: 0.16;
+}
+
+[data-run] .wire-waiting .wire-nerve,
+[data-run] .wire-off .wire-nerve {
+  display: none;
+}
+
+.wire-reached {
+  --fire-from: 0;
+  --fire-to: 1;
+}
+
+.wire-reached .wire-base,
+.wire-reached .wire-grain {
+  stroke: var(--foreground);
+  transition-delay: calc(var(--arrive, 0.6s) * var(--fire-to));
+}
+
+[data-run] .wire-reached .wire-nerve {
+  display: inline;
+  stroke: var(--brain-heat);
+  /* Once, as the item comes along it; and from then on now and then, as on a workflow that is live: the part of the workflow the run is through is at work. */
+  animation:
+    nerve-fire calc(var(--arrive, 0.6s) * (var(--fire-to) - var(--fire-from)))
+      steps(var(--hops, 40)) calc(var(--arrive, 0.6s) * var(--fire-from)) 1 both,
+    nerve-run var(--time, 6s) steps(var(--steps, 170))
+      calc(var(--arrive, 0.6s) * var(--fire-to) + 0.5s) infinite;
+}
+
+.wire-reached .wire-nerve-a {
+  stroke-width: 5;
+}
+
+.wire-reached .wire-nerve-halo {
+  stroke-width: 14;
+  opacity: 0.22;
+}
+
+.wire-reached .wire-nerve-b {
+  stroke-width: 3.8;
+}
+
+.wire-reached .wire-nerve-c {
+  stroke-width: 2.8;
+}
+
+.wire-fire-hop {
+  --arrive: 0.28s;
+}
+
+.wire-fire-out {
+  --fire-to: 0.5;
+}
+
+.wire-fire-fan {
+  --fire-from: 0.5;
+  --fire-to: 0.62;
+}
+
+.wire-fire-in {
+  --fire-from: 0.62;
+  --fire-to: 0.78;
+}
+
+.wire-fire-lead {
+  --fire-from: 0.78;
+}
+
+.wire-fire-exit {
+  --fire-to: 0.22;
+}
+
+.wire-fire-join {
+  --fire-from: 0.22;
+  --fire-to: 0.34;
+}
+
+.wire-fire-back {
+  --fire-from: 0.34;
+  --fire-to: 0.72;
+}
+
+.wire-fire-on {
+  --fire-from: 0.72;
+}
+
+@keyframes nerve-fire {
+  from {
+    stroke-dashoffset: calc(26px + var(--shift));
+  }
+  to {
+    stroke-dashoffset: calc(-26px - var(--total, 400px) + var(--shift));
+  }
+}
+
+[data-live] .wire-base {
+  animation: thread-flow 0.7s linear infinite;
+}
+
+[data-lines="nerve"] .wire-base {
+  animation: none;
+}
+
+[data-lines="nerve"] .wire-grain {
+  display: inline;
+  stroke: var(--wire);
+  stroke-width: 2.5;
+  stroke-dasharray: 0.5 19;
+}
+
+[data-lines="nerve"] .wire-nerve {
+  display: inline;
+  stroke: var(--brain-heat);
+  animation: nerve-rest var(--time-rest, 18s) steps(var(--steps-rest, 500))
+    infinite;
+  animation-delay: var(--wait-rest, 0s);
+}
+
+[data-lines="nerve"][data-live] .wire-nerve {
+  animation: nerve-run var(--time, 6s) steps(var(--steps, 170)) infinite;
+  animation-delay: var(--wait, 0s);
+}
+
+/* The signal is five dots that stand on the line's own dots: the one in the middle largest with a
+   faint light round it, the two beside it smaller, the two at its ends smallest. Each is a line
+   of its own with one or two dots and nothing else, set off by where its dots stand (`--shift`). */
+.wire-nerve-a {
+  --shift: 0px;
+  stroke-width: 3.8;
+  stroke-dasharray: 0.5 99999;
+}
+
+.wire-nerve-halo {
+  --shift: 0px;
+  stroke-width: 9;
+  opacity: 0.16;
+  stroke-dasharray: 0.5 99999;
+}
+
+.wire-nerve-b {
+  --shift: 6.5px;
+  stroke-width: 2.9;
+  opacity: 0.85;
+  stroke-dasharray: 0.5 12.5 0.5 99999;
+}
+
+.wire-nerve-c {
+  --shift: 13px;
+  stroke-width: 2.1;
+  opacity: 0.55;
+  stroke-dasharray: 0.5 25.5 0.5 99999;
+}
+
+@keyframes nerve-run {
+  from {
+    stroke-dashoffset: calc(26px + var(--shift));
+  }
+  to {
+    stroke-dashoffset: calc(-26px - var(--len, 1100px) + var(--shift));
+  }
+}
+
+@keyframes nerve-rest {
+  from {
+    stroke-dashoffset: calc(26px + var(--shift));
+  }
+  to {
+    stroke-dashoffset: calc(-26px - var(--len-rest, 3300px) + var(--shift));
+  }
+}
+
+[data-lines="dashes"] .wire-base {
+  stroke-dasharray: 5 5;
+}
+
+[data-lines="dashes"][data-live] .wire-base {
+  animation: wire-march 0.6s linear infinite;
+}
+
+[data-lines="pulse"] .wire-base {
+  stroke-dasharray: none;
+  stroke-width: 1;
+  opacity: 0.45;
+  animation: none;
+}
+
+[data-lines="spark"] .wire-base {
+  animation: none;
+}
+
+[data-lines="pulse"][data-live] .wire-pulse {
+  display: inline;
+  stroke: var(--status-agreed);
+  stroke-width: 2;
+  stroke-dasharray: calc(var(--total, 100px) * 0.09)
+    calc(var(--total, 100px) * 0.91);
+  animation: wire-run 2.6s linear infinite;
+}
+
+[data-lines="spark"][data-live] .wire-pulse {
+  display: inline;
+  stroke: var(--brain-heat);
+  stroke-width: 2.5;
+  stroke-dasharray: calc(var(--total, 100px) * 0.025)
+    calc(var(--total, 100px) * 0.975);
+  filter: drop-shadow(0 0 3px var(--brain-heat));
+  animation: wire-run 2s linear infinite;
+}
+
+@keyframes wire-march {
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+@keyframes wire-run {
+  from {
+    stroke-dashoffset: var(--total, 100px);
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The line down between two blocks on a narrow canvas, where the chain stands top to bottom
+   (`thread-dots`), and the same dots for a line of any length: down (`dots-down`, the rail a
+   question's answers hang on) and across (`dots-across`, from that rail to an answer). */
+@utility thread-dots {
+  width: 2px;
+  height: 1rem;
+  color: var(--wire);
+  background-image: radial-gradient(
+    circle,
+    currentColor 0.8px,
+    transparent 1px
+  );
+  background-size: 2px 6.5px;
+  background-repeat: repeat-y;
+}
+
+@utility dots-down {
+  color: var(--wire);
+  background-image: radial-gradient(
+    circle,
+    currentColor 0.8px,
+    transparent 1px
+  );
+  background-size: 2px 6.5px;
+  background-repeat: repeat-y;
+}
+
+@utility dots-across {
+  color: var(--wire);
+  background-image: radial-gradient(
+    circle,
+    currentColor 0.8px,
+    transparent 1px
+  );
+  background-size: 6.5px 2px;
+  background-repeat: repeat-x;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wire-base {
+    animation: none !important;
+  }
+  .wire-pulse,
+  .wire-nerve,
+  .wire-tip {
+    display: none !important;
+  }
+}
+
+/* A live workflow in the experiment. `thread-live`: the dots of the line between two blocks run
+   on, in the green of what is live. `live-beat`: the mark of a step lights up green in its turn
+   (`--beat` is how long it waits), so the agent's block is seen to work down its steps, on and
+   on. `live-ring`: a ring goes out from a live mark, as a heartbeat. */
+@utility thread-live {
+  stroke: var(--status-agreed);
+  animation: thread-flow 0.7s linear infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes thread-flow {
+  to {
+    stroke-dashoffset: -6.5;
+  }
+}
+
+@utility live-beat {
+  animation: live-beat 3.6s ease-in-out infinite;
+  animation-delay: var(--beat, 0s);
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes live-beat {
+  0%,
+  26%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 transparent;
+  }
+  10% {
+    background-color: var(--status-agreed);
+    transform: scale(1.6);
+    box-shadow: 0 0 0 4px
+      color-mix(in oklab, var(--status-agreed) 35%, transparent);
+  }
+}
+
+@utility live-ring {
+  animation: live-ring 1.8s ease-out infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes live-ring {
+  0% {
+    box-shadow: 0 0 0 0
+      color-mix(in oklab, var(--status-agreed) 55%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+
+/* On the experiment's drawing, pointing at one card lets the others stand back a little, so it is
+   seen which one is in hand. */
+[data-ground] [data-card] {
+  transition: opacity 0.2s;
+}
+
+[data-ground]:has([data-card]:hover) [data-card]:not(:hover) {
+  opacity: 0.6;
+}
+
+/* The experiment's drawing at the size it is zoomed to: `--zoom` is 1 at its own size. */
+@utility canvas-zoom {
+  zoom: var(--zoom, 1);
+}
+
+/* The workflow canvas's ground, alive: a second print of the dot grid in ink, seen only in a soft
+   band that crosses the canvas now and then, as a signal crosses the brain. It lies exactly over
+   the builder's own dots (`DotGrid`), so a dot darkens in place. Nothing follows the pointer: dots
+   that darken under it crowd the card or the line it is on. */
+@utility canvas-alive {
+  --ink: color-mix(in oklab, var(--foreground) 42%, transparent);
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    var(--ink) 1px,
+    transparent 1.4px
+  );
+  background-size: 16px 16px;
+  mask-image: linear-gradient(
+    100deg,
+    transparent 42%,
+    rgb(0 0 0 / 0.5) 50%,
+    transparent 58%
+  );
+  mask-size: 300% 100%;
+  mask-repeat: no-repeat;
+  mask-position: 100% 0;
+  animation: canvas-sweep 10s linear infinite;
+
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
+@keyframes canvas-sweep {
+  0%,
+  35% {
+    mask-position: 100% 0;
+  }
+  100% {
+    mask-position: 0% 0;
+  }
+}
+
+/* An invoice as a sheet from a printer: its lower edge is torn off in small scallops. */
+@utility paper-torn {
+  --tear: 5px;
+  -webkit-mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--tear)) no-repeat,
+    radial-gradient(50% 100% at 50% 0, #000 96%, transparent) bottom /
+      calc(var(--tear) * 2) var(--tear) round;
+  mask:
+    linear-gradient(#000 0 0) top / 100% calc(100% - var(--tear)) no-repeat,
+    radial-gradient(50% 100% at 50% 0, #000 96%, transparent) bottom /
+      calc(var(--tear) * 2) var(--tear) round;
 }
 
 /*

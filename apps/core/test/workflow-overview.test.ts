@@ -1,5 +1,9 @@
 import type { Role } from "@grasp-os/shared/roles";
-import { failedRunDays, runsPageSize } from "@grasp-os/shared/workflows";
+import {
+  failedRunDays,
+  handledRunDays,
+  runsPageSize,
+} from "@grasp-os/shared/workflows";
 import type {
   ListedRun,
   OutlineNode,
@@ -10,9 +14,11 @@ import type {
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { release } from "./apps.ts";
+import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
+import { mailConnection } from "./mail-connection.ts";
 import { fullScan, recordedQueries } from "./query-plans.ts";
+import { sleeping } from "./runs.ts";
 import {
   auditedDuring,
   openRpc,
@@ -22,7 +28,7 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
-import { workflowFiles } from "./workflow-apps.ts";
+import { mailer, workflowFiles } from "./workflow-apps.ts";
 
 // The Workflows page: every workflow of every App a person can open, the
 // runs across them, and one workflow's view. What could go wrong: a
@@ -126,6 +132,15 @@ const appOf = async (
   return id;
 };
 
+/** The workflows `person` is told use `connection`, as App and workflow. */
+const workflowsUsing = async (
+  person: Person,
+  connection: string
+): Promise<string[][]> => {
+  const summaries = await person.api.workflows.ofConnection(connection);
+  return summaries.map(({ app, workflow }) => [app, workflow]);
+};
+
 /** Why `hidden`'s steps can't be listed, as the SDK's describer says. */
 const hiddenReason =
   "Line 4: Steps can sit in `if`/`else` and `for`/`for...of` loops only; move this step out of the construct around it";
@@ -146,6 +161,20 @@ const shown = (run: ListedRun) => ({
   decision: run.decision ?? null,
   failedAt: run.failure?.step ?? null,
 });
+
+/** A run's status, and the share it waits for while queued. */
+const queueOf = (run: { status: string; queued?: unknown }) => ({
+  status: run.status,
+  queued: run.queued ?? null,
+});
+
+/** What `queueOf` shows of each of `runs`, by run. */
+const byRun = (
+  runs: readonly { id: string; status: string; queued?: unknown }[]
+) =>
+  new Map<string, ReturnType<typeof queueOf>>(
+    runs.map((run) => [run.id, queueOf(run)])
+  );
 
 /**
  * The code an outline shows: conditions, loop heads, keys, parameters
@@ -250,7 +279,7 @@ const seedRun = async (
 const buildTime = { timeout: 60_000 };
 
 describe("the Workflows page", buildTime, () => {
-  it("lists every workflow of every App the person can open, with its latest run and its waiting and failed runs", async () => {
+  it("lists every workflow of every App the person can open, with its latest run, its waiting and failed runs and those it handled this week", async () => {
     const [owner, other, user, admin] = await Promise.all([
       personApi("builder"),
       personApi("builder"),
@@ -286,6 +315,20 @@ describe("the Workflows page", buildTime, () => {
       status: "failed",
       createdAt: now - (failedRunDays + 2) * day,
       endedAt: now - (failedRunDays + 1) * day,
+    });
+    // Completed this week, though started before it: handled.
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "completed",
+      createdAt: now - (handledRunDays + 1) * day,
+      endedAt: now - 2 * day,
+    });
+    // Completed before the week: not counted.
+    await seedRun(invoices, {
+      workflow: "approve",
+      status: "completed",
+      createdAt: now - (handledRunDays + 3) * day,
+      endedAt: now - (handledRunDays + 1) * day,
     });
     await seedRun(invoices, {
       workflow: "approve",
@@ -337,6 +380,7 @@ describe("the Workflows page", buildTime, () => {
         },
         waiting: 1,
         failed: 1,
+        handled: 2,
       },
       {
         ...owned,
@@ -348,8 +392,16 @@ describe("the Workflows page", buildTime, () => {
         },
         waiting: 1,
         failed: 0,
+        handled: 0,
       },
-      { ...owned, workflow: "remind", lastRun: null, waiting: 0, failed: 0 },
+      {
+        ...owned,
+        workflow: "remind",
+        lastRun: null,
+        waiting: 0,
+        failed: 0,
+        handled: 0,
+      },
     ];
     await expect(listed(owner)).resolves.toStrictEqual(invoiceWorkflows);
     await expect(listed(user)).resolves.toStrictEqual(invoiceWorkflows);
@@ -585,6 +637,176 @@ describe("the Workflows page", buildTime, () => {
       counted: 0,
       last: "running",
     });
+  });
+
+  it("shows a run waiting for a share as queued, with the share and when it asks again, wherever runs are listed, and nothing of who else waits", async () => {
+    const [owner, user] = await Promise.all([
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    const app = await appOf(owner, `Invoices ${unique()}`, {
+      ...approveFiles,
+      ...workflowFiles("remind", "  return 1;"),
+      ...workflowFiles(
+        "idle",
+        `  await step.sleep("idle", { description: "Wait", duration: "1 day" });
+  return 1;`
+      ),
+    });
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const now = Date.now();
+    const at = (minutes: number) => now - minutes * minute;
+    const retryAt = now + 30_000;
+    const seeded = {
+      // Its step asks for a share of its App's attempts: queued.
+      queued: await seedRun(app, {
+        workflow: "remind",
+        status: "running",
+        createdAt: at(1),
+      }),
+      // Its step stopped asking two minutes ago: its place lapsed.
+      lapsed: await seedRun(app, {
+        workflow: "remind",
+        status: "running",
+        createdAt: at(2),
+      }),
+      // Paused before its place lapses: it waits for no share.
+      paused: await seedRun(app, {
+        workflow: "remind",
+        status: "paused",
+        createdAt: at(3),
+      }),
+      // A decision someone may answer comes first.
+      deciding: await seedRun(app, {
+        workflow: "approve",
+        status: "running",
+        createdAt: at(4),
+        decision: "open",
+        deciders: `person:${owner.userId}`,
+      }),
+    };
+    // The run's engine sleeps between asks, as a step waiting for a share
+    // does: the engine calls it waiting, though no decision is open.
+    const sleeper = await owner.api.workflows.start(app, "idle");
+    await sleeping(sleeper.id, "idle");
+    const place = async (
+      run: string,
+      waitingFor: "client" | "person" | "app",
+      seenAt: number,
+      asksAt = retryAt
+    ) =>
+      await env.DB.prepare(
+        "INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)"
+      )
+        .bind(
+          run,
+          `step-${unique()}`,
+          owner.userId,
+          app,
+          seenAt,
+          seenAt,
+          waitingFor,
+          asksAt,
+          now + minute
+        )
+        .run();
+    await place(seeded.queued.id, "app", now);
+    await place(seeded.lapsed.id, "app", now - 2 * minute);
+    await place(seeded.paused.id, "app", now);
+    await place(seeded.deciding.id, "app", now);
+    await place(sleeper.id, "person", now);
+    // Another run waits for another share: each run shows its own, and
+    // only which share and when (`toStrictEqual` below), never who else
+    // waits, how many, or where in the queue. Two of its steps wait, for
+    // different shares: the one that asks again first supplies both the
+    // share and when, whichever took its place first.
+    const other = await seedRun(app, {
+      workflow: "remind",
+      status: "running",
+      createdAt: at(5),
+    });
+    await place(other.id, "person", now, retryAt + minute);
+    await place(other.id, "client", now);
+
+    const asked = async (person: Person) => {
+      const [page, appRuns, overview, status, screenRuns] = await Promise.all([
+        person.api.workflows.runs({ app }),
+        person.api.workflows.list(app),
+        person.api.workflows.overview(),
+        person.api.workflows.status(sleeper.id),
+        person.api.screens.runs(app, "remind"),
+      ]);
+      const byId = byRun(page.runs);
+      const listed = byRun(appRuns);
+      const onScreen = byRun(screenRuns);
+      const last = (workflow: string) => {
+        const found = overview.find(
+          (row) => row.app === app && row.workflow === workflow
+        )?.lastRun;
+        return found === undefined || found === null ? null : queueOf(found);
+      };
+      return {
+        runs: Object.fromEntries(
+          Object.entries(seeded).map(([name, { id }]) => [name, byId.get(id)])
+        ),
+        appRuns: {
+          queued: listed.get(seeded.queued.id),
+          lapsed: listed.get(seeded.lapsed.id),
+          paused: listed.get(seeded.paused.id),
+        },
+        other: byId.get(other.id),
+        onScreen: onScreen.get(seeded.queued.id),
+        lastRemind: last("remind"),
+        lastIdle: last("idle"),
+        status: queueOf(status),
+      };
+    };
+    const queuedFor = (waitingFor: string) => ({
+      status: "queued",
+      queued: { waitingFor, retryAt: new Date(retryAt).toISOString() },
+    });
+    const expected = {
+      runs: {
+        queued: queuedFor("app"),
+        lapsed: { status: "running", queued: null },
+        paused: { status: "paused", queued: null },
+        deciding: { status: "waiting", queued: null },
+      },
+      appRuns: {
+        queued: queuedFor("app"),
+        lapsed: { status: "running", queued: null },
+        paused: { status: "paused", queued: null },
+      },
+      other: queuedFor("client"),
+      onScreen: queuedFor("app"),
+      lastRemind: queuedFor("app"),
+      lastIdle: queuedFor("person"),
+      status: queuedFor("person"),
+    };
+    try {
+      // The App's owner and one of its users see the same: the share, and
+      // when it asks again, of each run on its own.
+      await expect(asked(owner)).resolves.toStrictEqual(expected);
+      await expect(asked(user)).resolves.toStrictEqual(expected);
+      // Queued runs are among those going on, never among the failed.
+      const [running, failed] = await Promise.all([
+        idsOf(owner.api.workflows.runs({ app, status: "running" })),
+        idsOf(owner.api.workflows.runs({ app, status: "failed" })),
+      ]);
+      expect(running).toContain(seeded.queued.id);
+      expect(failed).not.toContain(seeded.queued.id);
+    } finally {
+      await owner.api.workflows.cancel(sleeper.id);
+      await env.DB.prepare(
+        "DELETE FROM workflow_admission_queue WHERE resource = ?"
+      )
+        .bind(app)
+        .run();
+    }
   });
 
   it("returns a page of runs, and says when more matched", async () => {
@@ -861,5 +1083,46 @@ export default workflowTests(definition, [
     await expect(
       outcome(user.api.workflows.test(app, "approve"))
     ).resolves.toBe("role.forbidden");
+  });
+
+  it("lists the workflows that use a connection: those calling the binding of their App's active permission on it, of Apps the person can open", async () => {
+    const [owner, other, user] = await Promise.all([
+      personApi("builder"),
+      personApi("builder"),
+      personApi("user"),
+    ]);
+    const [mail, otherMail] = await Promise.all([
+      mailConnection(),
+      mailConnection(),
+    ]);
+    // Its mailer calls MAIL; its idle workflow calls nothing.
+    const invoices = await appOf(owner, `Invoices ${unique()}`, {
+      ...mailer(""),
+      ...workflowFiles("idle", "  return 1;"),
+    });
+    // A mailer too, but with no permission on the connection.
+    await appOf(other, `Payroll ${unique()}`, mailer(""));
+    const granted = await requestGranted(idp, owner, {
+      subject: { type: "app", appId: invoices },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["mail.send"],
+      binding: "MAIL",
+    });
+
+    await expect(
+      Promise.all([
+        workflowsUsing(owner, mail.id),
+        workflowsUsing(other, mail.id),
+        workflowsUsing(user, mail.id),
+        workflowsUsing(owner, otherMail.id),
+      ])
+    ).resolves.toStrictEqual([[[invoices, "mailer"]], [], [], []]);
+    await expect(outcome(owner.api.workflows.ofConnection(""))).resolves.toBe(
+      "workflow.invalid"
+    );
+
+    const admin = await personApi("admin");
+    await admin.api.permissions.revoke(granted);
+    await expect(workflowsUsing(owner, mail.id)).resolves.toStrictEqual([]);
   });
 });

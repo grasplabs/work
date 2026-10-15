@@ -14,7 +14,12 @@ import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
-import { appFunctionResponse, functionCallApp } from "./app-function-route.ts";
+import {
+  appFunctionRoute,
+  portableCallApp,
+  portableFunctionResponse,
+} from "./app-function-route.ts";
+import { appTokenResponse, tokenRequestApp } from "./app-token-route.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -151,6 +156,32 @@ const frameCodeResponse = async (
   return await packageArtifactResponse(env, request);
 };
 
+/**
+ * A call of an App's functions, from a screen's page or a portable host,
+ * or a portable host's token request; `undefined` for any other path.
+ */
+const appCallResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response | undefined> => {
+  // A screen's call of one of its App's functions, or of a streaming
+  // action's (`<path>/<app>/<stream | attach | cancel>`).
+  const screenCall = await appFunctionRoute(request, env, pathname, requestId);
+  if (screenCall !== undefined) {
+    return screenCall;
+  }
+  const portableApp = portableCallApp(pathname);
+  if (portableApp !== undefined) {
+    return await portableFunctionResponse(request, env, portableApp, requestId);
+  }
+  const tokenApp = tokenRequestApp(pathname);
+  return tokenApp === undefined
+    ? undefined
+    : await appTokenResponse(request, env, tokenApp, requestId);
+};
+
 /** Routes a request that has passed the router-secret check. */
 const route = async (
   request: Request,
@@ -203,9 +234,9 @@ const route = async (
   if (pathname === platformUpdatePath) {
     return await platformUpdateResponse(request, env, requestId);
   }
-  const functionApp = functionCallApp(pathname);
-  if (functionApp !== undefined) {
-    return await appFunctionResponse(request, env, functionApp, requestId);
+  const appCall = await appCallResponse(pathname, request, env, requestId);
+  if (appCall !== undefined) {
+    return appCall;
   }
   const original = originalPath.exec(pathname)?.groups?.id;
   if (original !== undefined) {

@@ -11,11 +11,8 @@ import {
   workspaceIdSchema,
 } from "./ids.ts";
 import type { PackageRegistryApi } from "./packages.ts";
-import {
-  permissionActionSchema,
-  permissionSubjectSchema,
-} from "./permissions.ts";
-import type { PermissionSubject, WorkContext } from "./permissions.ts";
+import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
+import type { CodeSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
@@ -469,7 +466,7 @@ export interface ActionDescription {
 export interface PendingAction {
   id: string;
   /** The App or agent that asked for it. */
-  subject: PermissionSubject;
+  subject: CodeSubject;
   /** For an App's code: the version that asked. */
   appVersion: number | null;
   /** Asked for with the person there, or by a workflow run. */
@@ -679,7 +676,7 @@ export type ResolutionChoice = z.infer<typeof resolutionChoiceSchema>;
 
 /** The call of unknown outcome: whose, where, and the key it was sent under. */
 export const unknownOutcomeKeySchema = z.strictObject({
-  subject: permissionSubjectSchema,
+  subject: codeSubjectSchema,
   connectionId: connectionIdSchema,
   action: permissionActionSchema,
   idempotencyKey: identifierSchema,

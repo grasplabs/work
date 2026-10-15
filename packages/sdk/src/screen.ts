@@ -1,4 +1,10 @@
 /**
+ * The legacy screen SDK, for Apps whose server is an `app/server.ts`
+ * class. An App of spec 8's layout uses `@grasp-os/sdk/react` instead:
+ * its queries, mutations and actions through the generated `#grasp`
+ * references. GRA-343 removes this module, with `callServer`, `live`,
+ * `useLive`, the string `useWorkflow`, `useRun` and `followRuns`.
+ *
  * What an App's screens use to reach their App's server, from inside their
  * sandboxed frame. A screen has no network: these calls go through the
  * page around it, to core, which checks the person's session and role on
@@ -195,8 +201,13 @@ export const useLive = <Value>(
 
 // The App's workflows
 
-/** Where a run is: running, waiting for a decision, paused, or ended. */
+/**
+ * Where a run is: queued for a share of the runs going at once (`queued`
+ * on the run says which), running, waiting for a decision, paused, or
+ * ended.
+ */
 export type RunStatus =
+  | "queued"
   | "running"
   | "waiting"
   | "paused"
@@ -245,6 +256,8 @@ export interface RunSummary {
   };
   error?: { code: string; message: string };
   waits: { kind: "decision"; name: string; expiresAt: number }[];
+  /** While it waits its turn to run a step: for whose share, and until when at the latest. */
+  queued?: { waitingFor: "client" | "person" | "app"; retryAt: number };
   control: {
     canPause: boolean;
     canResume: boolean;
@@ -278,6 +291,13 @@ export interface WorkflowRun {
   /** A person started it (and it acts for them), or a trigger did. */
   startedBy: { type: "person"; userId: string } | { type: "trigger" };
   status: RunStatus;
+  /**
+   * While it is `queued`: whose share of the runs going at once it waits
+   * for (its App's, its person's or the organization's), and when it tries
+   * again at the latest (ISO 8601). Throttling, not a fault; it goes on by
+   * itself.
+   */
+  queued?: { waitingFor: "client" | "person" | "app"; retryAt: string };
   /** ISO 8601. */
   createdAt: string;
   endedAt: string | null;
@@ -305,7 +325,8 @@ export interface WorkflowRun {
 
 /**
  * A run as a screen sees it: `waiting` while a decision of it is open, with
- * the decisions it waits for (none once it has ended).
+ * the decisions it waits for (none once it has ended), and otherwise
+ * `queued` while it waits for a share of the runs going at once.
  */
 export interface ScreenRun extends WorkflowRun {
   waitingFor: WaitingDecision[];

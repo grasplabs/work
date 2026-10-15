@@ -16,6 +16,14 @@ describe("quota policy", () => {
         workflowAgeMs: 365 * 24 * 60 * 60 * 1000,
         lineageModelRequests: 100,
         lineageHostCalls: 10_000,
+        workflowResourcesPerPerson: 200,
+        workflowClientAttempts: 32,
+        workflowPersonAttempts: 8,
+        workflowAppAttempts: 8,
+        workflowQueuedPerPerson: 64,
+        workflowQueuedPerApp: 64,
+        workflowQueuedStepMs: 24 * 60 * 60 * 1000,
+        triggerResourcesPerPerson: 100,
       },
     });
   });

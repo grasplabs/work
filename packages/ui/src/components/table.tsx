@@ -1,3 +1,4 @@
+import { watchEnds } from "@grasp-os/ui/lib/row-ends";
 import { cn } from "@grasp-os/ui/lib/utils";
 import * as React from "react";
 
@@ -5,7 +6,8 @@ function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
     <div
       data-slot="table-container"
-      className="relative w-full overflow-x-auto"
+      ref={watchEnds}
+      className="relative w-full overflow-x-auto data-more-end:mask-r-from-[calc(100%-2.5rem)] data-more-start:mask-l-from-[calc(100%-2.5rem)]"
     >
       <table
         data-slot="table"
