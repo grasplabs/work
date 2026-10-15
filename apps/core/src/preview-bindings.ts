@@ -243,7 +243,10 @@ const previewStubOf = ({
     case "app": {
       return exports.PreviewExports({});
     }
-    case "workflow": {
+    // A store permission serves an App of spec 8's layout through its
+    // resource bindings (resource-store.ts), never as a binding in env.
+    case "workflow":
+    case "store": {
       return undefined;
     }
     case "platform": {

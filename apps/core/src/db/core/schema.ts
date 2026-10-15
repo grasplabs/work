@@ -330,7 +330,14 @@ export const permissions = sqliteTable(
     }).notNull(),
     subjectId: text("subject_id").notNull(),
     objectType: text("object_type", {
-      enum: ["connection", "collection", "workflow", "app", "platform"],
+      enum: [
+        "connection",
+        "collection",
+        "workflow",
+        "app",
+        "store",
+        "platform",
+      ],
     }).notNull(),
     objectId: text("object_id").notNull(),
     resource: text(),
@@ -917,7 +924,7 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["model", "connector", "knowledge", "template"],
+      enum: ["model", "connector", "knowledge", "template", "store"],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),

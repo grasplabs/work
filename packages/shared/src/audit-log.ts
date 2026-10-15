@@ -162,6 +162,11 @@ const typeRules: readonly {
   // the version its binding pins, and an admin publishing a version.
   { action: "resource.template.read", type: "read" },
   { action: "resource.template", type: "config" },
+  // A business store's public operations called by another App or a
+  // workflow (core's src/store-operations.ts): each mutation it calls,
+  // and each call refused.
+  { action: "store.operation.called", type: "action" },
+  { action: "store.operation.refused", type: "permission" },
   // Guest chats (core's src/guests.ts): an App inviting someone, revoking
   // the link, and reading back what they wrote; the guest opening the
   // chat, sending a message and finishing it.

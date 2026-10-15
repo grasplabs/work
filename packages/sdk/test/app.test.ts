@@ -101,6 +101,10 @@ const connectorOf = (contract: string) =>
     actions: ["send"],
   });
 
+/** A store declaration of `operations`, read back as the host reads a manifest's. */
+const declare = (operations: unknown) => () =>
+  readResourceDeclaration({ "~resource": "store", alias: "crm", operations });
+
 const refusal = (register: () => unknown): string => {
   try {
     register();
@@ -272,6 +276,49 @@ describe("resources", () => {
       connector.actions,
       model.structuredOutput?.kind,
     ]).toStrictEqual([["search"], ["send"], "object"]);
+  });
+
+  test("a store declaration reads back as code declared it, and calls only a store's queries and mutations", () => {
+    const store = resource.store("crm", {
+      operations: {
+        "contacts.list": {
+          kind: "query",
+          args: { limit: v.number().optional() },
+          returns: v.array(v.string()),
+        },
+        "contacts.add": {
+          kind: "mutation",
+          args: { name: v.string() },
+          returns: v.null(),
+        },
+      },
+    });
+    // As a manifest holds it: data, read back through the same checks.
+    const read = readResourceDeclaration(structuredClone(store));
+    const shape = {
+      kind: "query",
+      args: store.operations["contacts.list"]?.args,
+      returns: store.operations["contacts.list"]?.returns,
+    };
+    expect({
+      read: JSON.stringify(read) === JSON.stringify(store),
+      frozen: Reflect.set(store.operations, "contacts.remove", shape),
+    }).toStrictEqual({ read: true, frozen: false });
+    expect(
+      [
+        refusal(declare({ "contacts.ping": { ...shape, kind: "action" } })),
+        refusal(declare({ "contacts..list": shape })),
+        refusal(declare({ "a.b.c.d.e": shape })),
+        refusal(declare({})),
+        refusal(
+          declare({ "contacts.list": { ...shape, args: shape.returns } })
+        ),
+        refusal(declare({ "contacts.list": { ...shape, extra: true } })),
+      ].map((message) => message.length > 0)
+    ).toStrictEqual([true, true, true, true, true, true]);
+    expect(
+      refusal(declare({ "contacts.ping": { ...shape, kind: "action" } }))
+    ).toContain("never its actions");
   });
 });
 

@@ -18,6 +18,7 @@ import {
   workspaceIdSchema,
 } from "./ids.ts";
 import type { AppId, PermissionId } from "./ids.ts";
+import { storeOperationPathPattern } from "./operation-limits.ts";
 
 // Apps and agents start with nothing. Each thing they may use is one
 // permission: a person asks for it, an admin grants it (their own request
@@ -97,8 +98,10 @@ const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
  * resource in it, such as one mailbox), a Knowledge collection, an
  * independent workflow (to follow its runs, `read`, or start it,
  * `start`), another App's exports: the methods of its server
- * code it lets other Apps call (`appExportsPath`), or the platform's own
- * statistics.
+ * code it lets other Apps call (`appExportsPath`), a business store's
+ * public operations (the public queries and mutations of the App that owns
+ * it, each action one of them by its path: core's store-operations.ts), or
+ * the platform's own statistics.
  */
 export const permissionObjectSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -115,6 +118,10 @@ export const permissionObjectSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("app"),
     appId: appIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("store"),
+    storeId: storeIdSchema,
   }),
   platformObjectSchema,
 ]);
@@ -154,6 +161,10 @@ const isActionOf = (type: PermissionObjectType, action: string): boolean => {
   // `write`, or one by its name, whichever it is marked.
   if (type === "app") {
     return action === "read" || action === "write" || isExportName(action);
+  }
+  // A store's public operations, each by its path, e.g. `notes.list`.
+  if (type === "store") {
+    return storeOperationPathPattern.test(action);
   }
   const actions: readonly string[] = platformActions[type];
   return actions.includes(action);

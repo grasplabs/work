@@ -1117,6 +1117,13 @@ export interface ResourceContext {
    * effect, and never one App code chose.
    */
   readonly idempotencyKey: string;
+  /**
+   * On-prem, the sandbox session, by its call ID, the caller's function
+   * runs in: a call the adapter makes of another App's function runs in a
+   * child of it (a shared store's operation, resource-store.ts), never
+   * waiting for a process the caller holds while it waits.
+   */
+  readonly session?: string;
 }
 
 /**
@@ -1185,6 +1192,25 @@ const knowledgeDocumentSchema = z.strictObject({
 });
 
 /**
+ * Whether `method` with `args` is a `call` of one name `declares`, with an
+ * object of arguments: a connector's action, a store's operation.
+ */
+const isNamedCall = (
+  method: unknown,
+  args: readonly Json[],
+  declares: (name: string) => boolean
+): boolean => {
+  const [name, callArgs] = args;
+  return (
+    method === "call" &&
+    args.length === 2 &&
+    typeof name === "string" &&
+    declares(name) &&
+    isJsonObject(callArgs)
+  );
+};
+
+/**
  * The request `method` with `args` makes of `declaration`, if the
  * declaration allows it: a connector one of its declared actions with an
  * object of arguments, knowledge one of its declared operations, a model
@@ -1195,16 +1221,12 @@ const allowedRequest = (
   method: unknown,
   args: readonly Json[]
 ): void => {
-  const [first, second] = args;
+  const [first] = args;
   const kind = declaration["~resource"];
   let allowed: boolean;
   if (declaration["~resource"] === "connector") {
-    allowed =
-      method === "call" &&
-      args.length === 2 &&
-      typeof first === "string" &&
-      declaration.actions.includes(first) &&
-      isJsonObject(second);
+    const { actions } = declaration;
+    allowed = isNamedCall(method, args, (name) => actions.includes(name));
   } else if (declaration["~resource"] === "knowledge") {
     const schema =
       method === "search" || method === "read"
@@ -1224,12 +1246,28 @@ const allowedRequest = (
       method === "generate" &&
       args.length === 1 &&
       modelRequestSchema.safeParse(first).success;
+  } else if (declaration["~resource"] === "store") {
+    const { operations } = declaration;
+    allowed = isNamedCall(method, args, (path) =>
+      Object.hasOwn(operations, path)
+    );
   } else {
     allowed = method === "read" && args.length === 0;
   }
   if (!allowed) {
     throw notAllowed();
   }
+};
+
+/** Whether `result` fits `descriptor` and is already in its normalized form. */
+const isNormalized = (descriptor: unknown, result: Json): boolean => {
+  const checked = schemaOfDescriptor(descriptor)["~standard"].validate(result);
+  const normalized =
+    checked.issues === undefined ? jsonOf(checked.value) : undefined;
+  return (
+    normalized !== undefined &&
+    canonicalJson(normalized) === canonicalJson(result)
+  );
 };
 
 /**
@@ -1242,22 +1280,25 @@ const allowedRequest = (
 const checkedResourceResult = (
   declaration: AnyResource,
   method: string,
+  args: readonly Json[],
   result: Json
 ): Json => {
   let valid: boolean;
   if (declaration["~resource"] === "model") {
     const { structuredOutput } = declaration;
-    if (structuredOutput === null) {
-      valid = typeof result === "string";
-    } else {
-      const checked =
-        schemaOfDescriptor(structuredOutput)["~standard"].validate(result);
-      const normalized =
-        checked.issues === undefined ? jsonOf(checked.value) : undefined;
-      valid =
-        normalized !== undefined &&
-        canonicalJson(normalized) === canonicalJson(result);
-    }
+    valid =
+      structuredOutput === null
+        ? typeof result === "string"
+        : isNormalized(structuredOutput, result);
+  } else if (declaration["~resource"] === "store") {
+    // The declared operation's return, already normalized, as the store's
+    // own contract answered it (`allowedRequest` found the path).
+    const [path] = args;
+    const shape =
+      typeof path === "string" && Object.hasOwn(declaration.operations, path)
+        ? declaration.operations[path]
+        : undefined;
+    valid = shape !== undefined && isNormalized(shape.returns, result);
   } else if (declaration["~resource"] === "knowledge") {
     valid = (
       method === "search" ? knowledgeHitsSchema : knowledgeDocumentSchema
@@ -1295,6 +1336,11 @@ const busyDetailsSchema = z.object({
   retryAfterSeconds: z.int().positive().max(3600),
 });
 
+/** What a shared store operation's failure tells App code: the store's code. */
+const storeFailureSchema = z.object({
+  code: z.string().min(1).max(200),
+});
+
 /** What a busy budget's refusal tells App code: when to ask again, if known. */
 const busyDetails = (
   details: unknown
@@ -1308,6 +1354,23 @@ const exhaustedDetailsSchema = z.object({
     .positive()
     .max(31 * 24 * 60 * 60),
 });
+
+/** What a binding's adapter may refuse a request with, in the host's words. */
+const adapterRefusals = [
+  "resource.unavailable",
+  "resource.not_allowed",
+  "resource.awaiting_confirmation",
+  "resource.item_not_found",
+  "resource.invalid_args",
+  "resource.declined",
+  "resource.idempotency_conflict",
+  "contract.invalid_resource_result",
+] as const;
+
+const isAdapterRefusal = (
+  code: string | undefined
+): code is (typeof adapterRefusals)[number] =>
+  adapterRefusals.some((refusal) => refusal === code);
 
 const providerFailure = (error: unknown, requestId: string): Error => {
   const code = isExpectedError(error) ? error.code : undefined;
@@ -1324,17 +1387,22 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   }
   // What a binding's adapter, core's own code, says of a request it
   // refused or couldn't complete, each in the operation host's own words.
-  if (
-    code === "resource.unavailable" ||
-    code === "resource.not_allowed" ||
-    code === "resource.awaiting_confirmation" ||
-    code === "resource.item_not_found" ||
-    code === "resource.invalid_args" ||
-    code === "resource.declined" ||
-    code === "resource.idempotency_conflict" ||
-    code === "contract.invalid_resource_result"
-  ) {
+  if (isAdapterRefusal(code)) {
     return hostError(operationErrors.create(code));
+  }
+  // A shared store operation's own answer (store-operations.ts), or its
+  // failing for now, worth trying again: its code alone, which its
+  // contract gives every caller.
+  if (code === "resource.operation_failed" || code === "resource.busy") {
+    const details = storeFailureSchema.safeParse(
+      isExpectedError(error) ? error.details : undefined
+    );
+    return hostError(
+      operationErrors.create(
+        code,
+        details.success ? { code: details.data.code } : undefined
+      )
+    );
   }
   // A budget busy with requests under way, a full share of the requests in
   // flight, a provider's rate: worth trying again, after the wait the
@@ -1457,6 +1525,7 @@ const resourceCall = async (
       requestId: run.invocation.requestId,
       deadline: run.invocation.deadline,
       idempotencyKey: key.join(":"),
+      ...(run.call.session === undefined ? {} : { session: run.call.session }),
     });
   } catch (error) {
     throw providerFailure(error, run.invocation.requestId);
@@ -1465,7 +1534,7 @@ const resourceCall = async (
   if (result === undefined || bytesOf(result) > resourceResultMaxBytes) {
     throw operationErrors.create("contract.invalid_resource_result");
   }
-  return checkedResourceResult(declaration, method, result);
+  return checkedResourceResult(declaration, method, args, result);
 };
 
 /** What one run of a function may still read: its reads, and staged bytes sent. */

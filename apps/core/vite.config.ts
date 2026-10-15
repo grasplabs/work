@@ -84,6 +84,7 @@ export const screenTests = [
   "test/portable-client.test.ts",
   "test/resource-bindings.test.ts",
   "test/resource-connectors.test.ts",
+  "test/store-operations.test.ts",
   "test/run-functions.test.ts",
   "test/agent-apps.test.ts",
   "test/agent-app-functions.test.ts",

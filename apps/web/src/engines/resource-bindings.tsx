@@ -93,6 +93,7 @@ const kindLabels: Readonly<
   connector: msg`Integration`,
   knowledge: msg`Knowledge`,
   template: msg`Template`,
+  store: msg`Store`,
 };
 
 const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
@@ -192,6 +193,10 @@ const BoundTo = ({
       <TemplateName templateId={target.templateId} version={target.version} />
     );
   }
+  if (target.kind === "store") {
+    const { permissionId: permission } = target;
+    return <Trans>Permission {permission}</Trans>;
+  }
   if (target.kind === "connector") {
     // Core names the bound connection for everyone who reads the review,
     // while they can see it; its permission otherwise.
@@ -287,6 +292,12 @@ const NothingToChoose = ({
     ),
     template: (
       <Trans>Nothing is published for {contract} yet. Publish it first.</Trans>
+    ),
+    store: (
+      <Trans>
+        None of the domain&apos;s store permissions serves every operation it
+        declares, exactly as declared. Grant one first.
+      </Trans>
     ),
   };
   return (
@@ -517,6 +528,15 @@ const BindForm = ({
               {/* An option holds text only: the name, as text. */}
               {connections.find(({ id }) => id === connectionId)?.accountName ??
                 t`Connection ${connectionId}`}
+            </NativeSelectOption>
+          ))}
+        </Choice>
+      ) : null}
+      {choices.kind === "store" ? (
+        <Choice label={t`Store`} onChange={setPicked} value={picked}>
+          {choices.permissions.map(({ permissionId, storeId: store }) => (
+            <NativeSelectOption key={permissionId} value={permissionId}>
+              {t`Store ${store}`}
             </NativeSelectOption>
           ))}
         </Choice>

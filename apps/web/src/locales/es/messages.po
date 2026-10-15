@@ -3850,6 +3850,10 @@ msgstr "ninguna ahora"
 msgid "None of the domain's integration permissions serves {contract} with every action it declares. Grant one first."
 msgstr "Ninguno de los permisos de integración del dominio sirve {contract} con todas las acciones que declara. Concede uno primero."
 
+#: src/engines/resource-bindings.tsx
+msgid "None of the domain's store permissions serves every operation it declares, exactly as declared. Grant one first."
+msgstr "Ningún permiso de almacén del dominio sirve cada operación que declara, exactamente como se declara. Concede uno primero."
+
 #: src/dashboard/dependency-requests.tsx
 msgid "None stated"
 msgstr "No indicada"
@@ -5507,7 +5511,12 @@ msgstr "Dejó de seguir lo que cambia en una conexión"
 msgid "Stopped."
 msgstr "Detenido."
 
+#: src/engines/resource-bindings.tsx
+msgid "Store"
+msgstr "Almacén"
+
 #: src/activity/pending.tsx
+#: src/engines/resource-bindings.tsx
 msgid "Store {store}"
 msgstr "Almacén {store}"
 
