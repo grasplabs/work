@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  brainCloud,
   CORE,
   dotShape,
   HEAD_EAR,
@@ -299,5 +300,76 @@ describe("the brain in the middle of its nerves", () => {
       [0, 1, 2, 3, 4].filter((group) => seen(spokes, group) === 0)
     ).toStrictEqual([]);
     expect(seen(spokes, CORE)).toBeGreaterThan(0);
+  });
+});
+
+describe("the atlas brain", () => {
+  it("covers the whole atlas brain with dots, every region in it, on both halves", () => {
+    const cloud = brainCloud();
+    expect(cloud.count).toBeGreaterThan(4000);
+    const count = (region: number, side: number) => {
+      let found = 0;
+      for (let index = 0; index < cloud.count; index += 1) {
+        if (
+          cloud.region[index] === region &&
+          Math.sign(at(cloud.x, index)) === side
+        ) {
+          found += 1;
+        }
+      }
+      return found;
+    };
+    // The four lobes on both halves; the cerebellum and the stem in the middle, so on either side of it.
+    for (let region = 0; region < 4; region += 1) {
+      for (const side of [-1, 1]) {
+        expect(count(region, side)).toBeGreaterThan(cloud.count * 0.02);
+      }
+    }
+    for (const region of [4, 5]) {
+      expect(count(region, -1) + count(region, 1)).toBeGreaterThan(
+        cloud.count * 0.01
+      );
+    }
+    // Normals point out: away from the middle, on the whole.
+    let outward = 0;
+    for (let index = 0; index < cloud.body; index += 1) {
+      if (
+        at(cloud.x, index) * at(cloud.nx, index) +
+          at(cloud.y, index) * at(cloud.ny, index) +
+          at(cloud.z, index) * at(cloud.nz, index) >
+        0
+      ) {
+        outward += 1;
+      }
+    }
+    expect(outward / cloud.body).toBeGreaterThan(0.8);
+  });
+
+  it("runs the stem on into a spine, far below the brain, as part of the stem’s region", () => {
+    const cloud = brainCloud();
+    const spine = Array.from(
+      { length: cloud.count - cloud.body },
+      (_, index) => cloud.body + index
+    );
+    expect(spine.length).toBeGreaterThan(1000);
+    expect(spine.every((index) => cloud.region[index] === 5)).toBeTruthy();
+    // It starts where the stem ends and leaves the bottom of any view.
+    const heights = spine.map((index) => at(cloud.y, index));
+    expect(Math.max(...heights)).toBeGreaterThan(-1.15);
+    expect(Math.min(...heights)).toBeLessThan(-3);
+    // Around its own line, its normals point away from it.
+    const outward = spine.filter(
+      (index) => at(cloud.x, index) * at(cloud.nx, index) > -0.02
+    ).length;
+    expect(outward / spine.length).toBeGreaterThan(0.95);
+  });
+
+  it("keeps the brain itself where it was: nothing of it lower than the stem's end", () => {
+    const cloud = brainCloud();
+    let lowest = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < cloud.body; index += 1) {
+      lowest = Math.min(lowest, at(cloud.y, index));
+    }
+    expect(lowest).toBeGreaterThan(-1.15);
   });
 });
