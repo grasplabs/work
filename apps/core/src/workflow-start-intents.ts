@@ -183,6 +183,37 @@ const startAsApp = async (
 };
 
 /**
+ * How many times a start that a decision gone stale refused is decided
+ * again, before the refusal is taken as the answer: an action's start at
+ * once, a commit's as it is dispatched.
+ */
+const decisions = 3;
+
+/**
+ * `startAsApp`, decided again while a decision gone stale refuses it (an
+ * edit or a member landing between its decision and its admission), up
+ * to `decisions` times: a fresh decision's refusal is the answer.
+ */
+const startDecided = async (
+  ...args: Parameters<typeof startAsApp>
+): Promise<WorkflowStart> => {
+  let refusal: unknown;
+  for (let decision = 1; decision <= decisions; decision += 1) {
+    try {
+      // One decision after the other: each only once the last went stale.
+      // oxlint-disable-next-line no-await-in-loop -- see above
+      return await startAsApp(...args);
+    } catch (error) {
+      refusal = error;
+      if (!isStaleRefusal(error)) {
+        break;
+      }
+    }
+  }
+  throw refusal;
+};
+
+/**
  * How core starts the workflows App code binds, for an invocation acting
  * as `authority` (the App, its version, the person), made by `agent`'s
  * call when an agent made it: each through the App's binding of the
@@ -195,7 +226,7 @@ export const appWorkflowStarts = (
 ): WorkflowStarts => ({
   start: async (alias, input, key, requireGoing) =>
     handleOf(
-      await startAsApp(
+      await startDecided(
         env,
         authority,
         alias,
@@ -234,12 +265,6 @@ export const appWorkflowStarts = (
 
 /** Settled as never deliverable, for `code`. */
 const undeliverable = (code: string) => ({ undeliverable: code });
-
-/**
- * How many times a dispatch decides a start that a decision gone stale
- * refused, before it takes the refusal as the answer.
- */
-const decisions = 3;
 
 /**
  * Refuses (`workflow.start_denied`) a start an agent's call staged, once

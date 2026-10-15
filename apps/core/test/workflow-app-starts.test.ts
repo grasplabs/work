@@ -1722,6 +1722,71 @@ describe("what a start rechecks, and records", () => {
     }).toStrictEqual({ refused: true, receipts: 0 });
   });
 
+  it("decides an action's start again when a parameter edit lands as it is decided, and starts it", async () => {
+    const fx = await fixture();
+    const real = env.DB;
+    const raced = { done: false };
+    // The edit lands just before the decision's last read of what it was
+    // decided on.
+    const deciding = /config_revision[\s\S]*as holds/iu;
+    const db: D1Database = {
+      prepare: (statement) => {
+        const prepared = real.prepare(statement);
+        if (raced.done || !deciding.test(statement)) {
+          return prepared;
+        }
+        raced.done = true;
+        return new Proxy(prepared, {
+          get: (target, property) => {
+            const value: unknown = Reflect.get(target, property);
+            if (property !== "bind" || typeof value !== "function") {
+              return typeof value === "function"
+                ? (...rest: unknown[]): unknown =>
+                    Reflect.apply(value, target, rest)
+                : value;
+            }
+            return (...values: unknown[]) => {
+              const bound = target.bind(...values);
+              return new Proxy(bound, {
+                get: (inner, method) => {
+                  const run: unknown = Reflect.get(inner, method);
+                  if (typeof run !== "function") {
+                    return run;
+                  }
+                  return async (...rest: unknown[]): Promise<unknown> => {
+                    await setWorkflowParams(env, fx.ada, fx.workflowId, {
+                      expectedRevision: 0,
+                      values: { greeting: "Hi" },
+                    });
+                    const read: unknown = await Reflect.apply(run, inner, rest);
+                    return read;
+                  };
+                },
+              });
+            };
+          },
+        });
+      },
+      batch: async (statements) => await real.batch(statements),
+      exec: async (statement) => await real.exec(statement),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    const started = await call(
+      fx,
+      fx.bob,
+      "requests.kickOff",
+      { who: "Bob" },
+      { runEnv: { ...env, DB: db } }
+    );
+    expect({
+      raced: raced.done,
+      started: started.ok,
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({ raced: true, started: true, receipts: 1 });
+  });
+
   it("tells an action its start stopped at its deadline as it was decided, never an unexpected failure", async () => {
     const fx = await fixture();
     const restores: (() => void)[] = [];
