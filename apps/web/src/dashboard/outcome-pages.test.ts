@@ -1,7 +1,11 @@
-import { unknownOutcomeListLimit } from "@grasp-os/shared/connect";
+import {
+  unknownOutcomeListLimit,
+  connectErrors,
+} from "@grasp-os/shared/connect";
 import { describe, expect, it } from "vite-plus/test";
 
-import { everyPage } from "./outcome-pages.ts";
+import type { Session } from "../core.ts";
+import { everyPage, loadEveryPage } from "./outcome-pages.ts";
 
 // Reading every page of a list of calls of unknown outcome (outcome-pages.ts):
 // none past a full page goes unlisted, none is listed twice, and a list
@@ -44,6 +48,38 @@ describe("every page of calls of unknown outcome", () => {
       morePages: 3,
       exact: unknownOutcomeListLimit,
       exactPages: [undefined, exact.all.at(-1)?.cursor],
+    });
+  });
+
+  it("loads each page on its own, and asks for none after one that fails", async () => {
+    const pages = listOf(unknownOutcomeListLimit * 3);
+    // SAFETY: the session is only handed on, never used here.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const session = {} as Session;
+    const core = {
+      withSession: async <T>(read: (session: Session) => Promise<T>) =>
+        await read(session),
+    };
+    let reads = 0;
+    const loaded = await loadEveryPage(core, async (_session, before) => {
+      reads += 1;
+      if (reads === 2) {
+        throw connectErrors.create("connect.invalid");
+      }
+      return await pages.read(before);
+    });
+    const all = await loadEveryPage(
+      core,
+      async (_session, before) => await pages.read(before)
+    );
+    expect({
+      loaded: loaded.state,
+      reads,
+      all: all.state === "ready" ? all.data.length : all.state,
+    }).toStrictEqual({
+      loaded: "refused",
+      reads: 2,
+      all: unknownOutcomeListLimit * 3,
     });
   });
 });

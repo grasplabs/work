@@ -46,13 +46,18 @@ const readCount = async (
         return held.length;
       })
     ),
+    // Each page within its own few seconds (`readWithin`).
     countOf(
-      readWithin(core, async (session) => {
+      (async () => {
         const lost = await everyPage(
-          async (before) => await session.unknownOutcomes.list(before)
+          async (before) =>
+            await readWithin(
+              core,
+              async (session) => await session.unknownOutcomes.list(before)
+            )
         );
         return lost.length;
-      })
+      })()
     ),
     countOf(
       readWithin(core, async (session) => {

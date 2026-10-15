@@ -11,11 +11,12 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { everyPage } from "../dashboard/outcome-pages.ts";
+import { loadEveryPage } from "../dashboard/outcome-pages.ts";
 import { readPeople } from "../directory.ts";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import {
   SettingsError,
   SettingsLoading,
@@ -139,14 +140,24 @@ export const Route = createFileRoute("/_shell/settings/outcomes")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: UnknownOutcomes,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(core, async (session): Promise<Outcomes> => {
-      const [listed, people] = await Promise.all([
-        everyPage(
-          async (before) => await session.unknownOutcomes.listAll(before)
-        ),
-        readPeople(session),
-      ]);
-      return { listed, people };
-    }),
+  loader: async ({ context: { core } }): Promise<Loaded<Outcomes>> => {
+    // Each page of the listing within its own few seconds.
+    const [listed, people] = await Promise.all([
+      loadEveryPage(
+        core,
+        async (session, before) => await session.unknownOutcomes.listAll(before)
+      ),
+      loadFromCore(core, readPeople),
+    ]);
+    if (listed.state !== "ready") {
+      return listed;
+    }
+    if (people.state !== "ready") {
+      return people;
+    }
+    return {
+      state: "ready",
+      data: { listed: listed.data, people: people.data },
+    };
+  },
 });
