@@ -543,6 +543,11 @@ export const callStoreOperation = async (
       resourceId: consumer.subject.id,
       resourceVersion: consumer.version,
     },
+    // Each commit names the consumer, kept by the store for good.
+    writer: {
+      resourceId: consumer.subject.id,
+      resourceVersion: consumer.version,
+    },
     store: fenced(await openStore(env, storeId), caller.requireHolds),
     requestId: caller.requestId,
     deadline: caller.deadline,

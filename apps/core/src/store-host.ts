@@ -88,6 +88,7 @@ import { z } from "zod";
 import {
   abandonedTargets,
   backfills,
+  commitWriters,
   migrationWork,
   outbox,
   receipts,
@@ -356,6 +357,7 @@ const purgedTables = [
   "sdk_reserved_fields",
   "sdk_abandoned_targets",
   "sdk_change_outbox",
+  "sdk_commit_writers",
   "sdk_mutation_receipts",
   "sdk_tables",
 ] as const;
@@ -2620,6 +2622,7 @@ export class StoreHost {
       writes,
       intents,
       result,
+      writer,
     } = dataErrors.parse("data.invalid", commitSchema, input);
     const pinned = await this.#pinned(storeId, schemaHash);
     const committed = this.ctx.storage.transactionSync((): Committed => {
@@ -2713,6 +2716,20 @@ export class StoreHost {
         })
         .where(eq(receipts.receiptId, held.receiptId))
         .run();
+      // A consumer's commit names it for good, past its receipt's retention.
+      if (writer !== undefined) {
+        this.#db
+          .insert(commitWriters)
+          .values({
+            commit: counted.commits,
+            receiptId: held.receiptId,
+            resourceId: writer.resourceId,
+            resourceVersion: writer.resourceVersion,
+            principal: principal.userId,
+            committedAt: now,
+          })
+          .run();
+      }
       for (const [position, intent] of intents.entries()) {
         this.#db
           .insert(outbox)

@@ -7,6 +7,7 @@ import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
+import type { Authority } from "@grasp-os/shared/permissions";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
@@ -37,6 +38,7 @@ import {
 } from "./db/core/schema.ts";
 import { gatewaySettings } from "./models.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
+import { isRestricted } from "./restricted.ts";
 import {
   auditStoreRefusal,
   callStoreOperation,
@@ -436,9 +438,10 @@ const requireApprovalActive = async (
  * itself runs as store-operations.ts runs it, as `caller.principal`, its
  * receipts scoped to the workflow. An independent workflow keeps no
  * restricted mode of its own yet (a work context is a chat, an App or an
- * App's run), so nothing carries one here; the run host that calls this
- * carries it once workflows keep one, as an App's store resource does
- * (resource-store.ts).
+ * App's run), so it gets nothing from a store whose App is restricted:
+ * the call is refused, and recorded, before it runs or before its answer
+ * reaches the workflow. Once workflows keep the flag, this carries it as
+ * an App's store resource does (resource-store.ts).
  */
 export const callApprovedStoreOperation = async (
   env: Env,
@@ -483,22 +486,57 @@ export const callApprovedStoreOperation = async (
     }
     throw error;
   }
-  return await callStoreOperation(
-    env,
-    resolved.consumer,
-    resolved.served,
-    args,
-    {
-      ...caller,
-      // Before each protected step, the approval as it stands now, then the
-      // caller's own gate (its step's lease): one revoked or replaced since
-      // the run froze it stops the next commit.
-      stillAllowed: async () => {
-        await requireApprovalActive(env, id, version, approval.id);
-        await caller.stillAllowed?.();
-      },
+  // An independent workflow keeps no restricted mode, so it may not hold
+  // what a restricted store App read: refused while the store's App is
+  // restricted, before the call and again before its answer, or refusal,
+  // reaches the workflow (where its connectors would carry it out).
+  const { owner, release } = resolved.served;
+  const ownerAuthority: Authority = {
+    subject: { type: "app", appId: owner },
+    onBehalfOf: caller.principal,
+    mode: "workflow",
+    appVersion: release.manifest.resourceVersion,
+  };
+  const requireUnrestricted = async (): Promise<void> => {
+    if (
+      await isRestricted(env, ownerAuthority, { type: "app", appId: owner })
+    ) {
+      await auditStoreRefusal(env, {
+        actor: caller.actor,
+        consumer: resolved.consumer,
+        operation: target.operation,
+        storeId: resolved.served.storeId,
+        reason: "store.restricted",
+        requestId: caller.requestId,
+      });
+      throw operationErrors.create("resource.unavailable");
     }
-  );
+  };
+  await requireUnrestricted();
+  let answer: Json;
+  try {
+    answer = await callStoreOperation(
+      env,
+      resolved.consumer,
+      resolved.served,
+      args,
+      {
+        ...caller,
+        // Before each protected step, the approval as it stands now, then
+        // the caller's own gate (its step's lease): one revoked or replaced
+        // since the run froze it stops the next commit.
+        stillAllowed: async () => {
+          await requireApprovalActive(env, id, version, approval.id);
+          await caller.stillAllowed?.();
+        },
+      }
+    );
+  } catch (error) {
+    await requireUnrestricted();
+    throw error;
+  }
+  await requireUnrestricted();
+  return answer;
 };
 
 /**

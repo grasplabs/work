@@ -10,6 +10,7 @@ import type {
   PermissionRequest,
 } from "@grasp-os/shared/permissions";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -17,6 +18,7 @@ import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { permissionsOpenTo } from "../src/permissions-open.ts";
 import {
@@ -603,6 +605,12 @@ describe("an App calling another App's store", () => {
     await restrict(env, authorityOf(other), contextOf(other), ["test"]);
     const crm2Before = await restricted(crm2);
     const wrote = await call(other.owner, other, "desk.add", { name: "Ada" });
+    // A refusal carries it too: the restricted CRM's refusal restricts the
+    // App it reaches.
+    const third = await sealedApp(deskFiles, "Third desk");
+    await bind(admin, third, await deskGrant(admin, third, crm, crmActions));
+    const thirdBefore = await restricted(third);
+    const refused = await call(third.owner, third, "desk.secrets");
     expect({
       deskBefore,
       read,
@@ -610,6 +618,9 @@ describe("an App calling another App's store", () => {
       crm2Before,
       wrote,
       crm2After: await restricted(crm2),
+      thirdBefore,
+      refused,
+      thirdAfter: await restricted(third),
     }).toStrictEqual({
       deskBefore: false,
       read: [],
@@ -617,6 +628,9 @@ describe("an App calling another App's store", () => {
       crm2Before: false,
       wrote: null,
       crm2After: true,
+      thirdBefore: false,
+      refused: "error:resource.unavailable",
+      thirdAfter: true,
     });
   });
 
@@ -1399,5 +1413,100 @@ describe("a workflow calling a store's public operation", () => {
       ],
       crmOwnerReads: [],
     });
+  });
+
+  it("gets nothing from a store whose App is restricted, before or after the call, and records it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const key = await contractOf(admin, crm.release, "contacts.add");
+    const workflow = await workflowOf(ada, key, byName);
+    const permissionId = await granted(
+      admin,
+      {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "store", storeId: crm.store },
+        actions: ["contacts.add"],
+      },
+      null
+    );
+    const approval = await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "lookup",
+      target: {
+        kind: "storeOperation",
+        permissionId,
+        operation: "contacts.add",
+        operationKind: "mutation",
+      },
+      reviewed: { version: 1 },
+    });
+    const run = async (name: string, meanwhile?: () => Promise<void>) =>
+      await outcome(
+        callApprovedStoreOperation(
+          env,
+          { id: workflow.id, version: 1, approval },
+          { name },
+          {
+            actor: { type: "person", userId: ada.userId },
+            principal: ada.userId,
+            requestId: crypto.randomUUID(),
+            deadline: Date.now() + 30_000,
+            idempotencyKey: `step-${unique()}`,
+            runId: null,
+            ...(meanwhile === undefined ? {} : { stillAllowed: meanwhile }),
+          }
+        )
+      );
+    // The CRM becomes restricted while the call runs: what it answers
+    // never reaches the workflow, though its change stands.
+    let restrictedYet = false;
+    const during = await run("Ada", async () => {
+      if (!restrictedYet) {
+        restrictedYet = true;
+        await restrict(env, authorityOf(crm), contextOf(crm), ["test"]);
+      }
+    });
+    // Restricted already: nothing runs at all.
+    const before = await run("Mallory");
+    const refusals = refusedOf(await allEvents(), workflow.id);
+    expect({
+      during,
+      before,
+      refusals,
+      crmSees: await call(crm.owner, crm, "contacts.list"),
+    }).toStrictEqual({
+      during: "resource.unavailable",
+      before: "resource.unavailable",
+      refusals: [
+        ["contacts.add", "store.restricted"],
+        ["contacts.add", "store.restricted"],
+      ],
+      crmSees: ["Ada"],
+    });
+  });
+});
+
+describe("a shared store's commits", () => {
+  it("name the consumer that made them, for as long as the store is kept", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    await bind(admin, desk, await deskGrant(admin, desk, crm, crmActions));
+    await call(crm.owner, crm, "contacts.add", { name: "Own" });
+    await call(desk.owner, desk, "desk.add", { name: "Shared" });
+    const writers = await runInDurableObject(
+      inJurisdiction(env, env.DATA_STORES).getByName(crm.store),
+      (_instance, state) =>
+        state.storage.sql
+          .exec(
+            "SELECT resource_id AS resource, resource_version AS version, principal FROM sdk_commit_writers"
+          )
+          .toArray()
+    );
+    // The CRM's own commit names no consumer; Desk's names Desk, by its
+    // version, kept apart from the receipt retention lets go of.
+    expect(writers).toStrictEqual([
+      { resource: desk.app, version: 1, principal: desk.owner.userId },
+    ]);
   });
 });

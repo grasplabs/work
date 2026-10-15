@@ -183,6 +183,15 @@ export interface Invocation {
   /** The workflow run the call is made in, whose life keeps its receipt. */
   readonly runId: string | null;
   /**
+   * Another App or a workflow calling the store's public operation
+   * (store-operations.ts), by ID and version: each commit names it, in the
+   * store, for as long as the store is. None for the App's own calls.
+   */
+  readonly writer?: {
+    readonly resourceId: string;
+    readonly resourceVersion: number;
+  };
+  /**
    * The caller's roles in the App, read again on each call; throws when
    * they may no longer use it. The one admission (`admit`): called as the
    * call starts, just before each mutation commits and before each
@@ -2315,6 +2324,9 @@ const runMutation = async (
             readSet: reader.readSet(),
             writes: staging.writes(),
             result: value,
+            ...(invocation.writer === undefined
+              ? {}
+              : { writer: { ...invocation.writer } }),
           })
       );
       return committed.result;
