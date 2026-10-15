@@ -638,6 +638,10 @@ msgstr "{run}: mislukt"
 msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 msgstr "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{runs, plural, one {# run} other {# runs}}"
+msgstr "{runs, plural, one {# run} other {# runs}}"
+
 #: src/dashboard/runs-widget.tsx
 msgid "{runs, plural, one {of # run} other {of # runs}}"
 msgstr "{runs, plural, one {van # run} other {van # runs}}"
@@ -1092,7 +1096,6 @@ msgid "Agent"
 msgstr "Agent"
 
 #: src/activity/pending.tsx
-#: src/connections/connection-list.tsx
 msgid "Agent {agent}"
 msgstr "Agent {agent}"
 
@@ -2503,6 +2506,10 @@ msgstr "Navigatie uitklappen"
 msgid "Expand the sections"
 msgstr "Onderdelen uitklappen"
 
+#: src/workflows/workflows-table.tsx
+msgid "expected on top, from designs and tests"
+msgstr "verwacht daarbovenop, uit ontwerpen en tests"
+
 #: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exporteren"
@@ -2539,6 +2546,11 @@ msgstr "Exports"
 #: src/activity/pending.tsx
 msgid "Exports of {engine}: {covered}"
 msgstr "Exports van {engine}: {covered}"
+
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Extra high"
+msgstr "Extra hoog"
 
 #: src/knowledge/uploads.tsx
 msgid "Extracting"
@@ -2734,10 +2746,6 @@ msgstr "Toegang van Grasp"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp is nu niet bereikbaar. Probeer het zo opnieuw."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
-msgstr "Grasp telt wat de modellen kosten af tegen de budgetten die het voor u instelt. Er is geen budget ingesteld, dus er is niets te tonen."
-
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp gaf het startsein"
@@ -2858,6 +2866,11 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "Hoog"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "High"
+msgstr "Hoog"
+
 #: src/knowledge/timeline.tsx
 msgid "History"
 msgstr "Geschiedenis"
@@ -2865,6 +2878,10 @@ msgstr "Geschiedenis"
 #: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "Gehost in de EU"
+
+#: src/chat/composer.tsx
+msgid "How hard it thinks"
+msgstr "Hoe grondig het nadenkt"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "How much has to be known before it opens"
@@ -3286,6 +3303,11 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Laag"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Low"
+msgstr "Laag"
+
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
 msgstr "Gemaakt met Grasp op {date}"
@@ -3322,9 +3344,19 @@ msgstr "{app} beheren, gekoppeld voor jou"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Max"
+msgstr "Maximaal"
+
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
 msgstr "Kan iets buiten Grasp wijzigen"
+
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Medium"
+msgstr "Gemiddeld"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Members"
@@ -3370,6 +3402,10 @@ msgstr "Modelaanroep"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Modelkosten"
+
+#: src/chat/composer.tsx
+msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
+msgstr "Model: {name}, denkniveau {effort, select, low {laag} medium {gemiddeld} high {hoog} xhigh {extra hoog} other {maximaal}}. Model of denkniveau wijzigen"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"
@@ -3496,6 +3532,10 @@ msgstr "Volgende run: {next}"
 msgid "No apps yet"
 msgstr "Nog geen apps"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "No budget is set for all calls together"
+msgstr "Er is geen budget ingesteld voor alle aanroepen samen"
+
 #: src/routes/_shell.settings.models.tsx
 msgid "No budget is set: model calls aren't limited by cost."
 msgstr "Er is geen budget ingesteld: modelaanroepen worden niet beperkt op kosten."
@@ -3615,6 +3655,10 @@ msgstr "Nog geen stakeholder genoemd"
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"
 msgstr "Geen teams"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "No workflow has called a model this month."
+msgstr "Geen enkele workflow heeft deze maand een model aangeroepen."
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No workflow in this engine yet."
@@ -4352,6 +4396,10 @@ msgstr "Pulse op apparaten van het bedrijf. Voegt toe welke applicaties, MCP-ser
 msgid "Pulse shows what runs on the laptops, AI tools included."
 msgstr "Pulse laat zien wat er op de laptops draait, AI-tools inbegrepen."
 
+#: src/workflows/runs.tsx
+msgid "Queued"
+msgstr "In de wachtrij"
+
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
 msgid "Queued"
@@ -4658,6 +4706,10 @@ msgstr "Uitgefaseerd"
 msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
 msgstr "Uitgefaseerd door {endedBy}, {endedAt}: {endedReason}"
 
+#: src/workflows/workflows-table.tsx
+msgid "return a month, measured"
+msgstr "opbrengst per maand, gemeten"
+
 #: src/dashboard/to-do.tsx
 msgid "Review"
 msgstr "Beoordelen"
@@ -4825,6 +4877,14 @@ msgstr "Draait {how} {count, plural, one {# keer minder} other {# keer minder}} 
 #: src/chat/builds-state.ts
 msgid "Runs {how} {count, plural, one {# more time} other {# more times}} ({now} now)"
 msgstr "Draait {how} {count, plural, one {# keer vaker} other {# keer vaker}} (nu {now})"
+
+#: src/workflows/workflows-table.tsx
+msgid "Runs a week"
+msgstr "Runs per week"
+
+#: src/workflows/workflows-table.tsx
+msgid "runs a week by these workflows"
+msgstr "runs per week door deze workflows"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
@@ -5166,6 +5226,10 @@ msgstr "Iedereen kiest zijn eigen taal bij het openen van de link."
 msgid "Someone else"
 msgstr "Iemand anders"
 
+#: src/screens/screen-frame.tsx
+msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
+msgstr "Iemand anders heeft zich in deze browser aangemeld, dus deze app is gestopt. Probeer het opnieuw om hem te openen als de persoon die nu is aangemeld."
+
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Iemand die er niet meer is"
@@ -5321,6 +5385,10 @@ msgstr "Gestopt met volgen wat er bij een verbinding verandert"
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Gestopt."
+
+#: src/activity/pending.tsx
+msgid "Store {store}"
+msgstr "Opslag {store}"
 
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
@@ -5497,6 +5565,10 @@ msgstr "de {role}"
 #: src/brain/brain.ts
 msgid "the {role} and {staff}"
 msgstr "de {role} en {staff}"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "The {top} that spent most; more spent less."
+msgstr "De {top} die het meest uitgaven; andere gaven minder uit."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "The {top} who spent most; more spent less."
@@ -6134,6 +6206,10 @@ msgstr "Tools, producten en de eigen woorden van het bedrijf, zodat hij ze goed 
 msgid "Transcript"
 msgstr "Transcript"
 
+#: src/activity/pending.tsx
+msgid "Trigger {trigger}"
+msgstr "Trigger {trigger}"
+
 #: src/workflows/triggers.tsx
 msgid "Triggers"
 msgstr "Triggers"
@@ -6348,6 +6424,18 @@ msgstr "Wacht op een persoon"
 msgid "Waiting for a set time"
 msgstr "Wacht een vaste tijd"
 
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of the organization's runs; tries again by {time}"
+msgstr "Wacht op een deel van de uitvoeringen van de organisatie; probeert het uiterlijk {time} opnieuw"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of this App's runs; tries again by {time}"
+msgstr "Wacht op een deel van de uitvoeringen van deze App; probeert het uiterlijk {time} opnieuw"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of this person's runs; tries again by {time}"
+msgstr "Wacht op een deel van de uitvoeringen van deze persoon; probeert het uiterlijk {time} opnieuw"
+
 #: src/workflows/history-view.tsx
 msgid "Waiting for an event"
 msgstr "Wacht op een gebeurtenis"
@@ -6449,6 +6537,10 @@ msgstr "Wat beter kan"
 msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Wat als succes telt"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "What each workflow's model calls cost this month, most first, and how often it ran."
+msgstr "Wat de modelaanroepen van elke workflow deze maand kostten, de hoogste eerst, en hoe vaak hij draaide."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
@@ -6726,8 +6818,8 @@ msgid "Workflow"
 msgstr "Workflow"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {engine}"
-msgstr "Workflow {workflowId} van {engine}"
+msgid "Workflow {workflow}"
+msgstr "Workflow {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"
@@ -6786,6 +6878,10 @@ msgstr "Bekende workflows"
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
 msgstr "Mislukte workflows"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Workflows this month"
+msgstr "Workflows deze maand"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."

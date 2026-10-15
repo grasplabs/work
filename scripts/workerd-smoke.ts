@@ -68,13 +68,18 @@ const freePort = async (): Promise<number> => {
 const PORT = await freePort();
 
 // Durable Object migrations and the Grasp skills are bundled next to
-// index.js as text modules.
+// index.js as text modules, and WebAssembly (the jq evaluator) as wasm
+// modules.
 const textModule = /(?:\.sql|SKILL\.md)$/u;
+const files = readdirSync(out);
 const modules = [
   `(name = "index.js", esModule = embed "index.js")`,
-  ...readdirSync(out)
+  ...files
     .filter((file) => textModule.test(file))
     .map((file) => `(name = "${file}", text = embed "${file}")`),
+  ...files
+    .filter((file) => file.endsWith(".wasm"))
+    .map((file) => `(name = "${file}", wasm = embed "${file}")`),
 ];
 
 // The on-prem profile's D1 service, and core's D1 migrations for it.

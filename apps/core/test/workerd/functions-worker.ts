@@ -60,6 +60,7 @@ const { manifest } = inspectApp(
         forgets: action({ ...contract, uses: [waits] }),
         forgetsLeaf: action({ ...contract, uses: [leaf] }),
         awaitsLeaf: action({ ...contract, uses: [leaf] }),
+        waitsInside: action({ ...contract, uses: [leaf] }),
         catches: action({ ...contract, uses: [throws] }),
       },
     },
@@ -102,6 +103,12 @@ const appModule = `export default {
   }),
   "jobs.callsBusy": async (channel, args) => await channel.call("action", "jobs.busy", args),
   "jobs.awaitsLeaf": async (channel, args) => await channel.call("action", "jobs.leaf", args),
+  "jobs.waitsInside": async (channel, args) => {
+    // Reaching core from inside first: proof that its code runs there.
+    await channel.call("action", "jobs.leaf", args);
+    await scheduler.wait(60000);
+    return args;
+  },
   "jobs.forgetsLeaf": async (channel, args) => {
     // Started, so the host has it, and not waited for.
     channel.call("action", "jobs.leaf", args).catch(() => {});
@@ -144,6 +151,13 @@ const endLost = (host: Fetcher): Fetcher => ({
   connect: (address, options) => host.connect(address, options),
 });
 
+/**
+ * Nested calls core has authorized, across every request: each one a
+ * function's code reaching core from inside the sandbox, so its caller
+ * surely runs there (`GET /nested`).
+ */
+let nestedAuthorized = 0;
+
 /** An action has no database: any use of the store is a fault. */
 const noStore = new Proxy(
   {},
@@ -157,6 +171,9 @@ const noStore = new Proxy(
 export default {
   async fetch(request, env) {
     const { pathname, searchParams } = new URL(request.url);
+    if (pathname === "/nested") {
+      return Response.json({ nested: nestedAuthorized });
+    }
     if (pathname !== "/run") {
       return new Response("core answers");
     }
@@ -195,6 +212,9 @@ export default {
         runId: null,
         authorize: async () => {
           authorized += 1;
+          if (authorized > 1) {
+            nestedAuthorized += 1;
+          }
           // Each nested call held in its authorization a while, if asked:
           // still being authorized as the function that started it ends.
           if (authorized > 1 && searchParams.get("slowNested") === "1") {

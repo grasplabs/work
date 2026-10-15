@@ -12,14 +12,21 @@ import { platformLimits } from "./platform-limits.ts";
 // Only the limits core reads through the policy are listed: setting one
 // that nothing enforces would claim a limit that doesn't hold. Each is
 // read at the moment of each admission (a run's step, a step's attempt,
-// a child run's start), never kept with what was admitted before, so a
-// changed policy applies to every admission after it, and to none before.
+// a child run's start, a provider request to a model), never kept with
+// what was admitted before, so a changed policy applies to every admission
+// after it, and to none before.
 
 /**
  * The limits a deployment's operator may lower. Each is a ceiling core
  * checks as it admits work: a run's steps, a step's attempts (its first
- * included), the levels and descendant runs of a run lineage, and the
- * lineage's active execution and age.
+ * included), the levels and descendant runs of a run lineage, the
+ * lineage's active execution and age, the provider requests it sends to
+ * models (core's model ledger, model-budgets.ts), the host calls its
+ * attempts make, the attempts running at once in the client, for one
+ * person and of one App, the steps waiting for a share, for one person and
+ * of one App, how long one step waits, and the independent workflows and
+ * live triggers one person creates (core's workflow-resources.ts,
+ * trigger-resources.ts).
  */
 export const lowerableLimits = [
   "workflowSteps",
@@ -28,6 +35,16 @@ export const lowerableLimits = [
   "workflowDescendantRuns",
   "workflowActiveMs",
   "workflowAgeMs",
+  "lineageModelRequests",
+  "lineageHostCalls",
+  "workflowResourcesPerPerson",
+  "workflowClientAttempts",
+  "workflowPersonAttempts",
+  "workflowAppAttempts",
+  "workflowQueuedPerPerson",
+  "workflowQueuedPerApp",
+  "workflowQueuedStepMs",
+  "triggerResourcesPerPerson",
 ] as const;
 
 export type LowerableLimit = (typeof lowerableLimits)[number];
@@ -56,6 +73,16 @@ export const quotaLimitsSchema = z.strictObject({
     workflowDescendantRuns: lowered("workflowDescendantRuns"),
     workflowActiveMs: lowered("workflowActiveMs"),
     workflowAgeMs: lowered("workflowAgeMs"),
+    lineageModelRequests: lowered("lineageModelRequests"),
+    lineageHostCalls: lowered("lineageHostCalls"),
+    workflowResourcesPerPerson: lowered("workflowResourcesPerPerson"),
+    workflowClientAttempts: lowered("workflowClientAttempts"),
+    workflowPersonAttempts: lowered("workflowPersonAttempts"),
+    workflowAppAttempts: lowered("workflowAppAttempts"),
+    workflowQueuedPerPerson: lowered("workflowQueuedPerPerson"),
+    workflowQueuedPerApp: lowered("workflowQueuedPerApp"),
+    workflowQueuedStepMs: lowered("workflowQueuedStepMs"),
+    triggerResourcesPerPerson: lowered("triggerResourcesPerPerson"),
   } satisfies Record<LowerableLimit, z.ZodType>),
 });
 
@@ -82,6 +109,16 @@ export const quotaPolicyOf = (
     workflowDescendantRuns: platformLimits.workflowDescendantRuns,
     workflowActiveMs: platformLimits.workflowActiveMs,
     workflowAgeMs: platformLimits.workflowAgeMs,
+    lineageModelRequests: platformLimits.lineageModelRequests,
+    lineageHostCalls: platformLimits.lineageHostCalls,
+    workflowResourcesPerPerson: platformLimits.workflowResourcesPerPerson,
+    workflowClientAttempts: platformLimits.workflowClientAttempts,
+    workflowPersonAttempts: platformLimits.workflowPersonAttempts,
+    workflowAppAttempts: platformLimits.workflowAppAttempts,
+    workflowQueuedPerPerson: platformLimits.workflowQueuedPerPerson,
+    workflowQueuedPerApp: platformLimits.workflowQueuedPerApp,
+    workflowQueuedStepMs: platformLimits.workflowQueuedStepMs,
+    triggerResourcesPerPerson: platformLimits.triggerResourcesPerPerson,
   };
   if (configured === undefined) {
     return { generation: 0, limits };

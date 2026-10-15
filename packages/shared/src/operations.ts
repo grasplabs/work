@@ -55,10 +55,24 @@ export const operationErrors = defineErrorFamily({
     "The operation ran past its deadline, and was stopped before it changed anything more.",
   "operation.unfinished_call":
     "The operation left a call it started running past its deadline.",
-  "operation.unsupported":
-    "This operation needs a capability this release doesn't run yet.",
+  "operation.mode_mismatch":
+    "That action streams its progress, or doesn't, unlike what the call expects: a streaming action is called through useStream or client.stream, any other through useAction or client.action.",
+  "operation.cancelled":
+    "The action was cancelled before it finished. What it changed before then stays changed.",
+  "operation.outcome_unknown":
+    "The action stopped without an answer, so whether it finished is unknown. It wasn't run again.",
+  "operation.stream_limit":
+    "You're running as many streaming actions in this App as one person may at once. Wait for one to finish, or cancel one.",
+  "operation.action_limit":
+    "You're running as many actions in this App as one person may at once. Wait for one to finish.",
+  "operation.access_changed":
+    "Your access to this App changed since this action started, so its outcome isn't shown. Run it again to see it under your access now.",
+  "operation.no_stream":
+    "Only an action that declares `stream` emits progress.",
+  "operation.emit_limit":
+    "The action emitted more progress snapshots than one call may.",
   "operation.call_limit":
-    "This call ran more nested functions, or made more resource requests, than one call may.",
+    "This call made more host calls, ran more nested functions, or made more resource requests than one call may.",
   "operation.depth_exceeded":
     "Functions called each other deeper than one call may go.",
   "operation.cpu_exceeded":
@@ -71,6 +85,8 @@ export const operationErrors = defineErrorFamily({
     "This App runs as many calls at once as it may. Try again shortly.",
   "operation.sandbox_unavailable":
     "The sandbox that runs the App's code isn't available. Try again shortly.",
+  "operation.sandbox_lost":
+    "The sandbox stopped answering after the call started, so whether it changed anything is unknown.",
   "resource.not_allowed":
     "The App didn't declare that use of this resource for this function.",
   "resource.unavailable":
@@ -98,6 +114,10 @@ export const operationErrors = defineErrorFamily({
     "The operation returned something its contract doesn't allow.",
   "contract.result_too_large":
     "The operation returned more than an operation may return.",
+  "contract.invalid_progress":
+    "The action emitted progress its stream schema doesn't allow.",
+  "contract.progress_too_large":
+    "The action emitted a progress snapshot larger than one may be.",
   "contract.invalid_error":
     "The operation failed with an error its contract doesn't allow.",
   "contract.invalid_query":
@@ -157,9 +177,19 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "operation.deadline_exceeded": "operational",
   "operation.sandbox_busy": "operational",
   "operation.sandbox_unavailable": "operational",
+  // The call may have started, and changed something.
+  "operation.sandbox_lost": "uncertain",
   // The call ended (its caller went, or it was stopped): nothing the App's
   // code or its caller did wrong.
   "operation.ended": "operational",
+  // Cancelled by the person, or because no screen followed it any more.
+  "operation.cancelled": "operational",
+  // Its host went away while it ran: what it did is unknown, not failed.
+  "operation.outcome_unknown": "uncertain",
+  // Nothing ran: room comes back as the person's other streams end.
+  "operation.stream_limit": "operational",
+  "operation.action_limit": "operational",
+  "operation.access_changed": "authorization",
   // The App's own code went past a bound of one call: its source, not the
   // caller's request or the platform.
   "operation.cpu_exceeded": "source",
@@ -167,6 +197,8 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "operation.sandbox_refused": "source",
   "operation.call_limit": "source",
   "operation.depth_exceeded": "source",
+  "operation.emit_limit": "source",
+  "operation.no_stream": "source",
   // A call it started outlived the operation's deadline: the operation
   // broke its contract to end with its calls.
   "operation.unfinished_call": "contract",
@@ -183,6 +215,8 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "resource.budget_busy",
   "operation.sandbox_busy",
   "operation.sandbox_unavailable",
+  // Nothing was published; the build runs on, cached for the next try.
+  "workflow.build_slow",
 ]);
 
 /** The category of platform error `code`: its own, or by its family. */

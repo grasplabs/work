@@ -44,6 +44,7 @@ export const familyNamespaces = [
   "notification",
   "onboarding",
   "operation",
+  "organization",
   "package",
   "permission",
   "query",

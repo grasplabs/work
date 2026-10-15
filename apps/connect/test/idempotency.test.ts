@@ -222,6 +222,26 @@ describe("a side effect", () => {
     });
   });
 
+  it("of a remote server, its outcome unknown, doesn't hold a run for its person to resolve: its error is the step's", async () => {
+    const connectionId = await addConnection();
+    const call = send(connectionId, "run-2:send");
+    server.network = "drop";
+    let details: unknown;
+    try {
+      await callAs(anna, call);
+    } catch (error) {
+      details =
+        error instanceof Error ? Reflect.get(error, "details") : undefined;
+    }
+    expect({
+      details: details ?? null,
+      pending: await exports.default.anyPending({
+        onBehalfOf: anna.onBehalfOf,
+        idempotencyKey: "run-2:send",
+      }),
+    }).toStrictEqual({ details: null, pending: false });
+  });
+
   it("that may have run before its answer was lost is never sent again", async () => {
     const connectionId = await addConnection();
     const call = send(connectionId, "run-1:send");

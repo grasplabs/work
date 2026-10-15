@@ -13,13 +13,15 @@ import { serverModule } from "@grasp-os/sdk/server";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { effectErrors } from "@grasp-os/shared/operations";
+import { streamMaxEmits } from "@grasp-os/shared/operation-limits";
+import { effectErrors, operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { WriterRoles } from "@grasp-os/shared/stores";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { keepsReceipt } from "../src/action-invocation.ts";
 import { operationRoles } from "../src/app-access.ts";
 import { createApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
@@ -33,6 +35,7 @@ import {
 } from "../src/operations.ts";
 import type {
   BoundResource,
+  ProgressSink,
   ResourceBindings,
   ResourceContext,
   Runner,
@@ -433,7 +436,101 @@ const streaming = action({
   args: {},
   returns: v.null(),
   stream: v.object({ done: v.number() }),
-  handler: () => null,
+  handler: async (ctx) => {
+    await ctx.emit({ done: 1 });
+    await ctx.emit({ done: 2 });
+    return null;
+  },
+});
+
+/** Runs the streaming action nested, where its progress has nowhere to go. */
+const nestsStreaming = action({
+  args: {},
+  returns: v.string(),
+  uses: [streaming],
+  handler: async (ctx) => {
+    try {
+      // @ts-expect-error -- a streaming action isn't run nested
+      await ctx.runAction(streaming, {});
+    } catch (error) {
+      const code: unknown =
+        error instanceof Error ? Reflect.get(error, "code") : undefined;
+      return typeof code === "string" ? code : "thrown";
+    }
+    return "ran";
+  },
+});
+
+/** A streaming action that saves a note after its first snapshot. */
+const savesWhileStreaming = action({
+  args: { title: v.string() },
+  returns: v.null(),
+  stream: v.object({ done: v.number() }),
+  uses: [create],
+  handler: async (ctx, args) => {
+    await ctx.emit({ done: 0 });
+    await ctx.runMutation(create, { title: args.title });
+    return null;
+  },
+});
+
+/** A streaming action that sends a mail after its first snapshot. */
+const sendsWhileStreaming = action({
+  args: { to: v.string().email() },
+  returns: v.null(),
+  stream: v.object({ done: v.number() }),
+  uses: [mail],
+  handler: async (ctx, args) => {
+    await ctx.emit({ done: 0 });
+    await ctx.resources.mail.call("send", mailTo(args.to));
+    return null;
+  },
+});
+
+/** A streaming action that sends a mail without waiting for it, and returns. */
+const sendsAndLeaves = action({
+  args: { to: v.string().email() },
+  returns: v.null(),
+  stream: v.object({ done: v.number() }),
+  uses: [mail],
+  handler: async (ctx, args) => {
+    await ctx.emit({ done: 0 });
+    void ctx.resources.mail.call("send", mailTo(args.to));
+    return null;
+  },
+});
+
+/** A streaming action that emits `count` snapshots, then answers how many. */
+const emitsMany = action({
+  args: { count: v.number().integer().min(0) },
+  returns: v.number(),
+  stream: v.object({ done: v.number() }),
+  handler: async (ctx, args) => {
+    for (let done = 1; done <= args.count; done += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one snapshot after another
+      await ctx.emit({ done });
+    }
+    return args.count;
+  },
+});
+
+/** Saves a note, then sends a mail. */
+const savesThenSends = action({
+  args: { title: v.string(), to: v.string().email() },
+  returns: v.null(),
+  uses: [create, mail],
+  handler: async (ctx, args) => {
+    await ctx.runMutation(create, { title: args.title });
+    await ctx.resources.mail.call("send", mailTo(args.to));
+    return null;
+  },
+});
+
+/** An action that doesn't stream: its context has no `emit`. */
+const emitsAnyway = action({
+  args: {},
+  returns: v.string(),
+  handler: (ctx) => ("emit" in ctx ? "emit" : "no emit"),
 });
 
 const notesApp = app({
@@ -460,6 +557,13 @@ const notesApp = app({
       searchHelp,
       readLetter,
       streaming,
+      nestsStreaming,
+      emitsAnyway,
+      savesWhileStreaming,
+      sendsWhileStreaming,
+      sendsAndLeaves,
+      emitsMany,
+      savesThenSends,
       fanOut,
       sendMany,
       sendMailToo,
@@ -526,6 +630,12 @@ interface CallOptions {
   readonly resources?: ResourceBindings;
   /** The admission, in place of the caller's roles read as they are. */
   readonly authorize?: () => Promise<WriterRoles>;
+  /** For a streaming action: where its progress goes. */
+  readonly progress?: ProgressSink;
+  /** Cancels the call once aborted. */
+  readonly cancelled?: AbortSignal;
+  /** Told of each effect the call makes. */
+  readonly onEffect?: () => void;
 }
 
 const call = async (
@@ -539,6 +649,9 @@ const call = async (
     resources,
     within = 60_000,
     authorize,
+    progress,
+    cancelled,
+    onEffect,
   }: CallOptions = {}
 ): Promise<OperationResult> =>
   await callOperation(
@@ -556,7 +669,12 @@ const call = async (
     },
     { path, kind },
     args,
-    idempotencyKey === undefined ? {} : { idempotencyKey }
+    {
+      ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+      ...(progress === undefined ? {} : { progress }),
+      ...(cancelled === undefined ? {} : { cancelled }),
+      ...(onEffect === undefined ? {} : { onEffect }),
+    }
   );
 
 const valueOf = (result: OperationResult): Json => {
@@ -781,11 +899,63 @@ describe("composing the App's functions", () => {
     }).toStrictEqual({ staged: 1, narrowed: "data.access_denied" });
   });
 
-  it("refuses a stream until the streaming runtime delivers it", async () => {
+  it("runs a streaming action only where its progress has somewhere to go", async () => {
     const fixture = await notes();
-    expect(codeOf(await call(fixture, "action", "actions.streaming", {}))).toBe(
-      "operation.unsupported"
-    );
+    const published: Json[] = [];
+    const sink = {
+      publish: (progress: Json) => {
+        published.push(progress);
+      },
+    };
+    expect({
+      single: codeOf(await call(fixture, "action", "actions.streaming", {})),
+      streamed: codeOf(
+        await call(
+          fixture,
+          "action",
+          "actions.streaming",
+          {},
+          { progress: sink }
+        )
+      ),
+      published,
+      // An action that answers once, given somewhere for progress.
+      other: codeOf(
+        await call(
+          fixture,
+          "action",
+          "actions.compose",
+          { title: "x" },
+          {
+            progress: sink,
+          }
+        )
+      ),
+      nested: valueOf(
+        await call(fixture, "action", "actions.nestsStreaming", {})
+      ),
+      noEmit: valueOf(await call(fixture, "action", "actions.emitsAnyway", {})),
+      cancelled: codeOf(
+        await call(
+          fixture,
+          "action",
+          "actions.streaming",
+          {},
+          {
+            progress: sink,
+            cancelled: AbortSignal.abort(),
+          }
+        )
+      ),
+    }).toStrictEqual({
+      single: "operation.mode_mismatch",
+      streamed: "ok",
+      published: [{ done: 1 }, { done: 2 }],
+      other: "operation.mode_mismatch",
+      nested: "operation.mode_mismatch",
+      noEmit: "no emit",
+      cancelled: "operation.cancelled",
+    });
   });
 });
 
@@ -1123,6 +1293,277 @@ describe("resources", () => {
   });
 });
 
+/** A sink whose run `cancel()` cancels. */
+const cancellable = () => {
+  const controller = new AbortController();
+  return {
+    sink: {
+      publish: () => {
+        // Progress isn't what these test.
+      },
+    },
+    signal: controller.signal,
+    cancel: () => {
+      controller.abort();
+    },
+  };
+};
+
+describe("what an action's invocation keeps", () => {
+  /** Mail refused for a busy model budget, before anything was sent. */
+  const busy = bindingsOf({
+    mail: bound("connector", "microsoft-365.mail@1", async () => {
+      await Promise.resolve();
+      throw operationErrors.create("resource.budget_busy");
+    }),
+  });
+
+  it("counts an effect once a mutation committed, though a later request was refused for a busy budget", async () => {
+    const fixture = await notes();
+    let effects = 0;
+    const result = await call(
+      fixture,
+      "action",
+      "actions.savesThenSends",
+      { title: "Saved", to: "ada@acme.test" },
+      {
+        resources: busy,
+        onEffect: () => {
+          effects += 1;
+        },
+      }
+    );
+    const outcome = { result, reached: true, effects };
+    expect({
+      code: codeOf(result),
+      effects,
+      kept: keepsReceipt(outcome),
+    }).toStrictEqual({
+      code: "resource.budget_busy",
+      effects: 1,
+      // Running it again would act on the note it saved.
+      kept: true,
+    });
+  });
+
+  it("counts no effect for a request a busy budget refused before it was sent", async () => {
+    const fixture = await notes();
+    let effects = 0;
+    const result = await call(
+      fixture,
+      "action",
+      "actions.sendMail",
+      { to: "ada@acme.test" },
+      {
+        resources: busy,
+        onEffect: () => {
+          effects += 1;
+        },
+      }
+    );
+    expect({
+      code: codeOf(result),
+      effects,
+      kept: keepsReceipt({ result, reached: true, effects }),
+    }).toStrictEqual({
+      code: "resource.budget_busy",
+      effects: 0,
+      kept: false,
+    });
+  });
+});
+
+describe("a streaming action's progress budget", () => {
+  it("emits up to its own budget of snapshots, apart from the calls it makes", async () => {
+    const fixture = await notes();
+    const published: Json[] = [];
+    const sink = {
+      publish: (progress: Json) => {
+        published.push(progress);
+      },
+    };
+    const many = await call(
+      fixture,
+      "action",
+      "actions.emitsMany",
+      { count: streamMaxEmits },
+      { progress: sink }
+    );
+    const over = await call(
+      fixture,
+      "action",
+      "actions.emitsMany",
+      { count: streamMaxEmits + 1 },
+      { progress: sink }
+    );
+    expect({
+      many: valueOf(many),
+      // Far past the 100 calls an invocation may make.
+      published: published.length,
+      over: codeOf(over),
+    }).toStrictEqual({
+      many: streamMaxEmits,
+      published: streamMaxEmits * 2,
+      over: "operation.emit_limit",
+    });
+  });
+});
+
+describe("cancelling a streaming action", () => {
+  it("commits nothing when the cancel lands after a mutation's handler, before its commit", async () => {
+    const fixture = await notes();
+    const { sink, signal, cancel } = cancellable();
+    // The nested mutation's handler has run; the cancel lands before its
+    // commit.
+    const run: Runner = async (path, args, channel) => {
+      const answer = await defaultRun(path, args, channel);
+      if (path === "notes.create") {
+        cancel();
+      }
+      return answer;
+    };
+    const result = await call(
+      fixture,
+      "action",
+      "actions.savesWhileStreaming",
+      { title: "Never" },
+      { progress: sink, cancelled: signal, run }
+    );
+    // It can't tell, from the run alone, that nothing committed: uncertain.
+    expect({
+      code: codeOf(result),
+      notes: await noteCount(fixture),
+    }).toStrictEqual({ code: "operation.outcome_unknown", notes: 1 });
+  });
+
+  it("answers an uncertain outcome when the cancel lands during a mutation's commit", async () => {
+    const fixture = await notes();
+    const { sink, signal, cancel } = cancellable();
+    const committing: Fixture = {
+      ...fixture,
+      store: {
+        ...fixture.store,
+        commit: async (request) => {
+          cancel();
+          return await fixture.store.commit(request);
+        },
+      },
+    };
+    const result = await call(
+      committing,
+      "action",
+      "actions.savesWhileStreaming",
+      { title: "Maybe" },
+      { progress: sink, cancelled: signal }
+    );
+    // The commit went through: a definite "cancelled" would be untrue.
+    expect({
+      code: codeOf(result),
+      notes: await noteCount(fixture),
+    }).toStrictEqual({ code: "operation.outcome_unknown", notes: 2 });
+  });
+
+  it("sends nothing when the cancel lands before a resource request goes out", async () => {
+    const fixture = await notes();
+    const { sink, signal, cancel } = cancellable();
+    let sent = 0;
+    const mailBound = bound("connector", "microsoft-365.mail@1", async () => {
+      sent += 1;
+      return await Promise.resolve({ mailbox: "m-1", sent: true });
+    });
+    // Resolving the binding is the last step before the request is sent.
+    const resources: ResourceBindings = async (declaration) => {
+      cancel();
+      return await bindingsOf({ mail: mailBound })(declaration);
+    };
+    const result = await call(
+      fixture,
+      "action",
+      "actions.sendsWhileStreaming",
+      { to: "ada@acme.test" },
+      { progress: sink, cancelled: signal, resources }
+    );
+    expect({ code: codeOf(result), sent }).toStrictEqual({
+      code: "operation.outcome_unknown",
+      sent: 0,
+    });
+  });
+
+  it("answers an uncertain outcome when the cancel lands while a request is out", async () => {
+    const fixture = await notes();
+    const { sink, signal, cancel } = cancellable();
+    let sent = 0;
+    const resources = bindingsOf({
+      mail: bound("connector", "microsoft-365.mail@1", async () => {
+        sent += 1;
+        cancel();
+        await scheduler.wait(50);
+        return { mailbox: "m-1", sent: true };
+      }),
+    });
+    const result = await call(
+      fixture,
+      "action",
+      "actions.sendsWhileStreaming",
+      { to: "ada@acme.test" },
+      { progress: sink, cancelled: signal, resources }
+    );
+    expect({ code: codeOf(result), sent }).toStrictEqual({
+      code: "operation.outcome_unknown",
+      sent: 1,
+    });
+  });
+
+  it("answers an uncertain outcome when the cancel lands while a request it left running is out", async () => {
+    const fixture = await notes();
+    const { sink, signal, cancel } = cancellable();
+    let sent = 0;
+    const resources = bindingsOf({
+      mail: bound("connector", "microsoft-365.mail@1", async () => {
+        sent += 1;
+        cancel();
+        await scheduler.wait(100);
+        return { mailbox: "m-1", sent: true };
+      }),
+    });
+    // Its handler has returned; the run waits for the request it left.
+    const result = await call(
+      fixture,
+      "action",
+      "actions.sendsAndLeaves",
+      { to: "ada@acme.test" },
+      { progress: sink, cancelled: signal, resources }
+    );
+    expect({ code: codeOf(result), sent }).toStrictEqual({
+      code: "operation.outcome_unknown",
+      sent: 1,
+    });
+  });
+
+  it("answers a definite cancel when nothing it started is under way", async () => {
+    const fixture = await notes();
+    const { sink, signal, cancel } = cancellable();
+    const publishing = {
+      ...sink,
+      // Cancelled as its first snapshot arrives, before it saves anything.
+      publish: () => {
+        cancel();
+      },
+    };
+    const result = await call(
+      fixture,
+      "action",
+      "actions.savesWhileStreaming",
+      { title: "Never" },
+      { progress: publishing, cancelled: signal }
+    );
+    expect({
+      code: codeOf(result),
+      notes: await noteCount(fixture),
+    }).toStrictEqual({ code: "operation.cancelled", notes: 1 });
+  });
+});
+
 describe("one call's budget", () => {
   it("bounds the functions one action runs, at any depth, and their reads together", async () => {
     const fixture = await notes();
@@ -1131,7 +1572,8 @@ describe("one call's budget", () => {
     expect({
       allowed: await fan(callMaxNested, 0),
       tooMany: await fan(callMaxNested + 1, 0),
-      readsTogether: await fan(2, 200),
+      // 270 reads together, each query's 90 within its own host calls.
+      readsTogether: await fan(3, 90),
     }).toStrictEqual({
       allowed: "ok",
       tooMany: "operation.call_limit",
@@ -1543,6 +1985,7 @@ describe("an action's nested calls", () => {
           await channel.call(kind, called, callArgs),
         resource: async (alias, method, callArgs) =>
           await channel.resource(alias, method, callArgs),
+        emit: async (progress) => await channel.emit(progress),
       };
       return await defaultRun(path, args, tearing);
     };

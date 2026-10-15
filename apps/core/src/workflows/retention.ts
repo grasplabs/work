@@ -5,6 +5,11 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
+  workflowResourceParams,
+  workflowStartReceipts,
+  runLineageChildren,
+  runMailCalls,
+  runMailStamps,
   runLineageAttempts,
   runLineages,
   workflowDecisions,
@@ -39,6 +44,15 @@ import { runEngine, runRetentionDays } from "./engine.ts";
 // empty answer passed off as the run's. What went is left empty in the
 // rows; readers say why, with the retention as the deployment has it when
 // they read (`removedText`), so no row keeps a number that may change.
+//
+// The same retention removes what independent workflows keep of what a
+// person put in (`sweepWorkflowStartDetails`): a start receipt's input and
+// the parameter values it froze, once it was admitted that long ago, and
+// the values of a parameter revision once another replaced it that long
+// ago, or its workflow was deleted. The database lets nothing else of
+// either change (migration 0080): their IDs, hashes, revisions and who
+// did what stay, so a start sent again is still known by its key and
+// input's hash, and the revision in force is never touched.
 //
 // Kept, each by rules of its own, not this retention's:
 // - The audit log: it has its own retention (audit-log.ts), and its
@@ -166,7 +180,8 @@ const unkeyed = (step: SQL): SQL =>
  * that never returned: its run has ended) is settled first, as an
  * admission would, charging its lineage up to its deadline (now, at the
  * latest), so the lineage's row, which stays, neither keeps holding it nor
- * loses what it used. Every receipt of the runs goes. Run before its runs
+ * loses what it used. Every receipt of the runs goes, and every token of
+ * their mail. Run before its runs
  * are marked, so a sweep that stops before marking them leaves them due,
  * and none of a marked run is left.
  */
@@ -196,6 +211,21 @@ const receiptsPruned = (
       ),
     db.update(held).set({ usedMs: used, settledAt: now }).where(lapsed),
     db.delete(held).where(inArray(held.runId, runs)),
+    // The tokens of the runs' mail (mail-stamps.ts): mail to one this
+    // late is mail to an address no one receives at.
+    db.delete(runMailStamps).where(inArray(runMailStamps.runId, runs)),
+    db.delete(runMailCalls).where(inArray(runMailCalls.runId, runs)),
+    // The children their keys admitted (quotas.ts): what a delivery this
+    // late starts is admitted afresh, if its lineage has room.
+    db.delete(runLineageChildren).where(
+      inArray(
+        runLineageChildren.triggerKey,
+        db
+          .select({ key: sql<string>`${workflowRuns.triggerKey}` })
+          .from(workflowRuns)
+          .where(inArray(workflowRuns.id, runs))
+      )
+    ),
   ] as const;
 };
 
@@ -265,6 +295,64 @@ const pruneReceipts = async (
       receiptsPruned(db, runs.slice(from, from + receiptRunsPerBatch), now)
     );
   }
+};
+
+/** Most start receipts, and parameter revisions, one cron run empties. */
+export const startDetailsPerSweep = 500;
+
+/**
+ * Removes the input and frozen parameter values of start receipts
+ * admitted before `before`, and the values of parameter revisions
+ * replaced before it or of workflows deleted before it, at most
+ * {@link startDetailsPerSweep} of each, oldest first, marked at `now`:
+ * set to null once, which is all the database lets anything change of
+ * them. The rest is left to the next cron run.
+ */
+export const sweepWorkflowStartDetails = async (
+  env: Env,
+  before: Date,
+  now: Date
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const receipts = workflowStartReceipts;
+  const params = workflowResourceParams;
+  await db.batch([
+    db
+      .update(receipts)
+      .set({ input: null, params: null, detailsRemovedAt: now })
+      .where(
+        inArray(
+          receipts.id,
+          db
+            .select({ id: receipts.id })
+            .from(receipts)
+            .where(
+              and(
+                isNull(receipts.detailsRemovedAt),
+                lt(receipts.createdAt, before)
+              )
+            )
+            .orderBy(asc(receipts.createdAt))
+            .limit(startDetailsPerSweep)
+        )
+      ),
+    db
+      .update(params)
+      .set({ values: null, valuesRemovedAt: now })
+      .where(
+        sql`rowid IN (SELECT replaced.rowid FROM ${params} AS replaced
+          WHERE replaced.values_removed_at IS NULL
+            AND (EXISTS (SELECT 1 FROM ${params} AS next
+                WHERE next.workflow_resource_id = replaced.workflow_resource_id
+                  AND next.revision = replaced.revision + 1
+                  AND next.set_at < ${before.getTime()})
+              OR EXISTS (SELECT 1 FROM workflow_resources AS gone
+                WHERE gone.id = replaced.workflow_resource_id
+                  AND gone.deleted_at < ${before.getTime()}))
+          ORDER BY replaced.set_at
+          LIMIT ${startDetailsPerSweep})`
+      ),
+  ]);
 };
 
 /** A run to sweep, as the sweep reads it. */
@@ -374,6 +462,7 @@ export const sweepRunDetails = async (env: Env, now: Date): Promise<void> => {
     }
     last = rows.at(-1);
   }
+  await sweepWorkflowStartDetails(env, before, now);
   if (removed > 0) {
     log.info("workflow.run_details_removed", { runs: removed, days });
   }
