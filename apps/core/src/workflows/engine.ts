@@ -163,9 +163,18 @@ export interface RunEngine {
    * Delivers the run an event of `type`, which ends a wait on that type: it
    * carries nothing (`RunHost.waitForDecision`). `key` names the delivery:
    * the same key again is the same event, taken once. A run that has
-   * ended takes none, and that is no error.
+   * ended, or that the engine has no record of, takes none, and that is
+   * no error: there is nothing left to wake (workflows/wakes.ts). Answers
+   * `delivered` for those, and `refused` for an event the run will never
+   * take, sent again or not: its inbox is full, the event too large, or
+   * the key already names another event. Throws when the run can't be
+   * reached.
    */
-  sendEvent: (id: string, type: string, key: string) => Promise<void>;
+  sendEvent: (
+    id: string,
+    type: string,
+    key: string
+  ) => Promise<"delivered" | "refused">;
   /**
    * Removes the run, with all the engine kept of it, whether or not it has
    * ended; one it has no record of stays as it is. For a run core ended
@@ -309,13 +318,11 @@ export const runEngine = (env: Env): RunEngine => ({
       payload: encode(null),
       key,
     });
-    if (
-      outcome !== "accepted" &&
-      outcome !== "duplicate" &&
-      outcome !== "ended"
-    ) {
-      throw new Error(`Run ${id} didn't take the event ${type}: ${outcome}`);
-    }
+    return outcome === "full" ||
+      outcome === "too_large" ||
+      outcome === "conflict"
+      ? "refused"
+      : "delivered";
   },
   remove: async (id) => {
     await runStub(env, id).deleteRun();

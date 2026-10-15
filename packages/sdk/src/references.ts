@@ -1,5 +1,5 @@
 import { isPlainObject } from "./value-descriptor.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
+import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 
 // References (spec 8, 32.1): how code names one of an App's functions, a
 // browser-facing resource, a screen or its preferences, without holding
@@ -155,6 +155,173 @@ export interface ScreenReference<
 /** The route input of `Screen`, as a caller passes it. */
 export type ScreenInputOf<Screen> =
   Screen extends ScreenReference<string, infer Input> ? Input : never;
+
+declare const waitType: unique symbol;
+
+/**
+ * What a run of a workflow is, once the host admitted its start: its ID,
+ * its workflow and that workflow's exact version and manifest. Holding
+ * one grants nothing: the host checks every watch and control again.
+ */
+export interface RunHandle {
+  readonly runId: string;
+  readonly workflowId: string;
+  readonly workflowVersion: number;
+  readonly manifestHash: string;
+}
+
+/** Who classifies a failure as what (spec 32.1). */
+export type AppErrorCategory =
+  | "source"
+  | "contract"
+  | "domain"
+  | "authorization"
+  | "operational"
+  | "uncertain"
+  | "safety";
+
+/**
+ * A failure as the host answers it, sanitized: its code to branch on, its
+ * message for people, its category, whether trying again may help, the
+ * request to quote (null for a run's own failure, which no request made)
+ * and, when the failing code gave them, its details.
+ */
+export interface AppErrorPayload {
+  readonly code: string;
+  readonly message: string;
+  readonly category: AppErrorCategory;
+  readonly retryable: boolean;
+  readonly requestId: string | null;
+  readonly details?: JsonValue;
+}
+
+/** What every wait a run is held at has (spec 10.7.2). */
+interface WaitFields<Key extends string> {
+  /** This exact wait: its run, step, branch, iteration and generation. */
+  readonly id: string;
+  /** The source task it waits in, by its canonical path. */
+  readonly taskId: string;
+  /**
+   * A decision's binding alias; the task path for any other kind; `$run`
+   * for a hold on the whole run.
+   */
+  readonly key: Key;
+  /** Plain text, bounded: never HTML. */
+  readonly title: string;
+  /** When it opened, in Unix milliseconds. */
+  readonly openedAt: number;
+  /** When it closes on its own, in Unix milliseconds; null if never. */
+  readonly deadline: number | null;
+}
+
+/** The event a run listens for, as its wait names it (spec 10.4.6). */
+export interface WorkflowEventReference {
+  readonly kind: "workflowEvent";
+  /** The event binding's alias in the workflow. */
+  readonly alias: string;
+  /** The SHA-256 of its data contract, in hex. */
+  readonly fingerprint: string;
+}
+
+/**
+ * A wait a run is held at now (spec 10.4.5, 10.7.2): a timer, an event,
+ * a person's decision, a child run, or a hold of the platform's that no
+ * one answers from an App. Each grants nothing of what it names.
+ */
+export type WorkflowWait<Key extends string = string> =
+  | (WaitFields<Key> & {
+      readonly kind: "timer";
+      /** A sleep the workflow asked for, or a retry's backoff. */
+      readonly purpose: "sleep" | "retry";
+      readonly deadline: number;
+    })
+  | (WaitFields<Key> & {
+      readonly kind: "event";
+      readonly event: WorkflowEventReference;
+      /** Whether the person may send it now; false when unknown. */
+      readonly canSend: boolean;
+    })
+  | (WaitFields<Key> & {
+      readonly kind: "decision";
+      /** Whether the person may answer it now; false when unknown or stale. */
+      readonly canRespond: boolean;
+    })
+  | (WaitFields<Key> & {
+      readonly kind: "child";
+      /** The child run: no watch, control or output of it comes with it. */
+      readonly child: RunHandle;
+    })
+  | (WaitFields<Key> & {
+      readonly kind: "blocked";
+      /**
+       * Held by policy, a quota, or an outcome no one knows yet: only the
+       * platform's own remediation releases it, never a decision.
+       */
+      readonly reason: "policy" | "quota" | "uncertain";
+      readonly message: string;
+    });
+
+/**
+ * A generated reference to one of the workflows an App binds (spec 10.4.1):
+ * the App and release it belongs to, the binding's alias, the contract it
+ * pins (its ID and fingerprint, over its input and output) and the
+ * descriptors of its input and output. Its types, the input a run takes,
+ * the output a completed run has and the waits it can be held at, live
+ * in phantom members only. It holds no binding and grants nothing: the
+ * host resolves it against the release and binding in force, and refuses
+ * a run whose pinned contract isn't this one.
+ */
+export interface WorkflowReference<
+  Alias extends string = string,
+  Input = unknown,
+  Output = unknown,
+  Wait = WorkflowWait,
+> {
+  readonly kind: "workflow";
+  readonly visibility: "public";
+  readonly resourceId: string;
+  readonly resourceVersion: number;
+  readonly alias: Alias;
+  /** Its registered path, e.g. `workflows.summarizeNote`. */
+  readonly contractId: string;
+  /** The SHA-256 of its exact input and output contract, in hex. */
+  readonly fingerprint: string;
+  readonly input: ValueDescriptor;
+  readonly output: ValueDescriptor;
+  /** Types only: never set. */
+  readonly [argsType]?: Input;
+  /** Types only: never set. */
+  readonly [returnType]?: Output;
+  /** Types only: never set. */
+  readonly [waitType]?: Wait;
+}
+
+/** Any generated workflow reference, whatever it takes and gives. */
+export type AnyWorkflowReference = WorkflowReference<
+  string,
+  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowInputOf`
+  any,
+  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowOutputOf`
+  any,
+  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowWaitOf`
+  any
+>;
+
+/** The input a run of `Reference` takes, as a caller passes it. */
+export type WorkflowInputOf<Reference> =
+  Reference extends WorkflowReference<string, infer Input> ? Input : never;
+
+/** The output a completed run of `Reference` has. */
+export type WorkflowOutputOf<Reference> =
+  Reference extends WorkflowReference<string, unknown, infer Output>
+    ? Output
+    : never;
+
+/** The waits a run of `Reference` can be held at. */
+export type WorkflowWaitOf<Reference> =
+  Reference extends WorkflowReference<string, unknown, unknown, infer Wait>
+    ? Wait
+    : never;
 
 /** A generated reference to the App's preferences, when it declares them. */
 export interface PreferencesReference<Input = unknown, Value = unknown> {

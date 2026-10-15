@@ -482,7 +482,7 @@ describe("an abandoned change", () => {
       <Abandoned abandoned={abandoned} engine={engine} name="crm" />
     );
     expect(text).toContain(
-      "These releases can never be made current: Notes, version 3 and engine crm, version 5."
+      "These releases can never be made current: Notes, version 3 and domain crm, version 5."
     );
     expect(text).toContain("The change to the store crm was abandoned");
     expect(text).toContain(
@@ -551,24 +551,24 @@ describe("why a version wasn't made current", () => {
       unnamed: makeCurrentFailure(backfillFailed(null)),
     }).toStrictEqual({
       invalid: {
-        text: "This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept.",
-        link: "An admin can see the record that holds it back, and abandon the change, on the engine's page.",
+        text: "This version changes the domain's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept.",
+        link: "An admin can see the record that holds it back, and abandon the change, on the domain's page.",
       },
       tooLarge: {
-        text: "This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be.",
-        link: "An admin can see the record that holds it back, and abandon the change, on the engine's page.",
+        text: "This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be.",
+        link: "An admin can see the record that holds it back, and abandon the change, on the domain's page.",
       },
       stalled: {
-        text: "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress.",
-        link: "No record is to blame, so an admin can only abandon the change, on the engine's page.",
+        text: "This version changes the domain's data, and the change can't be applied: filling in its new fields stopped making progress.",
+        link: "No record is to blame, so an admin can only abandon the change, on the domain's page.",
       },
       migration: {
-        text: "This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept.",
-        link: "An admin can see what went wrong, and abandon the change, on the engine's page.",
+        text: "This version changes the domain's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept.",
+        link: "An admin can see what went wrong, and abandon the change, on the domain's page.",
       },
       unnamed: {
-        text: "This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress.",
-        link: "No record is to blame, so an admin can only abandon the change, on the engine's page.",
+        text: "This version changes the domain's data, and the change can't be applied: filling in its new fields stopped making progress.",
+        link: "No record is to blame, so an admin can only abandon the change, on the domain's page.",
       },
     });
   });
@@ -593,12 +593,12 @@ describe("why a version wasn't made current", () => {
       ).text,
     }).toStrictEqual({
       fixture: {
-        text: "The migration derive-category failed on its fixture 2 when this version was sealed: its output isn't what the fixture expects. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again.",
+        text: "The migration derive-category failed on its fixture 2 when this version was sealed: its output isn't what the fixture expects. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again.",
         link: undefined,
         // Core's own words, shown beside it.
         issues: ["It answered {}"],
       },
-      none: "The migration derive-category failed on its fixtures when this version was sealed: it answered something that isn't its records. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again.",
+      none: "The migration derive-category failed on its fixtures when this version was sealed: it answered something that isn't its records. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the domain again.",
     });
   });
 
@@ -616,10 +616,10 @@ describe("why a version wasn't made current", () => {
       ).text,
     }).toStrictEqual({
       some: {
-        text: "A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: 4 and 3.",
+        text: "A data migration moved this domain's records on after this version, so it can't be made current again. Kept versions that still fit them: 4 and 3.",
         link: undefined,
       },
-      none: "A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead.",
+      none: "A data migration moved this domain's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead.",
     });
   });
 
@@ -631,7 +631,7 @@ describe("why a version wasn't made current", () => {
       other: makeCurrentFailure(roleErrors.create("role.forbidden")).link,
     }).toStrictEqual({
       abandoned: {
-        text: "An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again.",
+        text: "An admin abandoned the data change this version needs, so it can never be made current. Ask the domain to be built again.",
         link: undefined,
       },
       other: undefined,

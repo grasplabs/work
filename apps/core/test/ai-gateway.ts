@@ -22,7 +22,13 @@ export type GatewayReply =
       /** Tool calls after the text; the answer then stops for them. */
       toolCalls?: ScriptedToolCall[];
       inputTokens: number;
+      /** The answer's tokens, its thinking's among them. */
       outputTokens: number;
+      /**
+       * What the model thought before it answered, streamed first, and how
+       * many of `outputTokens` it took: providers count thinking as output.
+       */
+      thinking?: { text: string; tokens: number };
       /** The model hit its output limit (Anthropic and chat completions). */
       truncated?: boolean;
       /**
@@ -161,9 +167,27 @@ const textDeltas = (
       ];
 };
 
+/** A content block of Anthropic's, as its stream opens it. */
+type AnthropicBlock =
+  | { type: "thinking"; text: string }
+  | { type: "text"; text: string }
+  | ({ type: "tool_use" } & ScriptedToolCall);
+
+const blockStart = (block: AnthropicBlock): object => {
+  if (block.type === "thinking") {
+    return { type: "thinking", thinking: "" };
+  }
+  return block.type === "text"
+    ? { type: "text", text: "" }
+    : { type: "tool_use", id: block.id, name: block.name, input: {} };
+};
+
 const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
-  const { text, inputTokens, outputTokens } = answer;
+  const { text, inputTokens, outputTokens, thinking } = answer;
   const blocks = [
+    ...(thinking === undefined
+      ? []
+      : [{ type: "thinking" as const, text: thinking.text }]),
     ...(text === "" ? [] : [{ type: "text" as const, text }]),
     ...(answer.toolCalls ?? []).map((call) => ({
       type: "tool_use" as const,
@@ -204,15 +228,34 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
         data: {
           type: "content_block_start",
           index,
-          content_block:
-            block.type === "text"
-              ? { type: "text", text: "" }
-              : { type: "tool_use", id: block.id, name: block.name, input: {} },
+          content_block: blockStart(block),
         },
       },
       ...(block.type === "text"
         ? textDeltas(index, block.text, answer.pause)
-        : [
+        : []),
+      ...(block.type === "thinking"
+        ? [
+            {
+              event: "content_block_delta",
+              data: {
+                type: "content_block_delta",
+                index,
+                delta: { type: "thinking_delta", thinking: block.text },
+              },
+            },
+            {
+              event: "content_block_delta",
+              data: {
+                type: "content_block_delta",
+                index,
+                delta: { type: "signature_delta", signature: "signed" },
+              },
+            },
+          ]
+        : []),
+      ...(block.type === "tool_use"
+        ? [
             {
               event: "content_block_delta",
               data: {
@@ -224,7 +267,8 @@ const anthropicEvents = (answer: Answer): (StreamEvent | StreamPause)[] => {
                 },
               },
             },
-          ]),
+          ]
+        : []),
       {
         event: "content_block_stop",
         data: { type: "content_block_stop", index },
@@ -258,7 +302,7 @@ const chunk = (fields: object) => ({
 const chatCompletionEvents = (
   answer: Answer
 ): (StreamEvent | StreamPause)[] => {
-  const { text, inputTokens, outputTokens, pause, noUsage } = answer;
+  const { text, inputTokens, outputTokens, pause, thinking, noUsage } = answer;
   const content = (part: string): StreamEvent =>
     chunk({
       choices: [
@@ -270,6 +314,19 @@ const chatCompletionEvents = (
       ],
     });
   return [
+    ...(thinking === undefined
+      ? []
+      : [
+          chunk({
+            choices: [
+              {
+                index: 0,
+                delta: { role: "assistant", reasoning_content: thinking.text },
+                finish_reason: null,
+              },
+            ],
+          }),
+        ]),
     ...(pause === undefined
       ? [content(text)]
       : [
@@ -318,6 +375,9 @@ const chatCompletionEvents = (
               prompt_tokens: inputTokens,
               completion_tokens: outputTokens,
               total_tokens: inputTokens + outputTokens,
+              completion_tokens_details: {
+                reasoning_tokens: thinking?.tokens ?? 0,
+              },
             },
           }),
         ]),
@@ -330,9 +390,29 @@ const responsesEvents = ({
   toolCalls,
   inputTokens,
   outputTokens,
+  thinking,
 }: Answer) => {
   const message = { type: "message", id: "msg_1", role: "assistant" };
+  const reasoning = { type: "reasoning", id: "rs_1" };
   const items = [
+    ...(thinking === undefined
+      ? []
+      : [
+          {
+            added: { ...reasoning, summary: [] },
+            deltas: [
+              {
+                type: "response.reasoning_summary_text.delta",
+                summary_index: 0,
+                delta: thinking.text,
+              },
+            ],
+            done: {
+              ...reasoning,
+              summary: [{ type: "summary_text", text: thinking.text }],
+            },
+          },
+        ]),
     ...(text === ""
       ? []
       : [
@@ -406,6 +486,7 @@ const responsesEvents = ({
             input_tokens: inputTokens,
             output_tokens: outputTokens,
             total_tokens: inputTokens + outputTokens,
+            output_tokens_details: { reasoning_tokens: thinking?.tokens ?? 0 },
           },
         },
       },

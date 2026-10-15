@@ -24,6 +24,7 @@ import { deleteExpiredEmail } from "./workflows/kept-email.ts";
 import { sweepRunDetails } from "./workflows/retention.ts";
 import { repairStarts } from "./workflows/runs.ts";
 import { startDueSchedules } from "./workflows/triggers.ts";
+import { repairWakes } from "./workflows/wakes.ts";
 
 /** The cron trigger that runs every 15 minutes (wrangler.jsonc). */
 const quarterHourCron = "*/15 * * * *";
@@ -50,6 +51,7 @@ export { ConnectionBinding } from "./bindings.ts";
 export { AppCollectionBinding } from "./knowledge/app-binding.ts";
 export { CollectionBinding } from "./knowledge/binding.ts";
 export { KnowledgeBinding } from "./knowledge/tools-binding.ts";
+export { ActionInvocation } from "./action-invocation.ts";
 export { WorkflowRuns } from "./workflows/run-object.ts";
 export {
   PreviewCollection,
@@ -77,7 +79,9 @@ export default {
   // starts core stopped in the middle of, sent to the engine again (see
   // `repairStarts`, src/workflows/runs.ts) and pauses, resumes and
   // cancels the engine is still to confirm (see `repairControls`,
-  // src/workflows/controls.ts), and connector events:
+  // src/workflows/controls.ts), wakes owed to runs waiting on a person,
+  // sent again (see `repairWakes`, src/workflows/wakes.ts), and connector
+  // events:
   // where connect listens, and the events it read, delivered (see
   // src/workflows/connector-events.ts).
   //
@@ -135,6 +139,7 @@ export default {
             startDueSchedules(env, new Date(controller.scheduledTime)),
             repairStarts(env),
             repairControls(env),
+            repairWakes(env, new Date(controller.scheduledTime)),
             pumpConnectorEvents(env),
           ];
     const results = await Promise.allSettled(jobs);

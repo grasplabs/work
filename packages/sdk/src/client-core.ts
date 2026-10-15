@@ -1,15 +1,22 @@
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
+import {
+  functionRequestMaxBytes,
+  streamIdleCancelMs,
+} from "@grasp-os/shared/operation-limits";
 
 import {
   clientError,
-  fencingCodes,
+  fences,
+  fencingRefusalOf,
   GraspError,
+  issueDetails,
   nothingRanCodes,
+  hidesOutcome,
   readAnswer,
   refusedBeforeCallCodes,
   readRejection,
+  settlesSubmission,
 } from "./client-error.ts";
 import type { Settled } from "./client-error.ts";
 import { PortableTransport } from "./client-portable.ts";
@@ -17,6 +24,7 @@ import type { PortableClientOptions } from "./client-portable.ts";
 import type {
   ArgsOf,
   OperationReference,
+  ProgressOf,
   ReferenceKind,
   ReturnOf,
 } from "./references.ts";
@@ -35,42 +43,86 @@ import { readDescriptor } from "./value-read.ts";
 // It owns what every screen would otherwise write again: reading the
 // generated reference, normalizing the arguments with the same native
 // interpreter the host uses, one logical submission per explicit call,
-// receipt recovery after a lost response, sharing one query among the
-// components that read it, ordering its snapshots and reading them again
-// after a change this client confirmed. Live updates from other clients
-// are GRA-252's, through this same entry. Failure modes, and how each is
-// closed:
+// receipt recovery after a lost response, and live queries (spec 11):
+// over the platform's frame, one subscription per query, shared by the
+// components that read it, whose snapshots core pushes after every write
+// that changed what the query read, whoever made it, ordered and
+// authorized, followed again after a lost connection; a screen there
+// never reads a query again on its own. A portable host has no such
+// connection yet: its queries are read again after a change this client
+// confirmed. Failure modes, and how each is closed:
 //
 // - A lost response turns a saved change into a second one: every
 //   mutation carries an idempotency key, the caller's or a fresh random
 //   one, and a retry after a lost response sends the very same request,
 //   so the host answers its receipt instead of saving again.
-// - An uncertain outcome passes for success or failure: a mutation whose
-//   response was lost is retried under its key until the host answers,
-//   for `lostBudgetMs` at most, then rejects as uncertain with its key;
-//   it resolves only on the host's committed answer. An action's lost
-//   response is never sent again (it may have reached outside):
-//   `submission.outcome_unknown`, with the key. The host keeps no
-//   receipt of a whole action: a deliberate call with that key runs it
-//   again, its completed steps reconciled by the keys operations.ts
-//   derives from it, not repeated.
-// - Retries spend the person's request budget: re-reads after changes are
-//   gathered and at most `maxReadsInFlight` run at once, a refusal for
-//   the budget waits as long as it says, and a save is sent again for
-//   `submissionBudgetMs` rather than a few quick tries.
+// - An uncertain outcome passes for success or failure: a mutation or
+//   action whose response was lost is sent again under its key until the
+//   host answers, for `lostBudgetMs` at most, then rejects as uncertain
+//   with its key; it resolves only on the host's own answer. The host
+//   keeps a receipt of each (a mutation's with its commit, an action's in
+//   its invocation's object), so the resend answers what the first did,
+//   or joins it while it still runs, and never runs it a second time. An
+//   outcome the host itself can't tell (`operation.sandbox_lost`) is that
+//   receipt: it rejects at once, with its key.
+// - Retries spend the person's request budget: reads run at most
+//   `maxReadsInFlight` at once (re-reads after changes, on a portable
+//   host, gathered first), a refusal for the budget waits as long as it
+//   says, a save is sent again for `submissionBudgetMs` rather than a few
+//   quick tries, and a followed query waits as a refusal of it says.
 // - Cancelling unlocks a duplicate: aborting stops the caller waiting,
 //   never the submission, which keeps reconciling under its key; a call
 //   with the same key and input joins it rather than send it again.
-// - A delayed answer overwrites a newer one: each read of a query is
-//   numbered, and an answer older than the one shown is dropped.
+// - A delayed answer overwrites a newer one: a followed query shows only
+//   its subscription's pushes, each numbered by core, an older or repeated
+//   one dropped, and a push of an earlier subscription dropped too; an
+//   imperative read's answer answers its caller and is shown only while
+//   nobody follows the query. Reads are numbered too, an answer older
+//   than the one shown dropped, and a push counts every read sent before
+//   it as older, so none of them replaces it once nobody follows.
+// - A lost connection leaves a screen silently stale, or hammers core:
+//   once core lets go of a subscription, the query keeps its last
+//   authorized snapshot and follows again after a delay from 250 ms up
+//   to 30 seconds, fully jittered; a fresh subscription starts with a
+//   fresh read. A refusal of the person or the build stops it for good.
 // - Data outlives the access it was read under: a refusal of the person
-//   or the build (`fencingCodes`) clears every cached result, and every
-//   answer to a request sent before it is dropped.
+//   or the build (`fences`), from a call or as a pushed result, clears
+//   every cached result and stops every subscription, and every answer
+//   to a request sent before it is dropped.
+// - One person's submission is sent as another's: a key whose outcome was
+//   left unknown is sent again only within the generation it was sent
+//   under; after someone else signed in, or access was lost, it is
+//   refused unsent as `auth.principal_changed`.
+// - Subscriptions pile up: a query is followed only while a component
+//   reads it, released as soon as the last one stops (a skipped query
+//   follows nothing); core bounds what a page follows.
 // - Invocation options travel as arguments: options are read on their
 //   own, strictly, and only the normalized input is sent.
 // - A malformed reference or argument reaches the host: references are
 //   read as data, their descriptors checked, and arguments validated
 //   before anything is sent; the host checks all of it again.
+//
+// A streaming action (spec 10.7.6, `stream`) is followed rather than
+// answered: its progress snapshots, then its result, over the transport's
+// `stream`. More ways it can fail:
+// - A reference of the wrong mode runs anyway: `action` takes only a
+//   single-answer reference and `stream` only a streaming one, refused
+//   before anything is sent (`contract.mode_mismatch`); the host refuses
+//   them too.
+// - A lost connection runs it again: the client attaches to the same
+//   invocation under the same key (`attach`), which never starts one, and
+//   gets its latest progress and its result; while it does, the caller is
+//   told it is recovering. If it can't, it rejects
+//   `stream.outcome_unknown` with the key, never a made-up outcome.
+// - Progress is applied unchecked, or out of order: each snapshot is
+//   validated against the reference's own `stream` descriptor and handed
+//   on only if newer than the last (a gap is snapshots the host replaced
+//   with a newer one), frozen, so no caller changes another's.
+// - A callback's failure turns into the action's: a throwing `onProgress`
+//   is only no longer called; the result is still the action's.
+// - Stopping following cancels another follower's run: aborting lets go
+//   of this caller's connection only; the host cancels the run once no
+//   one follows it. Cancelling it for everyone is a command of its own.
 
 /**
  * How the client reaches the host: one call of the App `app`, its
@@ -80,6 +132,33 @@ import { readDescriptor } from "./value-read.ts";
  */
 export interface ClientTransport {
   call: (request: string, app: string) => Promise<unknown>;
+  /**
+   * Follows the query `request` names (spec 11): `onSnapshot` gets each
+   * push of core's (`{ revision, result }`), and `onLost` is called once
+   * core, or the connection to it, let go of the subscription. Resolves
+   * with what releases it, or rejects as `call` does. A portable host
+   * has no transport, and reads its queries again after changes.
+   */
+  watch: (
+    request: string,
+    onSnapshot: (push: unknown) => void,
+    onLost: () => void
+  ) => Promise<{ release: () => void }>;
+  /**
+   * Follows one of a streaming action's invocations: `start` starts it
+   * (or joins it under the same key and input), `attach` only reads it
+   * again. `onFrame` gets each frame core sent, as data, then
+   * `{ type: "closed" }` once the connection ends; the promise resolves
+   * once it is open, with how to let go of it, or rejects as `call` does.
+   * A transport without it runs no streaming action.
+   */
+  stream?: (
+    what: "stream" | "attach",
+    request: string,
+    onFrame: (frame: unknown) => void
+  ) => Promise<StreamLink>;
+  /** Cancels the invocation `request` names, for everyone following it. */
+  cancelStream?: (request: string) => Promise<unknown>;
 }
 
 /**
@@ -106,6 +185,12 @@ const unsent = (refusal: GraspError): Error => {
 interface Bound {
   readonly generation?: number;
   principal?: string;
+}
+
+/** A connection to a streaming action's invocation, as the transport opened it. */
+export interface StreamLink {
+  /** Lets go of it: the invocation goes on for anyone else following it. */
+  readonly release: () => unknown;
 }
 
 /** Options of a query call. */
@@ -141,6 +226,34 @@ export type MutationReference = OperationReference<
 >;
 /** A public action reference that answers once (not a stream). */
 export type ActionReference = OperationReference<unknown, unknown, "action">;
+/** A public reference to an action that streams its progress. */
+export type StreamReference = OperationReference<
+  unknown,
+  unknown,
+  "action",
+  "public",
+  unknown
+> & {
+  // Spelled out: compared through its type parameters alone, a reference
+  // that answers once (its progress `never`) would pass for one that
+  // streams.
+  readonly mode: "stream";
+};
+
+/** Options of a streaming action's call through `client.stream`. */
+export interface StreamOptions<Progress> extends SubmitOptions {
+  /**
+   * Gets each progress snapshot, newer than the last, frozen. If it
+   * throws, it is no longer called; the call goes on.
+   */
+  readonly onProgress: (progress: Progress) => void;
+}
+
+/** The arguments of `client.stream`: its input, then its options. */
+export type StreamArguments<Reference> = [
+  args: ArgsOf<Reference>,
+  options: StreamOptions<ProgressOf<Reference>>,
+];
 
 /**
  * The arguments of a call of `Reference`, then its options. The input may
@@ -153,8 +266,10 @@ export type CallArguments<Reference, Options> =
     : [args: ArgsOf<Reference>, options?: Options];
 
 /** A reference as the client read it: what it sends, and its input's descriptor. */
-interface ReadReference {
+export interface ReadReference {
   readonly kind: ReferenceKind;
+  /** The descriptor of its progress, for a streaming action only. */
+  readonly stream: ValueDescriptor | undefined;
   readonly resourceId: string;
   readonly resourceVersion: number;
   readonly contractId: string;
@@ -167,7 +282,7 @@ const fingerprintPattern = /^[0-9a-f]{64}$/u;
 /** References read already, by the object App code passes. */
 const readReferences = new WeakMap<object, ReadReference>();
 
-/** Whether `value` names a public, single-answer function of `kind`. */
+/** Whether `value` names a public function of `kind`, of either mode. */
 const isReferenceOf = (
   value: unknown,
   kind: ReferenceKind
@@ -176,11 +291,12 @@ const isReferenceOf = (
   resourceVersion: number;
   contractId: string;
   fingerprint: string;
+  mode: "single" | "stream";
 } =>
   isPlainObject(value) &&
   value.kind === kind &&
   value.visibility === "public" &&
-  value.mode === "single" &&
+  (value.mode === "single" || (kind === "action" && value.mode === "stream")) &&
   typeof value.resourceId === "string" &&
   Number.isInteger(value.resourceVersion) &&
   typeof value.contractId === "string" &&
@@ -188,28 +304,46 @@ const isReferenceOf = (
   fingerprintPattern.test(value.fingerprint);
 
 /**
- * `value` as a public, single-answer reference of `kind`, read as data,
- * its descriptor checked; or `contract.invalid_request`.
+ * `value` as a public reference of `kind` and `mode`, read as data, its
+ * descriptors checked; `contract.mode_mismatch` for an action of the
+ * other mode, `contract.invalid_request` for anything else.
  */
-const readReference = (value: unknown, kind: ReferenceKind): ReadReference => {
+const readReference = (
+  value: unknown,
+  kind: ReferenceKind,
+  mode: "single" | "stream" = "single"
+): ReadReference => {
   const known =
     typeof value === "object" && value !== null
       ? readReferences.get(value)
       : undefined;
-  if (known !== undefined && known.kind === kind) {
+  if (
+    known !== undefined &&
+    known.kind === kind &&
+    (known.stream !== undefined) === (mode === "stream")
+  ) {
     return known;
   }
   if (!isReferenceOf(value, kind)) {
     throw clientError("contract.invalid_request");
   }
+  if (value.mode !== mode) {
+    throw clientError("contract.mode_mismatch");
+  }
   let args: ValueDescriptor;
+  let stream: ValueDescriptor | undefined;
   try {
     args = readDescriptor(value.args, 1, { nodes: 0 });
+    stream =
+      mode === "stream"
+        ? readDescriptor(value.stream, 1, { nodes: 0 })
+        : undefined;
   } catch {
     throw clientError("contract.invalid_request");
   }
   const read: ReadReference = {
     kind,
+    stream,
     resourceId: value.resourceId,
     resourceVersion: value.resourceVersion,
     contractId: value.contractId,
@@ -238,11 +372,7 @@ const normalized = (reference: ReadReference, args: unknown): Json => {
   const checked = validateValue(reference.args, args ?? {});
   if (checked.issues !== undefined) {
     throw clientError("contract.invalid_args", {
-      issues: checked.issues.map(({ code, message, path }) => ({
-        code,
-        message,
-        path: [...path],
-      })),
+      issues: issueDetails(checked.issues),
     });
   }
   // SAFETY: the interpreter answers a fresh JSON copy of what it accepted.
@@ -255,6 +385,10 @@ const submitOptionKeys: ReadonlySet<string> = new Set([
   "signal",
   "idempotencyKey",
 ]);
+const streamOptionKeys: ReadonlySet<string> = new Set([
+  ...submitOptionKeys,
+  "onProgress",
+]);
 
 const keyPattern = /^[ -~]{1,128}$/u;
 
@@ -265,7 +399,11 @@ const keyPattern = /^[ -~]{1,128}$/u;
 const readOptions = (
   options: unknown,
   allowed: ReadonlySet<string>
-): { signal?: AbortSignal; idempotencyKey?: string } => {
+): {
+  signal?: AbortSignal;
+  idempotencyKey?: string;
+  onProgress?: (progress: unknown) => void;
+} => {
   if (options === undefined) {
     return {};
   }
@@ -277,9 +415,12 @@ const readOptions = (
       throw new TypeError(`"${key}" isn't an option of this call.`);
     }
   }
-  const { signal, idempotencyKey } = options;
+  const { signal, idempotencyKey, onProgress } = options;
   if (signal !== undefined && !(signal instanceof AbortSignal)) {
     throw new TypeError("signal is an AbortSignal.");
+  }
+  if (onProgress !== undefined && typeof onProgress !== "function") {
+    throw new TypeError("onProgress is a function.");
   }
   if (
     idempotencyKey !== undefined &&
@@ -290,6 +431,13 @@ const readOptions = (
   return {
     ...(signal === undefined ? {} : { signal }),
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
+    ...(typeof onProgress === "function"
+      ? {
+          // SAFETY: a function App code passed; it gets what it asked for.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          onProgress: onProgress as (progress: unknown) => void,
+        }
+      : {}),
   };
 };
 
@@ -400,16 +548,41 @@ export const loading: QuerySnapshot = Object.freeze({
   error: undefined,
 });
 
+/** A query's subscription, while components read it. */
+interface Live {
+  /** Its place among the client's subscriptions: a later one is newer. */
+  readonly attempt: number;
+  /** What releases it, once core answered. */
+  release: (() => void) | undefined;
+  /** The revision of the latest push shown. */
+  revision: number;
+  /**
+   * How many times in a row it was lost before one lasted `steadyMs`: a
+   * push alone doesn't reset it, so a subscription lost right after each
+   * push still backs off.
+   */
+  failures: number;
+  /** When it was made. */
+  readonly since: number;
+  retry: ReturnType<typeof setTimeout> | undefined;
+  /** Released, ended, or fenced: nothing of it is shown any more. */
+  stopped: boolean;
+}
+
 /** One query, by reference and normalized arguments, shared by its readers. */
 export interface QueryEntry {
   readonly key: string;
   readonly reference: ReadReference;
   readonly input: Json;
+  /** Its request as the host reads it. */
+  readonly request: string;
   snapshot: QuerySnapshot;
   /** Components reading it now. */
   readonly listeners: Set<() => void>;
   /** Imperative reads waiting on it now. */
   interest: number;
+  /** Its subscription, while components read it (over the frame). */
+  live: Live | undefined;
   /** The number of the latest read sent, and of the one shown. */
   sent: number;
   shown: number;
@@ -444,9 +617,54 @@ const worthRetrying = (settled: Settled): boolean =>
   (settled.kind === "failed" && nothingRanCodes.has(settled.error.code));
 
 /**
+ * Refusals after which following a query again would only be refused
+ * again: the App moved to another version, or the page follows too many.
+ * (A refusal of the person or the build fences the whole client.)
+ */
+const endsFollowing = (code: string): boolean =>
+  code.startsWith("version.") ||
+  code === "app.not_running" ||
+  code === "screen.too_many_queries" ||
+  code === "screen.invalid" ||
+  code.startsWith("contract.");
+
+/** The least wait before following a query again. */
+const minFollowMs = 250;
+
+/**
+ * How long to wait before following a query again after it was lost
+ * `failures` times in a row: from 1 up to 30 seconds, fully jittered,
+ * but never under `minFollowMs`.
+ */
+const followDelay = (failures: number): number =>
+  Math.max(minFollowMs, Math.random() * Math.min(30_000, 1000 * 2 ** failures));
+
+/** How long a subscription must last for its losses to count afresh. */
+const steadyMs = 30_000;
+
+/** A push of core's, read: its revision and result, or none if malformed. */
+const readPush = (
+  push: unknown
+): { revision: number; settled: Settled } | undefined => {
+  if (
+    !isPlainObject(push) ||
+    typeof push.revision !== "number" ||
+    !Number.isSafeInteger(push.revision) ||
+    push.revision < 1
+  ) {
+    return undefined;
+  }
+  const settled = readAnswer({ result: push.result });
+  return settled.kind === "lost"
+    ? undefined
+    : { revision: push.revision, settled };
+};
+
+/**
  * Shows what read `number` of `entry` settled as, unless a newer read is
- * shown already, and answers it: its value, or its failure thrown. A
- * query that shows data keeps it while its server is unreachable.
+ * shown already or the query is followed (its pushes are what it shows),
+ * and answers it: its value, or its failure thrown. A query that shows
+ * data keeps it while its server is unreachable.
  */
 const settleRead = (
   entry: QueryEntry,
@@ -454,7 +672,7 @@ const settleRead = (
   settled: Settled
 ): unknown => {
   const { number } = read;
-  const newest = number > entry.shown;
+  const newest = number > entry.shown && entry.live === undefined;
   // A change confirmed after the read was sent may be missing from it.
   const current = read.changes === entry.changes;
   if (settled.kind === "lost") {
@@ -522,13 +740,181 @@ export interface ClientInternals {
   entry: (reference: unknown, args: unknown) => QueryEntry;
   /**
    * Adds a reader of `entry`, which `onChange` tells of every new
-   * snapshot, and reads the query when it has nothing current. Answers
-   * the function that removes the reader.
+   * snapshot: over the frame it follows the query while it has one,
+   * elsewhere it reads the query when it has nothing current. Answers the
+   * function that removes the reader; the last one out releases the
+   * subscription.
    */
   subscribe: (entry: QueryEntry, onChange: () => void) => () => void;
   /** Reads again every query that failed and is still read. */
   retryFailed: () => void;
+  /**
+   * `value` as a public, single-answer reference of `kind`, read as data,
+   * its descriptor checked; or `contract.invalid_request`.
+   */
+  readReference: (value: unknown, kind: ReferenceKind) => ReadReference;
+  /**
+   * Runs the streaming action `reference` names, as `client.stream` does,
+   * telling `events` how it goes: what `useStream` shows.
+   */
+  stream: (
+    reference: unknown,
+    args: unknown,
+    options: unknown,
+    events: StreamEvents
+  ) => Promise<unknown>;
+  /** How workflow runs reach the host (client-workflow.ts). */
+  readonly workflowLink: WorkflowLink;
 }
+
+/**
+ * What the workflow channel (client-workflow.ts) reaches of the client:
+ * the transport's subscriptions, submissions under the client's own key
+ * and fence rules, and its fences.
+ */
+export interface WorkflowLink {
+  /** Follows a request, as queries are followed; none on a portable host. */
+  readonly watch: ClientTransport["watch"] | undefined;
+  /**
+   * Sends `request`, a command of the workflow `target` names, as a
+   * mutation is sent: under `key`, sent again under it while its answer
+   * is lost (`onRecovering` told each time) or isn't one `read` accepts,
+   * resolving with what `read` made of the host's answer once it is
+   * durable, or rejecting with the host's refusal, or as uncertain with
+   * the key.
+   */
+  readonly command: (
+    target: SubmissionTarget,
+    request: string,
+    key: string,
+    events: {
+      readonly onRecovering: () => void;
+      /** The answer, read; undefined for one that isn't an answer. */
+      readonly read: (value: unknown) => unknown;
+    }
+  ) => Promise<unknown>;
+  /** Clears everything the client holds: the person or build lost access. */
+  readonly fence: (refusal: GraspError) => void;
+  /** Calls `listener` at every fence; answers what stops calling it. */
+  readonly onFence: (listener: (refusal: GraspError) => void) => () => void;
+}
+
+/** What a submission is scoped by: its App, contract and kind. */
+export type SubmissionTarget = Pick<
+  ReadReference,
+  "kind" | "resourceId" | "contractId"
+>;
+
+/** How a streaming action's call goes, beyond its progress and result. */
+export interface StreamEvents {
+  /** It was admitted: `cancel` cancels it for everyone following it. */
+  readonly onStarted: (cancel: () => Promise<void>) => void;
+  /** Its connection was lost, and the client is attaching again. */
+  readonly onRecovering: () => void;
+  /** It is followed again after a lost connection. */
+  readonly onAttached: () => void;
+  /** A newer progress snapshot, frozen. */
+  readonly onProgress: (progress: unknown) => void;
+}
+
+/** How a streaming action's connection ended. */
+type Followed =
+  | {
+      readonly kind: "settled";
+      readonly settled: Settled;
+      /** Whether the invocation answered, rather than its connection being refused. */
+      readonly answered: boolean;
+    }
+  | { readonly kind: "lost" }
+  | { readonly kind: "aborted" };
+
+/** How often a client starts a stream refused before it reached the invocation. */
+const streamStartAttempts = 3;
+
+/**
+ * Whether a start refused as `followed` (the `refused`th refusal) is
+ * worth sending again: only one refused before it reached the invocation
+ * (`refusedBeforeCallCodes`). One the invocation answered settled its
+ * receipt, which the same key only answers again.
+ */
+const startAgain = (
+  followed: Followed,
+  what: "stream" | "attach",
+  refused: number
+): boolean =>
+  what === "stream" &&
+  followed.kind === "settled" &&
+  !followed.answered &&
+  followed.settled.kind === "failed" &&
+  refusedBeforeCallCodes.has(followed.settled.error.code) &&
+  refused < streamStartAttempts;
+
+/** How often a client attaches again to a stream whose connection was lost. */
+const streamAttachAttempts = 8;
+
+/**
+ * How long a reconnect (`attach`) may take to open before it counts as one
+ * that failed: as long as the host keeps a run no one follows, so one that
+ * opens later finds nothing to follow anyway. A connection that arrives
+ * after it is let go of at once, its frames never delivered.
+ */
+const streamAttachOpenMs = streamIdleCancelMs;
+
+/**
+ * How long a stream whose connection was lost is recovered for, however
+ * the attempts go: past it, its outcome is unknown, with its key.
+ */
+const streamRecoverMs = 2 * 60_000;
+
+/** Whether recovering a stream stops, after `tries` since `since`. */
+const recoveryOver = (tries: number, since: number): boolean =>
+  tries > streamAttachAttempts || Date.now() - since >= streamRecoverMs;
+
+/** Whether `signal` was aborted, read afresh. */
+const isAborted = (signal: AbortSignal | undefined): boolean =>
+  signal?.aborted === true;
+
+/** `value`, and everything in it, frozen: a snapshot no caller can change. */
+const frozen = (value: unknown): unknown => {
+  if (typeof value === "object" && value !== null) {
+    for (const item of Object.values(value)) {
+      frozen(item);
+    }
+    Object.freeze(value);
+  }
+  return value;
+};
+
+/** A stream's frame, as the client reads it; anything else is undefined. */
+const readFrame = (
+  frame: unknown
+):
+  | { readonly type: "progress"; readonly seq: number; readonly value: unknown }
+  | { readonly type: "result"; readonly settled: Settled }
+  | { readonly type: "closed" }
+  | undefined => {
+  if (!isPlainObject(frame)) {
+    return undefined;
+  }
+  if (
+    frame.type === "progress" &&
+    typeof frame.seq === "number" &&
+    Number.isSafeInteger(frame.seq) &&
+    "value" in frame
+  ) {
+    return { type: "progress", seq: frame.seq, value: frame.value };
+  }
+  if (frame.type === "result") {
+    return { type: "result", settled: readAnswer({ result: frame.result }) };
+  }
+  if (frame.type === "refused") {
+    const settled = readAnswer({
+      result: { ok: false, error: frame.error },
+    });
+    return { type: "result", settled };
+  }
+  return frame.type === "closed" ? { type: "closed" } : undefined;
+};
 
 /** A submission in flight, by its scoped key. */
 interface Submission {
@@ -589,7 +975,7 @@ const ranNothing = (settled: Settled, isAction: boolean): boolean =>
  * Whether, after `settled`, what the App's queries show may be out of
  * date: a confirmed change; an action's failure after a step, or its lost
  * answer, which undoes none of what it committed (its queries are read
- * again, the action itself never is); or records that moved on since this
+ * again, the action itself is never run again); or records that moved on since this
  * client read them (`data.conflict`), so a draft kept for the person to
  * reload gets the record as it is now.
  */
@@ -598,14 +984,68 @@ const showsStale = (settled: Settled, isAction: boolean): boolean =>
   (isAction && !ranNothing(settled, isAction)) ||
   (settled.kind === "failed" && settled.error.code === "data.conflict");
 
+/**
+ * Where a key left unknown is remembered: by App, operation and key, as
+ * the host scopes a key's receipt; not by the App's version, so a resend
+ * after a new release is still checked.
+ */
+const uncertainScope = (reference: SubmissionTarget, key: string): string =>
+  canonicalJson([reference.resourceId, reference.contractId, key]);
+
+/**
+ * The code of the refusal `settled` is, if it withholds the outcome of
+ * what may have run: one `hidesOutcome` names, after a lost answer
+ * (`lost`), or, for an action, `operation.access_changed` or
+ * `submission.expired`, which come only once something ran under its key
+ * (its receipt, or its tombstone once the receipt expired): a form that
+ * stays uncertain past the receipt still keeps its key.
+ */
+const ranUnderKeyCodes: ReadonlySet<string> = new Set([
+  "operation.access_changed",
+  "submission.expired",
+]);
+
+/** The code `settled` withholds an outcome with, if it does (see above). */
+const withheldCode = (
+  settled: Settled,
+  lost: boolean,
+  isAction: boolean
+): string | undefined => {
+  if (settled.kind !== "failed" || !hidesOutcome(settled.error.code)) {
+    return undefined;
+  }
+  const { code } = settled.error;
+  return lost || (isAction && ranUnderKeyCodes.has(code)) ? code : undefined;
+};
+
+/**
+ * `answered` with its value read by `read`, when given: one `read` doesn't
+ * accept is as good as lost.
+ */
+const readSettled = (
+  answered: Settled,
+  read: ((value: unknown) => unknown) | undefined
+): Settled => {
+  if (answered.kind !== "value" || read === undefined) {
+    return answered;
+  }
+  const value = read(answered.value);
+  return value === undefined ? { kind: "lost" } : { kind: "value", value };
+};
+
 /** What a submission does next after `settled` (see `#send`). */
 const submissionVerdict = (
   settled: Settled,
   attempt: SubmissionAttempt
 ): SubmissionVerdict => {
   const { isAction, key, started, lostSince, now } = attempt;
-  const outcomeUnknown = () =>
-    clientError("submission.outcome_unknown", { idempotencyKey: key });
+  const outcomeUnknown = (refusal?: string) =>
+    clientError(
+      "submission.outcome_unknown",
+      refusal === undefined
+        ? { idempotencyKey: key }
+        : { idempotencyKey: key, refusal }
+    );
   if (settled.kind === "value") {
     return { next: "settle", value: settled.value };
   }
@@ -620,29 +1060,85 @@ const submissionVerdict = (
     // else.
     return { next: "fail", error: outcomeUnknown() };
   }
+  // A refusal that withholds the outcome of what may have run: after a
+  // lost answer, or an action's `operation.access_changed`, which comes
+  // only once something ran under its key. Still unknown, with the key:
+  // never a definite failure that invites a resubmit under a fresh one.
+  const withheld = withheldCode(settled, lostSince !== undefined, isAction);
+  if (withheld !== undefined) {
+    return { next: "fail", error: outcomeUnknown(withheld) };
+  }
   // An answer lost, or an outcome the host itself can't tell.
   const unknown =
     settled.kind === "lost" || settled.error.category === "uncertain";
-  if (unknown && isAction) {
-    return {
-      next: "fail",
-      error:
-        settled.kind === "lost"
-          ? outcomeUnknown()
-          : withKey(settled.error, key),
-    };
+  if (unknown && isAction && settled.kind === "failed") {
+    // The action's receipt holds what the host can't tell: sending it
+    // again answers the same.
+    return { next: "fail", error: withKey(settled.error, key) };
   }
   if (unknown) {
-    // A mutation is sent again under its key, which recovers its receipt,
-    // for as long as `lostBudgetMs`: never forever.
+    // Sent again under its key, which recovers its receipt (or joins an
+    // action still running), for as long as `lostBudgetMs`: never forever.
     return now - (lostSince ?? now) >= lostBudgetMs
       ? { next: "fail", error: outcomeUnknown() }
       : { next: "retry", unknown: true };
   }
-  if (!ranNothing(settled, isAction) || now - started >= submissionBudgetMs) {
+  if (!ranNothing(settled, isAction)) {
     return { next: "fail", error: settled.error };
   }
-  return { next: "retry", unknown: false };
+  // A refusal that ran nothing (its budget, a busy sandbox) is sent again
+  // for `submissionBudgetMs` from the call's start, or, once an answer was
+  // lost, for `lostBudgetMs` from then, past which what the lost answer
+  // would have said stays unknown, with its key.
+  if (lostSince === undefined) {
+    return now - started >= submissionBudgetMs
+      ? { next: "fail", error: settled.error }
+      : { next: "retry", unknown: false };
+  }
+  return now - lostSince >= lostBudgetMs
+    ? { next: "fail", error: outcomeUnknown(settled.error.code) }
+    : { next: "retry", unknown: false };
+};
+
+/**
+ * The connection `opening` resolves with, or undefined once `signal`
+ * aborts first: a caller who left stops waiting for an open that stalls,
+ * and a connection that arrives after it left is let go of at once.
+ */
+const openedUnlessAborted = async (
+  opening: Promise<StreamLink>,
+  signal: AbortSignal | undefined
+): Promise<StreamLink | undefined> => {
+  if (signal === undefined) {
+    return await opening;
+  }
+  const left = Promise.withResolvers<"left">();
+  const onAbort = (): void => {
+    left.resolve("left");
+  };
+  signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) {
+    onAbort();
+  }
+  try {
+    const first = await Promise.race([opening, left.promise]);
+    if (first !== "left") {
+      return first;
+    }
+    const letGo = async (): Promise<void> => {
+      try {
+        const late = await opening;
+        await late.release();
+      } catch {
+        // Never opened, or gone already.
+      }
+    };
+    // Nobody waits for it: the caller left already.
+    void letGo();
+    return undefined;
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
 };
 
 /**
@@ -667,6 +1163,18 @@ export class GraspClient {
   #gathering: ReturnType<typeof setTimeout> | undefined;
   /** What the latest fence was for. */
   #fencedBy: GraspError | undefined;
+  /**
+   * The keys of submissions whose outcome was left unknown, scoped by App
+   * and operation as the host scopes them (`uncertainScope`), by the
+   * generation they were sent under: one is sent again only within it,
+   * never for someone who signed in since, as the host scopes keys by
+   * person. Another operation under the same key never clears it.
+   */
+  readonly #uncertainKeys = new Map<string, number>();
+  /** How many subscriptions the client made: each is numbered by it. */
+  #attempts = 0;
+  /** Told of every fence (`WorkflowLink.onFence`). */
+  readonly #fenceListeners = new Set<(refusal: GraspError) => void>();
 
   /**
    * A portable host's client (`{ url, getToken }`, spec 10.7.1): its
@@ -695,6 +1203,29 @@ export class GraspClient {
       subscribe: (entry, onChange) => client.#subscribe(entry, onChange),
       retryFailed: () => {
         client.#retryFailed();
+      },
+      readReference,
+      stream: async (reference, args, options, events) =>
+        await client.#stream(reference, args, options, events),
+      workflowLink: {
+        watch: client.#transport?.watch,
+        command: async (target, request, key, events) =>
+          await client.#send(
+            target,
+            request,
+            key,
+            { scoped: canonicalJson([client.#generation, key]), input: "" },
+            events
+          ),
+        fence: (refusal) => {
+          client.#fence(refusal);
+        },
+        onFence: (listener) => {
+          client.#fenceListeners.add(listener);
+          return () => {
+            client.#fenceListeners.delete(listener);
+          };
+        },
       },
     });
   }
@@ -750,7 +1281,8 @@ export class GraspClient {
   /**
    * Runs the action `reference` names with `args`: resolves with its
    * declared result, or rejects with a structured error. A lost response
-   * is never sent again (see the header). See `SubmitOptions`.
+   * is recovered from its receipt under its key, never run again (see the
+   * header). See `SubmitOptions`.
    */
   async action<Reference extends ActionReference>(
     reference: Reference,
@@ -764,6 +1296,310 @@ export class GraspClient {
     // SAFETY: as in `query`.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return value as ReturnOf<Reference>;
+  }
+
+  /**
+   * Runs the streaming action `reference` names with `args` (spec
+   * 10.7.6): `options.onProgress` gets each newer progress snapshot, and
+   * the promise resolves with the action's declared result, or rejects
+   * with a structured error, `operation.cancelled` when it was cancelled.
+   * A lost connection attaches to the same invocation again, never runs
+   * it twice (see the header). Aborting `signal` stops only this caller
+   * following it: the host cancels it once no one does.
+   */
+  async stream<Reference extends StreamReference>(
+    reference: Reference,
+    ...[args, options]: StreamArguments<Reference>
+  ): Promise<ReturnOf<Reference>> {
+    const value = await this.#stream(reference, args, options);
+    // SAFETY: as in `query`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return value as ReturnOf<Reference>;
+  }
+
+  /** See `stream`; `events` are a hook's (`ClientInternals.stream`). */
+  async #stream(
+    reference: unknown,
+    args: unknown,
+    options: unknown,
+    events?: StreamEvents
+  ): Promise<unknown> {
+    const read = readReference(reference, "action", "stream");
+    const { signal, idempotencyKey, onProgress } = readOptions(
+      options,
+      streamOptionKeys
+    );
+    const input = normalized(read, args);
+    const key = idempotencyKey ?? freshKey();
+    const request = JSON.stringify({
+      reference: wireReference(read),
+      input,
+      idempotencyKey: key,
+    });
+    if (
+      new TextEncoder().encode(request).byteLength > functionRequestMaxBytes
+    ) {
+      throw clientError("contract.input_too_large", {
+        maxBytes: functionRequestMaxBytes,
+      });
+    }
+    const transport = this.#transport;
+    if (
+      transport === undefined ||
+      transport.stream === undefined ||
+      transport.cancelStream === undefined
+    ) {
+      throw clientError("stream.unavailable");
+    }
+    const open = transport.stream.bind(transport);
+    const cancel = transport.cancelStream.bind(transport);
+    if (signal?.aborted === true) {
+      throw clientError("submission.cancelled", { sent: false });
+    }
+    let seen = 0;
+    let listening = onProgress !== undefined;
+    const progressed = (value: unknown): void => {
+      events?.onProgress(value);
+      if (!listening) {
+        return;
+      }
+      try {
+        onProgress?.(value);
+      } catch {
+        // Its failure is its own: it isn't called again, and the action
+        // goes on (spec 10.7.6).
+        listening = false;
+      }
+    };
+    /** A snapshot, if newer than the last and as its descriptor allows. */
+    const onProgressFrame = (frameSeq: number, value: unknown): void => {
+      if (frameSeq <= seen || read.stream === undefined) {
+        return;
+      }
+      const checked = validateValue(read.stream, value);
+      if (checked.issues === undefined) {
+        seen = frameSeq;
+        progressed(frozen(checked.value));
+      }
+    };
+    /** Resolves once the invocation first answered (true), or never will. */
+    const opened = Promise.withResolvers<boolean>();
+    /** Follows the invocation over one connection, until it ends. */
+    const follow = async (what: "stream" | "attach"): Promise<Followed> => {
+      const ended = Promise.withResolvers<Followed>();
+      // Whether this connection still speaks for the caller: once it left,
+      // or the connection ended, a frame it delivers late is dropped, so it
+      // never reaches `onProgress` after the run settled for the caller.
+      let live = true;
+      const onFrame = (raw: unknown): void => {
+        if (!live) {
+          return;
+        }
+        const frame = readFrame(raw);
+        if (frame?.type === "closed") {
+          ended.resolve({ kind: "lost" });
+        } else if (frame?.type === "result") {
+          ended.resolve({
+            kind: "settled",
+            settled: frame.settled,
+            answered: true,
+          });
+        } else if (frame?.type === "progress") {
+          onProgressFrame(frame.seq, frame.value);
+        }
+      };
+      let link: StreamLink;
+      // A reconnect that doesn't open in time is given up on: it counts as
+      // a failed attempt, never a wait without end.
+      const stalled = new AbortController();
+      const stall =
+        what === "attach"
+          ? setTimeout(() => {
+              stalled.abort();
+            }, streamAttachOpenMs)
+          : undefined;
+      try {
+        const opening = open(what, request, onFrame);
+        const arrived = await openedUnlessAborted(
+          opening,
+          signal === undefined
+            ? stalled.signal
+            : AbortSignal.any([signal, stalled.signal])
+        );
+        if (arrived === undefined) {
+          live = false;
+          return isAborted(signal) ? { kind: "aborted" } : { kind: "lost" };
+        }
+        link = arrived;
+        opened.resolve(true);
+      } catch (error) {
+        live = false;
+        return {
+          kind: "settled",
+          settled: readRejection(error),
+          answered: false,
+        };
+      } finally {
+        clearTimeout(stall);
+      }
+      if (what === "attach") {
+        events?.onAttached();
+      }
+      const onAbort = (): void => {
+        ended.resolve({ kind: "aborted" });
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted === true) {
+        onAbort();
+      }
+      try {
+        return await ended.promise;
+      } finally {
+        live = false;
+        signal?.removeEventListener("abort", onAbort);
+        try {
+          await link.release();
+        } catch {
+          // Gone already.
+        }
+      }
+    };
+    // A cancel asked for before the invocation answered waits for it: sent
+    // before, it could reach the host ahead of the start and find nothing
+    // to cancel, while the run then went ahead. One that never opened has
+    // nothing to cancel.
+    events?.onStarted(async () => {
+      if (await opened.promise) {
+        await this.#cancelStream(request, cancel);
+      }
+    });
+    try {
+      return await this.#settleStream(follow, {
+        resourceId: read.resourceId,
+        key,
+        events,
+        signal,
+      });
+    } finally {
+      opened.resolve(false);
+    }
+  }
+
+  /**
+   * Follows a streaming action's invocation until it settles (see the
+   * header): its value, or its failure thrown. Starts it once, then, once
+   * a start may have reached the host, only ever attaches; a reconnect
+   * refused before it reached the invocation goes on recovering; after
+   * `streamAttachAttempts` it rejects `stream.outcome_unknown` with the key.
+   */
+  async #settleStream(
+    follow: (what: "stream" | "attach") => Promise<Followed>,
+    {
+      resourceId,
+      key,
+      events,
+      signal,
+    }: {
+      readonly resourceId: string;
+      readonly key: string;
+      readonly events: StreamEvents | undefined;
+      readonly signal: AbortSignal | undefined;
+    }
+  ): Promise<unknown> {
+    let refused = 0;
+    // Once a start may have reached the host, only ever attach.
+    let what: "stream" | "attach" = "stream";
+    let recoveringSince: number | undefined;
+    for (let tries = 1; ; tries += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      const followed = await follow(what);
+      if (followed.kind === "aborted") {
+        // Its start may have reached the host, and what it ran saved
+        // something: the App's queries are read again, as on every other
+        // exit that leaves its outcome unknown.
+        this.#changed(resourceId);
+        throw clientError("stream.cancelled", { idempotencyKey: key });
+      }
+      const settled: Settled =
+        followed.kind === "settled" ? followed.settled : { kind: "lost" };
+      if (settled.kind === "value") {
+        this.#changed(resourceId);
+        return settled.value;
+      }
+      // A refusal of a reconnect before it reached the invocation (the
+      // request budget) says nothing of the run: recovery goes on.
+      const attachRefused =
+        what === "attach" &&
+        settled.kind === "failed" &&
+        followed.kind === "settled" &&
+        !followed.answered &&
+        refusedBeforeCallCodes.has(settled.error.code);
+      if (settled.kind === "failed" && !attachRefused) {
+        const { error } = settled;
+        if (fences(error.code)) {
+          this.#fence(error);
+        }
+        refused += 1;
+        if (!startAgain(followed, what, refused)) {
+          this.#changed(resourceId);
+          // An outcome the host can't tell carries the key, so a caller that
+          // let the client pick it can still recover the receipt by it.
+          throw error.category === "uncertain" ? withKey(error, key) : error;
+        }
+      } else {
+        what = "attach";
+        recoveringSince ??= Date.now();
+        if (recoveryOver(tries, recoveringSince)) {
+          // What it ran may have committed: the App's queries are read again.
+          this.#changed(resourceId);
+          throw clientError("stream.outcome_unknown", { idempotencyKey: key });
+        }
+        events?.onRecovering();
+      }
+      // A refused start waits as long as the refusal said; an attach comes
+      // back before the host cancels a run no one follows.
+      const wait =
+        what === "stream" || attachRefused
+          ? waitAfter(settled, tries)
+          : Math.min(retryDelay(tries), streamIdleCancelMs / 2);
+      // oxlint-disable-next-line no-await-in-loop -- one connection after another
+      await sleep(wait, signal);
+      if (isAborted(signal)) {
+        // As above: it may have run, and saved something.
+        this.#changed(resourceId);
+        throw clientError("stream.cancelled", { idempotencyKey: key });
+      }
+    }
+  }
+
+  /**
+   * Asks the host to cancel the invocation `request` names: resolves once
+   * it acknowledged the request (`{ requested }`), whether or not the run
+   * was still going; rejects a refusal with its error, and an answer that
+   * isn't an acknowledgement, a lost one included, with
+   * `operation.unreachable`, so a caller never takes an unconfirmed cancel
+   * for one.
+   */
+  async #cancelStream(
+    request: string,
+    send: (text: string) => Promise<unknown>
+  ): Promise<void> {
+    let answer: unknown;
+    try {
+      answer = await send(request);
+    } catch (error) {
+      const settled = readRejection(error);
+      if (settled.kind === "failed") {
+        if (fences(settled.error.code)) {
+          this.#fence(settled.error);
+        }
+        throw settled.error;
+      }
+      throw clientError("operation.unreachable");
+    }
+    if (!isPlainObject(answer) || typeof answer.requested !== "boolean") {
+      throw clientError("operation.unreachable");
+    }
   }
 
   /** See `ClientInternals.entry`. */
@@ -794,9 +1630,11 @@ export class GraspClient {
       key,
       reference: read,
       input,
+      request,
       snapshot: loading,
       listeners: new Set(),
       interest: 0,
+      live: undefined,
       sent: 0,
       shown: 0,
       stale: false,
@@ -820,16 +1658,28 @@ export class GraspClient {
     if (!this.#queries.has(entry.key)) {
       this.#queries.set(entry.key, entry);
     }
-    const current = entry.snapshot.value !== undefined && !entry.stale;
-    if (
-      entry.reading === undefined &&
-      !current &&
-      entry.snapshot.error === undefined
-    ) {
-      this.#refresh(entry);
+    if (this.#transport === undefined) {
+      const current = entry.snapshot.value !== undefined && !entry.stale;
+      if (
+        entry.reading === undefined &&
+        !current &&
+        entry.snapshot.error === undefined
+      ) {
+        this.#refresh(entry);
+      }
+    } else if (entry.live === undefined && entry.snapshot.error === undefined) {
+      this.#follow(entry, 0);
     }
     return () => {
       entry.listeners.delete(onChange);
+      // Released once the task that let go of it ends without another
+      // reader: React resubscribes a component within one commit, and
+      // that keeps the subscription rather than follow the query anew.
+      queueMicrotask(() => {
+        if (entry.listeners.size === 0) {
+          GraspClient.#unfollow(entry);
+        }
+      });
       this.#release(entry);
     };
   }
@@ -839,8 +1689,13 @@ export class GraspClient {
     for (const entry of this.#queries.values()) {
       if (entry.snapshot.error !== undefined) {
         show(entry, loading);
-        if (entry.listeners.size > 0) {
+        if (entry.listeners.size === 0) {
+          continue;
+        }
+        if (this.#transport === undefined) {
           this.#refresh(entry);
+        } else if (entry.live === undefined) {
+          this.#follow(entry, 0);
         }
       }
     }
@@ -859,6 +1714,148 @@ export class GraspClient {
         this.#queries.delete(entry.key);
       }
     }, keepMs);
+  }
+
+  /**
+   * Follows `entry`'s query: subscribes, and shows each push of core's
+   * in order (see the header). `failures` is how often in a row it was
+   * lost before.
+   */
+  #follow(entry: QueryEntry, failures: number): void {
+    this.#attempts += 1;
+    const live: Live = {
+      attempt: this.#attempts,
+      release: undefined,
+      revision: 0,
+      failures,
+      since: Date.now(),
+      retry: undefined,
+      stopped: false,
+    };
+    entry.live = live;
+    void this.#connect(entry, live);
+  }
+
+  /** Whether `live` is still what `entry` shows. */
+  static #current(entry: QueryEntry, live: Live): boolean {
+    return entry.live === live && !live.stopped;
+  }
+
+  async #connect(entry: QueryEntry, live: Live): Promise<void> {
+    const watch = this.#transport?.watch;
+    if (watch === undefined) {
+      return;
+    }
+    let handle: { release: () => void };
+    try {
+      handle = await watch(
+        entry.request,
+        (push) => {
+          if (GraspClient.#current(entry, live)) {
+            this.#pushed(entry, live, push);
+          }
+        },
+        () => {
+          if (GraspClient.#current(entry, live)) {
+            this.#lost(entry, live);
+          }
+        }
+      );
+    } catch (error) {
+      if (!GraspClient.#current(entry, live)) {
+        return;
+      }
+      const settled = readRejection(error);
+      if (settled.kind === "failed") {
+        if (fences(settled.error.code)) {
+          this.#fence(settled.error);
+          return;
+        }
+        if (!nothingRanCodes.has(settled.error.code)) {
+          live.stopped = true;
+          entry.live = undefined;
+          show(entry, { value: undefined, error: settled.error });
+          return;
+        }
+      }
+      // A refusal for the request budget says how long to wait: never
+      // less than that, whatever the backoff would allow.
+      this.#lost(
+        entry,
+        live,
+        settled.kind === "failed" ? waitAfter(settled, 1) : 0
+      );
+      return;
+    }
+    if (GraspClient.#current(entry, live)) {
+      live.release = handle.release;
+    } else {
+      handle.release();
+    }
+  }
+
+  /** Shows a push of `live`'s, unless it is older than one shown. */
+  #pushed(entry: QueryEntry, live: Live, push: unknown): void {
+    const read = readPush(push);
+    if (read === undefined || read.revision <= live.revision) {
+      return;
+    }
+    live.revision = read.revision;
+    // Every read sent before this push is older than it: one answered
+    // later, once nobody follows the query, never replaces it.
+    entry.shown = entry.sent;
+    const { settled } = read;
+    if (settled.kind === "value") {
+      show(entry, { value: settled.value, error: undefined });
+      return;
+    }
+    if (settled.kind === "failed") {
+      const { error } = settled;
+      if (fences(error.code)) {
+        this.#fence(error);
+        return;
+      }
+      if (endsFollowing(error.code)) {
+        GraspClient.#stop(live);
+        entry.live = undefined;
+      }
+      show(entry, { value: undefined, error });
+    }
+  }
+
+  /**
+   * Core, or the connection to it, let go of `live`: keeps the last
+   * snapshot and follows again after a jittered delay.
+   */
+  #lost(entry: QueryEntry, live: Live, atLeastMs = 0): void {
+    live.release = undefined;
+    const failures =
+      Date.now() - live.since >= steadyMs ? 0 : live.failures + 1;
+    live.retry = setTimeout(
+      () => {
+        if (GraspClient.#current(entry, live) && entry.listeners.size > 0) {
+          this.#follow(entry, failures);
+        }
+      },
+      Math.max(atLeastMs, followDelay(Math.max(0, failures - 1)))
+    );
+  }
+
+  /** Stops `live`: released, its retry cancelled, nothing of it shown. */
+  static #stop(live: Live): void {
+    live.stopped = true;
+    clearTimeout(live.retry);
+    live.release?.();
+    live.release = undefined;
+  }
+
+  /** Stops following `entry`'s query: no component reads it any more. */
+  static #unfollow(entry: QueryEntry): void {
+    const { live } = entry;
+    entry.live = undefined;
+    if (live !== undefined) {
+      GraspClient.#stop(live);
+    }
   }
 
   /**
@@ -927,7 +1924,7 @@ export class GraspClient {
         } finally {
           release();
         }
-        if (settled.kind === "failed" && fencingCodes.has(settled.error.code)) {
+        if (settled.kind === "failed" && fences(settled.error.code)) {
           // The fence showed it to every reader already.
           throw settled.error;
         }
@@ -964,6 +1961,8 @@ export class GraspClient {
         if (
           entry.stale &&
           entry.listeners.size > 0 &&
+          entry.live === undefined &&
+          this.#transport === undefined &&
           generation === this.#generation
         ) {
           this.#refresh(entry);
@@ -994,12 +1993,10 @@ export class GraspClient {
     // what that fence already cleared: it doesn't fence whoever came after.
     const current =
       bound.generation === undefined || bound.generation === this.#generation;
-    if (
-      current &&
-      settled.kind === "failed" &&
-      fencingCodes.has(settled.error.code)
-    ) {
-      this.#fence(settled.error);
+    const fencing =
+      settled.kind === "failed" ? fencingRefusalOf(settled.error) : undefined;
+    if (current && fencing !== undefined) {
+      this.#fence(fencing);
     }
     return settled;
   }
@@ -1011,6 +2008,9 @@ export class GraspClient {
    * (`#switchPrincipal`), and a call bound to before is refused unsent.
    */
   async #through(request: string, app: string, bound: Bound): Promise<unknown> {
+    // Fenced since the call began (a retry of a lost answer among them):
+    // refused unsent, as the fence was, whichever way the host is reached.
+    this.#refuseIfFenced(bound);
     const portable = this.#portable;
     if (portable === undefined) {
       return await this.#transport?.call(request, app);
@@ -1023,15 +2023,20 @@ export class GraspClient {
     if (bound.principal !== undefined && bound.principal !== token.principal) {
       throw unsent(clientError("auth.principal_changed"));
     }
+    // Asking for the token may itself have found someone else signed in.
+    this.#refuseIfFenced(bound);
+    bound.principal = token.principal;
+    return await portable.send(request, app, token.text);
+  }
+
+  /** Refuses, unsent, a call bound to a generation before the latest fence. */
+  #refuseIfFenced(bound: Bound): void {
     if (
       bound.generation !== undefined &&
       bound.generation !== this.#generation
     ) {
-      // Fenced since the call began: refused unsent, as the fence was.
       throw unsent(this.#fencedBy ?? clientError("auth.principal_changed"));
     }
-    bound.principal = token.principal;
-    return await portable.send(request, app, token.text);
   }
 
   /**
@@ -1054,6 +2059,14 @@ export class GraspClient {
         this.#refresh(entry);
       }
     }
+    this.#tellFence(this.#fencedBy);
+  }
+
+  /** Tells the fence's listeners (`WorkflowLink.onFence`) of `refusal`. */
+  #tellFence(refusal: GraspError): void {
+    for (const listener of this.#fenceListeners) {
+      listener(refusal);
+    }
   }
 
   /**
@@ -1071,12 +2084,14 @@ export class GraspClient {
     this.#principal = undefined;
     this.#submissions.clear();
     for (const entry of this.#queries.values()) {
+      GraspClient.#unfollow(entry);
       entry.reading?.stop.abort();
       entry.reading = undefined;
       entry.shown = entry.sent;
       entry.stale = true;
       show(entry, { value: undefined, error: refusal });
     }
+    this.#tellFence(refusal);
   }
 
   /**
@@ -1092,7 +2107,13 @@ export class GraspClient {
         entry.changes += 1;
       }
     }
-    // Changes in quick succession share one round of re-reads.
+    // Over the frame, core pushes what the change made out of date: the
+    // marks above only keep a later imperative read from joining an
+    // older one (`#readCurrent`). Elsewhere, changes in quick succession
+    // share one round of re-reads.
+    if (this.#transport !== undefined) {
+      return;
+    }
     this.#changedApps.add(resourceId);
     if (this.#gathering !== undefined) {
       return;
@@ -1156,6 +2177,16 @@ export class GraspClient {
   ): Promise<unknown> {
     const { signal, idempotencyKey } = readOptions(options, submitOptionKeys);
     const input = normalized(reference, args);
+    // A key an unknown outcome was left under is the person's it was sent
+    // for: sent again for someone who signed in since, the host would take
+    // it as theirs, and commit the first person's change as them.
+    const sentUnder =
+      idempotencyKey === undefined
+        ? undefined
+        : this.#uncertainKeys.get(uncertainScope(reference, idempotencyKey));
+    if (sentUnder !== undefined && sentUnder !== this.#generation) {
+      throw clientError("auth.principal_changed");
+    }
     const key = idempotencyKey ?? freshKey();
     const request = JSON.stringify({
       reference: wireReference(reference),
@@ -1198,16 +2229,20 @@ export class GraspClient {
   }
 
   /**
-   * Sends `request` until the host settles it: a mutation's lost
-   * response under the same key until the host answers, a refusal that
-   * ran nothing a few times; never an action's lost response. Kept among
-   * the submissions in flight until it settles.
+   * Sends `request` until the host settles it: a lost response under the
+   * same key until the host answers from its receipt, a refusal that ran
+   * nothing a few times. Kept among the submissions in flight until it
+   * settles.
    */
   async #send(
-    reference: ReadReference,
+    reference: SubmissionTarget,
     request: string,
     key: string,
-    held: { readonly scoped: string; readonly input: string }
+    held: { readonly scoped: string; readonly input: string },
+    events?: {
+      readonly onRecovering: () => void;
+      readonly read: (value: unknown) => unknown;
+    }
   ): Promise<unknown> {
     const isAction = reference.kind === "action";
     // Bound to the person and the fence it was called under: one who signs
@@ -1221,7 +2256,11 @@ export class GraspClient {
       let lostSince: number | undefined;
       for (let tries = 1; ; tries += 1) {
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
-        const settled = await this.#call(request, reference.resourceId, bound);
+        const answered = await this.#call(request, reference.resourceId, bound);
+        // An answer that isn't one says nothing of the outcome: it is
+        // recovered under the same key, as a lost one is, never taken for
+        // a refusal that would leave the caller to send it afresh.
+        const settled = readSettled(answered, events?.read);
         if (showsStale(settled, isAction)) {
           this.#changed(reference.resourceId);
         }
@@ -1234,13 +2273,23 @@ export class GraspClient {
           now,
         });
         if (verdict.next === "settle") {
+          this.#uncertainKeys.delete(uncertainScope(reference, key));
           return verdict.value;
         }
         if (verdict.next === "fail") {
+          if (verdict.error.category === "uncertain") {
+            this.#uncertainKeys.set(
+              uncertainScope(reference, key),
+              bound.generation ?? this.#generation
+            );
+          } else if (settlesSubmission(verdict.error)) {
+            this.#uncertainKeys.delete(uncertainScope(reference, key));
+          }
           throw verdict.error;
         }
         if (verdict.unknown) {
           lostSince ??= now;
+          events?.onRecovering();
         }
         // oxlint-disable-next-line no-await-in-loop -- one attempt after another
         await sleep(waitAfter(settled, tries));
@@ -1258,6 +2307,19 @@ export class GraspClient {
   }
 }
 
-/** The internals of `client`, for the hooks and the platform. */
-export const clientInternals = (client: GraspClient): ClientInternals =>
-  internalsOf(client);
+/** Each client's internals, made once. */
+const madeInternals = new WeakMap<GraspClient, ClientInternals>();
+
+/**
+ * The internals of `client`, for the hooks and the platform: the same
+ * object every time, so a hook's subscribe function built on them keeps
+ * its identity across renders, and React doesn't resubscribe each one.
+ */
+export const clientInternals = (client: GraspClient): ClientInternals => {
+  let internals = madeInternals.get(client);
+  if (internals === undefined) {
+    internals = internalsOf(client);
+    madeInternals.set(client, internals);
+  }
+  return internals;
+};

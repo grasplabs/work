@@ -20,10 +20,20 @@
  * value directly, or `undefined` while loading or skipped (`"skip"`): a
  * `null` result is the App's data. A query's failure is thrown while
  * rendering, to the platform's error boundary; a mutation's or action's
- * rejects its promise.
+ * rejects its promise. `useWorkflow` is the client side of starting,
+ * following and controlling a workflow the App binds; generated workflow
+ * references and the host's side of it are still to come (GRA-625,
+ * GRA-626), so no App reaches it yet.
  */
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { createContext, createElement, use, useSyncExternalStore } from "react";
+import {
+  createContext,
+  createElement,
+  use,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { ReactNode } from "react";
 
 import { clientInternals, loading } from "./client-core.ts";
@@ -34,8 +44,11 @@ import type {
   MutationReference,
   QueryReference,
   QuerySnapshot,
+  StreamReference,
   SubmitOptions,
 } from "./client-core.ts";
+import { clientError, GraspError } from "./client-error.ts";
+import { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
 import { useGraspForm } from "./form.ts";
 import type {
   AnswersRecord,
@@ -47,11 +60,39 @@ import type {
   RecordFormOptions,
   SchemaFormOptions,
 } from "./form.ts";
-import type { ArgsOf, ReturnOf } from "./references.ts";
+import type {
+  AnyWorkflowReference,
+  ArgsOf,
+  ProgressOf,
+  ReturnOf,
+  WorkflowInputOf,
+  WorkflowOutputOf,
+  WorkflowWaitOf,
+} from "./references.ts";
+import { WorkflowStore } from "./workflow-store.ts";
+import type { WorkflowView } from "./workflow-store.ts";
 
 export { GraspError } from "./client-error.ts";
 export type { ErrorCategory } from "./client-error.ts";
-export type { QueryOptions, SubmitOptions } from "./client-core.ts";
+export type {
+  QueryOptions,
+  StreamOptions,
+  SubmitOptions,
+} from "./client-core.ts";
+export type {
+  ObservedRun,
+  PendingControl,
+  WorkflowCommands,
+  WorkflowRunView,
+  WorkflowView,
+} from "./workflow-store.ts";
+export type {
+  AppErrorPayload,
+  RunHandle,
+  WorkflowEventReference,
+  WorkflowReference,
+  WorkflowWait,
+} from "./references.ts";
 export type {
   FormFailure,
   FormStatus,
@@ -142,8 +183,9 @@ export const useMutation = <Reference extends MutationReference>(
 };
 
 /**
- * The action `reference` names, as a stable function, resolving with its
- * declared result. A lost response is never sent again on its own.
+ * The action `reference` names, as a stable function: each call is one
+ * logical submission, resolving with its declared result. A lost
+ * response is recovered from the action's receipt, never run again.
  */
 export const useAction = <Reference extends ActionReference>(
   reference: Reference
@@ -198,3 +240,322 @@ interface UseForm {
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
 export const useForm = ((target: unknown, options: FormOptionsInput) =>
   useGraspForm(useClient(), target, options)) as UseForm;
+
+/**
+ * What a streaming action shows while `useStream` follows it (spec
+ * 10.7.6): `idle` before its first run; `running` while it runs, and
+ * `recovering` while its connection is restored, each with its latest
+ * progress (null before the first); then `completed` with its output,
+ * `failed` with its error, or `cancelled`, each with its last progress.
+ */
+export type StreamView<Progress, Output> =
+  | { readonly status: "idle" }
+  | {
+      readonly status: "running" | "recovering";
+      readonly progress: Progress | null;
+    }
+  | {
+      readonly status: "completed";
+      readonly output: Output;
+      readonly progress: Progress | null;
+    }
+  | {
+      readonly status: "failed";
+      readonly error: GraspError;
+      readonly progress: Progress | null;
+    }
+  | { readonly status: "cancelled"; readonly progress: Progress | null };
+
+/** What `useStream` answers: the view, and how to run and cancel it. */
+export type StreamHandle<Reference> = StreamView<
+  ProgressOf<Reference>,
+  ReturnOf<Reference>
+> & {
+  /**
+   * Runs it, once at a time (`stream.active` while a run is under way):
+   * resolves with its validated result, or rejects as `client.stream`.
+   */
+  readonly run: (
+    ...args: CallArguments<Reference, SubmitOptions>
+  ) => Promise<ReturnOf<Reference>>;
+  /**
+   * Cancels the run under way for everyone following it; its view then
+   * shows `cancelled` (or `completed`, when it finished first).
+   */
+  readonly cancel: () => Promise<void>;
+};
+
+const idle: StreamView<never, never> = Object.freeze({ status: "idle" });
+
+/** One `useStream`'s run and view: one run at a time, its view a snapshot. */
+class StreamRun {
+  #view: StreamView<unknown, unknown> = idle;
+  readonly #listeners = new Set<() => void>();
+  #active = false;
+  #release: AbortController | undefined;
+  #cancel: (() => Promise<void>) | undefined;
+  /** Set once the component let go of the run under way (`release`). */
+  #left = false;
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  };
+
+  readonly view = (): StreamView<unknown, unknown> => this.#view;
+
+  #show(view: StreamView<unknown, unknown>): void {
+    this.#view = view;
+    for (const listener of this.#listeners) {
+      listener();
+    }
+  }
+
+  #progress(): unknown {
+    const view = this.#view;
+    return view.status === "idle" ? null : view.progress;
+  }
+
+  async run(
+    client: GraspClient,
+    reference: unknown,
+    args: unknown,
+    options: unknown
+  ): Promise<unknown> {
+    if (this.#active) {
+      throw clientError("stream.active");
+    }
+    const { signal } =
+      typeof options === "object" && options !== null && "signal" in options
+        ? options
+        : { signal: undefined };
+    // Aborted already: nothing starts, as `client.stream` refuses it.
+    if (signal instanceof AbortSignal && signal.aborted) {
+      throw clientError("submission.cancelled", { sent: false });
+    }
+    this.#active = true;
+    this.#left = false;
+    const release = new AbortController();
+    this.#release = release;
+    const before = this.#view;
+    const onAbort = (): void => {
+      release.abort();
+    };
+    if (signal instanceof AbortSignal) {
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    // A new run starts clean: nothing of the last one's progress or output.
+    this.#show({ status: "running", progress: null });
+    try {
+      const output = await clientInternals(client).stream(
+        reference,
+        args,
+        {
+          ...(typeof options === "object" && options !== null ? options : {}),
+          signal: release.signal,
+        },
+        {
+          onStarted: (cancel) => {
+            this.#cancel = cancel;
+          },
+          onRecovering: () => {
+            this.#show({ status: "recovering", progress: this.#progress() });
+          },
+          onAttached: () => {
+            this.#show({ status: "running", progress: this.#progress() });
+          },
+          onProgress: (progress) => {
+            const status =
+              this.#view.status === "recovering" ? "recovering" : "running";
+            this.#show({ status, progress });
+          },
+        }
+      );
+      this.#show({ status: "completed", output, progress: this.#progress() });
+      return output;
+    } catch (error) {
+      if (!this.#left && error instanceof GraspError) {
+        this.#show(
+          error.code === "operation.cancelled"
+            ? { status: "cancelled", progress: this.#progress() }
+            : { status: "failed", error, progress: this.#progress() }
+        );
+      } else if (!this.#left) {
+        // Not the action's failure (options it can't take, say): nothing
+        // ran, so the view is what it was before.
+        this.#show(before);
+      }
+      throw error;
+    } finally {
+      if (signal instanceof AbortSignal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+      this.#active = false;
+      this.#release = undefined;
+      this.#cancel = undefined;
+    }
+  }
+
+  /** Cancels the run under way for everyone following it. */
+  async cancel(): Promise<void> {
+    await this.#cancel?.();
+  }
+
+  /**
+   * Stops this component following its run (it unmounted): the run goes
+   * on for anyone else following it, and the host cancels it once no one
+   * does.
+   */
+  release(): void {
+    if (this.#release !== undefined) {
+      this.#left = true;
+      this.#release.abort();
+    }
+  }
+}
+
+/**
+ * The streaming action `reference` names (spec 10.7.6), for this
+ * component: its view (`StreamView`), and a stable `run` and `cancel`.
+ *
+ * ```tsx
+ * const draft = useStream(api.writer.draft);
+ * // In a handler: await draft.run({ topic });
+ * if (draft.status === "running" || draft.status === "recovering") {
+ *   const text = draft.progress?.text ?? "";
+ * }
+ * ```
+ *
+ * Unmounting, or switching to another action or client, stops this
+ * component following its run, and the view starts again from `idle`;
+ * it never becomes background work: the host cancels a run no one
+ * follows.
+ */
+export const useStream = <Reference extends StreamReference>(
+  reference: Reference
+): StreamHandle<Reference> => {
+  const client = useClient();
+  // One run per client and action: another of either starts afresh, and
+  // the run of the last is let go of (the effect's cleanup below), so it
+  // neither shows the last one's view nor blocks this one.
+  const [bound, setBound] = useState(() => ({
+    client,
+    reference,
+    stream: new StreamRun(),
+  }));
+  let current = bound;
+  if (bound.client !== client || bound.reference !== reference) {
+    current = { client, reference, stream: new StreamRun() };
+    setBound(current);
+  }
+  const { stream } = current;
+  const view = useSyncExternalStore(stream.subscribe, stream.view);
+  useEffect(
+    () => () => {
+      stream.release();
+    },
+    [stream]
+  );
+  const run = async (
+    ...[args, options]: CallArguments<Reference, SubmitOptions>
+  ): Promise<ReturnOf<Reference>> => {
+    const output = await stream.run(client, reference, args, options);
+    // SAFETY: the host validated the output against the reference's
+    // declared return, which `Reference` carries as its type.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return output as ReturnOf<Reference>;
+  };
+  const cancel = async (): Promise<void> => {
+    await stream.cancel();
+  };
+  // SAFETY: the view holds what the host validated against the
+  // reference's `stream` and `returns`, which `Reference` carries.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const typed = view as StreamView<ProgressOf<Reference>, ReturnOf<Reference>>;
+  return { ...typed, run, cancel };
+};
+
+/** The view `useWorkflow` answers for `Reference`. */
+export type WorkflowViewOf<Reference> = WorkflowView<
+  WorkflowInputOf<Reference>,
+  WorkflowOutputOf<Reference>,
+  WorkflowWaitOf<Reference>
+>;
+
+/** The longest run ID a selection takes, as the host's IDs are. */
+const maxRunIdLength = 256;
+
+/**
+ * One workflow the App binds and one run of it (spec 10.4): the run's
+ * view, narrowed by `status`, and stable `run`, `pause`, `resume` and
+ * `cancel`, with what may be done now (`canRun`, `canPause`, `canResume`,
+ * `canCancel`), whether a start is under way (`isStarting`) and a control
+ * still settling (`pendingControl`).
+ *
+ * ```tsx
+ * const summary = useWorkflow(workflows.summarizeNote);
+ * // In a handler: await summary.run({ noteId });
+ * if (summary.status === "completed") summary.output.summary;
+ * if (summary.status === "failed") summary.error.message;
+ *
+ * const existing = useWorkflow(workflows.summarizeNote, { runId });
+ * // In a handler: await existing.cancel();
+ * ```
+ *
+ * Without `runId` it shows the run of its latest admitted start, idle
+ * until the first; with one, exactly that run, whatever it starts.
+ * Nothing runs or is controlled but by those calls: never on render,
+ * remount or reconnect. Unmounting stops following; the run goes on. A
+ * run the person may not see, or one of another contract, is thrown
+ * while rendering, as a query's failure is; a command's failure rejects
+ * its own promise and is never the run's `error`.
+ */
+export const useWorkflow = <Reference extends AnyWorkflowReference>(
+  reference: Reference,
+  options?: { readonly runId: string }
+): WorkflowViewOf<Reference> => {
+  const client = useClient();
+  const read = readWorkflowReference(reference);
+  if (
+    options !== undefined &&
+    (typeof options.runId !== "string" ||
+      options.runId.length === 0 ||
+      options.runId.length > maxRunIdLength)
+  ) {
+    throw new TypeError("useWorkflow takes { runId }, a run's ID.");
+  }
+  // One store per client and workflow contract: another of either starts
+  // afresh, and the last one's selection, starts and controls show nothing
+  // here (its admitted starts still answer their callers).
+  const [bound, setBound] = useState(() => ({
+    client,
+    key: read.key,
+    store: new WorkflowStore(workflowChannel(client), read),
+  }));
+  let current = bound;
+  if (bound.client !== client || bound.key !== read.key) {
+    current = {
+      client,
+      key: read.key,
+      store: new WorkflowStore(workflowChannel(client), read),
+    };
+    setBound(current);
+  }
+  const { store } = current;
+  const selection = options === undefined ? null : options.runId;
+  const view = useSyncExternalStore(
+    (onChange) => store.subscribe(selection, onChange),
+    () => store.view(selection)
+  );
+  const error = store.error(selection);
+  if (error !== undefined) {
+    throw error;
+  }
+  // SAFETY: the view holds what the host sent, validated against the
+  // reference's own input and output descriptors, which `Reference`
+  // carries as its types.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return view as WorkflowViewOf<Reference>;
+};

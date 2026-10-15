@@ -1,4 +1,5 @@
 import type { Json } from "@grasp-os/shared/json";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { isPlainObject } from "./value-descriptor.ts";
 
@@ -87,8 +88,32 @@ const clientErrors = {
   },
   "submission.outcome_unknown": {
     message:
-      "Whether this finished is unknown, so it wasn't sent again. Sending it again with the same idempotency key gets a change's outcome; an action runs again, though steps it already completed aren't repeated.",
+      "Whether this finished is unknown: no answer came back in time. Sending it again with the same idempotency key gets its outcome, and never runs it a second time.",
     category: "uncertain",
+  },
+  "stream.cancelled": {
+    message:
+      "You stopped following this action. The platform cancels it once no one follows it; what it already did stays done.",
+    category: "operational",
+  },
+  "stream.outcome_unknown": {
+    message:
+      "The connection to this action was lost and couldn't be restored, so its outcome is unknown. It wasn't run again: run it again with the same idempotency key to get its outcome.",
+    category: "uncertain",
+  },
+  "contract.mode_mismatch": {
+    message:
+      "That action streams its progress: run it with useStream or client.stream. Any other action runs with useAction or client.action.",
+    category: "contract",
+  },
+  "stream.active": {
+    message:
+      "This stream is still running: wait for it to finish, or cancel it, before you run it again.",
+    category: "contract",
+  },
+  "stream.unavailable": {
+    message: "Streaming actions can't run here.",
+    category: "operational",
   },
   "operation.unreachable": {
     message: "The App's server couldn't be reached. Try again.",
@@ -99,6 +124,29 @@ const clientErrors = {
       "Someone else signed in, so what was shown for the person before was cleared.",
     category: "authorization",
   },
+  "form.failed": {
+    message: "This couldn't be submitted.",
+    category: "operational",
+  },
+  "contract.invalid_snapshot": {
+    message:
+      "The platform sent a run that doesn't fit its workflow's contract, so it isn't shown.",
+    category: "contract",
+  },
+  "contract.mismatch": {
+    message:
+      "This run belongs to another version of the workflow's contract than this screen was built for.",
+    category: "contract",
+  },
+  "workflow.not_attached": {
+    message:
+      "No run is shown yet: start one, or wait for the selected run to load, before you control it.",
+    category: "contract",
+  },
+  "workflow.unavailable": {
+    message: "Workflow runs can't be followed here.",
+    category: "operational",
+  },
 } as const satisfies Record<
   string,
   { message: string; category: ErrorCategory }
@@ -107,25 +155,80 @@ const clientErrors = {
 /** A failure the client itself decides on. */
 export type ClientErrorCode = keyof typeof clientErrors;
 
-/** The client's own failure `code`, with its `details`. */
+/**
+ * The client's own failure `code`, with its `details`; and `message` in
+ * place of its own, for a failure whose words are someone else's (a local
+ * form's callback).
+ */
 export const clientError = (
   code: ClientErrorCode,
-  details?: Json
+  details?: Json,
+  message?: string
 ): GraspError =>
   new GraspError({
     code,
     ...clientErrors[code],
+    ...(message === undefined ? {} : { message }),
     retryable: code === "operation.unreachable",
     requestId: null,
     ...(details === undefined ? {} : { details }),
   });
 
 /**
- * Refusals that mean the person, or the build they run, no longer gets
- * the App's data: the client clears every cached result on one.
+ * `issues` as a refusal's details carry them: each one's message, its
+ * path as keys and indexes, and its code when it has one.
  */
-export const fencingCodes: ReadonlySet<string> = new Set([
-  "auth.unauthenticated",
+export const issueDetails = (
+  issues: readonly (StandardSchemaV1.Issue & { readonly code?: string })[]
+): Json[] =>
+  issues.map(({ code, message, path }) => ({
+    ...(code === undefined ? {} : { code }),
+    message,
+    path: (path ?? []).map((segment) => {
+      const key = typeof segment === "object" ? segment.key : segment;
+      return typeof key === "number" ? key : String(key);
+    }),
+  }));
+
+/** The issues a refusal's `details` carry (`issueDetails`), as read back. */
+export const detailIssues = (
+  details: Json | undefined
+): StandardSchemaV1.Issue[] => {
+  const issues = isPlainObject(details) ? details.issues : undefined;
+  if (!Array.isArray(issues)) {
+    return [];
+  }
+  return issues.flatMap((issue) => {
+    if (!isPlainObject(issue) || typeof issue.message !== "string") {
+      return [];
+    }
+    const path = Array.isArray(issue.path)
+      ? issue.path.filter(
+          (segment): segment is string | number =>
+            typeof segment === "string" || typeof segment === "number"
+        )
+      : [];
+    return [{ message: issue.message, path }];
+  });
+};
+
+/**
+ * Sign-in refusals that don't mean the person lost access: the host had
+ * no token to give yet. `auth.principal_changed` fences: core answers it
+ * when the browser's session is someone else's than the screen's (its
+ * function route), so nothing held for the person before stays. The
+ * client's own refusal under that code is unsent and fenced already, so
+ * it never reaches the fence check.
+ */
+const nonFencingAuthCodes: ReadonlySet<string> = new Set([
+  "auth.token_unavailable",
+]);
+
+/**
+ * Refusals, besides sign-in's (`fences`), that mean the person or the
+ * build they run no longer gets the App's data.
+ */
+const fencingCodes: ReadonlySet<string> = new Set([
   "role.forbidden",
   "app.not_found",
   "app.unreadable",
@@ -135,6 +238,15 @@ export const fencingCodes: ReadonlySet<string> = new Set([
   "permission.person_inactive",
   "app.not_running",
 ]);
+
+/**
+ * Whether a refusal means the person, or the build they run, no longer
+ * gets the App's data: the client clears every cached result on one.
+ * Every sign-in refusal does (`auth.*`), but for `nonFencingAuthCodes`.
+ */
+export const fences = (code: string): boolean =>
+  fencingCodes.has(code) ||
+  (code.startsWith("auth.") && !nonFencingAuthCodes.has(code));
 
 /**
  * Host failures of a query or a mutation that changed nothing and may be
@@ -152,10 +264,83 @@ export const nothingRanCodes: ReadonlySet<string> = new Set([
   "submission.superseded",
 ]);
 
+/**
+ * Categories of the host's answers that prove a call ran and failed: the
+ * App's own failures and the data's (`domain`: `data.conflict` and the
+ * like), and its code going past what it may (`source`). Never one that
+ * may have been answered before or without running it: a refusal of the
+ * person, the request, the key (`submission.key_conflict`, answered while
+ * the first call's receipt has no outcome yet; `submission.expired`), the
+ * sandbox or the time it took (`contract`, `operational`, `authorization`),
+ * nor an outcome unknown.
+ */
+const ranAndFailedCategories: ReadonlySet<ErrorCategory> = new Set([
+  "domain",
+  "source",
+]);
+
+/**
+ * Whether `failure`, what a call of a submission came to, makes the
+ * outcome of a key left unknown known: the host's own answer (it carries
+ * a request ID) that the call ran and failed (`ranAndFailedCategories`).
+ * Anything else leaves it as unknown as it was, erring safe. The session
+ * client forgets whose such a key is, and a form gives up the submission
+ * it keeps, only on this, so neither ever sends it again for someone else.
+ */
+export const settlesSubmission = (failure: GraspError): boolean =>
+  failure.requestId !== null &&
+  ranAndFailedCategories.has(failure.category) &&
+  !nothingRanCodes.has(failure.code) &&
+  // A refusal that fences (the build revoked, the App stopped) says the
+  // access went, not what became of the call: whoever comes next never
+  // gets the key.
+  !fences(failure.code);
+
 /** Refusals sent before a call reached the App's code: nothing of it ran. */
 export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([
   "screen.rate_limited",
 ]);
+
+/**
+ * The refusal of the person or the build that `error` is, or carries: its
+ * own code, or the code an outcome withheld for it names
+ * (`details.refusal`, as core sends an action's answer it withheld after
+ * the run). The client fences on it either way. Only that wrapper's
+ * `details.refusal` counts: an App's own error may carry any details.
+ */
+export const fencingRefusalOf = (error: GraspError): GraspError | undefined => {
+  if (fences(error.code)) {
+    return error;
+  }
+  if (error.code !== "submission.outcome_unknown") {
+    return undefined;
+  }
+  const { details } = error;
+  const refusal: unknown =
+    typeof details === "object" && details !== null
+      ? Reflect.get(details, "refusal")
+      : undefined;
+  if (typeof refusal !== "string" || !fences(refusal)) {
+    return undefined;
+  }
+  return new GraspError({
+    code: refusal,
+    message: "You no longer have access to this App's data.",
+    category: "authorization",
+    retryable: false,
+    requestId: error.requestId,
+  });
+};
+
+/**
+ * Refusals that withhold an outcome rather than tell it: the person or
+ * the build lost access, the access changed, or the receipt expired.
+ * After a lost answer, one of these leaves what the call did unknown.
+ */
+export const hidesOutcome = (code: string): boolean =>
+  fences(code) ||
+  code === "operation.access_changed" ||
+  code === "submission.expired";
 
 /** The category of a refusal the page or core sent before any call ran. */
 const refusalCategory = (code: string): ErrorCategory => {

@@ -1,8 +1,15 @@
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, pageOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
+import { stateDir } from "./stack.ts";
+
+/** The checkout this stack runs from. */
+const repoRoot = path.join(import.meta.dirname, "..");
 
 // The Workflows page, end to end: a builder finds their App's workflows
 // with a waiting run, finds that run at the top of Runs and follows it to
@@ -187,8 +194,8 @@ test("a builder follows a waiting run to its decision, then changes and tests a 
   // It has run, so it is at work; its line begins with its engine, which opens it.
   await expect(page.getByRole("heading", { name: "At work" })).toBeVisible();
   await expect(
-    row.getByRole("link", { name: `Open the engine ${name}` })
-  ).toHaveAttribute("href", `/engines/${app}`);
+    row.getByRole("link", { name: `Open the domain ${name}` })
+  ).toHaveAttribute("href", `/domains/${app}`);
   // A run waits for a decision: it needs attention.
   await page.getByRole("tab", { name: "Needs attention" }).click();
   await expect(page).toHaveURL(/tab=needs/u);
@@ -310,7 +317,112 @@ test("someone an App is shared with reads its workflow, with nothing to change o
   // The App's workflows couldn't be read: the filter says so, and its runs
   // are listed all the same.
   await expect(
-    page.getByText("Couldn't load this engine's workflows.")
+    page.getByText("Couldn't load this domain's workflows.")
   ).toBeVisible();
   await expect(page.getByRole("combobox", { name: "Workflow" })).toBeDisabled();
+});
+
+/** A workflow whose runs sleep a day: a run that goes on, with no decision. */
+const idle = `import { workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow("idle", { params: {}, input: z.unknown() }, async (step) => {
+  await step.sleep("idle", { description: "Wait", duration: "1 day" });
+  return 1;
+});
+`;
+
+const idleTests = `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import idle from "./idle.ts";
+
+export default workflowTests(idle, [{ name: "waits, then ends", mocks: {}, expect: {} }]);
+`;
+
+/** Core's IDs: none of them is SQL. */
+const plainId = /^[\w-]+$/u;
+
+/**
+ * Runs `statement` on the stack's core database, as the running core
+ * keeps it: the test sets a run's place in the admission queue directly,
+ * as a step waiting for a share would.
+ */
+const coreSql = (statement: string): void => {
+  execFileSync(
+    path.join(repoRoot, "node_modules/.bin/wrangler"),
+    [
+      "d1",
+      "execute",
+      "DB",
+      "--local",
+      "-c",
+      "wrangler.jsonc",
+      "--persist-to",
+      stateDir,
+      "--command",
+      statement,
+    ],
+    { cwd: path.join(repoRoot, "apps/core"), stdio: "pipe" }
+  );
+};
+
+test("a run waiting for a share of its App's runs reads as queued, with when it tries again, not failed or running", async ({
+  browser,
+}) => {
+  const { builder } = peopleIn("workflows");
+  const name = `Reminders ${crypto.randomUUID()}`;
+  const { app, run } = await withApi(builder, async (api) => {
+    const { id } = await api.apps.create({ name });
+    await release(
+      api,
+      id,
+      {
+        "workflows/idle.ts": idle,
+        "workflows/idle.workflow-tests.ts": idleTests,
+      },
+      "Reminders"
+    );
+    const started = await api.workflows.start(id, "idle");
+    return { app: id, run: started.id };
+  });
+  expect(app).toMatch(plainId);
+  expect(run).toMatch(plainId);
+  expect(builder.userId).toMatch(plainId);
+  // Its step waits for its App's share, and asks again in ten minutes at
+  // the latest. A place stays live a minute and a half after its step
+  // asked: this one asked "now" a minute from now, room for pages to load.
+  const asked = Date.now() + 60_000;
+  const retryAt = Date.now() + 10 * 60_000;
+  coreSql(
+    `INSERT INTO workflow_admission_queue (run_id, step_hash, subject, resource, enqueued_at, seen_at, waiting_for, retry_at, turn, attempt_deadline) VALUES ('${run}', 'e2e-step', '${builder.userId}', '${app}', ${asked}, ${asked}, 'app', ${retryAt}, 0, ${retryAt})`
+  );
+  const page = await pageOf(browser, builder);
+  try {
+    // The Runs tab: queued, with the share and when it tries again.
+    await page.goto(`/workflows?tab=runs&app=${app}`);
+    const row = page.getByRole("row").nth(1);
+    await expect(row).toContainText("Queued", pageRead);
+    await expect(row).toContainText(
+      "Waiting for a share of this App's runs; tries again by"
+    );
+    await expect(row).not.toContainText("Failed");
+    await expect(row).not.toContainText("Running");
+    // Its own page says the same, where the engine has it sleeping.
+    await page.goto(`/workflows/${app}/idle/runs/${run}`);
+    // Its heading and status, above its history.
+    const header = page
+      .getByRole("heading", { name: "Run of idle" })
+      .locator("xpath=..");
+    await expect(header).toContainText("Queued", pageRead);
+    await expect(header).toContainText(
+      "Waiting for a share of this App's runs; tries again by"
+    );
+    await expect(header).not.toContainText("Waiting for a decision");
+    await expect(header).not.toContainText("Failed");
+    await expect(header).not.toContainText("Running");
+  } finally {
+    coreSql(`DELETE FROM workflow_admission_queue WHERE run_id = '${run}'`);
+    await withApi(builder, async (api) => {
+      await api.workflows.cancel(run);
+    });
+  }
 });

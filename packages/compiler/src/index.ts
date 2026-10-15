@@ -10,6 +10,8 @@
  * imports only the version.
  */
 import { isolateBase } from "@grasp-os/shared/runtime";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 
 import { version } from "#version";
 
@@ -23,6 +25,7 @@ export type { KitModules } from "./kit.ts";
 export type { BuildRequest, InspectRequest } from "./packages/worker.ts";
 export type {
   AppCodeBuild,
+  OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
   WorkflowBuild,
@@ -42,6 +45,8 @@ export {
   appCodeLimitErrors,
   buildFiles,
   limitErrors,
+  openWorkflowEntry,
+  openWorkflowErrors,
   serverFiles,
   workflowFiles,
   workflowIdOf,
@@ -167,6 +172,25 @@ export const isolateSettings = {
   limits: { cpuMs: 20_000, subRequests: 0 },
 } satisfies Omit<WorkerLoaderWorkerCode, "mainModule" | "modules">;
 
+/** The compiler's isolate as a Loader takes it, its code read from the assets. */
+const compilerWorker = async (
+  assets: Fetcher
+): Promise<WorkerLoaderWorkerCode> => {
+  const [source, kitJson] = await Promise.all([
+    readCompilerFile(assets, compilerAssets.source, "javascript"),
+    readCompilerFile(assets, compilerAssets.kit, "json"),
+  ]);
+  const kit: unknown = JSON.parse(kitJson);
+  return {
+    ...isolateSettings,
+    mainModule: "compiler.js",
+    modules: {
+      "compiler.js": source,
+      [kitModule]: { json: kit },
+    },
+  };
+};
+
 /**
  * The compiler, in one isolate per release that every build shares, with
  * its code read from core's static assets. Kept warm, a build doesn't load
@@ -176,29 +200,28 @@ export const isolateSettings = {
  * (`isolateSettings`). App code itself never runs here. The name holds
  * only the release's compiler version: workerd keeps a named isolate for
  * as long as the process runs, so a name per build would keep one
- * compiler for every build ever made.
+ * compiler for every build ever made. Being shared, its limits are every
+ * build's together: a stop at them may be another build's doing
+ * (`loadScreenCompiler`).
  */
 export const startScreenCompiler = (
   loader: WorkerLoader,
   assets: Fetcher
 ): Service<ScreenCompiler> =>
   loader
-    .get(`compiler:${version}`, async () => {
-      const [source, kitJson] = await Promise.all([
-        readCompilerFile(assets, compilerAssets.source, "javascript"),
-        readCompilerFile(assets, compilerAssets.kit, "json"),
-      ]);
-      const kit: unknown = JSON.parse(kitJson);
-      return {
-        ...isolateSettings,
-        mainModule: "compiler.js",
-        modules: {
-          "compiler.js": source,
-          [kitModule]: { json: kit },
-        },
-      };
-    })
+    .get(`compiler:${version}`, async () => await compilerWorker(assets))
     .getEntrypoint<ScreenCompiler>();
+
+/**
+ * The compiler in a fresh isolate of its own, for one build: what a stop
+ * at its limits says is that build's alone, as it is in the shared one
+ * only when nothing else compiled beside it.
+ */
+export const loadScreenCompiler = async (
+  loader: WorkerLoader,
+  assets: Fetcher
+): Promise<Service<ScreenCompiler>> =>
+  loader.load(await compilerWorker(assets)).getEntrypoint<ScreenCompiler>();
 
 /**
  * The screen compiler's or the package builder's code as bytes, for the
@@ -220,30 +243,39 @@ export interface PlatformCode {
  * release's, so a build doesn't read 15 to 28 MB of it from the assets
  * before the sandbox has even taken it. Only a read that worked is kept.
  */
-const platformCodeRead = new WeakMap<
+const platformCodeRead = new WeakMap<Fetcher, Map<string, PlatformCode>>();
+
+/**
+ * The reads running now, by the same keys: builds that start together
+ * share one, for as long as a read may take (`sharedRun`), so one whose
+ * request was cancelled holds no other build.
+ */
+const platformCodeReading = new WeakMap<
   Fetcher,
-  Map<string, Promise<PlatformCode>>
+  Map<string, SharedRun<PlatformCode>>
 >();
+
+/** The longest a read of platform code from the assets may take. */
+export const platformCodeReadMs = 10_000;
 
 const memoisedCode = async (
   assets: Fetcher,
   key: string,
   read: () => Promise<PlatformCode>
 ): Promise<PlatformCode> => {
-  const reads =
-    platformCodeRead.get(assets) ?? new Map<string, Promise<PlatformCode>>();
+  const reads = platformCodeRead.get(assets) ?? new Map<string, PlatformCode>();
   platformCodeRead.set(assets, reads);
-  let code = reads.get(key);
-  if (code === undefined) {
-    code = read();
-    reads.set(key, code);
+  const kept = reads.get(key);
+  if (kept !== undefined) {
+    return kept;
   }
-  try {
-    return await code;
-  } catch (error) {
-    reads.delete(key);
-    throw error;
-  }
+  const reading =
+    platformCodeReading.get(assets) ??
+    new Map<string, SharedRun<PlatformCode>>();
+  platformCodeReading.set(assets, reading);
+  const code = await sharedRun(reading, key, platformCodeReadMs, read);
+  reads.set(key, code);
+  return code;
 };
 
 /**

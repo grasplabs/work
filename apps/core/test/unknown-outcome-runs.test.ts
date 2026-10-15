@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appHost } from "../src/durable-objects.ts";
+import { waitKeyOf } from "../src/workflows/host.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import {
@@ -17,7 +18,7 @@ import {
 import { runQuarterHourCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
-import { endLiveRuns, finished, liveStatus } from "./runs.ts";
+import { endLiveRuns, finished, liveStatus, runInstance } from "./runs.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import {
   openRpc,
@@ -238,6 +239,67 @@ const elapse = async (ms: number): Promise<void> => {
 
 describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
   afterEach(endLiveRuns);
+
+  it("wakes the waiting step as soon as its person says what became of it, not at its next check", async () => {
+    const admin = await personApi("admin");
+    const { run } = await lostRun(admin);
+    const unknownWait = `$grasp:wait:${await waitKeyOf("send")}:unknown:`;
+    using events = await runInstance(run.id).subscribe({
+      filter: ["wait_started", "wait_completed", "wait_timed_out"],
+    });
+    const report = async () => {
+      const { done, value } = await events.next();
+      if (done === true) {
+        throw new Error(`Run ${run.id} ended while it waited`);
+      }
+      return value;
+    };
+    // Its checks come further apart each time (from 250 ms in tests): the
+    // fourth waits two seconds, which only a wake ends early.
+    let waits = 0;
+    await vi.waitFor(
+      async () => {
+        const value = await report();
+        if (
+          value.type === "wait_started" &&
+          value.stepName.startsWith(unknownWait)
+        ) {
+          waits += 1;
+        }
+        expect(waits).toBeGreaterThanOrEqual(4);
+      },
+      { timeout: 20_000, interval: 0 }
+    );
+    const [unknown] = await admin.api.unknownOutcomes.list();
+    if (unknown === undefined) {
+      throw new Error("Expected a call of unknown outcome");
+    }
+    await admin.api.unknownOutcomes.resolve(
+      unknown.key,
+      "happened",
+      unknown.claim
+    );
+    let ended: string | undefined;
+    while (ended === undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one report at a time
+      const value = await report();
+      if (
+        (value.type === "wait_completed" || value.type === "wait_timed_out") &&
+        value.stepName.startsWith(unknownWait)
+      ) {
+        ended = value.type;
+      }
+    }
+    await finished(run.id);
+
+    expect({
+      ended,
+      run: await admin.api.workflows.status(run.id),
+    }).toMatchObject({
+      ended: "wait_completed",
+      run: { status: "completed", output: { resolved: true } },
+    });
+  });
 
   it("holds the run, retries unspent, until its person says it happened: then the step completes without sending it again", async () => {
     const admin = await personApi("admin");
@@ -551,6 +613,111 @@ describe("a run's side effect of unknown outcome", { timeout: 60_000 }, () => {
       });
     } finally {
       env.CONNECT = connect;
+      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
+    }
+  });
+
+  it("gives each call of unknown outcome on a step its own deadline, however long the step's last one waited", async () => {
+    const admin = await personApi("admin");
+    const deadline = env.WORKFLOW_UNKNOWN_HOLD_MS;
+    env.WORKFLOW_UNKNOWN_HOLD_MS = "6000";
+    try {
+      const { mailbox, run, unknown } = await waitingRun(admin);
+      // Its one more send loses its answer too.
+      await loseAnswers(mailbox);
+      await elapse(3000);
+      await admin.api.unknownOutcomes.resolve(
+        unknown.key,
+        "not_happened",
+        unknown.claim
+      );
+      const second = await vi.waitFor(
+        async () => {
+          const listed = await admin.api.unknownOutcomes.list();
+          await expect(sentFrom(mailbox)).resolves.toBe(2);
+          expect(listed).toHaveLength(1);
+          return listed[0];
+        },
+        { timeout: 15_000, interval: 100 }
+      );
+      // Past the first's deadline, well within its own.
+      await elapse(5000);
+      if (second !== undefined) {
+        await admin.api.unknownOutcomes.resolve(
+          second.key,
+          "happened",
+          second.claim
+        );
+      }
+      await finished(run.id);
+      expect({
+        run: await admin.api.workflows.status(run.id),
+        sent: await sentFrom(mailbox),
+      }).toMatchObject({
+        run: { status: "completed", output: { resolved: true } },
+        sent: 2,
+      });
+    } finally {
+      env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
+    }
+  });
+
+  it("runs the step again once connect may recover its call, with nobody resolving it, and completes it as connect recovered it", async () => {
+    const admin = await personApi("admin");
+    // A draft, which connect recovers by looking it up.
+    const { mailbox, connectionId, run } = await waitingRun(
+      admin,
+      "mail.createDraft"
+    );
+    // Its call's claim is past the claim timeout: connect may recover it.
+    await connectDb()
+      .prepare(
+        "UPDATE idempotent_calls SET claimed_at = claimed_at - ?1, created_at = created_at - ?1 WHERE connection_id = ?2"
+      )
+      .bind(6 * 60 * 1000, connectionId)
+      .run();
+    await finished(run.id);
+    expect({
+      run: await statusOf(admin, run.id),
+      // Connect looked the draft up, and Graph here finds none: so it
+      // made it once more, under the same key, as a call that didn't
+      // happen.
+      drafts: await draftsIn(mailbox),
+      listed: await listedFor(admin),
+    }).toStrictEqual({ run: "completed", drafts: 2, listed: 0 });
+  });
+
+  it("ends a hold by its deadline once connect can no longer recover the call, a day after its first claim", async () => {
+    const admin = await personApi("admin");
+    const deadline = env.WORKFLOW_UNKNOWN_HOLD_MS;
+    env.WORKFLOW_UNKNOWN_HOLD_MS = "4000";
+    try {
+      const { mailbox, connectionId, run } = await waitingRun(
+        admin,
+        "mail.createDraft"
+      );
+      // First claimed more than a day ago: past connect's recovery
+      // horizon, so nothing clears the hold but its person.
+      await connectDb()
+        .prepare(
+          "UPDATE idempotent_calls SET claimed_at = claimed_at - ?1, created_at = created_at - ?1 WHERE connection_id = ?2"
+        )
+        .bind(day + 6 * 60 * 1000, connectionId)
+        .run();
+      await finished(run.id);
+      expect({
+        run: await admin.api.workflows.status(run.id),
+        drafts: await draftsIn(mailbox),
+        listed: await listedFor(admin),
+      }).toMatchObject({
+        run: {
+          status: "failed",
+          failure: { error: { code: "connect.outcome_unknown_unresolved" } },
+        },
+        drafts: 1,
+        listed: 1,
+      });
+    } finally {
       env.WORKFLOW_UNKNOWN_HOLD_MS = deadline;
     }
   });

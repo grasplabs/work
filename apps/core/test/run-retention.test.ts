@@ -2,7 +2,7 @@ import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
 import type { Role } from "@grasp-os/shared/roles";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { callApp } from "../src/app.ts";
@@ -372,7 +372,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     });
   });
 
-  it("settles and removes the receipt of a last attempt that never returned, charging its lineage, once the run's retention is over", async () => {
+  it("settles the receipt of a last attempt that never returned as its run ends, charging its lineage, and removes it once the run's retention is over", async () => {
     const builder = await personApi("builder");
     const app = await appWith(builder, hangs);
     const run = await builder.api.workflows.start(app, "hangs");
@@ -383,10 +383,16 @@ describe("run retention", { timeout: 60_000 }, () => {
       )
         .bind(run.id)
         .first<{ used: number; held: number }>();
-    const before = {
-      receipts: await receiptsOf(run.id),
-      lineage: await lineage(),
-    };
+    // Ended, the run's object gives back what its attempts held.
+    const ended = await vi.waitFor(
+      async () => {
+        const now = await lineage();
+        expect(now?.held).toBe(0);
+        return now;
+      },
+      { timeout: 10_000, interval: 200 }
+    );
+    const before = { receipts: await receiptsOf(run.id), lineage: ended };
 
     await runQuarterHourCron({}, daysOn(31));
     const after = {
@@ -397,17 +403,17 @@ describe("run retention", { timeout: 60_000 }, () => {
     expect({
       before: {
         receipts: before.receipts,
-        held: (before.lineage?.held ?? 0) > 0,
+        // Charged up to its deadline: its second of time.
+        used: (before.lineage?.used ?? 0) >= 900,
       },
       after: {
         receipts: after.receipts,
         held: after.lineage?.held,
-        // Charged up to its deadline: its second of time.
-        used: (after.lineage?.used ?? 0) >= 900,
+        used: after.lineage?.used,
       },
     }).toStrictEqual({
-      before: { receipts: 2, held: true },
-      after: { receipts: 0, held: 0, used: true },
+      before: { receipts: 2, used: true },
+      after: { receipts: 0, held: 0, used: before.lineage?.used },
     });
   });
 

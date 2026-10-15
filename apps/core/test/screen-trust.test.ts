@@ -978,7 +978,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     };
     await grantNow({
       subject: { type: "app", appId: near },
-      object: { type: "workflow", appId: granted, workflowId: "invoices" },
+      object: { type: "app", appId: granted },
       actions: ["read"],
       binding: "GRANTED",
     });

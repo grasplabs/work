@@ -118,7 +118,8 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   caller's choice, the host's, never App code's.
 
 /** Where an artifact's bytes are, by their SHA-256. */
-const artifactKey = (sha256: string): string => `release-artifacts/${sha256}`;
+export const artifactKey = (sha256: string): string =>
+  `release-artifacts/${sha256}`;
 
 const encoder = new TextEncoder();
 
@@ -422,6 +423,21 @@ const checkedManifest = async (
 };
 
 /**
+ * Refuses `app`'s `version` unless it loads as a release (`loadRelease`'s
+ * own manifest checks): sealed, not revoked, its manifest intact
+ * (`version.not_sealed`, `version.revoked`, `version.manifest_corrupt`).
+ * For what names a release to call later, such as a workflow binding's
+ * approval: its artifacts are verified when it is loaded to run.
+ */
+export const requireReleaseLoads = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<void> => {
+  await checkedManifest(env, app, version);
+};
+
+/**
  * The sealed release of `app`'s `version`, verified: its manifest's text
  * against its hash, then every artifact's bytes against theirs, the
  * contracts against the manifest's contract hash and the registration
@@ -469,10 +485,12 @@ const reserveWait = { attempts: 50, ms: 200 };
  * this, so they outlive that deletion); a deletion whose owner stopped
  * (`markTakeoverMs`) is taken over and finished here.
  * `version.seal_busy` if a deletion is still in flight after the wait.
+ * `key.app` is the release's resource: an App, or an independent workflow
+ * whose version seals its build (workflow-builds.ts).
  */
-const reserveArtifacts = async (
+export const reserveArtifacts = async (
   env: Env,
-  key: { app: AppId; version: number },
+  key: { app: string; version: number },
   hashes: readonly string[]
 ): Promise<void> => {
   const unique = [...new Set(hashes)];

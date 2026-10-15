@@ -9,7 +9,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { workContextSchema } from "@grasp-os/shared/permissions";
-import type { PermissionSubject } from "@grasp-os/shared/permissions";
+import type { CodeSubject } from "@grasp-os/shared/permissions";
 import { and, eq, inArray, isNotNull, lt, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
@@ -167,7 +167,7 @@ const retentionMs = 30 * 24 * 60 * 60 * 1000;
 
 /** Whose key it is, and for which call: never the key alone. */
 export interface IdempotencyScope {
-  subject: PermissionSubject;
+  subject: CodeSubject;
   onBehalfOf: string;
   connectionId: string;
   action: string;
@@ -201,7 +201,7 @@ export interface StoredAnswer {
 
 const provenanceSchema = z.array(z.string());
 
-const subjectColumns = (subject: PermissionSubject) =>
+const subjectColumns = (subject: CodeSubject) =>
   subject.type === "app"
     ? { subjectType: subject.type, subjectId: subject.appId }
     : { subjectType: subject.type, subjectId: subject.agentId };

@@ -49,6 +49,11 @@ export const profileLimits = {
   maxTagLength: 256,
   /** Duration of retry jitter, in milliseconds. */
   maxJitterMs: 60_000,
+  /**
+   * The longest a literal `wait` lasts, in milliseconds: 365 days, the
+   * longest the engine sleeps (the SDK's `Flow.wait` refuses more).
+   */
+  maxWaitMs: 365 * 86_400_000,
 } as const;
 
 /** The profile name a definition declares in `document.metadata.grasp`. */

@@ -28,11 +28,15 @@ import type {
   SchemaStatus,
   TransformedBatch,
 } from "./store-host.ts";
+import { StoreWatches } from "./store-watches.ts";
+import type { StoreWatcher } from "./store-watches.ts";
 
 // A business store: one Durable Object per store, named by the store's ID
 // (data-stores.ts), with a SQLite database of its own. What it does, and
 // its threat model, is in its host (store-host.ts); this is its RPC
-// surface, which only core reaches.
+// surface, which only core reaches. It also keeps the live queries core
+// follows of the store (store-watches.ts), told of every write that moves
+// a table's generation as soon as its transaction is over.
 
 /**
  * A business store's Durable Object: the store's host (`StoreHost`) with
@@ -40,15 +44,22 @@ import type {
  * the store's RPC surface, and take nothing a caller could choose to bend
  * time or delivery with.
  */
+/** How often the alarm sweeps the watches of screens gone without a word. */
+const watchSweepMs = 5 * 60 * 1000;
+
 /** The key a discarded fixture store keeps, alone (`discardFixture`). */
 const discardedKey = "grasp_fixture_discarded";
 
 export class DataStore extends DurableObject<Env> {
   readonly #host: StoreHost;
+  readonly #watches = new StoreWatches();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.#host = new StoreHost(ctx, env);
+    this.#host.onTablesMoved = (moved) => {
+      this.#watches.changed(moved);
+    };
     // A discarded fixture store wakes to nothing: no tables made again, no
     // alarm armed (`discardFixture`).
     if (this.#discarded()) {
@@ -228,13 +239,60 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /**
+   * Keeps `watcher` for a live query of `principal`'s that read the
+   * tables of `readSet` at those generations (`StoreWatches.watch`):
+   * told of every write that changes one of them. Answers the watch's ID,
+   * and whether a write moved past what it read already.
+   */
+  async watch(
+    storeId: StoreId,
+    principal: string,
+    readSet: Record<string, number>,
+    watcher: StoreWatcher
+  ): Promise<{ id: string; moved: boolean }> {
+    const host = this.#live();
+    const made = await this.#watches.watch(principal, readSet, watcher, () =>
+      host.generations(storeId, Object.keys(readSet))
+    );
+    // While it holds watches, the alarm sweeps the dead ones within
+    // `watchSweepMs`: one set later (a receipt's expiry) is brought
+    // forward, and runs whatever it was for then too.
+    const sweepAt = Date.now() + watchSweepMs;
+    const alarm = await this.ctx.storage.getAlarm();
+    if (alarm === null || alarm > sweepAt) {
+      await this.ctx.storage.setAlarm(sweepAt);
+    }
+    return made;
+  }
+
+  /**
+   * Moves watch `id` on to what its query read again
+   * (`StoreWatches.rewatch`): false once this object no longer has it.
+   */
+  rewatch(
+    storeId: StoreId,
+    id: string,
+    readSet: Record<string, number>
+  ): boolean {
+    const host = this.#live();
+    return this.#watches.rewatch(id, readSet, () =>
+      host.generations(storeId, Object.keys(readSet))
+    );
+  }
+
+  /** Lets go of watch `id`. */
+  unwatch(id: string): void {
+    this.#watches.unwatch(id);
+  }
+
+  /**
    * Discards a fixture store an App's tests ran on (app-tests.ts):
    * everything the object holds, and its alarm, and marks it discarded,
    * so it refuses every call after (`#live`) and wakes to nothing. Only
    * for a store core recorded as a fixture (`app_test_fixtures`) and its
    * inventory doesn't list, whatever asks: a business store is only ever
    * deleted through its deletion (store-deletion.ts), audited and kept
-   * until nothing refers to it. Both are read in one query, and nothing
+   * until nothing refers to it. Its live queries' watches go with it. Both are read in one query, and nothing
    * is awaited between it and emptying the object.
    */
   async discardFixture(storeId: StoreId): Promise<void> {
@@ -255,10 +313,14 @@ export class DataStore extends DurableObject<Env> {
     await this.ctx.storage.deleteAll();
     this.ctx.storage.kv.put(discardedKey, true);
     await this.ctx.storage.deleteAlarm();
+    // Its live queries too: nothing is written to it again, so they would
+    // only hold their watchers (a test's) until the object is evicted.
+    this.#watches.clear();
   }
 
   /**
-   * `StoreHost.runAlarm`, with the deployment's outbox consumers; nothing
+   * `StoreHost.runAlarm`, with the deployment's outbox consumers, and a
+   * sweep of the live queries whose watchers are gone; nothing
    * for a discarded fixture store, which arms no alarm again.
    */
   override async alarm(): Promise<void> {
@@ -266,5 +328,12 @@ export class DataStore extends DurableObject<Env> {
       return;
     }
     await this.#live().runAlarm(outboxConsumers);
+    if (this.#watches.size > 0) {
+      await this.#watches.sweep();
+      const next = await this.ctx.storage.getAlarm();
+      if (next === null || next > Date.now() + watchSweepMs) {
+        await this.ctx.storage.setAlarm(Date.now() + watchSweepMs);
+      }
+    }
   }
 }

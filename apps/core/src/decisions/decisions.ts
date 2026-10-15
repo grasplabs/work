@@ -12,7 +12,6 @@ import {
   workflowIdSchema,
 } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
-import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { executionErrors } from "@grasp-os/shared/workflows";
 import { and, eq, exists, gt, sql } from "drizzle-orm";
@@ -24,6 +23,7 @@ import { z } from "zod";
 
 import {
   auditedBatch,
+  outboxed,
   outboxedIfChanged,
   outboxedWhere,
 } from "../audit-outbox.ts";
@@ -40,9 +40,9 @@ import {
   workflowRuns,
 } from "../db/core/schema.ts";
 import { inList } from "../db/d1.ts";
-import { runEngine } from "../workflows/engine.ts";
 import { removedText } from "../workflows/retention.ts";
 import { tellScreens } from "../workflows/run-changes.ts";
+import { oweWake, sendWake } from "../workflows/wakes.ts";
 
 // Decisions workflow runs wait for (`step.decision`), and the only ways to
 // answer one. Threat model R3, R8 and WF1 to WF4:
@@ -64,7 +64,10 @@ import { tellScreens } from "../workflows/run-changes.ts";
 //   A run that stops waiting closes its decision the same way, so an answer
 //   and a timeout can't both count.
 // - The run takes the answer from the row, never from the event that wakes
-//   it: the event only says "look now".
+//   it: the event only says "look now". The wake is owed in the same batch
+//   as the answer, and sent until the engine takes it
+//   (workflows/wakes.ts), so a lost wake never leaves the run waiting out
+//   its deadline. One answer owes one wake, whose key is the decision.
 // - Who answered is taken from the session, never from the request. The
 //   audit log records the answer under them, without its payload (R16).
 
@@ -175,11 +178,17 @@ interface DecisionColumns {
 export const stillOpen = (decisions: DecisionColumns, now: Date): SQL =>
   and(eq(decisions.status, "open"), gt(decisions.expiresAt, now)) ?? sql`0`;
 
-/** That the decision's run hasn't ended, as a condition. */
+/**
+ * That the decision's run goes on, as a condition: it hasn't ended, and
+ * nobody asked to cancel it. A cancel is admitted before the engine
+ * stops the run, which shows as running until then; an answer in
+ * between would count for a run that never takes it.
+ */
 const runUnended = (): SQL => sql`EXISTS (
   SELECT 1 FROM ${workflowRuns}
   WHERE ${workflowRuns.id} = ${workflowDecisions.runId}
     AND ${workflowRuns.status} IN ('starting', 'running', 'paused')
+    AND ${workflowRuns.cancelRequestedAt} IS NULL
 )`;
 
 // Run side: the host (workflows/host.ts) calls these for its run only.
@@ -520,6 +529,7 @@ const decisionWithRun = async (env: Env, decision: unknown) => {
       workflow: workflowRuns.workflowId,
       version: workflowRuns.version,
       runStatus: workflowRuns.status,
+      cancelRequestedAt: workflowRuns.cancelRequestedAt,
       decidedByName: users.name,
     })
     .from(workflowDecisions)
@@ -576,7 +586,14 @@ const unended: ReadonlySet<string> = new Set(["starting", "running", "paused"]);
 
 const toView = (
   env: Env,
-  { decision, app, workflow, runStatus, decidedByName }: DecisionWithRun
+  {
+    decision,
+    app,
+    workflow,
+    runStatus,
+    cancelRequestedAt,
+    decidedByName,
+  }: DecisionWithRun
 ): DecisionView => ({
   id: decision.id,
   app: { id: appIdSchema.parse(app.id), name: app.name },
@@ -586,9 +603,11 @@ const toView = (
   // its run's details (workflows/retention.ts), and says so.
   description:
     decision.description === "" ? removedText(env) : decision.description,
-  // An open decision of a run that has ended takes no answer.
+  // An open decision of a run that has ended, or that someone asked to
+  // cancel, takes no answer (`runUnended`).
   status:
-    decision.status === "open" && !unended.has(runStatus)
+    decision.status === "open" &&
+    (!unended.has(runStatus) || cancelRequestedAt !== null)
       ? "closed"
       : decision.status,
   expiresAt: decision.expiresAt.toISOString(),
@@ -609,27 +628,6 @@ export const decisionFor = async (
   decision: unknown
 ): Promise<DecisionView> =>
   toView(env, await allowedDecision(env, by, decision));
-
-/**
- * Wakes the run waiting on the decision, once: the decision's ID names the
- * delivery, so a wake sent again is the same event. A run that misses it
- * still finds the answer: when its wait ends, it reads the decision again.
- */
-const wake = async (env: Env, row: DecisionRow): Promise<void> => {
-  try {
-    await runEngine(env).sendEvent(
-      row.runId,
-      decisionEventType(row.id),
-      row.id
-    );
-  } catch (error) {
-    log.warn("decision.wake_failed", {
-      decision: row.id,
-      run: row.runId,
-      ...errorFields(error),
-    });
-  }
-};
 
 /**
  * Of `decisions`, the ones `by` may answer now (`mayAnswer`): none for
@@ -669,6 +667,41 @@ export const answerableBy = async (
 };
 
 /**
+ * Records that `by`'s answer to a decision was refused (`code`): nobody
+ * may answer it, or nobody may any more (it was answered, it timed out,
+ * its run ended or a cancel of it was admitted). Who tried, and why,
+ * never what they answered. A refusal that can't be recorded fails the
+ * call as one to try again: none goes unrecorded.
+ */
+const auditRefusal = async (
+  env: Env,
+  by: Identity,
+  found: DecisionWithRun,
+  code: "decision.closed" | "decision.forbidden",
+  via: "screen" | undefined
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const run: DecisionRun = {
+    runId: found.decision.runId,
+    app: found.app.id,
+    workflow: found.workflow,
+    version: found.version,
+  };
+  await auditedBatch(env, db, [
+    outboxed(
+      db,
+      decisionEntry(
+        actorOf(by),
+        "workflow.decision.answer_refused",
+        run,
+        found.decision,
+        { errorCode: code, ...(via === undefined ? {} : { via }) }
+      )
+    ),
+  ]);
+};
+
+/**
  * Answers a decision for `by`, if they may, once: the first answer, before
  * the deadline and while the run goes on, is the decision, and anything
  * after it is `decision.closed`. `via` says where they answered, when not
@@ -682,7 +715,14 @@ export const answerDecision = async (
   answer: unknown,
   via?: "screen"
 ): Promise<DecisionView> => {
-  const found = await allowedDecision(env, by, decision);
+  const found = await decisionWithRun(env, decision);
+  const refuse = async (code: "decision.closed" | "decision.forbidden") => {
+    await auditRefusal(env, by, found, code, via);
+    return decisionErrors.create(code);
+  };
+  if (!(await mayAnswerNow(env, by, found.decision))) {
+    throw await refuse("decision.forbidden");
+  }
   const { approved, payload }: DecisionAnswerInput = decisionErrors.parse(
     "decision.invalid",
     answerSchema,
@@ -706,6 +746,11 @@ export const answerDecision = async (
   const status = approved ? "approved" : "rejected";
   const now = new Date();
   const db = drizzle(env.DB);
+  const wake = {
+    id: `decision:${row.id}`,
+    runId: row.runId,
+    type: decisionEventType(row.id),
+  };
   const [[answered]] = await auditedBatch(env, db, [
     db
       .update(workflowDecisions)
@@ -735,16 +780,29 @@ export const answerDecision = async (
       )
     ),
     summaryChanged(db, row.runId),
+    // Owed with this answer only: the row the update above wrote, by
+    // whoever answered here, at this moment.
+    oweWake(
+      db,
+      wake,
+      sql`EXISTS (SELECT 1 FROM ${workflowDecisions} WHERE ${and(
+        eq(workflowDecisions.id, row.id),
+        eq(workflowDecisions.status, status),
+        eq(workflowDecisions.decidedBy, by.userId),
+        eq(workflowDecisions.decidedAt, now)
+      )})`,
+      { now: now.getTime() }
+    ),
   ]);
   if (!answered) {
     // Who may answer can have changed since it was checked above.
-    throw decisionErrors.create(
+    throw await refuse(
       (await mayAnswerNow(env, by, row))
         ? "decision.closed"
         : "decision.forbidden"
     );
   }
-  await wake(env, answered);
+  await sendWake(env, wake.id);
   await tellScreens(env, changed(run));
   return toView(env, {
     ...found,

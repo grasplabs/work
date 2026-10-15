@@ -74,6 +74,7 @@ import type { Settled, StepError } from "./code.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
+import { heldWakeType } from "./wakes.ts";
 
 // The engine a run's workflow code runs on, as core's side of it: the SDK's
 // `WorkflowEngine` (`@grasp-os/sdk/engine`) on the engine's `step` API
@@ -254,27 +255,10 @@ const heldMarkerOf = (keys: readonly string[], unknown: boolean) => ({
   ...(unknown ? { [unknownField]: true } : {}),
 });
 
-/** Whether a held marker says its step waits on an unknown outcome. */
-const isUnknownMarker = (value: unknown): boolean =>
-  typeof value === "object" &&
-  value !== null &&
-  Reflect.get(value, unknownField) === true;
-
 const isHeldMarker = (value: unknown): boolean =>
   typeof value === "object" &&
   value !== null &&
   Object.hasOwn(value, heldField);
-
-/** The keys a held marker names (`heldMarkerOf`), as recorded. */
-const heldKeysOf = (marker: unknown): string[] => {
-  const keys: unknown =
-    typeof marker === "object" && marker !== null
-      ? Reflect.get(marker, heldField)
-      : undefined;
-  return Array.isArray(keys)
-    ? keys.filter((key): key is string => typeof key === "string")
-    : [];
-};
 
 /**
  * The most held keys of one attempt a held marker keeps. Past it, the
@@ -288,9 +272,6 @@ const busyField = `${coreStepPrefix}busy`;
 
 /** The field of a busy step's result that says it was queued, for which share. */
 const queuedField = `${coreStepPrefix}queued`;
-
-/** The field of a busy step's result that says when it was refused. */
-const busyAtField = `${coreStepPrefix}busyAt`;
 
 /** The field of a busy step's result that says how long a step may wait. */
 const busyMaxField = `${coreStepPrefix}busyMaxMs`;
@@ -306,70 +287,32 @@ const joinedField = `${coreStepPrefix}joined`;
  * the seconds to wait, so the run waits durably, holding no compute, and
  * runs the step again under a step of its own, as a held step does. The
  * refusal spends none of the step's attempts, and its wait none of the
- * run's steps (`loadWaitStep`): the load is others' as much as the
- * run's. It waits a day in all at most (`workflowQueuedStepMs`), then fails
- * (`workflow.queue_timeout`). Workflow code can't
+ * run's steps (`uncountedWaitStep`): the load is others' as much as the
+ * run's. Its rounds wait a day in all at most (`workflowQueuedStepMs`,
+ * `LoadWait`), then fail (`workflow.queue_timeout`). Workflow code can't
  * return it (`do` refuses it).
  */
-const busyMarker = ({ busyFor, queuedFor, at, maxWaitMs, joined }: Busy) => ({
+const busyMarker = ({ busyFor, queuedFor, maxWaitMs, joined }: Busy) => ({
   [busyField]: busyFor,
-  [busyAtField]: at,
   [busyMaxField]: maxWaitMs,
   ...(queuedFor === undefined ? {} : { [queuedField]: queuedFor }),
   ...(joined === true ? { [joinedField]: true } : {}),
 });
 
-/** Whether a busy step's result says it joined the queue as it was refused. */
-const joinedOf = (value: unknown): boolean =>
-  typeof value === "object" &&
-  value !== null &&
-  Reflect.get(value, joinedField) === true;
-
 /**
  * An attempt refused for now: the seconds to wait, the share it was
- * queued for, when it was (`workflow.queued`), not its lineage busy, when
- * it was refused, and how long a step may wait in all, as the quota
- * policy said then.
+ * queued for, when it was (`workflow.queued`), not its lineage busy, and
+ * how long a step may wait in all, as the quota policy said then.
  */
 interface Busy {
   busyFor: number;
   queuedFor?: Share;
-  at: number;
   maxWaitMs: number;
   /** Whether the refusal took it a place in the queue (admission.ts). */
   joined?: boolean;
 }
 
-/** When a busy step's result was refused, and how long it may wait. */
-const busyTimingOf = (
-  value: unknown
-): { at: number; maxWaitMs: number } | undefined => {
-  if (typeof value !== "object" || value === null) {
-    return undefined;
-  }
-  const at: unknown = Reflect.get(value, busyAtField);
-  const maxWaitMs: unknown = Reflect.get(value, busyMaxField);
-  return typeof at === "number" && typeof maxWaitMs === "number"
-    ? { at, maxWaitMs }
-    : undefined;
-};
-
 const shareSchema = z.enum(["client", "person", "app"]);
-
-/** The share a busy step's result says it was queued for; none for any other. */
-const queuedForOf = (value: unknown): Share | undefined =>
-  typeof value === "object" && value !== null
-    ? shareSchema.safeParse(Reflect.get(value, queuedField)).data
-    : undefined;
-
-/** The seconds a busy step's result says to wait; none for any other. */
-const busyWaitOf = (value: unknown): number | undefined => {
-  if (typeof value !== "object" || value === null) {
-    return undefined;
-  }
-  const seconds: unknown = Reflect.get(value, busyField);
-  return typeof seconds === "number" ? seconds : undefined;
-};
 
 /** Whether `value` is one of core's markers, which workflow code can't return. */
 const isCoreMarker = (value: unknown): boolean =>
@@ -377,6 +320,54 @@ const isCoreMarker = (value: unknown): boolean =>
   (typeof value === "object" &&
     value !== null &&
     Object.hasOwn(value, busyField));
+
+const busyRecordSchema = z.object({
+  busyFor: z.number(),
+  maxWaitMs: z.number(),
+  queuedFor: shareSchema.optional(),
+  joined: z.boolean(),
+});
+
+/**
+ * One of core's markers, as a step's recorded result says it: a step held
+ * for its person (`heldMarkerOf`), on an unknown outcome or not, with the
+ * keys it waits on; or refused for load (`busyMarker`), with the seconds
+ * to wait, when it was refused, how long a step may wait in all, and the
+ * share it was queued for and whether it joined the queue then.
+ */
+type CoreMarker =
+  | { kind: "held"; keys: string[]; unknown: boolean }
+  | ({ kind: "busy" } & z.infer<typeof busyRecordSchema>);
+
+/**
+ * The marker `value` is, as recorded; none when it is a step's own result.
+ * A marker core recorded always reads: one that doesn't is refused.
+ */
+const markerOf = (value: unknown): CoreMarker | undefined => {
+  if (!isCoreMarker(value) || typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const field = (name: string): unknown => Reflect.get(value, name);
+  if (isHeldMarker(value)) {
+    const keys = field(heldField);
+    return {
+      kind: "held",
+      keys: Array.isArray(keys)
+        ? keys.filter((key): key is string => typeof key === "string")
+        : [],
+      unknown: field(unknownField) === true,
+    };
+  }
+  return {
+    kind: "busy",
+    ...busyRecordSchema.parse({
+      busyFor: field(busyField),
+      maxWaitMs: field(busyMaxField),
+      queuedFor: field(queuedField),
+      joined: field(joinedField) === true,
+    }),
+  };
+};
 
 /** A test's host of its own admits every attempt, with nothing to settle. */
 const unadmitted: AttemptAdmission = {
@@ -403,17 +394,14 @@ const busyOf = (error: unknown): Busy | undefined => {
   const seconds = error.details?.retryAfterSeconds;
   const busyFor = typeof seconds === "number" && seconds >= 1 ? seconds : 1;
   const most = error.details?.maxWaitMs;
-  const timing = {
-    at: Date.now(),
-    maxWaitMs:
-      typeof most === "number" ? most : platformLimits.workflowQueuedStepMs,
-  };
+  const maxWaitMs =
+    typeof most === "number" ? most : platformLimits.workflowQueuedStepMs;
   if (error.code === "workflow.lineage_busy") {
-    return { busyFor, ...timing };
+    return { busyFor, maxWaitMs };
   }
   return {
     busyFor,
-    ...timing,
+    maxWaitMs,
     queuedFor:
       shareSchema.safeParse(error.details?.waitingFor).data ?? "client",
     joined: error.details?.joined === true,
@@ -424,11 +412,68 @@ const busyOf = (error: unknown): Busy | undefined => {
 interface WaitedSoFar {
   /** The rounds it waited in a row. */
   waited: number;
-  /** When it was first refused in this wait; none if it wasn't. */
-  since: number | undefined;
+  /**
+   * How long its rounds waited since it was last admitted: none if it
+   * wasn't refused for load since (`LoadWait`).
+   */
+  waitedMs: number | undefined;
   /** How long a step may wait in all, in ms. */
   maxWaitMs: number;
 }
+
+/**
+ * A step's wait for load since its last admission: the rounds it was
+ * refused for load in a row, what they wait in all (their sleeps, this
+ * round's included, never the time between them), how long a step may
+ * wait in all as the last refusal said, and how long this round sleeps.
+ * A pause, a restart or a wait for its person between rounds counts for
+ * none of it. A held marker means an attempt was admitted: the wait
+ * starts over (`loadWaitAfter`).
+ *
+ * Only an admission that ended in a hold is journaled as one. An attempt
+ * admitted that then fails, whose retry by the engine in the same round is
+ * refused for load, keeps counting from before its admission. That errs
+ * safe: such a step times out sooner, never later.
+ */
+interface LoadWait {
+  rounds: number;
+  waitedMs: number;
+  maxWaitMs: number;
+  sleepMs: number;
+}
+
+/** No wait for load yet. */
+const loadWaitStart: LoadWait = {
+  rounds: 0,
+  waitedMs: 0,
+  maxWaitMs: 0,
+  sleepMs: 0,
+};
+
+/**
+ * The step's wait for load once its attempt answered `marker`: after a
+ * hold, none (an attempt was admitted); after a refusal for load, one
+ * round more, sleeping as long as `askAgainMs` says, added to what its
+ * rounds wait in all. A round left nothing to sleep (`sleepMs` 0) has
+ * waited as long as a step may.
+ */
+const loadWaitAfter = (wait: LoadWait, marker: CoreMarker): LoadWait => {
+  if (marker.kind === "held") {
+    return loadWaitStart;
+  }
+  const sleepMs = askAgainMs({
+    waited: wait.rounds,
+    retryAfterSeconds: marker.busyFor,
+    waitedMs: wait.waitedMs,
+    maxWaitMs: marker.maxWaitMs,
+  });
+  return {
+    rounds: wait.rounds + 1,
+    waitedMs: wait.waitedMs + sleepMs,
+    maxWaitMs: marker.maxWaitMs,
+    sleepMs,
+  };
+};
 
 /** A round of a step's wait (`#waitBefore`). */
 interface WaitRound {
@@ -695,13 +740,37 @@ const maxWaits = 15;
  */
 const maxUnknownWaits = 60;
 
+/** What a round of a step's wait waits for (`#waitBefore`). */
+type WaitKind = "busy" | "held" | "unknown";
+
 /**
- * The steps of a hold on an unknown outcome (`#waitBefore`): its checks,
- * sleeps and the step's runs again. Not the run's own steps: the hold is
- * bounded by its deadline (`unknownHoldMsOf`) and the run lineage's age,
- * not by the steps the run's code takes, as a run waits on its person.
+ * The prefix of the steps of round `round` of the wait of the step keyed
+ * `key` (`waitKeyOf`) for `kind`: the one builder of a wait's step names,
+ * which `uncountedWaitStep` reads back.
  */
-const unknownHoldStep = /^\$grasp:wait:[0-9a-f]{16}:unknown:[1-9]\d*:/u;
+const waitStep = (key: string, kind: WaitKind, round: number): string =>
+  `${waitStepPrefix}${key}:${kind}:${round}`;
+
+/**
+ * The steps of a wait (`waitStep`) that are not the run's own:
+ *
+ * - a wait for load (`busy`): its sleep, its record of waiting and the
+ *   step's run again. Others' load causes it, so it counts against no
+ *   allowance, or a run queued long enough behind other Apps' work would
+ *   fail for it; `workflowQueuedStepMs` bounds how long it waits
+ *   (quotas.ts, admission.ts);
+ * - a held wait's record of waiting (`held:<round>:waiting:`);
+ * - a hold on an unknown outcome (`unknown`): its checks, sleeps and the
+ *   step's run again, bounded by its deadline (`unknownHoldMsOf`) and the
+ *   run lineage's age, not by the steps the run's code takes, as a run
+ *   waits on its person;
+ * - a decision's wait again, and its look, after a wake that answered
+ *   nothing (`again:<round>`, `woken:<round>`, `waitForDecision`): an
+ *   event of its type sent by someone else causes them, not the run's
+ *   code, bounded by the engine's inbox (`maxInboxEvents`).
+ */
+const uncountedWaitStep =
+  /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|held:\d+:waiting:|unknown:[1-9]\d*:|again:[1-9]\d*$|woken:\d+$)/u;
 
 /**
  * Tries of one check whether a held side effect still waits, after the
@@ -912,24 +981,13 @@ export const stepLimitOf = async (env: Env): Promise<number> => {
 };
 
 /**
- * The steps of a wait that others' load causes, not the run's code: a
- * step's rounds waiting for its busy lineage or for a share of the
- * client's attempts running at once (`#waitBefore`: its sleep, its run
- * again and its record of waiting), and a held wait's record of waiting.
- * They count against no allowance, or a run queued long enough behind
- * other Apps' work would fail for it; `workflowQueuedStepMs` bounds how long
- * it waits (quotas.ts, admission.ts).
- */
-const loadWaitStep =
-  /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|held:\d+:waiting:)/u;
-
-/**
  * `step`, counting the run's own steps (`stepLimit` is the operator's
  * allowance of them) and refusing one past it, as a failure of that step.
  * Core's own steps (`$grasp:…`, but for a wait's, which the run's code
  * causes without bound: {@link waitStepPrefix}) and the SDK's first
  * `$params` step are outside the allowance: a run of one step fits an
- * allowance of one. So are the steps of a wait for load (`loadWaitStep`),
+ * allowance of one. So are the steps of a wait that aren't the run's own
+ * (`uncountedWaitStep`),
  * and a step run again after one has no place of its own: it is the step
  * that already took its place. Counted over every replay, so each step
  * keeps its place.
@@ -941,8 +999,7 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
   const take = (name: string): number | undefined => {
     const core =
       (name.startsWith(coreStepPrefix) && !name.startsWith(waitStepPrefix)) ||
-      unknownHoldStep.test(name) ||
-      loadWaitStep.test(name);
+      uncountedWaitStep.test(name);
     const sdk = name === paramsStep && !params;
     params ||= sdk;
     if (core || sdk) {
@@ -1333,18 +1390,21 @@ export class RunHost extends RpcTarget {
    * Waits, before running the step `step` again, while a side effect it
    * asked for is held for the person the run acts for: each check a step
    * of its own (retried, and replayed without asking connect again), then
-   * a durable sleep, a minute first (`waitMsOf`), doubling up to 15
-   * minutes, in steps named after `prefix`. The wait is recorded once, in
-   * a step of its own. Each check and sleep is a step of the run's budget,
-   * so a run waits about five days at the platform's limit. A decline or a drop
-   * ends the wait too: the step's next run fails with `connect.declined`.
+   * a durable wait that the person's decision ends (`heldWakeType`,
+   * wakes.ts), or else the next check: a minute first (`waitMsOf`),
+   * doubling up to 15 minutes, in steps named after `prefix`, for holds
+   * connect ends by itself. A wake only makes the step check again: what
+   * connect says decides. The wait is recorded once, in a step of its
+   * own. Each check and wait is a step of the run's budget, so a run waits
+   * about five days at the platform's limit. A decline or a drop ends the
+   * wait too: the step's next run fails with `connect.declined`.
    */
   async #waitWhileHeld(
     step: string,
     prefix: string,
     keys: readonly string[],
     unknownSince?: number
-  ): Promise<void> {
+  ): Promise<boolean> {
     const first = waitMsOf(this.#env);
     if (unknownSince !== undefined) {
       // Never run again at once on an unknown outcome: should connect
@@ -1356,6 +1416,7 @@ export class RunHost extends RpcTarget {
       unknownSince === undefined
         ? undefined
         : unknownSince + unknownHoldMsOf(this.#env);
+    const wakeType = await heldWakeType(step);
     for (let checks = 0; ; checks += 1) {
       // Its answer is recorded, so a replay asks connect nothing, and a
       // failing connect is tried again rather than failing the step.
@@ -1389,7 +1450,8 @@ export class RunHost extends RpcTarget {
         throw connectErrors.create("connect.outcome_unknown_unresolved");
       }
       if (held !== true) {
-        return;
+        // Whether a check found it held before it cleared (`#waitBefore`).
+        return checks > 0;
       }
       if (checks === 0) {
         // oxlint-disable-next-line no-await-in-loop -- once per wait
@@ -1397,14 +1459,22 @@ export class RunHost extends RpcTarget {
           reason: "held",
         });
       }
-      // oxlint-disable-next-line no-await-in-loop -- one check at a time
-      await this.#step.sleep(
-        `${prefix}:${checks}`,
-        Math.min(
-          first * 2 ** checks,
-          first * (unknownSince === undefined ? maxWaits : maxUnknownWaits)
-        )
-      );
+      // Until its person decides, which wakes the step (wakes.ts), or the
+      // next check is due: the backstop for holds connect ends by itself.
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+        await this.#step.waitForEvent(`${prefix}:${checks}`, {
+          type: wakeType,
+          timeout: Math.min(
+            first * 2 ** checks,
+            first * (unknownSince === undefined ? maxWaits : maxUnknownWaits)
+          ),
+        });
+      } catch (error) {
+        if (!isTimeout(error)) {
+          throw error;
+        }
+      }
     }
   }
 
@@ -1475,7 +1545,7 @@ export class RunHost extends RpcTarget {
    */
   async #admit(
     attempt: StepAttempt,
-    { waited, since, maxWaitMs }: WaitedSoFar
+    { waited, waitedMs, maxWaitMs }: WaitedSoFar
   ): Promise<AttemptAdmission | Busy> {
     if (this.#hooks.admitAttempt === undefined) {
       // Waited as long as a step may: it fails, though a share came free
@@ -1483,7 +1553,7 @@ export class RunHost extends RpcTarget {
       // admission decides (quotas.ts), by the cap as it is now, not the
       // one the step's last refusal named: an operator may have raised it
       // as the step slept.
-      if (since !== undefined && Date.now() - since >= maxWaitMs) {
+      if (waitedMs !== undefined && waitedMs >= maxWaitMs) {
         throw workflowErrors.create("workflow.queue_timeout", { maxWaitMs });
       }
       return unadmitted;
@@ -1492,7 +1562,7 @@ export class RunHost extends RpcTarget {
       const admission = await this.#hooks.admitAttempt({
         key: attempt.key,
         waited,
-        ...(since === undefined ? {} : { waitingSince: since }),
+        ...(waitedMs === undefined ? {} : { waitedMs }),
         step: attempt.step,
         number: attempt.number,
         ...(attempt.ordinal === undefined ? {} : { ordinal: attempt.ordinal }),
@@ -1515,29 +1585,29 @@ export class RunHost extends RpcTarget {
 
   /**
    * Waits durably before the step `step` runs again, its attempt having
-   * answered `value`, in round `round`: until the person decided on its
+   * answered `marker`, in round `round`: until the person decided on its
    * held side effect (`#waitWhileHeld`), or the seconds its busy lineage
    * said, as long as `sleepMs` (a sleep, which holds no attempt). A step
    * queued for a share of the client's attempts running at once records
    * that the run waits each time it joins the queue: when its refusal
-   * took it a place (`joinedOf`), as after a pause gave its place up.
-   * Answers the prefix of the steps it waited in, which the step's next
-   * run is named after.
+   * took it a place (`joined`), as after a pause gave its place up.
+   * `unknown` carries when the step was first held on its current unknown
+   * outcome across rounds. Answers the prefix of the steps it waited in,
+   * which the step's next run is named after.
    */
   async #waitBefore(
     step: string,
-    value: unknown,
+    marker: CoreMarker,
     { round, sleepMs }: WaitRound,
     unknown: { since?: number }
   ): Promise<string> {
     const key = await waitKeyOf(step);
-    const busyFor = busyWaitOf(value);
-    if (busyFor === undefined) {
+    if (marker.kind === "held") {
       // A hold on an unknown outcome waits in steps of its own kind,
-      // outside the run's step allowance (`countedStep`).
-      const prefix = `${waitStepPrefix}${key}:${isUnknownMarker(value) ? "unknown" : "held"}:${round}`;
-      if (isUnknownMarker(value)) {
-        // When the step was first held on an unknown outcome, recorded
+      // outside the run's step allowance (`uncountedWaitStep`).
+      const prefix = waitStep(key, marker.unknown ? "unknown" : "held", round);
+      if (marker.unknown) {
+        // When the step was first held on this unknown outcome, recorded
         // once, so its deadline holds across rounds and replays.
         unknown.since ??= z
           .number()
@@ -1549,21 +1619,34 @@ export class RunHost extends RpcTarget {
             )
           );
       }
-      await this.#waitWhileHeld(
+      const decided = await this.#waitWhileHeld(
         step,
         prefix,
-        heldKeysOf(value),
-        isUnknownMarker(value) ? unknown.since : undefined
+        marker.keys,
+        marker.unknown ? unknown.since : undefined
       );
+      // A check found it held, and it cleared since: its person
+      // resolved it, or connect may now recover the call (its claim past
+      // the claim timeout). An unknown outcome the step comes back with
+      // after starts 7 days of its own. One that cleared before any check
+      // ran (connect and the step's call disagree) keeps its deadline.
+      // So a call connect keeps failing to recover restarts the window at
+      // most until connect's recovery horizon (a day from its first
+      // claim, apps/connect/src/idempotency.ts), past which it is never
+      // recoverable: a hold ends a day and 7 days after its first claim
+      // at the latest. A person who resolves before the first check
+      // leaves the next outcome on the old deadline, a minute shorter.
+      if (decided) {
+        unknown.since = undefined;
+      }
       return prefix;
     }
-    const prefix = `${waitStepPrefix}${key}:busy:${round}`;
-    const queuedFor = queuedForOf(value);
-    if (queuedFor !== undefined && joinedOf(value)) {
+    const prefix = waitStep(key, "busy", round);
+    if (marker.queuedFor !== undefined && marker.joined) {
       await this.#recordWaiting(`${prefix}:waiting:queued`, {
         reason: "queued",
-        waitingFor: queuedFor,
-        retryAfterSeconds: busyFor,
+        waitingFor: marker.queuedFor,
+        retryAfterSeconds: marker.busyFor,
       });
     }
     await this.#step.sleep(prefix, sleepMs);
@@ -1618,14 +1701,8 @@ export class RunHost extends RpcTarget {
       // The attempts of this `do` this execution made, for an engine that
       // doesn't say which attempt it runs.
       let tries = 0;
-      // The rounds the step has waited for load in a row: how long it
-      // waits the next (`askAgainSeconds`).
-      let waited = 0;
-      // When the step was first refused for load in this wait, and how long
-      // a step may wait in all: it waits so long at most, then fails,
-      // whatever it waited for, before any of its code runs again.
-      let busySince: number | undefined;
-      let busyMaxMs = 0;
+      // The step's wait for load since its last admission (`LoadWait`).
+      let load = loadWaitStart;
       const attemptStep = async (context?: unknown): Promise<unknown> => {
         attempted = true;
         tries += 1;
@@ -1664,9 +1741,9 @@ export class RunHost extends RpcTarget {
         const admitted = await settle(
           async () =>
             await this.#admit(attempt, {
-              waited,
-              since: busySince,
-              maxWaitMs: busyMaxMs,
+              waited: load.rounds,
+              waitedMs: load.rounds === 0 ? undefined : load.waitedMs,
+              maxWaitMs: load.maxWaitMs,
             })
         );
         if (!admitted.ok) {
@@ -1777,37 +1854,29 @@ export class RunHost extends RpcTarget {
       // seconds the lineage said, then run the step again under the same
       // key, in a step of its own each time, so every execution replays the
       // same steps.
+      // When the step was first held on its current unknown outcome.
       const unknown: { since?: number } = {};
-      for (let round = 1; isCoreMarker(value); round += 1) {
-        const timing = busyTimingOf(value);
-        // When the step first waited for load: the first busy round's
-        // refusal, journaled as its result, so every replay reads the
-        // same; a wait for the person between rounds, a pause or a resume
-        // moves it on none.
-        busySince ??= timing?.at;
-        busyMaxMs = timing?.maxWaitMs ?? busyMaxMs;
-        const sleepMs =
-          timing === undefined || busySince === undefined
-            ? 0
-            : askAgainMs({
-                waited,
-                retryAfterSeconds: busyWaitOf(value) ?? 0,
-                since: busySince,
-                maxWaitMs: timing.maxWaitMs,
-                now: timing.at,
-              });
-        if (timing !== undefined && sleepMs <= 0) {
-          failed = queueTimedOut(step, busyMaxMs);
+      let round = 0;
+      for (
+        let marker = markerOf(value);
+        marker !== undefined;
+        marker = markerOf(value)
+      ) {
+        round += 1;
+        // Read off the markers alone, journaled as the step's results, so
+        // every replay counts the same.
+        load = loadWaitAfter(load, marker);
+        if (marker.kind === "busy" && load.sleepMs <= 0) {
+          failed = queueTimedOut(step, marker.maxWaitMs);
           throw toStepError(failed);
         }
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         const prefix = await this.#waitBefore(
           step,
-          value,
-          { round, sleepMs },
+          marker,
+          { round, sleepMs: load.sleepMs },
           unknown
         );
-        waited = timing === undefined ? 0 : waited + 1;
         tries = 0;
         // oxlint-disable-next-line no-await-in-loop -- one round at a time
         value = await this.#step.do(
@@ -2693,6 +2762,9 @@ export class RunHost extends RpcTarget {
    * event that wakes the run carries nothing it takes. With `last`, a
    * decision still open is closed, timed out, unless an answer lands
    * first. An answer that came before the wait began is taken at once.
+   * A wake that finds nothing answered (an event of the decision's type
+   * sent by anyone else) ends nothing: the run looks, and waits again for
+   * the time it had left.
    */
   async waitForDecision(
     name: unknown,
@@ -2703,42 +2775,49 @@ export class RunHost extends RpcTarget {
       const step = checked(stepNameSchema, name);
       await this.#requireStepReviewed(step);
       const { decision, timeout, last } = checked(decisionWaitSchema, options);
-      // Whether it was answered when the run first got here, and when that
-      // was: recorded, so every replay decides as the first activation did
+      // Whether it was answered when the run looked, and when that was:
+      // recorded, so every replay decides as the first activation did
       // whether to wait, and for how long. The engine journals a wait's
       // timeout when it is first reached, and stops a run whose replay
       // asks for another (or skips a wait it holds).
       const prefix = `${waitStepPrefix}${await waitKeyOf(step)}`;
-      const reached = reachedSchema.parse(
-        await this.#step.do(`${prefix}:reached`, {}, async () => {
-          const at = Date.now();
-          const { answered } = await decisionOutcome(
-            this.#env,
-            this.#run,
-            decision,
-            false
-          );
-          return { at, answered };
-        })
-      );
+      const look = async (lookStep: string) =>
+        reachedSchema.parse(
+          await this.#step.do(lookStep, {}, async () => {
+            const at = Date.now();
+            const { answered } = await decisionOutcome(
+              this.#env,
+              this.#run,
+              decision,
+              false
+            );
+            return { at, answered };
+          })
+        );
+      const reached = await look(`${prefix}:reached`);
       // The SDK worked `timeout` out from when it asked, but a pause or a
       // restart may have outlasted that: so never wait past the decision's
       // deadline, as its row has it, from when the wait was first reached.
       // Once that has passed, the decision is closed as timed out at once,
       // so a reminder that follows asks nobody.
       const deadline = await decisionDeadline(this.#env, this.#run, decision);
-      const left = Math.min(timeout, deadline - reached.at);
-      if (!reached.answered && left > 0) {
+      const end = Math.min(reached.at + timeout, deadline);
+      let seen = reached;
+      for (let round = 0; !seen.answered && seen.at < end; round += 1) {
         try {
-          await this.#step.waitForEvent(step, {
-            type: decisionEventType(decision),
-            timeout: left,
-          });
+          // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+          await this.#step.waitForEvent(
+            round === 0 ? step : `${prefix}:again:${round}`,
+            { type: decisionEventType(decision), timeout: end - seen.at }
+          );
         } catch (error) {
           if (!isTimeout(error)) {
             throw error;
           }
+          break;
         }
+        // oxlint-disable-next-line no-await-in-loop -- one look per wake
+        seen = await look(`${prefix}:woken:${round}`);
       }
       // Recorded too: an answer that comes after this can't change what a
       // replay of the run hears it ended with.

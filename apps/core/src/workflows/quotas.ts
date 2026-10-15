@@ -12,7 +12,7 @@ import type {
   QuotaPolicy,
 } from "@grasp-os/shared/quota-policy";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
-import { and, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -75,6 +75,9 @@ import type { AdmissionScope, QueuePlace } from "./admission.ts";
 // - An attempt that dies before it settles: once its deadline has passed
 //   it is settled as having used all it could, its deadline less its
 //   admission. A late settle changes nothing: an attempt settles once.
+//   One the engine fenced sooner (its run paused, ended or cancelled, its
+//   activation taken over) is settled as the engine says so, having used
+//   what it ran (`sharesReleased`, `fencedSettled`).
 //
 // What an attempt holds while it runs is its allowance up to its
 // deadline, which is never more than an attempt's active wall time
@@ -116,7 +119,8 @@ import type { AdmissionScope, QueuePlace } from "./admission.ts";
 //   lineage has left. Attempts racing each other each reserve that way.
 // - Giving back more than was left over: an attempt gives back what it
 //   reserved and didn't use once, as it settles, in the statement that
-//   settles it; an attempt that never settles (its activation died) gives
+//   settles it, or, settled sooner as the engine fenced it, in the one
+//   that marks its calls settled (`calls_settled`); an attempt that never settles (its activation died) gives
 //   back nothing, and an attempt settled already reserves nothing more.
 //   What a block left unused while an attempt died is lost to the
 //   lineage: blocks start at one call and double, so at most about as
@@ -477,8 +481,11 @@ export interface QuotaAttempt {
    * `askAgainSeconds`).
    */
   waited?: number;
-  /** When its step first waited for load, if it has (host.ts). */
-  waitingSince?: number;
+  /**
+   * How long its step has waited for load since its last admission, if it
+   * has: its rounds' waits added up, not the time between them (host.ts).
+   */
+  waitedMs?: number;
   /** When the engine gives up on it (ms since the epoch). */
   deadline: number;
 }
@@ -552,6 +559,13 @@ const settleAttempt = async (
   // What it ran, no further than its deadline.
   const used = sql`min(${ran}, ${held.deadline} - ${held.admittedAt})`;
   const usedOf = sql`(SELECT ${used} FROM ${held} WHERE ${open})`;
+  // Settled sooner, as the engine fenced it or its time passed, with its
+  // calls not yet given back: they are, once, and its time stays charged.
+  const callsOwed = and(
+    identity,
+    isNotNull(held.settledAt),
+    eq(held.callsSettled, false)
+  );
   try {
     await db.batch([
       db
@@ -573,8 +587,27 @@ const settleAttempt = async (
           usedMs: used,
           settledAt: new Date(),
           hostCalls: sql`max(0, ${held.hostCalls} - ${unusedHostCalls})`,
+          callsSettled: true,
         })
         .where(open),
+      db
+        .update(runLineages)
+        .set({
+          hostCalls: sql`max(0, ${runLineages.hostCalls} - ${unusedHostCalls})`,
+        })
+        .where(
+          and(
+            eq(runLineages.rootRunId, root),
+            sql`EXISTS (SELECT 1 FROM ${held} WHERE ${callsOwed})`
+          )
+        ),
+      db
+        .update(held)
+        .set({
+          hostCalls: sql`max(0, ${held.hostCalls} - ${unusedHostCalls})`,
+          callsSettled: true,
+        })
+        .where(callsOwed),
     ]);
   } catch (error) {
     log.error("workflow.attempt_settle_failed", {
@@ -761,6 +794,98 @@ const hostCallsOf = (
     },
   };
 };
+
+/**
+ * The statements that settle, at `now`, the unsettled attempts `dead`
+ * picks (SQL over `run_lineage_attempts`), which the engine has fenced:
+ * they hold nothing more, so their shares of the attempts running at once
+ * come free (admission.ts), and each used what it ran, up to its
+ * deadline. Their lineages count that, and hold their allowance no more.
+ * An attempt settles once: one settled already, as it returned or as its
+ * time passed, is left as it is.
+ */
+const fencedSettled = (
+  db: DrizzleD1Database,
+  dead: SQL,
+  now: number,
+  toDeadline: SQL = sql`0`
+) => {
+  const held = runLineageAttempts;
+  const open = sql`${held.settledAt} IS NULL AND ${dead}`;
+  // What it ran, or, `toDeadline`, all it could: its deadline less its
+  // admission.
+  const used = sql`CASE WHEN ${toDeadline} THEN ${held.deadline} - ${held.admittedAt} ELSE min(${held.deadline}, ${now}) - ${held.admittedAt} END`;
+  // Each lineage by its own attempts: in the subquery, the attempts'
+  // columns are its table's, the lineage's the row being updated.
+  const sumOf = (of: SQL) =>
+    sql`(SELECT coalesce(sum(${of}), 0) FROM ${held} WHERE ${open} AND ${held.rootRunId} = run_lineages.root_run_id)`;
+  return [
+    db
+      .update(runLineages)
+      .set({
+        activeUsedMs: sql`${runLineages.activeUsedMs} + ${sumOf(used)}`,
+        activeHeldMs: sql`${runLineages.activeHeldMs} - ${sumOf(sql`${held.reservedMs}`)}`,
+      })
+      .where(
+        sql`${runLineages.rootRunId} IN (SELECT ${held.rootRunId} FROM ${held} WHERE ${open})`
+      ),
+    db
+      .update(held)
+      .set({ usedMs: used, settledAt: new Date(now) })
+      .where(open),
+  ] as const;
+};
+
+/**
+ * Gives back what the attempts of run `run` of activation generation
+ * `through`, or an older one, still hold: the engine has fenced them (its
+ * object says so, run-object.ts, `generationOver`), so they hold no share
+ * of the attempts running at once, nor any of their lineage's active time,
+ * whatever their code still does. Each used what it ran, up to its
+ * deadline; of a run cancelled (`cancelled`, its object's mark, or its
+ * tombstone), all it could, up to its deadline: the engine stops a
+ * cancelled attempt's calls, not its isolate, whose computation may run
+ * on until then. Its share still comes back now: the attempt can act on
+ * nothing, and holding the share would keep others from theirs for
+ * computation no one waits on. In the same transaction, the run's row
+ * records the fence
+ * (`shares_fenced_through`): an attempt of those generations whose
+ * admission lands later takes nothing (`admitAttemptOnce`).
+ *
+ * Only `run`'s attempts, and only of generations the engine fenced:
+ * `through` only grows, so a call however late, or made again, gives back
+ * nothing a newer activation's attempt holds, and nothing twice. Throws
+ * when the database can't, for the engine to hand the notification over
+ * again.
+ */
+export const sharesReleased = async (
+  env: Pick<Env, "DB">,
+  run: string,
+  through: number,
+  { cancelled }: { cancelled: boolean }
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const held = runLineageAttempts;
+  const tombstone = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND ${workflowRuns.cancelRequestedAt} IS NOT NULL)`;
+  await db.batch([
+    ...fencedSettled(
+      db,
+      sql`${held.runId} = ${run} AND ${held.generation} <= ${through}`,
+      Date.now(),
+      cancelled ? sql`1` : tombstone
+    ),
+    db
+      .update(workflowRuns)
+      .set({ sharesFencedThrough: through })
+      .where(
+        and(
+          eq(workflowRuns.id, run),
+          lt(workflowRuns.sharesFencedThrough, through)
+        )
+      ),
+  ]);
+};
+
 /** Whose run an attempt is: its lineage, who it acts for and its App. */
 export interface AttemptOwner extends AdmissionScope {
   run: string;
@@ -801,8 +926,8 @@ const admitAttemptOnce = async (
   // whatever cap the step waited under: it fails before taking a lease,
   // so none of its code runs.
   if (
-    attempt.waitingSince !== undefined &&
-    now - attempt.waitingSince >= policy.limits.workflowQueuedStepMs
+    attempt.waitedMs !== undefined &&
+    attempt.waitedMs >= policy.limits.workflowQueuedStepMs
   ) {
     throw workflowErrors.create("workflow.queue_timeout", {
       maxWaitMs: policy.limits.workflowQueuedStepMs,
@@ -831,13 +956,11 @@ const admitAttemptOnce = async (
   const lapsed = sql`${held.rootRunId} = ${root} AND ${held.settledAt} IS NULL AND ${held.deadline} <= ${now}`;
   const lapsedSum = (of: SQL) =>
     sql`(SELECT coalesce(sum(${of}), 0) FROM ${held} WHERE ${lapsed})`;
-  // The step's attempts the engine claimed for an activation that is over
-  // (a lower generation, under the same key), unsettled: the engine has
-  // fenced them, so they hold nothing more, and used what they ran.
-  const fenced = sql`${held.runId} = ${run} AND ${held.stepKey} = ${attempt.key} AND ${held.settledAt} IS NULL AND ${held.generation} < ${attempt.generation}`;
-  const fencedUsed = sql`min(${held.deadline}, ${now}) - ${held.admittedAt}`;
-  const fencedSum = (of: SQL) =>
-    sql`(SELECT coalesce(sum(${of}), 0) FROM ${held} WHERE ${fenced})`;
+  // An attempt of an activation the engine has fenced takes no share:
+  // the run was cancelled (its tombstone), its object said its attempts
+  // of this generation hold no more (`sharesReleased`), or a newer
+  // activation's attempt was admitted. However late its call lands.
+  const fencedOut = sql`(EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND (${workflowRuns.cancelRequestedAt} IS NOT NULL OR ${workflowRuns.sharesFencedThrough} >= ${attempt.generation})) OR EXISTS (SELECT 1 FROM ${held} WHERE ${held.runId} = ${run} AND ${held.generation} > ${attempt.generation}))`;
   const written = await db.batch([
     lineageCreated(db, root),
     db
@@ -854,17 +977,27 @@ const admitAttemptOnce = async (
         settledAt: new Date(now),
       })
       .where(lapsed),
+    // The run's attempts the engine claimed for an activation that is over
+    // (a lower generation): this one's activation took the run over, so
+    // they hold nothing more, whichever step they were of.
+    ...fencedSettled(
+      db,
+      sql`${held.runId} = ${run} AND ${held.generation} < ${attempt.generation}`,
+      now
+    ),
+    // And it records that fence, whether or not it takes a lease: an
+    // older activation's admission landing after this one, of any step,
+    // takes none of what it gave back. A takeover changes no status, so
+    // no notification records it.
     db
-      .update(runLineages)
-      .set({
-        activeUsedMs: sql`${runLineages.activeUsedMs} + ${fencedSum(fencedUsed)}`,
-        activeHeldMs: sql`${runLineages.activeHeldMs} - ${fencedSum(sql`${held.reservedMs}`)}`,
-      })
-      .where(eq(runLineages.rootRunId, root)),
-    db
-      .update(held)
-      .set({ usedMs: fencedUsed, settledAt: new Date(now) })
-      .where(fenced),
+      .update(workflowRuns)
+      .set({ sharesFencedThrough: attempt.generation - 1 })
+      .where(
+        and(
+          eq(workflowRuns.id, run),
+          lt(workflowRuns.sharesFencedThrough, attempt.generation - 1)
+        )
+      ),
     ...queuePruned(db, now),
     // The receipt, which is also the attempt's lease on its shares of the
     // attempts running at once (admission.ts), only while the lineage has
@@ -874,7 +1007,7 @@ const admitAttemptOnce = async (
     db
       .insert(held)
       .select(
-        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource}, ${place.stepHash} FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.hostCalls} < ${policy.limits.lineageHostCalls} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(owner, place, standing, now, shares)}`
+        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource}, ${place.stepHash}, 0 FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND NOT ${fencedOut} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.hostCalls} < ${policy.limits.lineageHostCalls} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(owner, place, standing, now, shares)}`
       )
       .onConflictDoNothing(),
     // Held on the lineage only if that statement took the receipt.
@@ -896,7 +1029,7 @@ const admitAttemptOnce = async (
   // this call or by an earlier one of the attempt. One that has settled
   // (the attempt returned, or its allowance passed and an admission
   // settled it as used up) admits nothing more: the attempt is over.
-  const [receipts, lineages] = await db.batch([
+  const [receipts, lineages, fencedRuns] = await db.batch([
     db
       .select({ admittedAt: held.admittedAt, settledAt: held.settledAt })
       .from(held)
@@ -910,6 +1043,10 @@ const admitAttemptOnce = async (
       })
       .from(runLineages)
       .where(eq(runLineages.rootRunId, root)),
+    db
+      .select({ id: workflowRuns.id })
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.id, run), fencedOut)),
   ]);
   const [admitted] = receipts;
   if (admitted !== undefined) {
@@ -930,6 +1067,10 @@ const admitAttemptOnce = async (
         );
       },
     };
+  }
+  // Fenced, it is over: it waits for no share, and takes none.
+  if (fencedRuns.length > 0) {
+    throw executionErrors.create("execution.stale_attempt");
   }
   if (!retried && !(await policyStill(db, policy))) {
     return await admitAttemptOnce(
@@ -965,7 +1106,7 @@ const admitAttemptOnce = async (
   // refused it read them.
   throw await queuedRefusal(db, owner, place, now, shares, sharesFound, {
     waited: attempt.waited ?? 0,
-    since: attempt.waitingSince ?? now,
+    waitedMs: attempt.waitedMs ?? 0,
     maxWaitMs: policy.limits.workflowQueuedStepMs,
   });
 };

@@ -2,7 +2,8 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
-import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import type { RunQueue } from "@grasp-os/shared/workflows";
+import { and, asc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -30,12 +31,33 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 // - A lease leaked by an attempt that died, or its activation, or core:
 //   a lease counts for what its receipt holds (`reserved_ms`), an
 //   attempt's wall time after its admission at most, whatever its
-//   deadline, so none outlives a minute. An attempt the engine took from
-//   an activation that is over (a lower generation of the same step's key)
-//   is settled as the new one is admitted (quotas.ts), so a replaced
-//   activation's lease never keeps its own retry waiting. One that settles
-//   gives its share back at once; a run that pauses or ends gives up its
-//   places (runs.ts, `projectStatus`).
+//   deadline, so none outlives a minute. One that settles gives its share
+//   back at once; a run that pauses or ends gives up its places (runs.ts,
+//   `projectStatus`).
+// - A lease kept by an attempt the engine gave up on: its run cancelled
+//   while its code still runs, paused or ended once its activation died,
+//   or taken over by a newer activation. The engine's fence decides it,
+//   never core's record of the run, which lags the engine: each time the
+//   run's object tells core of a status (its durable outbox, in order, at
+//   least once), it gives back every lease of the run's generations none
+//   of whose attempts holds any more, as its journal has them then
+//   (run-object.ts, `notify`; quotas.ts, `sharesReleased`). An activation
+//   that took the run over gives back its older ones' leases with its
+//   first admission, of any step (quotas.ts). Only the leases of the run
+//   the object holds, by its own journal (a batch naming another run acts
+//   on none), only of generations fenced: a notification late, or handed
+//   over again, gives back nothing a newer activation's attempt holds,
+//   since the fence only grows. A cancelled run's attempt is charged to
+//   its lineage up to its deadline, as its isolate may compute on, though
+//   its share comes back at once. A dead activation is told from a slow one only by the
+//   engine's watchdog, a lease away: its leases come back then, or as its
+//   run is cancelled.
+// - A fenced attempt taking a share again, its admission landing after
+//   its lease came back, or retried under the same key: an attempt of a
+//   generation the run's object fenced (`shares_fenced_through`), of a
+//   cancelled run, or of an activation a newer one's attempt came after,
+//   takes no lease (`execution.stale_attempt`), in the statement that
+//   would take it. An attempt settled is never admitted again.
 // - The same attempt admitted twice: it holds one lease (its receipt's
 //   key), so a retried admission is never a second share.
 // - A saturated App, or a person running many runs, taking every share:
@@ -96,12 +118,17 @@ import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
 //   statement per admission, which counts nothing more once its lease is
 //   taken.
 // - Waiting for ever, and a journal that grows without bound: a wait
-//   spends none of the run's steps (host.ts, `loadWaitStep`), since
+//   spends none of the run's steps (host.ts, `uncountedWaitStep`), since
 //   others' load causes it, but each round adds to the run's journal. So
 //   a step waits longer each round, five seconds doubling to a minute
-//   (`askAgainSeconds`), and fails once it has waited a day in all
-//   (`workflowQueuedStepMs`, `workflow.queue_timeout`), spending none of
-//   its retries: at most some 1,450 rounds a step.
+//   (`askAgainSeconds`), and fails once its rounds have waited a day in
+//   all since it was last admitted (`workflowQueuedStepMs`,
+//   `workflow.queue_timeout`), spending none of its retries. A round never
+//   waits past when the share's first lease ends (`retryAfterSeconds`),
+//   though, which can be a second away again and again: the backoff alone
+//   doesn't bound the rounds of a day's wait. Only those rounds count: a
+//   pause, or a wait for its person after an admission, is not a wait for
+//   load (host.ts).
 // - A fake identity for an extra share: who a run acts for and its App
 //   come from its row (dispatcher.ts), never from its input or code, and
 //   people are the organization's members, from its identity provider.
@@ -165,7 +192,7 @@ export interface Shares {
  * seconds, whatever a refusal said (host.ts): a lease holds what an
  * attempt may take, and most give it back far sooner.
  */
-export const maxAskAgainSeconds = 5;
+const maxAskAgainSeconds = 5;
 
 /** The longest a step that kept waiting waits between asks, in seconds. */
 const maxBackedOffSeconds = 60;
@@ -176,7 +203,7 @@ const maxBackedOffSeconds = 60;
  * so a step queued for long adds a round to its run's journal a minute at
  * most. It starts again from five seconds at the step's next wait.
  */
-export const askAgainSeconds = (waited: number): number =>
+const askAgainSeconds = (waited: number): number =>
   Math.min(maxAskAgainSeconds * 2 ** Math.max(0, waited), maxBackedOffSeconds);
 
 /** What decides when a waiting step asks again (`askAgainMs`). */
@@ -185,34 +212,35 @@ export interface AskingAgain {
   waited: number;
   /** What the refusal said, in seconds: the true wait, at the latest. */
   retryAfterSeconds: number;
-  /** When it first waited for load (ms since the epoch). */
-  since: number;
+  /**
+   * How long it has waited for load since it was last admitted: the sum
+   * of its rounds' waits, never the time between, so a pause or a wait
+   * for its person counts for none of it (host.ts).
+   */
+  waitedMs: number;
   /** How long a step may wait for load in all, in ms. */
   maxWaitMs: number;
-  /** Now, as the refusal was made. */
-  now: number;
 }
 
 /**
  * How long a waiting step waits before it asks again, in ms, and so when
  * it says it asks again: its backoff (`askAgainSeconds`), what the
- * refusal said and what is left of the time a step may wait, measured
- * from when it first waited, whichever is soonest. One rule for the
- * host's sleep, the summary's `retryAt` and the timeout.
+ * refusal said and what is left of the time a step may wait
+ * (`waitedMs`), whichever is soonest. One rule for the host's sleep, the
+ * summary's `retryAt` and the timeout.
  */
 export const askAgainMs = ({
   waited,
   retryAfterSeconds,
-  since,
+  waitedMs,
   maxWaitMs,
-  now,
 }: AskingAgain): number =>
   Math.max(
     0,
     Math.min(
       askAgainSeconds(waited) * 1000,
       retryAfterSeconds * 1000,
-      maxWaitMs - (now - since)
+      maxWaitMs - waitedMs
     )
   );
 
@@ -435,16 +463,12 @@ export const standingOf = async (
           live
         )
       ),
+    // The turn as a new place takes it (`nextTurn`), off the run's row,
+    // which every run has.
     db
-      .select({ next: sql<number>`coalesce(max(${queue.turn}) + 1, 0)` })
-      .from(queue)
-      .where(
-        and(
-          eq(queue.subject, scope.subject),
-          eq(queue.resource, scope.resource),
-          live
-        )
-      ),
+      .select({ next: sql<number>`${nextTurn(scope, now)}` })
+      .from(workflowRuns)
+      .where(eq(workflowRuns.id, place.runId)),
   ]);
   const [held] = mine;
   if (held !== undefined) {
@@ -502,6 +526,45 @@ export const runDequeued = (db: DrizzleD1Database, run: string, took: SQL) =>
   db
     .delete(workflowAdmissionQueue)
     .where(and(eq(workflowAdmissionQueue.runId, run), took));
+
+/**
+ * Of the runs `runs`, each one a step of which waits in the queue for a
+ * share at `now`: the share, and the earliest a step of it asks again, as
+ * its summary shows it (summary.ts). A place that stopped asking doesn't
+ * count. Only the runs' own places are read (the queue's primary key):
+ * never who else waits, nor how many, nor where in the queue.
+ */
+export const queuedRuns = async (
+  db: DrizzleD1Database,
+  runs: readonly string[],
+  now: number
+): Promise<Map<string, RunQueue>> => {
+  if (runs.length === 0) {
+    return new Map();
+  }
+  const rows = await db
+    .select({
+      runId: workflowAdmissionQueue.runId,
+      waitingFor: workflowAdmissionQueue.waitingFor,
+      retryAt: workflowAdmissionQueue.retryAt,
+    })
+    .from(workflowAdmissionQueue)
+    .where(
+      and(
+        // One bound list: D1 binds at most 100 parameters.
+        sql`${workflowAdmissionQueue.runId} IN (SELECT value FROM json_each(${JSON.stringify(runs)}))`,
+        gt(workflowAdmissionQueue.seenAt, new Date(now - queueLiveMs))
+      )
+    )
+    .orderBy(asc(workflowAdmissionQueue.retryAt));
+  const byRun = new Map<string, RunQueue>();
+  for (const { runId, waitingFor, retryAt } of rows) {
+    if (!byRun.has(runId)) {
+      byRun.set(runId, { waitingFor, retryAt: retryAt.toISOString() });
+    }
+  }
+  return byRun;
+};
 
 /**
  * The statements that give up `place` once its attempt holds its lease
@@ -643,9 +706,9 @@ export const queuedRefusal = async (
   read: unknown,
   {
     waited,
-    since,
+    waitedMs,
     maxWaitMs,
-  }: Pick<AskingAgain, "waited" | "since" | "maxWaitMs">
+  }: Pick<AskingAgain, "waited" | "waitedMs" | "maxWaitMs">
 ): Promise<Error> => {
   const rows = z.array(sharesRowSchema).safeParse(read).data;
   const { waitingFor, retryAfterSeconds } = waitOf(rows?.[0], shares, now);
@@ -653,7 +716,7 @@ export const queuedRefusal = async (
   // When it asks again at the latest, as the host waits (`askAgainMs`):
   // never after it would time out.
   const retryAt = new Date(
-    now + askAgainMs({ waited, retryAfterSeconds, since, maxWaitMs, now })
+    now + askAgainMs({ waited, retryAfterSeconds, waitedMs, maxWaitMs })
   );
   const queue = workflowAdmissionQueue;
   const mine = placeIs(place);

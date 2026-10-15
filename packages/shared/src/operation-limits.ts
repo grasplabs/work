@@ -118,3 +118,80 @@ export const resourceAliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
  * fit, never deep in Knowledge.
  */
 export const knowledgeSearchMaxLength = 500;
+
+// Foreground streaming actions (spec 10.7.6): an action that declares
+// `stream` emits bounded progress snapshots while it runs, each complete,
+// so a slow reader only ever needs the latest. These bound what one
+// invocation holds and sends.
+
+/**
+ * The most bytes of one progress snapshot, as UTF-8 JSON: what an
+ * operation may return (`operationResultMaxBytes`), since a snapshot is
+ * delivered to a screen as an answer is.
+ */
+export const streamProgressMaxBytes = operationResultMaxBytes;
+
+/**
+ * The most snapshots one invocation emits: past it, `ctx.emit` is refused
+ * (`operation.emit_limit`). The host keeps only the latest, so this bounds
+ * the work of validating them, never what is held.
+ */
+export const streamMaxEmits = 1000;
+
+/**
+ * How long a running stream waits, once no screen follows it, before the
+ * host asks it to stop: long enough to reconnect, never long enough to
+ * turn it into background work.
+ */
+export const streamIdleCancelMs = 10_000;
+
+/**
+ * How long a finished stream's terminal receipt (its result, and the last
+ * progress) is kept for a screen that lost its connection to read again.
+ */
+export const streamRetentionMs = 15 * 60_000;
+
+/**
+ * How long a stream's tombstone is kept after its receipt: a key reused
+ * within it is refused as expired (`submission.expired`). Past it nothing
+ * of the invocation is left, so the same key starts a fresh run, external
+ * effects included. That is what 10.7.1 promises of every key: it
+ * deduplicates only while evidence of it is kept. The session client
+ * makes a fresh random key for every call and reuses one only to
+ * recover a call still within its receipt; a caller that passes its own
+ * key for long-lived business intent needs a durable business record
+ * instead.
+ */
+export const streamTombstoneMs = 24 * 60 * 60_000;
+
+/**
+ * The most streaming actions one person runs at once in one App, beyond
+ * which a start is refused (`operation.stream_limit`). A screen follows
+ * one or two at a time (a draft, an export); each holds a sandbox run for
+ * up to a server invocation's wall time (60 s) and an object with its
+ * receipt, so four leaves room for a screen and a second tab while a
+ * screen that starts them in a loop can't hold more of the deployment's
+ * sandbox than that. The request rate limit alone would let it hold
+ * dozens.
+ */
+export const streamMaxRunning = 4;
+
+/**
+ * The most plain (non-streaming) actions one person runs at once in one
+ * App through its invocation objects, beyond which a start is refused
+ * (`operation.action_limit`). Such a run outlives the request that
+ * started it, so its caller can come back for its receipt, and no idle
+ * cancel ends it: this, with its deadline, is its only bound. A screen
+ * and a second tab firing actions from a form, a list's row buttons or a
+ * bulk edit stay well within sixteen; a screen that fires them in a loop
+ * can't hold more of the App's sandbox than that, leaving its other
+ * members room (the on-prem sandbox caps sessions per App).
+ */
+export const actionMaxRunning = 16;
+
+/**
+ * How long a plain action's invocation may run: as long as a screen's
+ * direct call (core's app-function-route.ts), never the 60 s a streaming
+ * action, which someone follows, gets.
+ */
+export const actionInvocationWallMs = 30_000;

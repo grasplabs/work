@@ -426,6 +426,54 @@ describe("a portable host's client", () => {
     ).toStrictEqual([false, false]);
   });
 
+  it("never sends a key left unknown as the next person, though the resend that found them was refused", async () => {
+    let token = tokenOf("ann");
+    const seen = network(async ({ authorization }) => {
+      await Promise.resolve();
+      if (authorization === `Bearer ${tokenOf("ann")}`) {
+        // An outcome the host can't tell: the action's key is left unknown
+        // (a lost answer would be sent again for its receipt).
+        return Response.json({
+          result: {
+            ok: false,
+            error: {
+              code: "operation.sandbox_lost",
+              message: "The sandbox stopped answering.",
+              category: "uncertain",
+              retryable: false,
+              requestId: "r",
+            },
+          },
+        });
+      }
+      return 3;
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const lost = await failureOf(client.action(api.notes.tally));
+    const { details } = lost;
+    const key: unknown =
+      typeof details === "object" && details !== null
+        ? Reflect.get(details, "idempotencyKey")
+        : undefined;
+    const keyed = { idempotencyKey: String(key) };
+    // Bo signs in: the resend that asks for the token finds him, unsent.
+    token = tokenOf("bo");
+    const found = await failureOf(client.action(api.notes.tally, {}, keyed));
+    const again = await failureOf(client.action(api.notes.tally, {}, keyed));
+    expect({
+      found: found.code,
+      again: again.code,
+      sent: seen.map(({ authorization }) => authorization),
+    }).toStrictEqual({
+      found: "auth.principal_changed",
+      again: "auth.principal_changed",
+      sent: [`Bearer ${tokenOf("ann")}`],
+    });
+  });
+
   it("never joins one person's save to the next person's, however the first one left", async () => {
     let token = tokenOf("ann");
     const held = Promise.withResolvers<null>();
@@ -574,7 +622,7 @@ describe("a portable host's client", () => {
     );
   });
 
-  it("takes an answer that never comes as lost: an action's outcome is then unknown", async () => {
+  it("takes an answer that never comes as lost: an action's outcome is then unknown once its key no longer recovers it", async () => {
     vi.useFakeTimers();
     vi.stubGlobal(
       "fetch",
@@ -591,12 +639,15 @@ describe("a portable host's client", () => {
       getToken: async () => await Promise.resolve(tokenOf("ann")),
     });
     const outcome = failureOf(client.action(api.notes.tally));
-    await vi.advanceTimersByTimeAsync(60_000);
+    // Sent again under its key, which would answer its receipt, for the
+    // lost answer's five minutes; past them, unknown.
+    await vi.advanceTimersByTimeAsync(7 * 60_000);
     const failure = await outcome;
     expect(failure.code).toBe("submission.outcome_unknown");
+    expect(failure.details).toHaveProperty("idempotencyKey");
   });
 
-  it("asks the host again after core refuses a token, whatever the refusal's body", async () => {
+  it("takes any refusal of a token as one, whatever its body, and asks the host again", async () => {
     const later = Math.floor(Date.now() / 1000) + 300;
     let asked = 0;
     let refuse = true;
@@ -615,9 +666,16 @@ describe("a portable host's client", () => {
         return await Promise.resolve(tokenOf("ann", later));
       },
     });
-    // The refusal isn't core's answer, so the read is tried again: with a
-    // token asked for afresh, not the one refused.
-    await client.query(api.notes.get, { id: idOf(1) });
-    expect(asked).toBe(2);
+    // Refused, though not in core's words: never a lost answer to send
+    // again after. The next call asks for a token afresh.
+    const refused = await failureOf(
+      client.query(api.notes.get, { id: idOf(1) })
+    );
+    const next = await client.query(api.notes.get, { id: idOf(2) });
+    expect({ refused: refused.code, next, asked }).toStrictEqual({
+      refused: "auth.unauthenticated",
+      next: null,
+      asked: 2,
+    });
   });
 });

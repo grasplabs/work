@@ -219,6 +219,11 @@ import { recordReferences } from "./store-references.ts";
 //   out, so it doesn't keep its receipt forever. Every commit gives its
 //   entries IDs of their own (its number in the store's order), so a key
 //   that commits again after its tombstone went never reuses one.
+// - A live query misses a write: every write that moves a table's
+//   generation (a commit, a migration or backfill batch) tells
+//   `onTablesMoved` once its transaction is over; a write the object
+//   died before telling is found by core's periodic `rewatch`, which
+//   compares generations (query-subscriptions.ts).
 // - The alarm spins, or stops: it is set only for what it can act on (an
 //   owed entry, a receipt the sweep may expire, a tombstone), never
 //   sooner than a second away, again after work that failed (a while
@@ -1012,6 +1017,15 @@ export class StoreHost {
   readonly ctx: DurableObjectState;
   readonly env: Env;
   readonly #db: DrizzleSqliteDODatabase;
+  /**
+   * Told, by name, the tables whose generation moved on and the
+   * generation each is at now, once the write that moved them is over
+   * (data-store.ts tells its live queries): a commit's, a migration
+   * batch's or a backfill batch's alike. Unset, nobody is told.
+   */
+  onTablesMoved: ((tables: Record<string, number>) => void) | undefined;
+  /** Tables moved since `onTablesMoved` was last told, by ID. */
+  readonly #movedIds = new Set<string>();
   /** The store's cursor keys, once derived (`#cursorKeys`). */
   #keys: CursorKeys | undefined;
   /** Each schema read so far, by hash (`#pinned`). */
@@ -2208,6 +2222,48 @@ export class StoreHost {
   }
 
   /**
+   * Notes that the generations of `tableIds` moved on, and tells
+   * `onTablesMoved` once the synchronous transaction that moved them is
+   * over (a microtask later). It reads the generations then: a write
+   * that rolled back (a preview's, a failed commit's) moved nothing, and
+   * a watch is told only of a generation past the one it read
+   * (store-watches.ts), so telling of one tells nobody.
+   */
+  #moved(tableIds: Iterable<string>): void {
+    const wasEmpty = this.#movedIds.size === 0;
+    for (const id of tableIds) {
+      this.#movedIds.add(id);
+    }
+    if (wasEmpty && this.#movedIds.size > 0) {
+      queueMicrotask(() => {
+        this.#tellMoved();
+      });
+    }
+  }
+
+  #tellMoved(): void {
+    const ids = [...this.#movedIds];
+    this.#movedIds.clear();
+    const listener = this.onTablesMoved;
+    if (listener === undefined || ids.length === 0) {
+      return;
+    }
+    const moved: Record<string, number> = {};
+    for (const { name, generation } of this.#db
+      .select({ name: tables.name, generation: tables.generation })
+      .from(tables)
+      .where(inArray(tables.tableId, ids))
+      .all()) {
+      moved[name] = Math.max(moved[name] ?? 0, generation);
+    }
+    try {
+      listener(moved);
+    } catch (error) {
+      log.error("store.tell_failed", errorFields(error));
+    }
+  }
+
+  /**
    * The current generation of each of `names` (tables of this store):
    * what a reader compares its read set with when its reads are done.
    * A table the store doesn't hold is left out, which no read set matches.
@@ -3276,6 +3332,7 @@ export class StoreHost {
         .set({ generation: sql`${tables.generation} + 1` })
         .where(inArray(tables.tableId, [...changed]))
         .run();
+      this.#moved(changed);
     }
   }
 
@@ -3871,6 +3928,7 @@ export class StoreHost {
         .set({ generation: sql`${tables.generation} + 1` })
         .where(eq(tables.tableId, tableId))
         .run();
+      this.#moved([tableId]);
     }
   }
 
@@ -3948,6 +4006,7 @@ export class StoreHost {
         .set({ generation: sql`${tables.generation} + 1` })
         .where(inArray(tables.tableId, [...changed]))
         .run();
+      this.#moved(changed);
     }
     const done = failure === null && index >= order.length;
     let state: BackfillOutcome["state"] = "running";

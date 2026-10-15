@@ -317,6 +317,38 @@ const durationMembers: ReadonlyMap<string, number> = new Map([
 ]);
 
 /**
+ * The milliseconds of a literal duration that passed `durationAt`: an ISO
+ * 8601 text or an object of whole units; `undefined` for anything else,
+ * an expression among them.
+ */
+export const literalDurationMs = (
+  value: JsonValue | undefined
+): number | undefined => {
+  if (typeof value === "string") {
+    return parseSlot(value).kind === "literal"
+      ? isoDurationMs(value)
+      : undefined;
+  }
+  if (!isObject(value)) {
+    return undefined;
+  }
+  let total = 0;
+  for (const [key, amount] of Object.entries(value)) {
+    const unit = durationMembers.get(key);
+    if (
+      unit === undefined ||
+      typeof amount !== "number" ||
+      !Number.isSafeInteger(amount) ||
+      amount < 0
+    ) {
+      return undefined;
+    }
+    total += amount * unit;
+  }
+  return total > 0 && Number.isSafeInteger(total) ? total : undefined;
+};
+
+/**
  * A duration: upstream's `{ days, hours, minutes, seconds, milliseconds }`
  * of literal whole numbers, or a fixed ISO 8601 duration; with
  * `expression`, also a `${ … }` that returns, at run time, whole
