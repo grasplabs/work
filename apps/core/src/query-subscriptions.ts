@@ -1166,6 +1166,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
   #unfollow(app: AppId): void {
     const following = this.#following.get(app);
     this.#following.delete(app);
+    // No read or push of the App is left to compare against it: a later
+    // follow starts afresh, so a connection keeps nothing per App it left.
+    this.#revocations.delete(app);
     // Not answered yet: `#follow` leaves once it is.
     if (following?.id !== undefined) {
       void this.#leave(app, following.id);

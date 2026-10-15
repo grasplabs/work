@@ -2144,13 +2144,10 @@ export class GraspClient {
 
   /**
    * Whether `live` shows nothing core pushed it: lost and waiting to
-   * follow again, or not yet answered nor pushed to.
+   * follow again, or not yet pushed to, answered or not.
    */
   static #waitsToFollow(live: Live): boolean {
-    return (
-      live.retry !== undefined ||
-      (live.release === undefined && live.revision === 0)
-    );
+    return live.retry !== undefined || live.revision === 0;
   }
 
   /**
