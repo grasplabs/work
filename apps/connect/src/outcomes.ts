@@ -185,7 +185,8 @@ const listingOf = async ({
     // Only tells rows apart, of what the admin is shown anyway, and never
     // of its key: App code chooses keys and may put data in them, and a
     // digest of a key a reader can guess would confirm the guess. Two calls
-    // alike in all of these, claimed in the same millisecond, share an id.
+    // alike in all of these, claimed in the same millisecond, share it until
+    // `distinctIds` tells them apart.
     id: await sha256Hex(
       JSON.stringify([
         row.subjectType,
@@ -205,6 +206,21 @@ const listingOf = async ({
     resource: row.resource,
     sentAt: row.createdAt.toISOString(),
   };
+};
+
+/**
+ * `listings` with every id told apart: a repeat of an id already given
+ * gets its count after it, so a listing never names two rows alike.
+ */
+const distinctIds = (
+  listings: UnknownOutcomeListing[]
+): UnknownOutcomeListing[] => {
+  const seen = new Map<string, number>();
+  return listings.map((listing) => {
+    const count = seen.get(listing.id) ?? 0;
+    seen.set(listing.id, count + 1);
+    return count === 0 ? listing : { ...listing, id: `${listing.id}-${count}` };
+  });
 };
 
 /**
@@ -231,7 +247,7 @@ export const listAllUnknownOutcomes = async (
     .where(unknownNow(Date.now()))
     .orderBy(desc(idempotentCalls.createdAt))
     .limit(listLimit);
-  return await Promise.all(rows.map(listingOf));
+  return distinctIds(await Promise.all(rows.map(listingOf)));
 };
 
 /** The person's call of unknown outcome `key` names, as stored, if any. */
@@ -403,6 +419,12 @@ export const resolveOutcome = async (
     // and lost again, it is another call to decide on.
     if (row === undefined || row.claimedAt.getTime() !== claim) {
       throw connectErrors.create("connect.outcome_not_found");
+    }
+    // What was sent is no longer kept (retention): "it didn't" would let
+    // it go out again unread, so only "it happened" is said (core checks
+    // this too, on its earlier read).
+    if (choice === "not_happened" && row.input === null) {
+      throw connectErrors.create("connect.outcome_not_kept");
     }
     const claims = await verifyCapability(signingKeys, capability, {
       connectionId: row.connectionId,

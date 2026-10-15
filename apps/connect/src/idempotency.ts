@@ -669,7 +669,7 @@ export const idempotencyStore = (
  * `connect.resolved_done`; "it didn't" frees it for one send of the same
  * input (`freed`). Either takes a claim time of its own, so a recovery
  * that read the row before can't retake it, and drops what was kept of
- * the call.
+ * the call. "It didn't" applies only while the call's input is kept.
  */
 export const resolution = (
   database: D1Database,
@@ -683,7 +683,10 @@ export const resolution = (
     eq(idempotentCalls.state, row.state),
     eq(idempotentCalls.claimedAt, row.claimedAt),
     eq(idempotentCalls.inputHash, row.inputHash),
-    unknownNow(now)
+    unknownNow(now),
+    // "It didn't" only while what was sent is still kept for its person
+    // to read: retention may drop it between the read and this write.
+    choice === "not_happened" ? isNotNull(idempotentCalls.input) : undefined
   );
   if (where === undefined) {
     throw new Error("Expected a condition");

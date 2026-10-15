@@ -969,8 +969,8 @@ export interface UnknownOutcome {
  */
 export interface UnknownOutcomeListing {
   /**
-   * For telling rows apart: a digest of what the listing shows anyway,
-   * never of the call's key.
+   * For telling rows apart, unique within one listing: a digest of what
+   * the listing shows anyway, never of the call's key.
    */
   id: string;
   /** The person it acted for: theirs to resolve. */

@@ -264,6 +264,29 @@ describe("a call of unknown outcome", () => {
     });
   });
 
+  it("is listed for admins as rows told apart, even two calls alike in all they show, claimed in the same millisecond", async () => {
+    const connection = await connected();
+    graph.loseWriteAnswer();
+    await outcome(send(connection, "run-twin:send-1"));
+    graph.loseWriteAnswer();
+    await outcome(send(connection, "run-twin:send-2"));
+    await env.DB.prepare(
+      "UPDATE idempotent_calls SET claimed_at = (SELECT MIN(claimed_at) FROM idempotent_calls WHERE connection_id = ?1) WHERE connection_id = ?1"
+    )
+      .bind(connection.id)
+      .run();
+    const listed = await exports.default.listAllUnknownOutcomes(
+      someone("admin")
+    );
+    const ids = listed
+      .filter(({ onBehalfOf }) => onBehalfOf === connection.person.userId)
+      .map(({ id }) => id);
+    expect({ rows: ids.length, distinct: new Set(ids).size }).toStrictEqual({
+      rows: 2,
+      distinct: 2,
+    });
+  });
+
   it("resolved as having happened is never sent again: a repeat gets `connect.resolved_done`, with no output", async () => {
     const connection = await connected();
     graph.loseWriteAnswer();
@@ -646,7 +669,7 @@ describe("a native connector's call of unknown outcome", () => {
     });
   });
 
-  it("keeps no input past the retention of answers, whoever made it, and stays listed", async () => {
+  it("keeps no input past the retention of answers, whoever made it, stays listed, and is then only said to have happened", async () => {
     const connection = await connected();
     graph.loseWriteAnswer();
     await outcome(send(connection, "chat-1:send"));
@@ -659,10 +682,24 @@ describe("a native connector's call of unknown outcome", () => {
     // Any later claim sweeps it, as it sweeps expired answers.
     await outcome(send(connection, "chat-2:send"));
     const after = await exports.default.listUnknownOutcomes(connection.person);
+    const key = keyOf(connection, "mail.send", "chat-1:send");
     expect({
       before: before.map(({ input }) => input),
       after: after.map(({ input }) => input),
-    }).toStrictEqual({ before: [JSON.stringify(email)], after: [null] });
+      // Core refuses it too, on its own read; connect holds the line for a
+      // read made before the input went.
+      notHappened: await outcome(
+        resolve(connection.person, key, "not_happened")
+      ),
+      happened: await outcome(resolve(connection.person, key, "happened")),
+      writes: writes().length,
+    }).toStrictEqual({
+      before: [JSON.stringify(email)],
+      after: [null],
+      notHappened: "connect.outcome_not_kept",
+      happened: "ok",
+      writes: 2,
+    });
   });
 
   it("keeps the resource binding its call came through, for core to check before it signs a resolution", async () => {
