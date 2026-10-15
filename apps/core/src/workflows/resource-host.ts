@@ -146,6 +146,8 @@ export interface ResourceHostHooks {
   attemptCall?: (call: Promise<unknown>, stepDone: Promise<unknown>) => void;
   /** Hears, once, that the isolate asked for what generated code never does. */
   tampered: (error: { name: string; message: string; code?: string }) => void;
+  /** The activation's fuel for expressions: {@link activationFuel} if unset. */
+  activationFuel?: number;
 }
 
 /** A task's step name, as the SDK names it (`task:<id>`). */
@@ -186,6 +188,19 @@ const maxResultBytes = platformLimits.stepPayloadBytes;
  * is `expression.budget_exhausted`, never retried: fuel is deterministic.
  */
 const attemptFuel = 2 ** 27;
+
+/**
+ * The fuel one activation's attempts spend together on expressions: about
+ * sixteen attempts' worst, some sixteen seconds of core's CPU, inside what
+ * one invocation of the run's object may take. Each attempt's spend comes
+ * off it; once it can't fund a whole attempt, the next is cut off as the
+ * Loader cuts off an isolate past its CPU time (`isCpuLimitKill`), so the
+ * engine parks its step for a retry and the activation suspends: the next
+ * one, which replays what was recorded without evaluating it again, starts
+ * from a fresh allowance. A long workflow goes on in turns, never holding
+ * core's CPU for all its tasks at once.
+ */
+const activationFuel = 16 * attemptFuel;
 
 /** One attempt of a task's step, from when the engine claims it. */
 interface TaskAttempt {
@@ -234,6 +249,8 @@ export class ResourceRunHost
   #tampered: Error | undefined;
   /** Whether the Loader stopped the isolate past its CPU time. */
   #isolateStopped = false;
+  /** What is left of this activation's fuel for expressions. */
+  #activationFuel: number;
 
   constructor(
     env: Env,
@@ -246,6 +263,7 @@ export class ResourceRunHost
     this.#step = step;
     this.#run = run;
     this.#hooks = hooks;
+    this.#activationFuel = hooks.activationFuel ?? activationFuel;
   }
 
   /**
@@ -325,13 +343,17 @@ export class ResourceRunHost
             evaluated: new Set(),
             budget: { fuel: attemptFuel },
           };
-          const call = this.#isolateStopped
-            ? Promise.reject(new Error("Worker exceeded CPU time limit."))
-            : fn(
-                new ResourceAttemptHost(
-                  async (slot) => await this.#evaluate(attempt, slot)
-                )
-              );
+          // An activation that can't fund a whole attempt any more cuts it
+          // off as the Loader does an isolate past its CPU time: its step
+          // is retried in the next activation (see `activationFuel`).
+          const call =
+            this.#isolateStopped || this.#activationFuel < attemptFuel
+              ? Promise.reject(new Error("Worker exceeded CPU time limit."))
+              : fn(
+                  new ResourceAttemptHost(
+                    async (slot) => await this.#evaluate(attempt, slot)
+                  )
+                );
           this.#hooks.attemptCall?.(call, stepDone.promise);
           let result: Settled<unknown>;
           try {
@@ -344,6 +366,7 @@ export class ResourceRunHost
             result = { ok: false, error: forIsolate(error) };
           } finally {
             attempt.over = true;
+            this.#activationFuel -= attemptFuel - attempt.budget.fuel;
           }
           if (this.#tampered !== undefined) {
             throw this.#tampered;

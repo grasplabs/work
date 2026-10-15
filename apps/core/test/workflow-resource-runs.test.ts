@@ -718,6 +718,97 @@ const evaluatedWith = async (
   return evaluated;
 };
 
+describe("an activation's share of core's CPU", () => {
+  it("cuts off an attempt the activation's expression fuel can't fund, as a CPU stop the next activation retries", async () => {
+    const by = await builder();
+    const workflow = await published(by, (name) =>
+      definitionOf(name, [
+        {
+          greet: {
+            set: {
+              status: '${ $params.greeting + ", " + $workflow.input.who }',
+            },
+          },
+        },
+      ])
+    );
+    const manifest = await env.DB.prepare(
+      "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+    )
+      .bind(workflow.id)
+      .first<{ hash: string }>();
+    const build = await loadWorkflowBuild(
+      env,
+      workflow.id,
+      1,
+      manifest?.hash ?? ""
+    );
+    // What each step's attempt failed with, as the engine would hear it.
+    const failures: string[] = [];
+    const step: RunStep = {
+      do: async (name, _config, fn) => {
+        try {
+          return await fn({
+            attempt: 1,
+            idempotencyKey: `key:${name}:${unique()}`,
+          });
+        } catch (error) {
+          failures.push(error instanceof Error ? error.name : "unknown");
+          throw error;
+        }
+      },
+      sleep: async () => {
+        await Promise.resolve();
+      },
+      waitForEvent: async () =>
+        await Promise.reject(new Error("No waits here")),
+    };
+    // Room for one attempt's worth: the first runs and spends some of it.
+    const host = new ResourceRunHost(
+      env,
+      step,
+      {
+        runId: crypto.randomUUID(),
+        workflowId: workflow.id,
+        version: 1,
+        principal: by.userId,
+        input: { who: "Ada" },
+        params: { greeting: "Hello" },
+        createdAt: Date.now(),
+        build,
+      },
+      {
+        leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+        tampered: () => {},
+        activationFuel: 2 ** 27,
+      }
+    );
+    const attempted = async () => {
+      const ran = { module: false };
+      await host.do(
+        "task:greet",
+        { input: { input: { who: "Ada" }, context: {} } },
+        async (attempt) => {
+          ran.module = true;
+          const value = await attempt.evaluate(0);
+          return value.ok ? { ok: true, value: value.value } : value;
+        }
+      );
+      return ran.module;
+    };
+    expect({
+      first: await attempted(),
+      second: await attempted(),
+      // A retryable timeout, as for an isolate stopped past its CPU time.
+      failures,
+    }).toStrictEqual({
+      first: true,
+      second: false,
+      failures: ["TimeoutError"],
+    });
+  });
+});
+
 describe("whose word a run's row takes, and whose clock", () => {
   it("shows what a run returned only within the retention the deployment has now", async () => {
     const by = await builder();
