@@ -984,6 +984,13 @@ describe("grasp.model calls of JSON workflows", () => {
       byAgent.workflow.id,
       adaStart()
     );
+    // Another person's grant to the agent, in a chat of theirs: it never
+    // holds for Ada's run.
+    await env.DB.prepare(
+      "INSERT INTO permissions (id, subject_type, subject_id, object_type, object_id, resource, actions, binding, status, requested_by, requested_at, granted_by, granted_at, chat_id, personal) SELECT ?, subject_type, subject_id, object_type, object_id, resource, actions, binding || '_CHAT', 'active', ?, requested_at, granted_by, granted_at, ?, personal FROM permissions WHERE id = ?"
+    )
+      .bind(crypto.randomUUID(), admin.userId, crypto.randomUUID(), agentGrant)
+      .run();
     // Each run sleeps before its call: each start stands.
     for (const grant of [triggerGrant, appGrant, agentGrant]) {
       // oxlint-disable-next-line no-await-in-loop -- one revocation at a time

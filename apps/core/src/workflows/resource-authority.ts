@@ -170,10 +170,14 @@ const invokerSql = (run: CallingRun): SQL => {
       )})`;
     }
     case "agent": {
+      // A chat's grant holds only for the person who asked for it there
+      // (permissions.ts, `holdsIn`): another person's never keeps this
+      // run's start standing.
       return sql`EXISTS (SELECT 1 FROM permissions AS held
         WHERE held.subject_type = 'agent' AND held.subject_id = ${invoker.id}
           AND held.object_type = 'workflow' AND held.object_id = ${run.workflowId}
           AND held.status = 'active'
+          AND (held.chat_id IS NULL OR held.requested_by = ${run.principal})
           AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'start'))`;
     }
     default: {
