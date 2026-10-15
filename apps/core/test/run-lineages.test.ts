@@ -302,13 +302,34 @@ const callFor = async (
   }
 };
 
+/**
+ * The outcome of a call for `trigger`, asked again each time it is told
+ * it is queued for a share of the model requests in flight, as a caller
+ * would: more at once than the shares and the queue's places hold are
+ * told so at once (model-admission.ts), and nothing else of them counts.
+ */
+const callUntilServed = async (
+  work: Work,
+  trigger: AuditActor
+): Promise<string> => {
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- asked again once told it is queued
+    const told = await callFor(work, trigger);
+    if (told !== "model.queued") {
+      return told;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a moment before asking again
+    await scheduler.wait(50);
+  }
+};
+
 /** The outcomes of calls for each of `triggers`, made all at once. */
 const allAtOnce = async (
   triggers: readonly AuditActor[],
   work: Work
 ): Promise<string[]> =>
   await Promise.all(
-    triggers.map(async (trigger) => await callFor(work, trigger))
+    triggers.map(async (trigger) => await callUntilServed(work, trigger))
   );
 
 /** How many of `outcomes` are `outcome`. */

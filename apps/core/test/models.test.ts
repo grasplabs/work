@@ -681,14 +681,15 @@ describe("model gateway", { timeout: 30_000 }, () => {
   });
 
   it.each([
-    [anthropic, 401, "authentication_error", 1],
-    [openai, 402, "insufficient_quota", 1],
-    // Refused for a moment: tried twice more before it fails.
-    [workersAi, 429, "rate_limit_error", 3],
-    [anthropic, 503, "overloaded_error", 3],
+    [anthropic, 401, "authentication_error", 1, "model.failed"],
+    [openai, 402, "insufficient_quota", 1, "model.failed"],
+    // Refused for a moment: tried twice more before it is told it is
+    // rate-limited, not that it failed.
+    [workersAi, 429, "rate_limit_error", 3, "model.rate_limited"],
+    [anthropic, 503, "overloaded_error", 3, "model.failed"],
   ])(
     "audits a call to %s the provider refuses with %i, with the status and error type only",
-    async (model, status, errorType, requests) => {
+    async (model, status, errorType, requests, told) => {
       const trigger = newPerson();
       const { gateway, gatewayEnv } = withGateway(
         Array.from({ length: requests }, () => ({ status, errorType }))
@@ -704,7 +705,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
             work: work(),
           })
         )
-      ).resolves.toBe("model.failed");
+      ).resolves.toBe(told);
       expect(gateway.requests).toHaveLength(requests);
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event).toMatchObject({
@@ -715,6 +716,77 @@ describe("model gateway", { timeout: 30_000 }, () => {
       expect(JSON.stringify(event)).not.toContain("Refused");
     }
   );
+
+  it("reads a rate limit's wait from retry-after when retry-after-ms is blank, held to core's most", async () => {
+    const { gatewayEnv } = withGateway(
+      Array.from({ length: 3 }, () => ({
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after-ms": " ", "retry-after": "61" },
+      }))
+    );
+
+    const told = await models(gatewayEnv)
+      .call({
+        model: workersAi,
+        input: "Hello.",
+        purpose: "chat.turn",
+        trigger: newPerson(),
+        work: work(),
+      })
+      .then(
+        () => "admitted",
+        (error: unknown) => error
+      );
+    expect(told).toMatchObject({
+      code: "model.rate_limited",
+      details: { retryAfterSeconds: 60 },
+    });
+  });
+
+  it("tells a call whose last request was lost that it failed, not that it was rate-limited before", async () => {
+    const { gatewayEnv } = withGateway([
+      { status: 429, errorType: "rate_limit_error" },
+      { hang: true },
+    ]);
+
+    await expect(
+      outcome(
+        models(gatewayEnv).call({
+          model: workersAi,
+          input: "Hello.",
+          timeoutMs: 5000,
+          purpose: "chat.turn",
+          trigger: newPerson(),
+          work: work(),
+        })
+      )
+    ).resolves.toBe("model.failed");
+  });
+
+  it("tells a call cut off while it waited out a rate limit that it failed, not that it was rate-limited", async () => {
+    const { gatewayEnv } = withGateway([
+      {
+        status: 429,
+        errorType: "rate_limit_error",
+        headers: { "retry-after-ms": "4000" },
+      },
+      { text: "Too late.", inputTokens: 10, outputTokens: 5 },
+    ]);
+
+    await expect(
+      outcome(
+        models(gatewayEnv).call({
+          model: workersAi,
+          input: "Hello.",
+          timeoutMs: 1500,
+          purpose: "chat.turn",
+          trigger: newPerson(),
+          work: work(),
+        })
+      )
+    ).resolves.toBe("model.failed");
+  });
 
   it("answers when the provider refuses for a moment, then answers", async () => {
     const trigger = newPerson();

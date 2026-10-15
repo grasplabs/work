@@ -150,6 +150,14 @@ export interface BindingCaller {
    */
   readonly held?: (key: string) => void;
   /**
+   * For a workflow run's call: whose person share of the model requests in
+   * flight it takes, from the run's row (workflows/dispatcher.ts): who
+   * started it, or its App's triggers' for a run nobody started. Not who
+   * it acts for: such a run acts for the App's owner, and never takes the
+   * owner's share.
+   */
+  readonly shareSubject?: string;
+  /**
    * For a workflow run's call: throws, synchronously, once the run's
    * step attempt no longer holds its lease. An adapter runs it last
    * before its side effect leaves core (connect's call, the provider

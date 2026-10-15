@@ -1301,6 +1301,41 @@ export const workflowAdmissionQueue = sqliteTable(
 );
 
 /**
+ * The steps of workflow runs whose model call waits in the model ledger's
+ * queue for a share of the model requests in flight (model-admission.ts),
+ * so the run's summary shows it queued (src/workflows/model-waits.ts): one
+ * row per step while its call waits, refreshed each time it asks again,
+ * gone once it stops. One whose call stopped asking (its isolate died)
+ * lapses as a workflow step's place does, and is pruned.
+ */
+export const workflowModelWaits = sqliteTable(
+  "workflow_model_waits",
+  {
+    runId: text("run_id").notNull(),
+    stepHash: text("step_hash").notNull(),
+    /** The call of the step that wrote it: only it clears it (model-waits.ts). */
+    owner: text().notNull(),
+    /**
+     * Which share its call waits for: `client`, `person` or `app`; null
+     * once the call that owns the row stopped waiting (a tombstone, so an
+     * older call's late note can't bring the wait back: model-waits.ts).
+     */
+    waitingFor: text("waiting_for", {
+      enum: ["client", "person", "app"],
+    }),
+    /** When its call asks again at the latest. */
+    retryAt: timestamp("retry_at").notNull(),
+    /** When its call last asked: it lapses a while after. */
+    seenAt: timestamp("seen_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.runId, table.stepHash] }),
+    // The waits still asking, and those to prune.
+    index("workflow_model_waits_seen_idx").on(table.seenAt),
+  ]
+);
+
+/**
  * The token core put on each address of the deployment's mail domain that
  * a workflow run's step mailed through a native mail connector
  * (src/workflows/mail-stamps.ts): `local+<token>@domain`. Mail back to

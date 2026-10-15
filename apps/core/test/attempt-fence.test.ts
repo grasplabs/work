@@ -165,6 +165,7 @@ const runOf = async (
         version: 1,
         runId,
         authority,
+        shareSubject: authority.onBehalfOf,
         collections,
         connections: {},
         apps: {},

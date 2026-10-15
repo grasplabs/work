@@ -336,6 +336,10 @@ const runWorkflow = async (
         ? {}
         : { rootRunId: runIdSchema.parse(row.rootRunId) }),
       authority,
+      // Its lineage, its person and its App from its row and its root's,
+      // never from its input: whose shares its attempts and model requests
+      // take.
+      shareSubject: await admissionSubjectOf(env, row),
       collections: bindings,
       connections,
       apps,
@@ -386,15 +390,13 @@ const runWorkflow = async (
         await callRunFunction(env, caller, reference, input, idempotencyKey),
       modelBinding: async (alias) =>
         await stepModelBinding(env, run.app, run.version, alias),
-      // Its lineage, its person and its App from its row and its root's,
-      // never from its input: whose shares its attempts take.
       admitAttempt: async (attempt) =>
         await admitAttempt(
           env,
           {
             run: runId,
             root: row.rootRunId ?? runId,
-            subject: await admissionSubjectOf(env, row),
+            subject: run.shareSubject,
             resource: run.app,
           },
           attempt

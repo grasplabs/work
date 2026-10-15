@@ -662,6 +662,8 @@ export interface RunCaller {
     readonly version: number;
     /** Who the run acts for in this execution, in workflow mode. */
     readonly authority: Authority;
+    /** Whose share its model requests take (workflows/host.ts, `HostedRun`). */
+    readonly shareSubject: string;
   };
   readonly requestId: string;
   readonly deadline: number;
@@ -752,6 +754,7 @@ export const runInvocationFor = async (
     sources: invocationSources(),
     actor: runActorOf(run),
     held,
+    shareSubject: run.shareSubject,
     requireHolds,
   });
   return {

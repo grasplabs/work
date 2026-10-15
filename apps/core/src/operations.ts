@@ -1301,6 +1301,14 @@ const busyDetails = (
 ): { retryAfterSeconds: number } | undefined =>
   busyDetailsSchema.safeParse(details).data;
 
+/** A used-up budget's wait: until it resets, a month at most. */
+const exhaustedDetailsSchema = z.object({
+  retryAfterSeconds: z
+    .int()
+    .positive()
+    .max(31 * 24 * 60 * 60),
+});
+
 const providerFailure = (error: unknown, requestId: string): Error => {
   const code = isExpectedError(error) ? error.code : undefined;
   if (code === "effect.outcome_unknown" || code === "connect.outcome_unknown") {
@@ -1319,7 +1327,6 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   if (
     code === "resource.unavailable" ||
     code === "resource.not_allowed" ||
-    code === "resource.budget_exhausted" ||
     code === "resource.awaiting_confirmation" ||
     code === "resource.item_not_found" ||
     code === "resource.invalid_args" ||
@@ -1329,13 +1336,29 @@ const providerFailure = (error: unknown, requestId: string): Error => {
   ) {
     return hostError(operationErrors.create(code));
   }
-  // A budget busy with requests under way: worth trying again, after the
-  // wait the gateway suggested, the only detail passed on.
-  if (code === "resource.budget_busy") {
+  // A budget busy with requests under way, a full share of the requests in
+  // flight, a provider's rate: worth trying again, after the wait the
+  // gateway computed, the only detail passed on.
+  if (
+    code === "resource.budget_busy" ||
+    code === "resource.queued" ||
+    code === "resource.rate_limited"
+  ) {
     return hostError(
       operationErrors.create(
         code,
         busyDetails(isExpectedError(error) ? error.details : undefined)
+      )
+    );
+  }
+  // Used up: when it resets, if it does, the only detail passed on.
+  if (code === "resource.budget_exhausted") {
+    return hostError(
+      operationErrors.create(
+        code,
+        exhaustedDetailsSchema.safeParse(
+          isExpectedError(error) ? error.details : undefined
+        ).data
       )
     );
   }

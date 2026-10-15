@@ -24,9 +24,11 @@ import { platformLimits } from "./platform-limits.ts";
  * models (core's model ledger, model-budgets.ts), the host calls its
  * attempts make, the attempts running at once in the client, for one
  * person and of one App, the steps waiting for a share, for one person and
- * of one App, how long one step waits, and the independent workflows and
+ * of one App, how long one step waits, the independent workflows and
  * live triggers one person creates (core's workflow-resources.ts,
- * trigger-resources.ts).
+ * trigger-resources.ts), and the provider requests to models in flight at
+ * once in the client, for one person and of one App, with the calls
+ * waiting for a share (core's model ledger, model-admission.ts).
  */
 export const lowerableLimits = [
   "workflowSteps",
@@ -45,6 +47,11 @@ export const lowerableLimits = [
   "workflowQueuedPerApp",
   "workflowQueuedStepMs",
   "triggerResourcesPerPerson",
+  "modelClientRequests",
+  "modelPersonRequests",
+  "modelAppRequests",
+  "modelQueuedPerPerson",
+  "modelQueuedPerApp",
 ] as const;
 
 export type LowerableLimit = (typeof lowerableLimits)[number];
@@ -83,6 +90,11 @@ export const quotaLimitsSchema = z.strictObject({
     workflowQueuedPerApp: lowered("workflowQueuedPerApp"),
     workflowQueuedStepMs: lowered("workflowQueuedStepMs"),
     triggerResourcesPerPerson: lowered("triggerResourcesPerPerson"),
+    modelClientRequests: lowered("modelClientRequests"),
+    modelPersonRequests: lowered("modelPersonRequests"),
+    modelAppRequests: lowered("modelAppRequests"),
+    modelQueuedPerPerson: lowered("modelQueuedPerPerson"),
+    modelQueuedPerApp: lowered("modelQueuedPerApp"),
   } satisfies Record<LowerableLimit, z.ZodType>),
 });
 
@@ -119,6 +131,11 @@ export const quotaPolicyOf = (
     workflowQueuedPerApp: platformLimits.workflowQueuedPerApp,
     workflowQueuedStepMs: platformLimits.workflowQueuedStepMs,
     triggerResourcesPerPerson: platformLimits.triggerResourcesPerPerson,
+    modelClientRequests: platformLimits.modelClientRequests,
+    modelPersonRequests: platformLimits.modelPersonRequests,
+    modelAppRequests: platformLimits.modelAppRequests,
+    modelQueuedPerPerson: platformLimits.modelQueuedPerPerson,
+    modelQueuedPerApp: platformLimits.modelQueuedPerApp,
   };
   if (configured === undefined) {
     return { generation: 0, limits };
