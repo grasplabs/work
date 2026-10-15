@@ -718,6 +718,21 @@ const evaluatedWith = async (
   return evaluated;
 };
 
+/** Whether an attempt of task `greet` on `host` got to run its module's code. */
+const attempted = async (host: ResourceRunHost): Promise<boolean> => {
+  const ran = { module: false };
+  await host.do(
+    "task:greet",
+    { input: { input: { who: "Ada" }, context: {} } },
+    async (attempt) => {
+      ran.module = true;
+      const value = await attempt.evaluate(0);
+      return value.ok ? { ok: true, value: value.value } : value;
+    }
+  );
+  return ran.module;
+};
+
 describe("an activation's share of core's CPU", () => {
   it("cuts off an attempt the activation's expression fuel can't fund, as a CPU stop the next activation retries", async () => {
     const by = await builder();
@@ -764,47 +779,43 @@ describe("an activation's share of core's CPU", () => {
         await Promise.reject(new Error("No waits here")),
     };
     // Room for one attempt's worth: the first runs and spends some of it.
-    const host = new ResourceRunHost(
-      env,
-      step,
-      {
-        runId: crypto.randomUUID(),
-        workflowId: workflow.id,
-        version: 1,
-        principal: by.userId,
-        input: { who: "Ada" },
-        params: { greeting: "Hello" },
-        createdAt: Date.now(),
-        build,
-      },
-      {
-        leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
-        tampered: () => {},
-        activationFuel: 2 ** 27,
-      }
-    );
-    const attempted = async () => {
-      const ran = { module: false };
-      await host.do(
-        "task:greet",
-        { input: { input: { who: "Ada" }, context: {} } },
-        async (attempt) => {
-          ran.module = true;
-          const value = await attempt.evaluate(0);
-          return value.ok ? { ok: true, value: value.value } : value;
+    const hostWithOneShare = () =>
+      new ResourceRunHost(
+        env,
+        step,
+        {
+          runId: crypto.randomUUID(),
+          workflowId: workflow.id,
+          version: 1,
+          principal: by.userId,
+          input: { who: "Ada" },
+          params: { greeting: "Hello" },
+          createdAt: Date.now(),
+          build,
+        },
+        {
+          leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+          tampered: () => {},
+          activationFuel: 2 ** 27,
         }
       );
-      return ran.module;
-    };
+    const host = hostWithOneShare();
+    const first = await attempted(host);
+    const second = await attempted(host);
+    // Two at once on a fresh activation: one holds the share from its start.
+    const fresh = hostWithOneShare();
+    const atOnce = await Promise.all([attempted(fresh), attempted(fresh)]);
     expect({
-      first: await attempted(),
-      second: await attempted(),
+      first,
+      second,
+      atOnce: atOnce.filter(Boolean).length,
       // A retryable timeout, as for an isolate stopped past its CPU time.
       failures,
     }).toStrictEqual({
       first: true,
       second: false,
-      failures: ["TimeoutError"],
+      atOnce: 1,
+      failures: ["TimeoutError", "TimeoutError"],
     });
   });
 });

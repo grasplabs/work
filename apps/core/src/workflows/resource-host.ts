@@ -345,15 +345,21 @@ export class ResourceRunHost
           };
           // An activation that can't fund a whole attempt any more cuts it
           // off as the Loader does an isolate past its CPU time: its step
-          // is retried in the next activation (see `activationFuel`).
-          const call =
-            this.#isolateStopped || this.#activationFuel < attemptFuel
-              ? Promise.reject(new Error("Worker exceeded CPU time limit."))
-              : fn(
-                  new ResourceAttemptHost(
-                    async (slot) => await this.#evaluate(attempt, slot)
-                  )
-                );
+          // is retried in the next activation (see `activationFuel`). A
+          // funded one holds its whole share from the start, so attempts
+          // run at once can't each find the same fuel.
+          const funded =
+            !this.#isolateStopped && this.#activationFuel >= attemptFuel;
+          if (funded) {
+            this.#activationFuel -= attemptFuel;
+          }
+          const call = funded
+            ? fn(
+                new ResourceAttemptHost(
+                  async (slot) => await this.#evaluate(attempt, slot)
+                )
+              )
+            : Promise.reject(new Error("Worker exceeded CPU time limit."));
           this.#hooks.attemptCall?.(call, stepDone.promise);
           let result: Settled<unknown>;
           try {
@@ -366,7 +372,10 @@ export class ResourceRunHost
             result = { ok: false, error: forIsolate(error) };
           } finally {
             attempt.over = true;
-            this.#activationFuel -= attemptFuel - attempt.budget.fuel;
+            // What it didn't spend of its share goes back.
+            if (funded) {
+              this.#activationFuel += Math.max(0, attempt.budget.fuel);
+            }
           }
           if (this.#tampered !== undefined) {
             throw this.#tampered;
