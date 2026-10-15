@@ -172,7 +172,10 @@ export const idempotentCalls = sqliteTable(
      * A random ID, set at the first claim: where a list of calls of unknown
      * outcome goes on after this one, with `created_at` (its cursor). Never
      * a row number, which would tell how many calls anyone made in between,
-     * and which the database may renumber. Empty on a row nothing lists.
+     * and which the database may renumber. Empty only on a declined row,
+     * which no list shows. Not backfilled: nothing with this table is
+     * released (a hard cut), so no deployment holds rows from before it
+     * that a list would show.
      */
     listId: text("list_id").notNull().default(""),
   },
