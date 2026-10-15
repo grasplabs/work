@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { transcriptWithReads } from "./brain-harness.ts";
 import {
   bootstrapInterval,
   compareArms,
@@ -568,6 +569,54 @@ describe("summarising and comparing arms", () => {
       leaked: "blocked",
       unpaired: [0, "inconclusive"],
       single: ["inconclusive", "inconclusive"],
+    });
+  });
+});
+
+/** A request carrying `calls`' results, as Anthropic's API takes them. */
+const request = (...calls: string[]) => ({
+  url: "https://gateway.test/v1/messages",
+  headers: new Headers(),
+  body: {
+    messages: [
+      { role: "user", content: "Who owns the lease?" },
+      ...calls.map((call) => ({
+        role: "user",
+        content: [{ type: "tool_result", tool_use_id: call, content: "x" }],
+      })),
+    ],
+  },
+});
+
+/** Each tool result's call and backing, in order. */
+const backings = (parts: ReturnType<typeof transcriptWithReads>) =>
+  parts.flatMap(({ by, call, backing }) =>
+    by === "tool" ? [[call, backing]] : []
+  );
+describe("backing tool results with reads", () => {
+  it("backs a call with its own step's reads, and no call of a step that ran several", () => {
+    expect({
+      // Each request carries the earlier results again: a result keeps
+      // the reads of the step that made it.
+      single: backings(
+        transcriptWithReads(
+          [request(), request("a"), request("a", "b")],
+          [[], ["read by a"], ["read by b"]]
+        )
+      ),
+      several: backings(
+        transcriptWithReads([request(), request("a", "b")], [[], ["read"]])
+      ),
+    }).toStrictEqual({
+      single: [
+        ["a", ["read by a"]],
+        ["a", ["read by a"]],
+        ["b", ["read by b"]],
+      ],
+      several: [
+        ["a", []],
+        ["b", []],
+      ],
     });
   });
 });

@@ -550,18 +550,24 @@ const providerOf = (respond: typeof stubReader) => {
   // not by clock. A request comes only after its step's code has ended.
   const recorded: AuditEvent[][] = [];
   let head = 0;
+  // The time this takes is the harness's, not the trial's: kept apart.
+  let observingMs = 0;
   const { fetch } = gateway.binding;
   const binding = {
     ...gateway.binding,
     fetch: async (input: Request | string | URL, init?: RequestInit) => {
+      const started = performance.now();
       recorded.push(await eventsAfter(head));
       head = await logHead();
+      observingMs += performance.now() - started;
       return await fetch(input, init);
     },
   };
   return {
     gateway: { ...gateway, binding },
     recorded,
+    /** How long reading the audit log took the harness so far. */
+    observingMs: () => observingMs,
     /** Where the log stands now: a trial's reads come after it. */
     mark: async () => {
       head = await logHead();
@@ -714,24 +720,33 @@ const readTextsOf = async (
 /**
  * Every request's parts, in order, each tool result backed by what the
  * reads of its call's step returned: those recorded between the request
- * that ran the step and the first request to carry its result back.
+ * that ran the step and the first request to carry its result back, when
+ * that step ran that one call alone.
  */
-const transcriptWithReads = (
+export const transcriptWithReads = (
   requests: readonly GatewayRequest[],
   reads: readonly (readonly string[])[]
 ): TranscriptPart[] => {
   const backings = new Map<string, readonly string[]>();
-  return requests.flatMap(({ body }, index) =>
-    transcriptOf(body).map((part) => {
-      if (part.by !== "tool" || part.call === undefined) {
-        return part;
+  return requests.flatMap(({ body }, index) => {
+    const parts = transcriptOf(body);
+    const fresh = parts.filter(
+      ({ by, call }) =>
+        by === "tool" && call !== undefined && !backings.has(call)
+    );
+    // Several calls of one step share its reads, which the log can't tell
+    // apart: none of them is backed, rather than one by another's read.
+    for (const { call } of fresh) {
+      if (call !== undefined) {
+        backings.set(call, fresh.length === 1 ? (reads[index] ?? []) : []);
       }
-      if (!backings.has(part.call)) {
-        backings.set(part.call, reads[index] ?? []);
-      }
-      return { ...part, backing: backings.get(part.call) ?? [] };
-    })
-  );
+    }
+    return parts.map((part) =>
+      part.by === "tool" && part.call !== undefined
+        ? { ...part, backing: backings.get(part.call) ?? [] }
+        : part
+    );
+  });
 };
 
 const runTrial = async (
@@ -769,6 +784,7 @@ const runTrial = async (
   let answer = "";
   let failure: string | undefined;
   let started = performance.now();
+  let observedBefore = provider.observingMs();
   try {
     setTurn({ phase: "prior" });
     for (const said of task.priorTurns ?? []) {
@@ -780,6 +796,7 @@ const runTrial = async (
     // memory gone, after any earlier turns of its chat. Its timer starts
     // before the object is constructed again, which pointing it at the
     // provider does.
+    observedBefore = provider.observingMs();
     if (cold) {
       await evictDurableObject(place.stub);
       started = performance.now();
@@ -804,7 +821,8 @@ const runTrial = async (
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
   }
-  const latencyMs = performance.now() - started;
+  const latencyMs =
+    performance.now() - started - (provider.observingMs() - observedBefore);
   const changedTables = changedBetween(stateBefore, await stateNow());
   const requests = gateway.requests.slice(firstRequest);
   return {
