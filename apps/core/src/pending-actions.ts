@@ -75,6 +75,14 @@ const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
   );
 };
 
+/** Whether connect still holds the held action `id` for `person`. */
+const stillHeld = async (
+  env: Env,
+  person: ConnectionPerson,
+  id: string
+): Promise<boolean> =>
+  (await env.CONNECT.pendingAction({ person, id })) !== null;
+
 /**
  * What a held action's run waits on it by (`wakingHeld`): none but a
  * workflow run's, of an App.
@@ -255,12 +263,13 @@ export const confirmPendingAction = async (
     await env.CONNECT.dropForEndedRun({ person, id: held.id });
     throw connectErrors.create("connect.run_ended");
   }
-  // Its run's step waits on it: woken once the person decided, whatever
+  // Its run's step waits on it: woken once it no longer waits, whatever
   // happened (workflows/wakes.ts).
   return await wakingHeld(
     env,
     heldWaitOf(held),
-    async () => await confirmHeld(env, identity, held, request)
+    async () => await confirmHeld(env, identity, held, request),
+    async () => await stillHeld(env, person, held.id)
   );
 };
 
@@ -281,9 +290,14 @@ const declinePendingAction = async (
     : null;
   await (held === null
     ? env.CONNECT.declineAction({ person, id })
-    : wakingHeld(env, heldWaitOf(held), async () => {
-        await env.CONNECT.declineAction({ person, id });
-      }));
+    : wakingHeld(
+        env,
+        heldWaitOf(held),
+        async () => {
+          await env.CONNECT.declineAction({ person, id });
+        },
+        async () => await stillHeld(env, person, held.id)
+      ));
   if (held !== null) {
     await tellChat(env, held, identity.userId, "declined");
   }

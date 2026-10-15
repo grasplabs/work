@@ -151,7 +151,7 @@ export const resolveUnknownOutcome = async (
     throw error;
   }
   // The run's step that waits on it is woken once it is resolved, whatever
-  // happened (workflows/wakes.ts): connect says what it became.
+  // happened, once it no longer waits (workflows/wakes.ts).
   await wakingHeld(
     env,
     {
@@ -164,7 +164,9 @@ export const resolveUnknownOutcome = async (
         claim: parsedClaim.data,
         capability,
       });
-    }
+    },
+    async () =>
+      (await env.CONNECT.unknownOutcome({ person, key: found.key })) !== null
   );
 };
 

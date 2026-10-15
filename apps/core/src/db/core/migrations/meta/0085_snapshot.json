@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0d32367f-ce85-40b6-992f-c483052495a8",
+  "id": "701e4030-a771-427b-a295-9b0cec55e33b",
   "prevId": "b693a9ef-190b-43ab-a8df-18390d750439",
   "tables": {
     "accounts": {
@@ -6278,6 +6278,14 @@
             "id"
           ],
           "isUnique": false
+        },
+        "workflow_run_wakes_resend_idx": {
+          "name": "workflow_run_wakes_resend_idx",
+          "columns": [
+            "resend_until"
+          ],
+          "isUnique": false,
+          "where": "resend_until IS NOT NULL"
         }
       },
       "foreignKeys": {

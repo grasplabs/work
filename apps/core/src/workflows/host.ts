@@ -763,10 +763,14 @@ const waitStep = (key: string, kind: WaitKind, round: number): string =>
  * - a hold on an unknown outcome (`unknown`): its checks, sleeps and the
  *   step's run again, bounded by its deadline (`unknownHoldMsOf`) and the
  *   run lineage's age, not by the steps the run's code takes, as a run
- *   waits on its person.
+ *   waits on its person;
+ * - a decision's wait again, and its look, after a wake that answered
+ *   nothing (`again:<round>`, `woken:<round>`, `waitForDecision`): an
+ *   event of its type sent by someone else causes them, not the run's
+ *   code, bounded by the engine's inbox (`maxInboxEvents`).
  */
 const uncountedWaitStep =
-  /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|held:\d+:waiting:|unknown:[1-9]\d*:)/u;
+  /^\$grasp:wait:[0-9a-f]{16}:(?:busy:\d+(?::|$)|held:\d+:waiting:|unknown:[1-9]\d*:|again:[1-9]\d*$|woken:\d+$)/u;
 
 /**
  * Tries of one check whether a held side effect still waits, after the

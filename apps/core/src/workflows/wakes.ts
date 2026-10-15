@@ -23,9 +23,15 @@ import { runEngine } from "./engine.ts";
 //   written before connect is asked, and replaced by one that is sent
 //   once connect answered. A crash in between leaves the first, which
 //   the repair sends again, each time as a new delivery, for a day: it
-//   can't know when connect decided. A wake whose decision
-//   never happened (connect refused it) costs the run one look, nothing
-//   more.
+//   can't know when connect decided. A decision connect refused wakes
+//   nothing, so the person a hold waits for can't spend the run's steps
+//   by asking again and again; and a wake that finds nothing decided
+//   costs the run steps of its own, outside its allowance, only on a
+//   decision's wait (host.ts, `uncountedWaitStep`).
+// - A wake the engine will never take (the run's inbox full, say) is
+//   given up at once, and one that can't get through at all after a
+//   bounded number of tries: both logged as errors, the run's timed
+//   checks and the decision's deadline being the backstop.
 // - Each row is sent at once, and again by the per-minute repair
 //   (`repairWakes`) until the engine takes it: a crash, a deploy or an
 //   engine that can't be reached delays a wake, never loses it.
@@ -62,6 +68,12 @@ const maxRepairMs = 60 * 60 * 1000;
  * sent again: past it, the run's timed checks are left to find it.
  */
 const resendMs = 24 * 60 * 60 * 1000;
+
+/**
+ * How often the repair sends a wake before giving it up: some 15 hours of
+ * an engine that can't be reached, at its backoff.
+ */
+const maxRetries = 20;
 
 /** Most wakes one repair sends. */
 const wakesPerRepair = 50;
@@ -111,14 +123,22 @@ export const oweWake = (
     )
     .onConflictDoNothing();
 
+/** Settles the wake `id`: nothing is owed by it any more. */
+const settle = async (db: DrizzleD1Database, id: string): Promise<void> => {
+  await db.delete(workflowRunWakes).where(eq(workflowRunWakes.id, id));
+};
+
 /**
  * Sends the wake `id`, if it is still owed, and settles it once the
  * engine took it (or its run takes none). One to send again until its
  * decision is known (`resendUntil`) isn't settled, and goes as a new
  * delivery each time, so an earlier one the run took doesn't swallow it.
- * Never throws: a failure, of the
- * engine or of the database, is logged, and the row stays for the repair,
- * so the request that owed it answers as what it recorded.
+ * One the engine refuses for good (its run's inbox full, say) is given up
+ * at once, and logged as an error: the run's own timed checks, or the
+ * decision's deadline, are left to find what it would have told. Never
+ * throws: a failure, of the engine or of the database, is logged, and the
+ * row stays for the repair, so the request that owed it answers as what
+ * it recorded.
  */
 export const sendWake = async (env: Env, id: string): Promise<void> => {
   try {
@@ -131,33 +151,41 @@ export const sendWake = async (env: Env, id: string): Promise<void> => {
     if (wake === undefined) {
       return;
     }
-    if (wake.resendUntil !== null) {
-      await runEngine(env).sendEvent(
-        wake.runId,
-        wake.type,
-        `${wake.id}:${wake.retries}`
-      );
+    const resends = wake.resendUntil !== null;
+    const sent = await runEngine(env).sendEvent(
+      wake.runId,
+      wake.type,
+      resends ? `${wake.id}:${wake.retries}` : wake.id
+    );
+    if (sent === "refused") {
+      log.error("workflow.wake_refused", { runId: wake.runId, wake: wake.id });
+      await settle(db, wake.id);
       return;
     }
-    await runEngine(env).sendEvent(wake.runId, wake.type, wake.id);
-    await db.delete(workflowRunWakes).where(eq(workflowRunWakes.id, wake.id));
+    if (!resends) {
+      await settle(db, wake.id);
+    }
   } catch (error) {
     log.warn("workflow.wake_failed", { wake: id, ...errorFields(error) });
   }
 };
 
 /**
- * Owes, and sends after `decide`, the wake of the run whose step's side
- * effect `idempotencyKey` names, when a person decides on it: confirms,
- * declines or resolves it (connect keeps the decision). Owed only to a run
- * of App `appId` that hasn't ended; a key of no step owes nothing, and its
- * run finds the decision at its next check. Answers what `decide` does,
- * which is sent even when `decide` throws: it may have decided.
+ * Owes, and sends once `decide` is done, the wake of the run whose step's
+ * side effect `idempotencyKey` names, when a person decides on it:
+ * confirms, declines or resolves it (connect keeps the decision). Owed
+ * only to a run of App `appId` that hasn't ended; a key of no step owes
+ * nothing, and its run finds the decision at its next check. Answers what
+ * `decide` does. A `decide` that throws wakes the run only if connect
+ * decided all the same (`stillWaiting` says it no longer waits, or can't
+ * say): a refused confirmation, made again and again, never wakes the run
+ * for nothing, and so never spends its steps.
  */
 export const wakingHeld = async <T>(
   env: Env,
   held: { appId: string | null; idempotencyKey: string },
-  decide: () => Promise<T>
+  decide: () => Promise<T>,
+  stillWaiting: () => Promise<boolean>
 ): Promise<T> => {
   const named = stepOfKey(held.idempotencyKey);
   if (held.appId === null || named === undefined) {
@@ -174,28 +202,36 @@ export const wakingHeld = async <T>(
   // again, wakes again. Owed first for a crash while connect decides
   // (`pending`): the repair sends it again, each time anew, until a day
   // has passed, as it can't know whether connect decided. Once `decide`
-  // is done, a wake that settles once taken takes its place (`decided`),
-  // in one batch, and that one is sent.
+  // is done, it goes: in the same batch, a wake that settles once taken
+  // takes its place (`decided`), and is sent, if connect decided.
   const id = crypto.randomUUID();
   const pending: Wake = { id: `held:${id}`, runId: named.runId, type };
   const decided: Wake = { ...pending, id: `held:${id}:decided` };
   await db.batch([oweWake(db, pending, runGoesOn, { resend: true })]);
+  let woken = false;
   try {
-    return await decide();
+    const result = await decide();
+    woken = true;
+    return result;
+  } catch (error) {
+    woken = !(await stillWaiting().catch(() => false));
+    throw error;
   } finally {
     try {
       await db.batch([
         db.delete(workflowRunWakes).where(eq(workflowRunWakes.id, pending.id)),
-        oweWake(db, decided, runGoesOn),
+        ...(woken ? [oweWake(db, decided, runGoesOn)] : []),
       ]);
     } catch (error) {
       // The pending wake stands, for the repair.
       log.warn("workflow.wake_failed", {
-        wake: decided.id,
+        wake: pending.id,
         ...errorFields(error),
       });
     }
-    await sendWake(env, decided.id);
+    if (woken) {
+      await sendWake(env, decided.id);
+    }
   }
 };
 
@@ -203,8 +239,9 @@ export const wakingHeld = async <T>(
  * Sends every wake that is due again, oldest due first: one the request
  * that owed it didn't get through (a crash, an engine that couldn't be
  * reached). Each is put off before it is sent, further each time, so one
- * the engine keeps refusing falls behind newer ones. From the per-minute
- * cron, for the minute `at` it runs for.
+ * the engine keeps refusing falls behind newer ones; one that still hasn't
+ * got through after {@link maxRetries} sends is given up, logged as an
+ * error. From the per-minute cron, for the minute `at` it runs for.
  */
 export const repairWakes = async (env: Env, at = new Date()): Promise<void> => {
   const db = drizzle(env.DB);
@@ -222,6 +259,15 @@ export const repairWakes = async (env: Env, at = new Date()): Promise<void> => {
   await Promise.all(
     due.map(async (wake) => {
       try {
+        if (wake.resendUntil === null && wake.retries >= maxRetries) {
+          log.error("workflow.wake_given_up", {
+            runId: wake.runId,
+            wake: wake.id,
+            retries: wake.retries,
+          });
+          await settle(db, wake.id);
+          return;
+        }
         await db
           .update(workflowRunWakes)
           .set({

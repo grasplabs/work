@@ -1474,6 +1474,10 @@ export const workflowRunWakes = sqliteTable(
   (table) => [
     // The repair (src/workflows/wakes.ts): next due first.
     index("workflow_run_wakes_due_idx").on(table.retryAt, table.id),
+    // The repair's drop of wakes sent again for as long as they may be.
+    index("workflow_run_wakes_resend_idx")
+      .on(table.resendUntil)
+      .where(sql`resend_until IS NOT NULL`),
   ]
 );
 

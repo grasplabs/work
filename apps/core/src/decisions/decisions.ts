@@ -23,6 +23,7 @@ import { z } from "zod";
 
 import {
   auditedBatch,
+  outboxed,
   outboxedIfChanged,
   outboxedWhere,
 } from "../audit-outbox.ts";
@@ -666,6 +667,41 @@ export const answerableBy = async (
 };
 
 /**
+ * Records that `by`'s answer to a decision was refused (`code`): nobody
+ * may answer it, or nobody may any more (it was answered, it timed out,
+ * its run ended or a cancel of it was admitted). Who tried, and why,
+ * never what they answered. A refusal that can't be recorded fails the
+ * call as one to try again: none goes unrecorded.
+ */
+const auditRefusal = async (
+  env: Env,
+  by: Identity,
+  found: DecisionWithRun,
+  code: "decision.closed" | "decision.forbidden",
+  via: "screen" | undefined
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const run: DecisionRun = {
+    runId: found.decision.runId,
+    app: found.app.id,
+    workflow: found.workflow,
+    version: found.version,
+  };
+  await auditedBatch(env, db, [
+    outboxed(
+      db,
+      decisionEntry(
+        actorOf(by),
+        "workflow.decision.answer_refused",
+        run,
+        found.decision,
+        { errorCode: code, ...(via === undefined ? {} : { via }) }
+      )
+    ),
+  ]);
+};
+
+/**
  * Answers a decision for `by`, if they may, once: the first answer, before
  * the deadline and while the run goes on, is the decision, and anything
  * after it is `decision.closed`. `via` says where they answered, when not
@@ -679,7 +715,14 @@ export const answerDecision = async (
   answer: unknown,
   via?: "screen"
 ): Promise<DecisionView> => {
-  const found = await allowedDecision(env, by, decision);
+  const found = await decisionWithRun(env, decision);
+  const refuse = async (code: "decision.closed" | "decision.forbidden") => {
+    await auditRefusal(env, by, found, code, via);
+    return decisionErrors.create(code);
+  };
+  if (!(await mayAnswerNow(env, by, found.decision))) {
+    throw await refuse("decision.forbidden");
+  }
   const { approved, payload }: DecisionAnswerInput = decisionErrors.parse(
     "decision.invalid",
     answerSchema,
@@ -753,7 +796,7 @@ export const answerDecision = async (
   ]);
   if (!answered) {
     // Who may answer can have changed since it was checked above.
-    throw decisionErrors.create(
+    throw await refuse(
       (await mayAnswerNow(env, by, row))
         ? "decision.closed"
         : "decision.forbidden"
