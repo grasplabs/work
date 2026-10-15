@@ -9,11 +9,13 @@ import {
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { AttemptLease } from "@grasp-os/workerflow/run";
+import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import {
   compileExpression,
   evaluateExpression,
 } from "@grasp-os/workflow-expressions/evaluate";
 import type { CompiledExpression } from "@grasp-os/workflow-expressions/evaluate";
+import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { RpcTarget } from "cloudflare:workers";
 import { z } from "zod";
 
@@ -177,6 +179,40 @@ const stepConfig = {
 const maxResultBytes = platformLimits.stepPayloadBytes;
 
 /**
+ * What a step captures may take as JSON: its input and context, each at
+ * most what a step records, and their framing.
+ */
+const maxCapturedBytes = 2 * platformLimits.stepPayloadBytes + 64;
+
+/**
+ * `value`, from the isolate, as plain JSON within `maxBytes`: written once
+ * by the bounded writer before anything else reads it, so a value past the
+ * bound (or a small graph of shared references that expands past it) costs
+ * core no more than that much. Why it isn't, otherwise.
+ */
+const boundedJson = (
+  value: unknown,
+  maxBytes: number
+):
+  | { ok: true; value: Json }
+  | { ok: false; refusal: "too_large" | "invalid" } => {
+  const written = writeJson(value, {
+    maxBytes,
+    maxDepth: evaluatorLimits.maxJsonDepth + 2,
+    maxNodes: maxBytes,
+    sortKeys: false,
+    safeIntegers: false,
+  });
+  if (!written.ok) {
+    return written;
+  }
+  const parsed = z.json().safeParse(JSON.parse(written.text));
+  return parsed.success
+    ? { ok: true, value: parsed.data }
+    : { ok: false, refusal: "invalid" };
+};
+
+/**
  * The jq fuel one attempt's expressions may spend together: eight
  * expressions' worth of the evaluator's own per-expression fuel (2^24,
  * workflow-expressions' jq.ts). That fuel is sized to about 100 ms of CPU
@@ -329,7 +365,10 @@ export class ResourceRunHost
     try {
       return await settle(async () => {
         const task = this.#taskOf(name, "set");
-        const captured = capturedSchema.safeParse(options);
+        const bounded = boundedJson(options, maxCapturedBytes);
+        const captured = capturedSchema.safeParse(
+          bounded.ok ? bounded.value : undefined
+        );
         if (!captured.success) {
           return this.#refuse("A task's step captures its input and context.");
         }
@@ -398,21 +437,17 @@ export class ResourceRunHost
           if (!result.ok) {
             throw toStepError(result.error);
           }
-          const value = z.json().safeParse(result.value);
-          if (!value.success) {
+          const value = boundedJson(result.value, maxResultBytes);
+          if (!value.ok) {
             throw toStepError({
               name: "Error",
-              message: `Task "${task.id}" answered something that isn't JSON`,
+              message:
+                value.refusal === "too_large"
+                  ? `Task "${task.id}" answered more than a step may record`
+                  : `Task "${task.id}" answered something that isn't JSON`,
             });
           }
-          const recorded = JSON.stringify(value.data);
-          if (new TextEncoder().encode(recorded).byteLength > maxResultBytes) {
-            throw toStepError({
-              name: "Error",
-              message: `Task "${task.id}" answered more than a step may record`,
-            });
-          }
-          return value.data;
+          return value.value;
         });
       });
     } finally {

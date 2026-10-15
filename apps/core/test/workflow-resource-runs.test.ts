@@ -1,5 +1,6 @@
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import {
   maxLiveRunsPerPrincipal,
@@ -707,6 +708,9 @@ const holdNotifications = async (
 const settledCode = (settled: Settled<unknown>): unknown =>
   settled.ok ? { ok: settled.value } : settled.error.code;
 
+/** What a step of task `greet` captures, as generated code asks. */
+const adaCaptured = { input: { input: { who: "Ada" }, context: {} } };
+
 /**
  * Evaluates the first expression of the first task of workflow `id`'s
  * version 1, as its run's host does for an attempt, with the attempt's
@@ -716,7 +720,9 @@ const evaluatedWith = async (
   by: Acting,
   id: string,
   lease: (read: number) => AttemptLease | undefined,
-  slot = 0
+  slot = 0,
+  captured: unknown = adaCaptured,
+  ran?: { module: boolean }
 ): Promise<unknown> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -755,15 +761,17 @@ const evaluatedWith = async (
     }
   );
   let evaluated: unknown;
-  await host.do(
-    "task:greet",
-    { input: { input: { who: "Ada" }, context: {} } },
-    async (attempt) => {
-      evaluated = settledCode(await attempt.evaluate(slot));
-      return null;
+  const settled = await host.do("task:greet", captured, async (attempt) => {
+    if (ran !== undefined) {
+      ran.module = true;
     }
-  );
-  return evaluated;
+    evaluated = settledCode(await attempt.evaluate(slot));
+    return null;
+  });
+  // What it evaluated, or, refused before it could, why.
+  return evaluated === undefined && !settled.ok
+    ? settledCode(settled)
+    : evaluated;
 };
 
 /** Whether an attempt of task `greet` on `host` got to run its module's code. */
@@ -905,6 +913,41 @@ describe("an activation's share of core's CPU", () => {
       askedAgain: false,
       atOnce: 1,
       failures: ["TimeoutError", "TimeoutError"],
+    });
+  });
+});
+
+describe("a run's host, against a forged module", () => {
+  it("refuses a capture past what a step records before its step runs", async () => {
+    const by = await builder();
+    const workflow = await published(by, (name) =>
+      definitionOf(name, [
+        {
+          greet: {
+            set: {
+              status: '${ $params.greeting + ", " + $workflow.input.who }',
+            },
+          },
+        },
+      ])
+    );
+    const ran = { module: false };
+    const refused = await evaluatedWith(
+      by,
+      workflow.id,
+      () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+      0,
+      {
+        input: {
+          input: { who: "x".repeat(3 * platformLimits.stepPayloadBytes) },
+          context: {},
+        },
+      },
+      ran
+    );
+    expect({ refused, ran: ran.module }).toStrictEqual({
+      refused: "workflow.invalid",
+      ran: false,
     });
   });
 });
