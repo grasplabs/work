@@ -911,25 +911,32 @@ export class ResourceRunHost
             if (funded) {
               this.#activationFuel -= attemptFuel;
             }
-            const call = funded
-              ? fn(
-                  new ResourceAttemptHost({
-                    evaluate: async (slot, frame) =>
-                      await this.#evaluate(attempt, slot, frame),
-                    check: (which, value) => this.#check(attempt, which, value),
-                    call: async (frame) =>
-                      await ResourceRunHost.#tracked(
-                        attempt,
-                        this.#call(attempt, frame)
-                      ),
-                    until: async (frame) =>
-                      await ResourceRunHost.#tracked(
-                        attempt,
-                        this.#until(attempt, frame)
-                      ),
-                  })
-                )
-              : Promise.reject(cpuLimitKill());
+            // A call tried once (`triedOnce`) is never cut off: its step has
+            // no attempt to retry it in the next activation, so it runs on a
+            // share of its own. Each step runs at most once an activation,
+            // so these add at most one share for each such task.
+            const triedOnly = configOf(step).retries.limit === 0;
+            const call =
+              funded || (triedOnly && !this.#isolateStopped)
+                ? fn(
+                    new ResourceAttemptHost({
+                      evaluate: async (slot, frame) =>
+                        await this.#evaluate(attempt, slot, frame),
+                      check: (which, value) =>
+                        this.#check(attempt, which, value),
+                      call: async (frame) =>
+                        await ResourceRunHost.#tracked(
+                          attempt,
+                          this.#call(attempt, frame)
+                        ),
+                      until: async (frame) =>
+                        await ResourceRunHost.#tracked(
+                          attempt,
+                          this.#until(attempt, frame)
+                        ),
+                    })
+                  )
+                : Promise.reject(cpuLimitKill());
             this.#hooks.attemptCall?.(call, stepDone.promise);
             let result: Settled<unknown>;
             try {

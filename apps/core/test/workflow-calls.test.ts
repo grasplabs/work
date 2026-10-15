@@ -1514,9 +1514,15 @@ const hostOf = async (
   {
     runEnv = env,
     bindings = new Map(),
+    activationFuel,
+    retries = [],
   }: {
     runEnv?: Env;
     bindings?: ReadonlyMap<string, FrozenCatalogBinding>;
+    /** The activation's fuel, if not the host's own. */
+    activationFuel?: number;
+    /** Where the retries each step is run with are told. */
+    retries?: number[];
   } = {}
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
@@ -1527,8 +1533,9 @@ const hostOf = async (
   const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
   let count = 0;
   const step: RunStep = {
-    do: async (name, _config, fn) => {
+    do: async (name, config, fn) => {
       count += 1;
+      retries.push(config.retries?.limit ?? 0);
       return await fn({ attempt: 1, idempotencyKey: `key:${name}:${count}` });
     },
     sleep: async () => {
@@ -1564,6 +1571,7 @@ const hostOf = async (
     },
     {
       leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+      ...(activationFuel === undefined ? {} : { activationFuel }),
       tampered: () => {},
     }
   );
@@ -2145,6 +2153,38 @@ describe("a workflow's own limits", () => {
           feature: "limits.maxActiveMs",
         },
       ],
+    });
+  });
+});
+
+describe("an activation's share of core's CPU, for calls tried once", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("never cuts off the one attempt of a model call an activation can't fund", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await greetingWorkflow(ada, admin);
+    /** The step's retries and whether its module ran, on `activationFuel`. */
+    const attempted = async (activationFuel?: number) => {
+      const retries: number[] = [];
+      const ran = { module: false };
+      const host = await hostOf(ada, workflow.id, { activationFuel, retries });
+      await host.do("task:greet", adaData, async () => {
+        ran.module = true;
+        return await Promise.resolve({ ok: true, value: { output: null } });
+      });
+      return { retries, ran: ran.module };
+    };
+    expect({
+      funded: await attempted(),
+      unfunded: await attempted(0),
+    }).toStrictEqual({
+      // Its one attempt, the call tried once.
+      funded: { retries: [0], ran: true },
+      // Its one attempt all the same, on a share of its own.
+      unfunded: { retries: [0], ran: true },
     });
   });
 });
