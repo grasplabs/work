@@ -123,7 +123,7 @@ export const paramDeclarationsSchema = <
     );
 
 /** Whether the runtime knows `timeZone`, an IANA name like `Europe/Amsterdam`. */
-const isTimeZone = (timeZone: string): boolean => {
+export const isTimeZone = (timeZone: string): boolean => {
   try {
     // oxlint-disable-next-line no-new -- constructing it is the check
     new Intl.DateTimeFormat("en", { timeZone });
