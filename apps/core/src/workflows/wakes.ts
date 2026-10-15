@@ -105,31 +105,26 @@ export const oweWake = (
 
 /**
  * Sends the wake `id`, if it is still owed, and settles it once the
- * engine took it (or its run takes none). A failure is logged: the row
- * stays, for the repair.
+ * engine took it (or its run takes none). Never throws: a failure, of the
+ * engine or of the database, is logged, and the row stays for the repair,
+ * so the request that owed it answers as what it recorded.
  */
 export const sendWake = async (env: Env, id: string): Promise<void> => {
-  const db = drizzle(env.DB);
-  const wake = await db
-    .select()
-    .from(workflowRunWakes)
-    .where(eq(workflowRunWakes.id, id))
-    .get();
-  if (wake === undefined) {
-    return;
-  }
   try {
+    const db = drizzle(env.DB);
+    const wake = await db
+      .select()
+      .from(workflowRunWakes)
+      .where(eq(workflowRunWakes.id, id))
+      .get();
+    if (wake === undefined) {
+      return;
+    }
     await runEngine(env).sendEvent(wake.runId, wake.type, wake.id);
+    await db.delete(workflowRunWakes).where(eq(workflowRunWakes.id, wake.id));
   } catch (error) {
-    log.warn("workflow.wake_failed", {
-      runId: wake.runId,
-      wake: wake.id,
-      retries: wake.retries,
-      ...errorFields(error),
-    });
-    return;
+    log.warn("workflow.wake_failed", { wake: id, ...errorFields(error) });
   }
-  await db.delete(workflowRunWakes).where(eq(workflowRunWakes.id, wake.id));
 };
 
 /**
@@ -150,28 +145,37 @@ export const wakingHeld = async <T>(
     return await decide();
   }
   const db = drizzle(env.DB);
-  const wake: Wake = {
-    // Each decision its own delivery: one that was refused, and then made
-    // again, wakes again.
-    id: `held:${crypto.randomUUID()}`,
-    runId: named.runId,
-    type: await heldWakeType(named.step),
-  };
-  await db.batch([
-    oweWake(
-      db,
-      wake,
-      sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${and(
-        eq(workflowRuns.id, named.runId),
-        eq(workflowRuns.appId, held.appId),
-        isNull(workflowRuns.endedAt)
-      )})`
-    ),
-  ]);
+  const type = await heldWakeType(named.step);
+  const runGoesOn = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${and(
+    eq(workflowRuns.id, named.runId),
+    eq(workflowRuns.appId, held.appId),
+    isNull(workflowRuns.endedAt)
+  )})`;
+  // Each decision its own deliveries: one that was refused, and then made
+  // again, wakes again. Owed first for a crash while connect decides
+  // (`pending`), which the repair may send before `decide` is done (a slow
+  // connect): so once it is, a fresh wake takes its place (`decided`), in
+  // one batch, and that one is sent.
+  const id = crypto.randomUUID();
+  const pending: Wake = { id: `held:${id}`, runId: named.runId, type };
+  const decided: Wake = { ...pending, id: `held:${id}:decided` };
+  await db.batch([oweWake(db, pending, runGoesOn)]);
   try {
     return await decide();
   } finally {
-    await sendWake(env, wake.id);
+    try {
+      await db.batch([
+        db.delete(workflowRunWakes).where(eq(workflowRunWakes.id, pending.id)),
+        oweWake(db, decided, runGoesOn),
+      ]);
+    } catch (error) {
+      // The pending wake stands, for the repair.
+      log.warn("workflow.wake_failed", {
+        wake: decided.id,
+        ...errorFields(error),
+      });
+    }
+    await sendWake(env, decided.id);
   }
 };
 
