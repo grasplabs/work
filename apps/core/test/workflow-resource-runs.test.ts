@@ -409,6 +409,7 @@ const runColumn = async (
     | "created_at"
     | "ended_at"
     | "manifest_hash"
+    | "next_start_at"
 ): Promise<unknown> => {
   const row = await env.DB.prepare(
     `SELECT ${column} AS value FROM workflow_resource_runs WHERE id = ?`
@@ -837,6 +838,30 @@ describe("whose word a run's row takes, and whose clock", () => {
       meanwhile: "waiting",
       inEngine: "terminated",
     });
+  });
+
+  it("moves a run whose engine lookup fails back in the repair's queue, neither sent again nor counted", async () => {
+    const by = await builder();
+    const workflow = await waitingWorkflow(by);
+    const { runId } = await whileEngineRefuses(
+      () => true,
+      async () => await start(by, workflow.id)
+    );
+    const id = runId ?? "";
+    const createdAt = Number(await runColumn(id, "created_at"));
+    const at = createdAt + 2 * 60_000;
+    // The engine can't say where the run is: every lookup fails.
+    await whileEngineRefuses(
+      (method) => method === "status",
+      async () => {
+        await repairResourceStarts(env, new Date(at));
+      }
+    );
+    expect({
+      attempts: await runColumn(id, "start_attempts"),
+      nextAt: Number(await runColumn(id, "next_start_at")) > at,
+      status: await runColumn(id, "status"),
+    }).toStrictEqual({ attempts: 0, nextAt: true, status: "starting" });
   });
 
   it("terminates a run the repair abandons when a start sent again made an instance after the repair asked", async () => {

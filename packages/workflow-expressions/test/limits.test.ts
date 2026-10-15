@@ -510,6 +510,22 @@ describe("a shared budget", () => {
     });
   });
 
+  it("draws a compile, which runs the expression, on the budget too", async () => {
+    const budget = { fuel: 1000 };
+    const compiled = await compileExpression(
+      "reduce range(0; 50000) as $i (0; . + 1)",
+      { stage: "taskDefinition", scope: ["loop"], pointer: "/do/0/loop/set" },
+      budget
+    ).then(
+      () => "compiled",
+      (error: unknown) => expressionErrors.codeOf(error) ?? String(error)
+    );
+    expect({ compiled, left: budget.fuel }).toStrictEqual({
+      compiled: "expression.budget_exhausted",
+      left: 0,
+    });
+  });
+
   it("runs evaluations at once on a budget that covers both, never failing one for what the other holds", async () => {
     const measured = { fuel: 2 ** 30 };
     await drawing(50_000, measured);

@@ -417,11 +417,16 @@ export class ResourceRunHost
       const key = `${build.hash}:${expression.slot}`;
       let compiling = compiled.get(key);
       if (compiling === undefined) {
-        compiling = compileExpression(expression.source, {
-          stage: expression.stage,
-          scope: [expression.taskId],
-          pointer: expression.pointer,
-        });
+        // Compiling runs it too: on the attempt's budget, as evaluating is.
+        compiling = compileExpression(
+          expression.source,
+          {
+            stage: expression.stage,
+            scope: [expression.taskId],
+            pointer: expression.pointer,
+          },
+          attempt.budget
+        );
         compiled.set(key, compiling);
         if (compiled.size > compiledMax) {
           const [oldest] = compiled.keys();

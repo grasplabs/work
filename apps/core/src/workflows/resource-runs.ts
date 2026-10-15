@@ -372,7 +372,30 @@ const startAbandoned = async (
  * marked failed.
  */
 const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
-  const live = await runEngine(env).status(row.id);
+  const backoff = Math.min(
+    repairAfterMs * 2 ** row.startAttempts,
+    maxStartBackoffMs
+  );
+  let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
+  try {
+    live = await runEngine(env).status(row.id);
+  } catch (error) {
+    // The engine couldn't say: the run may well be there, so it is neither
+    // sent again nor counted, but it yields its place in the queue until
+    // its backoff is over, so runs whose lookup keeps failing never keep
+    // the others from their repair.
+    await drizzle(env.DB)
+      .update(workflowResourceRuns)
+      .set({ nextStartAt: new Date(now.getTime() + backoff) })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, row.id),
+          eq(workflowResourceRuns.status, "starting"),
+          eq(workflowResourceRuns.startAttempts, row.startAttempts)
+        )
+      );
+    throw error;
+  }
   if (live !== undefined) {
     await drizzle(env.DB)
       .update(workflowResourceRuns)
@@ -393,10 +416,6 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
     return;
   }
   // Claimed by its count, so two repairs never send it at once.
-  const backoff = Math.min(
-    repairAfterMs * 2 ** row.startAttempts,
-    maxStartBackoffMs
-  );
   const claimed = await drizzle(env.DB)
     .update(workflowResourceRuns)
     .set({

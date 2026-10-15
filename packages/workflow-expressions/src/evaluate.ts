@@ -101,6 +101,39 @@ const fail = (
 };
 
 /**
+ * Runs `program` on `stdin` with what is left of `budget` (`drawing`), at
+ * most a run's own fuel: `expression.budget_exhausted` at `site` when it
+ * ran out of the budget's fuel, short of its own.
+ */
+const budgetedRun = async (
+  budget: { fuel: number } | undefined,
+  site: ExpressionSite,
+  program: string,
+  stdin: string
+): Promise<JqRun> => {
+  let given = runFuel;
+  const run = await drawing(
+    budget,
+    (left) => Math.max(0, Math.min(left, runFuel)),
+    async (fuel) => {
+      given = fuel;
+      if (fuel <= 0) {
+        return { kind: "exhausted", resource: "fuel" };
+      }
+      return await runJq(program, stdin, fuel);
+    }
+  );
+  if (run.kind === "exhausted" && run.resource === "fuel" && given < runFuel) {
+    return fail(
+      site,
+      "expression.budget_exhausted",
+      "Do less work in the task's expressions, or split the task."
+    );
+  }
+  return run;
+};
+
+/**
  * Runs `read` over caller data (objects the caller built: options, scopes,
  * contracts). Anything it throws that isn't an expression error, such as a
  * getter or proxy that throws, fails as `code` at `site`, and what it threw
@@ -190,7 +223,9 @@ const variableNamesOf = (expression: CompiledExpression): string[] => [
  */
 export const compileExpression = async <S extends Stage>(
   source: string,
-  options: CompileOptions<S>
+  options: CompileOptions<S>,
+  /** Fuel the compile draws on, as `evaluateExpression`'s `budget`. */
+  budget?: { fuel: number }
 ): Promise<CompiledExpression<S>> => {
   const read = readCallerData(
     { pointer: "" },
@@ -279,9 +314,13 @@ export const compileExpression = async <S extends Stage>(
       );
     }
   }
-  // jq compiles it against nulls; only a compile error matters here.
+  // jq compiles it against nulls; only a compile error matters here. That
+  // runs it too, so a compile in a run draws on its budget like an
+  // evaluation (`budget`): never fuel past what the run's steps may spend.
   const names = variableNamesOf(expression);
-  const run = await runJq(
+  const run = await budgetedRun(
+    budget,
+    site,
     programFor(source, names),
     JSON.stringify(Array.from({ length: names.length + 1 }, () => null))
   );
@@ -619,30 +658,12 @@ export const evaluateExpression = async <S extends Stage>(
     () => contextText(expression, scope)
   );
 
-  // What it was given, of what was left of the budget when its turn came.
-  let given = runFuel;
-  const run = await drawing(
+  const run = await budgetedRun(
     budget,
-    (left) => Math.max(0, Math.min(left, runFuel)),
-    async (fuel) => {
-      given = fuel;
-      if (fuel <= 0) {
-        return { kind: "exhausted", resource: "fuel" };
-      }
-      return await runJq(
-        programFor(expression.source, variableNamesOf(expression)),
-        stdin,
-        fuel
-      );
-    }
+    site,
+    programFor(expression.source, variableNamesOf(expression)),
+    stdin
   );
-  if (run.kind === "exhausted" && run.resource === "fuel" && given < runFuel) {
-    return fail(
-      site,
-      "expression.budget_exhausted",
-      "Do less work in the task's expressions, or split the task."
-    );
-  }
   if (run.kind === "exhausted") {
     return fail(
       site,
