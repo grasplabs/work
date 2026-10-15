@@ -609,4 +609,57 @@ describe("JSON workflow builds", () => {
       reserved: [...new Set(named.map(({ sha256 }) => sha256))].toSorted(),
     });
   });
+
+  it("gives back what a publication reserved when storing its bytes fails, so only a saved version's stay reserved", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
+    const failingFiles = new Proxy(env.FILES, {
+      get: (target, property) => {
+        // A sealed artifact's bytes alone fail to store; the build cache
+        // stores as ever.
+        if (property === "put") {
+          return async (...args: Parameters<R2Bucket["put"]>) => {
+            if (args[0].startsWith(artifactKey(""))) {
+              throw new Error("The bucket is unavailable");
+            }
+            return await target.put(...args);
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...rest: unknown[]): unknown => Reflect.apply(value, target, rest)
+          : value;
+      },
+    });
+    const failed = await outcome(
+      publishWorkflowVersion({ ...env, FILES: failingFiles }, by, workflow.id, {
+        definition: definitionOf(workflow.name, [
+          { finish: { set: { status: "first" } } },
+        ]),
+        basedOn: null,
+      })
+    );
+    // The number goes to another publication, of other content.
+    await publishWorkflowVersion(env, by, workflow.id, {
+      definition: definitionOf(
+        workflow.name,
+        [{ finish: { set: { status: "second" } } }],
+        { version: "1.0.1" }
+      ),
+      basedOn: null,
+    });
+    const reserved = await env.DB.prepare(
+      "SELECT sha256 FROM sdk_release_artifacts WHERE app_id = ? ORDER BY sha256"
+    )
+      .bind(workflow.id)
+      .all<{ sha256: string }>();
+    const named = await sealedArtifacts(workflow.id, 1);
+    expect({
+      failed: failed === "ok",
+      reserved: reserved.results.map(({ sha256 }) => sha256),
+    }).toStrictEqual({
+      failed: false,
+      reserved: [...new Set(named.map(({ sha256 }) => sha256))].toSorted(),
+    });
+  });
 });

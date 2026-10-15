@@ -1103,12 +1103,13 @@ const writeVersion = async (
     ]);
   }
   const manifestHash = await sha256Hex(manifest);
-  // Its build's bytes, reserved for this version and stored, before the
-  // row that names them.
-  await storeBuild(env, { id: workflow.id, version }, compiled);
   const createdAt = new Date();
   const db = drizzle(env.DB);
   try {
+    // Its build's bytes, reserved for this version and stored, before the
+    // row that names them; inside the cleanup, so a store that fails
+    // halfway gives its reservations back too.
+    await storeBuild(env, { id: workflow.id, version }, compiled);
     await auditedBatch(env, db, [
       db.insert(workflowResourceVersions).values({
         // Only while the workflow is live and still at the version this
