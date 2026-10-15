@@ -996,6 +996,7 @@ describe("a person's many calls of unknown outcome", () => {
       pages: [first.length, second.length],
       distinct: new Set(keys).size,
       byAdmin: listed.length,
+      distinctByAdmin: new Set(listed).size,
       invalid: await outcome(
         exports.default.listUnknownOutcomes(connection.person, "not-a-cursor")
       ),
@@ -1003,6 +1004,7 @@ describe("a person's many calls of unknown outcome", () => {
       pages: [200, 1],
       distinct: 201,
       byAdmin: 201,
+      distinctByAdmin: 201,
       invalid: "connect.invalid",
     });
   });

@@ -247,11 +247,11 @@ const listingOf = async ({
     connection
   )?.title;
   return {
-    // Only tells rows apart, of what the admin is shown anyway, and never
-    // of its key: App code chooses keys and may put data in them, and a
-    // digest of a key a reader can guess would confirm the guess. Two calls
-    // alike in all of these, claimed in the same millisecond, share it until
-    // `distinctIds` tells them apart.
+    // Only tells rows apart, of what the admin is shown anyway and the
+    // row's number, and never of its key: App code chooses keys and may put
+    // data in them, and a digest of a key a reader can guess would confirm
+    // the guess. The row's number makes it unique across every page, even
+    // for two calls alike in all the rest, claimed in the same millisecond.
     id: await sha256Hex(
       JSON.stringify([
         row.subjectType,
@@ -260,6 +260,7 @@ const listingOf = async ({
         row.connectionId,
         row.action,
         row.claimedAt.getTime(),
+        row.rowid,
       ])
     ),
     onBehalfOf: row.onBehalfOf,
@@ -276,21 +277,6 @@ const listingOf = async ({
     sentAt: row.createdAt.toISOString(),
     cursor: cursorOf(row.createdAt, row.rowid),
   };
-};
-
-/**
- * `listings` with every id told apart: a repeat of an id already given
- * gets its count after it, so a listing never names two rows alike.
- */
-const distinctIds = (
-  listings: UnknownOutcomeListing[]
-): UnknownOutcomeListing[] => {
-  const seen = new Map<string, number>();
-  return listings.map((listing) => {
-    const count = seen.get(listing.id) ?? 0;
-    seen.set(listing.id, count + 1);
-    return count === 0 ? listing : { ...listing, id: `${listing.id}-${count}` };
-  });
 };
 
 /**
@@ -318,7 +304,7 @@ export const listAllUnknownOutcomes = async (
     .where(and(unknownNow(Date.now()), after(before)))
     .orderBy(...listOrder)
     .limit(listLimit);
-  return distinctIds(await Promise.all(rows.map(listingOf)));
+  return await Promise.all(rows.map(listingOf));
 };
 
 /**
