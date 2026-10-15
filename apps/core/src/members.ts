@@ -176,6 +176,11 @@ const appsReachedBefore = async (
  * (`undefined`), every App shared with anyone is told too: a removal
  * deletes the person's teams, so the look after it can't find the Apps
  * they reached through them.
+ *
+ * Residual, accepted (GRA-564, follow-up GRA-635): a database away for longer than the
+ * looks' retries loses what they would have found, logged. Nothing leaks:
+ * every push still checks access first, so nothing new reaches the
+ * person; their screen is only cleared later.
  */
 const tellReached = async (
   env: Env,

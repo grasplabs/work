@@ -263,6 +263,13 @@ export const appsSharedWithAnyone = async (env: Env): Promise<AppId[]> => {
  * provenance the team may have been what let them read. Who left unknown
  * (`null`): every App shared with anyone, for everyone. Never throws:
  * Better Auth's change has committed already.
+ *
+ * Residual, accepted (GRA-564, follow-up GRA-635): a database away for longer than the
+ * lookup's retries loses this event, logged. Nothing leaks: every push
+ * still checks access first, so nothing new reaches the person; their
+ * screen is only cleared later. Our own writes may persist the lookup in
+ * their batch later; Better Auth's team endpoints stay best effort while
+ * the plugin is native.
  */
 export const teamAccessMayHaveDropped = async (
   env: Env,
