@@ -175,6 +175,17 @@ describe("the package builder on the on-prem sandbox", () => {
     });
   }, 60_000);
 
+  it("reads the builder's code again once the request reading it was cancelled, rather than wait on that read for good", async () => {
+    // workerd cancels a cancelled request's read, which then never ends:
+    // the next request takes it for abandoned once a read may take no
+    // longer (10 s), and reads the code itself.
+    const outcome = await call("", "/cancelled-code");
+
+    expect(outcome.status).toBe("ok");
+    expect(outcome.value).toBe(2);
+    expect(outcome.ms).toBeLessThan(15_000);
+  }, 60_000);
+
   it("keeps running App code while builds hold the builders' share of the pool", async () => {
     // One build holds its owner's share, and another waits for it: an App's
     // call takes the pool's other process meanwhile, at once.
