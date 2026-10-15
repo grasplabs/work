@@ -216,6 +216,8 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
       milliseconds: z.int().positive().optional(),
       /** Its duration's expression, which its enter step resolves. */
       duration: templateSchema.optional(),
+      // Its input.from, of the slots its module evaluates (generate.ts).
+      inputFrom: templateSchema.optional(),
     })
     .refine(
       ({ milliseconds, duration }) =>

@@ -1688,6 +1688,40 @@ describe("a run's host, against a forged module's calls", () => {
     expect(codeOf(sent)).toBe("workflow.call_denied");
   });
 
+  it("resolves a deadline on the input its task's input.from made, as the host built it", async () => {
+    const by = await person("builder");
+    const { workflow } = await published(by, {
+      tasks: [
+        {
+          later: {
+            input: { from: '${ {who: .who, late: "yes"} }' },
+            call: "grasp.sleepUntil",
+            with: { timestamp: "${ $workflow.startedAt + 60000 }" },
+          },
+        },
+        { finish: { set: { status: "done" } } },
+      ],
+    });
+    const transformed = { who: "Ada", late: "yes" };
+    /** The enter step, its deadline resolved on `input`. */
+    const entered = async (input: unknown) => {
+      const host = await hostOf(by, workflow.id);
+      return codeOf(
+        await host.do("enter:later", adaData, async (attempt) => {
+          await attempt.evaluate(0, { input: adaFrame.input, output: null });
+          const until = await attempt.until({ input });
+          return until.ok
+            ? { ok: true, value: { output: input, until: until.value } }
+            : { ok: false, error: until.error };
+        })
+      );
+    };
+    expect({
+      transformed: await entered(transformed),
+      raw: await entered(adaFrame.input),
+    }).toStrictEqual({ transformed: "ok", raw: "workflow.invalid" });
+  });
+
   it("sleeps only until the deadline its task's enter step resolved and recorded", async () => {
     const by = await person("builder");
     const { workflow } = await published(by, {

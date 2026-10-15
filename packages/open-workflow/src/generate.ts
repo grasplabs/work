@@ -210,10 +210,11 @@ export interface GeneratedTask {
   /** A `call` task's named call. */
   readonly call?: GeneratedCall;
   /**
-   * A `call` task's `input.from`, as a template of the expressions its
-   * module evaluates for it (their slots) and its literals: the host
-   * builds the transformed input from its own evaluations and makes the
-   * call only with that (resource-host.ts).
+   * A `call` or `wait` task's `input.from`, as a template of the
+   * expressions its module evaluates for it (their slots) and its
+   * literals: the host builds the transformed input from its own
+   * evaluations, and makes the call or resolves the deadline only on that
+   * (resource-host.ts).
    */
   readonly inputFrom?: CallTemplate;
   /**
@@ -1273,6 +1274,26 @@ const callOf = (
 };
 
 /**
+ * `item`'s `input.from`, as a template of the slots its module evaluates
+ * for it, if it has one: sealed so the host can build the transformed
+ * input itself.
+ */
+const inputFromOf = (
+  emitter: Emitter,
+  item: ListTask
+): CallTemplate | undefined => {
+  const input = flowPart(item.task, "input");
+  return input !== undefined && Object.hasOwn(input, "from")
+    ? slotTemplateOf(
+        emitter,
+        input.from ?? null,
+        pointerJoin(pointerJoin(item.pointer, "input"), "from"),
+        item.id
+      )
+    : undefined;
+};
+
+/**
  * The statement of a call task that makes its call within its step (every
  * named call but `grasp.sleepUntil`): the host makes the call, from what
  * the build sealed, as the step's own work.
@@ -1288,16 +1309,7 @@ const lowerCall = (
   if (call === undefined) {
     return;
   }
-  const input = flowPart(item.task, "input");
-  const inputFrom =
-    input !== undefined && Object.hasOwn(input, "from")
-      ? slotTemplateOf(
-          emitter,
-          input.from ?? null,
-          pointerJoin(pointerJoin(item.pointer, "input"), "from"),
-          item.id
-        )
-      : undefined;
+  const inputFrom = inputFromOf(emitter, item);
   emitter.tasks.push({
     ...sealed,
     kind: "call",
@@ -1339,6 +1351,8 @@ const lowerSleep = (
     return;
   }
   const before = emitter.expressions.length;
+  const inputFrom = inputFromOf(emitter, item);
+  const transformed = inputFrom === undefined ? {} : { inputFrom };
   let sleeping: GeneratedTask;
   if (task.call === undefined) {
     const duration = templateOf(
@@ -1348,7 +1362,7 @@ const lowerSleep = (
       id,
       "duration"
     );
-    sleeping = { ...sealed, kind: "wait", duration, steps };
+    sleeping = { ...sealed, kind: "wait", duration, steps, ...transformed };
   } else {
     const timestamp = callPart(emitter, item, "timestamp");
     if (timestamp === undefined) {
@@ -1359,6 +1373,7 @@ const lowerSleep = (
       kind: "call",
       call: { name: "grasp.sleepUntil", timestamp },
       steps,
+      ...transformed,
     };
   }
   // The enter step evaluates its stages and the deadline's expressions.

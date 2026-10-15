@@ -1464,7 +1464,8 @@ export class ResourceRunHost
     }
     // Built by the host, from the task's sealed input.from and its own
     // evaluations of it in this attempt; the raw input where it has none.
-    const inputFrom = task.kind === "call" ? task.inputFrom : undefined;
+    const inputFrom =
+      task.kind === "call" || task.kind === "wait" ? task.inputFrom : undefined;
     const expected =
       inputFrom === undefined
         ? attempt.data.input
