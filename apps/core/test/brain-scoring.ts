@@ -23,7 +23,7 @@ export interface TrialObservation {
   /** Every string the model was sent in the trial, joined: for leaks. */
   modelInput: string;
   /**
-   * The chat as the model last read it, in order, each part marked as the
+   * The chat as the model read it, request after request, each part marked as the
    * model's own or not. Evidence counts only where it first came from a
    * source, so a marker the model wrote first, and its code handed back,
    * is never credited; one it quoted after reading it still is.

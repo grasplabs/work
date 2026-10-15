@@ -686,8 +686,9 @@ const runTrial = async (
     cold,
     answer,
     modelInput: requests.flatMap(({ body }) => modelStrings(body)).join("\n"),
-    // The last request holds the whole chat, earlier turns too, in order.
-    transcript: transcriptOf(requests.at(-1)?.body),
+    // Every request in order: a long turn's last request may leave out
+    // earlier results, which the model still read.
+    transcript: requests.flatMap(({ body }) => transcriptOf(body)),
     forbidden: forbiddenIn(task),
     stateChanged: changedBetween(stateBefore, await stateNow()).length > 0,
     ...(failure === undefined ? {} : { error: failure }),

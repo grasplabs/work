@@ -112,6 +112,13 @@ describe("scoring a trial", () => {
           { by: "model", text: `const owner = "${marker}";` },
         ],
       }).evidenceRecall,
+      // Read in an earlier request, left out of the last one.
+      dropped: verdict(contract, {
+        transcript: [
+          { by: "source", text: `Returned: ${marker}` },
+          { by: "source", text: "[earlier results left out]" },
+        ],
+      }).completed,
       citationOnly: verdict(contract, {
         answer: "ANSWER: see [handbook/contracts.md#Marta Ruiz]",
       }).completed,
@@ -124,6 +131,7 @@ describe("scoring a trial", () => {
         citationSupport: 1,
       },
       quoted: 1,
+      dropped: true,
       citationOnly: false,
     });
   });
