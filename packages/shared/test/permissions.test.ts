@@ -51,13 +51,16 @@ describe("permission requests", () => {
 
   it("allow only the actions their object has", () => {
     const collection = { type: "collection", collectionId: "c" };
-    const workflow = { type: "workflow", appId: "a", workflowId: "w" };
+    const workflow = { type: "workflow", workflowId: "w" };
+    // A workflow is a resource of its own, never named through an App.
+    const appsWorkflow = { type: "workflow", appId: "a", workflowId: "w" };
     expect(
       isValid({ object: collection, actions: ["read", "write"] })
     ).toBeTruthy();
     expect(isValid({ object: workflow, actions: ["start"] })).toBeTruthy();
     expect(isValid({ object: collection, actions: ["delete"] })).toBeFalsy();
     expect(isValid({ object: workflow, actions: ["write"] })).toBeFalsy();
+    expect(isValid({ object: appsWorkflow, actions: ["start"] })).toBeFalsy();
   });
 
   it("allow at least one action, each once, each a name", () => {

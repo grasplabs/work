@@ -18,6 +18,9 @@ const outcome = async (call: Promise<unknown>): Promise<unknown> => {
   }
 };
 
+/** The frame's lease, and the person it was opened for. */
+const frame = { lease: "lease", person: "person" };
+
 describe("a screen's function call through the page", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -40,7 +43,7 @@ describe("a screen's function call through the page", () => {
     const results = [];
     for (let call = 0; call < 4; call += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one response after another
-      results.push(await outcome(callFunction("app", "lease", "{}")));
+      results.push(await outcome(callFunction("app", frame, "{}")));
     }
     expect(results).toStrictEqual([
       { answered: { result: { ok: true, value: 1 } } },
@@ -48,6 +51,36 @@ describe("a screen's function call through the page", () => {
       { code: "internal.unexpected" },
       { code: "internal.unexpected" },
     ]);
+  });
+
+  it("passes on how long core said to wait, and nothing else of its details", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          await Promise.resolve(
+            Response.json(
+              {
+                code: "screen.rate_limited",
+                message: "Too much at once.",
+                details: { retryAfterMs: 500, requestId: "r1" },
+              },
+              { status: 429 }
+            )
+          )
+      )
+    );
+    const refused = await callFunction(
+      "app",
+      { lease: "lease", person: "person" },
+      "{}"
+    ).catch((error: unknown) => error);
+    expect(refused).toMatchObject({
+      code: "screen.rate_limited",
+      details: { retryAfterMs: 500 },
+    });
+    // Nothing else of what core said: not its request ID.
+    expect(refused).not.toMatchObject({ details: { requestId: "r1" } });
   });
 
   it("turns a request that never reached core into a coded error", async () => {
@@ -59,7 +92,7 @@ describe("a screen's function call through the page", () => {
       })
     );
     await expect(
-      outcome(callFunction("app", "lease", "{}"))
+      outcome(callFunction("app", frame, "{}"))
     ).resolves.toStrictEqual({ code: "internal.unexpected" });
   });
 });

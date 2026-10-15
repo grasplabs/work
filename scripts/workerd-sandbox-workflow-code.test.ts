@@ -5,6 +5,8 @@
  * (workflows/code.ts), with `SANDBOX_HOST` bound to the supervisor
  * (workerd-sandbox.ts), so each runs in a session of its own.
  */
+import { chmodSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import { afterAll, beforeAll, describe, expect, it } from "vite-plus/test";
@@ -13,7 +15,7 @@ import { z } from "zod";
 import { nativeWorkerd, startSandboxSupervisor } from "./workerd-sandbox.ts";
 import type { SandboxSupervisor } from "./workerd-sandbox.ts";
 import { serveStandIn } from "./workerd-stand-in.ts";
-import { cleanUp } from "./workerd-test-server.ts";
+import { cleanUp, tempDir } from "./workerd-test-server.ts";
 
 /** How long core may take to answer another request meanwhile. */
 const ANSWER_MS = 500;
@@ -28,6 +30,14 @@ const outcomeSchema = z.union([
   }),
 ]);
 
+/** How workflow `notes`'s tests went with harness `name`, on core at `url`. */
+const tests = async (name: string, url: string) => {
+  const response = await fetch(`${url}tests?case=${name}`);
+  return z
+    .object({ failures: z.array(z.string()), keep: z.boolean() })
+    .parse(await response.json());
+};
+
 describe("a workflow's code read on the on-prem sandbox", () => {
   let supervisor: SandboxSupervisor;
   let coreUrl: string;
@@ -36,7 +46,8 @@ describe("a workflow's code read on the on-prem sandbox", () => {
     supervisor = await startSandboxSupervisor({
       workerd: nativeWorkerd,
       processes: 2,
-      // No memory bound of its own: a test past V8's heap limit crashes.
+      // No memory bound of its own: a test past V8's heap limit ends its
+      // process itself.
       memoryLimitBytes: 64 * 1024 ** 3,
       log: () => {},
     });
@@ -110,20 +121,42 @@ describe("a workflow's code read on the on-prem sandbox", () => {
     expect(outcome.ok ? null : outcome.codes).not.toBeNull();
   });
 
-  it("keeps what a workflow's tests say, but not when their isolate crashed: that may be the sandbox's", async () => {
-    const tests = async (name: string) => {
-      const response = await fetch(`${coreUrl}tests?case=${name}`);
-      return z
-        .object({ failures: z.array(z.string()), keep: z.boolean() })
-        .parse(await response.json());
-    };
-    const [fails, crashes] = [await tests("fails"), await tests("crashes")];
+  it("keeps what a workflow's tests say, even when they run past V8's heap: that is theirs", async () => {
+    const [fails, exhausts] = [
+      await tests("fails", coreUrl),
+      await tests("exhausts", coreUrl),
+    ];
     expect({
       fails,
-      crashes: { failed: crashes.failures.length, keep: crashes.keep },
+      exhausts: { failed: exhausts.failures.length, keep: exhausts.keep },
     }).toStrictEqual({
       fails: { failures: ['notes, "t": no'], keep: true },
-      crashes: { failed: 1, keep: false },
+      exhausts: { failed: 1, keep: true },
     });
+  }, 60_000);
+
+  it("doesn't keep what a workflow's tests say when their process was killed from outside: that may be the sandbox's", async () => {
+    // workerd behind a shell that SIGKILLs it four seconds in, as the
+    // kernel's OOM killer kills a process of a full cgroup.
+    const killed = path.join(tempDir(), "killed-from-outside.sh");
+    writeFileSync(
+      killed,
+      `#!/bin/sh\n"${nativeWorkerd}" "$@" &\nchild=$!\nsleep 4\nkill -9 $child\nwait $child\nexit $?\n`
+    );
+    chmodSync(killed, 0o755);
+    const killing = await startSandboxSupervisor({
+      workerd: killed,
+      processes: 2,
+      log: () => {},
+    });
+    try {
+      const url = await serveStandIn("workflow-code-worker.ts", killing.socket);
+      const spins = await tests("spins", url);
+      expect({ failed: spins.failures.length, keep: spins.keep }).toStrictEqual(
+        { failed: 1, keep: false }
+      );
+    } finally {
+      await killing.stop();
+    }
   }, 60_000);
 });

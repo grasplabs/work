@@ -42,6 +42,17 @@ export type BlueprintId = z.infer<typeof blueprintIdSchema>;
 export const workflowIdSchema = idSchema<"WorkflowId">();
 export type WorkflowId = z.infer<typeof workflowIdSchema>;
 
+/**
+ * An independent workflow resource (workflow-resources.ts): owned and
+ * versioned on its own, never part of an App.
+ */
+export const workflowResourceIdSchema = idSchema<"WorkflowResourceId">();
+export type WorkflowResourceId = z.infer<typeof workflowResourceIdSchema>;
+
+/** An independent trigger: what starts one exact workflow version. */
+export const triggerIdSchema = idSchema<"TriggerId">();
+export type TriggerId = z.infer<typeof triggerIdSchema>;
+
 /** One run of a workflow. */
 export const runIdSchema = idSchema<"RunId">();
 export type RunId = z.infer<typeof runIdSchema>;

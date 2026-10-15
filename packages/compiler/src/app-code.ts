@@ -292,6 +292,16 @@ const serverSpecifiers: ReadonlySet<string> = new Set([
   "@grasp-os/sdk/database",
 ]);
 
+/**
+ * What only the platform's bootstrap imports (spec 10.7.1): the session
+ * client and the frame's runtime. A screen that made its own client would
+ * get its own caches and submissions beside the platform's.
+ */
+const platformOnly: ReadonlySet<string> = new Set([
+  "@grasp-os/sdk/client",
+  "@grasp-os/sdk/screen-runtime",
+]);
+
 /** A server file a screen's relative import would reach, by its path. */
 const serverPath = (
   importer: string,
@@ -327,6 +337,9 @@ export const screenImportError = (
 ): string | undefined => {
   if (specifier === undefined) {
     return undefined;
+  }
+  if (platformOnly.has(specifier)) {
+    return `"${specifier}" is the platform's: it makes the session client and mounts it around every screen. Use useClient() and the hooks of @grasp-os/sdk/react.`;
   }
   let reached: string | undefined;
   if (isRelative(specifier)) {
