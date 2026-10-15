@@ -145,6 +145,8 @@ export const organizations = sqliteTable("organizations", {
   logo: text(),
   metadata: text(),
   createdAt: timestamp("created_at").notNull(),
+  /** The IANA time zone an admin set (organization.ts); `UTC` until then. */
+  timeZone: text("time_zone"),
 });
 
 /** A person's place in the organization, with their role. */
@@ -1787,6 +1789,27 @@ export const workflowParamValues = sqliteTable(
 );
 
 /**
+ * Who owns each workflow (workflows/owners.ts): the person who answers
+ * for it, shown on its line and told about its failures; one row per App
+ * and workflow, kept across the App's versions. A workflow without one is
+ * owned by its App's owner. Who owns it never changes whom its runs act
+ * for. `set_by` set it last.
+ */
+export const workflowOwners = sqliteTable(
+  "workflow_owners",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    workflowId: text("workflow_id").notNull(),
+    ownerId: text("owner_id").notNull(),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.workflowId] })]
+);
+
+/**
  * The catalog entries an admin stopped offering (connections.ts): one row
  * each, by its source (`native` or `composio`) and its ID there. Nobody
  * starts connecting a hidden entry, admins included, until an admin offers
@@ -1802,6 +1825,28 @@ export const hiddenConnectors = sqliteTable(
     hiddenAt: timestamp("hidden_at").notNull(),
   },
   (table) => [primaryKey({ columns: [table.source, table.connectorId] })]
+);
+
+/**
+ * Apps people asked Grasp to add, as the catalog doesn't have them
+ * (app-requests.ts): one row each, by its name in lower case, so the
+ * same app asked for twice is one request.
+ */
+export const appRequests = sqliteTable(
+  "app_requests",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    nameKey: text("name_key").notNull(),
+    why: text(),
+    url: text(),
+    requestedBy: text("requested_by").notNull(),
+    requestedAt: timestamp("requested_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("app_requests_name_key_idx").on(table.nameKey),
+    index("app_requests_requested_at_idx").on(table.requestedAt),
+  ]
 );
 
 /**

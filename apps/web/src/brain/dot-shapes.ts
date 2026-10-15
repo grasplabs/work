@@ -1527,3 +1527,323 @@ export const coarseScan = (
     ];
   });
 };
+
+// ---- The atlas brain -------------------------------------------------------------------------
+
+/** The atlas's regions, in the order of `REGIONS` in brain-atlas.ts: frontal, parietal, temporal, occipital, cerebellum, stem. */
+export const ATLAS_REGION_COUNT = 6;
+
+/** The spacing of the dots all over the atlas brain, in figure units: about as fine as the onboarding's, on a larger brain. */
+export const CLOUD_PITCH = 0.028;
+
+/** The spine prints finer than the brain, so each vertebra has a shape of its own. */
+export const SPINE_PITCH = 0.021;
+
+/**
+ * The brain as a whole surface, to turn in 3D: dots all over it, both halves, the cerebellum and
+ * the stem, and the spine the stem runs on into, each with its outward normal (for its shading as
+ * it turns) and its region.
+ */
+export interface BrainCloud {
+  count: number;
+  /** How many of the dots are the brain itself; the ones after them are its spine, which belongs to the stem's region. */
+  body: number;
+  x: Float32Array;
+  y: Float32Array;
+  z: Float32Array;
+  nx: Float32Array;
+  ny: Float32Array;
+  nz: Float32Array;
+  region: Uint8Array;
+}
+
+type CloudDot = [number, number, number, number, number, number];
+
+/** The stem's region, which the spine is part of. */
+const STEM = 5;
+
+/**
+ * The spine: the stem runs on down as a column of vertebrae, each a rounded body drawn in at the
+ * disc between two, with a spinous process behind and a transverse one on either side. Its line
+ * bows a little, back and then forward, as a neck and a back do. It is long enough to leave the
+ * bottom of any view, and thins to a point at its end.
+ */
+const SPINE = {
+  /** Where the stem's capsule ends and the spine takes over. */
+  x: 0,
+  y: -0.95,
+  z: -0.3,
+  length: 2.7,
+  radius: 0.1,
+  /** From one disc to the next. */
+  vertebra: 0.152,
+  /** How far its line bows either way, and over what depth it swings from back to forward. */
+  bow: 0.085,
+  swing: 1.5,
+  /** How far a process stands out behind and to each side. */
+  spinous: 0.1,
+  transverse: 0.06,
+};
+
+const cross = (
+  a: readonly [number, number, number],
+  b: readonly [number, number, number]
+): [number, number, number] => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+
+/** How far behind the stem's end the spine's middle is at a depth below it, and how fast that changes. */
+const spineBow = (depth: number): [number, number] => {
+  const turn = (Math.PI * depth) / SPINE.swing;
+  return [
+    SPINE.bow * Math.sin(turn),
+    ((SPINE.bow * Math.PI) / SPINE.swing) * Math.cos(turn),
+  ];
+};
+
+/** The spine's radius at a depth and an angle round it: 0 at its side, a quarter turn at its back. */
+const spineRadius = (depth: number, angle: number): number => {
+  const along = depth / SPINE.vertebra + 0.5;
+  const swell = Math.sin(Math.PI * (along - Math.floor(along)));
+  const back = Math.max(Math.sin(angle), 0);
+  const side = Math.abs(Math.cos(angle));
+  const radius =
+    SPINE.radius * (0.6 + 0.4 * Math.sqrt(swell)) +
+    swell *
+      swell *
+      (SPINE.spinous * back ** 10 + SPINE.transverse * side ** 12);
+  // It thins to a point over its last stretch.
+  return radius * smoothstep(0, 0.6, SPINE.length - depth);
+};
+
+/** A point on the spine's surface. A ring stands square on its line, and a process slants down as it stands out. */
+const spinePoint = (depth: number, angle: number): [number, number, number] => {
+  const [behind, slope] = spineBow(depth);
+  const length = Math.hypot(1, slope);
+  const radius = spineRadius(depth, angle);
+  const out = Math.sin(angle) * radius;
+  const drop = Math.max(radius - SPINE.radius, 0) * 0.7;
+  return [
+    SPINE.x + Math.cos(angle) * radius,
+    SPINE.y - depth - drop + (out * slope) / length,
+    SPINE.z - behind - out / length,
+  ];
+};
+
+/** Whether a point of the brain lies inside the spine, where the stem's end and the first vertebra meet. */
+const inSpine = (x: number, y: number, z: number): boolean => {
+  const depth = SPINE.y - y;
+  if (depth < 0.03 || depth > SPINE.length) {
+    return false;
+  }
+  const back = SPINE.z - spineBow(depth)[0] - z;
+  return (
+    Math.hypot(x - SPINE.x, back) <
+    spineRadius(depth, Math.atan2(back, x - SPINE.x)) - 0.004
+  );
+};
+
+/** One ring of the spine's dots at a depth, a dot every pitch round it, however far its processes stand out. */
+const spineRing = (ring: number, depth: number): CloudDot[] => {
+  const samples = 144;
+  const e = 0.004;
+  // The ring as a line, to step along it evenly.
+  const reached = [0];
+  let before = spinePoint(depth, 0);
+  for (let at = 1; at <= samples; at += 1) {
+    const here = spinePoint(depth, (at / samples) * Math.PI * 2);
+    reached.push(
+      (reached[at - 1] ?? 0) +
+        Math.hypot(
+          here[0] - before[0],
+          here[1] - before[1],
+          here[2] - before[2]
+        )
+    );
+    before = here;
+  }
+  const round = reached[samples] ?? 0;
+  const many = Math.round(round / SPINE_PITCH);
+  if (many < 3) {
+    return [];
+  }
+  const dots: CloudDot[] = [];
+  let at = 1;
+  for (let dot = 0; dot < many; dot += 1) {
+    // Every other ring starts half a step on, so the dots lie as on the brain rather than in columns.
+    const target = ((dot + (ring % 2) * 0.5) / many) * round;
+    while (at < samples && (reached[at] ?? 0) < target) {
+      at += 1;
+    }
+    const from = reached[at - 1] ?? 0;
+    const angle =
+      ((at - 1 + (target - from) / Math.max((reached[at] ?? 0) - from, 1e-9)) /
+        samples) *
+      Math.PI *
+      2;
+    const [x, y, z] = spinePoint(depth, angle);
+    // Inside the stem's end, the stem shows instead.
+    if (brainField(x, y, z) < 0.004) {
+      continue;
+    }
+    const round1 = spinePoint(depth, angle + e);
+    const round0 = spinePoint(depth, angle - e);
+    const down1 = spinePoint(depth + e, angle);
+    const down0 = spinePoint(depth - e, angle);
+    const normal = normalize(
+      ...cross(
+        [down1[0] - down0[0], down1[1] - down0[1], down1[2] - down0[2]],
+        [round1[0] - round0[0], round1[1] - round0[1], round1[2] - round0[2]]
+      )
+    );
+    dots.push([x, y, z, ...normal]);
+  }
+  return dots;
+};
+
+/** The spine's dots: ring upon ring down its line. */
+const spineDots = (): CloudDot[] => {
+  const dots: CloudDot[] = [];
+  const row = SPINE_PITCH * 0.9;
+  for (let ring = 0; ring * row < SPINE.length; ring += 1) {
+    dots.push(...spineRing(ring, ring * row));
+  }
+  return dots;
+};
+
+/**
+ * Which region a point of the brain is in, where it sits on the unturned figure: the stem around its
+ * capsule, the cerebellum in its bulge under the back, then the front third (frontal), the back
+ * (occipital), the low sides (temporal), and the top between them (parietal).
+ */
+const atlasRegion = (x: number, y: number, z: number): number => {
+  // The stem: near the line from under the middle down and back.
+  const t = Math.min(Math.max((-0.4 - y) / 0.55, 0), 1);
+  const stem = Math.hypot(x, y - (-0.4 - 0.55 * t), z - (-0.22 - 0.08 * t));
+  if (y < -0.36 && stem < 0.24) {
+    return 5;
+  }
+  if (
+    (x / 0.56) ** 2 + ((y + 0.48) / 0.32) ** 2 + ((z + 0.6) / 0.38) ** 2 <
+    1
+  ) {
+    return 4;
+  }
+  if (z > 0.3) {
+    return 0;
+  }
+  if (z < -0.42) {
+    return 3;
+  }
+  if (y < -0.1) {
+    return 2;
+  }
+  return 1;
+};
+
+/** Where a ray, marching in from 1.5 along `d` through the point (a, b) on the plane of `u` and `v`, meets the brain. */
+const brainHit = (
+  d: [number, number, number],
+  u: [number, number, number],
+  v: [number, number, number],
+  a: number,
+  b: number
+): [number, number, number] | null => {
+  const e = 0.0015;
+  let t = 0;
+  for (let march = 0; march < 80 && t < 3; march += 1) {
+    const px = u[0] * a + v[0] * b + d[0] * (1.5 - t);
+    const py = u[1] * a + v[1] * b + d[1] * (1.5 - t);
+    const pz = u[2] * a + v[2] * b + d[2] * (1.5 - t);
+    const distance = brainField(px, py, pz);
+    if (distance < e) {
+      return [px, py, pz];
+    }
+    t += Math.max(distance * 0.55, e);
+  }
+  return null;
+};
+
+/** The brain's own surface, scanned from every side and thinned to one dot per cell of the pitch. */
+const brainSurface = (): CloudDot[] => {
+  const kept = new Map<string, CloudDot>();
+  const directions = 18;
+  const e = 0.0015;
+  const reach = 1.35;
+  for (let at = 0; at < directions; at += 1) {
+    // A direction on the sphere, spread by the golden angle.
+    const dy = 1 - (2 * (at + 0.5)) / directions;
+    const ring = Math.sqrt(1 - dy * dy);
+    const angle = at * 2.399963;
+    const d: [number, number, number] = [
+      Math.cos(angle) * ring,
+      dy,
+      Math.sin(angle) * ring,
+    ];
+    const u = normalize(
+      ...(Math.abs(d[1]) > 0.9 ? cross(d, [1, 0, 0]) : cross(d, [0, 1, 0]))
+    );
+    const v = cross(d, u);
+    for (let a = -reach; a <= reach; a += CLOUD_PITCH) {
+      for (let b = -reach; b <= reach; b += CLOUD_PITCH) {
+        const hit = brainHit(d, u, v, a, b);
+        if (!hit) {
+          continue;
+        }
+        const [px, py, pz] = hit;
+        const key = `${Math.floor(px / CLOUD_PITCH)},${Math.floor(py / CLOUD_PITCH)},${Math.floor(pz / CLOUD_PITCH)}`;
+        if (!kept.has(key)) {
+          const [nx, ny, nz] = normalize(
+            brainField(px + e, py, pz) - brainField(px - e, py, pz),
+            brainField(px, py + e, pz) - brainField(px, py - e, pz),
+            brainField(px, py, pz + e) - brainField(px, py, pz - e)
+          );
+          kept.set(key, [px, py, pz, nx, ny, nz]);
+        }
+      }
+    }
+  }
+  return [...kept.values()];
+};
+
+let cloud: BrainCloud | null = null;
+
+/**
+ * The atlas brain, sampled once and kept: the surface scanned from directions spread evenly
+ * around it, as a depth camera walked around it would, and thinned to one dot per cell of the
+ * pitch, so the dots lie evenly however the surface curves.
+ */
+export const brainCloud = (): BrainCloud => {
+  if (cloud) {
+    return cloud;
+  }
+  // The stem's rounded end makes way for the spine that leaves it.
+  const points = brainSurface().filter(([x, y, z]) => !inSpine(x, y, z));
+  const body = points.length;
+  points.push(...spineDots());
+  const count = points.length;
+  const made: BrainCloud = {
+    count,
+    body,
+    x: new Float32Array(count),
+    y: new Float32Array(count),
+    z: new Float32Array(count),
+    nx: new Float32Array(count),
+    ny: new Float32Array(count),
+    nz: new Float32Array(count),
+    region: new Uint8Array(count),
+  };
+  for (const [index, [x, y, z, nx, ny, nz]] of points.entries()) {
+    made.x[index] = x;
+    made.y[index] = y;
+    made.z[index] = z;
+    made.nx[index] = nx;
+    made.ny[index] = ny;
+    made.nz[index] = nz;
+    made.region[index] = index < body ? atlasRegion(x, y, z) : STEM;
+  }
+  cloud = made;
+  return made;
+};

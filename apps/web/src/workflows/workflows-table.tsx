@@ -33,8 +33,8 @@ import { ChevronRightIcon, WorkflowIcon } from "lucide-react";
 import type { ReactElement, ReactNode } from "react";
 
 import { EngineIcon } from "../engines/engine-icon.tsx";
-import { formatDateTime } from "../format.ts";
-import { listsOf } from "./lists.ts";
+import { formatDateTime, formatNumber } from "../format.ts";
+import { handledOf, listsOf } from "./lists.ts";
 import { RunResult } from "./runs.tsx";
 
 // The workflows table, one line a workflow, as the prototype draws it
@@ -139,10 +139,10 @@ const Lead = ({ workflow }: { workflow: WorkflowSummary }) => {
       <TooltipTrigger
         render={
           <Link
-            aria-label={t`Open the engine ${name}`}
+            aria-label={t`Open the domain ${name}`}
             className="focus-visible:ring-ring/50 relative z-10 flex-none rounded-lg outline-none focus-visible:ring-3"
             params={{ engine: workflow.app }}
-            to="/engines/$engine"
+            to="/domains/$engine"
           />
         }
       >
@@ -206,7 +206,7 @@ const WorkflowRow = ({
             <Link
               className="relative z-10 truncate underline-offset-4 hover:underline"
               params={{ engine: workflow.app }}
-              to="/engines/$engine"
+              to="/domains/$engine"
             >
               {workflow.appName}
             </Link>
@@ -216,6 +216,9 @@ const WorkflowRow = ({
           </div>
         </TableCell>
       ) : null}
+      <TableCell className="hidden @xl:table-cell" variant="roomy">
+        <span className="tabular-nums">{formatNumber(workflow.handled)}</span>
+      </TableCell>
       <TableCell className="hidden @2xl:table-cell" variant="roomy">
         <LastRun workflow={workflow} />
       </TableCell>
@@ -266,7 +269,7 @@ export const WorkflowsTable = ({
             <EmptyDescription>
               <Trans>
                 Workflows are made in chat: describe what should run on its own,
-                and Grasp builds it into an engine.
+                and Grasp builds it into a domain.
               </Trans>
             </EmptyDescription>
           </EmptyHeader>
@@ -293,9 +296,12 @@ export const WorkflowsTable = ({
             </TableHead>
             {withEngine ? (
               <TableHead className="hidden w-56 @lg:table-cell" variant="card">
-                <Trans>Engine</Trans>
+                <Trans>Domain</Trans>
               </TableHead>
             ) : null}
+            <TableHead className="hidden w-32 @xl:table-cell" variant="card">
+              <Trans>Runs a week</Trans>
+            </TableHead>
             <TableHead className="hidden w-44 @2xl:table-cell" variant="card">
               <Trans>Last run</Trans>
             </TableHead>
@@ -340,12 +346,39 @@ const List = ({
     </section>
   );
 
+/** A large number over the words that say what it is; a dash for one nobody counts yet. */
+const Big = ({ value, label }: { value: string | null; label: ReactNode }) => (
+  <div className="flex min-w-0 flex-col-reverse gap-0.5">
+    <dt className="text-muted-foreground">{label}</dt>
+    <dd className="text-2xl tabular-nums">{value ?? "–"}</dd>
+  </div>
+);
+
+/**
+ * The prototype's three numbers over the lists, for all the workflows
+ * together: the runs they completed this week (core's `handled`); the
+ * return a month that was measured, and what designs and tests expect on
+ * top, are dashes: core measures no return yet, and keeps no designs.
+ */
+const Numbers = ({ rows }: { rows: WorkflowSummary[] }) => (
+  <dl className="@container grid grid-cols-1 gap-x-8 gap-y-4 @xl:grid-cols-3">
+    <Big
+      label={<Trans>runs a week by these workflows</Trans>}
+      value={formatNumber(handledOf(rows))}
+    />
+    <Big label={<Trans>return a month, measured</Trans>} value={null} />
+    <Big
+      label={<Trans>expected on top, from designs and tests</Trans>}
+      value={null}
+    />
+  </dl>
+);
+
 /**
  * The Workflows page's list, as the prototype tells it
- * (`components/workflows-overview.tsx`): made for many workflows, in two
- * lists. At work, those that have run, the ones waiting on a person first;
- * on the way, those that haven't run yet. The prototype's numbers on top
- * (runs a week, what comes back a month) are counts core doesn't keep.
+ * (`components/workflows-overview.tsx`): made for many workflows, its
+ * numbers on top, then two lists. At work, those that have run, the ones
+ * waiting on a person first; on the way, those that haven't run yet.
  */
 export const WorkflowsOverview = ({ rows }: { rows: WorkflowSummary[] }) => {
   if (rows.length === 0) {
@@ -354,6 +387,7 @@ export const WorkflowsOverview = ({ rows }: { rows: WorkflowSummary[] }) => {
   const { atWork, onTheWay } = listsOf(rows);
   return (
     <div className="flex flex-col gap-8">
+      <Numbers rows={rows} />
       <List rows={atWork} title={<Trans>At work</Trans>} />
       <List rows={onTheWay} title={<Trans>On the way</Trans>} />
     </div>

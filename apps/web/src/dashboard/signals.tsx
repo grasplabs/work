@@ -126,7 +126,7 @@ const About = ({
   }
   const engine = engines.get(app) ?? app;
   return workflow === null ? (
-    <Link className="underline" params={{ engine: app }} to="/engines/$engine">
+    <Link className="underline" params={{ engine: app }} to="/domains/$engine">
       {engine}
     </Link>
   ) : (

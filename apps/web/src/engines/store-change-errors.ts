@@ -68,18 +68,18 @@ const failedReasonOf = (
 
 /** What makes a version wait on a store's failed change, by its reason. */
 const backfillFailedTexts = {
-  invalid_value: msg`This version changes the engine's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept.`,
-  too_large: msg`This version changes the engine's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be.`,
-  migration: msg`This version changes the engine's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept.`,
-  stalled: msg`This version changes the engine's data, and the change can't be applied: filling in its new fields stopped making progress.`,
+  invalid_value: msg`This version changes the domain's data, and the change can't be applied: a record already holds a value one of its new fields doesn't accept.`,
+  too_large: msg`This version changes the domain's data, and the change can't be applied: filling in one of its new fields would make a record larger than a record may be.`,
+  migration: msg`This version changes the domain's data with a migration, and it can't finish: its transform failed, or answered what the table doesn't accept.`,
+  stalled: msg`This version changes the domain's data, and the change can't be applied: filling in its new fields stopped making progress.`,
 } as const;
 
 /** Where the engine's page helps, by the failure's reason. */
 const backfillFailedLinks = {
-  invalid_value: msg`An admin can see the record that holds it back, and abandon the change, on the engine's page.`,
-  too_large: msg`An admin can see the record that holds it back, and abandon the change, on the engine's page.`,
-  migration: msg`An admin can see what went wrong, and abandon the change, on the engine's page.`,
-  stalled: msg`No record is to blame, so an admin can only abandon the change, on the engine's page.`,
+  invalid_value: msg`An admin can see the record that holds it back, and abandon the change, on the domain's page.`,
+  too_large: msg`An admin can see the record that holds it back, and abandon the change, on the domain's page.`,
+  migration: msg`An admin can see what went wrong, and abandon the change, on the domain's page.`,
+  stalled: msg`No record is to blame, so an admin can only abandon the change, on the domain's page.`,
 } as const;
 
 /**
@@ -139,11 +139,11 @@ const fixturesFailedText = (error: unknown): string => {
     known === undefined ? i18n._(msg`it didn't pass`) : i18n._(known);
   if (typeof fixture === "number") {
     return i18n._(
-      msg`The migration ${migration} failed on its fixture ${fixture} when this version was sealed: ${reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the engine again.`
+      msg`The migration ${migration} failed on its fixture ${fixture} when this version was sealed: ${reason}. It runs on no records, so the version can't be made current: fix the migration or its fixture and build the domain again.`
     );
   }
   return i18n._(
-    msg`The migration ${migration} failed on its fixtures when this version was sealed: ${reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the engine again.`
+    msg`The migration ${migration} failed on its fixtures when this version was sealed: ${reason}. It runs on no records, so the version can't be made current: fix the migration or its fixtures and build the domain again.`
   );
 };
 
@@ -152,12 +152,12 @@ const rollbackIncompatibleText = (error: unknown): string => {
   const compatible = compatibleOf(error);
   if (compatible.length === 0) {
     return i18n._(
-      msg`A data migration moved this engine's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead.`
+      msg`A data migration moved this domain's records on after this version, so it can't be made current again, and no kept version fits them now. Build a new version instead.`
     );
   }
   const versions = formatList(compatible.map(String));
   return i18n._(
-    msg`A data migration moved this engine's records on after this version, so it can't be made current again. Kept versions that still fit them: ${versions}.`
+    msg`A data migration moved this domain's records on after this version, so it can't be made current again. Kept versions that still fit them: ${versions}.`
   );
 };
 
@@ -201,7 +201,7 @@ export const makeCurrentFailure = (
   if (code === "migration.abandoned") {
     return {
       text: i18n._(
-        msg`An admin abandoned the data change this version needs, so it can never be made current. Ask the engine to be built again.`
+        msg`An admin abandoned the data change this version needs, so it can never be made current. Ask the domain to be built again.`
       ),
       link: undefined,
     };
