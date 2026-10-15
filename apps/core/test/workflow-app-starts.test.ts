@@ -148,6 +148,30 @@ const kickOff = action({
     await ctx.startWorkflow(followUp, { who: args.who }),
 });
 
+/**
+ * Stages starts too large together for its commit, and goes on asking
+ * after each refusal: how many were refused.
+ */
+const retrying = mutation({
+  args: {},
+  returns: v.number(),
+  uses: [followUp],
+  handler: async (ctx) => {
+    let refused = 0;
+    for (let index = 0; index < 40; index += 1) {
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one start after the other
+        await ctx.afterCommit.start(followUp, {
+          who: `${index}`.padEnd(120 * 1024, "x"),
+        });
+      } catch {
+        refused += 1;
+      }
+    }
+    return refused;
+  },
+});
+
 /** Starts the follow-up now, with no input: its default. */
 const kickOffPlain = action({
   args: {},
@@ -233,6 +257,7 @@ const startsApp = registerApp({
       guarded,
       kickOff,
       kickOffPlain,
+      retrying,
       submitPlain,
       flood,
       bulky,
@@ -501,6 +526,7 @@ const kinds = {
   "requests.bulky": "mutation",
   "requests.kickOff": "action",
   "requests.kickOffPlain": "action",
+  "requests.retrying": "mutation",
   "requests.submitPlain": "mutation",
   "requests.plainAction": "action",
   "requests.plainMutation": "mutation",
@@ -517,7 +543,9 @@ const call = async (
     app?: HostedApp;
     agent?: CallingAgent;
     /** Counts each time the call's gate is passed through. */
-    gate?: { passes: number };
+    gate?: { passes: number; onPass?: (passes: number) => void };
+    /** Aborted once the caller cancels the call. */
+    cancelled?: AbortSignal;
   } = {}
 ): Promise<OperationResult> => {
   const invocation = await invocationFor(env, fx.release, {
@@ -535,12 +563,19 @@ const call = async (
           ...invocation,
           authorize: async () => {
             gate.passes += 1;
-            return await invocation.authorize();
+            const authorized = await invocation.authorize();
+            gate.onPass?.(gate.passes);
+            return authorized;
           },
         },
     { path, kind: kinds[path] },
     args,
-    options.key === undefined ? {} : { idempotencyKey: options.key }
+    {
+      ...(options.key === undefined ? {} : { idempotencyKey: options.key }),
+      ...(options.cancelled === undefined
+        ? {}
+        : { cancelled: options.cancelled }),
+    }
   );
 };
 
@@ -1369,6 +1404,42 @@ describe("what a start rechecks, and records", () => {
     });
   });
 
+  it("bounds the gate's reads by how often a mutation asks to start, whatever it catches", async () => {
+    const fx = await fixture();
+    const gate = { passes: 0 };
+    const retried = await call(fx, fx.bob, "requests.retrying", {}, { gate });
+    expect({
+      committed: retried.ok,
+      // The call's own, one per place a commit has, and the commit's.
+      passes: gate.passes,
+    }).toStrictEqual({ committed: true, passes: 18 });
+  });
+
+  it("starts nothing for an action cancelled as its start's gate was read", async () => {
+    const fx = await fixture();
+    const controller = new AbortController();
+    // The call's own gate, then the start's: cancelled as it is read.
+    const gate = {
+      passes: 0,
+      onPass: (passes: number) => {
+        if (passes === 2) {
+          controller.abort();
+        }
+      },
+    };
+    const started = await call(
+      fx,
+      fx.bob,
+      "requests.kickOff",
+      { who: "Bob" },
+      { gate, cancelled: controller.signal }
+    );
+    expect({
+      answer: answerOf(started),
+      receipts: await receiptCount(fx.app),
+    }).toStrictEqual({ answer: "operation.cancelled", receipts: 0 });
+  });
+
   it("records an unreadable intent, and one whose last attempt fails, as it gives them up", async () => {
     const fx = await fixture(true);
     const unreadable = await dispatched(env, {
@@ -1427,6 +1498,35 @@ describe("what a start rechecks, and records", () => {
       refused: [],
       receipts: 1,
     });
+  });
+
+  it("stops, starting nothing, once its hand-over's time runs out as an agent's permission is read", async () => {
+    const fx = await fixture();
+    const { agent } = await agentOf(fx);
+    const timedOut = new AbortController();
+    const real = env.DB;
+    // The hand-over runs out just as the agent's permission is read.
+    const db: D1Database = {
+      prepare: (statement) => {
+        if (/from "permissions"/iu.test(statement)) {
+          timedOut.abort();
+        }
+        return real.prepare(statement);
+      },
+      batch: async (statements) => await real.batch(statements),
+      exec: async (statement) => await real.exec(statement),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    const answer = await dispatched(
+      { ...env, DB: db },
+      entryOf(fx, fx.bob, { agent, signal: timedOut.signal })
+    );
+    expect({
+      stopped: answer !== "delivered",
+      receipts: await receiptsOf(fx.app),
+    }).toStrictEqual({ stopped: true, receipts: [] });
   });
 
   it("stops once its hand-over's time is up, starting nothing", async () => {

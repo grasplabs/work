@@ -394,6 +394,40 @@ mutation({
     return null;
   },
 });
+// A choice of workflows keeps each one's input: never another's, and
+// optional only for one that takes none.
+const counted = resource.workflow("counted", { input: v.number() });
+const optional = resource.workflow("optional", {
+  input: v.string().default("ready"),
+});
+declare const pick: boolean;
+action({
+  args: {},
+  returns: v.null(),
+  uses: [counted, optional],
+  handler: async (ctx) => {
+    await ctx.startWorkflow(optional);
+    // @ts-expect-error -- `counted` needs a number, which "text" isn't
+    await ctx.startWorkflow(pick ? counted : optional, "text");
+    // @ts-expect-error -- `counted` needs its input
+    await ctx.startWorkflow(pick ? counted : optional);
+    return null;
+  },
+});
+mutation({
+  args: {},
+  returns: v.null(),
+  uses: [counted, optional],
+  handler: async (ctx) => {
+    await ctx.afterCommit.start(optional);
+    // @ts-expect-error -- `counted` needs a number, which "text" isn't
+    await ctx.afterCommit.start(pick ? counted : optional, "text");
+    // @ts-expect-error -- `counted` needs its input
+    await ctx.afterCommit.start(pick ? counted : optional);
+    return null;
+  },
+});
+
 // A query starts nothing, now or after.
 expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("afterCommit");
 expectTypeOf<QueryCtx<Tables>>().not.toHaveProperty("startWorkflow");

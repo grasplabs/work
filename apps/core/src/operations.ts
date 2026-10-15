@@ -1795,7 +1795,9 @@ const startCall = async (
   run: Run,
   operation: OperationManifest,
   request: { alias: unknown; method: unknown; args: unknown },
-  key: readonly string[]
+  key: readonly string[],
+  /** Runs the start itself as an effect under way (`runAction`). */
+  sending: <Answer>(work: () => Promise<Answer>) => Promise<Answer>
 ): Promise<Json> => {
   const { alias, input } = workflowStart(run, operation, request);
   await admit(run.invocation);
@@ -1803,9 +1805,13 @@ const startCall = async (
   if (starts === undefined) {
     throw operationErrors.create("resource.unavailable");
   }
+  // Cancelled as the gate was read: nothing is started.
+  requireNotCancelled(run);
   let handle: RunHandle;
   try {
-    handle = await starts.start(alias, input, key.join(":"));
+    handle = await sending(
+      async () => await starts.start(alias, input, key.join(":"))
+    );
   } catch (error) {
     throw startFailure(error, run.invocation.requestId);
   }
@@ -2603,31 +2609,27 @@ const runMutation = async (
               throw operationErrors.create("resource.unavailable");
             }
             // Its place first, synchronously, so a start past the bound is
-            // refused before the gate reads anything.
+            // refused before the gate reads anything. Taken for good, the
+            // start refused or not: what bounds the gate's reads is how
+            // often App code asks, whatever it catches.
             if (placed >= commitMaxIntents) {
               throw operationErrors.create("operation.call_limit", {
                 maxStarts: commitMaxIntents,
               });
             }
             placed += 1;
-            let intent: NonNullable<Commit["intents"]>[number];
-            try {
-              // The one gate, as for a resource request: staged only while
-              // the caller may still act. Its commit is admitted again, and
-              // the start itself once more as it is dispatched.
-              await admit(invocation);
-              // Its key is its outbox entry's ID, given as it commits.
-              intent = {
-                kind: "workflow.start",
-                data: starts.intent(start.alias, start.input),
-              };
-              // In the commit's bound with its writes, or refused here,
-              // where the handler may catch it, never by the commit.
-              staging.reserve(intent);
-            } catch (error) {
-              placed -= 1;
-              throw error;
-            }
+            // The one gate, as for a resource request: staged only while
+            // the caller may still act. Its commit is admitted again, and
+            // the start itself once more as it is dispatched.
+            await admit(invocation);
+            // Its key is its outbox entry's ID, given as it commits.
+            const intent: NonNullable<Commit["intents"]>[number] = {
+              kind: "workflow.start",
+              data: starts.intent(start.alias, start.input),
+            };
+            // In the commit's bound with its writes, or refused here,
+            // where the handler may catch it, never by the commit.
+            staging.reserve(intent);
             intents.push(intent);
             return null;
           },
@@ -2775,8 +2777,10 @@ const runAction = async (
       return answer;
     } catch (error) {
       // Refused before it was sent, for a budget busy with requests under
-      // way: nothing went out. Anything else may have.
-      if (operationErrors.codeOf(error) !== "resource.budget_busy") {
+      // way or a call cancelled meanwhile: nothing went out. Anything else
+      // may have.
+      const code = operationErrors.codeOf(error);
+      if (code !== "resource.budget_busy" && code !== "operation.cancelled") {
         run.onEffect?.();
       }
       throw error;
@@ -2821,15 +2825,14 @@ const runAction = async (
       if (startsWorkflow(operation, alias)) {
         starts += 1;
         const startKey = await derived("start", starts);
-        // A start is an effect under way like any other.
-        return await effect(
-          async () =>
-            await startCall(
-              run,
-              operation,
-              { alias, method, args: callArgs },
-              startKey
-            )
+        // A start is an effect under way like any other, from when it is
+        // sent: its gate, before, starts nothing.
+        return await startCall(
+          run,
+          operation,
+          { alias, method, args: callArgs },
+          startKey,
+          effect
         );
       }
       requests += 1;

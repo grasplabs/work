@@ -141,22 +141,35 @@ const agentAllowedSql = (
   return sql`EXISTS (SELECT 1 FROM ${permissions} WHERE ${allowing})`;
 };
 
+/** Throws once the hand-over's time is up: another has it now. */
+const requireLive = (signal: AbortSignal): void => {
+  if (signal.aborted) {
+    throw new Error("The hand-over's time ran out");
+  }
+};
+
 /**
  * Starts the workflow App `authority` binds under `alias`: refused while
- * the App is restricted (see the header), audited naming `agent`.
+ * the App is restricted (see the header), audited naming `agent`. Stops,
+ * starting nothing, once `signal` (a dispatch's hand-over) is aborted
+ * before it is admitted.
  */
 const startAsApp = async (
   env: Env,
   authority: Authority,
   alias: string,
   request: { input: Json; key: string },
-  agent: CallingAgent | null
+  agent: CallingAgent | null,
+  signal?: AbortSignal
 ): Promise<WorkflowStart> => {
   if (authority.subject.type !== "app") {
     throw workflowResourceErrors.create("workflow.start_denied");
   }
   if (await appHost(env, authority.subject.appId).isRestricted()) {
     throw workflowResourceErrors.create("workflow.start_restricted");
+  }
+  if (signal !== undefined) {
+    requireLive(signal);
   }
   return await startAppBinding(
     env,
@@ -227,13 +240,6 @@ const undeliverable = (code: string) => ({ undeliverable: code });
  * refused, before it takes the refusal as the answer.
  */
 const decisions = 3;
-
-/** Throws once the hand-over's time is up: another has it now. */
-const requireLive = (signal: AbortSignal): void => {
-  if (signal.aborted) {
-    throw new Error("The hand-over's time ran out");
-  }
-};
 
 /**
  * Refuses (`workflow.start_denied`) a start an agent's call staged, once
@@ -333,8 +339,17 @@ export const dispatchStartIntent = async (
       // One decision after the other: each only once the last went stale.
       // oxlint-disable-next-line no-await-in-loop -- see above
       await requireAgentAllowed(env, app.data, principal, agent);
+      // Its hand-over may have run out as that was read.
+      requireLive(entry.signal);
       // oxlint-disable-next-line no-await-in-loop -- see above
-      await startAsApp(env, authority, alias, { input, key }, agent);
+      await startAsApp(
+        env,
+        authority,
+        alias,
+        { input, key },
+        agent,
+        entry.signal
+      );
       return "delivered";
     } catch (error) {
       refusal = error;

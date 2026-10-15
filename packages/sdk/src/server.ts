@@ -133,12 +133,15 @@ export interface RunHandle {
 
 /**
  * What a start of `Workflow` takes: the workflow and its input, which may
- * be left out where the input schema takes none (its default, say).
+ * be left out where the input schema takes none (its default, say). Over a
+ * union, each workflow with its own input: never one's input for another,
+ * nor optional for one that needs it.
  */
-type StartArgs<Workflow> =
-  undefined extends WorkflowInput<Workflow>
+type StartArgs<Workflow> = Workflow extends unknown
+  ? undefined extends WorkflowInput<Workflow>
     ? [workflow: Workflow, input?: WorkflowInput<Workflow>]
-    : [workflow: Workflow, input: WorkflowInput<Workflow>];
+    : [workflow: Workflow, input: WorkflowInput<Workflow>]
+  : never;
 
 /** `ctx.startWorkflow`: one of the workflows `Uses` lists, with its input. */
 type StartWorkflow<Uses extends readonly Use[]> = <
