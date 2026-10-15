@@ -488,6 +488,15 @@ describe("tasks and calls", () => {
       { code: "task.ambiguous_kind", pointer: "/do/0/both", taskId: "both" },
     ],
     [
+      "a literal wait longer than the engine sleeps",
+      probe([{ pause: { wait: { days: 366 } } }]),
+      {
+        code: "profile.invalid_value",
+        pointer: "/do/0/pause/wait",
+        taskId: "pause",
+      },
+    ],
+    [
       "a task ID that isn't kebab-case",
       probe([{ Finish: { set: { a: 1 } } }]),
       { code: "task.invalid_id", pointer: "/do/0/Finish", taskId: "Finish" },

@@ -1,4 +1,5 @@
 import {
+  catalogLogoUrl,
   catalogToolsRequestSchema,
   composioToolkitSchema,
   connectErrors,
@@ -68,6 +69,7 @@ const nativeEntries = (): CatalogEntry[] =>
         id: provider.id,
         ...nativeShown[provider.id],
         toolCount: Object.keys(connector.manifest.actions).length,
+        logo: null,
       },
     ];
   });
@@ -108,7 +110,16 @@ interface Cache<Value> {
   loading: Map<string, Promise<Value>>;
 }
 
-const toolkitCache: Cache<CatalogEntry[]> = {
+/**
+ * A toolkit in the catalog, and where Composio serves its logo, which only
+ * connect fetches (src/logos.ts): the entry names core's address for it.
+ */
+export interface ListedToolkit {
+  entry: CatalogEntry;
+  logoSource: URL | undefined;
+}
+
+const toolkitCache: Cache<ListedToolkit[]> = {
   values: new Map(),
   loading: new Map(),
 };
@@ -197,9 +208,32 @@ const toolkitSchema = z.object({
     .object({
       categories: z.array(z.unknown()).default([]),
       tools_count: z.number().int().nonnegative().default(0),
+      /** Read on its own (`logoSourceOf`): a bad one leaves the toolkit listed. */
+      logo: z.unknown().optional(),
     })
     .default({ categories: [], tools_count: 0 }),
 });
+
+/** The only host connect fetches Composio's logos from. */
+export const composioLogoHost = "logos.composio.dev";
+
+/**
+ * Where Composio says a toolkit's logo is, if that is on its logo host
+ * over https: any other address is none, so connect never fetches from a
+ * host Composio's answer chose.
+ */
+const logoSourceOf = (logo: unknown): URL | undefined => {
+  if (typeof logo !== "string" || !URL.canParse(logo)) {
+    return undefined;
+  }
+  const url = new URL(logo);
+  const onLogoHost =
+    url.protocol === "https:" &&
+    url.host === composioLogoHost &&
+    url.username === "" &&
+    url.password === "";
+  return onLogoHost ? url : undefined;
+};
 
 const categorySchema = z.object({ name: z.string().min(1).max(128) });
 
@@ -275,27 +309,38 @@ const isListed = ({
   managed.length > 0 && meta.tools_count > 0;
 
 /** Composio's toolkits in the catalog (`isListed`). */
-const composioEntries = async (key: string): Promise<CatalogEntry[]> => {
+const composioEntries = async (key: string): Promise<ListedToolkit[]> => {
   const toolkits = await composioList(
     key,
     "/toolkits?sort_by=alphabetically",
     toolkitSchema,
     toolkitPaging
   );
-  return toolkits.filter(isListed).map(({ slug, name, meta }) => ({
-    source: "composio",
-    id: slug,
-    name,
-    categories: meta.categories.flatMap((category) => {
-      const parsed = categorySchema.safeParse(category);
-      return parsed.success ? [parsed.data.name] : [];
-    }),
-    toolCount: meta.tools_count,
-  }));
+  return toolkits.filter(isListed).map(({ slug, name, meta }) => {
+    const logoSource = logoSourceOf(meta.logo);
+    return {
+      entry: {
+        source: "composio",
+        id: slug,
+        name,
+        categories: meta.categories.flatMap((category) => {
+          const parsed = categorySchema.safeParse(category);
+          return parsed.success ? [parsed.data.name] : [];
+        }),
+        toolCount: meta.tools_count,
+        logo:
+          logoSource === undefined ? null : catalogLogoUrl("composio", slug),
+      },
+      logoSource,
+    };
+  });
 };
 
-/** Composio's toolkits in the catalog, as cached. */
-const listedToolkits = async (key: string): Promise<CatalogEntry[]> =>
+/**
+ * Composio's toolkits in the catalog, as cached. Throws
+ * {@link ComposioError} when Composio doesn't list them completely.
+ */
+export const listedToolkits = async (key: string): Promise<ListedToolkit[]> =>
   await cachedIn(
     toolkitCache,
     key,
@@ -312,7 +357,10 @@ export const catalog = async (env: Env): Promise<Catalog> => {
   }
   try {
     const toolkits = await listedToolkits(key);
-    return { entries: [...native, ...toolkits], composio: "listed" };
+    return {
+      entries: [...native, ...toolkits.map(({ entry }) => entry)],
+      composio: "listed",
+    };
   } catch (error) {
     if (!(error instanceof ComposioError)) {
       throw error;
@@ -358,7 +406,7 @@ export const composioTools = async (
 ): Promise<CatalogTool[]> => {
   try {
     const listed = await listedToolkits(key);
-    if (!listed.some(({ id }) => id === toolkit)) {
+    if (!listed.some(({ entry }) => entry.id === toolkit)) {
       throw connectErrors.create("connect.catalog_entry_not_found");
     }
     return await cachedIn(

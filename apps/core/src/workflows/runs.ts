@@ -14,6 +14,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type {
   RunFailure,
+  RunQueue,
   RunStatus,
   WorkflowRun,
 } from "@grasp-os/shared/workflows";
@@ -50,7 +51,7 @@ import type { Member } from "../auth/identity.ts";
 import { apps, workflowRunControls, workflowRuns } from "../db/core/schema.ts";
 import { failureNoticed } from "../notifications.ts";
 import { stepStatisticsForgotten } from "../statistic-steps.ts";
-import { runDequeued } from "./admission.ts";
+import { queuedRuns, runDequeued } from "./admission.ts";
 import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
@@ -90,6 +91,13 @@ export const nextRevision = sql`${workflowRuns.summaryRevision} + 1`;
  * says it is.
  */
 export const unended: RunRow["status"][] = ["starting", "running", "paused"];
+
+/**
+ * Whether a row's run goes on (starting or running): the runs a step of
+ * which may wait in the queue for a share (admission.ts, `runActive`).
+ */
+export const goesOn = (status: RunRow["status"]): boolean =>
+  status === "starting" || status === "running";
 
 /** A row's status as callers see it: a run starting shows as running. */
 export const shownStatus = (
@@ -771,6 +779,21 @@ const liveStatuses: Record<InstanceStatus["status"], RunStatus> = {
   complete: "completed",
 };
 
+/**
+ * A run as it reads with its place in the queue (admission.ts,
+ * `queuedRuns`): `queued`, with the share it waits for and when it asks
+ * again, while it would otherwise read as running, or as waiting the way
+ * the engine has a step that sleeps between asks. A run that is paused or
+ * has ended waits for no share, whatever place may still lapse.
+ */
+export const queuedRun = <Run extends WorkflowRun>(
+  run: Run,
+  queue: RunQueue | undefined
+): Run =>
+  queue !== undefined && (run.status === "running" || run.status === "waiting")
+    ? { ...run, status: "queued", queued: queue }
+    : run;
+
 const foundRun = async (env: Env, run: unknown): Promise<RunRow> => {
   const row = await findRun(env, parse(runIdSchema, run));
   if (!row) {
@@ -845,7 +868,16 @@ export const runStatus = async (
     (row.status === "starting" || row.status === "running") && live
       ? liveStatuses[live.status]
       : shownStatus(row.status);
-  const found = { ...runFor(env, by, row, ownerId), status };
+  // Only a run that goes on may wait for a share: no read for another.
+  const queues = await queuedRuns(
+    drizzle(env.DB),
+    status === "running" || status === "waiting" ? [row.id] : [],
+    Date.now()
+  );
+  const found = queuedRun(
+    { ...runFor(env, by, row, ownerId), status },
+    queues.get(row.id)
+  );
   // Once its details are removed, nothing the engine may still have of it
   // is shown: the list, the overview and screens show none either.
   if (found.detailsRemoved || !(live && seesDetails(by, row, ownerId))) {
@@ -870,13 +902,21 @@ export const listRuns = async (
 ): Promise<WorkflowRun[]> => {
   const appId = parse(appIdSchema, app);
   const { owner: ownerId } = await appFor(env, by, appId, "user");
-  const rows = await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  const rows = await db
     .select()
     .from(workflowRuns)
     .where(eq(workflowRuns.appId, appId))
     .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.id))
     .limit(runsPerPage);
-  return rows.map((row) => runFor(env, by, row, ownerId));
+  const queues = await queuedRuns(
+    db,
+    rows.flatMap(({ id, status }) => (goesOn(status) ? [id] : [])),
+    Date.now()
+  );
+  return rows.map((row) =>
+    queuedRun(runFor(env, by, row, ownerId), queues.get(row.id))
+  );
 };
 
 /** What a run that stopped reports: where it stopped, and why. */

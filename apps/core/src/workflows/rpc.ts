@@ -16,6 +16,7 @@ import { CoreRpcTarget } from "../rpc-target.ts";
 import { withPerson } from "../session-check.ts";
 import type { SessionCheck } from "../session-check.ts";
 import { runActivity } from "./activity.ts";
+import { connectionWorkflows } from "./connection-workflows.ts";
 import { cancelRun } from "./controls.ts";
 import { runHistory } from "./history.ts";
 import {
@@ -96,6 +97,13 @@ export class WorkflowsRpc extends CoreRpcTarget implements WorkflowsApi {
     return await withPerson(
       this.#check,
       async (by) => await workflowOverview(this.#env, by)
+    );
+  }
+
+  async ofConnection(connection: string): Promise<WorkflowSummary[]> {
+    return await withPerson(
+      this.#check,
+      async (by) => await connectionWorkflows(this.#env, by, connection)
     );
   }
 

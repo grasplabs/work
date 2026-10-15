@@ -15,8 +15,7 @@ import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
 import {
-  appFunctionResponse,
-  functionCallApp,
+  appFunctionRoute,
   portableCallApp,
   portableFunctionResponse,
 } from "./app-function-route.ts";
@@ -26,7 +25,11 @@ import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
-import { handleConnectionCallback } from "./connections.ts";
+import {
+  catalogLogoResponse,
+  handleConnectionCallback,
+  isCatalogLogoPath,
+} from "./connections.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
@@ -158,6 +161,25 @@ const frameCodeResponse = async (
 };
 
 /**
+ * The connection routes: a provider's OAuth callback, and a catalog app's
+ * logo. Undefined for any other path, and for a callback that isn't one.
+ */
+const connectionRouteResponse = async (
+  request: Request,
+  env: Env,
+  pathname: string,
+  requestId: string
+): Promise<Response | undefined> => {
+  if (pathname === connectionCallbackPath) {
+    return await handleConnectionCallback(request, env);
+  }
+  if (isCatalogLogoPath(pathname)) {
+    return await catalogLogoResponse(request, env, pathname, requestId);
+  }
+  return undefined;
+};
+
+/**
  * A call of an App's functions, from a screen's page or a portable host,
  * or a portable host's token request; `undefined` for any other path.
  */
@@ -167,9 +189,11 @@ const appCallResponse = async (
   env: Env,
   requestId: string
 ): Promise<Response | undefined> => {
-  const functionApp = functionCallApp(pathname);
-  if (functionApp !== undefined) {
-    return await appFunctionResponse(request, env, functionApp, requestId);
+  // A screen's call of one of its App's functions, or of a streaming
+  // action's (`<path>/<app>/<stream | attach | cancel>`).
+  const screenCall = await appFunctionRoute(request, env, pathname, requestId);
+  if (screenCall !== undefined) {
+    return screenCall;
   }
   const portableApp = portableCallApp(pathname);
   if (portableApp !== undefined) {
@@ -211,11 +235,14 @@ const route = async (
   if (isUnder(pathname, authBasePath)) {
     return await handleAuthRequest(request, env, requestId);
   }
-  if (pathname === connectionCallbackPath) {
-    const response = await handleConnectionCallback(request, env);
-    if (response !== undefined) {
-      return response;
-    }
+  const connection = await connectionRouteResponse(
+    request,
+    env,
+    pathname,
+    requestId
+  );
+  if (connection !== undefined) {
+    return connection;
   }
   if (pathname === auditExportPath) {
     return await auditExportResponse(request, env, requestId);

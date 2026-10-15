@@ -42,6 +42,7 @@ import {
   codeImportError,
   rewriteAppCodeImports,
   rewriteCodeImports,
+  generatedWorkflowCode,
   rewriteImports,
   serverCode,
   workflowCode,
@@ -52,6 +53,7 @@ import {
   buildFiles,
   declarationFile,
   limitErrors,
+  openWorkflowErrors,
   screenFile,
   serverEntry,
   serverFiles,
@@ -517,6 +519,40 @@ export const buildWorkflows = (
 };
 
 /**
+ * The module the host generated from a JSON workflow, built: as one module
+ * by flat name; or why it failed.
+ */
+export type OpenWorkflowBuild =
+  | { ok: true; modules: Record<string, string> }
+  | { ok: false; diagnostics: Diagnostic[] };
+
+/**
+ * Builds the module the host generated from a JSON workflow
+ * (`openWorkflowEntry`): type-checked against the SDK's own declarations,
+ * then compiled as workflow code is, importing only
+ * `@grasp-os/sdk/open-workflow` (`generatedWorkflowCode`). Generated code
+ * is held to the type check that App workflows aren't (spec 19.1): it is
+ * the host's own output, so a type error is the generator's, and nothing
+ * is sealed that doesn't check.
+ */
+export const buildOpenWorkflow = (
+  files: Record<string, string>
+): OpenWorkflowBuild => {
+  const wrong = openWorkflowErrors(files);
+  if (wrong.length > 0) {
+    return { ok: false, diagnostics: wrong };
+  }
+  const built = compileCode(generatedWorkflowCode, files);
+  if (!built.ok) {
+    return built;
+  }
+  const diagnostics = typeCheck(files, kit.types);
+  return diagnostics.some((diagnostic) => isError(diagnostic))
+    ? { ok: false, diagnostics }
+    : built;
+};
+
+/**
  * An App's server code of spec 8's layout (app-code.ts) as modules by
  * flat name, the host's generated modules among them; or why it failed.
  */
@@ -692,6 +728,12 @@ export default class ScreenCompiler extends WorkerEntrypoint {
   // oxlint-disable-next-line class-methods-use-this
   buildWorkflows(files: Record<string, string>): WorkflowBuild {
     return buildWorkflows(files);
+  }
+
+  /** Builds a JSON workflow's generated module (`buildOpenWorkflow`). */
+  // oxlint-disable-next-line class-methods-use-this
+  buildOpenWorkflow(files: Record<string, string>): OpenWorkflowBuild {
+    return buildOpenWorkflow(files);
   }
 
   /** Only the type check and the lint, without building. */

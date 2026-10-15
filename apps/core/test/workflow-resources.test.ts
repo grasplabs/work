@@ -831,7 +831,12 @@ describe("what keeps a workflow from being deleted", () => {
     // Ada can't see Bob's workflow: she learns there is one, not which.
     await expect(
       detailsOf(deleteWorkflowResource(env, ada, child.id))
-    ).resolves.toStrictEqual({ binders: [], hidden: 1 });
+    ).resolves.toStrictEqual({
+      binders: [],
+      hidden: 1,
+      triggers: { ids: [], hidden: 0 },
+      appBindings: [],
+    });
     const events = await allEvents();
     const refused = events.find(
       ({ action, target }) =>
@@ -861,6 +866,8 @@ describe("what keeps a workflow from being deleted", () => {
     ).resolves.toStrictEqual({
       binders: [{ id: parent.id, name: parent.name }],
       hidden: 0,
+      triggers: { ids: [], hidden: 0 },
+      appBindings: [],
     });
   });
 
@@ -1063,6 +1070,19 @@ describe("stored versions", () => {
     const ada = await person("builder");
     const child = await workflowOf(ada, "child");
     await publish(ada, child.id, definitionOf({ name: child.name }));
+    // The database refuses to change a version; someone with its raw files
+    // gets past that, which is what the hashes are for.
+    const refusedByDatabase = await outcome(
+      env.DB.prepare(
+        "UPDATE workflow_resource_versions SET definition = '{}' WHERE workflow_resource_id = ?"
+      )
+        .bind(child.id)
+        .run()
+    );
+    expect(refusedByDatabase).toContain("immutable");
+    await env.DB.prepare(
+      "DROP TRIGGER workflow_resource_versions_immutable_update"
+    ).run();
     await env.DB.prepare(
       'UPDATE workflow_resource_versions SET definition = ?, contract = replace(contract, \'"label":"Instructions"\', \'"label":"Changed"\') WHERE workflow_resource_id = ?'
     )

@@ -400,6 +400,10 @@ msgstr "{run} : en échec"
 msgid "{runs, plural, one {{date}: # run} other {{date}: # runs}}"
 msgstr "{runs, plural, one {{date} : # exécution} other {{date} : # exécutions}}"
 
+#: src/routes/_shell.settings.spend.tsx
+msgid "{runs, plural, one {# run} other {# runs}}"
+msgstr "{runs, plural, one {# exécution} other {# exécutions}}"
+
 #: src/dashboard/runs-widget.tsx
 msgid "{runs, plural, one {of # run} other {of # runs}}"
 msgstr "{runs, plural, one {sur # exécution} other {sur # exécutions}}"
@@ -741,7 +745,6 @@ msgid "Agent"
 msgstr "Agent"
 
 #: src/activity/pending.tsx
-#: src/connections/connection-list.tsx
 msgid "Agent {agent}"
 msgstr "Agent {agent}"
 
@@ -1973,6 +1976,10 @@ msgstr "Déplier la navigation"
 msgid "Expand the sections"
 msgstr "Déplier les sections"
 
+#: src/workflows/workflows-table.tsx
+msgid "expected on top, from designs and tests"
+msgstr "attendu en plus, d’après les conceptions et les tests"
+
 #: src/export/export-menu.tsx
 msgid "Export"
 msgstr "Exporter"
@@ -2009,6 +2016,11 @@ msgstr "Exports"
 #: src/activity/pending.tsx
 msgid "Exports of {engine}: {covered}"
 msgstr "Exports de {engine} : {covered}"
+
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Extra high"
+msgstr "Très élevé"
 
 #: src/knowledge/uploads.tsx
 msgid "Extracting"
@@ -2172,10 +2184,6 @@ msgstr "A accordé une autorisation"
 msgid "Grasp can't be reached right now. Try again in a moment."
 msgstr "Grasp est injoignable pour le moment. Réessayez dans un instant."
 
-#: src/routes/_shell.settings.spend.tsx
-msgid "Grasp counts what the models cost against the budgets it sets for you. No budget is set, so there is nothing to show."
-msgstr "Grasp compte ce que coûtent les modèles sur les budgets qu’il fixe pour vous. Aucun budget n’est fixé, il n’y a donc rien à afficher."
-
 #: src/onboarding/staff-words.ts
 msgid "Grasp gave its go"
 msgstr "Grasp a donné son feu vert"
@@ -2288,6 +2296,11 @@ msgctxt "severity of a finding"
 msgid "High"
 msgstr "Élevée"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "High"
+msgstr "Élevé"
+
 #: src/knowledge/timeline.tsx
 msgid "History"
 msgstr "Historique"
@@ -2295,6 +2308,10 @@ msgstr "Historique"
 #: src/routes/_shell.settings.models.tsx
 msgid "Hosted in the EU"
 msgstr "Hébergé dans l’UE"
+
+#: src/chat/composer.tsx
+msgid "How hard it thinks"
+msgstr "Niveau de réflexion"
 
 #: src/routes/_shell.onboarding.open.tsx
 msgid "How much has to be known before it opens"
@@ -2670,6 +2687,11 @@ msgctxt "severity of a finding"
 msgid "Low"
 msgstr "Faible"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Low"
+msgstr "Faible"
+
 #: src/dashboard/report.ts
 msgid "Made with Grasp on {date}"
 msgstr "Réalisé avec Grasp le {date}"
@@ -2706,9 +2728,19 @@ msgstr "Gérer {app}, connecté pour vous"
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
 
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Max"
+msgstr "Maximal"
+
 #: src/chat/builds.tsx
 msgid "May change something outside Grasp"
 msgstr "Peut modifier quelque chose en dehors de Grasp"
+
+#: src/chat/composer.tsx
+msgctxt "thinking effort"
+msgid "Medium"
+msgstr "Moyen"
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "Members"
@@ -2745,6 +2777,10 @@ msgstr "Appel de modèle"
 #: src/dashboard/signals.tsx
 msgid "Model cost"
 msgstr "Coût du modèle"
+
+#: src/chat/composer.tsx
+msgid "Model: {name}, thinking {effort, select, low {low} medium {medium} high {high} xhigh {extra high} other {max}}. Change model or thinking"
+msgstr "Modèle : {name}, réflexion {effort, select, low {faible} medium {moyenne} high {élevée} xhigh {très élevée} other {maximale}}. Changer de modèle ou de réflexion"
 
 #: src/chat/composer.tsx
 msgid "Model: {name}. Change model"
@@ -2846,6 +2882,10 @@ msgstr "Prochaine exécution : {next}"
 #: src/routes/_shell.engines.index.tsx
 msgid "No apps yet"
 msgstr "Aucune application pour l’instant"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "No budget is set for all calls together"
+msgstr "Aucun budget n’est fixé pour l’ensemble des appels"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "No budget is set: model calls aren't limited by cost."
@@ -2958,6 +2998,10 @@ msgstr "Aucune exécution pour l’instant."
 #: src/routes/_shell.settings.profile.tsx
 msgid "No teams"
 msgstr "Aucune équipe"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "No workflow has called a model this month."
+msgstr "Aucun workflow n’a appelé de modèle ce mois-ci."
 
 #: src/routes/_shell.engines.$engine.index.tsx
 msgid "No workflow in this engine yet."
@@ -3611,6 +3655,10 @@ msgstr "Publier une version de {contract}"
 msgid "Publish as"
 msgstr "Publier comme"
 
+#: src/workflows/runs.tsx
+msgid "Queued"
+msgstr "En file d’attente"
+
 #: src/workflows/history-view.tsx
 msgctxt "a run's lifecycle"
 msgid "Queued"
@@ -3913,6 +3961,10 @@ msgstr "Hors service"
 msgid "Retired by {endedBy}, {endedAt}: {endedReason}"
 msgstr "Mis hors service par {endedBy}, {endedAt} : {endedReason}"
 
+#: src/workflows/workflows-table.tsx
+msgid "return a month, measured"
+msgstr "gain par mois, mesuré"
+
 #: src/dashboard/to-do.tsx
 msgid "Review"
 msgstr "Examiner"
@@ -4054,6 +4106,14 @@ msgstr "S’exécute {how} {count, plural, one {# fois de moins} other {# fois d
 #: src/chat/builds-state.ts
 msgid "Runs {how} {count, plural, one {# more time} other {# more times}} ({now} now)"
 msgstr "S’exécute {how} {count, plural, one {# fois de plus} other {# fois de plus}} ({now} désormais)"
+
+#: src/workflows/workflows-table.tsx
+msgid "Runs a week"
+msgstr "Exécutions par semaine"
+
+#: src/workflows/workflows-table.tsx
+msgid "runs a week by these workflows"
+msgstr "exécutions par semaine de ces workflows"
 
 #: src/dashboard/runs-widget.tsx
 msgid "Runs by the day they started"
@@ -4357,6 +4417,10 @@ msgstr "Chacun choisit sa langue en ouvrant son lien."
 msgid "Someone else"
 msgstr "Quelqu’un d’autre"
 
+#: src/screens/screen-frame.tsx
+msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
+msgstr "Quelqu’un d’autre s’est connecté sur ce navigateur, cette application a donc été arrêtée. Réessayez pour l’ouvrir au nom de la personne connectée maintenant."
+
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Quelqu’un qui n’est plus là"
@@ -4470,6 +4534,10 @@ msgstr "A arrêté de suivre ce qui change sur une connexion"
 #: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Arrêté."
+
+#: src/activity/pending.tsx
+msgid "Store {store}"
+msgstr "Magasin {store}"
 
 #: src/engines/store-changes.tsx
 msgid "Store ID: {store}"
@@ -4612,6 +4680,10 @@ msgstr "Cette transcription est trop longue. Apportez la conversation elle-même
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Ce mode de connexion n’est pas configuré ici."
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "The {top} that spent most; more spent less."
+msgstr "Les {top} qui ont le plus dépensé ; d’autres ont dépensé moins."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "The {top} who spent most; more spent less."
@@ -5185,6 +5257,10 @@ msgstr "Outils à autoriser"
 msgid "Tools, products and the company's own words, so he hears them right."
 msgstr "Outils, produits et mots propres à l’entreprise, pour qu’il les comprenne bien."
 
+#: src/activity/pending.tsx
+msgid "Trigger {trigger}"
+msgstr "Déclencheur {trigger}"
+
 #: src/workflows/triggers.tsx
 msgid "Triggers"
 msgstr "Déclencheurs"
@@ -5361,6 +5437,18 @@ msgstr "Attend une personne"
 msgid "Waiting for a set time"
 msgstr "Attend un délai fixé"
 
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of the organization's runs; tries again by {time}"
+msgstr "En attente d’une part des exécutions de l’organisation ; réessaie au plus tard le {time}"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of this App's runs; tries again by {time}"
+msgstr "En attente d’une part des exécutions de cette App ; réessaie au plus tard le {time}"
+
+#: src/workflows/runs.tsx
+msgid "Waiting for a share of this person's runs; tries again by {time}"
+msgstr "En attente d’une part des exécutions de cette personne ; réessaie au plus tard le {time}"
+
 #: src/workflows/history-view.tsx
 msgid "Waiting for an event"
 msgstr "Attend un événement"
@@ -5437,6 +5525,10 @@ msgstr "Ce qui pourrait être amélioré"
 msgctxt "kickoff field"
 msgid "What counts as success"
 msgstr "Ce qui compte comme un succès"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "What each workflow's model calls cost this month, most first, and how often it ran."
+msgstr "Ce qu’ont coûté ce mois-ci les appels au modèle de chaque workflow, du plus cher au moins cher, et combien de fois il s’est exécuté."
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "What every agent has in its context, all the time."
@@ -5648,8 +5740,8 @@ msgid "Workflow"
 msgstr "Workflow"
 
 #: src/activity/pending.tsx
-msgid "Workflow {workflowId} of {engine}"
-msgstr "Workflow {workflowId} de {engine}"
+msgid "Workflow {workflow}"
+msgstr "Workflow {workflow}"
 
 #: src/routes/_shell.workflows.$app.$workflow.tsx
 msgid "Workflow not found"
@@ -5693,6 +5785,10 @@ msgstr "Workflows connus"
 #: src/dashboard/to-do.tsx
 msgid "Workflows that failed"
 msgstr "Workflows en échec"
+
+#: src/routes/_shell.settings.spend.tsx
+msgid "Workflows this month"
+msgstr "Workflows ce mois-ci"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Workflows whose AI steps stay in the EU: {workflows}."

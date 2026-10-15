@@ -679,7 +679,7 @@ describe("the sandbox supervisor", () => {
     );
   }, 30_000);
 
-  it("blames the App whose call crashed its process", async () => {
+  it("refuses as its memory a call V8 aborted at its heap limit", async () => {
     // Past V8's own heap limit, which aborts workerd, before this one.
     await withSupervisor(
       { memoryLimitBytes: 64 * 1024 ** 3 },
@@ -690,15 +690,18 @@ describe("the sandbox supervisor", () => {
         });
         expect(result).toMatchObject({
           status: 200,
-          verdict: "crashed",
+          verdict: "memory",
           answer: { ok: false },
         });
-        expect(supervisor.stats().crashed).toBe(1);
+        expect({
+          memory: supervisor.stats().memory,
+          crashed: supervisor.stats().crashed,
+        }).toStrictEqual({ memory: 1, crashed: 0 });
       }
     );
   }, 30_000);
 
-  it("blames the App whose call crashed its process, however slowly the process goes", async () => {
+  it("refuses as its memory a call V8 aborted, however slowly the process goes", async () => {
     // workerd behind a shell that goes two seconds after it does: a process
     // V8 aborted, slow to exit on a loaded machine (a core to write, say).
     const slow = path.join(tempDir(), "slow-to-exit.sh");
@@ -716,11 +719,34 @@ describe("the sandbox supervisor", () => {
         });
         expect(result).toMatchObject({
           status: 200,
-          verdict: "crashed",
+          verdict: "memory",
           answer: { ok: false },
         });
       }
     );
+  }, 30_000);
+
+  it("says a call whose process was killed from outside crashed, as the kernel's OOM killer kills one", async () => {
+    // workerd behind a shell that SIGKILLs it three seconds in, mid-call:
+    // what a full cgroup does to whichever process it picks.
+    const killed = path.join(tempDir(), "killed-from-outside.sh");
+    writeFileSync(
+      killed,
+      `#!/bin/sh\n"${nativeWorkerd}" "$@" &\nchild=$!\nsleep 3\nkill -9 $child\nwait $child\nexit $?\n`
+    );
+    chmodSync(killed, 0o755);
+    await withSupervisor({ workerd: killed }, async (supervisor) => {
+      const result = await callSupervisor(supervisor.socket, {
+        body: "for (;;) {}",
+        deadlineMs: 20_000,
+      });
+      expect(result).toMatchObject({
+        status: 200,
+        verdict: "crashed",
+        answer: { ok: false },
+      });
+      expect(supervisor.stats().crashed).toBe(1);
+    });
   }, 30_000);
 
   it("ends at once, as its bound, a call whose host dropped it and still runs", async () => {

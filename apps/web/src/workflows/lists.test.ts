@@ -6,7 +6,7 @@ import {
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
-import { listsOf, needsAttention } from "./lists.ts";
+import { handledOf, listsOf, needsAttention } from "./lists.ts";
 
 /** A workflow that ran and needs nobody, changed by `change`. */
 const workflow = (
@@ -26,6 +26,7 @@ const workflow = (
   },
   waiting: 0,
   failed: 0,
+  handled: 0,
   scheduleStopped: false,
   ...change,
 });
@@ -65,5 +66,16 @@ describe("the Workflows page's lists", () => {
 
   it("puts nothing in a list it doesn't belong to", () => {
     expect(listsOf([never])).toStrictEqual({ atWork: [], onTheWay: [never] });
+  });
+
+  it("handles a week together what each workflow handled, none when none ran", () => {
+    expect({
+      some: handledOf([
+        workflow("a", { handled: 12 }),
+        never,
+        workflow("b", { handled: 30 }),
+      ]),
+      none: handledOf([]),
+    }).toStrictEqual({ some: 42, none: 0 });
   });
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { inProgramme, nextReport, programmeWeek } from "./programme.ts";
+import {
+  inProgramme,
+  nextReport,
+  programmeWeek,
+  reportWindow,
+} from "./programme.ts";
 
 // The programme's weeks (programme.ts): which week today is in, and when
 // the next weekly report is ready, from the programme's first Monday.
@@ -82,5 +87,33 @@ describe("the next weekly report", () => {
       { inDays: 0, week: 8, through: 7 },
       { inDays: 0, week: 9, through: 7 },
     ]);
+  });
+});
+
+describe("what a weekly report is about", () => {
+  it("is the week that just closed, whole, on the day its report is ready", () => {
+    expect(reportWindow(start, "2026-09-14")).toStrictEqual({
+      to: "2026-09-13",
+      days: 7,
+    });
+  });
+
+  it("is the week that runs, up to today, until then", () => {
+    expect({
+      monday: reportWindow(start, "2026-09-07"),
+      sunday: reportWindow(start, "2026-09-13"),
+      next: reportWindow(start, "2026-09-15"),
+    }).toStrictEqual({
+      monday: { to: "2026-09-07", days: 1 },
+      sunday: { to: "2026-09-13", days: 7 },
+      next: { to: "2026-09-15", days: 2 },
+    });
+  });
+
+  it("is today before the programme begins", () => {
+    expect(reportWindow(start, "2026-09-01")).toStrictEqual({
+      to: "2026-09-01",
+      days: 1,
+    });
   });
 });
