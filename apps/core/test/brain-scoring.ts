@@ -25,9 +25,9 @@ export interface TrialObservation {
   /**
    * The chat as the model read it, request after request, each part marked
    * by who wrote it. Evidence counts where a source gave it before the
-   * model wrote it, or where a tool result held it that a Knowledge read
-   * in the trial returned: never where only the model wrote it, or made
-   * it in code, itself.
+   * model wrote it, or where a tool result held the whole line a Knowledge
+   * read in the trial returned it in: never where only the model wrote
+   * it, or made it in code, itself.
    */
   transcript: readonly TranscriptPart[];
   /** What each of the agent's Knowledge reads in the trial returned. */
@@ -292,17 +292,24 @@ export const scoreTrial = (
       completed: abstained && authorized,
     };
   }
-  const reads = observed.readTexts.map((text) => normalized(text));
-  // A source gave it before the model wrote it, or a tool returned it
-  // that a Knowledge read in the trial returned too: a guess the model
-  // made doesn't spoil a read that followed it.
+  // The lines of what Knowledge reads returned, one by one.
+  const readLines = observed.readTexts.flatMap((text) =>
+    text.split("\n").map((line) => normalized(line))
+  );
+  // A source gave it before the model wrote it, or a tool returned the
+  // whole line a Knowledge read in the trial returned it in: the read's
+  // text reached the model, not only the words the model may have made.
+  // A guess the model made earlier doesn't spoil a read that followed.
   const reached = expect.evidence.filter(({ marker }) => {
     const words = normalized(marker);
     const holding = parts.filter(({ text }) => text.includes(words));
+    const lines = readLines.filter((line) => line.includes(words));
     return (
       holding[0]?.by === "source" ||
-      (holding.some(({ by }) => by === "tool") &&
-        reads.some((text) => text.includes(words)))
+      holding.some(
+        ({ by, text }) =>
+          by === "tool" && lines.some((line) => text.includes(line))
+      )
     );
   }).length;
   const cited = citationsOf(observed.answer);

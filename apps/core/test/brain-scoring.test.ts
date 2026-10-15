@@ -115,14 +115,23 @@ describe("scoring a trial", () => {
       }).evidenceRecall,
       // Its code read the section through Knowledge and returned it.
       read: verdict(contract, {
-        transcript: [{ by: "tool", text: `Returned: ${marker}` }],
+        transcript: [{ by: "tool", text: `Returned: ## Lease\n${marker}.` }],
         readTexts: [`## Lease\n${marker}.`],
+      }).evidenceRecall,
+      // It made the marker in one step and read the section, unreturned,
+      // in another.
+      readUnreturned: verdict(contract, {
+        transcript: [
+          { by: "tool", text: `Returned: ${marker}` },
+          { by: "tool", text: "Returned: done" },
+        ],
+        readTexts: [`## Lease\n${marker} since 2026-10-01.`],
       }).evidenceRecall,
       // It guessed in its code, then read the section that says it.
       guessedThenRead: verdict(contract, {
         transcript: [
           { by: "model", text: `search("${marker}")` },
-          { by: "tool", text: `Returned: ${marker}` },
+          { by: "tool", text: `Returned: ${marker}.` },
         ],
         readTexts: [`## Lease\n${marker}.`],
       }).evidenceRecall,
@@ -141,7 +150,7 @@ describe("scoring a trial", () => {
       // Read in an earlier request, left out of the last one.
       dropped: verdict(contract, {
         transcript: [
-          { by: "tool", text: `Returned: ${marker}` },
+          { by: "tool", text: `Returned: ${marker}.` },
           { by: "source", text: "[earlier results left out]" },
         ],
         readTexts: [`## Lease\n${marker}.`],
@@ -159,6 +168,7 @@ describe("scoring a trial", () => {
       },
       constructed: 0,
       read: 1,
+      readUnreturned: 0,
       guessedThenRead: 1,
       readElsewhere: 0,
       quoted: 1,
