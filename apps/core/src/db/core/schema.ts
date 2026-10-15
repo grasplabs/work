@@ -1074,6 +1074,14 @@ export const workflowRuns = sqliteTable(
      * allows however its runs start one another.
      */
     depth: integer().notNull().default(0),
+    /**
+     * The newest activation generation of the run whose attempts the
+     * engine has fenced, as its object last said (src/workflows/quotas.ts,
+     * `sharesReleased`): their shares of the attempts running at once were
+     * given back, and an attempt of this generation, or an older one, takes
+     * none again, however late its admission lands. Only grows.
+     */
+    sharesFencedThrough: integer("shares_fenced_through").notNull().default(0),
   },
   (table) => [
     index("workflow_runs_app_idx").on(table.appId, table.createdAt),
@@ -1161,8 +1169,9 @@ export const runLineages = sqliteTable("run_lineages", {
  * holds `reserved_ms` (its allowance up to its deadline, at most an
  * attempt's default active wall time) until it settles with what it used
  * (`used_ms`, `settled_at`), up to its `deadline`; one that never settles
- * (its activation died) is settled as having used all it could, once its
- * deadline has passed.
+ * (its activation died) is settled as having used what it ran once the
+ * engine fenced it (its run paused, ended or cancelled, its activation
+ * taken over), or all it could, once its deadline has passed.
  */
 export const runLineageAttempts = sqliteTable(
   "run_lineage_attempts",
@@ -1201,6 +1210,14 @@ export const runLineageAttempts = sqliteTable(
      * put back (src/workflows/admission.ts).
      */
     stepHash: text("step_hash").notNull().default(""),
+    /**
+     * Whether the attempt's own settle gave back the host calls it
+     * reserved and didn't make (src/workflows/quotas.ts): once only, also
+     * after the engine fenced it and its receipt settled sooner.
+     */
+    callsSettled: integer("calls_settled", { mode: "boolean" })
+      .notNull()
+      .default(false),
   },
   (table) => [
     primaryKey({

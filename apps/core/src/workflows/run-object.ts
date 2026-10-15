@@ -18,6 +18,7 @@ import { runPinned } from "./dispatcher.ts";
 import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls, BusyRefusals } from "./host.ts";
+import { sharesReleased } from "./quotas.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 
 /**
@@ -113,6 +114,32 @@ const revokeOrLog = async (
  * engine drops with the run, as `cancelTable`.
  */
 const appsTable = "grasp_run_apps";
+
+/**
+ * The newest generation of the run whose attempts' shares this object has
+ * given back (`WorkflowRuns.#sharesReleased`): a table the engine drops
+ * with the run, as `cancelTable`.
+ */
+const sharesTable = "grasp_run_shares";
+
+/** What `sharesTable` holds: 0 before the object gave anything back. */
+const releasedThrough = (sql: SqlStorage): number => {
+  const known =
+    sql
+      .exec(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        sharesTable
+      )
+      .toArray().length > 0;
+  if (!known) {
+    return 0;
+  }
+  return (
+    sql
+      .exec<{ released: number }>(`SELECT released FROM ${sharesTable}`)
+      .toArray()[0]?.released ?? 0
+  );
+};
 
 /** One attempt of a step, as a key (`WorkflowRuns.#returned`). */
 const attemptKey = (key: string, attempt: number, generation: number) =>
@@ -561,14 +588,52 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     if (pin?.type !== "app") {
       return;
     }
+    // The run this object holds, from its own journal: a batch naming
+    // another is no notification of this run, and acts on none.
+    const run = this.instanceId();
+    if (
+      run === undefined ||
+      notifications.some(({ instanceId }) => instanceId !== run)
+    ) {
+      log.warn("workflow.notify_foreign_run", {
+        runId: run,
+        named: latest.instanceId,
+      });
+      return;
+    }
+    const mark = cancelMarkIn(this.ctx.storage.sql);
+    // Beside the run's record, never behind it: whatever its attempts the
+    // engine has fenced still hold of the client's shares comes back now,
+    // not at their deadlines (`#sharesReleased`), whether or not what
+    // core records of the run goes through, and without keeping that
+    // record waiting. It depends on nothing the record writes.
+    const released = this.#sharesReleased(run, mark !== undefined);
+    const recorded = this.#statusRecorded(run, latest, mark);
+    const [release, record] = await Promise.allSettled([released, recorded]);
+    if (release.status === "rejected") {
+      throw release.reason;
+    }
+    if (record.status === "rejected") {
+      throw record.reason;
+    }
+  }
+
+  /**
+   * Makes core's record of run `run` follow the engine's `latest` status
+   * (runs.ts, `projectStatus`), its cancel (`mark`) recorded first.
+   */
+  async #statusRecorded(
+    run: string,
+    latest: RunNotification,
+    mark: CancelMark | undefined
+  ): Promise<void> {
     // A run marked cancelled ends cancelled, however it ended: its cancel
     // is recorded in core first (`completeCancel`, once), so its row reads
     // it, rather than a failure its refused attempts led to.
-    const mark = cancelMarkIn(this.ctx.storage.sql);
     if (mark !== undefined && mark.settled !== true) {
       await completeCancel(this.env, mark);
     }
-    await projectStatus(this.env, latest.instanceId, {
+    await projectStatus(this.env, run, {
       status: latest.status,
       at: latest.timestamp,
       sequence: latest.sequence,
@@ -579,6 +644,33 @@ export class WorkflowRuns extends WorkflowRun<Env> {
     // A pause or resume settles from where the engine has the run now,
     // and which controls it took, read together here from its journal,
     // not from the notification.
-    await settleControls(this.env, latest.instanceId, this.controlState());
+    await settleControls(this.env, run, this.controlState());
+  }
+
+  /**
+   * Gives back what run `run`'s attempts the engine has fenced still hold
+   * (quotas.ts, `sharesReleased`): paused, ended, cancelled, suspended or
+   * taken over by a command. By the fence as the run stands now, read
+   * from its own journal, never from a notification: one late or handed
+   * over again frees nothing a newer activation's attempt holds, since the
+   * fence only grows. Written only when the fence grew since the last
+   * release this object made (`sharesTable`): an attempt of a generation
+   * released takes no share again, so nothing is left to give back for
+   * it. A cancelled run's attempts are charged up to their deadlines.
+   */
+  async #sharesReleased(run: string, cancelled: boolean): Promise<void> {
+    const over = this.generationOver();
+    if (over === undefined || over <= releasedThrough(this.ctx.storage.sql)) {
+      return;
+    }
+    await sharesReleased(this.env, run, over, { cancelled });
+    const { sql } = this.ctx.storage;
+    sql.exec(
+      `CREATE TABLE IF NOT EXISTS ${sharesTable} (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), released INTEGER NOT NULL)`
+    );
+    sql.exec(
+      `INSERT INTO ${sharesTable} (singleton, released) VALUES (1, ?) ON CONFLICT (singleton) DO UPDATE SET released = max(released, excluded.released)`,
+      over
+    );
   }
 }
