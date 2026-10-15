@@ -343,6 +343,9 @@ const keptCallback = (given: object): object => {
   return kept;
 };
 
+/** How long a test's `onLost` may take before its stubs are let go of anyway. */
+const lostNoticeMs = 10_000;
+
 /** Calls `kept`, a test's callback (`keptCallback`), with `args`. */
 const callBack = async (kept: object, ...args: unknown[]): Promise<void> => {
   if (typeof kept === "function") {
@@ -371,15 +374,31 @@ const testCallback = (
     if (kept === undefined) {
       return;
     }
-    try {
-      if (!ended()) {
-        await callBack(kept.lost);
+    const { snapshot, lost: toLost } = kept;
+    const { promise: noticed, resolve } = Promise.withResolvers<null>();
+    // Waited for `lostNoticeMs` at most: a test that never answers still
+    // has both of its stubs let go of.
+    const timer = setTimeout(() => {
+      resolve(null);
+    }, lostNoticeMs);
+    const notice = async (): Promise<void> => {
+      try {
+        if (!ended()) {
+          await callBack(toLost);
+        }
+      } catch {
+        // The test's isolate is gone already.
       }
-    } catch {
-      // The test's isolate is gone already.
+      resolve(null);
+    };
+    try {
+      void notice();
+      await noticed;
+    } finally {
+      clearTimeout(timer);
+      disposeStub(snapshot);
+      disposeStub(toLost);
     }
-    disposeStub(kept.snapshot);
-    disposeStub(kept.lost);
   };
   const hold = (): SnapshotCallback => {
     holds += 1;
