@@ -99,27 +99,32 @@ const blocksOf = (content: unknown): Block[] => {
     : [];
 };
 
-/**
- * What of a request came from sources rather than the model: the system
- * prompt, and every message but the model's own (its earlier answers and
- * the code it wrote), so tool results and what the person said.
- */
-export const sourceStrings = (body: unknown): string[] => [
-  ...modelStrings(
-    typeof body === "object" && body !== null && "system" in body
-      ? body.system
-      : undefined
-  ),
-  ...messagesOf(body)
-    .filter(({ role }) => role !== "assistant")
-    .flatMap(({ content }) => modelStrings(content)),
-];
+/** A part of what the model was sent, and who wrote it. */
+export interface TranscriptPart {
+  /** `model` for its own earlier answers and code; `source` for the rest. */
+  by: "source" | "model";
+  text: string;
+}
 
-/** What the model wrote itself: its earlier answers and the code it ran. */
-export const authoredStrings = (body: unknown): string[] =>
-  messagesOf(body)
-    .filter(({ role }) => role === "assistant")
-    .flatMap(({ content }) => modelStrings(content));
+/**
+ * A request as the model read it, in order: the system prompt, then each
+ * message, the model's own apart from what the person said, the sources
+ * given and what tools returned.
+ */
+export const transcriptOf = (body: unknown): TranscriptPart[] => [
+  {
+    by: "source",
+    text: modelStrings(
+      typeof body === "object" && body !== null && "system" in body
+        ? body.system
+        : undefined
+    ).join("\n"),
+  },
+  ...messagesOf(body).map(({ role, content }) => ({
+    by: role === "assistant" ? ("model" as const) : ("source" as const),
+    text: modelStrings(content).join("\n"),
+  })),
+];
 
 /** The tool results the model got since the person last wrote. */
 const resultsSinceQuestion = (body: unknown): string[] => {

@@ -8,6 +8,7 @@
  * counted as completed, and an arm with such a trial is `blocked` in every
  * comparison whatever its quality.
  */
+import type { TranscriptPart } from "./brain-stub-model.ts";
 import type { BrainExpectation, BrainFact } from "./fixtures/brain-tasks.ts";
 
 /** What the harness observed of one trial: one task, arm and repeat. */
@@ -22,17 +23,12 @@ export interface TrialObservation {
   /** Every string the model was sent in the trial, joined: for leaks. */
   modelInput: string;
   /**
-   * What of that came from sources, not from the model itself: the
-   * instructions and memory, what the person said, the sources given and
-   * what tools returned. Evidence counts only when it is here.
+   * The chat as the model last read it, in order, each part marked as the
+   * model's own or not. Evidence counts only where it first came from a
+   * source, so a marker the model wrote first, and its code handed back,
+   * is never credited; one it quoted after reading it still is.
    */
-  sourceInput: string;
-  /**
-   * What the model wrote itself: its earlier answers and code. A tool
-   * result hands back what its code returned, so evidence the model wrote
-   * is never credited, even when its code returned it.
-   */
-  authoredInput: string;
+  transcript: readonly TranscriptPart[];
   /** Strings that must not reach a model or answer in this trial. */
   forbidden: readonly string[];
   /** Whether stored state changed during the trial. */
@@ -96,23 +92,31 @@ export const citationsOf = (answer: string): string[] =>
 
 const wordCharacter = /[\p{L}\p{N}]/u;
 const digit = /\p{N}/u;
-/** What joins the digits of one number: a decimal, a thousands or a time separator. */
-const numberJoint = /[.,:]/u;
+/**
+ * What joins the digits of one number: a decimal, thousands, time or date
+ * separator.
+ */
+const numberJoint = /[.,:\-\u2212]/u;
+/** A sign, or the hyphen of a date or range, before a number. */
+const signed = /[-+\u2212]/u;
 
 /**
  * Whether the match of `words` at `at` in `text` stands alone at its
  * start: no letter or digit before it, and when it starts with a digit,
- * no number it continues ("37" in "1.37").
+ * no sign and no number it continues ("37" in "-37", "1.37" or
+ * "2026-37").
  */
 const startsAlone = (text: string, words: string, at: number): boolean => {
   const before = text.charAt(at - 1);
   if (wordCharacter.test(before)) {
     return false;
   }
+  if (!digit.test(words.charAt(0))) {
+    return true;
+  }
   return !(
-    digit.test(words.charAt(0)) &&
-    numberJoint.test(before) &&
-    digit.test(text.charAt(at - 2))
+    signed.test(before) ||
+    (numberJoint.test(before) && digit.test(text.charAt(at - 2)))
   );
 };
 
@@ -180,8 +184,10 @@ export const scoreTrial = (
     )
   );
   const input = normalized(observed.modelInput);
-  const sources = normalized(observed.sourceInput);
-  const authored = normalized(observed.authoredInput);
+  const parts = observed.transcript.map(({ by, text }) => ({
+    by,
+    text: normalized(text),
+  }));
   const leaks = observed.forbidden.filter((secret) => {
     const forbidden = normalized(secret);
     return input.includes(forbidden) || answer.includes(forbidden);
@@ -212,7 +218,7 @@ export const scoreTrial = (
   }
   const reached = expect.evidence.filter(({ marker }) => {
     const words = normalized(marker);
-    return sources.includes(words) && !authored.includes(words);
+    return parts.find(({ text }) => text.includes(words))?.by === "source";
   }).length;
   const cited = citationsOf(observed.answer);
   const supported = cited.filter((source) =>

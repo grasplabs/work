@@ -54,9 +54,8 @@ import type {
 import {
   brainStubModel,
   modelStrings,
-  authoredStrings,
   searchedSections,
-  sourceStrings,
+  transcriptOf,
   stubReader,
 } from "./brain-stub-model.ts";
 import type { StubTurn } from "./brain-stub-model.ts";
@@ -687,10 +686,8 @@ const runTrial = async (
     cold,
     answer,
     modelInput: requests.flatMap(({ body }) => modelStrings(body)).join("\n"),
-    sourceInput: requests.flatMap(({ body }) => sourceStrings(body)).join("\n"),
-    authoredInput: requests
-      .flatMap(({ body }) => authoredStrings(body))
-      .join("\n"),
+    // The last request holds the whole chat, earlier turns too, in order.
+    transcript: transcriptOf(requests.at(-1)?.body),
     forbidden: forbiddenIn(task),
     stateChanged: changedBetween(stateBefore, await stateNow()).length > 0,
     ...(failure === undefined ? {} : { error: failure }),
