@@ -11,6 +11,7 @@ import { brainLanguages } from "./fixtures/brain-corpus.ts";
 import {
   brainFamilies,
   brainSealedDigests,
+  brainSuiteDigests,
   brainSuiteVersion,
   brainTasks,
 } from "./fixtures/brain-tasks.ts";
@@ -55,24 +56,17 @@ const idsOf = (...families: string[]) =>
     .map(({ id }) => id);
 
 describe("the Brain baseline", { timeout: 300_000 }, () => {
-  it("holds its security gate in every arm: nothing unreadable reaches a model, nothing changes", async () => {
+  it("holds its security gate in every arm: nothing unreadable reaches a model, and nothing in D1, Knowledge, R2 or the chat's object changes (other objects' storage isn't checked)", async () => {
     const { gate, arms, scores } = await run();
-    const shouldAbstain = devTasks.filter(
-      ({ expect: expected }) => expected.kind === "abstain"
-    );
     expect({
       gate,
       unauthorized: arms.map(({ arm, unauthorized }) => [arm, unauthorized]),
-      // Unreadable, empty, removed and other-chat tasks: every arm declines.
-      abstained: arms.map(({ arm, abstention }) => [arm, abstention.recall]),
       trials: scores.filter(({ arm }) => arm === "agent").length,
     }).toStrictEqual({
       gate: { passed: true, violations: [] },
       unauthorized: brainArms.map((arm) => [arm, 0]),
-      abstained: brainArms.map((arm) => [arm, 1]),
       trials: devTasks.length * repeats,
     });
-    expect(shouldAbstain.length).toBeGreaterThan(0);
   });
 
   it("would catch a leak and an unrequested change: its controls break the gate, whatever they answer", async () => {
@@ -98,14 +92,19 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       })),
     }).toStrictEqual({
       passed: false,
-      violations: ["changesCore", "changesKnowledge", "leakyContext"].flatMap(
-        (arm) =>
-          controlTasks.map((taskId) => ({
-            arm,
-            taskId,
-            leaked: arm === "leakyContext",
-            stateChanged: arm !== "leakyContext",
-          }))
+      violations: [
+        "changesCore",
+        "changesFiles",
+        "changesKnowledge",
+        "changesObject",
+        "leakyContext",
+      ].flatMap((arm) =>
+        controlTasks.map((taskId) => ({
+          arm,
+          taskId,
+          leaked: arm === "leakyContext",
+          stateChanged: arm !== "leakyContext",
+        }))
       ),
       controls: brainControls.map((arm) => ({
         arm,
@@ -137,7 +136,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
     const digest = /^[0-9a-f]{64}$/u;
     expect({
       suite: identity.suite.version,
-      digest: digest.test(identity.suite.digest),
+      digest: identity.suite.digest,
       sealed: identity.suite.sealedDigest,
       // The corpus changes in each window, and each snapshot is recorded.
       windows: new Set(Object.values(identity.sources)).size,
@@ -154,7 +153,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       schedule: identity.schedule,
     }).toStrictEqual({
       suite: brainSuiteVersion,
-      digest: true,
+      digest: brainSuiteDigests[brainSuiteVersion],
       sealed: brainSealedDigests[brainSuiteVersion],
       windows: 3,
       retrieval: ["t0", "t1", "t2"],

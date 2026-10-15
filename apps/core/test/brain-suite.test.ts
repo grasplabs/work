@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { sealedDigest, tasksOf } from "./brain-harness.ts";
+import {
+  forbiddenIn,
+  sealedDigest,
+  suiteDigest,
+  tasksOf,
+} from "./brain-harness.ts";
 import { normalized } from "./brain-scoring.ts";
 import {
   brainDocuments,
@@ -14,6 +19,7 @@ import {
   brainAdmissionProbes,
   brainFamilies,
   brainSealedDigests,
+  brainSuiteDigests,
   brainSplits,
   brainSuiteVersion,
   brainTasks,
@@ -139,7 +145,7 @@ describe("the Brain baseline's suite", () => {
     }).toStrictEqual({ checked: true, missing: [] });
   });
 
-  it("runs its sealed split only when opened on purpose, and can't change it within a version", async () => {
+  it("runs its sealed split only when opened on purpose, and can't change it, its documents or the suite within a version", async () => {
     expect({
       closed: (() => {
         try {
@@ -151,10 +157,77 @@ describe("the Brain baseline's suite", () => {
       })(),
       opened: tasksOf("sealed", { openSealed: true }).length,
       digest: await sealedDigest(),
+      suite: await suiteDigest(),
     }).toStrictEqual({
       closed: "refused",
       opened: brainTasks.filter(({ split }) => split === "sealed").length,
       digest: brainSealedDigests[brainSuiteVersion],
+      suite: brainSuiteDigests[brainSuiteVersion],
     });
+  });
+
+  it("forbids every restricted document's facts, not only its canary, to whoever may not read it", () => {
+    const restricted = Object.values(brainDocuments).filter(
+      (document) => "canary" in document
+    );
+    const open = Object.values(brainDocuments).filter(
+      (document) => !("canary" in document)
+    );
+    const outsiders = brainTasks.filter(
+      ({ expect: expected }) => expected.kind === "abstain"
+    );
+    expect({
+      // Each one's facts are in its own words, and no open document and
+      // no question holds them.
+      notInText: restricted.flatMap((document) =>
+        (document.restricted ?? []).filter(
+          (fact) => !document.text.includes(fact)
+        )
+      ),
+      elsewhere: restricted.flatMap((document) =>
+        (document.restricted ?? []).filter(
+          (fact) =>
+            open.some(({ text }) => text.includes(fact)) ||
+            brainTasks.some(({ question }) => question.includes(fact))
+        )
+      ),
+      // An outsider's task forbids them.
+      forbidden: outsiders
+        .filter(({ id }) => id === "dev-route-plan-outsider")
+        .map((task) => forbiddenIn(task).includes("05:30 from Tilburg")),
+    }).toStrictEqual({
+      notInText: [],
+      elsewhere: [],
+      forbidden: [true],
+    });
+  });
+
+  it("forbids what a correction or a later owner replaced, so a stale version can't pass", () => {
+    const missing = brainTasks.filter((task) => {
+      if (
+        task.family !== "correction" &&
+        task.family !== "historical-ownership"
+      ) {
+        return false;
+      }
+      // The text the task's window removed from its documents.
+      const removed = task.documents.flatMap((key) => {
+        const { path } = brainDocuments[key];
+        const at = brainWindows.indexOf(task.window);
+        const before =
+          at === 0 ? undefined : textAt(path, brainWindows[at - 1] ?? "t0");
+        const now = textAt(path, task.window) ?? "";
+        return (before ?? "")
+          .split("\n")
+          .filter((line) => line !== "" && !now.includes(line));
+      });
+      return (
+        removed.length > 0 &&
+        !(task.mustNotReach ?? []).some((stale) =>
+          removed.some((line) => line.includes(stale))
+        )
+      );
+    });
+    expect(missing.map(({ id }) => id)).toStrictEqual([]);
   });
 });

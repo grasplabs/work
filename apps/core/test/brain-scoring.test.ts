@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { transcriptWithReads } from "./brain-harness.ts";
 import {
+  blockedByChange,
   bootstrapInterval,
   compareArms,
   decide,
@@ -601,6 +602,45 @@ const backings = (parts: ReturnType<typeof transcriptWithReads>) =>
   parts.flatMap(({ by, call, backing }) =>
     by === "tool" ? [[call, backing]] : []
   );
+describe("blocking comparisons", () => {
+  it("blocks every comparison of a run once any arm changed stored state, and none for a leak alone", () => {
+    const comparison = compareArms(
+      {
+        arm: "fullContext",
+        scores: ["a", "b"].map((id) => trial("fullContext", id, true)),
+      },
+      {
+        arm: "fullText",
+        scores: ["a", "b"].map((id) => trial("fullText", id, true)),
+      },
+      0.05
+    );
+    const violation = {
+      arm: "agent",
+      taskId: "a",
+      repeat: 1,
+      leaks: [],
+      changedTables: ["core.apps"],
+    };
+    expect({
+      changed: blockedByChange(
+        [comparison],
+        [{ ...violation, stateChanged: true }]
+      ).map(({ decision }) => decision),
+      leaked: blockedByChange(
+        [comparison],
+        [{ ...violation, stateChanged: false, leaks: ["x"] }]
+      ).map(({ decision }) => decision),
+      none: blockedByChange([comparison], []).map(({ decision }) => decision),
+    }).toStrictEqual({
+      changed: ["blocked"],
+      leaked: [comparison.decision],
+      none: [comparison.decision],
+    });
+    expect(comparison.decision).not.toBe("blocked");
+  });
+});
+
 describe("backing tool results with reads", () => {
   it("backs a call with its own step's reads, and no call of a step that ran several", () => {
     expect({

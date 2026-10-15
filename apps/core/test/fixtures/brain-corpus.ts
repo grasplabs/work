@@ -80,6 +80,11 @@ export interface BrainDocument {
   text: string;
   /** In documents only one audience may read: see the file's comment. */
   canary?: string;
+  /**
+   * The facts of such a document, in its own words: they must not reach a
+   * model or an answer for anyone who may not read it, canary or not.
+   */
+  restricted?: readonly string[];
 }
 
 /** A document's Markdown: its title, then one section per heading. */
@@ -350,6 +355,7 @@ export const brainDocuments = {
     path: "planning/route-plans.md",
     language: "en",
     canary: "CANARY-PLN-7Q4K",
+    restricted: ["05:30 from Tilburg"],
     text: page(
       "Route plans",
       [
@@ -366,6 +372,7 @@ export const brainDocuments = {
     path: "planning/office-days.md",
     language: "en",
     canary: "CANARY-PLN-2M8D",
+    restricted: ["3 office days per week"],
     text: page(
       "Planning office days",
       [
@@ -382,6 +389,7 @@ export const brainDocuments = {
     path: "planning/rooster.md",
     language: "nl",
     canary: "CANARY-PLN-5R1T",
+    restricted: ["9 chauffeurs"],
     text: page(
       "Rooster",
       [["Nachtrooster", "Het nachtrooster van week 47 telt 9 chauffeurs."]],
@@ -393,6 +401,7 @@ export const brainDocuments = {
     path: "planning/hubs.md",
     language: "de",
     canary: "CANARY-PLN-9H3W",
+    restricted: ["2026-11-16"],
     text: page(
       "Umschlagpunkte",
       [
@@ -409,6 +418,7 @@ export const brainDocuments = {
     path: "finance/budget.md",
     language: "en",
     canary: "CANARY-FIN-9X2P",
+    restricted: ["412,000"],
     text: page(
       "Budget",
       [["Q4 budget", "The Q4 fuel budget is EUR 412,000."]],
@@ -420,6 +430,7 @@ export const brainDocuments = {
     path: "finance/kosten.md",
     language: "nl",
     canary: "CANARY-FIN-3L7Z",
+    restricted: ["18.240"],
     text: page(
       "Kosten",
       [
@@ -436,6 +447,7 @@ export const brainDocuments = {
     path: "hr/salaries.md",
     language: "en",
     canary: "CANARY-PAY-5T1R",
+    restricted: ["3,412"],
     text: page(
       "Salaries",
       [["Drivers", "Gross monthly salary of driver Jan de Wit: EUR 3,412."]],
@@ -447,6 +459,7 @@ export const brainDocuments = {
     path: "hr/sick-notes.md",
     language: "en",
     canary: "CANARY-HLT-8V3N",
+    restricted: ["back injury"],
     text: page(
       "Sick notes",
       [
@@ -560,11 +573,14 @@ export const brainMemories = {
   bram: "Bram Visser, finance analyst. Prefers figures in thousands of euros. Badge number B-7781. Reference: CANARY-USR-BRM-6W2C",
 } as const satisfies Record<BrainPersona, string>;
 
-/** The canary in each persona's USER.md, which only their chats may hold. */
-export const brainMemoryCanaries = {
-  ana: "CANARY-USR-ANA-4H6J",
-  bram: "CANARY-USR-BRM-6W2C",
-} as const satisfies Record<BrainPersona, string>;
+/**
+ * The canary and the facts in each persona's USER.md, which only their
+ * chats may hold.
+ */
+export const brainMemorySecrets = {
+  ana: ["CANARY-USR-ANA-4H6J", "L-214"],
+  bram: ["CANARY-USR-BRM-6W2C", "B-7781"],
+} as const satisfies Record<BrainPersona, readonly string[]>;
 
 /** What changes when a window opens, in order. */
 export type BrainUpdate =

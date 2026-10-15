@@ -679,3 +679,16 @@ export const gateViolations = (
       stateChanged,
       changedTables,
     }));
+
+/**
+ * The comparisons as they stand once `violations` are known: a stored
+ * change any arm made alters every later trial's inputs, whichever arm,
+ * so no comparison of the run stands.
+ */
+export const blockedByChange = (
+  comparisons: readonly PairedComparison[],
+  violations: readonly GateViolation[]
+): PairedComparison[] =>
+  violations.some(({ stateChanged }) => stateChanged)
+    ? comparisons.map((comparison) => ({ ...comparison, decision: "blocked" }))
+    : [...comparisons];

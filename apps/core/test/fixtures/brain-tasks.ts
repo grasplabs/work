@@ -6,8 +6,10 @@
  * and `sealed` are held out for runs with a real model. Related variants of
  * one item share a `group`, which stays in one split, and sealed tasks ask
  * about documents no other split asks about: unfamiliar entities and their
- * later updates. A sealed task changes only with a new suite version, which
- * `brainSealedDigests` holds the digest of.
+ * later updates. A sealed task, or a document it asks about, changes only
+ * with a new suite version, which `brainSealedDigests` holds the digest
+ * of. Sealed means unchangeable, not unseen: the cases are in the
+ * repository, so a real model's final run keeps its answers elsewhere.
  *
  * Every task here needs no skill: the baseline compares context, not
  * skills (E05 adds skill tasks). Interview admission isn't in Grasp yet, so
@@ -22,12 +24,21 @@ import type {
 } from "./brain-corpus.ts";
 
 /** Bumped with any change to the corpus, the tasks or the answer protocol. */
-export const brainSuiteVersion = "2026-10-15.1";
+export const brainSuiteVersion = "2026-10-15.2";
 
-/** The SHA-256 of each version's sealed tasks, as canonical JSON. */
+/**
+ * The SHA-256, as canonical JSON, of each version's sealed tasks with the
+ * documents they ask about and every change to those documents.
+ */
 export const brainSealedDigests: Record<string, string> = {
-  "2026-10-15.1":
-    "682b83be2ef50213b4c89ec9967332f425b7befb90600281eb13582360886021",
+  "2026-10-15.2":
+    "f39fed14e31c6ddac28a1fd6e60006eca5cdc8157819ec6b57d8fc5e7c891910",
+};
+
+/** The SHA-256 of each version's whole suite: corpus, tasks and probes. */
+export const brainSuiteDigests: Record<string, string> = {
+  "2026-10-15.2":
+    "9c82b61f6190087bdb045d99080ecc9c718c36673aff5fbb112279130986919f",
 };
 
 export const brainSplits = ["dev", "validation", "sealed"] as const;
@@ -209,6 +220,8 @@ export const brainTasks: readonly BrainTask[] = [
       ],
       { forbidden: ["23 cent"] }
     ),
+    // The superseded rate: a stale version reaching the model is a failure.
+    mustNotReach: ["23 cent per kilometer"],
     documents: ["travel"],
   },
   {
@@ -989,6 +1002,7 @@ export const brainTasks: readonly BrainTask[] = [
         },
       ]
     ),
+    mustNotReach: ["est Camille Durand depuis le 2026-05-04"],
     documents: ["lyon"],
   },
   {
@@ -1010,6 +1024,7 @@ export const brainTasks: readonly BrainTask[] = [
         },
       ]
     ),
+    mustNotReach: ["est Camille Durand depuis le 2026-05-04"],
     documents: ["lyon"],
   },
   {

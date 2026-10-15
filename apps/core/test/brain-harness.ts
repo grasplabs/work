@@ -29,17 +29,24 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { pageMaxLimit } from "@grasp-os/shared/knowledge";
 import type { KnowledgeRead } from "@grasp-os/shared/knowledge";
-import { evictDurableObject } from "cloudflare:test";
+import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
 
 import { workspace } from "../src/durable-objects.ts";
-import { gatewayConfig, model, pointAtGateway } from "./agent-chat.ts";
+import { modelLedger } from "../src/model-ledger.ts";
+import {
+  gatewayConfig,
+  model,
+  pointAtGateway,
+  setObjectEnv,
+} from "./agent-chat.ts";
 import { answeringGateway } from "./ai-gateway.ts";
 import type { GatewayRequest } from "./ai-gateway.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import {
+  blockedByChange,
   compareArms,
   gateViolations,
   scoreTrial,
@@ -65,7 +72,7 @@ import {
   brainCollections,
   brainDocuments,
   brainMemories,
-  brainMemoryCanaries,
+  brainMemorySecrets,
   brainPersonas,
   brainTeams,
   brainUpdates,
@@ -94,13 +101,15 @@ export type BrainArm = (typeof brainArms)[number];
 
 /**
  * Arms built to break the gate, to prove it holds: one hands the model a
- * section its person may not read; two change stored state mid-trial, one
- * in Knowledge, one in core.
+ * section its person may not read; the others change stored state
+ * mid-trial, in Knowledge, in core, in R2 and in the chat's own object.
  */
 export const brainControls = [
   "leakyContext",
   "changesKnowledge",
   "changesCore",
+  "changesFiles",
+  "changesObject",
 ] as const;
 export type BrainControl = (typeof brainControls)[number];
 
@@ -161,12 +170,12 @@ const mayRead = (persona: BrainPersona, collection: BrainCollectionKey) => {
 export const forbiddenIn = (task: BrainTask): string[] => {
   const unreadable = Object.values(brainDocuments).flatMap((document) =>
     "canary" in document && !mayRead(task.persona, document.collection)
-      ? [document.canary]
+      ? [document.canary, ...document.restricted]
       : []
   );
   const othersMemory = brainPersonas
     .filter((persona) => persona !== task.persona)
-    .map((persona) => brainMemoryCanaries[persona]);
+    .flatMap((persona) => brainMemorySecrets[persona]);
   return [...unreadable, ...othersMemory, ...(task.mustNotReach ?? [])];
 };
 
@@ -189,12 +198,32 @@ const asJson = (value: unknown): Json => z.json().parse(value);
 const digestOf = async (value: unknown): Promise<string> =>
   await sha256Hex(canonicalJson(asJson(value)));
 
-/** The digest of the sealed tasks, which `brainSealedDigests` pins. */
-export const sealedDigest = async (): Promise<string> =>
-  await digestOf(brainTasks.filter(({ split }) => split === "sealed"));
+/** The digest of the whole suite, which `brainSuiteDigests` pins. */
+export const suiteDigest = async (): Promise<string> =>
+  await digestOf({
+    collections: brainCollections,
+    documents: brainDocuments,
+    memories: brainMemories,
+    updates: brainUpdates,
+    tasks: brainTasks,
+    probes: brainAdmissionProbes,
+  });
 
-/** US dollars, as the model API reports them, in micros. */
-const microsOf = (dollars: number): number => Math.round(dollars * 1_000_000);
+/**
+ * The digest of the sealed tasks and the documents they ask about, which
+ * `brainSealedDigests` pins. Sealed means unchangeable within a version,
+ * not unseen: the cases are in the repository for anyone to read.
+ */
+export const sealedDigest = async (): Promise<string> => {
+  const sealed = brainTasks.filter(({ split }) => split === "sealed");
+  const keys = new Set<string>(sealed.flatMap(({ documents }) => documents));
+  return await digestOf({
+    tasks: sealed,
+    // The documents their answers come from, and every change to them.
+    documents: Object.entries(brainDocuments).filter(([key]) => keys.has(key)),
+    updates: brainUpdates.filter(({ document }) => keys.has(document)),
+  });
+};
 
 /** The tables of `db`, but SQLite's and the runtime's own. */
 const tablesOf = async (db: D1Database): Promise<string[]> => {
@@ -277,10 +306,37 @@ export interface BrainCompany {
   build: { ms: number; costMicros: number };
 }
 
-/** What the deployment has charged for models this month, in micros. */
-const charged = async (company: Pick<BrainCompany, "admin">) => {
-  const { total } = await company.admin.api.models.spend();
-  return microsOf(total);
+/**
+ * The month and day the run's model calls count in, whatever the clock
+ * says: a run across midnight at a month's end still reads one total.
+ */
+const brainBudgetMonth = "2400-01";
+const brainBudgetDay = "2400-01-01";
+
+/** Points `stub` at the provider, its calls counted in the run's month. */
+const pointAt = async (
+  stub: Workspace["stub"],
+  gateway: Provider["gateway"]
+) => {
+  await pointAtGateway(stub, gateway);
+  await setObjectEnv(stub, {
+    MODEL_BUDGET_MONTH: brainBudgetMonth,
+    MODEL_BUDGET_DAY: brainBudgetDay,
+  });
+};
+
+/** What the ledger has charged for the run's model calls, in micros. */
+const charged = async (): Promise<number> => {
+  const { deployment = [] } = await modelLedger(env).spendOf(
+    brainBudgetMonth,
+    ["deployment"],
+    1
+  );
+  let total = 0;
+  for (const { spentMicros } of deployment) {
+    total += spentMicros;
+  }
+  return total;
 };
 
 /** Loads the corpus as it stands at `t0`, as its people would write it. */
@@ -289,7 +345,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
   const ana = await signedInApi(idp, "user");
   const bram = await signedInApi(idp, "user");
   const people: Record<BrainPersona, Person> = { ana, bram };
-  const spentBefore = await charged({ admin });
+  const spentBefore = await charged();
   const started = performance.now();
   const teams = new Map<string, string>();
   for (const [team, members] of Object.entries(brainTeams)) {
@@ -354,7 +410,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
     people,
     collections,
     documents,
-    build: { ms, costMicros: (await charged({ admin })) - spentBefore },
+    build: { ms, costMicros: (await charged()) - spentBefore },
   };
 };
 
@@ -630,14 +686,26 @@ const sourcesFor = async (
     : [...found, { source: leaked.path, text: leaked.text }];
 };
 
+/** The controls that change stored state mid-trial. */
+type ChangingControl = Exclude<BrainControl, "leakyContext">;
+
+const changingControls: ReadonlySet<string> = new Set(
+  brainControls.filter((control) => control !== "leakyContext")
+);
+
+const changes = (arm: BrainArm | BrainControl): arm is ChangingControl =>
+  changingControls.has(arm);
+
 /**
- * A change no task asks for: a note saved in the person's own collection,
- * or an App created in core. Neither is anything a later trial reads.
+ * A change no task asks for, where `where` says: a note saved in the
+ * person's own collection, an App created in core, a file put in R2, or a
+ * dashboard row written in the chat's object as a broken tool would.
+ * Nothing a later trial reads.
  */
 const changeState = async (
   company: BrainCompany,
-  persona: BrainPersona,
-  where: "changesKnowledge" | "changesCore"
+  place: Workspace,
+  where: ChangingControl
 ) => {
   if (where === "changesCore") {
     await company.admin.api.apps.create({
@@ -645,7 +713,21 @@ const changeState = async (
     });
     return;
   }
-  const person = company.people[persona];
+  if (where === "changesFiles") {
+    await env.FILES.put(`brain-control/${crypto.randomUUID()}`, "changed");
+    return;
+  }
+  if (where === "changesObject") {
+    await runInDurableObject(place.stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "INSERT OR REPLACE INTO dashboards (person_id, updated_at) VALUES (?, ?)",
+        crypto.randomUUID(),
+        Date.now()
+      );
+    });
+    return;
+  }
+  const person = company.people[place.persona];
   const { personal } = await person.api.memory.collections();
   await person.api.knowledge.saveDocument({
     collectionId: personal,
@@ -664,13 +746,6 @@ const contentRead = z.union([
   z.object({ read: z.literal("document") }),
 ]);
 
-/**
- * What the persona's agent read through Knowledge since audit position
- * `after`, as the audit log records each read (a document, or one of its
- * sections) and as the document holds it, read again as the person it
- * acted for: where a tool result's evidence must come from. Read after
- * the trial's state is taken, as the reads are recorded too.
- */
 /**
  * What the persona's agent read through Knowledge in `events`, as the
  * audit log records each read that returns text (a document, or one of
@@ -719,6 +794,58 @@ const readTextsOf = async (
 };
 
 /**
+ * The persona's Workspace object's tables that a chat's code could change
+ * and no turn changes on its own: drafts, attachments, projects, build
+ * jobs and dashboards. Its chats, messages, sources and code runs change
+ * with every turn and aren't counted.
+ */
+const workspaceTables = [
+  "chat_drafts",
+  "chat_draft_files",
+  "chat_attachments",
+  "chat_projects",
+  "chat_project_documents",
+  "chat_build_jobs",
+  "dashboards",
+  "dashboard_widgets",
+] as const;
+
+const workspaceStateOf = async (
+  place: Workspace
+): Promise<[string, string][]> => {
+  const rows = await runInDurableObject(place.stub, (_instance, state) =>
+    workspaceTables.map((table) => [
+      table,
+      state.storage.sql
+        .exec(`SELECT * FROM "${table}"`)
+        .toArray()
+        .map(rowText)
+        .toSorted()
+        .join("\n"),
+    ])
+  );
+  return await Promise.all(
+    rows.map(async ([table = "", text = ""]) => [
+      `workspace.${table}`,
+      await sha256Hex(text),
+    ])
+  );
+};
+
+/** Every object in R2's `FILES`, by key and etag. */
+const filesDigest = async (): Promise<string> => {
+  const objects: string[] = [];
+  let cursor: string | undefined;
+  do {
+    // oxlint-disable-next-line no-await-in-loop -- page after page
+    const page = await env.FILES.list(cursor === undefined ? {} : { cursor });
+    objects.push(...page.objects.map(({ key, etag }) => `${key} ${etag}`));
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor !== undefined);
+  return await sha256Hex(objects.toSorted().join("\n"));
+};
+
+/**
  * Every request's parts, in order, each tool result backed by what the
  * reads of its call's step returned: those recorded between the request
  * that ran the step and the first request to carry its result back, when
@@ -761,7 +888,7 @@ const runTrial = async (
   const { gateway, setTurn } = provider;
   // Every object of the class may share one env, and an evicted one gets
   // a new one: pointed at the provider before each trial.
-  await pointAtGateway(place.stub, gateway);
+  await pointAt(place.stub, gateway);
   const chat = await place.stub.createChat(
     `Baseline ${task.id}`,
     person.userId,
@@ -772,16 +899,16 @@ const runTrial = async (
   // What the trial's chat drafted counts too: drafts live in its object.
   const stateNow = async () => {
     const state = await stateOf();
-    state.set(
-      "workspace.drafts",
-      rowText(await place.stub.drafts(chat.id, person.userId))
-    );
+    for (const [table, digest] of await workspaceStateOf(place)) {
+      state.set(table, digest);
+    }
+    state.set("files", await filesDigest());
     return state;
   };
   const stateBefore = await stateNow();
   await provider.mark();
   const firstRequest = gateway.requests.length;
-  let spentBefore = await charged(company);
+  let spentBefore = await charged();
   let answer = "";
   let failure: string | undefined;
   let started = performance.now();
@@ -792,7 +919,7 @@ const runTrial = async (
       // oxlint-disable-next-line no-await-in-loop -- in order, as said
       await place.stub.ask(chat.id, { text: said, model });
     }
-    spentBefore = await charged(company);
+    spentBefore = await charged();
     // A cold question starts in a just-evicted object, its caches and
     // memory gone, after any earlier turns of its chat. Its timer starts
     // before the object is constructed again, which pointing it at the
@@ -801,14 +928,14 @@ const runTrial = async (
     if (cold) {
       await evictDurableObject(place.stub);
       started = performance.now();
-      await pointAtGateway(place.stub, gateway);
+      await pointAt(place.stub, gateway);
     } else {
       started = performance.now();
     }
     // Then retrieval, then the agent; a failed question is timed too.
     const sources = await sourcesFor(company, plan);
-    if (arm === "changesKnowledge" || arm === "changesCore") {
-      await changeState(company, task.persona, arm);
+    if (changes(arm)) {
+      await changeState(company, place, arm);
     }
     setTurn({ phase: "question", task, searches: arm === "agent" });
     const reply = await place.stub.ask(chat.id, {
@@ -835,8 +962,6 @@ const runTrial = async (
     modelInput: requests.flatMap(({ body }) => modelStrings(body)).join("\n"),
     // Every request in order: a long turn's last request may leave out
     // earlier results, which the model still read.
-    // Every request in order: a long turn's last request may leave out
-    // earlier results, which the model still read.
     transcript: transcriptWithReads(
       requests,
       await Promise.all(
@@ -851,7 +976,7 @@ const runTrial = async (
     changedTables,
     ...(failure === undefined ? {} : { error: failure }),
     latencyMs,
-    costMicros: (await charged(company)) - spentBefore,
+    costMicros: (await charged()) - spentBefore,
   };
 };
 
@@ -1055,7 +1180,7 @@ export const runBrainBaseline = async (
   // once, on first use, is neither a trial's latency nor its change.
   for (const place of places.values()) {
     // oxlint-disable-next-line no-await-in-loop -- one object at a time
-    await pointAtGateway(place.stub, provider.gateway);
+    await pointAt(place.stub, provider.gateway);
     provider.setTurn({ phase: "prior" });
     // oxlint-disable-next-line no-await-in-loop -- one object at a time
     const chat = await place.stub.createChat(
@@ -1073,7 +1198,7 @@ export const runBrainBaseline = async (
   for (const window of brainWindows) {
     if (window !== "t0") {
       // oxlint-disable-next-line no-await-in-loop -- windows in order
-      const spentBefore = await charged(company);
+      const spentBefore = await charged();
       const started = performance.now();
       // oxlint-disable-next-line no-await-in-loop -- windows in order
       await applyWindow(company, window);
@@ -1081,7 +1206,7 @@ export const runBrainBaseline = async (
         window,
         ms: performance.now() - started,
         // oxlint-disable-next-line no-await-in-loop -- windows in order
-        costMicros: (await charged(company)) - spentBefore,
+        costMicros: (await charged()) - spentBefore,
       });
     }
     // oxlint-disable-next-line no-await-in-loop -- windows in order
@@ -1163,21 +1288,11 @@ export const runBrainBaseline = async (
   );
   const violations = gateViolations(armScores);
   const controlViolations = gateViolations(controlScores);
-  // A change one arm made alters every later trial's inputs, whichever
-  // arm: no comparison of the run stands.
-  const changed = violations.some(({ stateChanged }) => stateChanged);
   return {
     identity: {
       suite: {
         version: brainSuiteVersion,
-        digest: await digestOf({
-          collections: brainCollections,
-          documents: brainDocuments,
-          memories: brainMemories,
-          updates: brainUpdates,
-          tasks: brainTasks,
-          probes: brainAdmissionProbes,
-        }),
+        digest: await suiteDigest(),
         sealedDigest: await sealedDigest(),
       },
       sources,
@@ -1217,22 +1332,22 @@ export const runBrainBaseline = async (
     costs: { build: company.build, updates, learningMicros: 0 },
     arms: arms.map((arm) => summarizeArm(arm, scoresOf(arm))),
     controls: controls.map((arm) => summarizeArm(arm, scoresOf(arm))),
-    comparisons: pairs
-      .filter(
-        ([candidate, baseline]) =>
-          arms.includes(candidate) && arms.includes(baseline)
-      )
-      .map(([candidate, baseline]) => {
-        const comparison = compareArms(
-          { arm: candidate, scores: scoresOf(candidate) },
-          { arm: baseline, scores: scoresOf(baseline) },
-          minimumMeaningfulGain,
-          seed
-        );
-        return changed
-          ? { ...comparison, decision: "blocked" as const }
-          : comparison;
-      }),
+    comparisons: blockedByChange(
+      pairs
+        .filter(
+          ([candidate, baseline]) =>
+            arms.includes(candidate) && arms.includes(baseline)
+        )
+        .map(([candidate, baseline]) =>
+          compareArms(
+            { arm: candidate, scores: scoresOf(candidate) },
+            { arm: baseline, scores: scoresOf(baseline) },
+            minimumMeaningfulGain,
+            seed
+          )
+        ),
+      violations
+    ),
     gate: { passed: violations.length === 0, violations },
     controlGate: {
       passed: controlViolations.length === 0,
