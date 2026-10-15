@@ -15,7 +15,8 @@ import { toCard } from "./pile.ts";
 // completes without sending it again. The run's page says why it waited.
 // The local stack reaches no Microsoft 365, so the lost answer is written
 // into connect's local database as a lost send leaves it, under the run's
-// step's key, while the run sleeps before that step; connect then answers
+// step's key, while the run waits for its person's go-ahead before that
+// step (a decision, answered only once both are written); connect then answers
 // the step's call as for any lost answer, and the run waits on its person.
 // What connect and core do with it (who may resolve it, what each choice
 // does) is their tests' (apps/connect/test/unknown-outcomes.test.ts,
@@ -29,14 +30,15 @@ const mail = {
 };
 
 /**
- * Sleeps, so the test can lose its send's answer first, then sends the
- * mail under its step's key; said to have happened, the send answers
+ * Waits for an admin's go-ahead, so the test can lose its send's
+ * answer first, however long that takes, then sends the mail under its
+ * step's key; said to have happened, the send answers
  * `connect.resolved_done`, and the step says so.
  */
-const mailer = `import { resolvedDone, workflow, z } from "@grasp-os/sdk/workflow";
+const mailer = `import { person, resolvedDone, workflow, z } from "@grasp-os/sdk/workflow";
 
-export default workflow("mailer", { params: {}, input: z.unknown() }, async (step, { env }) => {
-  await step.sleep("pause", { description: "Wait a moment", duration: "15 seconds" });
+export default workflow("mailer", { params: { reviewer: person({ label: "Reviewer", default: "role:admin" }) }, input: z.unknown() }, async (step, { env, params }) => {
+  await step.decision("go", { description: "Send the invoice now", from: params.reviewer, ask: async () => {}, timeout: "1 hour" });
   return await step.do(
     "send",
     { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(mail)}, retries: { limit: 0 } },
@@ -59,7 +61,12 @@ const mailerTests = `import { workflowTests } from "@grasp-os/sdk/testing";
 import mailer from "./mailer.ts";
 
 export default workflowTests(mailer, [
-  { name: "sends", mocks: { send: { sent: true } }, expect: {} },
+  {
+    name: "sends",
+    decisions: { go: { approved: true, by: "anna" } },
+    mocks: { send: { sent: true } },
+    expect: {},
+  },
 ]);
 `;
 
@@ -180,6 +187,23 @@ test("a run's lost answer shows up for its person, and saying it happened comple
       step: "earlier",
       kept: false,
     });
+    // Both written, the run may go on to its send: another admin says so,
+    // as its starter isn't asked.
+    let go = "";
+    await expect(async () => {
+      const { items } = await api.workflows.history(run, { pageSize: 100 });
+      const decision = items.find(
+        (entry) => entry.kind === "wait" && entry.waitKind === "decision"
+      );
+      expect(decision?.kind).toBe("wait");
+      go = decision?.kind === "wait" ? decision.waitId : "";
+    }).toPass({ timeout: 60_000 });
+    const reviewer = apiOf(other);
+    try {
+      await reviewer.api.decisions.answer(go, { approved: true });
+    } finally {
+      reviewer.core[Symbol.dispose]();
+    }
     // Its step comes back of unknown outcome, and the run waits.
     await expect(async () => {
       const { items } = await api.workflows.history(run, { pageSize: 100 });
