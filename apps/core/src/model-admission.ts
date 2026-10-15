@@ -62,9 +62,14 @@ import { z } from "zod";
 //   held between bounds core sets (models.ts, `rateLimitedSeconds`).
 // - Budget bypass through the queue: a queued request is admitted only
 //   through the same transaction as any other, every budget and request
-//   limit checked again then. A request whose budget is used up for good
-//   is refused as that, before any share is looked at, and takes no place:
-//   waiting would never help it.
+//   limit checked again then. A request whose budget has no room, used up
+//   for good or held by requests under way, is refused as that before any
+//   share is looked at, and takes no place: waiting for a share would never
+//   help it, and a full share never tells the two apart.
+// - A place abandoned: however a call's wait ends unadmitted (out of time,
+//   cancelled, stopped by its caller, a policy or a ledger that fails), the
+//   gateway gives its place up on its one way out (models.ts,
+//   `admitWaiting`), and a call cancelled while it waits asks nothing more.
 // - A fake identity for an extra share: who a request counts for and its
 //   App come from the call's trigger and work context, which core's host
 //   sets (models.ts), never from what an App or a workflow passes. A call

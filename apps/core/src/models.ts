@@ -1042,17 +1042,6 @@ const leaveQueue = async (route: Route): Promise<void> => {
   }
 };
 
-/**
- * Ends `route`'s call's wait for a share, unadmitted: its place given up,
- * and its caller told, if it waited at all (`waited` rounds).
- */
-const stopWaiting = async (route: Route, waited: number): Promise<void> => {
-  await leaveQueue(route);
-  if (waited > 0) {
-    await told(route, null);
-  }
-};
-
 /** The prices of a model that has none, which no budget admits. */
 const unpriced: PinnedPrice = {
   version: "unpriced",
@@ -1307,57 +1296,56 @@ const admitRequest = async (
   }
 };
 
+/** How a call's wait for a share went, for its one way out (`admitWaiting`). */
+interface Waiting {
+  /** The rounds it waited. */
+  rounds: number;
+  /** Whether the ledger ever gave it a place in the queue. */
+  placed: boolean;
+}
+
 /**
- * `admitRequest`, waiting in the queue while a share of the requests in
- * flight is full: the call keeps its place and asks again, as soon as the
- * ledger says (`askAgainMs`), until admitted, refused for anything else, or
- * out of the time it may wait (`queueWaitMs`); then refused as
- * `model.queued`, its place given up. It stops early when its caller says
- * so (`beforeSend`, which throws) or it is cancelled. Its caller is told
- * where it stands each round (`onQueued`).
+ * The rounds of `admitWaiting`: asks the ledger, and while a share is full
+ * and its call may wait, waits and asks again. Cancellation is checked
+ * before every ask after the first, right after each wait too, so a call
+ * cancelled while it waits asks nothing more.
  */
-const admitWaiting = async (
+const askUntilServed = async (
   route: Route,
   body: unknown,
-  { endsAt, signal }: { endsAt: number; signal: AbortSignal }
+  {
+    endsAt,
+    signal,
+    maxWaitMs,
+  }: { endsAt: number; signal: AbortSignal; maxWaitMs: number },
+  waiting: Waiting
 ): Promise<Admission | { held: Refusal }> => {
-  const startedAt = Date.now();
-  const maxWaitMs = Math.min(
-    queueWaitMs,
-    Math.max(0, Math.floor((endsAt - startedAt) / 2))
-  );
-  let waited = 0;
   let waitedMs = 0;
+  let last: { held: Refusal } | undefined = undefined;
   for (;;) {
+    if (last !== undefined && signal.aborted) {
+      return last;
+    }
     // oxlint-disable-next-line no-await-in-loop -- asked again after each wait
     const admitted = await admitRequest(route, body, endsAt);
     if (!("held" in admitted) || admitted.held.code !== "model.queued") {
-      if (waited > 0) {
-        // oxlint-disable-next-line no-await-in-loop -- once, as it ends
-        await told(route, null);
-      }
       return admitted;
     }
+    last = admitted;
+    waiting.placed ||= admitted.held.placed === true;
     const ms = askAgainMs({
-      waited,
+      waited: waiting.rounds,
       retryAfterSeconds: admitted.held.retryAfterSeconds ?? maxAskAgainSeconds,
       waitedMs,
       maxWaitMs,
     });
-    try {
-      // The caller's word: a workflow attempt let go of stops waiting.
-      route.beforeSend?.();
-    } catch (error) {
-      // oxlint-disable-next-line no-await-in-loop -- once, as it ends
-      await stopWaiting(route, waited);
-      throw error;
-    }
+    // The caller's word: a workflow attempt let go of stops waiting (it
+    // throws).
+    route.beforeSend?.();
     // Out of time, cancelled, or given no place (its person's, its App's
     // or the client's places all taken): told so at once, and the ledger
     // asked nothing more for it.
     if (ms <= 0 || signal.aborted || admitted.held.placed === false) {
-      // oxlint-disable-next-line no-await-in-loop -- once, as it ends
-      await stopWaiting(route, waited);
       return admitted;
     }
     const { waitingFor = "client" } = admitted.held;
@@ -1371,8 +1359,56 @@ const admitWaiting = async (
     });
     // oxlint-disable-next-line no-await-in-loop -- each round
     await pause(ms, signal);
-    waited += 1;
+    waiting.rounds += 1;
     waitedMs += ms;
+  }
+};
+
+/**
+ * `admitRequest`, waiting in the queue while a share of the requests in
+ * flight is full: the call keeps its place and asks again, as soon as the
+ * ledger says (`askAgainMs`), until admitted, refused for anything else, or
+ * out of the time it may wait (`queueWaitMs`); then refused as
+ * `model.queued`. It stops early when its caller says so (`beforeSend`,
+ * which throws) or it is cancelled. Its caller is told where it stands each
+ * round (`onQueued`).
+ *
+ * One way out, however the wait ends (admitted, refused for anything, out
+ * of time, cancelled, stopped by its caller, a policy that can't be read,
+ * a ledger that throws): a call that held a place and wasn't admitted
+ * gives it up, so no abandoned place holds others back while it lapses,
+ * and a caller told it waited is told it stopped.
+ */
+const admitWaiting = async (
+  route: Route,
+  body: unknown,
+  { endsAt, signal }: { endsAt: number; signal: AbortSignal }
+): Promise<Admission | { held: Refusal }> => {
+  const maxWaitMs = Math.min(
+    queueWaitMs,
+    Math.max(0, Math.floor((endsAt - Date.now()) / 2))
+  );
+  const waiting: Waiting = { rounds: 0, placed: false };
+  let admission: Admission | undefined = undefined;
+  try {
+    const answered = await askUntilServed(
+      route,
+      body,
+      { endsAt, signal, maxWaitMs },
+      waiting
+    );
+    if (!("held" in answered)) {
+      admission = answered;
+    }
+    return answered;
+  } finally {
+    // An admission took its place out of the queue itself.
+    if (admission === undefined && waiting.placed) {
+      await leaveQueue(route);
+    }
+    if (waiting.rounds > 0) {
+      await told(route, null);
+    }
   }
 };
 

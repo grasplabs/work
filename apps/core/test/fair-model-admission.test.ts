@@ -1,5 +1,6 @@
 import type { AiBinding } from "@earendil-works/pi-ai/api/cloudflare-ai-binding";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import { runActorOf } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import { runInDurableObject } from "cloudflare:test";
@@ -165,6 +166,26 @@ const queueOf = () => {
     },
   };
 };
+
+/** How many of `query`'s rows the deployment's ledger holds for `subject`. */
+const ledgerCount = async (query: string, subject: string): Promise<number> =>
+  await runInDurableObject(modelLedger(env), (_instance, state) =>
+    Number(state.storage.sql.exec(query, subject).one().n)
+  );
+
+/** The places the deployment's queue keeps for `subject`. */
+const placesOf = async (subject: string): Promise<number> =>
+  await ledgerCount(
+    "SELECT count(*) AS n FROM queue WHERE subject = ?",
+    subject
+  );
+
+/** The requests the deployment's ledger ever admitted for `subject`. */
+const requestsOf = async (subject: string): Promise<number> =>
+  await ledgerCount(
+    "SELECT count(*) AS n FROM requests WHERE subject = ?",
+    subject
+  );
 
 /** A ledger no other test uses. */
 const newLedger = () => env.MODEL_LEDGER.getByName(crypto.randomUUID());
@@ -651,6 +672,146 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       adaWaitedFor: "app",
       guestWaitedFor: ["app", "app"],
       all: ["ok", "ok", "ok", "ok", "ok"],
+    });
+  });
+
+  it("tells a guest the same whether the member's budget is held or used up, while its App's share is full", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const budgeted = (limit: number, month: string, replies: GatewayReply[]) =>
+      gatewayWith(replies, {
+        MODEL_GATEWAY: {
+          gateway,
+          models: [workersAi, sonnet],
+          budgets: { user: { limit } },
+        },
+        MODEL_BUDGET_MONTH: month,
+      });
+    // Sonnet 4.5 reserves some $0.56: with $1, Ada's call under way leaves
+    // no room for a second; with a cent, there is none at all.
+    const held = budgeted(1, "2312-01", [
+      paused(release.promise),
+      paused(release.promise),
+    ]);
+    const usedUp = budgeted(0.01, "2312-02", []);
+    const ada = newPerson().userId;
+    const asSonnet = { model: sonnet, maxTokens: undefined };
+    // Ada's call, and Ben's beside it, fill the App's share too.
+    const running = [
+      outcome(held.call(callBy(ada, 0, asSonnet))),
+      outcome(held.call(callBy(newPerson().userId, 0))),
+    ];
+    await until(() => held.fake.requests.length === 2);
+    const asGuest = callBy(ada, 0, {
+      ...asSonnet,
+      timeoutMs: 2000,
+      trigger: {
+        type: "guest",
+        chatId: `chat-${crypto.randomUUID()}`,
+        appId: appIdSchema.parse(apps[0]?.appId),
+        invitedBy: ada,
+      },
+    });
+    const whenHeld = await toldBy(held.call(asGuest));
+    const whenUsedUp = await toldBy(usedUp.call(asGuest));
+    release.resolve(true);
+    await Promise.all(running);
+
+    const usedUpAnswer = {
+      code: "model.over_budget",
+      details: { model: sonnet, because: "user" },
+    };
+    expect({ whenHeld, whenUsedUp }).toStrictEqual({
+      whenHeld: usedUpAnswer,
+      whenUsedUp: usedUpAnswer,
+    });
+  });
+
+  it("gives a waiting call's place up when the policy can't be read as it asks again", async () => {
+    const release = Promise.withResolvers<boolean>();
+    let failing = false;
+    // Core's database, failing once told to, as an unreachable one would.
+    const db = new Proxy(env.DB, {
+      get: (target, name): unknown => {
+        const member: unknown = Reflect.get(target, name, target);
+        if (typeof member !== "function") {
+          return member;
+        }
+        return (...args: unknown[]): unknown => {
+          if (failing) {
+            throw new Error("D1_ERROR: the database is unavailable");
+          }
+          return Reflect.apply(member, target, args);
+        };
+      },
+    });
+    const { fake, call } = gatewayWith(
+      [paused(release.promise), paused(release.promise)],
+      { DB: db }
+    );
+    const ada = newPerson().userId;
+    const running = [
+      outcome(call(callBy(newPerson().userId, 0))),
+      outcome(call(callBy(newPerson().userId, 0))),
+    ];
+    await until(() => fake.requests.length === 2);
+    // A run's step, whose call needs its lineage's policy for every ask.
+    const queue = queueOf();
+    const step = outcome(
+      call(
+        callBy(ada, 0, {
+          purpose: "workflow.step",
+          trigger: runActorOf({
+            runId: `run-${crypto.randomUUID()}`,
+            app: apps[0]?.appId ?? "",
+            workflow: "reader",
+          }),
+          onQueued: async (queued) => {
+            failing = true;
+            await queue.onQueued(queued);
+          },
+        })
+      )
+    );
+    await step;
+    failing = false;
+    const places = await placesOf(ada);
+    release.resolve(true);
+    await Promise.all(running);
+
+    expect({ waited: queue.seen, places }).toStrictEqual({
+      waited: ["app", null],
+      places: 0,
+    });
+  });
+
+  it("asks nothing more for a call cancelled while it waits", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const { fake, call } = gatewayWith([
+      paused(release.promise),
+      paused(release.promise),
+    ]);
+    const ada = newPerson().userId;
+    const running = [
+      outcome(call(callBy(ada, 0))),
+      outcome(call(callBy(ada, 0))),
+    ];
+    await until(() => fake.requests.length === 2);
+    const queue = queueOf();
+    const cancel = new AbortController();
+    const waiting = outcome(
+      call(callBy(ada, 0, { onQueued: queue.onQueued, signal: cancel.signal }))
+    );
+    await until(() => queue.seen.length > 0);
+    // Room comes back while it waits, then its caller goes away.
+    release.resolve(true);
+    await Promise.all(running);
+    cancel.abort();
+    const told = await waiting;
+
+    // Admitted nothing after it was cancelled: only Ada's two requests.
+    expect({ told, admitted: await requestsOf(ada) }).toStrictEqual({
+      told: "model.queued",
+      admitted: 2,
     });
   });
 

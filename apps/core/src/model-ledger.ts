@@ -611,10 +611,12 @@ export class ModelLedger extends DurableObject<Env> {
               admission.reservedMicros,
               now
             );
-      // Used up for good, until its budget resets: no wait for a share
-      // helps it, so it is told so before any share is looked at, and
-      // holds no place.
-      if (refused !== undefined && !("heldBy" in refused)) {
+      // A budget without room, used up or held by requests under way, is
+      // told so before any share is looked at, and holds no place: no
+      // wait for a share helps it. Both budget refusals come first, so
+      // whether a share is full never tells one from the other (a guest,
+      // who spends the member's budgets, hears the same either way).
+      if (refused !== undefined) {
         this.#leaveQueue(admission.fair.place);
         return { admitted: refused, alerted: alertedNow };
       }
@@ -622,12 +624,7 @@ export class ModelLedger extends DurableObject<Env> {
       if (queued !== undefined) {
         return { admitted: queued, alerted: alertedNow };
       }
-      // A budget held only by requests under way: a wait of its own, not
-      // a share's, so the call gives its place up.
       this.#leaveQueue(admission.fair.place);
-      if (refused !== undefined) {
-        return { admitted: refused, alerted: alertedNow };
-      }
       this.#db
         .insert(requests)
         .values({
