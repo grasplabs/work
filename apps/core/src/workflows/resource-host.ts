@@ -1345,7 +1345,7 @@ export class ResourceRunHost
           "An evaluation passes its task's data as JSON, within a step's size."
         );
       }
-      this.#requireAnswered(attempt, expression, passed.data.output);
+      this.#requireAnswered(attempt, expression, passed.data);
       const value = await this.#evaluated(
         attempt,
         expression,
@@ -1366,6 +1366,22 @@ export class ResourceRunHost
       }
       return value;
     });
+  }
+
+  /**
+   * `task`'s input as `attempt` transformed it, built by the host from the
+   * task's sealed `input.from` and its own evaluations of it in this
+   * attempt; the raw input where it has none; `undefined` until it can be.
+   */
+  static #transformedInput(
+    attempt: StepAttempt,
+    task: SealedTask
+  ): Json | undefined {
+    const inputFrom =
+      task.kind === "call" || task.kind === "wait" ? task.inputFrom : undefined;
+    return inputFrom === undefined
+      ? attempt.data.input
+      : filledFrom(inputFrom, attempt.inputFrom);
   }
 
   /**
@@ -1392,7 +1408,7 @@ export class ResourceRunHost
   #requireAnswered(
     attempt: StepAttempt,
     expression: SealedExpression,
-    output: Json
+    { input, output }: { input: Json; output: Json }
   ): void {
     const { task } = attempt.step;
     const transforms =
@@ -1409,10 +1425,14 @@ export class ResourceRunHost
       expression.stage === "taskOutputAs"
         ? attempt.answer
         : ResourceRunHost.#shapedAnswer(attempt, task);
+    // And on the input its call was made on, as the host built it.
+    const transformed = ResourceRunHost.#transformedInput(attempt, task);
     if (
       attempt.call !== "done" ||
       expected === undefined ||
-      canonicalJson(expected) !== canonicalJson(output)
+      transformed === undefined ||
+      canonicalJson(expected) !== canonicalJson(output) ||
+      canonicalJson(transformed) !== canonicalJson(input)
     ) {
       this.#refuse(`Task "${task.id}" transforms only its call's answer.`);
     }
@@ -1548,14 +1568,7 @@ export class ResourceRunHost
     if (stages.has("taskIf") && attempt.condition !== "held") {
       return this.#refuse(`Task "${task.id}" ${doing} only once its if held.`);
     }
-    // Built by the host, from the task's sealed input.from and its own
-    // evaluations of it in this attempt; the raw input where it has none.
-    const inputFrom =
-      task.kind === "call" || task.kind === "wait" ? task.inputFrom : undefined;
-    const expected =
-      inputFrom === undefined
-        ? attempt.data.input
-        : filledFrom(inputFrom, attempt.inputFrom);
+    const expected = ResourceRunHost.#transformedInput(attempt, task);
     if (expected === undefined) {
       return this.#refuse(
         `Task "${task.id}" ${doing} only on the input its input.from made.`

@@ -17,6 +17,7 @@ import {
 } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -1067,6 +1068,22 @@ describe("grasp.model calls of JSON workflows", () => {
     });
   });
 
+  it("refuses a model's answer past what a step records before reading it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow } = await greetingWorkflow(ada, admin);
+    gatewayAnswering(
+      answer(
+        JSON.stringify({ line: "x".repeat(platformLimits.stepPayloadBytes) })
+      )
+    );
+    const run = await started(ada, workflow.id);
+    expect(endOf(await ended(ada, workflow.id, run))).toStrictEqual({
+      status: "failed",
+      code: "workflow.call_invalid",
+    });
+  });
+
   it("refuses the next model call once its approval is revoked, and one past the workflow's own limit", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
@@ -1661,6 +1678,41 @@ describe("a run's host, against a forged module's calls", () => {
       afterFailure: "workflow.invalid",
       beforeAnswer: "workflow.invalid",
     });
+  });
+
+  it("transforms a call's answer only with the input its call was made on", async () => {
+    const by = await person("builder");
+    const { workflow } = await published(by, {
+      tasks: [
+        {
+          clock: {
+            call: "grasp.now",
+            output: { as: "${ {at: ., who: $input.who} }" },
+          },
+        },
+        { finish: { set: { status: "done" } } },
+      ],
+    });
+    /** The step, its output.as read on `input`. */
+    const recorded = async (input: unknown) => {
+      const host = await hostOf(by, workflow.id);
+      return codeOf(
+        await host.do("task:clock", adaData, async (attempt) => {
+          const now = await attempt.call(adaFrame);
+          const shaped = await attempt.evaluate(0, {
+            input,
+            output: now.ok ? now.value : null,
+          });
+          return shaped.ok
+            ? { ok: true, value: { output: shaped.value } }
+            : { ok: false, error: shaped.error };
+        })
+      );
+    };
+    expect({
+      honest: await recorded(adaFrame.input),
+      otherInput: await recorded({ who: "Mallory" }),
+    }).toStrictEqual({ honest: "ok", otherInput: "workflow.invalid" });
   });
 
   it("makes a call on an input.from of many parts, as the host builds it from its own evaluations", async () => {

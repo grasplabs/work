@@ -11,7 +11,10 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
+import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -136,17 +139,48 @@ const callInvalid = (issue: string) =>
   workflowResourceErrors.create("workflow.call_invalid", { issues: [issue] });
 
 /**
+ * `value`, an RPC call's result, without what the runtime adds to its top
+ * level (its disposer, a symbol): only its own enumerable string keys,
+ * read once, as JSON has.
+ */
+const rpcResult = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    const items: unknown[] = value;
+    return [...items];
+  }
+  return typeof value === "object" && value !== null
+    ? Object.fromEntries(Object.entries(value))
+    : value;
+};
+
+/**
  * Refuses `value` unless the schema of `descriptor` (its JSON text) takes
  * it exactly as it is (exact-values.ts): a contract checks what crosses
  * it, never fills in or changes it (`workflow.call_invalid`, naming
- * `what`, never the value).
+ * `what`, never the value). Written once by the bounded writer first, so
+ * a value past what a step records, or nested past the evaluator's depth,
+ * is refused before anything walks it.
  */
 const requireShape = (
   descriptor: string | undefined,
   value: unknown,
   what: string
 ): Json => {
-  const parsed = z.json().safeParse(value);
+  const written = writeJson(value, {
+    maxBytes: platformLimits.stepPayloadBytes,
+    maxDepth: evaluatorLimits.maxJsonDepth,
+    maxNodes: platformLimits.stepPayloadBytes,
+    sortKeys: false,
+    safeIntegers: false,
+  });
+  if (!written.ok) {
+    throw callInvalid(
+      written.refusal === "too_large"
+        ? `${what}: Larger than a step records.`
+        : `${what}: Not JSON.`
+    );
+  }
+  const parsed = z.json().safeParse(JSON.parse(written.text));
   if (
     descriptor === undefined ||
     !parsed.success ||
@@ -454,7 +488,7 @@ const callOperation = async (
   if (await host.isRestricted()) {
     throw permissionErrors.create("permission.restricted");
   }
-  return requireShape(contract.output, answer, "output");
+  return requireShape(contract.output, rpcResult(answer), "output");
 };
 
 /** The connections the run's connector bindings reach, for the model rules. */
