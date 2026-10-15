@@ -489,7 +489,10 @@ export class ResourceRunHost
   readonly #asked = new Set<string>();
   /** The parameters expressions may read: the build's, not sensitive. */
   readonly #readableParams: Record<string, Json>;
-  /** The size of the run's input, charged to each evaluation. */
+  /**
+   * The size of what every evaluation serializes besides its step's data:
+   * the run's input and the readable parameters, charged to each.
+   */
   readonly #inputSize: number;
 
   constructor(
@@ -511,7 +514,9 @@ export class ResourceRunHost
           : []
       )
     );
-    this.#inputSize = JSON.stringify(run.input).length;
+    this.#inputSize =
+      JSON.stringify(run.input).length +
+      JSON.stringify(this.#readableParams).length;
   }
 
   /**
@@ -979,9 +984,9 @@ export class ResourceRunHost
 
   /** `#check`'s work: throws what refuses the value. */
   #checkNow(attempt: StepAttempt, which: unknown, value: unknown): void {
-    if (attempt.over) {
-      throw executionErrors.create("execution.stale_attempt");
-    }
+    // Its lease first, as for an evaluation: a stale attempt's check is
+    // stale, never a forged one that taints the run.
+    this.#requireCurrent(attempt);
     const kind = dataCheckSchema.safeParse(which);
     const { task } = attempt.step;
     const schema =
@@ -1029,6 +1034,18 @@ export class ResourceRunHost
     }
     const record = parsed.data;
     const skipped = "skipped" in record;
+    // A task with an `if` records an outcome only once the host evaluated
+    // it in this step: leaving it out never takes the task past it.
+    const hasIf =
+      stagesOf[step.kind].includes("taskIf") &&
+      this.#run.build.expressions.some(
+        ({ taskId, stage }) => taskId === task.id && stage === "taskIf"
+      );
+    if (hasIf && attempt.ifHeld === undefined) {
+      return this.#refuse(
+        `Task "${task.id}" records an outcome only once its if was evaluated.`
+      );
+    }
     if (skipped !== (attempt.ifHeld === false)) {
       return this.#refuse(
         `Task "${task.id}" is skipped exactly when its if answered false.`

@@ -2,6 +2,7 @@
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import type { AttemptLease } from "@grasp-os/workerflow/run";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -494,7 +495,9 @@ describe("switch and transitions in JSON workflows", () => {
 const hostOf = async (
   by: Acting,
   id: string,
-  params?: Record<string, unknown>
+  params?: Record<string, unknown>,
+  /** The attempt's lease at each read of it, by count: held unless given. */
+  lease?: (read: number) => AttemptLease | undefined
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -503,6 +506,7 @@ const hostOf = async (
     .first<{ hash: string }>();
   const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
   let count = 0;
+  let reads = 0;
   const step: RunStep = {
     do: async (name, _config, fn) => {
       count += 1;
@@ -527,7 +531,12 @@ const hostOf = async (
       build,
     },
     {
-      leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+      leaseOf: () => {
+        reads += 1;
+        return lease === undefined
+          ? { generation: 1, deadline: Date.now() + 60_000 }
+          : lease(reads);
+      },
       tampered: () => {},
     }
   );
@@ -693,10 +702,70 @@ describe("a run's host, against a forged module", () => {
         return { ok: true, value: { skipped: true } };
       }
     );
-    expect({ unasked, held: codeOf(held) }).toStrictEqual({
+    // No if evaluated, and an outcome recorded all the same: never past it.
+    const unaskedRan = await forged(
+      await hostOf(by, workflow.id),
+      "task:maybe",
+      { who: "Ada" },
+      { output: { status: "ran" } }
+    );
+    expect({ unasked, held: codeOf(held), unaskedRan }).toStrictEqual({
       unasked: "workflow.invalid",
       held: "workflow.invalid",
+      unaskedRan: "workflow.invalid",
     });
+  });
+
+  it("checks a step's data on an attempt only while it holds its lease, stale past it", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, typedOutput)
+    );
+    // Its lease held as it was claimed, gone as the module checks.
+    const host = await hostOf(by, workflow.id, undefined, (read) =>
+      read < 2 ? { generation: 1, deadline: Date.now() + 60_000 } : undefined
+    );
+    const checked: unknown[] = [];
+    await host.do(
+      "task:typed",
+      { input: { input: { who: "Ada" }, context: {} } },
+      async (attempt) => {
+        checked.push(codeOf(attempt.check("nothing", null)));
+        return await Promise.resolve({
+          ok: true,
+          value: { output: { status: "typed" } },
+        });
+      }
+    );
+    expect(checked).toStrictEqual(["execution.stale_attempt"]);
+  });
+
+  it("charges each evaluation for the parameters it reads, so large ones bound the work", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, [
+        { wide: { set: fields(24) } },
+        { finish: { set: { status: "done" } } },
+      ])
+    );
+    const host = await hostOf(by, workflow.id, { limit: "x".repeat(600_000) });
+    const codes: unknown[] = [];
+    await host.do(
+      "task:wide",
+      { input: { input: { who: "Ada" }, context: {} } },
+      async (attempt) => {
+        for (let slot = 0; slot < 24; slot += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one after the other
+          const evaluated = await attempt.evaluate(slot, {
+            input: { who: "Ada" },
+            output: null,
+          });
+          codes.push(codeOf(evaluated));
+        }
+        return { ok: true, value: { output: null } };
+      }
+    );
+    expect(codes.at(-1)).toBe("expression.budget_exhausted");
   });
 
   it("refuses a step's capture or an evaluation's data past what a step holds, before reading it", async () => {
