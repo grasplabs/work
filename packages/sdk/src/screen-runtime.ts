@@ -17,9 +17,14 @@ import { portTransport } from "@grasp-os/shared/screen-port";
 import type { ScreenMounted, ScreenProblem } from "@grasp-os/shared/screens";
 import { RpcSession } from "capnweb";
 import type { RpcStub } from "capnweb";
-import { createElement, Fragment, useEffect } from "react";
-import type { ComponentType } from "react";
+import { Component, createElement, useEffect } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+
+import { clientInternals, GraspClient } from "./client-core.ts";
+import type { ClientTransport } from "./client-core.ts";
+import { GraspError } from "./client-error.ts";
+import { GraspProvider } from "./react.ts";
 
 export type Theme = "light" | "dark";
 
@@ -42,6 +47,22 @@ export interface ScreenBridge {
    * client builds on, not a call for screen code itself.
    */
   callFunction: (request: string) => Promise<unknown>;
+  /**
+   * Follows one of the App's streaming actions (spec 10.7.6): `what` is
+   * `stream` (start it, or join it under the same key) or `attach` (read
+   * it again, never starting it), `request` as for `callFunction`.
+   * `onFrame` gets each frame core sent, one at a time, the next only once
+   * it has answered, then `{ type: "closed" }` once the connection ends
+   * without a result. Answers the subscription, to `release()` once the
+   * screen stops following it. The transport the screen client builds on.
+   */
+  streamFunction: (
+    what: string,
+    request: string,
+    onFrame: (frame: unknown) => Promise<void>
+  ) => Promise<{ release: () => void }>;
+  /** Cancels the streaming action's invocation `request` names, for everyone. */
+  cancelStream: (request: string) => Promise<unknown>;
   /** Adds a problem to the App's error log. */
   report: (problem: ScreenProblem) => void;
   /** Calls `onTheme` with the page's theme now and whenever it changes. */
@@ -67,6 +88,17 @@ export interface ScreenBridge {
     workflow: string,
     onChange: (change: unknown) => void
   ) => Promise<unknown>;
+  /**
+   * Follows one of the App's queries (spec 11): `request` is the call as
+   * `callFunction` sends it; `onSnapshot` gets each result core pushes
+   * (`{ revision, result }`), until the subscription it answers is
+   * released (`release()`) or core lets go of `onSnapshot`. The transport
+   * the screen client follows queries over, not a call for screen code.
+   */
+  watchQuery: (
+    request: string,
+    onSnapshot: (snapshot: unknown) => void
+  ) => Promise<{ release: () => Promise<void> }>;
 }
 
 let connected: RpcStub<ScreenBridge> | undefined;
@@ -78,6 +110,98 @@ export const bridge = (): RpcStub<ScreenBridge> => {
   }
   return connected;
 };
+
+/** A subscription the page answered: released, and let go of, once. */
+type HeldSubscription = Awaited<
+  ReturnType<RpcStub<ScreenBridge>["watchQuery"]>
+>;
+
+/**
+ * Releases `subscription` and lets go of its stub: Cap'n Web keeps what a
+ * session was handed until its stub is disposed of, so a released
+ * subscription must be both.
+ */
+const releaseQuietly = async (
+  subscription: HeldSubscription
+): Promise<void> => {
+  try {
+    await subscription.release();
+  } catch {
+    // Core lets go of it anyway once the page's connection does.
+  } finally {
+    subscription[Symbol.dispose]();
+  }
+};
+
+/**
+ * The session client's transport over the page's bridge `page`: calls as
+ * function calls, queries followed with `watchQuery`. Core's letting go
+ * of a callback reaches it as the callback's disposal (Cap'n Web
+ * disposes a callback once nothing can call it any more), which the
+ * client reads as a lost subscription; the subscription's stub is let go
+ * of then too.
+ */
+export const bridgeTransport = (
+  page: () => RpcStub<ScreenBridge>
+): ClientTransport => ({
+  call: async (request) => await page().callFunction(request),
+  watch: async (request, onSnapshot, onLost) => {
+    // The subscription's stub, once the page answered, and whether core
+    // let go of it first; its stub is let go of once, whichever comes.
+    const state: { held?: HeldSubscription; lost: boolean; gone: boolean } = {
+      lost: false,
+      gone: false,
+    };
+    const letGo = (): void => {
+      if (state.held !== undefined && !state.gone) {
+        state.gone = true;
+        state.held[Symbol.dispose]();
+      }
+    };
+    const callback = Object.assign(
+      (snapshot: unknown): void => {
+        onSnapshot(snapshot);
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          state.lost = true;
+          letGo();
+          onLost();
+        },
+      }
+    );
+    state.held = await page().watchQuery(request, callback);
+    if (state.lost) {
+      letGo();
+    }
+    return {
+      release: () => {
+        if (state.held !== undefined && !state.gone) {
+          state.gone = true;
+          void releaseQuietly(state.held);
+        }
+      },
+    };
+  },
+  stream: async (what, request, onFrame) => {
+    const link = await page().streamFunction(what, request, async (frame) => {
+      await Promise.resolve();
+      onFrame(frame);
+    });
+    return {
+      // Released, then let go of: the page holds the subscription's stub
+      // until it is disposed, whatever became of the stream.
+      release: async () => {
+        try {
+          await link.release();
+        } finally {
+          link[Symbol.dispose]();
+        }
+      },
+    };
+  },
+  cancelStream: async (request) => await page().cancelStream(request),
+});
 
 /**
  * Connects the frame to the page's bridge over `port`, each message as
@@ -174,6 +298,78 @@ const reportProblems = (): void => {
   };
 };
 
+/**
+ * What a screen shows in place of what failed to render: the failure's
+ * own message when it is a structured SDK error (worded for people, and
+ * never with a cause or stack, though App code can make one with any
+ * message: this box is the App's, not the platform's), a plain sentence
+ * otherwise, and a way to try again.
+ */
+const fallbackOf = (error: unknown, tryAgain: () => void): ReactNode =>
+  createElement(
+    "div",
+    { role: "alert", className: "flex flex-col items-start gap-3 p-6" },
+    createElement(
+      "p",
+      { className: "text-sm" },
+      error instanceof GraspError
+        ? error.message
+        : "Something went wrong showing this screen."
+    ),
+    // A plain button, not @grasp-os/ui's Button: the UI kit depends on
+    // the SDK, so the SDK can't depend on it back. Styled with theme
+    // utilities only, nothing arbitrary.
+    createElement(
+      "button",
+      {
+        type: "button",
+        className:
+          "rounded-md border px-3 py-1.5 text-sm outline-none transition-colors hover:bg-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
+        onClick: tryAgain,
+      },
+      "Try again"
+    )
+  );
+
+interface BoundaryProps {
+  /** Reads the queries that failed again, before the screen renders again. */
+  retry: () => void;
+  children?: ReactNode;
+}
+
+/** What failed to render, if anything did (whatever was thrown, even `undefined`). */
+interface BoundaryState {
+  failure: { error: unknown } | null;
+}
+
+/**
+ * The platform's error boundary around every screen (spec 10.1): a query
+ * that fails throws while rendering, and lands here instead of blanking
+ * the frame. React offers no hook for this, so it is the runtime's one
+ * class component; the React Compiler leaves classes as they are.
+ */
+class ScreenBoundary extends Component<BoundaryProps, BoundaryState> {
+  constructor(props: BoundaryProps) {
+    super(props);
+    this.state = { failure: null };
+  }
+
+  static getDerivedStateFromError(error: unknown): BoundaryState {
+    return { failure: { error } };
+  }
+
+  override render(): ReactNode {
+    const { failure } = this.state;
+    if (failure === null) {
+      return this.props.children;
+    }
+    return fallbackOf(failure.error, () => {
+      this.props.retry();
+      this.setState({ failure: null });
+    });
+  }
+}
+
 const isScreenModule = (value: unknown): value is { default: ComponentType } =>
   typeof value === "object" &&
   value !== null &&
@@ -202,16 +398,43 @@ export const runScreen = async (
     if (!isScreenModule(loaded)) {
       throw new Error(`${screen} has no default export to render.`);
     }
+    // One client for the App session this frame runs, over the page's
+    // bridge: every screen in it reads through the same queries and
+    // submissions, and none makes its own (spec 10.7.1).
+    const client = new GraspClient(bridgeTransport(bridge));
     createRoot(root, {
       onUncaughtError: (error) => {
         report({ kind: "error", ...describe(error) });
       },
+      // What the boundary caught: of a structured SDK error only its code
+      // and request ID, never the domain message it may carry.
+      onCaughtError: (error) => {
+        report({
+          kind: "error",
+          ...(error instanceof GraspError
+            ? {
+                message: `${error.code}${error.requestId === null ? "" : ` (request ${error.requestId})`}`,
+              }
+            : describe(error)),
+        });
+      },
     }).render(
       createElement(
-        Fragment,
-        null,
-        createElement(loaded.default),
-        createElement(Mounted, { start })
+        GraspProvider,
+        { client },
+        // Inside the boundary: a screen whose first render throws replaces
+        // `Mounted` with the fallback too, so the page never hears that a
+        // start which didn't work did.
+        createElement(
+          ScreenBoundary,
+          {
+            retry: () => {
+              clientInternals(client).retryFailed();
+            },
+          },
+          createElement(loaded.default),
+          createElement(Mounted, { start })
+        )
       )
     );
   } catch (error) {

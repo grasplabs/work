@@ -10,7 +10,7 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { connectBridge } from "../src/screen-runtime.ts";
+import { bridgeTransport, connectBridge } from "../src/screen-runtime.ts";
 import { callServer, followRun, followRuns, live } from "../src/screen.ts";
 
 // `live` from the side of the page: the screen's runtime connects to a fake
@@ -53,8 +53,30 @@ class FakeHold extends RpcTarget {
   }
 }
 
+/** Core's answer to `streamFunction`, released and then let go of. */
+class FakeStream extends RpcTarget {
+  released = false;
+  disposed = false;
+
+  release(): void {
+    this.released = true;
+  }
+
+  [Symbol.dispose](): void {
+    this.disposed = true;
+  }
+}
+
 /** The page's side of the bridge, keeping each callback a call ends with. */
 class FakePage extends RpcTarget {
+  readonly streams: FakeStream[] = [];
+
+  streamFunction(): FakeStream {
+    const stream = new FakeStream();
+    this.streams.push(stream);
+    return stream;
+  }
+
   readonly subscriptions: { args: unknown[]; callback: RpcStub<Callback> }[] =
     [];
 
@@ -145,6 +167,31 @@ describe(live, () => {
     }
     return subscription.callback;
   };
+
+  it("lets go of a stream's subscription once it is released, so the page holds none", async () => {
+    const { port1, port2 } = new MessageChannel();
+    const streaming = new FakePage();
+    const served = servePage(port2, streaming);
+    const bridge = connectBridge(port1);
+    try {
+      const transport = bridgeTransport(() => bridge);
+      const stream = await transport.stream?.("stream", "{}", () => {
+        // No frames here.
+      });
+      await stream?.release();
+      await vi.waitFor(() => {
+        expect(
+          streaming.streams.map(({ released, disposed }) => ({
+            released,
+            disposed,
+          }))
+        ).toStrictEqual([{ released: true, disposed: true }]);
+      });
+    } finally {
+      bridge[Symbol.dispose]();
+      served[Symbol.dispose]();
+    }
+  });
 
   it("passes on what the server sends until stopped, then rejects it, so the server lets go", async () => {
     const received: unknown[] = [];

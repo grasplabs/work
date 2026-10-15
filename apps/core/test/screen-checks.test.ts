@@ -252,10 +252,14 @@ describe("screen checks", { timeout: 60_000 }, () => {
       built.diagnostics.map((diagnostic) => summary(diagnostic))
     ).toStrictEqual([
       expect.stringContaining(
-        'screens/tickets.tsx:31:21 shadcn/no-raw-colors error: "bg-red-500" uses the raw Tailwind palette. Nearest theme tokens: bg-destructive'
+        'screens/tickets.tsx:31:21 shadcn/no-raw-colors error: "bg-red-500" uses the raw Tailwind palette. Nearest theme tokens: '
       ),
     ]);
-    expect(built.diagnostics[0]?.fix).toBe('Replace with "bg-destructive".');
+    // The theme's nearest reds: its chart hue and its destructive colour.
+    expect(built.diagnostics[0]?.message).toContain("bg-destructive");
+    expect(built.diagnostics[0]?.fix).toMatch(
+      /^Replace with "bg-(?:hue-red|destructive)"\.$/u
+    );
   });
 
   it("checks a typical screen quickly once the isolate is warm", async () => {

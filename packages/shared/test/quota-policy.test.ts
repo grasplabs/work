@@ -14,6 +14,16 @@ describe("quota policy", () => {
         workflowDescendantRuns: 100,
         workflowActiveMs: 30 * 60 * 1000,
         workflowAgeMs: 365 * 24 * 60 * 60 * 1000,
+        lineageModelRequests: 100,
+        lineageHostCalls: 10_000,
+        workflowResourcesPerPerson: 200,
+        workflowClientAttempts: 32,
+        workflowPersonAttempts: 8,
+        workflowAppAttempts: 8,
+        workflowQueuedPerPerson: 64,
+        workflowQueuedPerApp: 64,
+        workflowQueuedStepMs: 24 * 60 * 60 * 1000,
+        triggerResourcesPerPerson: 100,
       },
     });
   });
@@ -40,8 +50,10 @@ describe("quota policy", () => {
     const refused = [
       { generation: 1, limits: { workflowSteps: 1001 } },
       { generation: 1, limits: { workflowAttemptsPerStep: 6 } },
+      { generation: 1, limits: { lineageModelRequests: 101 } },
       { generation: 1, limits: { workflowActiveMs: 30 * 60 * 1000 + 1 } },
       { generation: 1, limits: { workflowNestingLevels: 0 } },
+      { generation: 1, limits: { lineageHostCalls: 10_001 } },
       { generation: 1, limits: { workflowBranches: 4 } },
       { generation: 1, limits: { workflowSteps: 1.5 } },
       { limits: { workflowSteps: 10 } },

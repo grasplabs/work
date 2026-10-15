@@ -119,12 +119,15 @@ export const retryable = async (
   } catch (error) {
     const { details } = z
       .object({
-        details: z.object({ retryAfterSeconds: z.number() }).optional(),
+        details: z
+          .object({ retryAfterSeconds: z.number().optional() })
+          .optional(),
       })
       .parse(error);
+    const wait = details?.retryAfterSeconds;
     return {
       code: connectErrors.codeOf(error) ?? String(error),
-      ...details,
+      ...(wait === undefined ? {} : { retryAfterSeconds: wait }),
     };
   }
 };

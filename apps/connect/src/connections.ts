@@ -150,7 +150,9 @@ export const composioServer = (env: Env, connection: Connection): McpServer => {
 /**
  * Whose each connection `request` names is (`ConnectApi.connectionOwners`),
  * disconnected ones too: what an App read through a connection before it
- * was disconnected is still its owner's alone. Unknown IDs are left out.
+ * was disconnected is still its owner's alone. With what it is (its
+ * source and provider) and its account's name, which core records with
+ * the mail a workflow run sends through it. Unknown IDs are left out.
  */
 export const connectionOwners = async (
   db: D1Database,
@@ -165,7 +167,13 @@ export const connectionOwners = async (
     return [];
   }
   return await drizzle(db)
-    .select({ id: connections.id, ownerUserId: connections.ownerUserId })
+    .select({
+      id: connections.id,
+      ownerUserId: connections.ownerUserId,
+      source: connections.serverKind,
+      provider: connections.provider,
+      accountName: connections.accountName,
+    })
     .from(connections)
     .where(inArray(connections.id, ids));
 };

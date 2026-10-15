@@ -12,7 +12,9 @@ import {
   identifierMaxLength,
   identifierSchema,
   runIdSchema,
-  workflowIdSchema,
+  storeIdSchema,
+  triggerIdSchema,
+  workflowResourceIdSchema,
   workspaceIdSchema,
 } from "./ids.ts";
 import type { AppId, PermissionId } from "./ids.ts";
@@ -23,18 +25,49 @@ import type { AppId, PermissionId } from "./ids.ts";
 // Everything here names things by ID and stays identifier-sized, because
 // each grant and revoke goes into the audit log with these values.
 
-/** Who a permission is for: an App, or an agent. Never a person. */
+const appSubjectSchema = z.strictObject({
+  type: z.literal("app"),
+  appId: appIdSchema,
+});
+const agentSubjectSchema = z.strictObject({
+  type: z.literal("agent"),
+  agentId: agentIdSchema,
+});
+
+/**
+ * Whose code makes a call: an App's or an agent's. What a call's
+ * authority names (`authoritySchema`).
+ */
+export const codeSubjectSchema = z.discriminatedUnion("type", [
+  appSubjectSchema,
+  agentSubjectSchema,
+]);
+export type CodeSubject = z.infer<typeof codeSubjectSchema>;
+
+/**
+ * Who a permission is for: an App, an agent, or an independent resource
+ * (platform specification 24): a workflow, a business store or a trigger,
+ * each holding its own grants, never its owner's nor those of an App that
+ * uses it. Never a person.
+ */
 export const permissionSubjectSchema = z.discriminatedUnion("type", [
+  appSubjectSchema,
+  agentSubjectSchema,
   z.strictObject({
-    type: z.literal("app"),
-    appId: appIdSchema,
+    type: z.literal("workflow"),
+    workflowId: workflowResourceIdSchema,
   }),
   z.strictObject({
-    type: z.literal("agent"),
-    agentId: agentIdSchema,
+    type: z.literal("store"),
+    storeId: storeIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("trigger"),
+    triggerId: triggerIdSchema,
   }),
 ]);
 export type PermissionSubject = z.infer<typeof permissionSubjectSchema>;
+export type PermissionSubjectType = PermissionSubject["type"];
 /** A subject as a client sends it, with a plain string ID. */
 export type PermissionSubjectInput = z.input<typeof permissionSubjectSchema>;
 
@@ -61,8 +94,9 @@ const platformObjectSchema = z.strictObject({ type: z.literal("platform") });
 
 /**
  * What a permission gives access to: a connection (all of it, or one
- * resource in it, such as one mailbox), a Knowledge collection, one
- * workflow of an App, another App's exports: the methods of its server
+ * resource in it, such as one mailbox), a Knowledge collection, an
+ * independent workflow (to follow its runs, `read`, or start it,
+ * `start`), another App's exports: the methods of its server
  * code it lets other Apps call (`appExportsPath`), or the platform's own
  * statistics.
  */
@@ -76,8 +110,7 @@ export const permissionObjectSchema = z.discriminatedUnion("type", [
   collectionObjectSchema,
   z.strictObject({
     type: z.literal("workflow"),
-    appId: appIdSchema,
-    workflowId: workflowIdSchema,
+    workflowId: workflowResourceIdSchema,
   }),
   z.strictObject({
     type: z.literal("app"),
@@ -135,6 +168,8 @@ export const permissionMaxActions = 16;
  * as, a platform binding. Tests check this list against both Workers' env.
  */
 const platformBindingNames: ReadonlySet<string> = new Set([
+  // One foreground action's invocation (core's src/action-invocation.ts).
+  "ACTION_INVOCATIONS",
   "AI",
   // A workflow run's own App (its server methods), next to its permissions.
   "APP",
@@ -407,7 +442,7 @@ export interface PermissionsApi {
  */
 export const authoritySchema = z
   .strictObject({
-    subject: permissionSubjectSchema,
+    subject: codeSubjectSchema,
     onBehalfOf: identifierSchema,
     mode: z.enum(["interactive", "workflow"]),
     /**

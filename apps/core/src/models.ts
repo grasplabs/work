@@ -8,8 +8,13 @@ import type {
   ProviderHeaders,
   SimpleStreamOptions,
   StreamFunction,
+  ThinkingLevel,
   TranscriptContext,
   Usage,
+} from "@earendil-works/pi-ai";
+import {
+  clampThinkingLevel,
+  getSupportedThinkingLevels,
 } from "@earendil-works/pi-ai";
 import { streamSimple as anthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
 import {
@@ -47,7 +52,12 @@ import {
   identifierSchema,
 } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { modelErrors } from "@grasp-os/shared/models";
+import {
+  defaultModelEffort,
+  modelEfforts,
+  modelErrors,
+} from "@grasp-os/shared/models";
+import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import {
   authoritySchema,
   permissionErrors,
@@ -63,10 +73,12 @@ import {
   bindingScopes,
   budgetPeriods,
   hasBudget,
+  lineageModelRequests,
   scopesFor,
 } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
 import type {
+  Admitted as LedgerAdmitted,
   LedgerScope,
   LedgerScopeName,
   Settled,
@@ -83,6 +95,7 @@ import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
+import { quotaPolicy } from "./workflows/quotas.ts";
 
 // The model gateway: every model call in a deployment goes through here, and
 // from here through the deployment's AI Gateway, never straight to a
@@ -298,6 +311,46 @@ export const gatewaySettings = (
 });
 
 /**
+ * The thinking level a request asks `model` for: the call's effort, or
+ * {@link defaultModelEffort}, as the model takes it. A level it lacks
+ * becomes the next one up that it has, or its highest when it has none
+ * above: pi's rule, which its OpenAI adapters apply anyway, applied here
+ * for every provider (Anthropic's falls back its own way). So a call that
+ * names none asks what it did before efforts. `undefined` for a model
+ * that doesn't think, which pi then asks for none.
+ */
+const thinkingOf = (
+  model: Model<Api>,
+  effort?: ModelEffort
+): ThinkingLevel | undefined => {
+  if (!model.reasoning) {
+    return undefined;
+  }
+  const level = clampThinkingLevel(model, effort ?? defaultModelEffort);
+  return level === "off" ? undefined : level;
+};
+
+/**
+ * The efforts `ref` takes, least first (those of {@link modelEfforts} its
+ * catalog entry supports), and the one a call that names none gets
+ * ({@link thinkingOf}). None for a model that doesn't think or isn't one
+ * the gateway offers.
+ */
+export const modelEffortsOf = (ref: string): ModelEfforts => {
+  const model = parseModelRef(ref)?.catalog;
+  if (model === undefined) {
+    return { levels: [], default: null };
+  }
+  const supported = new Set<string>(getSupportedThinkingLevels(model));
+  const levels = modelEfforts.filter((effort) => supported.has(effort));
+  const fallback = thinkingOf(model);
+  return {
+    levels,
+    default: levels.find((effort) => effort === fallback) ?? null,
+  };
+};
+
+/**
  * Whether the deployment's config keeps every call in the EU
  * (`eu.deployment`): for what sends data out of the Worker without being a model call,
  * such as Workers AI's document conversion (knowledge/extract.ts), which
@@ -327,6 +380,11 @@ const sessionShape = {
   maxTokens: z.int().positive().optional(),
   /** How long a request may take, in milliseconds, retries included. */
   timeoutMs: z.int().positive().max(maxTimeoutMs).optional(),
+  /**
+   * How hard a model that thinks does so before it answers
+   * ({@link thinkingOf}); {@link defaultModelEffort} without one.
+   */
+  effort: z.enum(modelEfforts).optional(),
   /** Why the call is made, for the audit log. */
   purpose: z.string().max(64).regex(purposePattern),
   /** Who or what asked: a person, an agent, an App or a workflow run. */
@@ -628,8 +686,17 @@ interface Route extends Admitted {
   transport: FetchFunction;
   /** The prices its provider requests are pinned to; none for a model with none. */
   price: PinnedPrice | undefined;
-  /** The scopes a provider request sent now counts against, in this month. */
-  scopesNow: () => { period: string; scopes: LedgerScope[] };
+  /**
+   * The scopes a provider request sent now counts against, in this month,
+   * its run lineage's limited by the quota policy in force now, and that
+   * policy's generation (none for a call with no lineage). Throws when the
+   * policy can't be read.
+   */
+  scopesNow: () => Promise<{
+    period: string;
+    scopes: LedgerScope[];
+    policyGeneration: number | undefined;
+  }>;
   /**
    * What the call's provider requests may reserve together, under its
    * binding's cap per request, and what they hold of it now: each one's
@@ -909,20 +976,74 @@ const settleAdmitted = async (
   return { reservedMicros: admission.reservedMicros, settled };
 };
 
+/** `route`'s scopes now, or held back when the quota policy can't be read. */
+const scopesRead = async (
+  route: Route
+): Promise<Awaited<ReturnType<Route["scopesNow"]>> | { held: Refusal }> => {
+  try {
+    return await route.scopesNow();
+  } catch (error) {
+    // No lineage's request limit, so nothing is admitted.
+    log.error("model.quota_policy_failed", errorFields(error));
+    return { held: { code: "model.quota_policy_unavailable" } };
+  }
+};
+
+/** Why the ledger's refusal `admitted` holds back a request of `call`. */
+const heldBecause = (
+  call: Session,
+  admitted: Exclude<
+    LedgerAdmitted,
+    { ok: true } | { policyBehind: true; highest: number }
+  >
+): Refusal => {
+  if ("unpriced" in admitted) {
+    return { code: "model.unpriced" };
+  }
+  // The run lineage's own limits: no wait helps a lineage out of
+  // requests, nor one whose spend leaves no room.
+  if ("requests" in admitted) {
+    return { code: "model.run_limit", because: "requests" };
+  }
+  if ("reused" in admitted) {
+    // Never expected: every ID is a new UUID.
+    log.error("model.request_id_reused", { model: call.model });
+    return { code: "model.ledger_unavailable" };
+  }
+  // A guest's user scope is the member who invited them: whether that
+  // member has calls under way is theirs to know, not the guest's.
+  if ("heldUntil" in admitted && call.trigger.type !== "guest") {
+    return {
+      code: "model.budget_busy",
+      because: admitted.scope,
+      retryAfterSeconds: retryAfterSeconds(admitted.heldBy, admitted.heldUntil),
+    };
+  }
+  return admitted.scope === "run"
+    ? { code: "model.run_limit", because: "spend" }
+    : { code: "model.over_budget", because: admitted.scope };
+};
+
 /**
  * Asks the model ledger to admit one provider request, with the body it
  * will send: reserves the most it can cost, its prompt bounded by the
  * body's size and its answer by the cap the body sets (or the model's,
  * where it sets none), at the model's pinned prices. Its ID, or why it
- * is held back.
+ * is held back. Asked once more, under the quota policy read again, when
+ * the ledger already admitted under a newer one (`retried`).
  */
 const admitRequest = async (
   route: Route,
   body: unknown,
-  endsAt: number
+  endsAt: number,
+  retried = false
 ): Promise<Admission | { held: Refusal }> => {
   const { env, call, model, price, perRequest } = route;
-  const { period, scopes } = route.scopesNow();
+  const now = await scopesRead(route);
+  if ("held" in now) {
+    return now;
+  }
+  const { period, scopes, policyGeneration } = now;
   const budgeted = hasBudget(scopes) || perRequest !== undefined;
   if (price === undefined && budgeted) {
     return { held: { code: "model.unpriced" } };
@@ -972,43 +1093,31 @@ const admitRequest = async (
       actor: call.trigger,
       deadline: callDeadline,
       reconcileAt: callDeadline + reconcileGraceMs,
+      ...(policyGeneration === undefined ? {} : { policyGeneration }),
     });
+    if ("policyBehind" in admitted) {
+      if (!retried) {
+        return await admitRequest(route, body, endsAt, true);
+      }
+      // Never expected: core records a generation before any admission
+      // carries it, and reads the highest it recorded. A ledger ahead of
+      // core (core's database restored, say) holds back every workflow's
+      // call until core's policy passes it: logged with both generations,
+      // and refused for what it is, never as a ledger outage.
+      log.error("model.quota_policy_behind", {
+        model: call.model,
+        generation: policyGeneration,
+        ledgerGeneration: admitted.highest,
+      });
+      return { held: { code: "model.quota_policy_behind" } };
+    }
     if (admitted.ok) {
       if (perRequest !== undefined) {
         perRequest.heldMicros += reservedMicros;
       }
       return { id, reservedMicros };
     }
-    if ("unpriced" in admitted) {
-      return { held: { code: "model.unpriced" } };
-    }
-    // The run lineage's own limits: no wait helps a lineage out of
-    // requests, nor one whose spend leaves no room.
-    if ("requests" in admitted) {
-      return { held: { code: "model.run_limit", because: "requests" } };
-    }
-    if ("reused" in admitted) {
-      // Never expected: every ID is a new UUID.
-      log.error("model.request_id_reused", { model: call.model });
-      return { held: { code: "model.ledger_unavailable" } };
-    }
-    // A guest's user scope is the member who invited them: whether that
-    // member has calls under way is theirs to know, not the guest's.
-    if ("heldUntil" in admitted && call.trigger.type !== "guest") {
-      return {
-        held: {
-          code: "model.budget_busy",
-          because: admitted.scope,
-          retryAfterSeconds: retryAfterSeconds(
-            admitted.heldBy,
-            admitted.heldUntil
-          ),
-        },
-      };
-    }
-    return admitted.scope === "run"
-      ? { held: { code: "model.run_limit", because: "spend" } }
-      : { held: { code: "model.over_budget", because: admitted.scope } };
+    return { held: heldBecause(call, admitted) };
   } catch (error) {
     log.error("model.ledger_failed", errorFields(error));
     // The admission may have committed with its answer lost: nothing was
@@ -1128,9 +1237,8 @@ const open = (
     headers: gatewayHeaders(call),
     maxTokens: answerTokens(call, model),
     maxRetries,
-    // Reasoning at a middle effort where the model has it: without a level
-    // pi turns it off.
-    reasoning: model.reasoning ? "medium" : undefined,
+    // Without a level pi turns reasoning off.
+    reasoning: thinkingOf(model, call.effort),
     signal,
     onPayload: ref.provider === "workers-ai" ? workersAiPayload : undefined,
     onResponse: ({ status, headers }) => {
@@ -1473,6 +1581,8 @@ const auditEntry = (
         logId !== undefined && logId.length <= auditIdentifierMaxLength
           ? logId
           : null,
+      // How hard the model was asked to think: a cost the person chose.
+      effort: thinkingOf(ref.catalog, call.effort) ?? null,
       // Which rule kept the call in the EU, if one did.
       euOnly: judged.euOnly ?? null,
       // Why it carried sensitive data, if a data rule asked and it did.
@@ -1721,15 +1831,18 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     listPricesOf(ref.provider, ref.id, ref.catalog.cost)
   );
   const { binding } = call;
-  const scopes = scopesFor(rules.budgets, call);
-  const scopesOn = (day: string): LedgerScope[] =>
-    binding === undefined
+  const scopesOn = (day: string, lineageRequests: number): LedgerScope[] => {
+    const scopes = scopesFor(rules.budgets, call, lineageRequests);
+    return binding === undefined
       ? scopes
       : [...scopes, ...bindingScopes(binding, day)];
+  };
   const requestMicros = bindingRequestMicros(binding);
+  // Whether a budget applies: the lineage's request limit limits no spend.
   if (
     price === undefined &&
-    (hasBudget(scopesOn(budgetPeriods(env).day)) || requestMicros !== undefined)
+    (hasBudget(scopesOn(budgetPeriods(env).day, lineageModelRequests)) ||
+      requestMicros !== undefined)
   ) {
     return await refuse(env, call, { code: "model.unpriced" });
   }
@@ -1740,11 +1853,22 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     model: gatewayModel(config.gateway, ref),
     transport: createAiBindingFetch(env.AI),
     price,
-    scopesNow: () => {
+    scopesNow: async () => {
+      // A run lineage's request limit, as the policy stands for this
+      // request: lowered for runs already under way too (model-budgets.ts).
+      const lineage =
+        call.trigger.type === "workflow" ? await quotaPolicy(env) : undefined;
       // One clock for both, so a request at a month's last instant never
       // counts its day in one month and its month in the next.
       const { month, day } = budgetPeriods(env);
-      return { period: month, scopes: scopesOn(day) };
+      return {
+        period: month,
+        scopes: scopesOn(
+          day,
+          lineage?.limits.lineageModelRequests ?? lineageModelRequests
+        ),
+        policyGeneration: lineage?.generation,
+      };
     },
     perRequest:
       requestMicros === undefined

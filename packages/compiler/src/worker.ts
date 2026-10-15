@@ -42,6 +42,7 @@ import {
   codeImportError,
   rewriteAppCodeImports,
   rewriteCodeImports,
+  generatedWorkflowCode,
   rewriteImports,
   serverCode,
   workflowCode,
@@ -52,6 +53,7 @@ import {
   buildFiles,
   declarationFile,
   limitErrors,
+  openWorkflowErrors,
   screenFile,
   serverEntry,
   serverFiles,
@@ -62,6 +64,7 @@ import {
   kitModuleName,
   kitStylesheet,
   ownEntry,
+  screenReferences,
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
@@ -301,11 +304,15 @@ const buildCss = async (
  */
 export const checkScreens = (files: Record<string, string>): Diagnostic[] => {
   const app = buildFiles(files);
-  const tooMuch = limitErrors(app);
+  const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
     return tooMuch;
   }
-  return [...typeCheck(app, kit.types), ...lint(app, kit)];
+  // The host wrote the references; the design system is the App's to keep.
+  const own = Object.fromEntries(
+    Object.entries(app).filter(([path]) => path !== screenReferences.path)
+  );
+  return [...typeCheck(app, kit.types), ...lint(own, kit)];
 };
 
 /**
@@ -316,7 +323,7 @@ export const buildScreens = async (
   files: Record<string, string>
 ): Promise<ScreenBuild> => {
   const app = buildFiles(files);
-  const tooMuch = limitErrors(app);
+  const tooMuch = appCodeLimitErrors(app);
   if (tooMuch.length > 0) {
     return { ok: false, diagnostics: tooMuch };
   }
@@ -364,7 +371,9 @@ export const buildScreens = async (
     [...imports.values()].flatMap(({ kit: imported }) => [...imported])
   );
   const css = await buildCss(
-    sources.map(([, source]) => source),
+    sources
+      .filter(([path]) => path !== screenReferences.path)
+      .map(([, source]) => source),
     kitModules
   );
   return {
@@ -507,6 +516,40 @@ export const buildWorkflows = (
   return tooMuch.length > 0
     ? { ok: false, diagnostics: tooMuch }
     : compileCode(workflowCode, workflows);
+};
+
+/**
+ * The module the host generated from a JSON workflow, built: as one module
+ * by flat name; or why it failed.
+ */
+export type OpenWorkflowBuild =
+  | { ok: true; modules: Record<string, string> }
+  | { ok: false; diagnostics: Diagnostic[] };
+
+/**
+ * Builds the module the host generated from a JSON workflow
+ * (`openWorkflowEntry`): type-checked against the SDK's own declarations,
+ * then compiled as workflow code is, importing only
+ * `@grasp-os/sdk/open-workflow` (`generatedWorkflowCode`). Generated code
+ * is held to the type check that App workflows aren't (spec 19.1): it is
+ * the host's own output, so a type error is the generator's, and nothing
+ * is sealed that doesn't check.
+ */
+export const buildOpenWorkflow = (
+  files: Record<string, string>
+): OpenWorkflowBuild => {
+  const wrong = openWorkflowErrors(files);
+  if (wrong.length > 0) {
+    return { ok: false, diagnostics: wrong };
+  }
+  const built = compileCode(generatedWorkflowCode, files);
+  if (!built.ok) {
+    return built;
+  }
+  const diagnostics = typeCheck(files, kit.types);
+  return diagnostics.some((diagnostic) => isError(diagnostic))
+    ? { ok: false, diagnostics }
+    : built;
 };
 
 /**
@@ -685,6 +728,12 @@ export default class ScreenCompiler extends WorkerEntrypoint {
   // oxlint-disable-next-line class-methods-use-this
   buildWorkflows(files: Record<string, string>): WorkflowBuild {
     return buildWorkflows(files);
+  }
+
+  /** Builds a JSON workflow's generated module (`buildOpenWorkflow`). */
+  // oxlint-disable-next-line class-methods-use-this
+  buildOpenWorkflow(files: Record<string, string>): OpenWorkflowBuild {
+    return buildOpenWorkflow(files);
   }
 
   /** Only the type check and the lint, without building. */

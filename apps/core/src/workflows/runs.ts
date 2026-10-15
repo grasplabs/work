@@ -14,6 +14,7 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowErrors } from "@grasp-os/shared/workflows";
 import type {
   RunFailure,
+  RunQueue,
   RunStatus,
   WorkflowRun,
 } from "@grasp-os/shared/workflows";
@@ -50,9 +51,11 @@ import type { Member } from "../auth/identity.ts";
 import { apps, workflowRunControls, workflowRuns } from "../db/core/schema.ts";
 import { failureNoticed } from "../notifications.ts";
 import { stepStatisticsForgotten } from "../statistic-steps.ts";
+import { queuedRuns, runDequeued } from "./admission.ts";
 import { hasWorkflow } from "./code.ts";
 import { runEngine } from "./engine.ts";
 import type { WaitReason } from "./host.ts";
+import { ownerOf } from "./owners.ts";
 import { admitChild, lineageCreated } from "./quotas.ts";
 import type { ChildPlace } from "./quotas.ts";
 import { detailsRemoved, removedText } from "./retention.ts";
@@ -88,6 +91,13 @@ export const nextRevision = sql`${workflowRuns.summaryRevision} + 1`;
  * says it is.
  */
 export const unended: RunRow["status"][] = ["starting", "running", "paused"];
+
+/**
+ * Whether a row's run goes on (starting or running): the runs a step of
+ * which may wait in the queue for a share (admission.ts, `runActive`).
+ */
+export const goesOn = (status: RunRow["status"]): boolean =>
+  status === "starting" || status === "running";
 
 /** A row's status as callers see it: a run starting shows as running. */
 export const shownStatus = (
@@ -235,10 +245,10 @@ export const runActor = (
  * The statements that record a run's failure, after the one that marks it
  * failed in the same batch: its `workflow.run.failed` event, stored only
  * if that statement changed the row, so a run that ended otherwise records
- * nothing; and the notice to the person
- * it acted for (notifications.ts), only if the event was stored. That
- * person is who started it, or for a triggered run the App's owner, read
- * now.
+ * nothing; and the notice to the person who answers for it
+ * (notifications.ts), only if the event was stored. That person is who
+ * started it, or for a triggered run the workflow's owner (owners.ts),
+ * read now: its App's owner unless someone set another.
  */
 const failureRecorded = async (
   env: Env,
@@ -252,11 +262,9 @@ const failureRecorded = async (
     "core"
   );
   const stored = outboxedEventWhere(db, failed, sql`changes() > 0 AND ${also}`);
-  let personId = row.startedBy;
-  if (personId === null) {
-    const app = await appRecord(env, appIdSchema.parse(row.appId));
-    personId = app.ownerId;
-  }
+  const personId =
+    row.startedBy ??
+    (await ownerOf(env, appIdSchema.parse(row.appId), row.workflowId));
   return [
     stored,
     ...failureNoticed(db, {
@@ -531,12 +539,14 @@ const rootPlace = { rootRunId: null, depth: 0 } as const;
  * root (or the parent itself, when it is a root), one deeper than it. Read
  * from the parent's row, so a lineage holds however deep its runs nest,
  * and admitted against the lineage's quotas (quotas.ts, `admitChild`),
- * which takes one of its descendant runs. A run started by no other is a
+ * which takes one of its descendant runs, once for a `trigger`'s key
+ * however often its delivery is admitted. A run started by no other is a
  * root (`rootPlace`).
  */
 const placeUnder = async (
   env: Env,
-  parent: RunId | undefined
+  parent: RunId | undefined,
+  trigger: RunRequest["trigger"]
 ): Promise<ChildPlace | typeof rootPlace> => {
   if (parent === undefined) {
     return rootPlace;
@@ -545,7 +555,7 @@ const placeUnder = async (
   if (row === undefined) {
     throw new Error(`No run ${parent} to start a run under`);
   }
-  return await admitChild(env, row);
+  return await admitChild(env, row, trigger?.key);
 };
 
 /**
@@ -568,6 +578,30 @@ const deliveredBefore = async (
   }
   await resendStart(env, started);
   return toRun(env, started);
+};
+
+/**
+ * The run a trigger's key already started, for a delivery tried again of
+ * a run started under another (mail-stamps.ts): found before the start
+ * is admitted, so it takes no other slot of the lineage, which a delivery
+ * tried again until it fits could use up. None for any other start.
+ */
+const deliveredUnder = async (
+  env: Env,
+  trigger: RunRequest["trigger"],
+  parent: RunId | undefined
+): Promise<WorkflowRun | undefined> => {
+  if (trigger === undefined || parent === undefined) {
+    return undefined;
+  }
+  const before = await drizzle(env.DB)
+    .select({ id: workflowRuns.id })
+    .from(workflowRuns)
+    .where(eq(workflowRuns.triggerKey, trigger.key))
+    .get();
+  return before === undefined
+    ? undefined
+    : await deliveredBefore(env, trigger.key, before.id);
 };
 
 /**
@@ -647,9 +681,13 @@ export const startRun = async (
   if (!hasWorkflow(await versionFiles(env, app, version), workflow)) {
     throw workflowErrors.create("workflow.not_found", { workflow, version });
   }
+  const again = await deliveredUnder(env, trigger, parent);
+  if (again !== undefined) {
+    return again;
+  }
   // Admitted last, once nothing else refuses the start: the slot it takes
   // in its lineage is never given back.
-  const { rootRunId, depth } = await placeUnder(env, parent);
+  const { rootRunId, depth } = await placeUnder(env, parent, trigger);
   const row = {
     id: crypto.randomUUID(),
     appId: app,
@@ -741,6 +779,21 @@ const liveStatuses: Record<InstanceStatus["status"], RunStatus> = {
   complete: "completed",
 };
 
+/**
+ * A run as it reads with its place in the queue (admission.ts,
+ * `queuedRuns`): `queued`, with the share it waits for and when it asks
+ * again, while it would otherwise read as running, or as waiting the way
+ * the engine has a step that sleeps between asks. A run that is paused or
+ * has ended waits for no share, whatever place may still lapse.
+ */
+export const queuedRun = <Run extends WorkflowRun>(
+  run: Run,
+  queue: RunQueue | undefined
+): Run =>
+  queue !== undefined && (run.status === "running" || run.status === "waiting")
+    ? { ...run, status: "queued", queued: queue }
+    : run;
+
 const foundRun = async (env: Env, run: unknown): Promise<RunRow> => {
   const row = await findRun(env, parse(runIdSchema, run));
   if (!row) {
@@ -815,7 +868,16 @@ export const runStatus = async (
     (row.status === "starting" || row.status === "running") && live
       ? liveStatuses[live.status]
       : shownStatus(row.status);
-  const found = { ...runFor(env, by, row, ownerId), status };
+  // Only a run that goes on may wait for a share: no read for another.
+  const queues = await queuedRuns(
+    drizzle(env.DB),
+    status === "running" || status === "waiting" ? [row.id] : [],
+    Date.now()
+  );
+  const found = queuedRun(
+    { ...runFor(env, by, row, ownerId), status },
+    queues.get(row.id)
+  );
   // Once its details are removed, nothing the engine may still have of it
   // is shown: the list, the overview and screens show none either.
   if (found.detailsRemoved || !(live && seesDetails(by, row, ownerId))) {
@@ -840,13 +902,21 @@ export const listRuns = async (
 ): Promise<WorkflowRun[]> => {
   const appId = parse(appIdSchema, app);
   const { owner: ownerId } = await appFor(env, by, appId, "user");
-  const rows = await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  const rows = await db
     .select()
     .from(workflowRuns)
     .where(eq(workflowRuns.appId, appId))
     .orderBy(desc(workflowRuns.createdAt), desc(workflowRuns.id))
     .limit(runsPerPage);
-  return rows.map((row) => runFor(env, by, row, ownerId));
+  const queues = await queuedRuns(
+    db,
+    rows.flatMap(({ id, status }) => (goesOn(status) ? [id] : [])),
+    Date.now()
+  );
+  return rows.map((row) =>
+    queuedRun(runFor(env, by, row, ownerId), queues.get(row.id))
+  );
 };
 
 /** What a run that stopped reports: where it stopped, and why. */
@@ -1096,6 +1166,18 @@ export const projectStatus = async (
         ]
       : []),
     ...controlsSettledBy(db, row.id, engine, at),
+    // Paused or ended, it waits in the client's queue for nothing
+    // (admission.ts): its places go, once the row took this notification,
+    // never for one it refused as older.
+    ...(ended || status === "paused"
+      ? [
+          runDequeued(
+            db,
+            row.id,
+            sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${row.id} AND ${workflowRuns.status} = ${status}${engine.sequence === undefined ? sql`` : sql` AND ${workflowRuns.engineSequence} = ${engine.sequence}`})`
+          ),
+        ]
+      : []),
     // Its end and the cleanup of the statistics points its steps never
     // added up are written together: a retried notification finds the
     // row ended, so nothing would be left to clean up after it.

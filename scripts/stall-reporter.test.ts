@@ -667,3 +667,153 @@ describe("why a run ended", () => {
     });
   });
 });
+
+/** A reporter as `ending` makes, that dumps stacks with `dumpStacks`. */
+const endingWithStacks = (
+  dumpStacks: () => Promise<string>,
+  stackDumpTimeoutMs = 100,
+  outputFlushed: () => Promise<void> = async () => {
+    await Promise.resolve();
+  }
+) => {
+  const written: string[] = [];
+  const state = { ended: 0, writtenAtEnd: 0 };
+  const reporter = new StallReporter({
+    overdueGraceSeconds: 0.05,
+    overdueCheckMs: 10,
+    dumpStacks,
+    stackDumpTimeoutMs,
+    outputFlushed,
+    outputFlushTimeoutMs: 100,
+    write: (text) => {
+      written.push(text);
+    },
+    end: () => {
+      state.ended += 1;
+      state.writtenAtEnd = written.length;
+    },
+  });
+  return { reporter, written, state };
+};
+
+/** Starts a test that never reports, overdue once `pastTheGrace` is over. */
+const stall = (reporter: StallReporter): void => {
+  const builds = file("package-builds");
+  reporter.onTestRunStart();
+  reporter.onTestModuleStart(builds);
+  reporter.onTestCaseReady(test(builds, "spins forever", { timeout: 20 }));
+};
+
+describe("the stacks of a stalled run", () => {
+  it("have left stdout before the run is ended", async () => {
+    const order: string[] = [];
+    const { reporter, state } = endingWithStacks(
+      async () => {
+        await Promise.resolve();
+        return "--- workerd 150 ---\n";
+      },
+      100,
+      async () => {
+        await wait(30);
+        order.push(`flushed, ended ${state.ended} times`);
+      }
+    );
+    stall(reporter);
+    await wait(pastTheGrace);
+
+    expect({ order, ended: state.ended }).toStrictEqual({
+      order: ["flushed, ended 0 times"],
+      ended: 1,
+    });
+  });
+
+  it("don't keep the run from ending when stdout never takes them", async () => {
+    const { reporter, state } = endingWithStacks(
+      async () => {
+        await Promise.resolve();
+        return "--- workerd 150 ---\n";
+      },
+      100,
+      async () => {
+        await Promise.withResolvers<undefined>().promise;
+      }
+    );
+    stall(reporter);
+    await wait(pastTheGrace + 150);
+
+    expect(state.ended).toBe(1);
+  });
+
+  it("are printed, once, before the run is ended", async () => {
+    let dumps = 0;
+    const { reporter, written, state } = endingWithStacks(async () => {
+      dumps += 1;
+      await wait(10);
+      return "--- workerd 150 ---\n#0 epoll_wait\n";
+    });
+    stall(reporter);
+    await wait(pastTheGrace);
+
+    const beforeEnd = written.slice(0, state.writtenAtEnd).join("");
+    expect({
+      dumps,
+      ended: state.ended,
+      printed: beforeEnd.includes(
+        "What the stalled run is stuck in (stack-dump.ts):\n--- workerd 150 ---\n#0 epoll_wait"
+      ),
+    }).toStrictEqual({ dumps: 1, ended: 1, printed: true });
+  });
+
+  it("don't keep the run from ending when the dump never does", async () => {
+    const { reporter, written, state } = endingWithStacks(
+      async () => await Promise.withResolvers<string>().promise,
+      50
+    );
+    stall(reporter);
+    await wait(pastTheGrace + 100);
+
+    expect({
+      ended: state.ended,
+      said: written.join("").includes("[the stack dump took too long]"),
+    }).toStrictEqual({ ended: 1, said: true });
+  });
+
+  it("don't keep the run from ending when the dump fails", async () => {
+    const { reporter, written, state } = endingWithStacks(async () => {
+      await Promise.resolve();
+      throw new Error("gdb: ptrace not permitted");
+    });
+    stall(reporter);
+    await wait(pastTheGrace);
+
+    expect({
+      ended: state.ended,
+      said: written
+        .join("")
+        .includes("[the stack dump failed: gdb: ptrace not permitted]"),
+    }).toStrictEqual({ ended: 1, said: true });
+  });
+
+  it("aren't dumped for a run that ends in time", async () => {
+    let dumps = 0;
+    const { reporter, state } = endingWithStacks(async () => {
+      dumps += 1;
+      await Promise.resolve();
+      return "";
+    });
+    const builds = file("package-builds");
+    const done = test(builds, "builds", { timeout: 20 });
+    reporter.onTestRunStart();
+    reporter.onTestModuleStart(builds);
+    reporter.onTestCaseReady(done);
+    reporter.onTestCaseResult(finish(done));
+    reporter.onTestModuleEnd(finishFile(builds));
+    await reporter.onTestRunEnd([builds]);
+    await wait(pastTheGrace);
+
+    expect({ dumps, ended: state.ended }).toStrictEqual({
+      dumps: 0,
+      ended: 0,
+    });
+  });
+});

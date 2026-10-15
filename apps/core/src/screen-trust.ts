@@ -18,10 +18,11 @@ import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
+  apps,
   auditOutbox,
-  permissions,
   screenArtifacts,
   screenPolicies,
+  sdkReleaseManifests,
 } from "./db/core/schema.ts";
 import { derivedHmacKey } from "./derived-keys.ts";
 import { appHost } from "./durable-objects.ts";
@@ -180,21 +181,54 @@ export const advanceGeneration = (
       set: { generation: sql`${screenPolicies.generation} + 1` },
     });
 
+/** Who a grant widening screens' reach was given to: an App or a workflow. */
+export type Grantee =
+  | { type: "app"; appId: AppId }
+  | { type: "workflow"; workflowId: string };
+
 /**
- * The Apps whose reach a grant to `grantee` widens, as a recursive SQL
- * table `reaching(app_id)`: the grantee, and every App that reaches an
- * App in it through an active permission on its exports or workflows,
- * however many Apps away.
+ * The Apps whose reach a grant to `grantee` widens, as recursive SQL
+ * tables ending in `reaching(app_id)`: everything that reaches the
+ * grantee, however many steps away, through what lets it use another's
+ * reach (`reached(kind, id)`, Apps and workflows alike):
+ *
+ * - an App or a workflow holding an active permission on an App's exports
+ *   reaches that App;
+ * - an App or a workflow holding an active `start` grant on a workflow
+ *   reaches that workflow, and so does a live workflow any of whose
+ *   versions binds it: what it reads comes back to what started it.
+ *
+ * So more for an App reaches the Apps starting a workflow that calls its
+ * exports, and more for a workflow the Apps calling it, or starting one
+ * that runs it.
  */
-const reachingSql = (grantee: AppId): SQL => sql`reaching(app_id) AS (
-  SELECT ${grantee}
+const reachingSql = (grantee: Grantee): SQL => {
+  const seed =
+    grantee.type === "app"
+      ? sql`SELECT 'app', ${grantee.appId}`
+      : sql`SELECT 'workflow', ${grantee.workflowId}`;
+  return sql`reached(kind, id) AS (
+  ${seed}
   UNION
-  SELECT ${permissions.subjectId} FROM ${permissions}
-    JOIN reaching ON ${permissions.objectId} = reaching.app_id
-  WHERE ${permissions.subjectType} = 'app'
-    AND ${permissions.status} = 'active'
-    AND ${permissions.objectType} IN ('app', 'workflow')
-)`;
+  SELECT held.subject_type, held.subject_id FROM permissions AS held
+    JOIN reached ON reached.kind = 'app' AND held.object_type = 'app'
+      AND held.object_id = reached.id
+  WHERE held.status = 'active' AND held.subject_type IN ('app', 'workflow')
+  UNION
+  SELECT held.subject_type, held.subject_id FROM permissions AS held
+    JOIN reached ON reached.kind = 'workflow' AND held.object_type = 'workflow'
+      AND held.object_id = reached.id
+  WHERE held.status = 'active' AND held.subject_type IN ('app', 'workflow')
+    AND EXISTS (SELECT 1 FROM json_each(held.actions) WHERE value = 'start')
+  UNION
+  SELECT 'workflow', bound.resource_id FROM sdk_resource_bindings AS bound
+    JOIN reached ON reached.kind = 'workflow' AND bound.kind = 'workflow'
+      AND bound.target_id = reached.id
+    JOIN workflow_resources AS binder ON binder.id = bound.resource_id
+  WHERE binder.deleted_at IS NULL
+),
+reaching(app_id) AS (SELECT id FROM reached WHERE kind = 'app')`;
+};
 
 /** A random version 4 UUID, as SQL, for each row it is read in. */
 const uuidSql = sql`lower(
@@ -219,7 +253,7 @@ const uuidSql = sql`lower(
 export const widenedByGrant = (
   db: DrizzleD1Database,
   by: Pick<Identity, "userId" | "staff">,
-  grantee: AppId,
+  grantee: Grantee,
   condition: SQL,
   because: Record<string, AuditDetailValue>
 ): BatchItem<"sqlite">[] => {
@@ -232,7 +266,7 @@ export const widenedByGrant = (
   const detail = JSON.stringify({
     output: "sensitive",
     previous: "ordinary",
-    grantedTo: grantee,
+    grantedTo: grantee.type === "app" ? grantee.appId : grantee.workflowId,
     ...because,
   });
   return [
@@ -272,6 +306,11 @@ export interface Standing {
   output: OutputClass;
   generation: number;
   trust: ArtifactTrust;
+  /**
+   * Whether the release of the App's current version was revoked: its
+   * screens then get nothing more, whatever their build's approval.
+   */
+  releaseRevoked: boolean;
 }
 
 /**
@@ -287,29 +326,41 @@ export const standingOf = async (
     output: OutputClass | null;
     generation: number;
     trust: ArtifactTrust | null;
+    releaseRevoked: number;
   }>(
     sql`SELECT
       (SELECT ${screenPolicies.output} FROM ${screenPolicies} WHERE ${screenPolicies.appId} = ${app}) AS output,
       ${generationSql(app)} AS generation,
       (SELECT ${screenArtifacts.status} FROM ${screenArtifacts}
         WHERE ${screenArtifacts.appId} = ${app}
-          AND ${screenArtifacts.artifact} = ${artifact ?? null}) AS trust`
+          AND ${screenArtifacts.artifact} = ${artifact ?? null}) AS trust,
+      EXISTS (SELECT 1 FROM ${sdkReleaseManifests}
+        WHERE ${sdkReleaseManifests.appId} = ${app}
+          AND ${sdkReleaseManifests.version} =
+            (SELECT ${apps.currentVersion} FROM ${apps} WHERE ${apps.id} = ${app})
+          AND ${sdkReleaseManifests.revokedAt} IS NOT NULL) AS releaseRevoked`
   );
   return {
     output: row.output ?? "sensitive",
     generation: row.generation,
     trust: row.trust ?? "unreviewed",
+    releaseRevoked: row.releaseRevoked === 1,
   };
 };
 
 /**
  * Whether a build with that standing gets its App's data: never once its
- * approval was taken back, whatever the App's data is classified as;
+ * approval was taken back, or the release it runs was revoked, whatever
+ * the App's data is classified as;
  * otherwise always when an admin classified the data `ordinary`, and
  * only once approved when it is `sensitive`.
  */
-export const deliveryOf = ({ output, trust }: Standing): ScreenDelivery => {
-  if (trust === "revoked") {
+export const deliveryOf = ({
+  output,
+  trust,
+  releaseRevoked,
+}: Standing): ScreenDelivery => {
+  if (trust === "revoked" || releaseRevoked) {
     return "revoked";
   }
   return output === "ordinary" || trust === "approved" ? "open" : "unreviewed";
@@ -350,7 +401,7 @@ const recordRefusal = async (
     operation,
     stage,
   ]);
-  await appHost(env, app).auditRefusal(refusal, {
+  await appHost(env, app).auditOnce(refusal, {
     actor: actorOf(by),
     action: "app.artifact.refused",
     target: { type: "app", id: app },

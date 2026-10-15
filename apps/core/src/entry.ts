@@ -14,13 +14,22 @@ import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
-import { appFunctionResponse, functionCallApp } from "./app-function-route.ts";
+import {
+  appFunctionRoute,
+  portableCallApp,
+  portableFunctionResponse,
+} from "./app-function-route.ts";
+import { appTokenResponse, tokenRequestApp } from "./app-token-route.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
 import { handleAuthRequest } from "./auth/routes.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
-import { handleConnectionCallback } from "./connections.ts";
+import {
+  catalogLogoResponse,
+  handleConnectionCallback,
+  isCatalogLogoPath,
+} from "./connections.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { guestResponse } from "./guests.ts";
@@ -151,6 +160,51 @@ const frameCodeResponse = async (
   return await packageArtifactResponse(env, request);
 };
 
+/**
+ * The connection routes: a provider's OAuth callback, and a catalog app's
+ * logo. Undefined for any other path, and for a callback that isn't one.
+ */
+const connectionRouteResponse = async (
+  request: Request,
+  env: Env,
+  pathname: string,
+  requestId: string
+): Promise<Response | undefined> => {
+  if (pathname === connectionCallbackPath) {
+    return await handleConnectionCallback(request, env);
+  }
+  if (isCatalogLogoPath(pathname)) {
+    return await catalogLogoResponse(request, env, pathname, requestId);
+  }
+  return undefined;
+};
+
+/**
+ * A call of an App's functions, from a screen's page or a portable host,
+ * or a portable host's token request; `undefined` for any other path.
+ */
+const appCallResponse = async (
+  pathname: string,
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response | undefined> => {
+  // A screen's call of one of its App's functions, or of a streaming
+  // action's (`<path>/<app>/<stream | attach | cancel>`).
+  const screenCall = await appFunctionRoute(request, env, pathname, requestId);
+  if (screenCall !== undefined) {
+    return screenCall;
+  }
+  const portableApp = portableCallApp(pathname);
+  if (portableApp !== undefined) {
+    return await portableFunctionResponse(request, env, portableApp, requestId);
+  }
+  const tokenApp = tokenRequestApp(pathname);
+  return tokenApp === undefined
+    ? undefined
+    : await appTokenResponse(request, env, tokenApp, requestId);
+};
+
 /** Routes a request that has passed the router-secret check. */
 const route = async (
   request: Request,
@@ -181,11 +235,14 @@ const route = async (
   if (isUnder(pathname, authBasePath)) {
     return await handleAuthRequest(request, env, requestId);
   }
-  if (pathname === connectionCallbackPath) {
-    const response = await handleConnectionCallback(request, env);
-    if (response !== undefined) {
-      return response;
-    }
+  const connection = await connectionRouteResponse(
+    request,
+    env,
+    pathname,
+    requestId
+  );
+  if (connection !== undefined) {
+    return connection;
   }
   if (pathname === auditExportPath) {
     return await auditExportResponse(request, env, requestId);
@@ -203,9 +260,9 @@ const route = async (
   if (pathname === platformUpdatePath) {
     return await platformUpdateResponse(request, env, requestId);
   }
-  const functionApp = functionCallApp(pathname);
-  if (functionApp !== undefined) {
-    return await appFunctionResponse(request, env, functionApp, requestId);
+  const appCall = await appCallResponse(pathname, request, env, requestId);
+  if (appCall !== undefined) {
+    return appCall;
   }
   const original = originalPath.exec(pathname)?.groups?.id;
   if (original !== undefined) {
