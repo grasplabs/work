@@ -743,6 +743,8 @@ interface Route extends Admitted {
   beforeSend?: () => void;
   /** Told while the call waits for a share (`ModelCall.onQueued`). */
   onQueued?: QueuedHook;
+  /** The call's notes of its wait, one after another (`told`). */
+  notes: Promise<void>;
 }
 
 interface Request extends Route {
@@ -1028,7 +1030,12 @@ const pause = async (ms: number, signal: AbortSignal): Promise<void> => {
  */
 const queuedHookMs = 2000;
 
-/** Tells `route`'s caller where its wait stands; never fails, nor holds up, the call. */
+/**
+ * Tells `route`'s caller where its wait stands; never fails, nor holds up,
+ * the call. Its notes run one after another, each once the one before
+ * it is done, even one the gateway stopped waiting for: a slow note never
+ * lands after a newer one, so the last a caller records is the latest.
+ */
 const told = async (
   route: Route,
   queued: Parameters<QueuedHook>[0]
@@ -1037,10 +1044,21 @@ const told = async (
   if (onQueued === undefined) {
     return;
   }
+  const before = route.notes;
+  const note = async (): Promise<void> => {
+    await before;
+    try {
+      await onQueued(queued);
+    } catch (error) {
+      log.error("model.queued_hook_failed", errorFields(error));
+    }
+  };
+  const noted = note();
+  route.notes = noted;
   const timer = new AbortController();
   try {
     await Promise.race([
-      onQueued(queued),
+      noted,
       scheduler
         .wait(queuedHookMs, { signal: timer.signal })
         .then(() => {
@@ -1049,8 +1067,6 @@ const told = async (
         // Stopped once the hook answered first.
         .catch(() => null),
     ]);
-  } catch (error) {
-    log.error("model.queued_hook_failed", errorFields(error));
   } finally {
     timer.abort();
   }
@@ -1503,6 +1519,9 @@ const open = (
     // its reservation goes back.
     try {
       route.beforeSend?.();
+      // Cancelled while it was admitted, or while its wait was cleared: it
+      // is never sent, and its reservation goes back whole.
+      signal.throwIfAborted();
     } catch (error) {
       response.settled.push(
         await settleAdmitted(route, admitted, { by: "unsent" })
@@ -2213,6 +2232,7 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     price,
     place,
     disclose,
+    notes: Promise.resolve(),
     scopesNow: async () => {
       // A run lineage's request limit, as the policy stands for this
       // request: lowered for runs already under way too (model-budgets.ts).

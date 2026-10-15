@@ -862,6 +862,91 @@ describe("fair model admission", { timeout: 60_000 }, () => {
     }).toStrictEqual({ waiting: "ok", running: ["ok", "ok"] });
   });
 
+  it("lands a caller's notes of its wait in order, a slow one before the last", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const { fake, call } = gatewayWith([
+      paused(release.promise),
+      paused(release.promise),
+      answered,
+    ]);
+    const ada = newPerson().userId;
+    const running = [
+      outcome(call(callBy(ada, 0))),
+      outcome(call(callBy(ada, 0))),
+    ];
+    await until(() => fake.requests.length === 2);
+    // Where the caller's record stands, as each note lands: the first
+    // takes ten seconds, as a stalled write might.
+    const landed: (string | null)[] = [];
+    let noted = 0;
+    const waiting = outcome(
+      call(
+        callBy(ada, 0, {
+          onQueued: async (queued) => {
+            noted += 1;
+            if (noted === 1) {
+              await scheduler.wait(10_000);
+            }
+            landed.push(queued?.waitingFor ?? null);
+          },
+        })
+      )
+    );
+    await until(() => noted > 0);
+    release.resolve(true);
+    await Promise.all(running);
+    await until(() => landed.includes(null));
+
+    expect({ landed, waiting: await waiting }).toStrictEqual({
+      landed: ["app", null],
+      waiting: "ok",
+    });
+  });
+
+  it("sends nothing, and holds nothing back, for a call cancelled as its wait ends", async () => {
+    const release = Promise.withResolvers<boolean>();
+    const { fake, call } = gatewayWith([
+      paused(release.promise),
+      paused(release.promise),
+      answered,
+    ]);
+    const ada = newPerson().userId;
+    const running = [
+      outcome(call(callBy(ada, 0))),
+      outcome(call(callBy(ada, 0))),
+    ];
+    await until(() => fake.requests.length === 2);
+    const queue = queueOf();
+    const cancel = new AbortController();
+    // Admitted at last, its caller goes away as it is told it stopped
+    // waiting.
+    const waiting = outcome(
+      call(
+        callBy(ada, 0, {
+          signal: cancel.signal,
+          onQueued: async (queued) => {
+            if (queued === null) {
+              cancel.abort();
+            }
+            await queue.onQueued(queued);
+          },
+        })
+      )
+    );
+    await until(() => queue.seen.length > 0);
+    release.resolve(true);
+    await Promise.all(running);
+    await waiting;
+
+    expect({
+      sent: fake.requests.length,
+      heldInFull: await ledgerCount(
+        "SELECT count(*) AS n FROM requests WHERE subject = ? AND state = 'unknown'",
+        ada
+      ),
+    }).toStrictEqual({ sent: 2, heldInFull: 0 });
+  });
+
   it("asks nothing more for a call cancelled while it waits", async () => {
     const release = Promise.withResolvers<boolean>();
     const { fake, call } = gatewayWith([
