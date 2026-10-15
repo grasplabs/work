@@ -81,6 +81,50 @@ export const workflowIdOf = (path: string): string | undefined =>
   workflowPath.exec(path)?.groups?.id;
 
 /**
+ * The module the host generates from a JSON workflow's definition: one
+ * file, never anything a person wrote.
+ */
+export const openWorkflowEntry = ".grasp/workflow.ts";
+
+/**
+ * The most characters the generated module may have: four times the
+ * largest definition the profile accepts (1 MiB), as it restates each
+ * literal once, with a few characters of code around it.
+ */
+const openWorkflowMaxLength = 4 * 1024 * 1024;
+
+/**
+ * Why `files` aren't one generated workflow module within its bounds, if
+ * they aren't: exactly `openWorkflowEntry`, at most
+ * {@link openWorkflowMaxLength} characters.
+ */
+export const openWorkflowErrors = (
+  files: Record<string, string>
+): Diagnostic[] => {
+  const paths = Object.keys(files);
+  if (paths.length !== 1 || paths[0] !== openWorkflowEntry) {
+    return [
+      {
+        rule: "limits",
+        severity: "error",
+        message: `A generated workflow is one module, ${openWorkflowEntry}.`,
+      },
+    ];
+  }
+  const source = files[openWorkflowEntry] ?? "";
+  return source.length > openWorkflowMaxLength
+    ? [
+        {
+          file: openWorkflowEntry,
+          rule: "limits",
+          severity: "error",
+          message: `The generated module has ${source.length} characters; a build takes at most ${openWorkflowMaxLength}.`,
+        },
+      ]
+    : [];
+};
+
+/**
  * The most a build takes: as much as an App holds, so any App fits, and a
  * mistake (or an attack) fails fast and says why.
  */

@@ -1,6 +1,9 @@
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { builderOwner } from "../../src/platform-sandbox.ts";
+import { runInSession } from "../../src/sandbox-session.ts";
+import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { buildScreens, buildServer } from "../../src/screens.ts";
 
 // The screen compiler on-prem: it runs on the sandbox host this project
@@ -169,6 +172,42 @@ describe("the screen compiler on-prem", () => {
       read: 1,
     });
   });
+
+  it("refuses a build as no place in the sandbox, before it started, while the builders' share is held", async () => {
+    // Two processes here, so the builders' share is one: a call of theirs
+    // that spins holds it to its deadline, past a build's wait for a place.
+    const host = env.SANDBOX_HOST;
+    if (host === undefined) {
+      throw new Error("The on-prem project binds SANDBOX_HOST.");
+    }
+    const holding = runInSession(host, {
+      mainModule: "m.js",
+      modules: {
+        "m.js":
+          'import { WorkerEntrypoint } from "cloudflare:workers";\nexport class E extends WorkerEntrypoint { async go() { for (;;) {} } }',
+      },
+      entrypoint: "E",
+      method: "go",
+      args: [],
+      cpuMs: 20_000,
+      wallMs: 6000,
+      owner: builderOwner,
+    });
+    await scheduler.wait(500);
+    let refused: unknown;
+    try {
+      await buildScreens(onPrem, screen("// waits for a place"));
+    } catch (error) {
+      refused = error;
+    }
+    await expect(holding).rejects.toThrow("ran past its time");
+
+    expect({
+      unavailable: refused instanceof SandboxUnavailableError,
+      status: refused instanceof SandboxUnavailableError && refused.status,
+      started: refused instanceof SandboxUnavailableError && refused.started,
+    }).toStrictEqual({ unavailable: true, status: 429, started: false });
+  }, 60_000);
 
   it("builds the same screen again once the sandbox stopped it at its deadline, as that stop isn't cached", async () => {
     const files = screen(`${recursiveTypes}\n// again`);

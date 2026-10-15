@@ -11,6 +11,8 @@ import {
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
 import type {
+  AppRequest,
+  AppRequestInput,
   CatalogSource,
   ConnectionScope,
   CatalogTool,
@@ -39,6 +41,7 @@ import {
 } from "./audit-outbox.ts";
 import { providerIds, signInConfig } from "./auth/config.ts";
 import { identifyFull } from "./auth/identity.ts";
+import { listAppRequests, requestApp } from "./catalog-requests.ts";
 import { accounts, hiddenConnectors, users } from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { errorResponse } from "./errors.ts";
@@ -508,6 +511,20 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
             event,
           ]));
     });
+  }
+
+  async requestApp(request: AppRequestInput): Promise<AppRequest> {
+    return await withPerson(
+      this.#check,
+      async (identity) => await requestApp(this.#env, identity, request)
+    );
+  }
+
+  async appRequests(): Promise<AppRequest[]> {
+    return await withPerson(
+      this.#check,
+      async () => await listAppRequests(this.#env)
+    );
   }
 
   async catalogTools(

@@ -1,6 +1,9 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { AppExports } from "@grasp-os/shared/apps";
-import type { Permission } from "@grasp-os/shared/permissions";
+import type {
+  Permission,
+  PermissionSubject,
+} from "@grasp-os/shared/permissions";
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -70,14 +73,40 @@ export const readPendingRequests = async (
   return { requests, directory, exports };
 };
 
-/** Who asks: the App or agent the permission is for. */
+/**
+ * What holds a permission other than an App, for people: the agent, or an
+ * independent workflow, store or trigger, by its ID.
+ */
+export const holderName = (
+  subject: Exclude<PermissionSubject, { type: "app" }>
+): string => {
+  switch (subject.type) {
+    case "agent": {
+      return i18n._(msg`Agent ${ph({ agent: subject.agentId })}`);
+    }
+    case "workflow": {
+      return i18n._(msg`Workflow ${ph({ workflow: subject.workflowId })}`);
+    }
+    case "store": {
+      return i18n._(msg`Store ${ph({ store: subject.storeId })}`);
+    }
+    case "trigger": {
+      return i18n._(msg`Trigger ${ph({ trigger: subject.triggerId })}`);
+    }
+    default: {
+      return subject satisfies never;
+    }
+  }
+};
+
+/** Who asks: the App, agent or independent resource the permission is for. */
 export const subjectOf = (
   { subject }: Permission,
   directory: Directory
 ): string =>
   subject.type === "app"
     ? appName(directory, subject.appId)
-    : i18n._(msg`Agent ${ph({ agent: subject.agentId })}`);
+    : holderName(subject);
 
 /**
  * The exports of another App a request's actions cover, as they are now:
@@ -132,9 +161,7 @@ export const objectOf = (
       msg`Platform statistics. This engine can read run and signal counts for every engine, and may show them to anyone who uses it`
     );
   }
-  const { workflowId } = object;
-  const engine = appName(directory, object.appId);
-  return i18n._(msg`Workflow ${workflowId} of ${engine}`);
+  return i18n._(msg`Workflow ${ph({ workflow: object.workflowId })}`);
 };
 
 /**

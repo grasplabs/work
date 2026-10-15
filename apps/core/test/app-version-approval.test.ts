@@ -303,6 +303,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
     ]);
     const app = await builtBy(builder, admin);
     const subject = { type: "app", appId: app } as const;
+    const flow = await builder.api.workflowResources.create(`pay-${unique()}`);
     const requests: PermissionRequest[] = [
       {
         subject,
@@ -322,7 +323,7 @@ describe("An App's next version", { timeout: 60_000 }, () => {
       },
       {
         subject,
-        object: { type: "workflow", appId: app, workflowId: "pay" },
+        object: { type: "workflow", workflowId: flow.id },
         actions: ["start"],
         binding: "PAY",
       },

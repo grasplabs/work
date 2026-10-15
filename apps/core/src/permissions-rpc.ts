@@ -8,6 +8,7 @@ import type {
 } from "@grasp-os/shared/permissions";
 
 import { appFor } from "./apps.ts";
+import { requireResourceRole } from "./permission-resources.ts";
 import { permissionsOpenTo } from "./permissions-open.ts";
 import {
   grantPermission,
@@ -37,12 +38,12 @@ export class PermissionsRpc extends CoreRpcTarget implements PermissionsApi {
     return await withPerson(
       this.#check,
       async (person) =>
-        await requestPermission(
-          this.#env,
-          person,
-          request,
-          async (app, role) => await appFor(this.#env, person, app, role)
-        )
+        await requestPermission(this.#env, person, request, {
+          app: async (app, role) => await appFor(this.#env, person, app, role),
+          resource: async (ref, needed) => {
+            await requireResourceRole(this.#env, person, ref, needed);
+          },
+        })
     );
   }
 

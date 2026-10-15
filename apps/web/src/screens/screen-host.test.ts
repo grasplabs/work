@@ -18,6 +18,9 @@ const outcome = async (call: Promise<unknown>): Promise<unknown> => {
   }
 };
 
+/** The frame's lease, and the person it was opened for. */
+const frame = { lease: "lease", person: "person" };
+
 describe("a screen's function call through the page", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -40,7 +43,7 @@ describe("a screen's function call through the page", () => {
     const results = [];
     for (let call = 0; call < 4; call += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one response after another
-      results.push(await outcome(callFunction("app", "lease", "{}")));
+      results.push(await outcome(callFunction("app", frame, "{}")));
     }
     expect(results).toStrictEqual([
       { answered: { result: { ok: true, value: 1 } } },
@@ -67,9 +70,11 @@ describe("a screen's function call through the page", () => {
           )
       )
     );
-    const refused = await callFunction("app", "lease", "{}").catch(
-      (error: unknown) => error
-    );
+    const refused = await callFunction(
+      "app",
+      { lease: "lease", person: "person" },
+      "{}"
+    ).catch((error: unknown) => error);
     expect(refused).toMatchObject({
       code: "screen.rate_limited",
       details: { retryAfterMs: 500 },
@@ -87,7 +92,7 @@ describe("a screen's function call through the page", () => {
       })
     );
     await expect(
-      outcome(callFunction("app", "lease", "{}"))
+      outcome(callFunction("app", frame, "{}"))
     ).resolves.toStrictEqual({ code: "internal.unexpected" });
   });
 });

@@ -1,5 +1,9 @@
 import { runsPageSize } from "@grasp-os/shared/workflows";
-import type { ListedRun, RunStatus } from "@grasp-os/shared/workflows";
+import type {
+  ListedRun,
+  RunQueue,
+  RunStatus,
+} from "@grasp-os/shared/workflows";
 import {
   Table,
   TableBody,
@@ -24,6 +28,7 @@ import { AskToFix } from "./fix-in-chat.tsx";
 // answered; a failed one says why and offers a fix in chat.
 
 const statusLabels: Readonly<Record<RunStatus, MessageDescriptor>> = {
+  queued: msg`Queued`,
   running: msg`Running`,
   waiting: msg`Waiting for a decision`,
   paused: msg`Paused`,
@@ -45,11 +50,31 @@ const startedByOf = ({ startedBy }: ListedRun, me: string): string => {
 };
 
 /**
- * A run's status with its dot, as the prototype's `RunResult`: green once
- * done, the attention colour where someone is needed (waiting, failed),
- * ink while it goes on or after it stopped.
+ * Why a queued run waits, and when it asks again at the latest: throttling,
+ * not a fault of the workflow, and it goes on by itself. Core names only
+ * the share it waits for, never who else holds it.
  */
-export const RunResult = ({ status }: { status: RunStatus }) => (
+const QueuedFor = ({ queued }: { queued: RunQueue }) => {
+  const { t } = useLingui();
+  const time = formatDateTime(queued.retryAt);
+  switch (queued.waitingFor) {
+    case "app": {
+      return t`Waiting for a share of this App's runs; tries again by ${ph({ time })}`;
+    }
+    case "person": {
+      return t`Waiting for a share of this person's runs; tries again by ${ph({ time })}`;
+    }
+    case "client": {
+      return t`Waiting for a share of the organization's runs; tries again by ${ph({ time })}`;
+    }
+    default: {
+      return queued.waitingFor satisfies never;
+    }
+  }
+};
+
+/** The status in words, after its dot. */
+const RunStatusDot = ({ status }: { status: RunStatus }) => (
   <span className="inline-flex items-center gap-2">
     {status === "completed" ? (
       <span
@@ -63,13 +88,40 @@ export const RunResult = ({ status }: { status: RunStatus }) => (
         className="bg-status-attention size-1.75 flex-none rounded-full"
       />
     ) : null}
-    {status === "running" || status === "paused" || status === "cancelled" ? (
+    {status === "queued" ||
+    status === "running" ||
+    status === "paused" ||
+    status === "cancelled" ? (
       <span
         aria-hidden="true"
         className="bg-foreground size-1.75 flex-none rounded-full"
       />
     ) : null}
     {runStatusLabel(status)}
+  </span>
+);
+
+/**
+ * A run's status with its dot, as the prototype's `RunResult`: green once
+ * done, the attention colour where someone is needed (waiting, failed),
+ * ink while it goes on (queued included) or after it stopped. A queued
+ * run also says which share it waits for and when it tries again.
+ */
+export const RunResult = ({
+  status,
+  queued,
+}: {
+  status: RunStatus;
+  /** While it is queued: the share it waits for, and when it asks again. */
+  queued?: RunQueue | undefined;
+}) => (
+  <span className="inline-flex flex-col items-start gap-0.5">
+    <RunStatusDot status={status} />
+    {status === "queued" && queued !== undefined ? (
+      <span className="text-muted-foreground text-xs">
+        <QueuedFor queued={queued} />
+      </span>
+    ) : null}
   </span>
 );
 
@@ -90,7 +142,7 @@ const RunOutcome = ({
   const { t } = useLingui();
   return (
     <div className="flex flex-col items-start gap-1">
-      <RunResult status={run.status} />
+      <RunResult queued={run.queued} status={run.status} />
       {run.decision === undefined ? null : (
         <Link
           className="underline-offset-4 hover:underline"

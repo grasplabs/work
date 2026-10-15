@@ -396,7 +396,13 @@ const grantedCollection = async (
       actions: ["read"],
       binding,
     },
-    async (app, role) => await appFor(env, sealed.owner, app, role)
+    {
+      app: async (app, role) => await appFor(env, sealed.owner, app, role),
+      resource: async () =>
+        await Promise.reject(
+          new Error("No independent resource is named here")
+        ),
+    }
   );
   await grantPermission(env, admin, requested.id, {
     version: sealed.release.manifest.resourceVersion,

@@ -242,10 +242,12 @@ describe("a catalog entry's logo", () => {
       contentType: "image/png",
     });
     await expect(logoOf("linear")).resolves.toBeNull();
-    expect(composio.logoRequests.map(({ path }) => path)).toStrictEqual([
-      "/api/hubspot",
-      "/api/linear",
-    ]);
+    // Each fetched once, in whichever order the loads reached the host.
+    expect(
+      composio.logoRequests
+        .map(({ path }) => path)
+        .toSorted((one, other) => one.localeCompare(other))
+    ).toStrictEqual(["/api/hubspot", "/api/linear"]);
     // A day on, each is fetched again.
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now + 25 * 60 * 60 * 1000);

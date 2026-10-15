@@ -19,3 +19,22 @@ export const formatDate = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
     new Date(value)
   );
+
+/**
+ * A calendar day kept as an ISO date ("2026-10-03"), as the page's language
+ * writes it: the same day wherever the reader is, since the day carries no
+ * time to shift. An empty date stays empty.
+ */
+export const formatDay = (iso: string): string =>
+  iso === ""
+    ? iso
+    : new Intl.DateTimeFormat(i18n.locale, {
+        dateStyle: "medium",
+        timeZone: "UTC",
+      }).format(new Date(`${iso.slice(0, 10)}T00:00:00Z`));
+
+/** A plain whole number with the page's language's separators: "1,234", "1.234". */
+export const formatNumber = (value: number): string =>
+  new Intl.NumberFormat(i18n.locale, { maximumFractionDigits: 0 }).format(
+    value
+  );
