@@ -33,8 +33,25 @@ export const formatDay = (iso: string): string =>
         timeZone: "UTC",
       }).format(new Date(`${iso.slice(0, 10)}T00:00:00Z`));
 
+/** A month kept as an ISO month ("2026-10"), as the page's language writes it: "Oct 2026". */
+export const formatMonth = (iso: string): string => {
+  const [year = 1970, month = 1] = iso.split("-").map(Number);
+  return new Intl.DateTimeFormat(i18n.locale, {
+    month: "short",
+    timeZone: "UTC",
+    year: "numeric",
+  }).format(Date.UTC(year, month - 1, 1));
+};
+
 /** A plain whole number with the page's language's separators: "1,234", "1.234". */
 export const formatNumber = (value: number): string =>
   new Intl.NumberFormat(i18n.locale, { maximumFractionDigits: 0 }).format(
     value
   );
+
+/** A day and month as the page's language writes it, such as "3 Oct": for what is recent. */
+export const formatDayMonth = (value: string | number | Date): string =>
+  new Intl.DateTimeFormat(i18n.locale, {
+    day: "numeric",
+    month: "short",
+  }).format(new Date(value));

@@ -123,7 +123,7 @@ const releaseApp = async (
 };
 
 const screenPath = (app: string, screen: string): string =>
-  `/engines/${app}/apps/${screen}/full`;
+  `/domains/${app}/apps/${screen}/full`;
 
 /** The page's frame for a screen, emptied or not. */
 const frameOf = (page: Page) => page.locator("iframe");

@@ -27,8 +27,10 @@ test("a page whose file is gone after a release loads Grasp anew on Try again", 
   await page.goto("/");
   await expect(page.getByRole("navigation", { name: "Main" })).toBeVisible();
   page.removeAllListeners("request");
-  const knowledgeFiles = "**/assets/_shell.knowledge*.js";
-  await page.route(knowledgeFiles, async (route) => {
+  // The Brain's own file, its layout's: the router loads Grasp anew once
+  // for each file that fails, so one file is gone, as one page's would be.
+  const brainFiles = "**/assets/_shell.brain-*.js";
+  await page.route(brainFiles, async (route) => {
     await (upFront.has(route.request().url())
       ? route.continue()
       : route.abort());
@@ -38,7 +40,7 @@ test("a page whose file is gone after a release loads Grasp anew on Try again", 
   // missing after that, the page says why and how to go on.
   await page
     .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: "Knowledge", exact: true })
+    .getByRole("link", { name: "Brain", exact: true })
     .click();
   await expect(
     page.getByText(
@@ -50,10 +52,10 @@ test("a page whose file is gone after a release loads Grasp anew on Try again", 
   });
 
   // The new release's files are there: trying again loads Grasp anew.
-  await page.unroute(knowledgeFiles);
+  await page.unroute(brainFiles);
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(
-    page.getByRole("heading", { level: 1, name: "Knowledge" })
+    page.getByRole("complementary", { name: "The brain" })
   ).toBeVisible();
   expect(await sameDocument(page)).toBe(false);
 });

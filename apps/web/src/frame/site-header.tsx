@@ -19,9 +19,21 @@ export type Crumb =
   | { label: string }
   | {
       label: string;
-      to: "/" | "/knowledge" | "/engines" | "/workflows" | "/integrations";
+      to:
+        | "/"
+        | "/brain"
+        | "/knowledge"
+        | "/domains"
+        | "/workflows"
+        | "/integrations";
     }
-  | { label: string; to: "/engines/$engine"; params: { engine: string } }
+  | { label: string; to: "/brain/$noteId"; params: { noteId: string } }
+  | {
+      label: string;
+      to: "/brain/sections/$sectionId";
+      params: { sectionId: string };
+    }
+  | { label: string; to: "/domains/$engine"; params: { engine: string } }
   | {
       label: string;
       to: "/knowledge/$collection";
@@ -41,8 +53,14 @@ const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
   if (crumb.to === "/workflows/$app/$workflow") {
     return <Link params={crumb.params} to="/workflows/$app/$workflow" />;
   }
-  return crumb.to === "/engines/$engine" ? (
-    <Link params={crumb.params} to="/engines/$engine" />
+  if (crumb.to === "/brain/$noteId") {
+    return <Link params={crumb.params} to="/brain/$noteId" />;
+  }
+  if (crumb.to === "/brain/sections/$sectionId") {
+    return <Link params={crumb.params} to="/brain/sections/$sectionId" />;
+  }
+  return crumb.to === "/domains/$engine" ? (
+    <Link params={crumb.params} to="/domains/$engine" />
   ) : (
     <Link params={crumb.params} search={{}} to="/knowledge/$collection" />
   );

@@ -16,7 +16,7 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
-  BookOpenIcon,
+  BrainIcon,
   CogIcon,
   ClipboardCheckIcon,
   MessagesSquareIcon,
@@ -38,8 +38,8 @@ import { PersonMenu } from "./person-menu.tsx";
 interface Section {
   to:
     | "/"
-    | "/knowledge"
-    | "/engines"
+    | "/brain"
+    | "/domains"
     | "/workflows"
     | "/integrations"
     | "/onboarding";
@@ -49,8 +49,8 @@ interface Section {
 
 const sections: readonly Section[] = [
   { to: "/", label: msg`Chat`, icon: MessagesSquareIcon },
-  { to: "/knowledge", label: msg`Knowledge`, icon: BookOpenIcon },
-  { to: "/engines", label: msg`Engines`, icon: CogIcon },
+  { to: "/brain", label: msg`Brain`, icon: BrainIcon },
+  { to: "/domains", label: msg`Domains`, icon: CogIcon },
   { to: "/workflows", label: msg`Workflows`, icon: WorkflowIcon },
   { to: "/integrations", label: msg`Integrations`, icon: IntegrationsIcon },
 ];

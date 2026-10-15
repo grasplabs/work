@@ -337,19 +337,19 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
   await signInTo(context, member);
   await page.goto("/knowledge");
   const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link", { name: "Engines" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Domains" })).toBeVisible();
 
   // Signed out in another tab, or revoked: the page's connection, opened
   // while they were signed in, is refused at the next page they open.
   await endSession(member);
-  await nav.getByRole("link", { name: "Engines" }).click();
+  await nav.getByRole("link", { name: "Domains" }).click();
   await expect(
     page.getByText("Use your organization’s account to go on.")
   ).toBeVisible({
     timeout: reconnectMs,
   });
   expect(new URL(page.url()).pathname).toBe("/sign-in");
-  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/engines");
+  expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/domains");
   await expect(nav).toHaveCount(0);
 });
 
@@ -367,12 +367,12 @@ test("says an address no page has, and an App that isn't there, are not found, i
   ).toBeVisible();
   // In the frame: the sidebar is there to go on from.
   const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link", { name: "Engines" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Domains" })).toBeVisible();
 
   // An old link to an App is an engine's now.
   await page.goto("/apps/no-such-app");
   await expect(
-    page.getByRole("heading", { name: "Engine not found" })
+    page.getByRole("heading", { name: "Domain not found" })
   ).toBeVisible();
   await expect(
     page.getByRole("navigation", { name: "Breadcrumb" })
@@ -412,13 +412,13 @@ test("never sends what it gave up on while core was out of reach, once core is b
   });
   await page.goto("/settings/members");
   const nav = page.getByRole("navigation", { name: "Main" });
-  await expect(nav.getByRole("link", { name: "Knowledge" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Brain" })).toBeVisible();
 
   // Core goes out of reach: the page's connection drops, and none gets in.
   refusing = true;
   recording = true;
   await open?.close();
-  await nav.getByRole("link", { name: "Knowledge" }).click();
+  await nav.getByRole("link", { name: "Brain" }).click();
   await expect(
     page.getByText("Grasp can't be reached right now. Try again in a moment.")
   ).toBeVisible({ timeout: reconnectMs });
@@ -427,9 +427,9 @@ test("never sends what it gave up on while core was out of reach, once core is b
   // only status read sent, not the one the page gave up on as well.
   refusing = false;
   await page.getByRole("button", { name: "Try again" }).click();
-  await expect(page.getByRole("heading", { name: "Knowledge" })).toBeVisible({
-    timeout: reconnectMs,
-  });
+  await expect(
+    page.getByRole("complementary", { name: "The brain" })
+  ).toBeVisible({ timeout: reconnectMs });
   const pings = sent.filter((message) => message.includes('["ping"]'));
   expect(pings).toHaveLength(1);
 });
