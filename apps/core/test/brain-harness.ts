@@ -37,6 +37,7 @@ import { gatewayConfig, model, pointAtGateway } from "./agent-chat.ts";
 import { answeringGateway } from "./ai-gateway.ts";
 import type { GatewayRequest } from "./ai-gateway.ts";
 import { grantReviewed } from "./apps.ts";
+import { eventsAfter, logHead } from "./audit-events.ts";
 import {
   compareArms,
   gateViolations,
@@ -608,6 +609,33 @@ const changeState = async (
   });
 };
 
+/**
+ * The documents the persona's agent read through Knowledge since audit
+ * position `after`, by path: the reads the audit log records, which is
+ * where a tool result's evidence must come from.
+ */
+const readPathsOf = async (
+  company: BrainCompany,
+  place: Workspace,
+  after: number
+): Promise<string[]> => {
+  const paths = new Map(
+    Object.entries(brainDocuments).map(([key, { path }]) => [
+      held(company.documents, key).id,
+      path,
+    ])
+  );
+  const events = await eventsAfter(after);
+  return events.flatMap(({ action, actor, target }) =>
+    action === "knowledge.read" &&
+    actor.type === "agent" &&
+    actor.agentId === place.agent.agentId &&
+    target?.type === "document"
+      ? [paths.get(target.id) ?? target.id]
+      : []
+  );
+};
+
 const runTrial = async (
   company: BrainCompany,
   place: Workspace,
@@ -637,6 +665,7 @@ const runTrial = async (
     return state;
   };
   const stateBefore = await stateNow();
+  const auditBefore = await logHead();
   const firstRequest = gateway.requests.length;
   let spentBefore = await charged(company);
   let answer = "";
@@ -689,6 +718,7 @@ const runTrial = async (
     // Every request in order: a long turn's last request may leave out
     // earlier results, which the model still read.
     transcript: requests.flatMap(({ body }) => transcriptOf(body)),
+    readPaths: await readPathsOf(company, place, auditBefore),
     forbidden: forbiddenIn(task),
     stateChanged: changedBetween(stateBefore, await stateNow()).length > 0,
     ...(failure === undefined ? {} : { error: failure }),
@@ -785,7 +815,7 @@ export interface BrainRunOptions {
   split: BrainSplit;
   repeats: number;
   arms?: readonly BrainArm[];
-  /** Controls to run, on `controlTasks` only, first repeat only. */
+  /** Controls to run on `controlTasks`, once each, after the measured trials. */
   controls?: readonly BrainControl[];
   controlTasks?: readonly string[];
   openSealed?: boolean;
@@ -857,20 +887,27 @@ export const runBrainBaseline = async (
       const paired = inWindow.flatMap((task) =>
         arms.map((arm) => ({ arm, task, repeat, cold }))
       );
-      const controlled =
-        repeat === 1
-          ? inWindow
-              .filter(({ id }) => controlTasks.includes(id))
-              .flatMap((task) =>
-                controls.map((arm) => ({ arm, task, repeat, cold }))
-              )
-          : [];
-      plans.push(...shuffled([...paired, ...controlled], random));
+      plans.push(...shuffled(paired, random));
     }
     for (const plan of plans) {
       observations.push(
         // oxlint-disable-next-line no-await-in-loop -- trials one at a time, so latency and state are each trial's own
         await runTrial(company, held(places, plan.task.persona), provider, plan)
+      );
+    }
+  }
+  // The controls change what they run in on purpose: they run after every
+  // measured trial, cold, so nothing measured runs in what they changed.
+  for (const task of tasks.filter(({ id }) => controlTasks.includes(id))) {
+    for (const arm of controls) {
+      observations.push(
+        // oxlint-disable-next-line no-await-in-loop -- trials one at a time
+        await runTrial(company, held(places, task.persona), provider, {
+          arm,
+          task,
+          repeat: 1,
+          cold: true,
+        })
       );
     }
   }

@@ -101,8 +101,12 @@ const blocksOf = (content: unknown): Block[] => {
 
 /** A part of what the model was sent, and who wrote it. */
 export interface TranscriptPart {
-  /** `model` for its own earlier answers and code; `source` for the rest. */
-  by: "source" | "model";
+  /**
+   * `model` for its own earlier answers and code; `tool` for what its code
+   * returned, which holds whatever the code made; `source` for the rest:
+   * the system prompt, what the person said and the sources given.
+   */
+  by: "source" | "tool" | "model";
   text: string;
 }
 
@@ -120,10 +124,15 @@ export const transcriptOf = (body: unknown): TranscriptPart[] => [
         : undefined
     ).join("\n"),
   },
-  ...messagesOf(body).map(({ role, content }) => ({
-    by: role === "assistant" ? ("model" as const) : ("source" as const),
-    text: modelStrings(content).join("\n"),
-  })),
+  ...messagesOf(body).flatMap(({ role, content }) =>
+    blocksOf(content).map((block): TranscriptPart => {
+      const text = modelStrings(block).join("\n");
+      if (role === "assistant") {
+        return { by: "model", text };
+      }
+      return { by: block.type === "tool_result" ? "tool" : "source", text };
+    })
+  ),
 ];
 
 /** The tool results the model got since the person last wrote. */

@@ -40,6 +40,7 @@ const observed = (changes: Partial<TrialObservation>): TrialObservation => {
     answer: "ANSWER: Marta Ruiz\nFrom [handbook/contracts.md#Lease]",
     modelInput,
     transcript: [{ by: "source", text: modelInput }],
+    readPaths: [],
     forbidden: ["CANARY-1"],
     stateChanged: false,
     latencyMs: 10,
@@ -94,7 +95,7 @@ describe("scoring a trial", () => {
     });
   });
 
-  it("credits evidence where a source gave it first, never where the model wrote it first", () => {
+  it("credits evidence a source gave first, or a Knowledge read returned, never what the model made", () => {
     const marker = "Owner: Marta Ruiz";
     expect({
       // Its code returned what it wrote itself: no source gave it.
@@ -102,9 +103,21 @@ describe("scoring a trial", () => {
         transcript: [
           { by: "source", text: "Who owns the lease?" },
           { by: "model", text: `return "${marker}";` },
-          { by: "source", text: `Returned: ${marker}` },
+          { by: "tool", text: `Returned: ${marker}` },
         ],
       }),
+      // Its code made the marker from pieces, reading nothing.
+      constructed: verdict(contract, {
+        transcript: [
+          { by: "model", text: 'return ["Owner:", "Marta Ruiz"].join(" ");' },
+          { by: "tool", text: `Returned: ${marker}` },
+        ],
+      }).evidenceRecall,
+      // Its code read the document through Knowledge and returned it.
+      read: verdict(contract, {
+        transcript: [{ by: "tool", text: `Returned: ${marker}` }],
+        readPaths: ["handbook/contracts.md"],
+      }).evidenceRecall,
       // It read it, then quoted it in its next code: still the source's.
       quoted: verdict(contract, {
         transcript: [
@@ -115,9 +128,10 @@ describe("scoring a trial", () => {
       // Read in an earlier request, left out of the last one.
       dropped: verdict(contract, {
         transcript: [
-          { by: "source", text: `Returned: ${marker}` },
+          { by: "tool", text: `Returned: ${marker}` },
           { by: "source", text: "[earlier results left out]" },
         ],
+        readPaths: ["handbook/contracts.md"],
       }).completed,
       citationOnly: verdict(contract, {
         answer: "ANSWER: see [handbook/contracts.md#Marta Ruiz]",
@@ -130,6 +144,8 @@ describe("scoring a trial", () => {
         evidenceRecall: 0,
         citationSupport: 1,
       },
+      constructed: 0,
+      read: 1,
       quoted: 1,
       dropped: true,
       citationOnly: false,

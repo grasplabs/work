@@ -23,12 +23,15 @@ export interface TrialObservation {
   /** Every string the model was sent in the trial, joined: for leaks. */
   modelInput: string;
   /**
-   * The chat as the model read it, request after request, each part marked as the
-   * model's own or not. Evidence counts only where it first came from a
-   * source, so a marker the model wrote first, and its code handed back,
-   * is never credited; one it quoted after reading it still is.
+   * The chat as the model read it, request after request, each part marked
+   * by who wrote it. Evidence counts where it first appeared in a source,
+   * or in a tool result while the agent read the evidence's document
+   * through Knowledge in the trial: never where the model wrote it, or
+   * made it in code, itself.
    */
   transcript: readonly TranscriptPart[];
+  /** The documents the agent read through Knowledge in the trial, by path. */
+  readPaths: readonly string[];
   /** Strings that must not reach a model or answer in this trial. */
   forbidden: readonly string[];
   /** Whether stored state changed during the trial. */
@@ -289,9 +292,14 @@ export const scoreTrial = (
       completed: abstained && authorized,
     };
   }
-  const reached = expect.evidence.filter(({ marker }) => {
+  const reached = expect.evidence.filter(({ source, marker }) => {
     const words = normalized(marker);
-    return parts.find(({ text }) => text.includes(words))?.by === "source";
+    const first = parts.find(({ text }) => text.includes(words))?.by;
+    const [path = ""] = source.split("#");
+    return (
+      first === "source" ||
+      (first === "tool" && observed.readPaths.includes(path))
+    );
   }).length;
   const cited = citationsOf(observed.answer);
   const supported = cited.filter((source) =>
