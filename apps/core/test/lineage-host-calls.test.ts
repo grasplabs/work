@@ -121,12 +121,17 @@ ${Array.from({ length: calls }, () => `    await env.APP.call("hit", "${name}");
     return 1;
   });`;
 
-/** A first attempt at the step `key`, holding `ms` from now: a minute unless said. */
+/**
+ * A first attempt at the step `key`, holding `ms` from now: a minute
+ * unless said. Of an activation past any the engine ran of the run it is
+ * admitted for, as its next one: an attempt of a generation the engine
+ * has fenced is admitted no more (quotas.ts, `sharesReleased`).
+ */
 const attemptOf = (key: string, ms = 60_000) => ({
   key,
   step: key,
   number: 1,
-  generation: 1,
+  generation: 100,
   deadline: Date.now() + ms,
 });
 

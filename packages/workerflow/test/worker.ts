@@ -26,6 +26,7 @@ import {
   handledAt,
   tick,
   measuredClock,
+  hostFences,
   hostNotifications,
   notifyFailures,
   notifyHangs,
@@ -1141,11 +1142,11 @@ export class TestRuns extends WorkflowRun {
   protected override readonly notifyTimeoutMs: number = testNotifyTimeoutMs;
 
   /**
-   * The host: takes the run's notifications into `hostNotifications`, held at the
+   * The host: takes the run's notifications into `hostNotifications`, with
+   * the activation fence as it took them into `hostFences`, held at the
    * checkpoint "notify" if the test holds it, failing as many times as
    * `notifyFailures` says, or not answering once if `notifyHangs` says.
    */
-  // oxlint-disable-next-line class-methods-use-this -- the host's state is the test's, shared through outside.ts
   protected override async notify(
     notifications: readonly RunNotification[]
   ): Promise<void> {
@@ -1160,6 +1161,11 @@ export class TestRuns extends WorkflowRun {
       await Promise.withResolvers<never>().promise;
     }
     hostNotifications.push(...notifications);
+    hostFences.push({
+      run: id,
+      statuses: notifications.map(({ status }) => status),
+      over: this.generationOver(),
+    });
   }
 
   override async alarm(): Promise<void> {
