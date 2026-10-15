@@ -649,6 +649,11 @@ export interface RunHostCalls<Attempt = AttemptHost> {
     fn: (attempt: Attempt) => Promise<unknown>
   ) => Promise<Settled<unknown>>;
   sleep: (name: unknown, duration: unknown) => Promise<Settled<null>>;
+  /**
+   * A durable sleep until a deadline its step recorded: an independent
+   * workflow's (resource-host.ts); an App's run has none.
+   */
+  sleepUntil?: (name: unknown, until: unknown) => Promise<Settled<null>>;
   waitForDecision: (
     name: unknown,
     options: unknown
@@ -864,6 +869,13 @@ export const sessionRunHost = <Attempt extends object = AttemptHost>(
     });
   },
   sleep: async (name, duration) => await host.sleep(name, duration),
+  sleepUntil: async (name, until) =>
+    host.sleepUntil === undefined
+      ? {
+          ok: false,
+          error: { name: "Error", message: "This run has no sleep until." },
+        }
+      : await host.sleepUntil(name, until),
   waitForDecision: async (name, options) =>
     await host.waitForDecision(name, options),
 });
@@ -955,6 +967,7 @@ export const loadRunIsolate = <Attempt extends object = AttemptHost>(
             capability: capability(sessionRunHost(host, session, methods), [
               "do",
               "sleep",
+              "sleepUntil",
               "waitForDecision",
             ]),
           },
