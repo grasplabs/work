@@ -2,7 +2,8 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
-import { and, eq, inArray, lte, sql } from "drizzle-orm";
+import type { RunQueue } from "@grasp-os/shared/workflows";
+import { and, asc, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -504,6 +505,45 @@ export const runDequeued = (db: DrizzleD1Database, run: string, took: SQL) =>
   db
     .delete(workflowAdmissionQueue)
     .where(and(eq(workflowAdmissionQueue.runId, run), took));
+
+/**
+ * Of the runs `runs`, each one a step of which waits in the queue for a
+ * share at `now`: the share, and the earliest a step of it asks again, as
+ * its summary shows it (summary.ts). A place that stopped asking doesn't
+ * count. Only the runs' own places are read (the queue's primary key):
+ * never who else waits, nor how many, nor where in the queue.
+ */
+export const queuedRuns = async (
+  db: DrizzleD1Database,
+  runs: readonly string[],
+  now: number
+): Promise<Map<string, RunQueue>> => {
+  if (runs.length === 0) {
+    return new Map();
+  }
+  const rows = await db
+    .select({
+      runId: workflowAdmissionQueue.runId,
+      waitingFor: workflowAdmissionQueue.waitingFor,
+      retryAt: workflowAdmissionQueue.retryAt,
+    })
+    .from(workflowAdmissionQueue)
+    .where(
+      and(
+        // One bound list: D1 binds at most 100 parameters.
+        sql`${workflowAdmissionQueue.runId} IN (SELECT value FROM json_each(${JSON.stringify(runs)}))`,
+        gt(workflowAdmissionQueue.seenAt, new Date(now - queueLiveMs))
+      )
+    )
+    .orderBy(asc(workflowAdmissionQueue.retryAt));
+  const byRun = new Map<string, RunQueue>();
+  for (const { runId, waitingFor, retryAt } of rows) {
+    if (!byRun.has(runId)) {
+      byRun.set(runId, { waitingFor, retryAt: retryAt.toISOString() });
+    }
+  }
+  return byRun;
+};
 
 /**
  * The statements that give up `place` once its attempt holds its lease
