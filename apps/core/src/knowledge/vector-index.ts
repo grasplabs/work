@@ -75,6 +75,7 @@ export interface VectorQuery {
 }
 
 export interface VectorIndexStatus {
+  /** The generation this adapter was given; only its dimensions are checked. */
   generation: string;
   dimensions: number;
   vectors: number;
@@ -92,16 +93,25 @@ export interface VectorIndex {
   upsert: (records: readonly VectorRecord[]) => Promise<void>;
   /** Safe to repeat; an ID that isn't there is no error. */
   delete: (ids: readonly string[]) => Promise<void>;
-  /** Fails `invalid` when the index isn't of this generation. */
+  /**
+   * Fails `invalid` when the index's dimensions aren't the generation's.
+   * The provider can show nothing else of a generation (its model,
+   * revision or metric), so provisioning pins each index to one: an index
+   * per generation, created with its dimensions and metric.
+   */
   status: () => Promise<VectorIndexStatus>;
 }
 
 /**
  * Why a vector index call failed. `unsupported`: this profile has no vector
- * adapter. `unavailable`: the provider failed or didn't answer in time; a
- * write may have been applied in part, so it is repeated whole. `invalid`:
- * the input or the index doesn't fit the generation or the provider's
- * limits; repeating it won't help.
+ * adapter. `invalid`: the input doesn't fit the generation or the
+ * provider's documented limits, or `status` found an index of other
+ * dimensions; repeating it won't help. `unavailable`: anything the
+ * provider did instead of answering, in time or at all. Its errors carry
+ * no documented classes, so an outage and a misprovisioned index both land
+ * here: a caller retries a bounded number of times, then degrades and
+ * reports it, and `status` tells an operator which it is. A write may have
+ * been applied in part, so it is repeated whole.
  */
 export class VectorIndexError extends Error {
   readonly kind: "unsupported" | "unavailable" | "invalid";
