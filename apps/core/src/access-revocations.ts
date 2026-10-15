@@ -28,10 +28,48 @@ import { appHost } from "./durable-objects.ts";
 const toldAtOnce = 16;
 
 /**
+ * How long to wait before telling a host again that couldn't be reached:
+ * a host that is away for a moment is told within a second.
+ */
+const retryDelaysMs = [100, 500] as const;
+
+/**
+ * Tells `app`'s host, trying again after `retryDelaysMs` while it can't
+ * be reached. A host that restarted meanwhile let go of every connection
+ * it held, and each of those looks again on its own (query-subscriptions.ts).
+ */
+const tellHost = async (
+  env: Env,
+  app: AppId,
+  userIds: readonly string[] | null
+): Promise<void> => {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
+      await appHost(env, app).accessRevoked(userIds);
+      return;
+    } catch (error) {
+      const delay = retryDelaysMs[attempt];
+      if (delay === undefined) {
+        log.error("app.access_revocation_failed", {
+          appId: app,
+          ...errorFields(error),
+        });
+        return;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
+      await scheduler.wait(delay);
+    }
+  }
+};
+
+/**
  * Tells the hosts of `apps` that `userIds` (everyone, when `null`) may
  * have lost their role in them. Best effort, after the change committed:
- * a host that can't be reached is logged, and its screens fall back on
- * the check before each push (query-subscriptions.ts).
+ * a host that still can't be reached after its retries is logged, and its
+ * screens fall back on the check before each push (query-subscriptions.ts).
+ * A durable outbox for these is a follow-up; no periodic recheck (spec
+ * 11.4).
  */
 export const accessMayHaveDropped = async (
   env: Env,
@@ -43,14 +81,7 @@ export const accessMayHaveDropped = async (
     // oxlint-disable-next-line no-await-in-loop -- a few hosts at a time
     await Promise.all(
       pending.slice(at, at + toldAtOnce).map(async (app) => {
-        try {
-          await appHost(env, app).accessRevoked(userIds);
-        } catch (error) {
-          log.error("app.access_revocation_failed", {
-            appId: app,
-            ...errorFields(error),
-          });
-        }
+        await tellHost(env, app, userIds);
       })
     );
   }
