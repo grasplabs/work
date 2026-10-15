@@ -195,27 +195,33 @@ export const policyFilters = (
   for (const key of keys) {
     checkPolicyKey(key);
   }
+  // A filter's size is its fixed part plus each key as JSON, with commas
+  // between them, so it grows by key without serialising it again.
+  const emptyBytes = bytesOf(JSON.stringify(filterOf([])));
   const filters: VectorizeVectorMetadataFilter[] = [];
   let batch: string[] = [];
+  let batchBytes = emptyBytes;
   for (const key of keys) {
-    const grown = [...batch, key];
+    const keyBytes = bytesOf(JSON.stringify(key)) + (batch.length > 0 ? 1 : 0);
     if (
-      grown.length <= maxPolicyKeysPerFilter &&
-      bytesOf(JSON.stringify(filterOf(grown))) < maxFilterBytes
+      batch.length < maxPolicyKeysPerFilter &&
+      batchBytes + keyBytes < maxFilterBytes
     ) {
-      batch = grown;
+      batch.push(key);
+      batchBytes += keyBytes;
       continue;
     }
     filters.push(filterOf(batch));
+    if (filters.length === maxPolicyBatches) {
+      return { filters, complete: false };
+    }
     batch = [key];
+    batchBytes = emptyBytes + keyBytes - 1;
   }
   if (batch.length > 0) {
     filters.push(filterOf(batch));
   }
-  return {
-    filters: filters.slice(0, maxPolicyBatches),
-    complete: filters.length <= maxPolicyBatches,
-  };
+  return { filters, complete: true };
 };
 
 /** Nearest first: the highest score, or for euclidean the lowest distance. */
