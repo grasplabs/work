@@ -171,12 +171,14 @@ export const detailIssues = (
 
 /**
  * Sign-in refusals that don't mean the person lost access: the host had
- * no token to give yet, or the client itself refused a call because
- * someone else signed in, which fenced already.
+ * no token to give yet. `auth.principal_changed` fences: core answers it
+ * when the browser's session is someone else's than the screen's (its
+ * function route), so nothing held for the person before stays. The
+ * client's own refusal under that code is unsent and fenced already, so
+ * it never reaches the fence check.
  */
 const nonFencingAuthCodes: ReadonlySet<string> = new Set([
   "auth.token_unavailable",
-  "auth.principal_changed",
 ]);
 
 /**

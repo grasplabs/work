@@ -4361,6 +4361,10 @@ msgstr "Someone chooses their own language when they open their link."
 msgid "Someone else"
 msgstr "Someone else"
 
+#: src/screens/screen-frame.tsx
+msgid "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
+msgstr "Someone else signed in on this browser, so this app was stopped. Try again to open it as the person signed in now."
+
 #: src/connections/connection-list.tsx
 msgid "Someone no longer here"
 msgstr "Someone no longer here"
