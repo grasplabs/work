@@ -493,9 +493,10 @@ describe("a session on the on-prem sandbox", () => {
     "judges a session whose process reset its connection as it died, as a dying process with unread bytes does on Linux",
     { timeout: 60_000 },
     async () => {
-      // A stand-in host: it answers the session, reads nothing more, and
-      // ends itself (status 1, as workerd does at V8's heap limit) with
-      // core's next bytes still unread, which Linux answers with a reset.
+      // A stand-in host: it answers the session, then ends itself (status
+      // 1, as workerd does at V8's heap limit) on the first read of core's
+      // next frame, far larger than one read takes: the rest still unread,
+      // which Linux answers with a reset, whatever the timing.
       const host = path.join(tempDir(), "resetting-host.mjs");
       writeFileSync(
         host,
@@ -506,13 +507,16 @@ const addr = process.argv.find((arg) => arg.startsWith("--socket-addr=http=unix:
 const socket = addr.slice("--socket-addr=http=unix:".length);
 const server = createServer((connection) => {
   let head = "";
+  let upgraded = false;
   connection.on("data", (chunk) => {
+    if (upgraded) {
+      connection.pause();
+      process.exit(1);
+    }
     head += chunk.toString("latin1");
     if (!head.includes("\\r\\n\\r\\n")) return;
-    connection.pause();
-    connection.removeAllListeners("data");
+    upgraded = true;
     connection.write("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\n\\r\\n");
-    setTimeout(() => process.exit(1), 300);
   });
 });
 server.listen(socket, () => {
@@ -537,11 +541,25 @@ server.listen(socket, () => {
         if (socket === undefined) {
           throw new TypeError("The session gave no socket");
         }
-        const closed = once(socket, "close");
-        // A text frame, masked as a client's are, that the host never reads.
-        socket.write(Buffer.from([0x81, 0x82, 0, 0, 0, 0, 0x68, 0x69]));
+        // The supervisor closes it while the frame may still be going out:
+        // the write's EPIPE then is no fault of the session.
+        socket.on("error", () => {});
+        const closed = new AbortController();
+        socket.once("close", () => {
+          closed.abort();
+        });
+        // A binary frame of a MiB, masked as a client's are (with a zero
+        // key): the host reads only the start of it.
+        const frameBytes = 1024 * 1024;
+        const frame = Buffer.alloc(14 + frameBytes);
+        frame[0] = 0x82;
+        frame[1] = 0xff;
+        frame.writeBigUInt64BE(BigInt(frameBytes), 2);
+        socket.write(frame);
         // The supervisor closes core's end once it has judged the session.
-        await closed;
+        if (!closed.signal.aborted) {
+          await once(closed.signal, "abort");
+        }
         await expect(verdictAnswer(id, small.socket)).resolves.toMatchObject({
           status: 200,
           body: { verdict: "memory" },
