@@ -131,7 +131,7 @@ export const workflowResourceErrors = defineErrorFamily({
     "That isn't a workflow version this App can bind.",
   "workflow.app_binding_unavailable": "This App has no such workflow binding.",
   "workflow.call_denied":
-    "This run may no longer make that call: the person it acts for, the approval or permission behind the binding, or the trigger that started it changed since it started.",
+    "This run may no longer make that call: the person it acts for, the approval or permission behind the binding, or the trigger, App or agent that started it lost what it needed since the run started.",
   "workflow.call_invalid":
     "A task's call, or what it answered, doesn't match the binding's contract, so the run failed.",
   "workflow.call_release_not_current":
