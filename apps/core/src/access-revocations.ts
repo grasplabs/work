@@ -152,6 +152,9 @@ export const teamAboutToGo = async (
   env: Env,
   teamId: string
 ): Promise<void> => {
+  // What an earlier deletion of it read, one that failed before its
+  // `teamGone`, is stale: never told in place of this read.
+  leavingTeams.delete(teamId);
   try {
     const rows = await drizzle(env.DB)
       .select({ userId: teamMembers.userId })
