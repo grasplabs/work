@@ -16,9 +16,16 @@ import {
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { log } from "@grasp-os/shared/log";
+import {
+  actionMaxRunning,
+  streamMaxRunning,
+} from "@grasp-os/shared/operation-limits";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
-import { screenLimits } from "@grasp-os/shared/screens";
+import {
+  querySubscriptionLimits,
+  screenLimits,
+} from "@grasp-os/shared/screens";
 import type {
   AppErrorLog,
   RunChange,
@@ -141,11 +148,11 @@ const refusalLogMs = 60_000;
 
 /**
  * How often, at most, the same refusal of the App's data to a screen (who,
- * which build, why, what and where) is audited (`auditRefusal`).
+ * which build, why, what and where) is audited (`auditOnce`).
  */
 const refusalAuditMs = 10 * 60_000;
 
-/** How many refusals `auditRefusal` remembers at most. */
+/** How many refusals `auditOnce` remembers at most. */
 const refusalsKept = 1000;
 
 /** The one bucket all of an App's reports share, and its server lines. */
@@ -768,6 +775,10 @@ const releaseAfter = async (
  * Core reaches it through `callApp`; the App's own code reaches it only
  * through its stubs.
  */
+/** Where the App's object keeps `userId`'s held places of one kind. */
+const invocationHoldsKey = (userId: string, streaming: boolean): string =>
+  `${streaming ? "stream" : "action"}-holds:${userId}`;
+
 export class App extends DurableObject<Env> {
   /**
    * The code the facet runs: its version, which read of the current
@@ -807,6 +818,12 @@ export class App extends DurableObject<Env> {
   /** Each person's requests of the App's screens. */
   readonly #requests = new TokenBuckets(screenLimits.requests);
 
+  /**
+   * Each person's reads of their live queries that writes caused
+   * (`querySubscriptionLimits.liveReads`, query-subscriptions.ts).
+   */
+  readonly #liveReads = new TokenBuckets(querySubscriptionLimits.liveReads);
+
   /** The reports kept of each person's screens, and of all of them. */
   readonly #callerReports = new TokenBuckets(screenLimits.callerReports);
   readonly #appReports = new TokenBuckets(screenLimits.appReports);
@@ -827,10 +844,10 @@ export class App extends DurableObject<Env> {
   /** Requests refused since the last line logged of them, and when that was. */
   #refused = { requests: 0, loggedAt: 0 };
 
-  /** When each refusal of a screen was last audited, oldest first (`auditRefusal`). */
+  /** When each refusal of a screen was last audited, oldest first (`auditOnce`). */
   readonly #refusalsAudited = new Map<string, number>();
 
-  /** The refusals whose rows are being written now (`auditRefusal`). */
+  /** The refusals whose rows are being written now (`auditOnce`). */
   readonly #refusalsWriting = new Map<string, Promise<void>>();
 
   get #app(): AppId {
@@ -1182,8 +1199,9 @@ export class App extends DurableObject<Env> {
   }
 
   /**
-   * Audits a screen's refusal of the App's data, named by `refusal`
-   * (who, which build, why, what and where), with `entry`: unless it was
+   * Audits what `refusal` names, with `entry`: a screen's refusal of the
+   * App's data (who, which build, why, what and where), or a person's use
+   * of the App from a portable host (app-function-route.ts); unless it was
    * audited within `refusalAuditMs`, so a screen opened over and over, or
    * a page retrying, adds a row a window, not one a try. The check and the
    * write are one operation per refusal here: the same refusal arriving
@@ -1194,7 +1212,7 @@ export class App extends DurableObject<Env> {
    * once more; past `refusalsKept`, the oldest are forgotten first, which
    * only audits them again.
    */
-  async auditRefusal(refusal: string, entry: AuditEntry): Promise<void> {
+  async auditOnce(refusal: string, entry: AuditEntry): Promise<void> {
     const audited = this.#refusalsAudited.get(refusal);
     if (audited !== undefined && Date.now() - audited < refusalAuditMs) {
       return;
@@ -1225,6 +1243,66 @@ export class App extends DurableObject<Env> {
       }
       this.#refusalsAudited.delete(oldest);
     }
+  }
+
+  /**
+   * Whether core may read one more of `userId`'s live queries of the App
+   * now because a write changed what it read
+   * (`querySubscriptionLimits.liveReads`). One that may not waits.
+   */
+  admitLiveRead(userId: string): boolean {
+    return this.#liveReads.take(userId);
+  }
+
+  /**
+   * Whether `userId` may start the action invocation `name` now, which
+   * runs until `until` at most: holds a place for it if so. A person runs
+   * at most `streamMaxRunning` streaming actions and `actionMaxRunning`
+   * plain ones at once in the App, each kind counted apart. A hold past
+   * its time no longer counts, so a run whose end was never told frees its
+   * place by its deadline. Stored, not only in memory: a restart of this
+   * object while invocations run (each in an object of its own) must not
+   * give their places back.
+   */
+  holdInvocation(
+    userId: string,
+    name: string,
+    until: number,
+    streaming: boolean
+  ): boolean {
+    const now = Date.now();
+    const key = invocationHoldsKey(userId, streaming);
+    const held = Object.entries(this.#invocationHolds(key)).filter(
+      ([, end]) => end > now
+    );
+    const most = streaming ? streamMaxRunning : actionMaxRunning;
+    if (!held.some(([running]) => running === name) && held.length >= most) {
+      return false;
+    }
+    this.ctx.storage.kv.put(key, {
+      ...Object.fromEntries(held),
+      [name]: until,
+    });
+    return true;
+  }
+
+  /** Frees `userId`'s place for the invocation `name`, which has ended. */
+  releaseInvocation(userId: string, name: string, streaming: boolean): void {
+    const now = Date.now();
+    const key = invocationHoldsKey(userId, streaming);
+    const held = Object.entries(this.#invocationHolds(key)).filter(
+      ([running, end]) => running !== name && end > now
+    );
+    if (held.length === 0) {
+      this.ctx.storage.kv.delete(key);
+      return;
+    }
+    this.ctx.storage.kv.put(key, Object.fromEntries(held));
+  }
+
+  /** The places held under `key`, by invocation name, each until when. */
+  #invocationHolds(key: string): Readonly<Record<string, number>> {
+    return this.ctx.storage.kv.get<Record<string, number>>(key) ?? {};
   }
 
   /**

@@ -14,8 +14,11 @@ import { z } from "zod";
 import { appFor } from "../apps.ts";
 import { workflowDecisions, workflowRuns } from "../db/core/schema.ts";
 import { answerableBy, answerDecision } from "../decisions/decisions.ts";
+import { queuedRuns } from "./admission.ts";
 import {
   findRun,
+  goesOn,
+  queuedRun,
   runFor,
   runsPerPage,
   runStatus,
@@ -144,9 +147,11 @@ const endedStatuses: ReadonlySet<RunStatus> = new Set([
 
 /**
  * A run as a screen sees it, the same whichever call read it: `waiting`
- * exactly while a decision of it is open, and `running` while it waits on
- * anything else (a sleep, a held side effect), whatever the engine calls that. An
- * ended run waits for nothing. A paused one stays paused.
+ * exactly while a decision of it is open, otherwise `queued` while a step
+ * waits for a share of the attempts running at once (runs.ts,
+ * `queuedRun`), and `running` while it waits on anything else (a sleep, a
+ * held side effect), whatever the engine calls that. An ended run waits
+ * for nothing. A paused one stays paused.
  */
 export const toScreenRun = (
   run: WorkflowRun,
@@ -154,6 +159,14 @@ export const toScreenRun = (
 ): ScreenRun => {
   if (endedStatuses.has(run.status)) {
     return { ...run, waitingFor: [] };
+  }
+  if (run.status === "queued") {
+    if (decisions.length === 0) {
+      return { ...run, waitingFor: [] };
+    }
+    // A decision someone may answer comes first, as in the Runs list.
+    const { queued: _queued, ...going } = run;
+    return { ...going, status: "waiting", waitingFor: decisions };
   }
   if (run.status === "running" || run.status === "waiting") {
     return {
@@ -213,9 +226,19 @@ export const screenRuns = async (
       .where(and(inArray(workflowDecisions.runId, latest), openNow(new Date())))
       .orderBy(workflowDecisions.openedAt, workflowDecisions.id),
   ]);
-  const waiting = await waitingFor(env, by, owner, rows, open);
+  const [waiting, queues] = await Promise.all([
+    waitingFor(env, by, owner, rows, open),
+    queuedRuns(
+      db,
+      rows.flatMap((row) => (goesOn(row.status) ? [row.id] : [])),
+      Date.now()
+    ),
+  ]);
   return rows.map((row) =>
-    toScreenRun(runFor(env, by, row, owner), waiting.get(row.id) ?? [])
+    toScreenRun(
+      queuedRun(runFor(env, by, row, owner), queues.get(row.id)),
+      waiting.get(row.id) ?? []
+    )
   );
 };
 

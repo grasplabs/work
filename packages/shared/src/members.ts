@@ -12,6 +12,24 @@ export interface Member {
 }
 
 /**
+ * An admin's invitation, not taken up yet: the role `email` gets when they
+ * first sign in through the organization's IdP. Grasp sends no email;
+ * whoever invites tells them.
+ */
+export interface Invitation {
+  id: string;
+  /** Lowercased, in one of the deployment's sign-in domains. */
+  email: string;
+  role: Role;
+  /** Who invited them, by name. */
+  invitedBy: string;
+  /** When (ISO 8601). */
+  invitedAt: string;
+  /** When it lapses unused (ISO 8601): they then join as users. */
+  expiresAt: string;
+}
+
+/**
  * The organization's members, over `/rpc`, for admins only (never Grasp
  * staff): offboarding. Removing someone is for good: every session they
  * have ends, their open connections close on their next call, their
@@ -33,6 +51,16 @@ export interface MembersApi {
    * organization without an admin.
    */
   setRole: (userId: string, role: Role) => Promise<void>;
+  /** The invitations nobody has taken up yet, newest first. */
+  invitations: () => Promise<Invitation[]>;
+  /**
+   * Invites `email` as `role`: their first sign-in makes them a member
+   * with it. Refused for an address outside the sign-in domains, someone
+   * who is a member already, removed, or invited already.
+   */
+  invite: (email: string, role: Role) => Promise<Invitation>;
+  /** Withdraws an invitation nobody has taken up: they'd join as users. */
+  withdrawInvitation: (invitationId: string) => Promise<void>;
 }
 
 /** Why an admin's change to a member was refused or not finished. */
@@ -47,4 +75,12 @@ export const memberErrors = defineErrorFamily({
     "Another admin changed their role at the same time. Check it, and try again.",
   "member.last_admin":
     "The organization needs at least one admin. Make someone else an admin first.",
+  "member.invite_email":
+    "Use an email address in one of the domains your organization signs in with.",
+  "member.invite_member": "They're a member already.",
+  "member.invite_removed":
+    "They were removed from the organization, and can't join again.",
+  "member.invite_pending": "They're invited already.",
+  "member.invitation_not_found":
+    "There's no such invitation: it was taken up or withdrawn.",
 });

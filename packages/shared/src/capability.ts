@@ -114,6 +114,20 @@ export const capabilityClaimsSchema = z.strictObject({
    * action only with it, and takes it nowhere else.
    */
   confirms: z.uuid().optional(),
+  /**
+   * Only on the capability core signs once the person a call acted for
+   * resolved its unknown outcome, from their own session, after checking
+   * the call's permission again: what they said of it, and of which claim
+   * of its key (`claimedAt`, the claim they were shown). Connect resolves
+   * the call's outcome only with it, only while that claim is the key's,
+   * and takes it nowhere else.
+   */
+  resolves: z
+    .strictObject({
+      choice: z.enum(["happened", "not_happened"]),
+      claimedAt: z.int().nonnegative(),
+    })
+    .optional(),
 });
 export type CapabilityClaims = z.infer<typeof capabilityClaimsSchema>;
 
@@ -143,6 +157,10 @@ export interface CapabilityScope extends CapabilityCall {
   context?: z.input<typeof workContextSchema> | undefined;
   /** The held action the person confirmed: signed, not compared. */
   confirms?: string | undefined;
+  /** What the person said of an unknown outcome: signed, not compared. */
+  resolves?:
+    | { choice: "happened" | "not_happened"; claimedAt: number }
+    | undefined;
 }
 
 /** Why connect refuses a call before looking at it any further. */
@@ -202,6 +220,7 @@ export const signCapability = async (
     origin: scope.origin,
     ...(scope.context === undefined ? {} : { context: scope.context }),
     ...(scope.confirms === undefined ? {} : { confirms: scope.confirms }),
+    ...(scope.resolves === undefined ? {} : { resolves: scope.resolves }),
   };
   capabilityClaimsSchema.parse(claims);
   const payload = toBase64Url(new TextEncoder().encode(JSON.stringify(claims)));

@@ -1,3 +1,4 @@
+import { chunkBytes } from "@grasp-os/shared/chunks";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import type {
   HeldPool,
@@ -19,6 +20,7 @@ import {
   sandboxCallIdHeader,
   sandboxCpuHeader,
   sandboxDeadlineHeader,
+  sandboxMemoryHeader,
   sandboxOwnerHeader,
   sandboxParentHeader,
   sandboxWaitHeader,
@@ -59,10 +61,41 @@ export type SessionArgument =
   | { readonly value: unknown }
   | { readonly capability: SessionCapability };
 
+/**
+ * A module of the release's own platform code (the screen compiler, the
+ * package builder, and what they load), as its bytes: JavaScript, a JSON
+ * module or a WebAssembly module, which the sandbox host reads a chunk at
+ * a time (`platformModules`).
+ */
+export interface PlatformModule {
+  readonly type: "js" | "json" | "wasm";
+  readonly bytes: Uint8Array;
+}
+
 /** One call in a session. */
 export interface SessionCall {
   readonly mainModule: string;
   readonly modules: Readonly<Record<string, string>>;
+  /**
+   * Modules too large for the call's message, or of another type than
+   * JavaScript: the release's platform code, never an App's. The sandbox
+   * host reads each through a reader core passes with the call, a chunk at
+   * a time, in order and once (`inOrderReader`), before it loads the
+   * isolate.
+   */
+  readonly platformModules?: Readonly<Record<string, PlatformModule>>;
+  /**
+   * Whether the isolate runs with `nodejs_compat`, which the screen
+   * compiler's React Compiler needs: core's own platform code only. The
+   * sandbox host adds that flag and no other.
+   */
+  readonly nodejsCompat?: boolean;
+  /**
+   * The resident memory the call's process may use, in MiB, where core's
+   * platform code needs more than App code gets: the supervisor holds it
+   * to its most. Never set for App code.
+   */
+  readonly memoryMib?: number;
   readonly entrypoint: string;
   readonly method: string;
   readonly args: readonly SessionArgument[];
@@ -88,6 +121,34 @@ export interface SessionCall {
    */
   readonly lingerMs?: number;
 }
+
+/**
+ * A reader of `parts`' bytes, for the sandbox host to call as
+ * `read(name, offset)`: a chunk at a time, the parts in their order and
+ * each from where its last chunk ended, never again. So a session reads
+ * at most as many chunks as the parts make, rounded up, and nothing it
+ * wasn't handed.
+ */
+export const inOrderReader = (
+  parts: readonly (readonly [string, Uint8Array])[]
+): ((name: unknown, offset: unknown) => Uint8Array) => {
+  let index = 0;
+  let next = 0;
+  return (name, offset) => {
+    const part = parts[index];
+    if (part === undefined || name !== part[0] || offset !== next) {
+      throw new RangeError("Each part is read once, in order.");
+    }
+    const [, bytes] = part;
+    const chunk = bytes.slice(next, next + chunkBytes);
+    next += chunk.byteLength;
+    if (next >= bytes.byteLength) {
+      index += 1;
+      next = 0;
+    }
+    return chunk;
+  };
+};
 
 /** A call made in a session already open, in its process. */
 export type NestedCall = Pick<
@@ -311,11 +372,36 @@ export const sandboxVerdictOf = (error: unknown): string | undefined =>
   error instanceof Error ? verdicts.get(error) : undefined;
 
 /**
+ * Whether the sandbox refused a call before any of it ran, for want of a
+ * place: its owner at its share (`busy`, or 429 once `runPlatformCode`
+ * in platform-sandbox.ts said so), or the pool full (503).
+ */
+export const noPlaceOf = (error: unknown): boolean =>
+  sandboxVerdictOf(error) === "busy" ||
+  (error instanceof SandboxUnavailableError &&
+    !error.started &&
+    (error.status === 429 || error.status === 503));
+
+/**
  * How long core waits for the supervisor's verdict on a call that failed
  * while its session looked open, and how often it asks meanwhile.
  */
 const verdictWaitMs = 1000;
 const verdictPollMs = 100;
+
+/**
+ * The longest `runInSession` may take for a call of `wallMs`, from asking
+ * for a session to settling, every bound and wait of its own included:
+ * the supervisor's answer to the upgrade (`openSession`), the call's
+ * backstop, the wait for a verdict, and telling the supervisor the
+ * session is over, twice at most, before and after.
+ */
+export const sessionCallMs = (wallMs: number): number =>
+  2 * sandboxWaitMs +
+  backstopMs +
+  (sandboxWaitMs + wallMs + backstopMs) +
+  verdictWaitMs +
+  2 * (2 * backstopMs);
 
 /** Whether `signal` has aborted, read as it is now. */
 const isAborted = (signal: AbortSignal | undefined): boolean =>
@@ -428,6 +514,9 @@ const openSession = async (
         upgrade: "websocket",
         [sandboxDeadlineHeader]: String(call.wallMs),
         [sandboxCpuHeader]: String(call.cpuMs),
+        ...(call.memoryMib === undefined
+          ? {}
+          : { [sandboxMemoryHeader]: String(call.memoryMib) }),
         [sandboxWaitHeader]: String(sandboxWaitMs),
         [sandboxCallIdHeader]: id,
         ...(call.parent === undefined
@@ -448,8 +537,10 @@ const openSession = async (
     // It may have taken the session, and hold a process for it.
     await endSession(host, id, "cancel");
     signal?.throwIfAborted();
+    // Before its socket, no call went to the session: nothing ran.
     throw new SandboxUnavailableError("The sandbox host didn't answer.", {
       cause: error,
+      started: false,
     });
   } finally {
     clearTimeout(answerBy);
@@ -468,7 +559,7 @@ const openSession = async (
     }
     throw new SandboxUnavailableError(
       `The sandbox host answered ${response.status}.`,
-      { status: response.status }
+      { status: response.status, started: false }
     );
   }
   socket.accept();
@@ -479,11 +570,29 @@ const openSession = async (
     // It holds a process for the session all the same.
     await endSession(host, id, "end");
     throw new SandboxUnavailableError(
-      "The sandbox doesn't bound the call's CPU time."
+      "The sandbox doesn't bound the call's CPU time.",
+      { started: false }
     );
   }
   return socket;
 };
+
+/**
+ * What a call whose `run` never went out fails with, for `error`: the
+ * sandbox unavailable, the call surely not started, whatever ended it (a
+ * session that ended, a transport that took nothing, an argument no
+ * session carries).
+ */
+const unsentError = (error: unknown): SandboxUnavailableError =>
+  new SandboxUnavailableError(
+    error instanceof Error ? error.message : String(error),
+    {
+      cause: error,
+      status:
+        error instanceof SandboxUnavailableError ? error.status : undefined,
+      started: false,
+    }
+  );
 
 /**
  * What a session's call ended with, as `runInSession` throws it: the
@@ -497,18 +606,25 @@ const failureOf = async (
     id,
     isClosed,
     signal,
+    sent = true,
   }: {
     host: Fetcher;
     id: string;
     /** Whether the session's socket has closed, read when it's needed. */
     isClosed: () => boolean;
     signal: AbortSignal | undefined;
+    /** Whether the call's `run` went out: a nested call's always did. */
+    sent?: boolean;
   }
 ): Promise<unknown> => {
   if (signal?.aborted === true) {
     // Cancelled, or past a deadline core keeps: the socket closes, and with
     // it the call's process.
     return signal.reason;
+  }
+  if (!sent) {
+    // Nothing to ask the supervisor of a call that never reached it.
+    return unsentError(error);
   }
   if (
     sandboxVerdictOf(error) !== undefined ||
@@ -600,6 +716,10 @@ export const runInSession = async (
 ): Promise<unknown> => {
   signal?.throwIfAborted();
   const id = crypto.randomUUID();
+  // Until the call's `run` has gone out on its socket, nothing of it ran:
+  // a stop before then (no socket, a session refused or ended, a transport
+  // that took nothing) is `started: false`. Once it went out the call may
+  // have run, so every failure from then on is one that may have.
   const socket = await openSession(host, call, id, signal);
   // Every capability by a name of the session's own: the isolate never
   // sees these, only what the sandbox host makes of them.
@@ -623,8 +743,22 @@ export const runInSession = async (
   const whenRefused = (async (): Promise<never> => {
     throw await refusedWith;
   })();
+  // The first message to pass the socket's `send` is the call's own `run`:
+  // Cap'n Web sends nothing before it, and nothing nests in a call before
+  // it runs.
+  let runSent = false;
+  const socketTransport = new WebSocketTransport(socket);
   const transport = accountedTransport(
-    new WebSocketTransport(socket),
+    {
+      send: (message) => {
+        socketTransport.send(message);
+        runSent = true;
+      },
+      receive: async () => await socketTransport.receive(),
+      abort: (reason) => {
+        socketTransport.abort(reason);
+      },
+    },
     sessionAccounting,
     (refusal, direction) => {
       // Every session's holdings together past the isolate's pool: the
@@ -634,7 +768,7 @@ export const runInSession = async (
       let error: Error;
       if (refusal === "isolate") {
         error = new SandboxUnavailableError(
-          "Core holds as much for calls in the sandbox as it may. Try again shortly."
+          "Core holds as much for calls in the sandbox as it may."
         );
       } else if (direction === "sent") {
         error = new SandboxUnavailableError(
@@ -668,7 +802,10 @@ export const runInSession = async (
   // A call in the session: each capability by a name of the call's own,
   // its forwarder live while `isLive` says; the isolate never sees these,
   // only what the sandbox host makes of them.
-  const callIn = (given: NestedCall, isCallLive: () => boolean): unknown => {
+  const callIn = (
+    given: NestedCall & Pick<SessionCall, "platformModules" | "nodejsCompat">,
+    isCallLive: () => boolean
+  ): unknown => {
     const specs: Record<string, { methods: string[] } | { function: true }> =
       {};
     const stubs: Record<string, object> = {};
@@ -683,6 +820,27 @@ export const runInSession = async (
     const args = given.args.map((arg) =>
       "capability" in arg ? { capability: named(arg.capability) } : arg
     );
+    // Platform modules go as their sizes, read through a reader of their
+    // own in their order: the sandbox host takes no more than they are.
+    const platform = Object.entries(given.platformModules ?? {});
+    const chunked =
+      platform.length === 0
+        ? {}
+        : {
+            chunkedModules: Object.fromEntries(
+              platform.map(([name, { type, bytes }]) => [
+                name,
+                { type, size: bytes.byteLength },
+              ])
+            ),
+            moduleReader: named(
+              functionCapability(
+                inOrderReader(
+                  platform.map(([name, { bytes }]) => [name, bytes] as const)
+                )
+              )
+            ),
+          };
     const remote: unknown = session.getRemoteMain();
     const run: unknown =
       typeof remote === "object" || typeof remote === "function"
@@ -699,6 +857,8 @@ export const runInSession = async (
         method: given.method,
         args,
         capabilities: specs,
+        nodejsCompat: given.nodejsCompat === true,
+        ...chunked,
       },
       stubs,
     ]);
@@ -785,6 +945,7 @@ export const runInSession = async (
       id,
       isClosed: () => closed,
       signal,
+      sent: runSent,
     });
   } finally {
     giveUp();

@@ -109,7 +109,15 @@ export const idempotentCalls = sqliteTable(
     idempotencyKey: text("idempotency_key").notNull(),
     inputHash: text("input_hash").notNull(),
     state: text({
-      enum: ["running", "done", "failed", "unknown", "declined"],
+      enum: [
+        "running",
+        "done",
+        "failed",
+        "unknown",
+        "declined",
+        "resolved",
+        "freed",
+      ],
     }).notNull(),
     /**
      * Once done or failed: the result as returned to the first call, while
@@ -141,6 +149,18 @@ export const idempotentCalls = sqliteTable(
      * again (`heldOutcome`).
      */
     resource: text(),
+    /**
+     * The exact input, as JSON, while the call may be of unknown outcome:
+     * kept from its claim until it is answered or freed, and while it is
+     * unknown, so its person sees what was sent before they resolve it.
+     */
+    input: text(),
+    /**
+     * Where the call came from, as its capability said (mode, App version,
+     * permission and context), as JSON, kept as long as `input`: what core
+     * checks again before it signs a resolution of it.
+     */
+    origin: text(),
   },
   (table) => [
     primaryKey({

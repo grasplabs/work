@@ -4,12 +4,13 @@ import { modelSpendListed } from "@grasp-os/shared/models";
 import type {
   ModelBudget,
   ModelBudgetScope,
+  ModelMonthSpend,
   ModelSpender,
 } from "@grasp-os/shared/models";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { ModelBindingBudget } from "@grasp-os/shared/resource-bindings";
-import { inArray } from "drizzle-orm";
+import { and, count, gte, inArray, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -40,8 +41,36 @@ import { microsPerDollar } from "./model-prices.ts";
 // input). It is counted across all their steps, retries, restarts and
 // children, for the lineage's whole life (the ledger never resets it by
 // month), so none of them starts afresh. It has a budget only where the
-// deployment sets `run`; whatever it sets, a lineage makes at most
-// {@link lineageModelRequests} provider requests.
+// deployment sets `run`; whatever it sets, a lineage makes at most the
+// provider requests the deployment's quota policy allows
+// (`lineageModelRequests`, @grasp-os/shared/quota-policy): the platform's
+// 100, or fewer where its operator lowered it. From the threat model:
+//
+// - Raising it: the operator can only lower it (the policy's schema caps
+//   it at the platform's, and `scopesFor` again); nothing a call, an App
+//   or a run passes reaches it. Only a release that changes the
+//   platform's limit raises it.
+// - A lowered limit missed by runs already under way: the gateway reads
+//   the policy for every provider request (models.ts, `scopesNow`), and
+//   the ledger checks the lineage's count as it stands against the limit
+//   that admission carries. A lineage already at or past a lowered limit
+//   sends nothing more. No limit is kept on the lineage's row, so none
+//   goes stale; each request's receipt keeps the limit and generation it
+//   was admitted under, as the record of it.
+// - Requests under an older policy after one under a newer: the ledger
+//   keeps the highest generation an admission carried, and refuses one
+//   under a lower (`policyBehind`); the gateway reads the policy again and
+//   tries once more. Still behind, it is held back as
+//   `model.quota_policy_behind`, logged with both generations. One that
+//   read the policy just before a newer generation was recorded, and
+//   reaches the ledger before anything under it, is admitted as if it
+//   came first: at most the requests already on their way when the policy
+//   changed, and never past the limit they read, so never past the
+//   platform's.
+// - A rebuilt lineage starting afresh: a lineage whose spend row was lost
+//   comes back used up under any policy (model-ledger.ts, `#rebuildScope`).
+// - A policy that can't be read: a workflow's request is held back as
+//   `model.quota_policy_unavailable`, never admitted without its limit.
 //
 // A model binding of an App (resource-bindings.ts) may have caps of its
 // own, set by the admin who approved it, on top of all these: per UTC
@@ -113,8 +142,9 @@ export const budgetMonth = (
     : now.toISOString().slice(0, "yyyy-mm".length);
 
 /**
- * The most provider requests one run lineage may make, retries included
- * (platform default: 100 model requests per run lineage).
+ * The most provider requests one run lineage may make under any quota
+ * policy, retries included (platform default: 100 model requests per run
+ * lineage); a deployment's policy may lower it.
  */
 export const { lineageModelRequests } = platformLimits;
 
@@ -129,7 +159,11 @@ interface Scoped {
 }
 
 /** The workflow and run lineage scopes of a workflow's call. */
-const workflowScopes = (budgets: Budgets, trigger: AuditActor): Scoped[] => {
+const workflowScopes = (
+  budgets: Budgets,
+  trigger: AuditActor,
+  requests: number
+): Scoped[] => {
   if (trigger.type !== "workflow") {
     return [];
   }
@@ -146,7 +180,7 @@ const workflowScopes = (budgets: Budgets, trigger: AuditActor): Scoped[] => {
       key: lineage,
       budget: budgets?.run,
       names: { run: lineage },
-      requests: lineageModelRequests,
+      requests,
     },
   ];
 };
@@ -156,11 +190,13 @@ const workflowScopes = (budgets: Budgets, trigger: AuditActor): Scoped[] => {
  * the deployment sets one: the deployment, always; the workflow and the
  * run lineage, for a workflow's call; and the person it is made by or
  * for. A scope without a budget is counted, and limits no spend; the run
- * lineage's requests are limited whatever the budgets.
+ * lineage's requests are limited whatever the budgets, to
+ * `lineageRequests` (the quota policy's), never above the platform's.
  */
 export const scopesFor = (
   budgets: Budgets,
-  input: BudgetInput
+  input: BudgetInput,
+  lineageRequests: number
 ): LedgerScope[] => {
   const person = personOf(input);
   const scopes: Scoped[] = [
@@ -170,7 +206,11 @@ export const scopesFor = (
       budget: budgets?.deployment,
       names: {},
     },
-    ...workflowScopes(budgets, input.trigger),
+    ...workflowScopes(
+      budgets,
+      input.trigger,
+      Math.min(lineageRequests, lineageModelRequests)
+    ),
     ...(person === undefined
       ? []
       : [
@@ -475,4 +515,83 @@ export const budgetSpend = async (
     }),
     more,
   }));
+};
+
+/** The first millisecond of UTC month `month` (`yyyy-mm`), and of the one after. */
+const monthBounds = (month: string): { from: Date; until: Date } => {
+  const from = new Date(`${month}-01T00:00:00Z`);
+  const until = new Date(from);
+  until.setUTCMonth(until.getUTCMonth() + 1);
+  return { from, until };
+};
+
+/**
+ * What the models cost in `month`, budget or not: every scope is counted
+ * by the ledger, whether or not it limits spend (`scopesFor`). The
+ * deployment's total, and the workflows that spent most (at most
+ * `modelSpendListed`), each with its App's name where core still has it
+ * and its runs started in the month: for admins to read (models-rpc.ts).
+ */
+export const monthSpend = async (
+  env: Pick<Env, "DB" | "MODEL_LEDGER" | "DURABLE_OBJECT_JURISDICTION">,
+  month: string
+): Promise<ModelMonthSpend> => {
+  // One more than are listed, to tell whether any are left out.
+  const spent = await modelLedger(env).spendOf(
+    month,
+    ["deployment", "workflow"],
+    modelSpendListed + 1
+  );
+  const total = (spent.deployment ?? []).reduce(
+    (sum, { spentMicros }) => sum + spentMicros,
+    0
+  );
+  const rows = (spent.workflow ?? []).flatMap(({ key, spentMicros }) => {
+    const workflow = workflowOf(key);
+    return workflow === undefined ? [] : [{ workflow, spentMicros }];
+  });
+  const listed = rows.slice(0, modelSpendListed);
+  const appIds = [...new Set(listed.map(({ workflow }) => workflow[0]))];
+  const db = drizzle(env.DB);
+  const { from, until } = monthBounds(month);
+  const [appRows, runRows] =
+    appIds.length === 0
+      ? [[], []]
+      : await Promise.all([
+          db
+            .select({ id: apps.id, name: apps.name })
+            .from(apps)
+            .where(inArray(apps.id, appIds)),
+          db
+            .select({
+              app: workflowRuns.appId,
+              workflow: workflowRuns.workflowId,
+              runs: count(),
+            })
+            .from(workflowRuns)
+            .where(
+              and(
+                inArray(workflowRuns.appId, appIds),
+                gte(workflowRuns.createdAt, from),
+                lt(workflowRuns.createdAt, until)
+              )
+            )
+            .groupBy(workflowRuns.appId, workflowRuns.workflowId),
+        ]);
+  const names = new Map(appRows.map(({ id, name }) => [id, name]));
+  const runs = new Map(
+    runRows.map((row) => [JSON.stringify([row.app, row.workflow]), row.runs])
+  );
+  return {
+    month,
+    total: total / microsPerDollar,
+    workflows: listed.map(({ workflow: [appId, workflowId], spentMicros }) => ({
+      appId,
+      appName: names.get(appId) ?? null,
+      workflowId,
+      amount: spentMicros / microsPerDollar,
+      runs: runs.get(JSON.stringify([appId, workflowId])) ?? 0,
+    })),
+    more: rows.length > modelSpendListed,
+  };
 };

@@ -1051,10 +1051,13 @@ describe("the model ledger", () => {
     });
   });
 
-  it("recreates a lost run lineage's spend as used up when a person releases a request held for it, so the lineage makes no more requests", async () => {
+  it("recreates a lost run lineage's spend as used up when a person releases a request held for it, so the lineage makes no more requests under any quota policy", async () => {
     const ledger = newLedger();
     const run = lineageOf(`root-${crypto.randomUUID()}`);
-    const held = admission(30, [run], { reconcileAt: Date.now() + 1000 });
+    // Admitted under a policy that lowered the lineage's requests to 3.
+    const held = admission(30, [{ ...run, limitRequests: 3 }], {
+      reconcileAt: Date.now() + 1000,
+    });
     await ledger.admit(held);
     // Its spend row, and the count with it, is gone.
     await runInDurableObject(ledger, (_instance, state) => {
@@ -1081,6 +1084,7 @@ describe("the model ledger", () => {
     } as const;
 
     const released = await ledger.resolveQuarantined(held.id, "release", admin);
+    // Under the platform's own limit again, 100.
     const again = await ledger.admit(admission(1, [run]));
     await runDurableObjectAlarm(ledger);
     const rebuilt = await ledger.spendOf("2400-01", ["run"], 10);
@@ -1102,6 +1106,57 @@ describe("the model ledger", () => {
       again: { ok: false, scope: "run", requests: true },
       lineage: [{ key: run.key, spentMicros: 0, reservedMicros: 0 }],
       audited: [[1, null, 0, 100]],
+    });
+  });
+
+  it("refuses an admission under an older quota policy than one it already admitted under, reserving and counting nothing", async () => {
+    const ledger = newLedger();
+    const run = lineageOf(`root-${crypto.randomUUID()}`);
+    const newer = admission(10, [{ ...run, limitRequests: 2 }], {
+      policyGeneration: 7,
+    });
+    // Read before generation 7 was recorded, with the limit it had then.
+    const older = admission(10, [run], { policyGeneration: 6 });
+
+    const admitted = [
+      await ledger.admit(newer),
+      await ledger.admit(older),
+      // A request with no lineage carries no generation: never refused for it.
+      await ledger.admit(
+        admission(10, [budget(1000, `ivo-${crypto.randomUUID()}`)])
+      ),
+      await ledger.admit(
+        admission(10, [{ ...run, limitRequests: 2 }], { policyGeneration: 7 })
+      ),
+      await ledger.admit(
+        admission(10, [{ ...run, limitRequests: 2 }], { policyGeneration: 8 })
+      ),
+    ];
+    const generations = await runInDurableObject(ledger, (_instance, state) =>
+      state.storage.sql
+        .exec<{ id: string; generation: number | null }>(
+          "SELECT id, policy_generation AS generation FROM requests WHERE id IN (?, ?)",
+          newer.id,
+          older.id
+        )
+        .toArray()
+    );
+    const spent = await ledger.spendOf("2400-01", ["run"], 10);
+    expect({
+      admitted,
+      lineage: spent.run,
+      generations,
+    }).toStrictEqual({
+      admitted: [
+        { ok: true },
+        { ok: false, policyBehind: true, highest: 7 },
+        { ok: true },
+        { ok: true },
+        // Two of its two requests made, under the newest policy too.
+        { ok: false, scope: "run", requests: true },
+      ],
+      lineage: [{ key: run.key, spentMicros: 0, reservedMicros: 20 }],
+      generations: [{ id: newer.id, generation: 7 }],
     });
   });
 

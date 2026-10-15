@@ -1,7 +1,11 @@
 import { signCapability } from "@grasp-os/shared/capability";
 import type { HeldBinding } from "@grasp-os/shared/capability";
 import { connectCallSchema, connectErrors } from "@grasp-os/shared/connect";
-import type { ConnectCall, ConnectResult } from "@grasp-os/shared/connect";
+import type {
+  ConnectCall,
+  ConnectResult,
+  ResolutionChoice,
+} from "@grasp-os/shared/connect";
 import { isExpectedError, toOpaqueError } from "@grasp-os/shared/errors";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -23,6 +27,8 @@ import type { KnowledgeBinding } from "./knowledge/tools-binding.ts";
 import { authorize, grantedPermissions } from "./permissions.ts";
 import { isRestricted } from "./restricted.ts";
 import type { WorkContext } from "./restricted.ts";
+import { stampedMail } from "./workflows/mail-stamps.ts";
+import type { StampingRun } from "./workflows/mail-stamps.ts";
 
 // What Apps and agents get in their env: one stub per granted permission,
 // and nothing else. Each stub is a loopback entrypoint of core whose props
@@ -62,7 +68,9 @@ export interface CallGrant {
  * saying whether `context` is in restricted mode (connect then holds its
  * side effects for the person), whether the call may only read, and the
  * permission and context to check again should connect hold it for them.
- * `confirms` is the held action a person confirmed (pending-actions.ts).
+ * `confirms` is the held action a person confirmed (pending-actions.ts);
+ * `resolves`, what a person said of a call of unknown outcome
+ * (unknown-outcomes.ts).
  * Core makes capabilities here and nowhere else, and nothing outside core
  * reaches this function.
  */
@@ -78,7 +86,8 @@ export const signedCall = async (
     binding,
   }: CallGrant,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
-  confirms?: string
+  confirms?: string,
+  resolves?: { choice: ResolutionChoice; claimedAt: number }
 ) => {
   await authorize(env, authority, connection, action, permissionId, context);
   const restricted = await isRestricted(env, authority, context);
@@ -103,6 +112,7 @@ export const signedCall = async (
       },
       context,
       confirms,
+      resolves,
     }
   );
   return { capability, scope };
@@ -192,6 +202,13 @@ export interface StubCaller {
    * it comes from may still act.
    */
   stillAllowed?: () => Promise<void>;
+  /**
+   * The workflow run the call is a step of, and the step's key, as core
+   * knows them, never as the call names them: mail it sends to the
+   * deployment's own domain is stamped with the run
+   * (workflows/mail-stamps.ts).
+   */
+  stamping?: StampingRun;
 }
 
 /**
@@ -214,7 +231,11 @@ const signedStub = async (
   authority: StubAuthority,
   { context, permissionId, connection }: ConnectionGrant,
   call: unknown[]
-): Promise<{ request: ConnectCall; stillAllowed?: () => Promise<void> }> => {
+): Promise<{
+  request: ConnectCall;
+  stillAllowed?: () => Promise<void>;
+  stamping?: StampingRun;
+}> => {
   const parsed = stubCallSchema.safeParse(call);
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
@@ -242,6 +263,7 @@ const signedStub = async (
       ...(caller.stillAllowed === undefined
         ? {}
         : { stillAllowed: caller.stillAllowed }),
+      ...(caller.stamping === undefined ? {} : { stamping: caller.stamping }),
     };
   } catch (error) {
     throw forSandbox(error);
@@ -271,15 +293,25 @@ export const runStubCall = async (
   grant: ConnectionGrant,
   call: unknown[]
 ): Promise<ConnectResult> => {
-  const { request, stillAllowed } = await signedStub(
+  const { request, stillAllowed, stamping } = await signedStub(
     env,
     authority,
     grant,
     call
   );
   try {
+    // A run's mail to the deployment's domain carries the run's token,
+    // recorded before the call leaves, so the runs it starts join its
+    // lineage. A record that fails fails the call, which sent nothing.
+    const sent =
+      stamping === undefined
+        ? request
+        : {
+            ...request,
+            input: await stampedMail(env, stamping, request),
+          };
     await stillAllowed?.();
-    return await env.CONNECT.call(request);
+    return await env.CONNECT.call(sent);
   } catch (error) {
     throw forSandbox(error);
   }

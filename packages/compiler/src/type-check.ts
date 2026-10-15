@@ -7,7 +7,7 @@
 import ts from "typescript";
 
 import type { Diagnostic } from "./diagnostic.ts";
-import { ownEntry } from "./kit.ts";
+import { ownEntry, screenReferences } from "./kit.ts";
 
 /**
  * How App code is checked. `build.ts` loads the kit with the same options
@@ -30,6 +30,8 @@ export const compilerOptions: ts.CompilerOptions = {
   // diagnostics are asked for, so the kit's declarations aren't checked.
   skipLibCheck: false,
   types: [],
+  // The App's generated references, as its screens import them.
+  paths: { [screenReferences.specifier]: [`./${screenReferences.path}`] },
 };
 
 /** Where TypeScript's own declarations (`lib.dom.d.ts`, …) are. */

@@ -14,7 +14,9 @@ import type {
 import type { Json } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { redact } from "@grasp-os/shared/redact";
+import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import {
@@ -24,10 +26,13 @@ import {
 } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { nativeAction, nativeRelease, nativeServer } from "./connectors.ts";
+import { connections } from "./db/schema.ts";
 import {
   effectKeyOf,
   hashCall,
   idempotencyStore,
+  keptOf,
+  originOf,
   recoveryWaitMs,
   replay,
 } from "./idempotency.ts";
@@ -168,6 +173,11 @@ export interface CallProgress extends Repeat {
   claimed?: boolean;
   /** Set once a call of unknown outcome was taken up again to recover it. */
   recovery?: RecoveryMode;
+  /**
+   * Set once its connection is found: a native connector's, whose call of
+   * unknown outcome a run waits on for its person to resolve.
+   */
+  native?: boolean;
 }
 
 type Input = Record<string, Json>;
@@ -359,6 +369,13 @@ export const heldOutcome = async (
     if (reason === "connect.outcome_unknown") {
       return { outcome: { state: "unknown", reason } };
     }
+    // Its person said what became of it: as they said, never more.
+    if (
+      reason === "connect.resolved_done" ||
+      reason === "connect.resolved_not_done"
+    ) {
+      return { outcome: { state: "resolved", reason } };
+    }
     // Its answer is no longer kept.
     return { outcome: { state: "failed", reason, output: null } };
   }
@@ -488,6 +505,43 @@ const requireRecoverable = (
       ),
     });
   }
+};
+
+/**
+ * Whether the call of unknown outcome `row` records would be recovered by
+ * the same call made again now, as `requireRecoverable` lets one through:
+ * its native action recovers, the build that claimed it serves it, nobody
+ * must confirm it, and its last claim is past the claim timeout. A run's
+ * step that got its unknown outcome waits for its person's resolution
+ * only while it isn't (outcomes.ts `unresolvedUnder`).
+ */
+export const recoverableNow = async (env: Env, row: Row): Promise<boolean> => {
+  const origin = originOf(row);
+  const connection = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(eq(connections.id, row.connectionId))
+    .get();
+  if (connection?.serverKind !== "native" || origin === null) {
+    return false;
+  }
+  let native: ReturnType<typeof nativeAction>;
+  try {
+    native = nativeAction(connection, row.action);
+  } catch {
+    // Not served by this release: nothing recovers it.
+    return false;
+  }
+  try {
+    requireRecoverable(row, {
+      recovery: native.declared.recovery,
+      release: await nativeRelease(native.connector),
+      mustConfirm: origin.restricted || origin.mode === "interactive",
+    });
+  } catch {
+    return false;
+  }
+  return true;
 };
 
 /**
@@ -714,6 +768,7 @@ export const carryOut = async (
 ): Promise<CallDone> => {
   const { authority, resource, idempotencyKey } = claims;
   const connection = await connectionFor(env, claims, call.connectionId, held);
+  progress.native = connection.serverKind === "native";
   const { input } = call;
   // MCP tools take an object of arguments.
   if (!isInput(input)) {
@@ -761,10 +816,17 @@ export const carryOut = async (
     // has passed again (the capability core signed for this caller now,
     // the connection, the scope), never by a call a person must confirm,
     // which would be held anew instead.
+    const mustConfirm = mustHold(claims, held);
+    if (mustConfirm && store !== undefined) {
+      // Refused for that: kept on the row, so a run waiting on it isn't
+      // told it may be recovered now (`recoverableNow`), and run again,
+      // only to be refused again.
+      await store.requireConfirmation();
+    }
     requireRecoverable(recovering, {
       recovery: sideEffect ? recovery : "none",
       release,
-      mustConfirm: mustHold(claims, held),
+      mustConfirm,
     });
   }
   if (sideEffect && mustHold(claims, held)) {
@@ -811,7 +873,7 @@ export const carryOut = async (
   }
   // Every refusal is behind: only now may a token be read.
   const server = await open();
-  const earlier = await store.claim(progress, release);
+  const earlier = await store.claim(progress, release, keptOf(claims, input));
   if (earlier !== undefined) {
     return { ...earlier, sideEffect, replayed: true };
   }
