@@ -94,6 +94,7 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
       passed: false,
       violations: [
         "changesChat",
+        "changesChatTitle",
         "changesCore",
         "changesFiles",
         "changesHistory",

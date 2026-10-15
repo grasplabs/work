@@ -113,6 +113,7 @@ export const brainControls = [
   "changesObject",
   "changesHistory",
   "changesChat",
+  "changesChatTitle",
 ] as const;
 export type BrainControl = (typeof brainControls)[number];
 
@@ -709,8 +710,9 @@ const changes = (arm: BrainArm | BrainControl): arm is ChangingControl =>
 /**
  * A change no task asks for, where `where` says: a note saved in the
  * person's own collection, an App created in core, a file put in R2, a
- * dashboard row written in the chat's object, or a message of an earlier
- * chat or of this one rewritten, as a broken tool would.
+ * dashboard row written in the chat's object, a message of an earlier chat
+ * or of this one rewritten, or this chat's title changed, as a broken tool
+ * would.
  * Nothing a later trial reads.
  */
 const changeState = async (
@@ -738,6 +740,15 @@ const changeState = async (
     await runInDurableObject(place.stub, (_instance, state) => {
       state.storage.sql.exec(
         "UPDATE chat_messages SET message = message || ' ' WHERE id = (SELECT min(id) FROM chat_messages WHERE chat_id = ?)",
+        chatId
+      );
+    });
+    return;
+  }
+  if (where === "changesChatTitle") {
+    await runInDurableObject(place.stub, (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE chats SET title = title || ' (changed)' WHERE id = ?",
         chatId
       );
     });
@@ -892,17 +903,34 @@ const workspaceStateOf = async (
   );
 };
 
-/** The chat's messages as stored, a row each. */
-const chatMessagesOf = async (
+/**
+ * What a turn of the chat may add to but never change, a row each: its
+ * messages, sources and code runs, and its own fixed fields (title,
+ * person, agent, project, creation).
+ */
+const chatRowsOf = async (
   place: Workspace,
   chatId: string
 ): Promise<string[]> =>
-  await runInDurableObject(place.stub, (_instance, state) =>
-    state.storage.sql
-      .exec("SELECT * FROM chat_messages WHERE chat_id = ?", chatId)
-      .toArray()
-      .map(rowText)
-  );
+  await runInDurableObject(place.stub, (_instance, state) => {
+    const rows = (table: string, query: string) =>
+      state.storage.sql
+        .exec(query, chatId)
+        .toArray()
+        .map((row) => `${table} ${rowText(row)}`);
+    return [
+      ...rows(
+        "chats",
+        "SELECT id, title, created_at, person_id, agent_id, project_id FROM chats WHERE id = ?"
+      ),
+      ...rows("chat_messages", "SELECT * FROM chat_messages WHERE chat_id = ?"),
+      ...rows("chat_sources", "SELECT * FROM chat_sources WHERE chat_id = ?"),
+      ...rows(
+        "chat_code_runs",
+        "SELECT * FROM chat_code_runs WHERE chat_id = ?"
+      ),
+    ];
+  });
 
 /**
  * Every object in R2's `FILES`: its key, version, etag, upload time and
@@ -998,9 +1026,9 @@ const runTrial = async (
   await provider.mark();
   const firstRequest = gateway.requests.length;
   let spentBefore = await charged();
-  // The chat's own messages before its question: they must stay as they
+  // The chat's own rows before its question: they must stay as they
   // were, while the question and its answer are added.
-  let historyBefore = await chatMessagesOf(place, chat.id);
+  let historyBefore = await chatRowsOf(place, chat.id);
   let answer = "";
   let failure: string | undefined;
   let started = performance.now();
@@ -1015,7 +1043,7 @@ const runTrial = async (
       // oxlint-disable-next-line no-await-in-loop -- in order, as said
       await place.stub.ask(chat.id, { text: said, model });
     }
-    historyBefore = await chatMessagesOf(place, chat.id);
+    historyBefore = await chatRowsOf(place, chat.id);
     spentBefore = await charged();
     // A cold question starts in a just-evicted object, its caches and
     // memory gone, after any earlier turns of its chat. Its timer starts
@@ -1048,12 +1076,12 @@ const runTrial = async (
   }
   const latencyMs =
     performance.now() - started - (provider.observingMs() - observedBefore);
-  const historyAfter = new Set(await chatMessagesOf(place, chat.id));
+  const historyAfter = new Set(await chatRowsOf(place, chat.id));
   const changedTables = [
     ...changedBetween(stateBefore, await stateNow()),
     ...(historyBefore.every((row) => historyAfter.has(row))
       ? []
-      : ["workspace.chat_messages (this chat)"]),
+      : ["workspace.chat (this chat's rows)"]),
   ];
   const requests = gateway.requests.slice(firstRequest);
   return {
