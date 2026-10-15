@@ -128,6 +128,9 @@ export class CoreLink {
       await first;
     } catch {
       this.#startFailed = true;
+      // The last attempt's connection may still be open: a link that
+      // never connects holds none, whether or not anyone opens another.
+      this.close();
     }
   }
 

@@ -98,6 +98,21 @@ describe("the tab's link for its App frames", () => {
     });
   });
 
+  it("tells every frame it ended, even when stopping one of them throws", () => {
+    const { links } = tab();
+    const throwing = links.join(() => {
+      throw new Error("The page failed to show it.");
+    });
+    const after = frameOn(links);
+
+    const ending = (): void => {
+      throwing.end("signed-out");
+    };
+
+    expect(ending).toThrow(AggregateError);
+    expect(after.told).toStrictEqual(["signed-out"]);
+  });
+
   it("gives up on a link whose first connection failed, so trying again connects anew", () => {
     const { links, opened } = tab();
     const failed = frameOn(links);

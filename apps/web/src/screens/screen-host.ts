@@ -186,11 +186,12 @@ type FrameApi = Awaited<ReturnType<Session["screens"]["frame"]>>;
 interface FrameHold {
   use: <T>(run: (frame: FrameApi) => Promise<T>) => Promise<T>;
   /**
-   * The link's person, for the frame's plain requests: refused once the
-   * frame is stopped, also when it stopped while the link connected
-   * again, so a stopped frame's call is never sent.
+   * Sends one of the frame's plain requests as the link's person: `send`
+   * is called right after the last check that the frame still runs, in
+   * the same turn, so a frame stopped meanwhile (also while the link
+   * connected again) sends nothing.
    */
-  person: () => Promise<string>;
+  asPerson: <T>(send: (person: string) => Promise<T>) => Promise<T>;
   /** The link's session, refused as `person` is. */
   session: () => Promise<Session>;
   close: () => void;
@@ -254,7 +255,17 @@ const holdFrame = (
   };
   return {
     use: async (run) => await run(await current()),
-    person: async () => await whileOpen(async () => await link.person()),
+    asPerson: async (send) => {
+      if (closed) {
+        throw frameClosedError();
+      }
+      const person = await link.person();
+      if (closed) {
+        throw frameClosedError();
+      }
+      // In this same turn: nothing can stop the frame in between.
+      return await send(person);
+    },
     session: async () => await whileOpen(async () => await link.session()),
     close: () => {
       closed = true;
@@ -383,61 +394,48 @@ const appTarget = (
       throw error;
     }
   };
+  /**
+   * One of the frame's plain requests, as the link's person: it waits for
+   * a connection being made again, which fails when it is someone else's,
+   * and is never sent once the frame stopped. Core refusing it for the
+   * build, or as someone else's, is handled as for a call.
+   */
+  const plain = async <T>(send: (person: string) => Promise<T>): Promise<T> => {
+    try {
+      return await hold.asPerson(send);
+    } catch (error) {
+      if (refusedForBuild(error)) {
+        void checkDeliveryNow(hold, refused);
+      }
+      if (authErrors.codeOf(error) === "auth.principal_changed") {
+        refused("principal-changed");
+      }
+      throw error;
+    }
+  };
   return {
     call: async (method, args) =>
       await framed(async (frame) => await frame.call(method, args)),
-    callFunction: async (request) => {
-      // Waits for a connection being made again, which fails when it is
-      // someone else's: then nothing is sent.
-      const person = await hold.person();
-      try {
-        return await callFunction(app, { lease, person }, request);
-      } catch (error) {
-        if (refusedForBuild(error)) {
-          void checkDeliveryNow(hold, refused);
-        }
-        if (authErrors.codeOf(error) === "auth.principal_changed") {
-          refused("principal-changed");
-        }
-        throw error;
-      }
-    },
-    streamFunction: async (what, request, onFrame, onEnded) => {
-      // As `callFunction`: never sent once the connection is someone else's.
-      const person = await hold.person();
-      try {
-        return await followStream(
-          app,
-          { lease, person },
-          what,
-          request,
-          onFrame,
-          onEnded
-        );
-      } catch (error) {
-        if (refusedForBuild(error)) {
-          void checkDeliveryNow(hold, refused);
-        }
-        if (authErrors.codeOf(error) === "auth.principal_changed") {
-          refused("principal-changed");
-        }
-        throw error;
-      }
-    },
-    cancelStream: async (request) => {
-      const person = await hold.person();
-      try {
-        return await cancelStream(app, { lease, person }, request);
-      } catch (error) {
-        if (refusedForBuild(error)) {
-          void checkDeliveryNow(hold, refused);
-        }
-        if (authErrors.codeOf(error) === "auth.principal_changed") {
-          refused("principal-changed");
-        }
-        throw error;
-      }
-    },
+    callFunction: async (request) =>
+      await plain(
+        async (person) => await callFunction(app, { lease, person }, request)
+      ),
+    streamFunction: async (what, request, onFrame, onEnded) =>
+      await plain(
+        async (person) =>
+          await followStream(
+            app,
+            { lease, person },
+            what,
+            request,
+            onFrame,
+            onEnded
+          )
+      ),
+    cancelStream: async (request) =>
+      await plain(
+        async (person) => await cancelStream(app, { lease, person }, request)
+      ),
     report: async (problem) => {
       const { screens } = await hold.session();
       await screens.report(app, { version, screen }, problem);

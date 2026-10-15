@@ -122,8 +122,18 @@ export class TabLinks<Link extends SharedLink> {
     // A copy: retiring the link forgets its frames.
     const frames = [...opened.frames];
     this.#retire(opened);
+    // Every frame is told, whatever stopping one of them throws: the link
+    // is gone already, so nothing would tell those after it again.
+    const failures: unknown[] = [];
     for (const frame of frames) {
-      frame(why);
+      try {
+        frame(why);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Stopping a frame failed.");
     }
   }
 }
