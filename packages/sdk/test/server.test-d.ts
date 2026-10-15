@@ -348,11 +348,11 @@ action({
   },
 });
 action({
-  args: {},
+  args: { noteId: v.id("notes") },
   returns: v.null(),
-  handler: async (ctx) => {
+  handler: async (ctx, args) => {
     // @ts-expect-error -- it lists no workflow
-    await ctx.startWorkflow(followUp, { noteId });
+    await ctx.startWorkflow(followUp, { noteId: args.noteId });
     return null;
   },
 });
@@ -386,11 +386,11 @@ mutation({
   },
 });
 mutation({
-  args: {},
+  args: { noteId: v.id("notes") },
   returns: v.null(),
-  handler: async (ctx) => {
+  handler: async (ctx, args) => {
     // @ts-expect-error -- it lists no workflow
-    await ctx.afterCommit.start(followUp, { noteId });
+    await ctx.afterCommit.start(followUp, { noteId: args.noteId });
     return null;
   },
 });
