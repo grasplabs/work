@@ -189,8 +189,14 @@ export const bridgeTransport = (
       onFrame(frame);
     });
     return {
+      // Released, then let go of: the page holds the subscription's stub
+      // until it is disposed, whatever became of the stream.
       release: async () => {
-        await link.release();
+        try {
+          await link.release();
+        } finally {
+          link[Symbol.dispose]();
+        }
       },
     };
   },
