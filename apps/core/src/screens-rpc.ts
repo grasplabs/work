@@ -15,6 +15,7 @@ import type { ScreenDelivery } from "@grasp-os/shared/screen-trust";
 import {
   jsonBytes,
   rateLimited,
+  rateLimitedRetryMs,
   screenErrors,
   screenLimits,
   screenNameSchema,
@@ -156,13 +157,17 @@ export const admitted = async (
 /**
  * What charges `by` for a paginated list's pages of App `app`, past what
  * its request paid (query-windows.ts): `pages` more of their requests,
- * or `screen.rate_limited` with how long to wait.
+ * or `screen.rate_limited` with how long to wait: long enough for the
+ * budget to give back all of them and the request asking again, so a
+ * caller that waits as told isn't refused again for the same window.
  */
 export const windowCharger =
   (env: Env, by: Identity, app: AppId) =>
   async (pages: number): Promise<void> => {
     if (!(await appHost(env, app).admitRequest(by.userId, pages))) {
-      throw rateLimited();
+      throw screenErrors.create("screen.rate_limited", {
+        retryAfterMs: rateLimitedRetryMs * (pages + 1),
+      });
     }
   };
 
@@ -899,6 +904,8 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     ) {
       throw screenErrors.create("screen.invalid");
     }
+    // A window counts as the pages it reads (query-windows.ts).
+    await admitWindow(env, by, id, request);
     await requireDelivery(env, by, id, artifact, {
       operation: "watchQuery",
       stage: "admission",

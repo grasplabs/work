@@ -7,6 +7,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
 import {
   appFunctionPath,
+  rateLimitedRetryMs,
   screenLeaseHeader,
   screenPersonHeader,
 } from "@grasp-os/shared/screens";
@@ -19,6 +20,7 @@ import { z } from "zod";
 import { loadRelease } from "../src/app-releases.ts";
 import type { DataStore } from "../src/data-store.ts";
 import { appHost, inJurisdiction } from "../src/durable-objects.ts";
+import { windowPages } from "../src/query-windows.ts";
 import { pastAccessRecheck } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles, referenceTo } from "./notes-client-app.ts";
@@ -284,7 +286,7 @@ const windowRequest = (
   opened: Opened,
   path: string,
   input: unknown,
-  window: unknown
+  window?: unknown
 ): string => {
   const reference = referenceTo<unknown, unknown, "query">(
     opened.release,
@@ -301,6 +303,22 @@ const windowRequest = (
     input,
     window,
   });
+};
+
+/** A refusal core threw: its code, and how long it said to wait. */
+const refusalOf = (error: unknown) => {
+  const parsed = z
+    .object({
+      code: z.string(),
+      details: z.object({ retryAfterMs: z.number() }).optional(),
+    })
+    .safeParse(error);
+  return parsed.success
+    ? {
+        code: parsed.data.code,
+        retryAfterMs: parsed.data.details?.retryAfterMs,
+      }
+    : "failed";
 };
 
 /** What core answered a raw call: its value, or the code it failed with. */
@@ -1200,6 +1218,59 @@ describe(
           answers.push(await ask());
         }
         expect(answers).toStrictEqual(["ok", "ok", "screen.rate_limited"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("counts a window followed through a frame as the pages it reads, and says to wait for all of them", async () => {
+      const opened = await openedApp();
+      const frame = await opened.screens.frame(opened.app, opened.lease);
+      const window = windowRequest(
+        opened,
+        "notes.list",
+        {},
+        { extent: liveWindowMaxItems }
+      );
+      const follow = async (request: string): Promise<unknown> => {
+        try {
+          const subscription = await frame.watchQuery(
+            request,
+            pageFollower().callback
+          );
+          await subscription.release();
+          return "ok";
+        } catch (error) {
+          return refusalOf(error);
+        }
+      };
+      const plain = windowRequest(opened, "notes.list", {
+        pagination: { pageSize: 1, cursor: null },
+      });
+      // With the person's requests full and none coming back meanwhile.
+      vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 10 * 60_000 });
+      try {
+        // A window of ten pages, then nine plain follows: one request is
+        // left, which the next window's own follow takes, not its pages.
+        const first = await follow(window);
+        const plains: unknown[] = [];
+        for (let request = 0; request < 9; request += 1) {
+          // oxlint-disable-next-line no-await-in-loop -- one after the other
+          plains.push(await follow(plain));
+        }
+        const refused = await follow(window);
+        expect({
+          first,
+          plains: plains.every((answer) => answer === "ok"),
+          refused,
+        }).toStrictEqual({
+          first: "ok",
+          plains: true,
+          refused: {
+            code: "screen.rate_limited",
+            retryAfterMs: rateLimitedRetryMs * windowPages(liveWindowMaxItems),
+          },
+        });
       } finally {
         vi.useRealTimers();
       }
