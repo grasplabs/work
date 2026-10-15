@@ -259,6 +259,42 @@ export interface RunSubscriptionApi {
 }
 
 /**
+ * One frame's way to its App, on the connection all of a tab's frames
+ * share (`ScreensApi.frame`): bound to the App, the build core leased the
+ * frame and the person it was opened for. Each call is decided on that
+ * build alone, never on what another frame of the App on the connection
+ * runs, and is refused as `ScreensApi`'s same call would be otherwise.
+ * `close` (or letting go of the stub) releases everything the frame
+ * follows through it, its live queries, its runs' updates and the
+ * callbacks its server calls passed, at once; a closed frame is refused
+ * every call (`screen.invalid`).
+ */
+export interface ScreenFrameApi {
+  /** Whether the frame's build gets the App's data now. */
+  delivery: () => Promise<ScreenDelivery>;
+  call: (method: string, args: unknown[]) => Promise<unknown>;
+  startRun: (workflow: string, input?: unknown) => Promise<WorkflowRun>;
+  runs: (workflow: string) => Promise<ScreenRun[]>;
+  run: (run: string) => Promise<ScreenRun>;
+  summary: (run: string) => Promise<RunSummary>;
+  decide: (
+    run: string,
+    decision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionView>;
+  control: (run: string, kind: RunControl["kind"]) => Promise<RunControl>;
+  watchRuns: (
+    workflow: string,
+    onChange: (change: RunChange) => void
+  ) => Promise<RunSubscriptionApi>;
+  watchQuery: (
+    request: string,
+    onSnapshot: (snapshot: QuerySnapshotPush) => void
+  ) => Promise<RunSubscriptionApi>;
+  close: () => Promise<void>;
+}
+
+/**
  * A signed-in person's way to an App's screens: for anyone with a role in
  * the App (`AppsApi`); its error log for its builders only.
  */
@@ -280,6 +316,14 @@ export interface ScreensApi {
    * presented nothing runs a build nobody approved, as far as core knows.
    */
   present: (app: string, lease: string) => Promise<ScreenDelivery>;
+  /**
+   * One frame's own way to the App (`ScreenFrameApi`), for the build the
+   * lease `open` gave it: how frames that share a connection each get
+   * their App's data on their own build, and let go of all they follow
+   * when they close. A lease core didn't sign for this person and App
+   * runs a build nobody approved, as with `present`.
+   */
+  frame: (app: string, lease: string) => Promise<ScreenFrameApi>;
   /**
    * Calls `method` of the App's server with `args`, as the person. Plain
    * data, and functions (callbacks the server may keep and call later

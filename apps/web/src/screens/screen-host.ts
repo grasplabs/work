@@ -13,7 +13,7 @@ import {
 } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 
-import { CoreLink } from "./core-link.ts";
+import type { CoreLink } from "./core-link.ts";
 import {
   inTime,
   isMounted,
@@ -25,6 +25,7 @@ import type { ExpectedStart } from "./frame-stages.ts";
 import { openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
 import { cancelStream, followStream } from "./screen-stream.ts";
+import { frameLinks } from "./tab-link.ts";
 
 // The page's side of an App's screen. The screen runs in a sandboxed frame
 // (core's screen-frame.ts) with no network, whose document core serves for
@@ -70,6 +71,17 @@ import { cancelStream, followStream } from "./screen-stream.ts";
 // `auth.principal_changed`), or ends, the frame is stopped and emptied,
 // so nothing the screen held for the first person, such as their data or
 // a save it would send again, is left on the page or sent as the next.
+//
+// A tab's frames share that connection (tab-link.ts, spec 11.2), and each
+// reaches its App on it through a way of its own (core's `screens.frame`):
+// bound to its App, its build and its person, decided on its own build
+// alone, and closed when the frame stops, which lets go in core of
+// everything the frame followed. The frames never see the connection or
+// each other. What ends the connection for its person (signed out, or
+// someone else's session) ends it for every frame on it, and the next
+// frame opens a new one; what stops one frame (its build's approval
+// taken back, a broken channel, a timeout, the page leaving) stops that
+// frame alone.
 
 /** What the page shows about a screen besides the screen itself. */
 export type ScreenState =
@@ -160,6 +172,83 @@ type Refused = Extract<
   "unreviewed" | "revoked" | "principal-changed"
 >;
 
+/** A frame's own way to its App, as core's `screens.frame` answers it. */
+type FrameApi = Awaited<ReturnType<Session["screens"]["frame"]>>;
+
+/**
+ * The frame's own way to its App on the tab's link (core's
+ * `screens.frame`), for the build core leased it: asked for on each
+ * connection the link makes, as one made again knows nothing of the last.
+ * `close` lets go of it, and core of everything the frame followed
+ * through it; nothing is asked for once it is closed.
+ */
+interface FrameHold {
+  use: <T>(run: (frame: FrameApi) => Promise<T>) => Promise<T>;
+  close: () => void;
+}
+
+const frameClosedError = (): Error => new Error("The frame was stopped.");
+
+/** Closes `frame` in core and lets go of it, gone already or not. */
+const letGo = async (frame: Promise<FrameApi>): Promise<void> => {
+  try {
+    const held = await frame;
+    try {
+      await held.close();
+    } finally {
+      held[Symbol.dispose]();
+    }
+  } catch {
+    // Gone with its connection, which let go of it in core too.
+  }
+};
+
+const holdFrame = (
+  link: CoreLink,
+  { app, lease }: Pick<ScreenBundle, "app" | "lease">
+): FrameHold => {
+  let held: { session: Session; frame: Promise<FrameApi> } | undefined;
+  let closed = false;
+  const ask = async (session: Session): Promise<FrameApi> => {
+    try {
+      return await session.screens.frame(app, lease);
+    } catch (error) {
+      // Asked again by the next call, not refused for good.
+      if (held?.session === session) {
+        held = undefined;
+      }
+      throw error;
+    }
+  };
+  const current = async (): Promise<FrameApi> => {
+    if (closed) {
+      throw frameClosedError();
+    }
+    const session = await link.session();
+    // Stopped while the link connected: nothing is asked for that would
+    // never be closed.
+    if (closed) {
+      throw frameClosedError();
+    }
+    if (held?.session !== session) {
+      // The last connection's broke with it, and core let go of it then.
+      held = { session, frame: ask(session) };
+    }
+    return await held.frame;
+  };
+  return {
+    use: async (run) => await run(await current()),
+    close: () => {
+      closed = true;
+      const last = held;
+      held = undefined;
+      if (last !== undefined) {
+        void letGo(last.frame);
+      }
+    },
+  };
+};
+
 /**
  * Asks core whether the frame's build still gets its App's data, and
  * calls `refused` when it doesn't. Core's own answer on the page's own
@@ -167,12 +256,10 @@ type Refused = Extract<
  * can word as it likes.
  */
 const checkDelivery = async (
-  link: CoreLink,
-  { app, lease }: Pick<ScreenBundle, "app" | "lease">,
+  hold: FrameHold,
   refused: (reason: Refused) => void
 ): Promise<void> => {
-  const session = await link.session();
-  const delivery = await session.screens.present(app, lease);
+  const delivery = await hold.use(async (frame) => await frame.delivery());
   if (delivery !== "open") {
     refused(delivery);
   }
@@ -180,12 +267,11 @@ const checkDelivery = async (
 
 /** `checkDelivery`, for a call that doesn't wait for it. */
 const checkDeliveryNow = async (
-  link: CoreLink,
-  bundle: Pick<ScreenBundle, "app" | "lease">,
+  hold: FrameHold,
   refused: (reason: Refused) => void
 ): Promise<void> => {
   try {
-    await checkDelivery(link, bundle, refused);
+    await checkDelivery(hold, refused);
   } catch {
     // Asked again at the page's next check.
   }
@@ -254,39 +340,35 @@ export const callFunction = async (
 };
 
 /**
- * A running App's screen: its own App's server, runs and error log. Each
- * connection is told which build the frame runs before its first call,
- * with core's lease on it, so one made again after a break is too.
+ * A running App's screen: its own App's server, runs and error log. Its
+ * calls go through the frame's own way to its App (`hold`), so each is
+ * decided on the build this frame runs, whatever other frames of the App
+ * on the tab's connection run.
  */
 const appTarget = (
   link: CoreLink,
   bundle: ScreenBundle,
-  refused: (reason: Refused) => void
+  refused: (reason: Refused) => void,
+  hold: FrameHold
 ): FrameTarget => {
   const { app, version, screen, lease } = bundle;
-  let presentedOn: Session | undefined;
   const framed = async <T>(
-    run: (screens: Session["screens"]) => Promise<T>
+    run: (frame: FrameApi) => Promise<T>
   ): Promise<T> => {
-    const session = await link.session();
-    if (presentedOn !== session) {
-      await session.screens.present(app, lease);
-      presentedOn = session;
-    }
     try {
-      return await run(session.screens);
+      return await hold.use(run);
     } catch (error) {
       if (refusedForBuild(error)) {
         // The frame gets the refusal as it is; whether to stop it is
         // core's answer to the page.
-        void checkDeliveryNow(link, bundle, refused);
+        void checkDeliveryNow(hold, refused);
       }
       throw error;
     }
   };
   return {
     call: async (method, args) =>
-      await framed(async (screens) => await screens.call(app, method, args)),
+      await framed(async (frame) => await frame.call(method, args)),
     callFunction: async (request) => {
       // Waits for a connection being made again, which fails when it is
       // someone else's: then nothing is sent.
@@ -295,7 +377,7 @@ const appTarget = (
         return await callFunction(app, { lease, person }, request);
       } catch (error) {
         if (refusedForBuild(error)) {
-          void checkDeliveryNow(link, bundle, refused);
+          void checkDeliveryNow(hold, refused);
         }
         if (authErrors.codeOf(error) === "auth.principal_changed") {
           refused("principal-changed");
@@ -317,7 +399,7 @@ const appTarget = (
         );
       } catch (error) {
         if (refusedForBuild(error)) {
-          void checkDeliveryNow(link, bundle, refused);
+          void checkDeliveryNow(hold, refused);
         }
         if (authErrors.codeOf(error) === "auth.principal_changed") {
           refused("principal-changed");
@@ -331,7 +413,7 @@ const appTarget = (
         return await cancelStream(app, { lease, person }, request);
       } catch (error) {
         if (refusedForBuild(error)) {
-          void checkDeliveryNow(link, bundle, refused);
+          void checkDeliveryNow(hold, refused);
         }
         if (authErrors.codeOf(error) === "auth.principal_changed") {
           refused("principal-changed");
@@ -345,36 +427,30 @@ const appTarget = (
       });
     },
     startRun: async (workflow, input) =>
-      await framed(
-        async (screens) => await screens.startRun(app, workflow, input)
-      ),
+      await framed(async (frame) => await frame.startRun(workflow, input)),
     runs: async (workflow) =>
-      await framed(async (screens) => await screens.runs(app, workflow)),
-    run: async (run) =>
-      await framed(async (screens) => await screens.run(app, run)),
+      await framed(async (frame) => await frame.runs(workflow)),
+    run: async (run) => await framed(async (frame) => await frame.run(run)),
     decide: async (run, decision, answer) =>
       await framed(
-        async (screens) =>
-          await screens.decide(app, run, decision, forCore(answer))
+        async (frame) => await frame.decide(run, decision, forCore(answer))
       ),
     summary: async (run) =>
-      await framed(async (screens) => await screens.summary(app, run)),
+      await framed(async (frame) => await frame.summary(run)),
     control: async (run, kind) =>
-      await framed(async (screens) => {
+      await framed(async (frame) => {
         if (kind !== "pause" && kind !== "resume" && kind !== "cancel") {
           throw screenErrors.create("screen.invalid");
         }
-        return await screens.control(app, run, kind);
+        return await frame.control(run, kind);
       }),
     watchRuns: async (workflow, onChange) =>
       await framed(
-        async (screens) =>
-          await screens.watchRuns(app, workflow, forCore(onChange))
+        async (frame) => await frame.watchRuns(workflow, forCore(onChange))
       ),
     watchQuery: async (request, onSnapshot) =>
       await framed(
-        async (screens) =>
-          await screens.watchQuery(app, lease, request, forCore(onSnapshot))
+        async (frame) => await frame.watchQuery(request, forCore(onSnapshot))
       ),
   };
 };
@@ -438,27 +514,27 @@ const previewTarget = (
 /** Which build a frame runs, and the App's name to show around it. */
 type FrameCode = Pick<ScreenBundle, "name" | "artifact" | "frameToken">;
 
+/** What a frame's bridge reaches, and what runs once its screen does. */
+interface Connected {
+  target: FrameTarget;
+  /** Called once the screen runs, if given: `onState` says what the page shows. */
+  running?: (onState: (state: ScreenState) => void) => void;
+}
+
 /** What a frame runs, and what its bridge reaches. */
 interface FrameSource<Bundle extends FrameCode> {
   open: (session: Session) => Promise<Bundle>;
-  /** `refused` stops the frame: core no longer hands its build the data. */
-  target: (
-    link: CoreLink,
-    bundle: Bundle,
-    refused: (reason: Refused) => void
-  ) => FrameTarget;
   /**
-   * Called once the screen runs, if given: `cleanups` stop what it
-   * starts, `onState` says what the page shows, and `refused` stops the
-   * frame.
+   * What the frame's bridge reaches on the tab's `link`: `refused` stops
+   * the frame (core no longer hands its build the data, or the browser's
+   * session is someone else's), and `cleanups` stop what it starts.
    */
-  running?: (
+  connect: (
     link: CoreLink,
     bundle: Bundle,
-    cleanups: (() => void)[],
-    onState: (state: ScreenState) => void,
-    refused: (reason: Refused) => void
-  ) => void;
+    refused: (reason: Refused) => void,
+    cleanups: (() => void)[]
+  ) => Connected;
 }
 
 /**
@@ -478,9 +554,10 @@ const runFrame = <Bundle extends FrameCode>(
 
   /**
    * Stops it all, once: what waits for the frame stops waiting, the
-   * bridge and its port close, timers end, and the page's connection for
-   * this frame closes (the first cleanup), and with it what the frame
-   * followed in core.
+   * frame leaves the tab's link (the first cleanup), its own way to its
+   * App closes, and with it what the frame followed in core, and the
+   * bridge and its port close and timers end. The link stays, for the
+   * tab's other frames.
    */
   const stop = (): void => {
     if (stopped.signal.aborted) {
@@ -506,19 +583,34 @@ const runFrame = <Bundle extends FrameCode>(
     onState(state);
   };
 
-  // The link ending stops the frame, signed out or not: nothing of the
-  // person's stays on the page, in the frame or its bridge, for whoever
-  // uses the browser next.
-  const link = new CoreLink((why) => {
+  // The link ending stops the frame, signed out or not, as it stops every
+  // frame of the tab: nothing of the person's stays on the page, in a
+  // frame or its bridge, for whoever uses the browser next.
+  const joined = frameLinks.join((why) => {
     fail(
       why === "signed-out"
         ? { status: "signed-out" }
         : { status: "failed", reason: "principal-changed" }
     );
   });
+  const { link } = joined;
   cleanups.push(() => {
-    link.close();
+    joined.leave();
   });
+
+  /**
+   * Stops the frame for `reason`. Core saying the browser's session is
+   * someone else's ends the tab's link, which stops every frame on it,
+   * this one too, and the next frame connects anew; anything else stops
+   * this frame alone.
+   */
+  const refused = (reason: Refused): void => {
+    if (reason === "principal-changed") {
+      joined.end("principal-changed");
+      return;
+    }
+    fail({ status: "failed", reason });
+  };
 
   // The frame loads one document: its own, which `ready` answers for. A
   // load after that is the screen sending its frame to another address,
@@ -576,12 +668,10 @@ const runFrame = <Bundle extends FrameCode>(
       artifact: bundle.artifact,
       generation,
     };
-    const refused = (reason: Refused): void => {
-      fail({ status: "failed", reason });
-    };
+    const { target, running } = source.connect(link, bundle, refused, cleanups);
     const { port1, port2 } = new MessageChannel();
     cleanups.push(
-      openBridge(port1, source.target(link, bundle, refused), () => {
+      openBridge(port1, target, () => {
         fail({ status: "failed", reason: "disconnected" });
       })
     );
@@ -604,7 +694,7 @@ const runFrame = <Bundle extends FrameCode>(
       return;
     }
     onState({ status: "running" });
-    source.running?.(link, bundle, cleanups, onState, refused);
+    running?.(onState);
   };
 
   const run = async (): Promise<void> => {
@@ -643,28 +733,37 @@ export const runScreen = (
     frame,
     {
       open: async (session) => await session.screens.open(app, screen),
-      target: appTarget,
-      running: (link, bundle, cleanups, setState, refused) => {
-        const { version } = bundle;
-        const check = async (): Promise<void> => {
-          try {
-            // A screen that asks for nothing more still holds what it was
-            // handed: this is when the page hears its approval is gone.
-            await checkDelivery(link, bundle, refused);
-            const session = await link.session();
-            if ((await session.screens.version(app)) !== version) {
-              setState({ status: "updated" });
-            }
-          } catch {
-            // Asked again at the next check.
-          }
-        };
-        const timer = setInterval(() => {
-          void check();
-        }, versionCheckMs);
+      connect: (link, bundle, refused, cleanups) => {
+        const hold = holdFrame(link, bundle);
         cleanups.push(() => {
-          clearInterval(timer);
+          hold.close();
         });
+        return {
+          target: appTarget(link, bundle, refused, hold),
+          running: (setState) => {
+            const { version } = bundle;
+            const check = async (): Promise<void> => {
+              try {
+                // A screen that asks for nothing more still holds what it
+                // was handed: this is when the page hears its approval is
+                // gone.
+                await checkDelivery(hold, refused);
+                const session = await link.session();
+                if ((await session.screens.version(app)) !== version) {
+                  setState({ status: "updated" });
+                }
+              } catch {
+                // Asked again at the next check.
+              }
+            };
+            const timer = setInterval(() => {
+              void check();
+            }, versionCheckMs);
+            cleanups.push(() => {
+              clearInterval(timer);
+            });
+          },
+        };
       },
     },
     onState,
@@ -686,7 +785,9 @@ export const runPreview = (
     {
       open: async (session) => await session.chats.preview(chatId, app, screen),
       // A preview reads no real data, so no approval decides it.
-      target: (link, bundle) => previewTarget(link, chatId, bundle),
+      connect: (link, bundle) => ({
+        target: previewTarget(link, chatId, bundle),
+      }),
     },
     onState,
     onOpened
