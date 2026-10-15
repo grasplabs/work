@@ -1476,6 +1476,11 @@ describe("a run's host, against a forged module's calls", () => {
         "task:clock",
         async () => await Promise.resolve({ ok: true, value: { output: 5 } })
       ),
+      // The call made, its answer put aside for one of the module's own.
+      discarded: await run("task:clock", async (attempt) => {
+        await attempt.call(adaFrame);
+        return { ok: true, value: { output: 5 } };
+      }),
       notACall: await run("task:finish", async (attempt) => {
         await attempt.call(adaFrame);
         return { ok: true, value: { output: null } };
@@ -1505,6 +1510,7 @@ describe("a run's host, against a forged module's calls", () => {
       templateRead: "workflow.invalid",
       twice: "workflow.invalid",
       unmade: "workflow.invalid",
+      discarded: "workflow.invalid",
       notACall: "workflow.invalid",
       unfrozen: "workflow.call_denied",
       afterFailure: "workflow.invalid",

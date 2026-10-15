@@ -227,8 +227,11 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
     ...taskBase,
     kind: z.literal("call"),
     call: sealedCallSchema,
-    // Its input.from, of the slots its module evaluates (generate.ts).
+    // Its input.from, output.as and export.as, of the slots its module
+    // evaluates (generate.ts).
     inputFrom: templateSchema.optional(),
+    outputAs: templateSchema.optional(),
+    exportAs: templateSchema.optional(),
   }),
 ]);
 
@@ -386,6 +389,8 @@ export const compileWorkflow = async (
             duration,
             call,
             inputFrom,
+            outputAs,
+            exportAs,
             timeoutMs,
             steps,
             schemas,
@@ -407,6 +412,12 @@ export const compileWorkflow = async (
             ...(inputFrom === undefined
               ? {}
               : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
+            ...(outputAs === undefined
+              ? {}
+              : { outputAs: z.json().parse(structuredClone(outputAs)) }),
+            ...(exportAs === undefined
+              ? {}
+              : { exportAs: z.json().parse(structuredClone(exportAs)) }),
             ...(timeoutMs === undefined ? {} : { timeoutMs }),
           })
         ),

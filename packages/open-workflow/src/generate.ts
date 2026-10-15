@@ -218,6 +218,13 @@ export interface GeneratedTask {
    */
   readonly inputFrom?: CallTemplate;
   /**
+   * A `call` task's `output.as` and `export.as`, sealed as its `input.from`
+   * is: the host holds what its step records to its call's answer as they
+   * transform it.
+   */
+  readonly outputAs?: CallTemplate;
+  readonly exportAs?: CallTemplate;
+  /**
    * The most each attempt of its steps may take, in milliseconds, from its
    * `timeout`: the host applies the lower of this and its own ceiling.
    */
@@ -751,17 +758,21 @@ const templateOf = (
     : { literal: null };
 };
 
+/** The stages whose transformation the build seals as a template. */
+type SealedStage = "taskInputFrom" | "taskOutputAs" | "taskExportAs";
+
 /**
- * `value` at `pointer`, task `taskId`'s `input.from`, as a template of the
- * slots its stage already evaluates (`stagesOf`, by pointer) and its
- * literals: no new expression, so what the host builds from it is what
- * the module's own evaluations make.
+ * `value` at `pointer`, task `taskId`'s transformation at `stage`, as a
+ * template of the slots its stage already evaluates (`stagesOf`, by
+ * pointer) and its literals: no new expression, so what the host builds
+ * from it is what the module's own evaluations make.
  */
 const slotTemplateOf = (
   emitter: Emitter,
   value: JsonValue,
   pointer: string,
-  taskId: string
+  taskId: string,
+  stage: SealedStage
 ): CallTemplate => {
   if (typeof value === "string") {
     if (parseSlot(value).kind !== "expression") {
@@ -770,11 +781,11 @@ const slotTemplateOf = (
     const evaluated = emitter.expressions.find(
       (expression) =>
         expression.taskId === taskId &&
-        expression.stage === "taskInputFrom" &&
+        expression.stage === stage &&
         expression.pointer === pointer
     );
     if (evaluated === undefined) {
-      throw new Error(`The task's input.from has no expression at ${pointer}`);
+      throw new Error(`The task's ${stage} has no expression at ${pointer}`);
     }
     return { slot: evaluated.slot };
   }
@@ -783,7 +794,7 @@ const slotTemplateOf = (
   }
   if (Array.isArray(value)) {
     const items = value.map((item, index) =>
-      slotTemplateOf(emitter, item, pointerJoin(pointer, index), taskId)
+      slotTemplateOf(emitter, item, pointerJoin(pointer, index), taskId, stage)
     );
     if (items.every((item) => isLiteral(item))) {
       return { literal: value };
@@ -796,7 +807,7 @@ const slotTemplateOf = (
     ([key, item]) =>
       [
         key,
-        slotTemplateOf(emitter, item, pointerJoin(pointer, key), taskId),
+        slotTemplateOf(emitter, item, pointerJoin(pointer, key), taskId, stage),
       ] as const
   );
   if (entries.every(([, item]) => isLiteral(item))) {
@@ -1266,24 +1277,36 @@ const callOf = (
 };
 
 /**
- * `item`'s `input.from`, as a template of the slots its module evaluates
- * for it, if it has one: sealed so the host can build the transformed
- * input itself.
+ * `item`'s transformation `transform` of its `key` (its `input.from`, its
+ * `output.as` or its `export.as`), as a template of the slots its module
+ * evaluates for it at `stage`, if it has one: sealed so the host can
+ * build what it makes itself.
  */
-const inputFromOf = (
+const sealedPartOf = (
   emitter: Emitter,
-  item: ListTask
+  item: ListTask,
+  key: "input" | "output" | "export",
+  transform: "from" | "as",
+  stage: SealedStage
 ): CallTemplate | undefined => {
-  const input = flowPart(item.task, "input");
-  return input !== undefined && Object.hasOwn(input, "from")
+  const part = flowPart(item.task, key);
+  return part !== undefined && Object.hasOwn(part, transform)
     ? slotTemplateOf(
         emitter,
-        input.from ?? null,
-        pointerJoin(pointerJoin(item.pointer, "input"), "from"),
-        item.id
+        part[transform] ?? null,
+        pointerJoin(pointerJoin(item.pointer, key), transform),
+        item.id,
+        stage
       )
     : undefined;
 };
+
+/** `item`'s `input.from`, sealed (`sealedPartOf`), if it has one. */
+const inputFromOf = (
+  emitter: Emitter,
+  item: ListTask
+): CallTemplate | undefined =>
+  sealedPartOf(emitter, item, "input", "from", "taskInputFrom");
 
 /**
  * The statement of a call task that makes its call within its step (every
@@ -1302,12 +1325,16 @@ const lowerCall = (
     return;
   }
   const inputFrom = inputFromOf(emitter, item);
+  const outputAs = sealedPartOf(emitter, item, "output", "as", "taskOutputAs");
+  const exportAs = sealedPartOf(emitter, item, "export", "as", "taskExportAs");
   emitter.tasks.push({
     ...sealed,
     kind: "call",
     call,
     steps: ["task"],
     ...(inputFrom === undefined ? {} : { inputFrom }),
+    ...(outputAs === undefined ? {} : { outputAs }),
+    ...(exportAs === undefined ? {} : { exportAs }),
   });
   const plan = planCode([...stages.enter, ...stages.leave]);
   emitter.lines.push(

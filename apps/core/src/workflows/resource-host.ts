@@ -536,6 +536,12 @@ interface StepAttempt {
    * one.
    */
   call: "none" | "pending" | "done" | "failed";
+  /** What its task's call answered, once done: its raw output. */
+  answer: Json | undefined;
+  /** What the host's evaluations of its task's `output.as` answered, by slot. */
+  outputAs: Map<number, Json>;
+  /** What the host's evaluations of its task's `export.as` answered, by slot. */
+  exportAs: Map<number, Json>;
   /** The deadline it resolved for its task, once (`until`). */
   until: number | undefined;
 }
@@ -890,6 +896,9 @@ export class ResourceRunHost
               budget: { fuel: attemptFuel },
               pending: new Set(),
               call: "none",
+              answer: undefined,
+              outputAs: new Map(),
+              exportAs: new Map(),
               until: undefined,
             };
             // An activation that can't fund a whole attempt any more cuts it
@@ -1316,6 +1325,7 @@ export class ResourceRunHost
           "An evaluation passes its task's data as JSON, within a step's size."
         );
       }
+      this.#requireAnswered(attempt, expression, passed.data.output);
       const value = await this.#evaluated(
         attempt,
         expression,
@@ -1328,8 +1338,64 @@ export class ResourceRunHost
       if (expression.stage === "taskInputFrom") {
         attempt.inputFrom.set(expression.slot, value);
       }
+      if (expression.stage === "taskOutputAs") {
+        attempt.outputAs.set(expression.slot, value);
+      }
+      if (expression.stage === "taskExportAs") {
+        attempt.exportAs.set(expression.slot, value);
+      }
       return value;
     });
+  }
+
+  /**
+   * The output a call task's step of `attempt` records, as the host built
+   * it: its call's answer, transformed by its sealed `output.as` from the
+   * host's own evaluations, where it has one; `undefined` until it can be.
+   */
+  static #shapedAnswer(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>
+  ): Json | undefined {
+    return task.outputAs === undefined
+      ? attempt.answer
+      : filledFrom(task.outputAs, attempt.outputAs);
+  }
+
+  /**
+   * Refuses an `output.as` or `export.as` evaluation of `attempt`'s call
+   * task unless it reads what the host has: the call's answer for
+   * `output.as`, and the output as its `output.as` made it for `export.as`.
+   * So a forged module can't put an answer the call never gave into what
+   * the task records.
+   */
+  #requireAnswered(
+    attempt: StepAttempt,
+    expression: SealedExpression,
+    output: Json
+  ): void {
+    const { task } = attempt.step;
+    const transforms =
+      expression.stage === "taskOutputAs" ||
+      expression.stage === "taskExportAs";
+    if (
+      !transforms ||
+      task?.kind !== "call" ||
+      task.call.name === "grasp.sleepUntil"
+    ) {
+      return;
+    }
+    const expected =
+      expression.stage === "taskOutputAs"
+        ? attempt.answer
+        : ResourceRunHost.#shapedAnswer(attempt, task);
+    if (
+      attempt.call !== "done" ||
+      expected === undefined ||
+      canonicalJson(expected) !== canonicalJson(output)
+    ) {
+      this.#refuse(`Task "${task.id}" transforms only its call's answer.`);
+    }
   }
 
   /**
@@ -1523,6 +1589,7 @@ export class ResourceRunHost
       try {
         const answer = await this.#made(attempt, task, frame);
         attempt.call = "done";
+        attempt.answer = answer;
         return answer;
       } catch (error) {
         attempt.call = "failed";
@@ -1763,6 +1830,38 @@ export class ResourceRunHost
    * input it captured, its output and the context it leaves, each against
    * its task's schema (`workflow.task_data_invalid`).
    */
+  /**
+   * Refuses `record` of `attempt`'s call task unless it is what the host
+   * built from its call's answer: its output, as its `output.as` made it,
+   * and its context, as its `export.as` made it (none without one).
+   */
+  #requireRecordedAnswer(
+    attempt: StepAttempt,
+    task: Extract<SealedTask, { kind: "call" }>,
+    record: { output: Json; context?: Json | undefined }
+  ): void {
+    if (attempt.call !== "done") {
+      return this.#refuse(`Task "${task.id}"'s step makes its call.`);
+    }
+    const output = ResourceRunHost.#shapedAnswer(attempt, task);
+    const context =
+      task.exportAs === undefined
+        ? undefined
+        : filledFrom(task.exportAs, attempt.exportAs);
+    const sameContext =
+      context === undefined
+        ? record.context === undefined && task.exportAs === undefined
+        : record.context !== undefined &&
+          canonicalJson(context) === canonicalJson(record.context);
+    if (
+      output === undefined ||
+      canonicalJson(output) !== canonicalJson(record.output) ||
+      !sameContext
+    ) {
+      this.#refuse(`Task "${task.id}"'s step records its call's answer.`);
+    }
+  }
+
   #acceptRecord(attempt: StepAttempt, value: Json): void {
     const { step, data } = attempt;
     const { task } = step;
@@ -1818,8 +1917,8 @@ export class ResourceRunHost
       step.kind === "task" &&
       task.kind === "call" &&
       task.call.name !== "grasp.sleepUntil";
-    if (callTask && attempt.call !== "done") {
-      return this.#refuse(`Task "${task.id}"'s step makes its call.`);
+    if (callTask) {
+      this.#requireRecordedAnswer(attempt, task, record);
     }
     const checks = checksOf[step.kind];
     const against: [DataCheck, Json][] = [
