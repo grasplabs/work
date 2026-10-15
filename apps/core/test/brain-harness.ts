@@ -610,7 +610,14 @@ const changeState = async (
   });
 };
 
-const sectionDetail = z.object({ section: z.int().min(0) });
+/**
+ * The reads that return a document's text: one section, or the whole
+ * document. Following links, listing and history return none of it.
+ */
+const contentRead = z.union([
+  z.object({ read: z.literal("section"), section: z.int().min(0) }),
+  z.object({ read: z.literal("document") }),
+]);
 
 /**
  * What the persona's agent read through Knowledge since audit position
@@ -628,19 +635,21 @@ const readTextsOf = async (
   // Explicit reads only: a search's snippets aren't recorded, so nothing
   // shows what it returned, and the evidence an answer needs is a whole
   // section, which the agent reads.
-  const reads = events.flatMap(({ action, actor, target, detail }) =>
-    action === "knowledge.read" &&
-    actor.type === "agent" &&
-    actor.agentId === place.agent.agentId &&
-    target?.type === "document"
+  const reads = events.flatMap(({ action, actor, target, detail }) => {
+    const read = contentRead.safeParse(detail).data;
+    return action === "knowledge.read" &&
+      actor.type === "agent" &&
+      actor.agentId === place.agent.agentId &&
+      target?.type === "document" &&
+      read !== undefined
       ? [
           {
             id: target.id,
-            section: sectionDetail.safeParse(detail).data?.section,
+            section: "section" in read ? read.section : undefined,
           },
         ]
-      : []
-  );
+      : [];
+  });
   // A read the log recorded but Knowledge refused (a section that isn't
   // there) returned nothing: it backs no evidence.
   const texts = await Promise.all(
