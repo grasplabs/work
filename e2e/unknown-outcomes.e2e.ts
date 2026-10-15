@@ -207,7 +207,19 @@ test("a run's lost answer shows up for its person, and saying it happened comple
     }).toPass({ timeout: 60_000 });
     const reviewer = apiOf(other);
     try {
-      await reviewer.api.decisions.answer(go, { approved: true });
+      // As the decision's page answers: reviewed, confirmed, then answered
+      // with that confirmation.
+      const review = await reviewer.api.decisions.review(go, {
+        approved: true,
+      });
+      if (review.state === "review") {
+        const { confirmation } = await reviewer.api.decisions.confirm(
+          go,
+          review.decision.revision,
+          review.response
+        );
+        await reviewer.api.decisions.answer(go, review.response, confirmation);
+      }
     } finally {
       reviewer.core[Symbol.dispose]();
     }
