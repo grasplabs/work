@@ -320,6 +320,37 @@ describe("the session client and lost access", () => {
     }
   );
 
+  it("keeps whose a key left unknown is when the host's answer to a resend fences", async () => {
+    const sent: string[] = [];
+    const { client } = network(async (_call, request) => {
+      await Promise.resolve();
+      sent.push(request);
+      if (sent.length === 1) {
+        throw new Error("The connection was reset.");
+      }
+      // Core's own answer, with its request ID: the App stopped running.
+      return sent.length === 2 ? failedWith("app.not_running") : answered(3);
+    });
+    const lost = await failureOf(client.action(api.notes.tally));
+    const { details } = lost;
+    const key: unknown =
+      typeof details === "object" && details !== null
+        ? Reflect.get(details, "idempotencyKey")
+        : undefined;
+    const keyed = { idempotencyKey: String(key) };
+    const fenced = await failureOf(client.action(api.notes.tally, {}, keyed));
+    const after = await failureOf(client.action(api.notes.tally, {}, keyed));
+    expect({
+      fenced: fenced.code,
+      after: after.code,
+      sent: sent.length,
+    }).toStrictEqual({
+      fenced: "app.not_running",
+      after: "auth.principal_changed",
+      sent: 2,
+    });
+  });
+
   it("never sends a lost save again once access was lost while it waited to", async () => {
     let signedOut = false;
     const creates: string[] = [];

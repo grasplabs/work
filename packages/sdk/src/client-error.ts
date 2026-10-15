@@ -233,7 +233,11 @@ export const settlesSubmission = (failure: GraspError): boolean =>
   failure.requestId !== null &&
   failure.category !== "authorization" &&
   failure.category !== "uncertain" &&
-  !nothingRanCodes.has(failure.code);
+  !nothingRanCodes.has(failure.code) &&
+  // A refusal that fences (the build revoked, the App stopped) says the
+  // access went, not what became of the call: whoever comes next never
+  // gets the key.
+  !fences(failure.code);
 
 /** Refusals sent before a call reached the App's code: nothing of it ran. */
 export const refusedBeforeCallCodes: ReadonlySet<string> = new Set([

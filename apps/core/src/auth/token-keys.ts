@@ -40,7 +40,12 @@ const keysKeptMs = 60_000;
  */
 const unknownKeyRereadMs = 5000;
 
-/** How many unheld keys an isolate remembers checking unread: a bound on forged ones. */
+/**
+ * How many unheld keys an isolate remembers checking unread: a bound on
+ * forged ones. Once it is full, a genuine token signed by a key made since
+ * gets a 401 within the window, as before tokens were told to try again;
+ * that takes a flood of forged keys right after a rotation.
+ */
 const unreadKeysMax = 1024;
 
 /** A key row, by the ID a token's header names it with (`kid`). */
