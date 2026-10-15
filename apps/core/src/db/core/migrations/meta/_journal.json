@@ -551,8 +551,29 @@
     {
       "idx": 78,
       "version": "6",
-      "when": 1792016079704,
-      "tag": "0078_organization_time_zone",
+      "when": 1792011052144,
+      "tag": "0078_workflow_start_authorization",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "6",
+      "when": 1792011152852,
+      "tag": "0079_workflow_bindings_and_params",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1792011153172,
+      "tag": "0080_immutable_workflow_records",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1792066592722,
+      "tag": "0081_organization_time_zone",
       "breakpoints": true
     }
   ]

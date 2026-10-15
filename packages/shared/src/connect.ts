@@ -11,11 +11,8 @@ import {
   workspaceIdSchema,
 } from "./ids.ts";
 import type { PackageRegistryApi } from "./packages.ts";
-import {
-  permissionActionSchema,
-  permissionSubjectSchema,
-} from "./permissions.ts";
-import type { PermissionSubject, WorkContext } from "./permissions.ts";
+import { codeSubjectSchema, permissionActionSchema } from "./permissions.ts";
+import type { CodeSubject, WorkContext } from "./permissions.ts";
 import { roleSchema } from "./roles.ts";
 import { eventTypeSchema } from "./workflows.ts";
 
@@ -316,7 +313,43 @@ export interface CatalogEntry {
   categories: string[];
   /** How many tools it has; `catalogTools` lists them. */
   toolCount: number;
+  /**
+   * Where its logo is, on the deployment's own origin
+   * ({@link catalogLogoUrl}), or `null` when it has none: the page draws its
+   * first letter. Never its provider's address: a browser loading that
+   * would call outside connect, and tell the provider who looks.
+   */
+  logo: string | null;
 }
+
+/**
+ * Where core serves catalog entries' logos, which connect fetches from
+ * their provider and checks (`ConnectApi.catalogLogo`).
+ */
+export const catalogLogoPath = "/api/catalog/logos";
+
+/** Where one catalog entry's logo is served. */
+export const catalogLogoUrl = (source: CatalogSource, id: string): string =>
+  `${catalogLogoPath}/${source}/${encodeURIComponent(id)}`;
+
+/**
+ * A catalog entry's logo, as connect hands it to core: an image, of
+ * `contentType`, which connect has checked is what its bytes are.
+ */
+export interface CatalogLogo {
+  contentType: CatalogLogoType;
+  bytes: Uint8Array;
+}
+
+/** The image types a catalog logo may be. */
+export const catalogLogoTypes = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+] as const;
+export type CatalogLogoType = (typeof catalogLogoTypes)[number];
 
 /**
  * The catalog, native entries first. `composio` says whether Composio's
@@ -435,6 +468,9 @@ export const catalogToolsRequestSchema = z.strictObject({
 });
 export type CatalogToolsRequest = z.input<typeof catalogToolsRequestSchema>;
 
+export const catalogLogoRequestSchema = catalogToolsRequestSchema;
+export type CatalogLogoRequest = CatalogToolsRequest;
+
 // Side effects held for their person (threat model R7, R12). Connect
 // holds a side effect from chat, from a person using an App, or from any
 // context that read restricted data, until the person it acts for confirms
@@ -469,7 +505,7 @@ export interface ActionDescription {
 export interface PendingAction {
   id: string;
   /** The App or agent that asked for it. */
-  subject: PermissionSubject;
+  subject: CodeSubject;
   /** For an App's code: the version that asked. */
   appVersion: number | null;
   /** Asked for with the person there, or by a workflow run. */
@@ -679,7 +715,7 @@ export type ResolutionChoice = z.infer<typeof resolutionChoiceSchema>;
 
 /** The call of unknown outcome: whose, where, and the key it was sent under. */
 export const unknownOutcomeKeySchema = z.strictObject({
-  subject: permissionSubjectSchema,
+  subject: codeSubjectSchema,
   connectionId: connectionIdSchema,
   action: permissionActionSchema,
   idempotencyKey: identifierSchema,
@@ -912,6 +948,13 @@ export interface ConnectApi extends PackageRegistryApi {
    * Composio doesn't list the catalog or the toolkit's tools completely.
    */
   catalogTools: (request: CatalogToolsRequest) => Promise<CatalogTool[]>;
+  /**
+   * One catalog entry's logo, fetched from its provider and checked, or
+   * `null` when the catalog lists none for it, or its provider's isn't
+   * an image connect serves (`catalogLogoTypes`, size-capped) or doesn't
+   * come.
+   */
+  catalogLogo: (request: CatalogLogoRequest) => Promise<CatalogLogo | null>;
   /**
    * The generated contract `contract` names as the connection
    * `connectionId` serves it now, each action with the JSON Schemas of its

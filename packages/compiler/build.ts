@@ -31,7 +31,7 @@ import { withBuildLock } from "./build-lock.ts";
 import { serverSdkImports } from "./src/app-code.ts";
 import { extractCandidates } from "./src/candidates.ts";
 import { compileModule } from "./src/compile.ts";
-import { sdkImports } from "./src/imports.ts";
+import { openWorkflowSdkImports, sdkImports } from "./src/imports.ts";
 import {
   compilerAssets,
   kitModule,
@@ -895,7 +895,12 @@ const buildScreenCompiler = async (
     stylesheets,
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
-    types: collectTypes([...imports, "lucide-react"]),
+    // The generated workflow module is type-checked against its SDK too.
+    types: collectTypes([
+      ...imports,
+      "lucide-react",
+      ...openWorkflowSdkImports,
+    ]),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.
     lintRules: rulesSchema.parse(shadcnPreset.rules),
@@ -908,7 +913,11 @@ const buildScreenCompiler = async (
     require.resolve("esbuild-wasm/esbuild.wasm")
   );
   const kitModules = modulesOf(kitCode);
-  const workflowSdkModules = modulesOf(await buildSdkModules(sdkImports));
+  // App workflows and the code generated from JSON workflows share one set:
+  // each imports only its own entry of it (imports.ts).
+  const workflowSdkModules = modulesOf(
+    await buildSdkModules([...sdkImports, ...openWorkflowSdkImports])
+  );
   const serverSdkModules = modulesOf(await buildSdkModules(serverSdkImports));
   // Everything a build depends on: the compiler, what it knows of the kit,
   // and the kit's and the SDK's modules the App's modules import.

@@ -430,6 +430,25 @@ export const workflowCode: CodeKind = {
   ),
 };
 
+/**
+ * The SDK module the code the host generates from a JSON workflow imports
+ * (`@grasp-os/sdk/open-workflow`), and nothing else: App workflows can't
+ * import it, nor it anything of theirs.
+ */
+export const openWorkflowSdkImports = ["@grasp-os/sdk/open-workflow"] as const;
+
+/** Generated workflow code imports only `openWorkflowSdkImports`. */
+export const generatedWorkflowCode: CodeKind = {
+  name: "Generated workflow",
+  folder: ".grasp/",
+  imports: new Map(
+    openWorkflowSdkImports.map((specifier) => [
+      specifier,
+      kitModuleName(specifier),
+    ])
+  ),
+};
+
 const javascriptExtension = /\.js$/u;
 
 /**

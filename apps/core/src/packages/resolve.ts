@@ -41,8 +41,8 @@ import { appFor } from "../apps.ts";
 import type { Acting } from "../auth/identity.ts";
 import { dependencyLocks, dependencyRequests } from "../db/core/schema.ts";
 import { proposeResolved } from "../dependencies/requests.ts";
-import { PlatformBoundError } from "../platform-sandbox.ts";
-import { packageBuilder, requireBuilderBound } from "./builder.ts";
+import { builderFailure, packageBuilder } from "./builder.ts";
+import type { PackageBuilderRun } from "./builder.ts";
 import { verifiedTarball } from "./tarballs.ts";
 
 // Resolving what an App's package.json asks for into one exact graph, and
@@ -664,9 +664,9 @@ const inspectGraph = async (
   env: Env,
   nodes: readonly Node[],
   limits: PackageLimits,
-  refusals: Refusals
+  refusals: Refusals,
+  builder: PackageBuilderRun
 ): Promise<void> => {
-  const builder = await packageBuilder(env);
   let archiveBytes = 0;
   let extractedBytes = 0;
   const pending = [...nodes];
@@ -701,12 +701,10 @@ const inspectGraph = async (
       // oxlint-disable-next-line no-await-in-loop
       answer = await builder.inspect(limits, batch);
     } catch (error) {
-      if (error instanceof PlatformBoundError) {
-        throw packageErrors.create("package.refused", {
-          refusals: ["unpacking the packages took more than the builder may"],
-        });
-      }
-      throw error;
+      throw builderFailure(
+        error,
+        "unpacking the packages took more than the builder may"
+      );
     }
     const inspected: PackageInspection[] = inspectionsSchema.parse(answer);
     const asked = batch.map(({ key }) => key).toSorted();
@@ -810,7 +808,7 @@ export const resolveDependencies = async (
   // Dynamic Worker whose CPU the runtime bounds, on-prem on the sandbox
   // host (builder.ts). Where neither bounds it, nothing resolves, refused
   // before any tarball is fetched.
-  requireBuilderBound(env);
+  const builder = packageBuilder(env);
   const intent = dependencyErrors.parse(
     "dependency.invalid",
     dependencyIntentSchema,
@@ -851,7 +849,7 @@ export const resolveDependencies = async (
       refusals.add(`${packageKey(node)}: ${reason}`);
     }
   }
-  await inspectGraph(env, nodes, limits, refusals);
+  await inspectGraph(env, nodes, limits, refusals, builder);
   if (refusals.total() > 0) {
     log.info("packages.refused", {
       app: intent.app,

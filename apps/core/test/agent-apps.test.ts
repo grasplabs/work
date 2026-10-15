@@ -36,8 +36,9 @@ const totalsExport = {
 };
 
 /**
- * A workflow that returns what it read, and a second one of the same App
- * that the agent is never granted; and an export.
+ * A workflow that returns what it read, a second one of the same App,
+ * and an export. The agent follows both workflows once it may read the
+ * App: an App's workflows are read as part of the App.
  */
 const reportFiles = {
   "app/exports.json": JSON.stringify({ totals: totalsExport }),
@@ -75,7 +76,7 @@ const setUp = async (
   const person =
     personRole === undefined ? builder : await signedInApi(idp, personRole);
   const chat = await chatOf(person.userId, ...script({ app, run }));
-  /** Grants the agent reading the Apps collection, and the workflow. */
+  /** Grants the agent reading the Apps collection, and the App. */
   const grant = async () => {
     await requestGranted(
       idp,
@@ -84,7 +85,8 @@ const setUp = async (
     );
     await requestGranted(idp, admin, {
       subject: chat.agent,
-      object: { type: "workflow", appId: app, workflowId: "report" },
+      // An App's workflows' runs are read as part of the App.
+      object: { type: "app", appId: app },
       actions: ["read"],
       binding: "REPORT",
     });
@@ -216,8 +218,12 @@ describe("a chat's Apps and workflows", () => {
       files: true,
       versions: [1],
       exports: { version: 1, exports: { totals: totalsExport } },
-      // Only the workflow the agent may read, summed up as ever.
-      workflows: [{ workflow: "report", lastRun: run }],
+      // Every workflow of the App whose functions the agent may read: an
+      // App's workflows are read as part of the App.
+      workflows: [
+        { workflow: "digest", lastRun: null },
+        { workflow: "report", lastRun: run },
+      ],
       runs: [{ id: run, status: "completed" }],
       status: {
         id: run,

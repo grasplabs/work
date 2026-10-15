@@ -23,7 +23,11 @@
  *   core reaches this supervisor.
  *   Should V8 reach its own heap limit first, it aborts the process: a
  *   process that dies during its one call is that call's doing, refused as
- *   the App's too, never an outage it could fake.
+ *   the App's too, never an outage it could fake. Ended by itself (its exit
+ *   status or V8's abort says so) it is the call's memory, which only the
+ *   call reaches; killed from outside (SIGKILL from the kernel's OOM killer, which a
+ *   full cgroup sends to whichever process it picks) it is `crashed`,
+ *   which load can cause, so core doesn't keep it as the input's verdict.
  * - Someone local bypasses the supervisor, or floods it. The supervisor and
  *   every process listen only on Unix sockets in a directory it creates
  *   with mode 0700: no TCP port, nothing another user can reach. Calls in
@@ -396,6 +400,49 @@ const exitOf = async (child: ChildProcess): Promise<void> => {
   }
 };
 
+/**
+ * The signals a process ends itself with: V8's abort (SIGABRT), or its
+ * fatal error as a trap instruction (SIGTRAP, SIGILL).
+ */
+const ownSignals = new Set(["SIGABRT", "SIGTRAP", "SIGILL"]);
+
+/** A shell's exit status for a child a signal ended: 128 + its number. */
+const signalStatus = 128;
+const ownSignalStatuses = new Set([
+  signalStatus + 6,
+  signalStatus + 5,
+  signalStatus + 4,
+]);
+
+/**
+ * What a process that died during its one call says of it. `exited` when
+ * it ended itself: workerd exits with a status of its own when V8 reaches
+ * its heap limit (status 1 on the workerd built here), or V8 aborts it,
+ * either way through nothing but the call it ran, so the input's doing
+ * whatever the load. `crashed` when a signal from outside killed it,
+ * above all SIGKILL from the kernel's OOM killer, which a full cgroup
+ * sends to whichever process it picks: the load's doing.
+ */
+const deathOf = (child: ChildProcess): "exited" | "crashed" => {
+  const { signalCode, exitCode } = child;
+  if (signalCode !== null) {
+    return ownSignals.has(signalCode) ? "exited" : "crashed";
+  }
+  if (exitCode === null || exitCode === 0) {
+    return "crashed";
+  }
+  return exitCode < signalStatus || ownSignalStatuses.has(exitCode)
+    ? "exited"
+    : "crashed";
+};
+
+/**
+ * What the App is told when its call ended its own process: as for its
+ * memory, which is what V8 ends one for.
+ */
+const endedMessage =
+  "The App's code ended its sandbox's process, as V8 does at its heap limit.";
+
 /** For errors already handled where they're awaited. */
 const ignore = (): undefined => undefined;
 
@@ -573,7 +620,9 @@ const millisOf = (
 type Ending =
   | { kind: "answered"; status: number; body: Buffer }
   | { kind: "too_large" }
-  | { kind: "deadline" | "memory" | "cpu" | "abandoned" | "crashed" }
+  | {
+      kind: "deadline" | "memory" | "exited" | "cpu" | "abandoned" | "crashed";
+    }
   | { kind: "failed"; error: unknown }
   | { kind: "unreadable"; why: string };
 
@@ -938,7 +987,7 @@ class SandboxPool {
       return { kind: reason };
     }
     if (host.gone && !this.#stopping) {
-      return { kind: "crashed" };
+      return { kind: deathOf(host.child) };
     }
     if (reason === "unreadable") {
       return { kind: "unreadable", why: guard.unreadable() };
@@ -1075,6 +1124,11 @@ class SandboxPool {
           "memory",
           `The App's code used more than ${Math.round(this.#settings.memoryLimitBytes / MIB)} MiB of memory.`
         );
+        return;
+      }
+      case "exited": {
+        this.#counts.memory += 1;
+        verdict("memory", endedMessage);
         return;
       }
       case "cpu": {
@@ -1527,7 +1581,7 @@ class SandboxPool {
     // a process slow to go is still the crash it is (`exitWaitMs`).
     await waitForExit(host, exitWaitMs(endsAt));
     if (host.gone && !this.#stopping) {
-      return { kind: "crashed" };
+      return { kind: deathOf(host.child) };
     }
     return { kind: "answered", status: 101, body: Buffer.alloc(0) };
   }
@@ -1567,6 +1621,11 @@ class SandboxPool {
           "memory",
           `The App's code used more than ${Math.round(memoryLimitBytes / MIB)} MiB of memory.`
         );
+        return;
+      }
+      case "exited": {
+        this.#counts.memory += 1;
+        blame("memory", endedMessage);
         return;
       }
       case "crashed": {

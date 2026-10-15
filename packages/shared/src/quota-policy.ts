@@ -24,8 +24,9 @@ import { platformLimits } from "./platform-limits.ts";
  * models (core's model ledger, model-budgets.ts), the host calls its
  * attempts make, the attempts running at once in the client, for one
  * person and of one App, the steps waiting for a share, for one person and
- * of one App, how long one step waits, and the independent workflows one
- * person creates (core's workflow-resources.ts).
+ * of one App, how long one step waits, and the independent workflows and
+ * live triggers one person creates (core's workflow-resources.ts,
+ * trigger-resources.ts).
  */
 export const lowerableLimits = [
   "workflowSteps",
@@ -43,6 +44,7 @@ export const lowerableLimits = [
   "workflowQueuedPerPerson",
   "workflowQueuedPerApp",
   "workflowQueuedStepMs",
+  "triggerResourcesPerPerson",
 ] as const;
 
 export type LowerableLimit = (typeof lowerableLimits)[number];
@@ -80,6 +82,7 @@ export const quotaLimitsSchema = z.strictObject({
     workflowQueuedPerPerson: lowered("workflowQueuedPerPerson"),
     workflowQueuedPerApp: lowered("workflowQueuedPerApp"),
     workflowQueuedStepMs: lowered("workflowQueuedStepMs"),
+    triggerResourcesPerPerson: lowered("triggerResourcesPerPerson"),
   } satisfies Record<LowerableLimit, z.ZodType>),
 });
 
@@ -115,6 +118,7 @@ export const quotaPolicyOf = (
     workflowQueuedPerPerson: platformLimits.workflowQueuedPerPerson,
     workflowQueuedPerApp: platformLimits.workflowQueuedPerApp,
     workflowQueuedStepMs: platformLimits.workflowQueuedStepMs,
+    triggerResourcesPerPerson: platformLimits.triggerResourcesPerPerson,
   };
   if (configured === undefined) {
     return { generation: 0, limits };

@@ -15,8 +15,8 @@ import { runStatus } from "./workflows/runs.ts";
 
 // Workflows for a chat's code: `await env.workflows.runs("app-1",
 // "report")`. What the chat's person sees of them themselves
-// (agent-person.ts), of the workflows the agent may read: a permission's
-// object of its own. The agent sees runs' state here, never what a run
+// (agent-person.ts), of the Apps whose functions the agent may read
+// (`readsWorkflow`). The agent sees runs' state here, never what a run
 // returned or its error's words: those hold what the run read through its
 // App's connections and collections, which the chat has no permission
 // for, and whose restricted mode it doesn't share; of a restricted App's
@@ -26,15 +26,20 @@ import { runStatus } from "./workflows/runs.ts";
 // report, attached with the App's sources and restricted mode
 // (run-fixes.ts).
 
-/** Whether the agent may read workflow `workflow` of App `app`. */
+/**
+ * Whether the agent may read the runs of App `app`'s workflows: those of
+ * an App whose functions it may read (`read` on the App). A permission's
+ * workflow object is an independent workflow resource
+ * (workflow-resources.ts), never a workflow inside an App, so an App's
+ * workflows are read as part of the App.
+ */
 const readsWorkflow =
-  (app: unknown, workflow: unknown) =>
+  (app: unknown, _workflow?: unknown) =>
   (permissions: Permission[]): boolean =>
     permissions.some(
       ({ object, actions }) =>
-        object.type === "workflow" &&
+        object.type === "app" &&
         object.appId === app &&
-        object.workflowId === workflow &&
         actions.includes("read")
     );
 
@@ -175,7 +180,8 @@ interface WorkflowRun {
   workflow: string;
   /** The App version it runs. */
   version: number;
-  status: "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
+  /** queued: waiting for a share of the attempts that run at once, not a fault. */
+  status: "queued" | "running" | "waiting" | "paused" | "completed" | "failed" | "cancelled";
   /** A person started it, or a trigger did. */
   startedBy: { type: "person"; userId: string } | { type: "trigger" };
   createdAt: string;

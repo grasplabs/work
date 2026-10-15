@@ -23,6 +23,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { holderName } from "../activity/pending.tsx";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate, formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
@@ -71,7 +72,7 @@ const holderOf = (
     ? i18n._(
         msg`Engine ${ph({ engine: appNames.get(subject.appId) ?? subject.appId })}`
       )
-    : i18n._(msg`Agent ${ph({ agent: subject.agentId })}`);
+    : holderName(subject);
 
 const HolderItem = ({
   permission,

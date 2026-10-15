@@ -1,13 +1,17 @@
 import type { CatalogContract } from "@grasp-os/open-workflow/catalog";
 import type { Diagnostic } from "@grasp-os/open-workflow/diagnostics";
+import {
+  generatedPath,
+  sensitiveReads,
+} from "@grasp-os/open-workflow/generate";
 import { profileLimits } from "@grasp-os/open-workflow/limits";
 import { validateWorkflow } from "@grasp-os/open-workflow/validate";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, auditDetailMaxKeys } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import {
   canBuild,
   isAdmin,
@@ -15,6 +19,8 @@ import {
   roleErrors,
 } from "@grasp-os/shared/roles";
 import {
+  catalogBindingKinds,
+  catalogKeySchema,
   workflowNameSchema,
   workflowNamespace,
   workflowPublishSchema,
@@ -23,6 +29,7 @@ import {
   workflowMemberSchema,
 } from "@grasp-os/shared/workflow-resources";
 import type {
+  CatalogBindingKind,
   WorkflowDefinitionProblem,
   WorkflowMember,
   WorkflowResource,
@@ -30,15 +37,28 @@ import type {
   WorkflowRole,
   WorkflowBinders,
   WorkflowVersionBinding,
+  WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
 import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
-import { and, asc, desc, eq, exists, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNull,
+  or,
+  sql,
+} from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
 import {
+  sdkReleasePins,
   sdkResourceBindings,
   workflowResourceMembers,
   workflowResources,
@@ -53,6 +73,18 @@ import {
   stillMembers,
 } from "./sharing.ts";
 import type { MemberRef } from "./sharing.ts";
+import {
+  buildOf,
+  buildSummary,
+  compileWorkflow,
+  loadWorkflowBuild,
+  adoptReservations,
+  publicationReservation,
+  releaseBuild,
+  storeBuild,
+} from "./workflow-builds.ts";
+import type { CompiledBuild, SealedBuild } from "./workflow-builds.ts";
+import { resolveCatalogKeys } from "./workflow-catalog.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
 // Independent workflows (platform specification 3, 13.2, 15, 16 and 24):
@@ -100,6 +132,10 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   other content is refused (`workflow.version_exists`), and with the
 //   same content answers the version already published, so a retried
 //   publication is the same publication.
+// - A version running other code than its definition's. Publication
+//   generates SDK TypeScript from the checked definition, compiles it and
+//   seals it into the version's manifest, by hash (workflow-builds.ts):
+//   what a version runs is fixed with it, and nothing compiles later.
 // - Two publications racing. A publication names the current version it
 //   built on; its batch inserts the version only while that is still the
 //   current one and the workflow is live, and moves the current version in
@@ -127,6 +163,28 @@ import { quotaPolicy } from "./workflows/quotas.ts";
 //   bindings differ from the current version's (`role.forbidden`). They
 //   may read definitions and publish versions that bind nothing new, as
 //   for Apps.
+
+/**
+ * Moves workflow `id`'s policy generation on, for a batch that changes who
+ * may start or follow it: a start admitted under the generation before is
+ * refused (workflow-starts.ts).
+ */
+export const nextGeneration = (
+  db: ReturnType<typeof drizzle>,
+  id: string,
+  landed?: SQL
+) =>
+  db
+    .update(workflowResources)
+    .set({ policyGeneration: sql`${workflowResources.policyGeneration} + 1` })
+    .where(and(eq(workflowResources.id, id), landed));
+
+/**
+ * That the batch's previous statement changed a row, as SQL: for the
+ * statement right after a write, which then changes a row only if the
+ * write did, so the one after it can ask the same (`outboxedIfChanged`).
+ */
+export const previousChanged = sql`changes() > 0`;
 
 /** The audit log's target type of a workflow resource. */
 const targetType = "workflow_resource";
@@ -219,9 +277,11 @@ const liveWorkflow = async (
 /**
  * The live workflow `id` and `by`'s role in it, which must be `needed` or
  * more: a workflow they have no role in is `workflow.resource_unavailable`,
- * as one that doesn't exist; too low a role is `role.forbidden`.
+ * as one that doesn't exist; too low a role is `role.forbidden`. Whom it
+ * is shared with is read now; `by`'s role and teams are their identity as
+ * read for this call.
  */
-const accessible = async (
+export const requireWorkflowRole = async (
   env: Env,
   by: Acting,
   id: unknown,
@@ -330,7 +390,7 @@ export const getWorkflowResource = async (
   by: Acting,
   id: unknown
 ): Promise<WorkflowResource> => {
-  const workflow = await accessible(env, by, id, "user");
+  const workflow = await requireWorkflowRole(env, by, id, "user");
   return resourceOf(workflow, workflow.role);
 };
 
@@ -385,15 +445,31 @@ const workflowContractKey =
 /** At most this many workflow contracts are looked up for one definition. */
 const maxWorkflowBindings = 64;
 
-/** A binding as publication resolved it: every field known. */
-interface PinnedBinding {
-  alias: string;
-  kind: "workflow";
-  resourceId: string;
-  resourceVersion: number;
-  contractId: string;
-  fingerprint: string;
-}
+/**
+ * A binding as publication resolved it: another workflow's exact version,
+ * or a host catalog contract by its key and fingerprint, whose serving
+ * resource an approval names (workflow-bindings.ts).
+ */
+export type PinnedBinding =
+  | {
+      alias: string;
+      kind: "workflow";
+      resourceId: string;
+      resourceVersion: number;
+      contractId: string;
+      fingerprint: string;
+    }
+  | {
+      alias: string;
+      kind: CatalogBindingKind;
+      resourceId: null;
+      resourceVersion: null;
+      contractId: string;
+      fingerprint: string;
+    };
+
+/** At most this many catalog contracts are looked up for one definition. */
+const maxCatalogBindings = 64;
 
 /**
  * The most a version's contract and manifest may each take as text: with
@@ -446,6 +522,11 @@ const workflowBindingSchema = z.object({
   contract: z.string().regex(workflowContractKey),
 });
 
+const catalogBindingSchema = z.object({
+  kind: z.enum(catalogBindingKinds),
+  contract: catalogKeySchema,
+});
+
 /** The labels and sensitivity a checked definition gives its parameters. */
 const declaredParamsSchema = z.object({
   document: z.object({
@@ -463,32 +544,43 @@ const declaredParamsSchema = z.object({
 });
 
 /**
- * The workflow contract keys a definition's bindings name, read from its
- * text only to know what to look up before validation: what validation
- * then resolves through the catalog is all that counts. Text that isn't
- * JSON names none, and validation refuses it.
+ * The contract keys a definition's bindings name, workflow contracts and
+ * host catalog ones apart, read from its text only to know what to look up
+ * before validation: what validation then resolves through the catalog is
+ * all that counts. Text that isn't JSON names none, and validation
+ * refuses it.
  */
-const namedWorkflowKeys = (definition: string): string[] => {
+const namedKeys = (
+  definition: string
+): { workflows: string[]; catalog: string[] } => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(definition);
   } catch {
-    return [];
+    return { workflows: [], catalog: [] };
   }
   const declared = declaredBindingsSchema.safeParse(parsed);
   if (!declared.success) {
-    return [];
+    return { workflows: [], catalog: [] };
   }
-  const keys = new Set<string>();
+  const workflows = new Set<string>();
+  const catalog = new Set<string>();
   for (const binding of Object.values(
     declared.data.document.metadata.grasp.bindings
   )) {
     const workflow = workflowBindingSchema.safeParse(binding);
     if (workflow.success) {
-      keys.add(workflow.data.contract);
+      workflows.add(workflow.data.contract);
+    }
+    const contract = catalogBindingSchema.safeParse(binding);
+    if (contract.success) {
+      catalog.add(contract.data.contract);
     }
   }
-  return [...keys].slice(0, maxWorkflowBindings);
+  return {
+    workflows: [...workflows].slice(0, maxWorkflowBindings),
+    catalog: [...catalog].slice(0, maxCatalogBindings),
+  };
 };
 
 /**
@@ -626,10 +718,13 @@ const checkDefinition = async (
   checked: CheckedWorkflow;
   bindings: PinnedBinding[];
 }> => {
-  // Every workflow contract the definition names, resolved for `by`
-  // before validation, which looks contracts up as it goes.
+  // Every contract the definition names, resolved before validation,
+  // which looks contracts up as it goes: workflows for `by`, catalog
+  // contracts from the host catalog.
+  const named = namedKeys(definition);
+  const catalog = await resolveCatalogKeys(env, named.catalog);
   const resolved = new Map<string, ResolvedWorkflow>();
-  for (const key of namedWorkflowKeys(definition)) {
+  for (const key of named.workflows) {
     // oxlint-disable-next-line no-await-in-loop -- bounded, each a point lookup
     const found = await resolveWorkflowKey(env, by, key);
     if (found !== undefined) {
@@ -638,7 +733,7 @@ const checkDefinition = async (
   }
   const policy = await quotaPolicy(env);
   const result = await validateWorkflow(definition, {
-    catalog: (key) => resolved.get(key)?.contract,
+    catalog: (key) => resolved.get(key)?.contract ?? catalog.get(key)?.contract,
     ceilings: {
       maxSteps: policy.limits.workflowSteps,
       maxModelCalls: policy.limits.lineageModelRequests,
@@ -655,11 +750,39 @@ const checkDefinition = async (
   ) {
     throw workflowResourceErrors.create("workflow.identity_mismatch");
   }
+  // A run's output reaches whoever started it, who may only use the
+  // workflow: a sensitive parameter stays out of every expression until
+  // bindings that need one come (GRA-566).
+  const sensitive = sensitiveReads(checked);
+  if (sensitive.length > 0) {
+    throw definitionInvalid(
+      sensitive.map((read) => ({
+        code: "expression.sensitive_param",
+        message:
+          "An expression reads a sensitive parameter, or all parameters at once, which could pass its value on.",
+        pointer: read.pointer,
+        ...(read.taskId === undefined ? {} : { taskId: read.taskId }),
+        remedy: "Read only parameters that aren't sensitive, each by its name.",
+      }))
+    );
+  }
   const bindings: PinnedBinding[] = [];
   for (const [alias, binding] of checked.bindings) {
+    const contract = catalog.get(binding.contract);
+    if (binding.kind !== "workflow" && contract?.kind === binding.kind) {
+      bindings.push({
+        alias,
+        kind: contract.kind,
+        resourceId: null,
+        resourceVersion: null,
+        contractId: contract.key,
+        fingerprint: contract.fingerprint,
+      });
+      continue;
+    }
     const target = resolved.get(binding.contract);
-    // Validation resolved every binding it kept through the catalog,
-    // which holds workflow contracts alone.
+    // Validation resolved every binding it kept through the catalog: a
+    // workflow's or a catalog contract.
     if (binding.kind !== "workflow" || target === undefined) {
       throw new Error(`Binding ${alias} resolved outside the catalog`);
     }
@@ -676,6 +799,22 @@ const checkDefinition = async (
   return { checked, bindings };
 };
 
+/**
+ * The build version `version` of workflow `id` seals, from its manifest
+ * text (`workflow.version_corrupt` for one that seals none it can read).
+ */
+const sealedBuildOf = (
+  id: string,
+  version: number,
+  manifest: string
+): SealedBuild => {
+  try {
+    return buildOf(manifest);
+  } catch {
+    throw corrupt(id, version);
+  }
+};
+
 /** A version's row, as the registry answers it. */
 const versionOf = (
   row: typeof workflowResourceVersions.$inferSelect,
@@ -689,12 +828,15 @@ const versionOf = (
   contractHash: row.contractHash,
   manifestHash: row.manifestHash,
   bindings,
+  build: buildSummary(
+    sealedBuildOf(row.workflowResourceId, row.version, row.manifest)
+  ),
   author: row.authorId,
   createdAt: row.createdAt.toISOString(),
 });
 
-/** The workflow bindings of the versions of `id`, by version. */
-const bindingsOf = async (
+/** The bindings of the versions of `id`, by version. */
+export const bindingsOf = async (
   env: Env,
   id: string
 ): Promise<Map<number, PinnedBinding[]>> => {
@@ -704,21 +846,36 @@ const bindingsOf = async (
     .where(
       and(
         eq(sdkResourceBindings.resourceId, id),
-        eq(sdkResourceBindings.kind, "workflow")
+        inArray(sdkResourceBindings.kind, ["workflow", ...catalogBindingKinds])
       )
     )
     .orderBy(asc(sdkResourceBindings.alias));
   const byVersion = new Map<number, PinnedBinding[]>();
   for (const row of rows) {
+    // Filtered above: an App's store binding is never a workflow's.
+    if (row.kind === "store") {
+      continue;
+    }
     const list = byVersion.get(row.resourceVersion) ?? [];
-    list.push({
-      alias: row.alias,
-      kind: "workflow",
-      resourceId: row.targetId,
-      resourceVersion: row.targetVersion ?? 0,
-      contractId: row.contractId ?? "",
-      fingerprint: row.schemaHash,
-    });
+    list.push(
+      row.kind === "workflow"
+        ? {
+            alias: row.alias,
+            kind: "workflow",
+            resourceId: row.targetId,
+            resourceVersion: row.targetVersion ?? 0,
+            contractId: row.contractId ?? "",
+            fingerprint: row.schemaHash,
+          }
+        : {
+            alias: row.alias,
+            kind: row.kind,
+            resourceId: null,
+            resourceVersion: null,
+            contractId: row.targetId,
+            fingerprint: row.schemaHash,
+          }
+    );
     byVersion.set(row.resourceVersion, list);
   }
   return byVersion;
@@ -737,7 +894,7 @@ const visibleTo = async (
 ): Promise<Map<PinnedBinding, WorkflowVersionBinding>> => {
   const builds = new Map<string, boolean>();
   for (const { resourceId } of bindings) {
-    if (!builds.has(resourceId)) {
+    if (resourceId !== null && !builds.has(resourceId)) {
       // oxlint-disable-next-line no-await-in-loop -- one point lookup per bound workflow
       const target = await liveWorkflow(env, resourceId);
       const role =
@@ -749,7 +906,7 @@ const visibleTo = async (
   return new Map(
     bindings.map((binding) => [
       binding,
-      builds.get(binding.resourceId) === true
+      binding.resourceId === null || builds.get(binding.resourceId) === true
         ? binding
         : {
             alias: binding.alias,
@@ -761,6 +918,41 @@ const visibleTo = async (
           },
     ])
   );
+};
+
+/** A version's contract: its input, output and parameters. */
+export type VersionContract = StoredContract;
+
+/**
+ * The contract of version `version` of workflow `id`, checked against its
+ * hash (`workflow.version_corrupt` otherwise); undefined for a version it
+ * never published.
+ */
+export const versionContract = async (
+  env: Env,
+  id: string,
+  version: number
+): Promise<VersionContract | undefined> => {
+  const row = await drizzle(env.DB)
+    .select({
+      contract: workflowResourceVersions.contract,
+      contractHash: workflowResourceVersions.contractHash,
+    })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, id),
+        eq(workflowResourceVersions.version, version)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    return undefined;
+  }
+  if ((await sha256Hex(row.contract)) !== row.contractHash) {
+    throw corrupt(id, version);
+  }
+  return storedContractSchema.parse(JSON.parse(row.contract));
 };
 
 /** The version of `id` with semantic version `definitionVersion`, if any. */
@@ -851,6 +1043,8 @@ interface Publication {
   definition: string;
   definitionHash: string;
   bindings: PinnedBinding[];
+  /** What it runs: the code generated from it, compiled (workflow-builds.ts). */
+  compiled: CompiledBuild;
 }
 
 /**
@@ -864,7 +1058,7 @@ const writeVersion = async (
   by: Acting,
   publication: Publication
 ): Promise<WorkflowResourceVersion> => {
-  const { workflow, checked, definition, definitionHash, bindings } =
+  const { workflow, checked, definition, definitionHash, bindings, compiled } =
     publication;
   const contract = contractOf(checked);
   const contractText = canonicalJson(contract);
@@ -895,6 +1089,9 @@ const writeVersion = async (
     evaluatorHash: jqProvenance.sha256,
     contractHash,
     bindings: bindings.map((binding) => ({ ...binding })),
+    // What the version runs, sealed with it: its build's artifacts by
+    // hash, and its executable identity (workflow-builds.ts).
+    build: compiled.build,
     artifactTrust: "unreviewed",
   });
   if (bytesOf(manifest) > manifestMaxBytes) {
@@ -910,57 +1107,99 @@ const writeVersion = async (
   const manifestHash = await sha256Hex(manifest);
   const createdAt = new Date();
   const db = drizzle(env.DB);
-  await auditedBatch(env, db, [
-    db.insert(workflowResourceVersions).values({
-      // Only while the workflow is live and still at the version this
-      // publication built on: otherwise NULL, which fails the batch.
-      workflowResourceId: sql`(SELECT id FROM workflow_resources
+  // This publication's own reservations: another publishing the same
+  // version at once keeps its own, so neither gives back the other's.
+  const owner = publicationReservation(workflow.id);
+  try {
+    // Its build's bytes, reserved for this publication and stored, before
+    // the row that names them; inside the cleanup, so a store that fails
+    // halfway gives its reservations back too.
+    await storeBuild(env, { id: owner, version }, compiled);
+    await auditedBatch(env, db, [
+      db.insert(workflowResourceVersions).values({
+        // Only while the workflow is live and still at the version this
+        // publication built on: otherwise NULL, which fails the batch.
+        workflowResourceId: sql`(SELECT id FROM workflow_resources
         WHERE id = ${workflow.id} AND deleted_at IS NULL
           AND current_version IS ${workflow.currentVersion})`,
-      version,
-      definitionVersion,
-      definition,
-      definitionJsonHash: definitionHash,
-      profileVersion: checked.profile,
-      evaluatorHash: jqProvenance.sha256,
-      contract: contractText,
-      contractHash,
-      manifest,
-      manifestHash,
-      authorId: by.userId,
-      createdAt,
-    }),
-    db
-      .update(workflowResources)
-      .set({ currentVersion: version })
-      .where(eq(workflowResources.id, workflow.id)),
-    ...bindings.map((binding) =>
-      db.insert(sdkResourceBindings).values({
-        resourceId: workflow.id,
-        resourceVersion: version,
-        alias: binding.alias,
-        kind: "workflow" as const,
-        // Only while the target is live: otherwise NULL, which fails the
-        // batch, so a deletion and this binding never both land.
-        targetId: sql`(SELECT id FROM workflow_resources
-          WHERE id = ${binding.resourceId} AND deleted_at IS NULL)`,
-        targetVersion: binding.resourceVersion,
-        contractId: binding.contractId,
-        schemaHash: binding.fingerprint,
-        manifestHash,
-      })
-    ),
-    outboxed(
-      db,
-      entry(by, "workflow.version.published", workflow.id, {
         version,
         definitionVersion,
-        definitionHash,
+        definition,
+        definitionJsonHash: definitionHash,
+        profileVersion: checked.profile,
+        evaluatorHash: jqProvenance.sha256,
+        contract: contractText,
         contractHash,
-        manifestHash,
-      })
-    ),
-  ]);
+        manifest,
+        // The hash only while every artifact its build names is reserved for
+        // this publication: otherwise NULL, which the column refuses, and
+        // the whole publication with it. So no sweep deletes bytes a version
+        // names (release-retention.ts).
+        manifestHash: sql`(SELECT ${manifestHash} WHERE NOT EXISTS (
+        SELECT 1 FROM json_each(${manifest}, '$.build.artifacts') AS named
+        WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts AS reserved
+          WHERE reserved.app_id = ${owner} AND reserved.version = ${version}
+            AND reserved.sha256 = json_extract(named.value, '$.sha256'))))`,
+        authorId: by.userId,
+        createdAt,
+      }),
+      // The version's from now on, as long as it is.
+      ...adoptReservations(db, owner, workflow.id, version),
+      db
+        .update(workflowResources)
+        .set({ currentVersion: version })
+        .where(eq(workflowResources.id, workflow.id)),
+      ...bindings.map((binding) =>
+        binding.kind === "workflow"
+          ? db.insert(sdkResourceBindings).values({
+              resourceId: workflow.id,
+              resourceVersion: version,
+              alias: binding.alias,
+              kind: "workflow" as const,
+              // Only while the target is live: otherwise NULL, which fails the
+              // batch, so a deletion and this binding never both land.
+              targetId: sql`(SELECT id FROM workflow_resources
+          WHERE id = ${binding.resourceId} AND deleted_at IS NULL)`,
+              targetVersion: binding.resourceVersion,
+              contractId: binding.contractId,
+              schemaHash: binding.fingerprint,
+              manifestHash,
+            })
+          : db.insert(sdkResourceBindings).values({
+              resourceId: workflow.id,
+              resourceVersion: version,
+              alias: binding.alias,
+              kind: binding.kind,
+              // A catalog contract, by its key: what serves it is an
+              // approval's (workflow-bindings.ts), never this row's.
+              targetId: binding.contractId,
+              targetVersion: null,
+              contractId: binding.contractId,
+              schemaHash: binding.fingerprint,
+              manifestHash,
+            })
+      ),
+      outboxed(
+        db,
+        entry(by, "workflow.version.published", workflow.id, {
+          version,
+          definitionVersion,
+          definitionHash,
+          contractHash,
+          manifestHash,
+        })
+      ),
+    ]);
+  } catch (error) {
+    // Not written: what this publication reserved goes back, and only
+    // that: another's, and a saved version's, stay.
+    try {
+      await releaseBuild(env, { id: owner, version }, compiled);
+    } catch (releaseError) {
+      log.warn("workflow.build_release_failed", errorFields(releaseError));
+    }
+    throw error;
+  }
   return {
     resourceId: workflow.id,
     version,
@@ -970,6 +1209,7 @@ const writeVersion = async (
     contractHash,
     manifestHash,
     bindings,
+    build: buildSummary(compiled.build),
     author: by.userId,
     createdAt: createdAt.toISOString(),
   };
@@ -1022,7 +1262,7 @@ const publish = async (
   id: unknown,
   input: unknown
 ): Promise<WorkflowResourceVersion> => {
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   const { definition, basedOn } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     publishSchema,
@@ -1066,6 +1306,8 @@ const publish = async (
   if (basedOn !== workflow.currentVersion) {
     throw workflowResourceErrors.create("workflow.version_conflict");
   }
+  // Generated and built once, here: no start or resume compiles anything.
+  const compiled = await compileWorkflow(env, checked, definition);
   try {
     return await writeVersion(env, by, {
       workflow,
@@ -1073,8 +1315,15 @@ const publish = async (
       definition,
       definitionHash,
       bindings,
+      compiled,
     });
   } catch (error) {
+    if (notNullFailed(error, "workflow_resource_versions.manifest_hash")) {
+      // A reservation of its build went before the row could name it,
+      // which only a publication stalled past the sweep's grace sees:
+      // publishing again reserves afresh.
+      throw workflowResourceErrors.create("workflow.version_conflict");
+    }
     if (
       notNullFailed(error, "workflow_resource_versions.workflow_resource_id")
     ) {
@@ -1135,7 +1384,7 @@ export const workflowVersions = async (
   by: Acting,
   id: unknown
 ): Promise<WorkflowResourceVersion[]> => {
-  const workflow = await accessible(env, by, id, "user");
+  const workflow = await requireWorkflowRole(env, by, id, "user");
   const rows = await drizzle(env.DB)
     .select()
     .from(workflowResourceVersions)
@@ -1163,7 +1412,7 @@ export const workflowDefinition = async (
   id: unknown,
   version: unknown
 ): Promise<string> => {
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   if (typeof version !== "number" || !Number.isSafeInteger(version)) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
@@ -1198,6 +1447,46 @@ export const workflowDefinition = async (
 };
 
 /**
+ * The portable source of version `version` of workflow `id`, for its
+ * builders: its definition exactly as published (`workflowDefinition`'s
+ * checks) and, for an executable version, the SDK TypeScript generated
+ * from it, read back from its sealed build with every hash checked. It
+ * goes one way: a version is only ever published from a definition, so
+ * edited generated code never comes back as one.
+ */
+export const workflowSource = async (
+  env: Env,
+  by: Acting,
+  id: unknown,
+  version: unknown
+): Promise<WorkflowVersionSource> => {
+  const definition = await workflowDefinition(env, by, id, version);
+  // Both checked by `workflowDefinition`: a workflow `by` builds, and a
+  // version it published.
+  const workflowId = String(id);
+  const number = Number(version);
+  const row = await drizzle(env.DB)
+    .select({ manifest: workflowResourceVersions.manifest })
+    .from(workflowResourceVersions)
+    .where(
+      and(
+        eq(workflowResourceVersions.workflowResourceId, workflowId),
+        eq(workflowResourceVersions.version, number)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw workflowResourceErrors.create("workflow.version_not_found");
+  }
+  const files: Record<string, string> = { "workflow.json": definition };
+  if (sealedBuildOf(workflowId, number, row.manifest).executable) {
+    const build = await loadWorkflowBuild(env, workflowId, number);
+    files[generatedPath] = build.source;
+  }
+  return { files };
+};
+
+/**
  * Shares workflow `id` with a person or team in a role, for `by`, who must
  * build it and isn't Grasp staff: never with its owner; as a builder, only
  * with someone whose organization role builds. Sharing again changes the
@@ -1210,7 +1499,7 @@ export const shareWorkflowResource = async (
   input: unknown
 ): Promise<void> => {
   requireNotStaff(by);
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   const { role, ...member } = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowShareSchema,
@@ -1254,6 +1543,9 @@ export const shareWorkflowResource = async (
           AND EXISTS (SELECT 1 FROM workflow_resources
             WHERE id = ${workflow.id} AND deleted_at IS NULL)`,
       }),
+    // Only when the share changed something (a role the member already
+    // has changes nothing): a start decided meanwhile is still good.
+    nextGeneration(db, workflow.id, previousChanged),
     outboxedIfChanged(
       db,
       memberEntry(
@@ -1288,7 +1580,7 @@ export const unshareWorkflowResource = async (
   input: unknown
 ): Promise<void> => {
   requireNotStaff(by);
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   const member: MemberRef = workflowResourceErrors.parse(
     "workflow.resource_invalid",
     workflowMemberSchema,
@@ -1311,6 +1603,7 @@ export const unshareWorkflowResource = async (
   }
   await auditedBatch(env, db, [
     db.delete(workflowResourceMembers).where(ofMember),
+    nextGeneration(db, workflow.id, previousChanged),
     outboxedIfChanged(
       db,
       memberEntry(
@@ -1333,7 +1626,7 @@ export const workflowMembers = async (
   by: Acting,
   id: unknown
 ): Promise<WorkflowMember[]> => {
-  const workflow = await accessible(env, by, id, "user");
+  const workflow = await requireWorkflowRole(env, by, id, "user");
   const rows = await drizzle(env.DB)
     .select()
     .from(workflowResourceMembers)
@@ -1357,23 +1650,87 @@ export const workflowMembers = async (
   }));
 };
 
-/** At most this many binders are named in a refused deletion's event. */
-const maxNamedBinders = 20;
+/**
+ * `counts` and as many of `groups` as fit beside them in one audit event's
+ * detail (`auditDetailMaxKeys` fields in all), each group's fields named
+ * with its place in its list (`binder1`, `trigger3`, `appBinding2` and
+ * `app2`), earlier lists first. The counts always say how many there are.
+ */
+const namedWithin = (
+  counts: Record<string, string | number>,
+  lists: readonly Record<string, string>[][]
+): Record<string, string | number> => {
+  let room = auditDetailMaxKeys - Object.keys(counts).length;
+  const named: Record<string, string> = {};
+  for (const list of lists) {
+    for (const [index, group] of list.entries()) {
+      const fields = Object.entries(group);
+      if (fields.length > room) {
+        return { ...counts, ...named };
+      }
+      for (const [field, value] of fields) {
+        named[`${field}${index + 1}`] = value;
+      }
+      room -= fields.length;
+    }
+  }
+  return { ...counts, ...named };
+};
 
 /**
- * That the current version of another live workflow binds `id`, as SQL.
- * Only the current version counts: an older, immutable version can't keep
- * a workflow from ever being deleted. Versions pinned by live runs, App
- * bindings and rollback targets come with starts and App bindings, and
- * will count here then.
+ * The triggers that may start `id`, as SQL rows of their IDs: live,
+ * enabled, their current version pinning `id`, and holding an active
+ * `start` grant on it. A trigger that can't start it pins nothing.
+ */
+const pinningTriggersSql = (id: string) => sql`SELECT trigger.id AS id
+    FROM trigger_resources AS trigger
+    JOIN trigger_resource_versions AS pinned
+      ON pinned.trigger_id = trigger.id AND pinned.version = trigger.current_version
+    WHERE pinned.workflow_resource_id = ${id} AND trigger.deleted_at IS NULL
+      AND trigger.enabled = 1
+      AND EXISTS (SELECT 1 FROM permissions AS allowed
+        WHERE allowed.subject_type = 'trigger' AND allowed.subject_id = trigger.id
+          AND allowed.object_type = 'workflow' AND allowed.object_id = ${id}
+          AND allowed.status = 'active'
+          AND EXISTS (SELECT 1 FROM json_each(allowed.actions) WHERE value = 'start'))`;
+
+/**
+ * The App bindings that may start a version of `id`, as SQL rows of each
+ * binding's ID and its App's: active, their App holding an active `start`
+ * grant on it. A binding grants nothing, so one whose App can't start it
+ * pins nothing: no builder of some App keeps a workflow from being deleted
+ * by binding it.
+ */
+const pinningAppsSql = (id: string) => sql`SELECT pinned.id AS id,
+      pinned.app_id AS app
+    FROM app_workflow_bindings AS pinned
+    WHERE pinned.workflow_resource_id = ${id} AND pinned.status = 'active'
+      AND EXISTS (SELECT 1 FROM permissions AS allowed
+        WHERE allowed.subject_type = 'app' AND allowed.subject_id = pinned.app_id
+          AND allowed.object_type = 'workflow' AND allowed.object_id = ${id}
+          AND allowed.status = 'active'
+          AND EXISTS (SELECT 1 FROM json_each(allowed.actions) WHERE value = 'start'))`;
+
+/**
+ * That something still pins a version of `id`, as SQL: the current version
+ * of another live workflow binds it, a live trigger's current version
+ * starts it, or an active App binding whose App may start it pins one of
+ * its versions. Runs of independent workflows don't exist yet: what keeps
+ * a version alive while one runs comes with them. Only another workflow's
+ * current version counts, so an
+ * older, immutable version can't keep a workflow from ever being deleted;
+ * a workflow has no rollback of its own, and an App rolls back to a
+ * binding by binding it again, so a removed App binding pins nothing.
  */
 const boundSql = (
   id: string
-) => sql`EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
+) => sql`(EXISTS (SELECT 1 FROM sdk_resource_bindings AS bound
     JOIN workflow_resources AS binder ON binder.id = bound.resource_id
     WHERE bound.kind = 'workflow' AND bound.target_id = ${id}
       AND bound.resource_version = binder.current_version
-      AND binder.id <> ${id} AND binder.deleted_at IS NULL)`;
+      AND binder.id <> ${id} AND binder.deleted_at IS NULL)
+  OR EXISTS (${pinningTriggersSql(id)})
+  OR EXISTS (${pinningAppsSql(id)}))`;
 
 /** The live workflows whose current version binds `id`. */
 const bindersOf = async (env: Env, id: string): Promise<Live[]> =>
@@ -1420,12 +1777,15 @@ export const deleteWorkflowResource = async (
   id: unknown
 ): Promise<void> => {
   requireNotStaff(by);
-  const workflow = await accessible(env, by, id, "builder");
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
   const db = drizzle(env.DB);
   const [deleted] = await auditedBatch(env, db, [
     db
       .update(workflowResources)
-      .set({ deletedAt: new Date() })
+      .set({
+        deletedAt: new Date(),
+        policyGeneration: sql`${workflowResources.policyGeneration} + 1`,
+      })
       .where(
         and(
           eq(workflowResources.id, workflow.id),
@@ -1435,6 +1795,18 @@ export const deleteWorkflowResource = async (
       )
       .returning({ id: workflowResources.id }),
     outboxedIfChanged(db, entry(by, "workflow.deleted", workflow.id)),
+    // The releases its approvals kept (workflow-bindings.ts) go back to
+    // their retention once it is deleted.
+    db.delete(sdkReleasePins).where(
+      and(
+        eq(sdkReleasePins.holderKind, "approval"),
+        sql`${sdkReleasePins.holderId} IN (SELECT approval.id
+          FROM workflow_binding_approvals AS approval
+          JOIN workflow_resources AS workflow ON workflow.id = approval.workflow_resource_id
+          WHERE approval.workflow_resource_id = ${workflow.id}
+            AND workflow.deleted_at IS NOT NULL)`
+      )
+    ),
   ]);
   if (deleted.length > 0) {
     return;
@@ -1443,19 +1815,34 @@ export const deleteWorkflowResource = async (
     throw unavailable();
   }
   const binders = await bindersOf(env, workflow.id);
-  const named = Object.fromEntries(
-    binders
-      .slice(0, maxNamedBinders)
-      .map((binder, index) => [`binder${index + 1}`, binder.id])
+  const triggerRows = await drizzle(env.DB).all<{ id: string }>(
+    sql`${pinningTriggersSql(workflow.id)} ORDER BY trigger.id`
+  );
+  const triggers = triggerRows.map(({ id: trigger }) => trigger);
+  const appBindings = await drizzle(env.DB).all<{ id: string; app: string }>(
+    sql`${pinningAppsSql(workflow.id)} ORDER BY pinned.app_id, pinned.id`
   );
   await auditedBatch(env, db, [
     outboxed(
       db,
-      entry(by, "workflow.delete_refused", workflow.id, {
-        reason: "workflow.resource_bound",
-        binders: binders.length,
-        ...named,
-      })
+      entry(
+        by,
+        "workflow.delete_refused",
+        workflow.id,
+        namedWithin(
+          {
+            reason: "workflow.resource_bound",
+            binders: binders.length,
+            triggers: triggers.length,
+            appBindings: appBindings.length,
+          },
+          [
+            binders.map(({ id: binder }) => ({ binder })),
+            triggers.map((trigger) => ({ trigger })),
+            appBindings.map(({ id: appBinding, app }) => ({ appBinding, app })),
+          ]
+        )
+      )
     ),
   ]);
   const visible: WorkflowBinders["binders"] = [];
@@ -1468,9 +1855,20 @@ export const deleteWorkflowResource = async (
   const details: WorkflowBinders = {
     binders: visible,
     hidden: binders.length - visible.length,
+    // A workflow's builders manage every trigger that starts it
+    // (trigger-resources.ts), and only they delete it: they see them all.
+    triggers: { ids: triggers, hidden: 0 },
+    // And remove any App binding to it (app-workflow-bindings.ts): they
+    // see them all, with their Apps.
+    appBindings: appBindings.map(({ id: binding, app }) => ({
+      id: binding,
+      app,
+    })),
   };
   throw workflowResourceErrors.create("workflow.resource_bound", {
     binders: details.binders,
     hidden: details.hidden,
+    triggers: details.triggers,
+    appBindings: details.appBindings,
   });
 };
