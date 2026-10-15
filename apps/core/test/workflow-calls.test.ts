@@ -1742,6 +1742,36 @@ describe("a run's host, against a forged module's calls", () => {
     }).toStrictEqual({ transformed: "ok", raw: "workflow.invalid" });
   });
 
+  it("waits for a deadline the module left resolving before its attempt ends", async () => {
+    const by = await person("builder");
+    const { workflow } = await published(by, {
+      tasks: [
+        {
+          later: {
+            call: "grasp.sleepUntil",
+            with: { timestamp: "${ $workflow.startedAt + 60000 }" },
+          },
+        },
+        { finish: { set: { status: "done" } } },
+      ],
+    });
+    const settledFirst: string[] = [];
+    const leftRunning: Promise<unknown>[] = [];
+    const host = await hostOf(by, workflow.id);
+    await host.do("enter:later", adaData, async (attempt) => {
+      leftRunning.push(
+        attempt.until(adaFrame).then((until) => {
+          settledFirst.push("until");
+          return codeOf(until);
+        })
+      );
+      return await Promise.resolve({ ok: true, value: { output: null } });
+    });
+    settledFirst.push("attempt");
+    await Promise.all(leftRunning);
+    expect(settledFirst).toStrictEqual(["until", "attempt"]);
+  });
+
   it("sleeps only until the deadline its task's enter step resolved and recorded", async () => {
     const by = await person("builder");
     const { workflow } = await published(by, {

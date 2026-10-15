@@ -917,8 +917,16 @@ export class ResourceRunHost
                     evaluate: async (slot, frame) =>
                       await this.#evaluate(attempt, slot, frame),
                     check: (which, value) => this.#check(attempt, which, value),
-                    call: async (frame) => await this.#call(attempt, frame),
-                    until: async (frame) => await this.#until(attempt, frame),
+                    call: async (frame) =>
+                      await ResourceRunHost.#tracked(
+                        attempt,
+                        this.#call(attempt, frame)
+                      ),
+                    until: async (frame) =>
+                      await ResourceRunHost.#tracked(
+                        attempt,
+                        this.#until(attempt, frame)
+                      ),
                   })
                 )
               : Promise.reject(cpuLimitKill());
@@ -1291,19 +1299,31 @@ export class ResourceRunHost
     }
   }
 
+  /**
+   * `work` of `attempt`, among its work under way until it settles: its
+   * fuel goes back only once all of it has, so nothing the isolate left
+   * running (an evaluation, or a call or deadline the host builds from
+   * expressions) spends after.
+   */
+  static async #tracked<T>(attempt: StepAttempt, work: Promise<T>): Promise<T> {
+    attempt.pending.add(work);
+    try {
+      return await work;
+    } finally {
+      attempt.pending.delete(work);
+    }
+  }
+
   /** `ResourceAttemptHost.evaluate`, for `attempt`. */
   async #evaluate(
     attempt: StepAttempt,
     slot: unknown,
     frame: unknown
   ): Promise<Settled<Json>> {
-    const evaluating = this.#evaluating(attempt, slot, frame);
-    attempt.pending.add(evaluating);
-    try {
-      return await evaluating;
-    } finally {
-      attempt.pending.delete(evaluating);
-    }
+    return await ResourceRunHost.#tracked(
+      attempt,
+      this.#evaluating(attempt, slot, frame)
+    );
   }
 
   /** `#evaluate`'s work. */
