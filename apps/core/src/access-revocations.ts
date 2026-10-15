@@ -1,10 +1,14 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { appMembers, teamMembers } from "./db/core/schema.ts";
+import {
+  accessRevocations,
+  appMembers,
+  teamMembers,
+} from "./db/core/schema.ts";
 import { inList } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
 
@@ -34,6 +38,33 @@ const toldAtOnce = 16;
 const retryDelaysMs = [100, 500] as const;
 
 /**
+ * Keeps a revocation `app`'s host couldn't be told of, for the cron
+ * trigger to tell it again (`retryAccessRevocations`). A database away
+ * too is logged: the screens then fall back on the check before each push.
+ */
+const keepForLater = async (
+  env: Env,
+  app: AppId,
+  userIds: readonly string[] | null
+): Promise<void> => {
+  try {
+    await drizzle(env.DB)
+      .insert(accessRevocations)
+      .values({
+        id: crypto.randomUUID(),
+        appId: app,
+        userIds: userIds === null ? null : [...userIds],
+        createdAt: new Date(),
+      });
+  } catch (error) {
+    log.error("app.access_revocation_lost", {
+      appId: app,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
  * Tells `app`'s host, trying again after `retryDelaysMs` while it can't
  * be reached. A host that restarted meanwhile let go of every connection
  * it held, and each of those looks again on its own (query-subscriptions.ts).
@@ -55,6 +86,8 @@ const tellHost = async (
           appId: app,
           ...errorFields(error),
         });
+        // oxlint-disable-next-line no-await-in-loop -- the last attempt, then out
+        await keepForLater(env, app, userIds);
         return;
       }
       // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
@@ -65,11 +98,9 @@ const tellHost = async (
 
 /**
  * Tells the hosts of `apps` that `userIds` (everyone, when `null`) may
- * have lost their role in them. Best effort, after the change committed:
- * a host that still can't be reached after its retries is logged, and its
- * screens fall back on the check before each push (query-subscriptions.ts).
- * A durable outbox for these is a follow-up; no periodic recheck (spec
- * 11.4).
+ * have lost their role in them, after the change committed. A host that
+ * still can't be reached after its retries is told again by the cron
+ * trigger (`retryAccessRevocations`). No periodic recheck (spec 11.4).
  */
 export const accessMayHaveDropped = async (
   env: Env,
@@ -82,6 +113,65 @@ export const accessMayHaveDropped = async (
     await Promise.all(
       pending.slice(at, at + toldAtOnce).map(async (app) => {
         await tellHost(env, app, userIds);
+      })
+    );
+  }
+};
+
+/** Most kept revocations one run of the cron trigger tells. */
+const retriedAtOnce = 100;
+
+/**
+ * How many runs of the cron trigger (one a minute) a kept revocation is
+ * told again for: a day. One whose host is away longer is logged and
+ * dropped; the screens then fall back on the check before each push.
+ */
+const maxRetries = 24 * 60;
+
+/** Tells one kept revocation again: dropped once taken, or past its retries. */
+const retryOne = async (
+  env: Env,
+  row: typeof accessRevocations.$inferSelect
+): Promise<void> => {
+  const db = drizzle(env.DB);
+  const app = appIdSchema.parse(row.appId);
+  const drop = db
+    .delete(accessRevocations)
+    .where(eq(accessRevocations.id, row.id));
+  try {
+    await appHost(env, app).accessRevoked(row.userIds);
+    await drop;
+  } catch (error) {
+    if (row.attempts + 1 < maxRetries) {
+      await db
+        .update(accessRevocations)
+        .set({ attempts: sql`${accessRevocations.attempts} + 1` })
+        .where(eq(accessRevocations.id, row.id));
+      return;
+    }
+    log.error("app.access_revocation_lost", {
+      appId: app,
+      ...errorFields(error),
+    });
+    await drop;
+  }
+};
+
+/**
+ * Tells the hosts again of the revocations they couldn't be told of
+ * (`keepForLater`), oldest first. The cron trigger runs it every minute.
+ */
+export const retryAccessRevocations = async (env: Env): Promise<void> => {
+  const kept = await drizzle(env.DB)
+    .select()
+    .from(accessRevocations)
+    .orderBy(asc(accessRevocations.createdAt))
+    .limit(retriedAtOnce);
+  for (let at = 0; at < kept.length; at += toldAtOnce) {
+    // oxlint-disable-next-line no-await-in-loop -- a few hosts at a time
+    await Promise.all(
+      kept.slice(at, at + toldAtOnce).map(async (row) => {
+        await retryOne(env, row);
       })
     );
   }

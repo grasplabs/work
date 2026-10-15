@@ -29,6 +29,7 @@ import { sessionRecheckMs } from "../src/session-check.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { storeMaxWatches } from "../src/store-watches.ts";
 import { pastAccessRecheck, requestGranted } from "./apps.ts";
+import { runCron } from "./cron.ts";
 import { mockIdp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
 import { apiOf, notesFiles as files, referenceTo } from "./notes-client-app.ts";
@@ -2353,6 +2354,42 @@ const flakyDb = (failing: RegExp) => {
   };
 };
 
+/**
+ * The App hosts' namespace as a connection that can't reach them to tell
+ * of a revocation sees it: every `accessRevoked` fails, anything else
+ * goes through.
+ */
+const unreachableRevocations = (namespace: Env["APPS"]): Env["APPS"] =>
+  new Proxy(namespace, {
+    get: (target, property): unknown => {
+      if (property === "getByName") {
+        return (name: string) =>
+          new Proxy(target.getByName(name), {
+            get: (stub, method): unknown => {
+              if (method === "accessRevoked") {
+                return async () => {
+                  await Promise.resolve();
+                  throw new Error("The App's host can't be reached.");
+                };
+              }
+              const value: unknown = Reflect.get(stub, method);
+              if (typeof value !== "function") {
+                return value;
+              }
+              const bound: unknown = value.bind(stub);
+              return bound;
+            },
+          });
+      }
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
+
 /** A cleared screen: its last push a refusal, and core let go of it. */
 const refusedAndLetGo = { last: "app.not_found", released: true };
 
@@ -2860,6 +2897,25 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       removed: await outcome(session.members.remove(removed.userId)),
       lowered: await outcome(session.members.setRole(lowered.userId, "user")),
     }).toStrictEqual({ removed: "ok", lowered: "ok" });
+  });
+
+  it("tells an App's host later, from the cron trigger, when it can't be reached when access drops", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+    // The builder's own connection, whose word to the App's host that
+    // access dropped never arrives.
+    const { core } = await openRpc(opened.cookie, {
+      coreEnv: { ...env, APPS: unreachableRevocations(env.APPS) },
+    });
+
+    await core.authenticate().apps.members.remove(opened.app, them);
+    await scheduler.wait(1500);
+    const before = follower.state.released;
+    await runCron();
+
+    expect(before).toBeFalsy();
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
   it("clears the screen of someone removed who reached the App through a team, even when looking up their Apps fails", async () => {

@@ -422,6 +422,22 @@ export const apps = sqliteTable("apps", {
 });
 
 /**
+ * Revocations an App's host couldn't be told of (src/access-revocations.ts):
+ * told again by the cron trigger until it takes them, so a host away for
+ * longer than its retries still clears the screens of whoever lost a
+ * role. `user_ids` is null for everyone the host knows of.
+ */
+export const accessRevocations = sqliteTable("access_revocations", {
+  id: text().primaryKey(),
+  appId: text("app_id")
+    .notNull()
+    .references(() => apps.id, { onDelete: "cascade" }),
+  userIds: text("user_ids", { mode: "json" }).$type<string[] | null>(),
+  attempts: integer().notNull().default(0),
+  createdAt: timestamp("created_at").notNull(),
+});
+
+/**
  * Whom each App is shared with (src/app-access.ts): a person
  * (`member_type` `person`, `member_id` their user ID) or a team, with their
  * role in it. Sharing again changes the role; unsharing deletes the row.
