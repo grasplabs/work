@@ -948,13 +948,13 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     // cost two full pages, which the Load More pays up front.
     const now = Date.now();
     vi.useFakeTimers({ toFake: ["Date"], now });
-    for (let request = 0; request < 40; request += 1) {
+    let limited = false;
+    for (let request = 0; request < 40 && !limited; request += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one after the other
       const response = await listWith(notes, token);
-      if (response.status === 429) {
-        break;
-      }
+      limited = response.status === 429;
     }
+    expect(limited).toBeTruthy();
     vi.setSystemTime(now + 1500);
     await list.pager.loadMore(100);
     expect(list.titles()).toHaveLength(110);
@@ -1113,13 +1113,13 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     // short pages costs what two full ones do, more than is left.
     const now = Date.now();
     vi.useFakeTimers({ toFake: ["Date"], now });
-    for (let request = 0; request < 40; request += 1) {
+    let limited = false;
+    for (let request = 0; request < 40 && !limited; request += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one after the other
       const response = await listWith(notes, token);
-      if (response.status === 429) {
-        break;
-      }
+      limited = response.status === 429;
     }
+    expect(limited).toBeTruthy();
     vi.setSystemTime(now + 500);
     const sentBefore = network.sent.length;
     const loadMore = await failureOf(list.pager.loadMore(100));

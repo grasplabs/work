@@ -362,6 +362,17 @@ export const readWindow = async (
     if (read.kind === "torn") {
       continue;
     }
+    // A read again that ran out of the window's one read budget ran out
+    // because writes tore the reads before it: the window is refused as
+    // torn, which passes, never as a handler past its reads.
+    if (
+      attempt > 0 &&
+      read.kind === "failed" &&
+      !read.result.ok &&
+      read.result.error.code === "operation.read_limit"
+    ) {
+      break;
+    }
     // A failure stands only as one state of the store, as a window does:
     // one assembled from pages that saw two states is read again.
     // oxlint-disable-next-line no-await-in-loop -- see above
