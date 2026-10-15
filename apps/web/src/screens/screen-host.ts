@@ -245,6 +245,11 @@ const holdFrame = (
     // Stopped while the link connected: nothing is asked for that would
     // never be closed.
     const session = await whileOpen(async () => await link.session());
+    // Checked again in the turn it is asked for: a frame stopped since
+    // would hold a capability nobody closes.
+    if (closed) {
+      throw frameClosedError();
+    }
     if (held?.session !== session) {
       // The last connection's broke with it, and core let go of it then.
       held = { session, frame: ask(session) };
