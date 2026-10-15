@@ -11,6 +11,7 @@ import {
   approvalApp,
   asking,
   asksOf,
+  confirmedAnswer,
   linkOf,
   outputOf,
   reminding,
@@ -143,7 +144,7 @@ describe("decisions", { timeout: 60_000 }, () => {
     // The run is stopped while it waits, as a deploy or a crash does, and
     // the answer comes in while it's down, days before the deadline.
     await stopped(run.id);
-    const answered = await decider.api.decisions.answer(decision, {
+    const answered = await confirmedAnswer(decider, decision, {
       approved: true,
       payload: { comment: "Matches the PO" },
     });
@@ -181,7 +182,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       },
     });
     const audited = await eventsOf(decision);
-    const [opened, asked, approved] = audited;
+    const [opened, asked, confirmed, approved] = audited;
     expect({
       actions: audited.map(({ action }) => action),
       openedBy: opened?.actor,
@@ -190,12 +191,15 @@ describe("decisions", { timeout: 60_000 }, () => {
       asked: asked?.detail,
       // Whom the ask went to, by ID: never their names or emails.
       askedWhom: asked?.provenance,
+      confirmedBy: confirmed?.actor,
       approvedBy: approved?.actor,
       approved: approved?.detail,
     }).toMatchObject({
       actions: [
         "workflow.decision.opened",
         "workflow.decision.asked",
+        // Confirmed in Grasp's own dialog before it was answered.
+        "workflow.decision.confirmed",
         "workflow.decision.approved",
       ],
       openedBy: { type: "workflow", runId: run.id },
@@ -203,6 +207,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       askedBy: { type: "workflow", runId: run.id },
       asked: { recipients: 1, reminder: false },
       askedWhom: [decider.userId],
+      confirmedBy: { type: "person", userId: decider.userId },
       approvedBy: { type: "person", userId: decider.userId },
       approved: { run: run.id, step: "review" },
     });
@@ -230,14 +235,22 @@ describe("decisions", { timeout: 60_000 }, () => {
     const answered = await whileEngineRefuses(
       (method) => method === "sendEvent",
       async () =>
-        await decider.api.decisions.answer(decision, {
+        await confirmedAnswer(decider, decision, {
           approved: true,
           payload: { comment: "Matches the PO" },
         })
     );
     // The same answer sent again, as after an acknowledgement that never
-    // came: it is the decision already taken, and owes nothing more.
+    // came: it is the decision already taken, given back without asking
+    // for another confirmation, and owes nothing more. Another answer
+    // finds the decision closed.
     const again = await outcome(
+      decider.api.decisions.answer(decision, {
+        approved: true,
+        payload: { comment: "Matches the PO" },
+      })
+    );
+    const other = await outcome(
       decider.api.decisions.answer(decision, { approved: true })
     );
     // The minute's repair sends the wake while the run is down, and the
@@ -265,12 +278,14 @@ describe("decisions", { timeout: 60_000 }, () => {
     expect({
       answered: answered.status,
       again,
+      other,
       output,
       answers: answers.length,
       completions: completions.length,
     }).toStrictEqual({
       answered: "approved",
-      again: "decision.closed",
+      again: "ok",
+      other: "decision.closed",
       output: {
         timedOut: false,
         approved: true,
@@ -294,7 +309,7 @@ describe("decisions", { timeout: 60_000 }, () => {
     await aroundEngine(
       async (method, call) => (method === "sendEvent" ? "full" : await call()),
       async () =>
-        await decider.api.decisions.answer(full.decision, { approved: true })
+        await confirmedAnswer(decider, full.decision, { approved: true })
     );
     const owedWhenFull = await owed(full.run.id);
     // The engine can't be reached at all: the repair tries a bounded
@@ -306,7 +321,7 @@ describe("decisions", { timeout: 60_000 }, () => {
     const owedAfter = await whileEngineRefuses(
       (method) => method === "sendEvent",
       async () => {
-        await decider.api.decisions.answer(down.decision, { approved: true });
+        await confirmedAnswer(decider, down.decision, { approved: true });
         const counts: number[] = [];
         const hours = 60 * 60 * 1000;
         for (let repair = 1; repair <= 21; repair += 1) {
@@ -358,7 +373,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       Array.from({ length: 3 }, () => "decision.forbidden")
     );
     // Still open: the decider answers.
-    await decider.api.decisions.answer(decision, { approved: false });
+    await confirmedAnswer(decider, decision, { approved: false });
     await expect(outputOf(builder, run.id)).resolves.toMatchObject({
       approved: false,
       by: decider.userId,
@@ -390,13 +405,14 @@ describe("decisions", { timeout: 60_000 }, () => {
       timeout: week,
     });
     const racing = await Promise.all([
-      outcome(anna.api.decisions.answer(decision, { approved: true })),
-      outcome(ben.api.decisions.answer(decision, { approved: false })),
+      outcome(confirmedAnswer(anna, decision, { approved: true })),
+      outcome(confirmedAnswer(ben, decision, { approved: false })),
     ]);
     const winner = racing[0] === "ok" ? anna : ben;
+    // Each of them again, with the other answer than they raced with.
     const again = await Promise.all([
-      outcome(anna.api.decisions.answer(decision, { approved: true })),
-      outcome(ben.api.decisions.answer(decision, { approved: true })),
+      outcome(confirmedAnswer(anna, decision, { approved: false })),
+      outcome(confirmedAnswer(ben, decision, { approved: true })),
     ]);
     const output = await outputOf(admin, run.id);
     const logged = await eventsOf(decision);
@@ -563,7 +579,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       themselves: {
         asked: askedTo(byThemselves.ask),
         starter: await outcome(
-          admin.api.decisions.answer(byThemselves.decision, { approved: true })
+          confirmedAnswer(admin, byThemselves.decision, { approved: true })
         ),
       },
     }).toStrictEqual({
@@ -577,7 +593,7 @@ describe("decisions", { timeout: 60_000 }, () => {
     });
     // Anyone else the decision is from still answers, and the audit log
     // has their answer, never one under the starter.
-    await otherAdmin.api.decisions.answer(byRole.decision, { approved: false });
+    await confirmedAnswer(otherAdmin, byRole.decision, { approved: false });
     await expect(outputOf(admin, byRole.run.id)).resolves.toMatchObject({
       approved: false,
       by: otherAdmin.userId,
@@ -621,7 +637,7 @@ describe("decisions", { timeout: 60_000 }, () => {
     expect({
       asked: askedTo(ask).toSorted(),
       answer: await outcome(
-        owner.api.decisions.answer(decision, { approved: true })
+        confirmedAnswer(owner, decision, { approved: true })
       ),
     }).toStrictEqual({
       asked: [owner.userId, anna.userId].toSorted(),
@@ -758,7 +774,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       ),
       // Asked before they joined, so they weren't asked, but may answer.
       joinedTheTeam: await outcome(
-        joins.api.decisions.answer(inTeam.decision, { approved: true })
+        confirmedAnswer(joins, inTeam.decision, { approved: true })
       ),
     }).toStrictEqual({
       leftTheTeam: "decision.forbidden",
@@ -808,7 +824,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       { timeout: 20_000, interval: 0 }
     );
     const { status } = await decider.api.decisions.get(decision);
-    await decider.api.decisions.answer(decision, { approved: false });
+    await confirmedAnswer(decider, decision, { approved: false });
 
     expect({
       status,
@@ -864,7 +880,7 @@ describe("decisions", { timeout: 60_000 }, () => {
       unknownDecision: "decision.not_found",
     });
     // None of it counted: the decision is still open.
-    await decider.api.decisions.answer(decision, {
+    await confirmedAnswer(decider, decision, {
       approved: true,
       payload: ["a", 1, null, { nested: true }],
     });

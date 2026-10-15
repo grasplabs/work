@@ -1,5 +1,6 @@
 import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewBundle } from "@grasp-os/shared/chat";
+import { decisionErrors } from "@grasp-os/shared/decisions";
 import { authErrors, errorPayloadSchema } from "@grasp-os/shared/errors";
 import { roleErrors } from "@grasp-os/shared/roles";
 import {
@@ -13,6 +14,7 @@ import {
 } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 
+import type { PendingConfirmation } from "../decision-confirmation.tsx";
 import type { CoreLink, LinkEnded } from "./core-link.ts";
 import {
   inTime,
@@ -381,15 +383,33 @@ export const callFunction = async (
 };
 
 /**
+ * Asks the person, in Grasp's own dialog outside the frame, to confirm an
+ * answer a screen asked to give (decision-confirmation.tsx): whether they
+ * did.
+ */
+export type ConfirmDecision = (
+  pending: PendingConfirmation
+) => Promise<boolean>;
+
+/**
  * A running App's screen: its own App's server, runs and error log. Its
  * calls go through the frame's own way to its App (`hold`), so each is
  * decided on the build this frame runs, whatever other frames of the App
  * on the tab's connection run.
+ *
+ * A screen's answer to a decision is the person's only once they
+ * confirmed it in the page's own dialog (`confirm`): the page shows them
+ * what core says is asked and what would be recorded, mints the one-use
+ * confirmation on their click, and answers with it. The frame gets the
+ * answered decision, never the confirmation; nothing the frame sends can
+ * stand in for one. Cancelled, nothing is recorded, and the frame gets
+ * `decision.cancelled`.
  */
 const appTarget = (
   bundle: ScreenBundle,
   refused: (reason: Refused) => void,
-  hold: FrameHold
+  hold: FrameHold,
+  confirm: ConfirmDecision
 ): FrameTarget => {
   const { app, version, screen, lease } = bundle;
   const framed = async <T>(
@@ -457,10 +477,31 @@ const appTarget = (
     runs: async (workflow) =>
       await framed(async (frame) => await frame.runs(workflow)),
     run: async (run) => await framed(async (frame) => await frame.run(run)),
-    decide: async (run, decision, answer) =>
-      await framed(
-        async (frame) => await frame.decide(run, decision, forCore(answer))
-      ),
+    decide: async (run, decision, answer) => {
+      const review = await framed(
+        async (frame) =>
+          await frame.reviewDecision(run, decision, forCore(answer))
+      );
+      if (review.state === "recorded") {
+        return review.decision;
+      }
+      if (!(await confirm(review))) {
+        throw decisionErrors.create("decision.cancelled");
+      }
+      const { confirmation } = await framed(
+        async (frame) =>
+          await frame.confirmDecision(
+            run,
+            decision,
+            review.decision.revision,
+            review.response
+          )
+      );
+      return await framed(
+        async (frame) =>
+          await frame.decide(run, decision, review.response, confirmation)
+      );
+    },
     summary: async (run) =>
       await framed(async (frame) => await frame.summary(run)),
     control: async (run, kind) =>
@@ -761,7 +802,8 @@ export const runScreen = (
   app: string,
   screen: string,
   onState: (state: ScreenState) => void,
-  onOpened: (appName: string) => void
+  onOpened: (appName: string) => void,
+  confirm: ConfirmDecision
 ): (() => void) =>
   runFrame(
     frame,
@@ -773,7 +815,7 @@ export const runScreen = (
           hold.close();
         });
         return {
-          target: appTarget(bundle, refused, hold),
+          target: appTarget(bundle, refused, hold, confirm),
           running: (setState) => {
             const { version } = bundle;
             const check = async (): Promise<void> => {

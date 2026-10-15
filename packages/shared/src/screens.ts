@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-import type { DecisionAnswerInput, DecisionView } from "./decisions.ts";
+import type {
+  DecisionAnswerInput,
+  DecisionConfirmation,
+  DecisionReview,
+  DecisionView,
+} from "./decisions.ts";
 import { defineErrorFamily } from "./errors.ts";
 import type { AppId } from "./ids.ts";
 import {
@@ -277,10 +282,29 @@ export interface ScreenFrameApi {
   runs: (workflow: string) => Promise<ScreenRun[]>;
   run: (run: string) => Promise<ScreenRun>;
   summary: (run: string) => Promise<RunSummary>;
-  decide: (
+  /** `ScreensApi.reviewDecision`, for this frame's App. */
+  reviewDecision: (
     run: string,
     decision: string,
     answer: DecisionAnswerInput
+  ) => Promise<DecisionReview>;
+  /**
+   * `ScreensApi.confirmDecision`, for this frame's App: the page's alone,
+   * once the person confirmed the answer in its own dialog, never reached
+   * from the frame.
+   */
+  confirmDecision: (
+    run: string,
+    decision: string,
+    revision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionConfirmation>;
+  /** `ScreensApi.decide`, for this frame's App, with the confirmation. */
+  decide: (
+    run: string,
+    decision: string,
+    answer: DecisionAnswerInput,
+    confirmation?: string
   ) => Promise<DecisionView>;
   control: (run: string, kind: RunControl["kind"]) => Promise<RunControl>;
   watchRuns: (
@@ -370,16 +394,43 @@ export interface ScreensApi {
    */
   summary: (app: string, run: string) => Promise<RunSummary>;
   /**
+   * What the trusted host decision UI shows the person before they
+   * confirm the screen's answer to the decision `decision` (its name in
+   * the workflow) of one of the App's runs (`DecisionsApi.review`).
+   */
+  reviewDecision: (
+    app: string,
+    run: string,
+    decision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionReview>;
+  /**
+   * Mints the person's one-use confirmation of the screen's answer, as
+   * reviewed at `revision` (`DecisionsApi.confirm`), once they confirmed it
+   * in the page's own dialog: the page's alone, never the screen's.
+   * Audited as confirmed for a screen.
+   */
+  confirmDecision: (
+    app: string,
+    run: string,
+    decision: string,
+    revision: string,
+    answer: DecisionAnswerInput
+  ) => Promise<DecisionConfirmation>;
+  /**
    * Answers the decision `decision` (its name in the workflow) of one of
    * the App's runs, as the person, by the decision's own rules: only
    * someone it is from, and never the run's starter unless it names
-   * exactly them. Audited as answered on a screen (`via: "screen"`).
+   * exactly them, with the one-use confirmation the page minted once the
+   * person confirmed exactly this answer (`DecisionsApi.confirm`); the
+   * screen never has it. Audited as answered on a screen (`via: "screen"`).
    */
   decide: (
     app: string,
     run: string,
     decision: string,
-    answer: DecisionAnswerInput
+    answer: DecisionAnswerInput,
+    confirmation?: string
   ) => Promise<DecisionView>;
   /**
    * Pauses, resumes or cancels one of the App's runs, for a builder of the

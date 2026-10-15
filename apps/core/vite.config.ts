@@ -98,6 +98,7 @@ export const screenTests = [
   "test/held-wakes.test.ts",
   "test/unknown-outcome-runs.test.ts",
   "test/decisions.test.ts",
+  "test/decision-confirmations.test.ts",
   "test/decision-deadlines.test.ts",
   "test/workflow-params.test.ts",
   "test/build-on-save.test.ts",

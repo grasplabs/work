@@ -19,6 +19,7 @@ import { runQuarterHourCron } from "./cron.ts";
 import {
   approvalTests,
   asksOf,
+  confirmedAnswer,
   server as approvalServer,
 } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
@@ -686,7 +687,7 @@ describe("run retention", { timeout: 60_000 }, () => {
     const asked = await decisionRow();
     const decision = asked?.id ?? "";
     const open = await decider.api.decisions.get(decision);
-    await decider.api.decisions.answer(decision, {
+    await confirmedAnswer(decider, decision, {
       approved: true,
       payload: { comment: transcript },
     });

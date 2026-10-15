@@ -6,7 +6,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { approvalApp, week } from "./decisions.ts";
+import { approvalApp, confirmedAnswer, week } from "./decisions.ts";
 import type { Person } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { endLiveRuns, finished, runObject } from "./runs.ts";
@@ -295,7 +295,7 @@ describe("a run's history", { timeout: 60_000 }, () => {
       },
       { timeout: 20_000, interval: 100 }
     );
-    await admin.api.decisions.answer(decision, { approved: true });
+    await confirmedAnswer(admin, decision, { approved: true });
     await finished(run.id);
     const { entries } = await historyOf(builder, run.id);
     const waits = entries.filter((entry) => entry.kind === "wait");

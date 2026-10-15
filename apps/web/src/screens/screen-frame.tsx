@@ -5,6 +5,10 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
+import { DecisionConfirmDialog } from "../decision-confirmation.tsx";
+import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import { frameQuestions } from "./frame-questions.ts";
+import type { Asked } from "./frame-questions.ts";
 import { runPreview, runScreen } from "./screen-host.ts";
 import type { FailureReason, ScreenState } from "./screen-host.ts";
 
@@ -70,10 +74,11 @@ const start = (
   frame: HTMLIFrameElement,
   { app, screen, chatId }: FrameSource,
   onState: (state: ScreenState) => void,
-  onOpened: (appName: string) => void
+  onOpened: (appName: string) => void,
+  confirm: (review: PendingConfirmation) => Promise<boolean>
 ): (() => void) =>
   chatId === undefined
-    ? runScreen(frame, app, screen ?? "", onState, onOpened)
+    ? runScreen(frame, app, screen ?? "", onState, onOpened, confirm)
     : runPreview(
         frame,
         { chatId, app, ...(screen === undefined ? {} : { screen }) },
@@ -81,10 +86,45 @@ const start = (
         onOpened
       );
 
+/**
+ * Starts what `source` names in `frame`, as `start` does, with the
+ * questions its screen asks shown through `onAsk` (frame-questions.ts);
+ * returns what stops it. Once the frame stops (taken down, failed,
+ * signed out), its question waiting ends unconfirmed, so no decision of a
+ * screen that is gone, or of someone else, stays on the page.
+ */
+const startAsking = (
+  frame: HTMLIFrameElement,
+  source: FrameSource,
+  onState: (state: ScreenState) => void,
+  onOpened: (appName: string) => void,
+  onAsk: (asked: Asked | null) => void
+): (() => void) => {
+  const questions = frameQuestions(onAsk);
+  const stop = start(
+    frame,
+    source,
+    (state) => {
+      if (state.status === "failed" || state.status === "signed-out") {
+        questions.end();
+      }
+      onState(state);
+    },
+    onOpened,
+    questions.confirm
+  );
+  return () => {
+    questions.end();
+    stop();
+  };
+};
+
 interface FrameProps extends FrameSource {
   title: string;
   onState: (state: ScreenState) => void;
   onOpened: (appName: string) => void;
+  /** Shows the question waiting in the dialog, or takes it away. */
+  onAsk: (asked: Asked | null) => void;
 }
 
 /**
@@ -98,12 +138,13 @@ const Frame = ({
   title,
   onState,
   onOpened,
+  onAsk,
 }: FrameProps) => {
   const [frame, setFrame] = useState<HTMLIFrameElement | null>(null);
   useEffect(
     () =>
       frame
-        ? start(
+        ? startAsking(
             frame,
             {
               app,
@@ -111,10 +152,11 @@ const Frame = ({
               ...(chatId === undefined ? {} : { chatId }),
             },
             onState,
-            onOpened
+            onOpened,
+            onAsk
           )
         : undefined,
-    [frame, app, screen, chatId, onState, onOpened]
+    [frame, app, screen, chatId, onState, onOpened, onAsk]
   );
   return (
     <iframe
@@ -152,6 +194,7 @@ const FramedScreen = ({
   const [state, setState] = useState<ScreenState>({ status: "loading" });
   const [appName, setAppName] = useState("");
   const [attempt, setAttempt] = useState(0);
+  const [asked, setAsked] = useState<Asked | null>(null);
   const reload = () => {
     setState({ status: "loading" });
     setAttempt(attempt + 1);
@@ -164,8 +207,23 @@ const FramedScreen = ({
         <Title className="text-sm font-medium">{appName}</Title>
       </header>
       <ScreenStatus onReload={reload} state={state} />
+      <DecisionConfirmDialog
+        onCancel={(review) => {
+          if (asked?.review === review) {
+            asked.settle(false);
+          }
+        }}
+        onConfirm={(review) => {
+          if (asked?.review === review) {
+            asked.settle(true);
+          }
+        }}
+        pending={asked?.review}
+        source="screen"
+      />
       <Frame
         app={source.app}
+        onAsk={setAsked}
         key={attempt}
         onOpened={setAppName}
         onState={setState}
