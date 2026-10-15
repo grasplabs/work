@@ -975,7 +975,7 @@ export interface UnknownOutcomeListing {
   id: string;
   /** The person it acted for: theirs to resolve. */
   onBehalfOf: string;
-  subject: PermissionSubject;
+  subject: CodeSubject;
   connectionId: string;
   /** As `PendingAction.connectionName`. */
   connectionName: string | null;
