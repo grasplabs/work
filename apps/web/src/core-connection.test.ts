@@ -425,6 +425,25 @@ describe("the tab's one connection to core", () => {
     });
   });
 
+  it("lets no call given up on already cut a reconnect pause short", async () => {
+    const { core, opened } = tab([one, "down", one]);
+    await core.session();
+    vi.spyOn(Math, "random").mockReturnValue(1);
+    opened[0]?.break();
+    await vi.advanceTimersByTimeAsync(1000);
+    // The next pause is 2 s.
+    const given = AbortSignal.abort(new Error("Gave up."));
+    const refused = [
+      await refusal(core.session(given)),
+      await refusal(core.api(given)),
+    ];
+    await vi.advanceTimersByTimeAsync(1999);
+    expect({ refused: refused.length, attempts: opened.length }).toStrictEqual({
+      refused: 2,
+      attempts: 2,
+    });
+  });
+
   it("makes no more reconnect attempts than its pauses allow, however often App frames ask", async () => {
     const { core, opened } = tab([one, "down"]);
     await core.session();

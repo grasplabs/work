@@ -301,6 +301,9 @@ export class CoreConnection {
     { patient = false }: Waiting
   ): Promise<Connected> {
     this.#closing.signal.throwIfAborted();
+    // A call given up on already wants nothing: it neither opens the
+    // connection nor cuts a reconnect pause short.
+    signal.throwIfAborted();
     // A person wants core now, such as trying again: a reconnect waiting
     // out its pause tries at once. Only a pause is cut short, so however
     // many ask, one attempt is made at a time. App frames never cut it.
