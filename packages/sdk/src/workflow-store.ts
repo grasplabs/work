@@ -211,6 +211,32 @@ const controlsOf = (
 
 const noWaits: readonly never[] = Object.freeze([]);
 
+/**
+ * `snapshot`'s waits as shown: whether an event may be sent or a decision
+ * answered is the host's word only while the subscription is in force,
+ * and off from a lost connection until a fresh push, as the run's own
+ * controls are; the waits themselves stay on screen.
+ */
+const waitsOf = (
+  snapshot: RunSnapshot,
+  run: WatchState<RunSnapshot> | undefined
+): readonly WorkflowWait[] => {
+  if (run?.fresh === true) {
+    return snapshot.waits;
+  }
+  return Object.freeze(
+    snapshot.waits.map((wait) => {
+      if (wait.kind === "event") {
+        return Object.freeze({ ...wait, canSend: false });
+      }
+      if (wait.kind === "decision") {
+        return Object.freeze({ ...wait, canRespond: false });
+      }
+      return wait;
+    })
+  );
+};
+
 /** A control of this hook's, while it is unsettled. */
 interface Intent {
   readonly kind: PendingControl["kind"];
@@ -463,10 +489,9 @@ export class WorkflowStore {
           // Applying until a snapshot newer than the one shown now settles
           // it: the host admitted it, the run hasn't got there yet.
           intent.stage = "applying";
-          intent.settleAfter = this.#channel.peekRun(
-            this.#read,
-            runId
-          ).revision;
+          // The receipt names the revision that admitted it: a snapshot
+          // that arrived before this answer may have settled it already.
+          intent.settleAfter = receipt.revision;
         } else {
           // Settled already, or overtaken by a cancel: the run's snapshot
           // is what says where it stands.
@@ -526,7 +551,7 @@ export class WorkflowStore {
       ...controlsOf(run, pending),
       isStarting: this.#starting > 0,
       pendingControl: pending === null ? null : Object.freeze({ ...pending }),
-      waits: snapshot?.waits ?? noWaits,
+      waits: snapshot === undefined ? noWaits : waitsOf(snapshot, run),
     };
     if (runId === undefined) {
       return Object.freeze({ ...commands, status: "idle" });

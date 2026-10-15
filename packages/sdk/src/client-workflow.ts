@@ -39,7 +39,8 @@ import { v } from "./values.ts";
 //   through the App's binding; answers its `RunHandle` once admitted.
 // - `{ workflow, command: "pause" | "resume" | "cancel", runId,
 //   idempotencyKey }`: controls the run; answers its receipt, `{ kind,
-//   state: "admitted" | "applied" | "superseded" }`, once admitted.
+//   state: "admitted" | "applied" | "superseded", revision }`, once
+//   admitted, `revision` the run snapshot's that recorded it.
 // - `{ workflow, watch: "run", runId }`: pushes `{ revision, result }`, the
 //   result the run's snapshot (`RunSnapshot`) or a refusal, one revision of
 //   the run each, status and what the person may do with it together.
@@ -274,6 +275,8 @@ const bindingSchema = v.object({ canRun: v.boolean() });
 const receiptSchema = v.object({
   kind: v.enum(controlKinds),
   state: v.enum(["admitted", "applied", "superseded"]),
+  /** The run's revision that admitted it: a later one settles it. */
+  revision: v.number().integer().min(1),
 });
 
 const descriptors = {
@@ -504,6 +507,12 @@ const readBinding = (value: unknown): BindingSnapshot => {
 export interface ControlReceipt {
   readonly kind: (typeof controlKinds)[number];
   readonly state: "admitted" | "applied" | "superseded";
+  /**
+   * The revision of the run's snapshot that recorded its admission (or,
+   * once applied or superseded, its settlement): a snapshot newer than it
+   * shows where the control stands.
+   */
+  readonly revision: number;
 }
 
 /** A fresh logical submission key: 128 random bits, in hex. */
@@ -570,6 +579,14 @@ const steadyMs = 30_000;
 /** How long to wait before following again after `failures` losses: jittered. */
 const followDelay = (failures: number): number =>
   Math.max(250, Math.random() * Math.min(30_000, 1000 * 2 ** failures));
+
+/** How long a refusal said to wait before asking again, if it said. */
+const hintOf = (error: GraspError): number => {
+  const hinted = isPlainObject(error.details)
+    ? error.details.retryAfterMs
+    : undefined;
+  return typeof hinted === "number" && Number.isFinite(hinted) ? hinted : 0;
+};
 
 /**
  * Refusals after which following again would only be refused again: the
@@ -806,7 +823,13 @@ export class WorkflowChannel {
           return;
         }
       }
-      this.#lost(entry, live);
+      // A refusal for the request budget says how long to wait: never
+      // less than that, whatever the backoff would allow.
+      this.#lost(
+        entry,
+        live,
+        settled.kind === "failed" ? hintOf(settled.error) : 0
+      );
       return;
     }
     if (WorkflowChannel.#current(entry, live)) {
@@ -877,7 +900,7 @@ export class WorkflowChannel {
   }
 
   /** Core, or the connection, let go of `live`: follow again, later. */
-  #lost(entry: Watched<unknown>, live: Live): void {
+  #lost(entry: Watched<unknown>, live: Live, atLeastMs = 0): void {
     live.release = undefined;
     const failures =
       Date.now() - live.since >= steadyMs ? 0 : live.failures + 1;
@@ -891,7 +914,7 @@ export class WorkflowChannel {
           this.#subscribe(entry, failures);
         }
       },
-      followDelay(Math.max(0, failures - 1))
+      Math.max(atLeastMs, followDelay(Math.max(0, failures - 1)))
     );
   }
 

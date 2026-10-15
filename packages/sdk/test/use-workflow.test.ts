@@ -80,10 +80,11 @@ const unheard = (): void => {
 const host = () => {
   const commands: Command[] = [];
   const subscriptions: Subscription[] = [];
+  let watchRefusal: Error | undefined;
   let reply: (command: Command) => Reply | Promise<Reply> = (command) =>
     command.command === "start"
       ? { value: handleOf("run-1") }
-      : { value: { kind: command.command, state: "admitted" } };
+      : { value: { kind: command.command, state: "admitted", revision: 2 } };
   const transport: ClientTransport = {
     call: async (text) => {
       const command: Command = {
@@ -104,6 +105,12 @@ const host = () => {
       return { result: { ok: true, value: answer.value } };
     },
     watch: async (text, onSnapshot, onLost) => {
+      const refused = watchRefusal;
+      if (refused !== undefined && fieldOf(text, "runId") !== undefined) {
+        watchRefusal = undefined;
+        await Promise.resolve();
+        throw refused;
+      }
       const subscription: Subscription = {
         runId: fieldOf(text, "runId"),
         released: false,
@@ -151,6 +158,10 @@ const host = () => {
     one,
     answer: (next: typeof reply) => {
       reply = next;
+    },
+    /** Refuses the next subscription to a run with `error`. */
+    refuseNextWatch: (error: Error) => {
+      watchRefusal = error;
     },
   };
 };
@@ -324,6 +335,60 @@ describe("what a hook shows", () => {
     expect(hook.view()).toMatchObject({ status: "paused", canCancel: false });
     page.one("run-1").push(5, snapshotOf({ status: "paused" }));
     expect(hook.view()).toMatchObject({ status: "paused", canCancel: true });
+  });
+
+  it("keeps a lost run's waits on screen, answerable or sendable only once a fresh push arrives", async () => {
+    const page = host();
+    const fields = { taskId: "review", title: "Wait", openedAt: 1000 };
+    const decision = {
+      ...fields,
+      kind: "decision",
+      id: "wait-1",
+      key: "approveSummary",
+      deadline: null,
+      canRespond: true,
+    };
+    const event = {
+      ...fields,
+      kind: "event",
+      id: "wait-2",
+      key: "upload",
+      deadline: null,
+      event: {
+        kind: "workflowEvent",
+        alias: "documentUploaded",
+        fingerprint: "e".repeat(64),
+      },
+      canSend: true,
+    };
+    const waiting = snapshotOf({ status: "waiting", waits: [decision, event] });
+    const hook = await showing(page, waiting);
+    page.one("run-1").lose();
+    expect(hook.view().waits).toMatchObject([
+      { id: "wait-1", canRespond: false },
+      { id: "wait-2", canSend: false },
+    ]);
+    await vi.advanceTimersByTimeAsync(31_000);
+    page.one("run-1").push(1, waiting);
+    expect(hook.view().waits).toMatchObject([
+      { canRespond: true },
+      { canSend: true },
+    ]);
+  });
+
+  it("waits as long as a refused subscription says before following again", async () => {
+    const page = host();
+    page.refuseNextWatch(
+      Object.assign(new Error("Too much at once."), {
+        code: "screen.rate_limited",
+        details: { retryAfterMs: 20_000 },
+      })
+    );
+    mount(page, "run-1");
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(page.open("run-1")).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(page.open("run-1")).toHaveLength(1);
   });
 
   it("shows no older revision over a newer one", async () => {
@@ -662,7 +727,9 @@ describe("selecting another run", () => {
     hook.select("run-2");
     await flush();
     page.one("run-2").push(1, snapshotOf(handleOf("run-2")));
-    answered.resolve({ value: { kind: "pause", state: "admitted" } });
+    answered.resolve({
+      value: { kind: "pause", state: "admitted", revision: 2 },
+    });
     await paused;
     expect(page.commands).toStrictEqual([
       expect.objectContaining({ command: "pause", runId: "run-1" }),
@@ -683,7 +750,9 @@ describe("selecting another run", () => {
     hook.select("run-2");
     hook.select("run-1");
     expect(hook.view().pendingControl).toBeNull();
-    answered.resolve({ value: { kind: "pause", state: "admitted" } });
+    answered.resolve({
+      value: { kind: "pause", state: "admitted", revision: 2 },
+    });
     await paused;
     expect(hook.view().pendingControl).toBeNull();
   });
@@ -719,7 +788,7 @@ describe("controlling the selected run", () => {
       attempts += 1;
       return attempts === 1
         ? "lost"
-        : { value: { kind: "pause", state: "admitted" } };
+        : { value: { kind: "pause", state: "admitted", revision: 2 } };
     });
     const hook = await showing(page);
     const paused = hook.store.pause();
@@ -755,6 +824,9 @@ describe("controlling the selected run", () => {
   it("keeps an admitted control applying until a newer snapshot settles it", async () => {
     const page = host();
     const hook = await showing(page, snapshotOf(), 3);
+    page.answer(() => ({
+      value: { kind: "pause", state: "admitted", revision: 4 },
+    }));
     await hook.store.pause();
     expect(hook.view()).toMatchObject({
       pendingControl: { kind: "pause", stage: "applying" },
@@ -787,6 +859,31 @@ describe("controlling the selected run", () => {
     });
   });
 
+  it("settles a control whose settling snapshot arrived before its answer", async () => {
+    const page = host();
+    const answered = Promise.withResolvers<Reply>();
+    page.answer(async () => await answered.promise);
+    const hook = await showing(page);
+    const paused = hook.store.pause();
+    // Admitted at revision 2, applied at 3, both pushed before the answer.
+    page.one("run-1").push(
+      3,
+      snapshotOf({
+        status: "paused",
+        ...controlOf({ resume: true, cancel: true }),
+      })
+    );
+    answered.resolve({
+      value: { kind: "pause", state: "admitted", revision: 2 },
+    });
+    await paused;
+    expect(hook.view()).toMatchObject({
+      status: "paused",
+      pendingControl: null,
+      canResume: true,
+    });
+  });
+
   it("joins an identical control still unanswered", async () => {
     const page = host();
     const answered = Promise.withResolvers<Reply>();
@@ -794,7 +891,9 @@ describe("controlling the selected run", () => {
     const hook = await showing(page);
     const first = hook.store.cancel();
     const second = hook.store.cancel();
-    answered.resolve({ value: { kind: "cancel", state: "admitted" } });
+    answered.resolve({
+      value: { kind: "cancel", state: "admitted", revision: 2 },
+    });
     await Promise.all([first, second]);
     expect(page.commands).toHaveLength(1);
   });
@@ -805,7 +904,7 @@ describe("controlling the selected run", () => {
     page.answer(async (command) =>
       command.command === "pause"
         ? await pauseAnswer.promise
-        : { value: { kind: "cancel", state: "admitted" } }
+        : { value: { kind: "cancel", state: "admitted", revision: 2 } }
     );
     const hook = await showing(page);
     const paused = hook.store.pause();
@@ -818,7 +917,9 @@ describe("controlling the selected run", () => {
       pendingControl: { kind: "cancel", stage: "applying" },
       canCancel: false,
     });
-    pauseAnswer.resolve({ value: { kind: "pause", state: "admitted" } });
+    pauseAnswer.resolve({
+      value: { kind: "pause", state: "admitted", revision: 2 },
+    });
     await paused;
     expect(hook.view().pendingControl).toStrictEqual({
       kind: "cancel",
@@ -827,7 +928,7 @@ describe("controlling the selected run", () => {
     page
       .one("run-1")
       .push(
-        2,
+        3,
         snapshotOf({ status: "cancelled", finishedAt: 3000, ...controlOf({}) })
       );
     expect(hook.view()).toMatchObject({
@@ -856,7 +957,9 @@ describe("controlling the selected run", () => {
     });
     const code = await codeOf(paused);
     expect(code).toBe("workflow.control_conflict");
-    cancelAnswer.resolve({ value: { kind: "cancel", state: "admitted" } });
+    cancelAnswer.resolve({
+      value: { kind: "cancel", state: "admitted", revision: 2 },
+    });
     await cancelled;
   });
 
