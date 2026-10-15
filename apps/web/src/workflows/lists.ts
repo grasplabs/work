@@ -24,3 +24,11 @@ export const listsOf = (
     onTheWay: rows.filter(({ lastRun }) => lastRun === null),
   };
 };
+
+/**
+ * What `rows` handled this week, together: the sum of each one's runs
+ * completed in the last week (`handled`), so a person's total counts only
+ * the workflows they can open.
+ */
+export const handledOf = (rows: readonly WorkflowSummary[]): number =>
+  rows.reduce((sum, row) => sum + row.handled, 0);
