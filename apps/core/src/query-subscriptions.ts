@@ -962,12 +962,17 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     this.#unsent += snapshot.bytes;
     try {
       // Every push of data passes the gate first, however long it waited.
+      const revocations = this.#revocations;
       const gate = await this.#gate(evaluation);
       if ("refusal" in gate) {
         void this.#end(evaluation, gate.refusal);
-      } else if (gate.roles !== snapshot.roles) {
-        // Read under roles the person no longer has: dropped, and read
-        // again as they are now.
+      } else if (
+        gate.roles !== snapshot.roles ||
+        this.#revocations !== revocations
+      ) {
+        // Read under roles the person no longer has, or passed by a gate
+        // that looked before a revocation landed (`#revoked`): dropped,
+        // and read again as they are now.
         if (evaluation.latest === snapshot) {
           evaluation.latest = undefined;
         }

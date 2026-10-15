@@ -617,6 +617,13 @@ const worthRetrying = (settled: Settled): boolean =>
   (settled.kind === "failed" && nothingRanCodes.has(settled.error.code));
 
 /**
+ * What core ends a followed query with once the person's roles in its App
+ * dropped: nothing read under the old roles is shown again
+ * (`#accessChanged`), and the query is followed again under the new.
+ */
+const accessChangedCode = "screen.access_changed";
+
+/**
  * Refusals after which following a query again would only be refused
  * again: the App moved to another version, or the page follows too many.
  * (A refusal of the person or the build fences the whole client.)
@@ -1819,6 +1826,9 @@ export class GraspClient {
         GraspClient.#stop(live);
         entry.live = undefined;
       }
+      if (error.code === accessChangedCode) {
+        this.#accessChanged(entry.reference.resourceId, error);
+      }
       show(entry, { value: undefined, error });
     }
   }
@@ -2092,6 +2102,24 @@ export class GraspClient {
       show(entry, { value: undefined, error: refusal });
     }
     this.#tellFence(refusal);
+  }
+
+  /**
+   * The person's roles in App `resourceId` dropped (`screen.access_changed`,
+   * pushed as a followed query's last result): what any query of the App
+   * shows was read under the old roles, kept or not, so none of it is
+   * shown again. Followed queries get their own push and follow again;
+   * the rest read afresh when next read.
+   */
+  #accessChanged(resourceId: string, error: GraspError): void {
+    for (const entry of this.#queries.values()) {
+      if (entry.reference.resourceId === resourceId) {
+        entry.shown = entry.sent;
+        entry.stale = true;
+        entry.changes += 1;
+        show(entry, { value: undefined, error });
+      }
+    }
   }
 
   /**

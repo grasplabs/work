@@ -2667,4 +2667,53 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
       expect(showsSecret()).toBeFalsy();
     }, deliveryWait);
   });
+
+  it("shows nothing a screen kept from before the person became only a user, followed or not", async () => {
+    const opened = await openedApp(withSecrets());
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    const member = await personApi("builder");
+    const them = { type: "person", id: member.userId } as const;
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "builder",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const { client } = clientFor(
+      { ...opened, lease, cookie: member.session, userId: member.userId },
+      member.api.screens
+    );
+    const followed = reading(client, secrets, {});
+    // Read once, then no longer shown: the client keeps it for a while.
+    const kept = reading(client, apiOf(opened.release).list, {
+      pagination: {},
+    });
+    await eventually(() => {
+      expect({
+        followed: JSON.stringify(followed.now().value).includes(
+          "Builders only"
+        ),
+        kept: shown(kept.now()),
+      }).toStrictEqual({ followed: true, kept: [] });
+    });
+    kept.stop();
+
+    await opened.builder.api.apps.members.add(opened.app, {
+      ...them,
+      role: "user",
+    });
+
+    await vi.waitFor(() => {
+      expect(followed.now().error?.code).toBe("screen.access_changed");
+    }, deliveryWait);
+    expect(kept.now()).toMatchObject({ value: undefined });
+  });
 });
