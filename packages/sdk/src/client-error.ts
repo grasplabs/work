@@ -128,6 +128,25 @@ const clientErrors = {
     message: "This couldn't be submitted.",
     category: "operational",
   },
+  "contract.invalid_snapshot": {
+    message:
+      "The platform sent a run that doesn't fit its workflow's contract, so it isn't shown.",
+    category: "contract",
+  },
+  "contract.mismatch": {
+    message:
+      "This run belongs to another version of the workflow's contract than this screen was built for.",
+    category: "contract",
+  },
+  "workflow.not_attached": {
+    message:
+      "No run is shown yet: start one, or wait for the selected run to load, before you control it.",
+    category: "contract",
+  },
+  "workflow.unavailable": {
+    message: "Workflow runs can't be followed here.",
+    category: "operational",
+  },
 } as const satisfies Record<
   string,
   { message: string; category: ErrorCategory }
