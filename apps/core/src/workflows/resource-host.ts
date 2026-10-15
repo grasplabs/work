@@ -224,6 +224,8 @@ interface TaskAttempt {
   evaluated: Set<number>;
   /** The fuel its evaluations have left together (`attemptFuel`). */
   budget: { fuel: number };
+  /** Its evaluations under way: waited for before its fuel goes back. */
+  pending: Set<Promise<unknown>>;
 }
 
 /** Expressions compiled once per build, by build hash and slot. */
@@ -342,6 +344,7 @@ export class ResourceRunHost
             over: false,
             evaluated: new Set(),
             budget: { fuel: attemptFuel },
+            pending: new Set(),
           };
           // An activation that can't fund a whole attempt any more cuts it
           // off as the Loader does an isolate past its CPU time: its step
@@ -372,7 +375,10 @@ export class ResourceRunHost
             result = { ok: false, error: forIsolate(error) };
           } finally {
             attempt.over = true;
-            // What it didn't spend of its share goes back.
+            // What it didn't spend of its share goes back, once every
+            // evaluation it started has settled: one it left running would
+            // spend after its fuel went back. Over now, none starts jq.
+            await Promise.allSettled(attempt.pending);
             if (funded) {
               this.#activationFuel += Math.max(0, attempt.budget.fuel);
             }
@@ -425,6 +431,20 @@ export class ResourceRunHost
 
   /** `ResourceAttemptHost.evaluate`, for `attempt`. */
   async #evaluate(attempt: TaskAttempt, slot: unknown): Promise<Settled<Json>> {
+    const evaluating = this.#evaluating(attempt, slot);
+    attempt.pending.add(evaluating);
+    try {
+      return await evaluating;
+    } finally {
+      attempt.pending.delete(evaluating);
+    }
+  }
+
+  /** `#evaluate`'s work. */
+  async #evaluating(
+    attempt: TaskAttempt,
+    slot: unknown
+  ): Promise<Settled<Json>> {
     return await settle(async () => {
       // Its lease first: an attempt the engine let go of, still running in
       // the isolate, is stale whatever it asks, and never taken for a
@@ -476,6 +496,8 @@ export class ResourceRunHost
         compiled.delete(key);
         throw error;
       }
+      // Compiling awaited: an attempt over meanwhile evaluates nothing.
+      this.#requireCurrent(attempt);
       const { data } = attempt;
       const value = await evaluateExpression(
         expressionCompiled,

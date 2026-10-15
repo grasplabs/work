@@ -799,6 +799,25 @@ describe("an activation's share of core's CPU", () => {
           activationFuel: 2 ** 27,
         }
       );
+    // A module that leaves an evaluation running as its attempt returns:
+    // the attempt's fuel goes back only once it settled, and it never runs.
+    const leftRunning: Promise<unknown>[] = [];
+    const settledFirst: string[] = [];
+    await hostWithOneShare().do(
+      "task:greet",
+      { input: { input: { who: "Ada" }, context: {} } },
+      async (attempt) => {
+        leftRunning.push(
+          attempt.evaluate(0).then((settled) => {
+            settledFirst.push("evaluation");
+            return settledCode(settled);
+          })
+        );
+        return await Promise.resolve({ ok: true, value: null });
+      }
+    );
+    settledFirst.push("attempt");
+    const [late] = await Promise.all(leftRunning);
     const host = hostWithOneShare();
     const first = await attempted(host);
     const second = await attempted(host);
@@ -806,12 +825,16 @@ describe("an activation's share of core's CPU", () => {
     const fresh = hostWithOneShare();
     const atOnce = await Promise.all([attempted(fresh), attempted(fresh)]);
     expect({
+      late,
+      settledFirst,
       first,
       second,
       atOnce: atOnce.filter(Boolean).length,
       // A retryable timeout, as for an isolate stopped past its CPU time.
       failures,
     }).toStrictEqual({
+      late: "execution.stale_attempt",
+      settledFirst: ["evaluation", "attempt"],
       first: true,
       second: false,
       atOnce: 1,
