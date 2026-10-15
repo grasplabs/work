@@ -1417,17 +1417,28 @@ export class RunHost extends RpcTarget {
     unknownSince?: number
   ): Promise<boolean> {
     const first = waitMsOf(this.#env);
+    const wakeType = await heldWakeType(step);
     if (unknownSince !== undefined) {
       // Never run again at once on an unknown outcome: should connect
       // and the step's call disagree on whether it may be recovered now,
-      // the step would come back held at once, again and again.
-      await this.#step.sleep(`${prefix}:first`, first);
+      // the step would come back held at once, again and again. Only its
+      // person's resolution, which wakes the step (wakes.ts), cuts this
+      // first wait short, so the run acts on their word within seconds.
+      try {
+        await this.#step.waitForEvent(`${prefix}:first`, {
+          type: wakeType,
+          timeout: first,
+        });
+      } catch (error) {
+        if (!isTimeout(error)) {
+          throw error;
+        }
+      }
     }
     const deadline =
       unknownSince === undefined
         ? undefined
         : unknownSince + unknownHoldMsOf(this.#env);
-    const wakeType = await heldWakeType(step);
     for (let checks = 0; ; checks += 1) {
       // Its answer is recorded, so a replay asks connect nothing, and a
       // failing connect is tried again rather than failing the step.
