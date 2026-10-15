@@ -54,6 +54,7 @@ import type {
 import {
   brainStubModel,
   modelStrings,
+  authoredStrings,
   searchedSections,
   sourceStrings,
   stubReader,
@@ -115,7 +116,8 @@ export const fullContextChars = 60_000;
 export const answerProtocol = [
   "Answer from what you can read in this chat: your memory, this conversation and Knowledge.",
   "Cite each source you used in square brackets: [path#heading], [memory] or [session].",
-  "If those sources don't answer the question, start your reply with ABSTAIN: and say why.",
+  "Start your reply with a line ANSWER: followed by only the answer itself, such as a name, number, date or code; explain after it.",
+  "If those sources don't answer the question, start your reply with ABSTAIN: instead and say why.",
   "Don't save, change or send anything.",
 ].join("\n");
 
@@ -686,6 +688,9 @@ const runTrial = async (
     answer,
     modelInput: requests.flatMap(({ body }) => modelStrings(body)).join("\n"),
     sourceInput: requests.flatMap(({ body }) => sourceStrings(body)).join("\n"),
+    authoredInput: requests
+      .flatMap(({ body }) => authoredStrings(body))
+      .join("\n"),
     forbidden: forbiddenIn(task),
     stateChanged: changedBetween(stateBefore, await stateNow()).length > 0,
     ...(failure === undefined ? {} : { error: failure }),

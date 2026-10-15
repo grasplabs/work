@@ -115,6 +115,12 @@ export const sourceStrings = (body: unknown): string[] => [
     .flatMap(({ content }) => modelStrings(content)),
 ];
 
+/** What the model wrote itself: its earlier answers and the code it ran. */
+export const authoredStrings = (body: unknown): string[] =>
+  messagesOf(body)
+    .filter(({ role }) => role === "assistant")
+    .flatMap(({ content }) => modelStrings(content));
+
 /** The tool results the model got since the person last wrote. */
 const resultsSinceQuestion = (body: unknown): string[] => {
   const messages = messagesOf(body);
@@ -181,7 +187,7 @@ const answerOf = (task: BrainTask, input: string): string => {
   }
   const facts = expect.facts.map(([first = ""]) => first).join("; ");
   const cited = expect.evidence.map(({ source }) => `[${source}]`).join(" ");
-  return `${facts} ${cited}`;
+  return `ANSWER: ${facts}\nFrom ${cited}`;
 };
 
 /**

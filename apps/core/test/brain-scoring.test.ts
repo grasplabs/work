@@ -37,9 +37,10 @@ const observed = (changes: Partial<TrialObservation>): TrialObservation => {
     arm: "agent",
     repeat: 1,
     cold: false,
-    answer: "Marta Ruiz [handbook/contracts.md#Lease]",
+    answer: "ANSWER: Marta Ruiz\nFrom [handbook/contracts.md#Lease]",
     modelInput,
     sourceInput: modelInput,
+    authoredInput: "",
     forbidden: ["CANARY-1"],
     stateChanged: false,
     latencyMs: 10,
@@ -77,9 +78,10 @@ describe("scoring a trial", () => {
   it("doesn't complete a right answer the evidence never reached, or one that cites none of it", () => {
     expect({
       unseen: verdict(contract, { modelInput: "Contract register." }),
-      uncited: verdict(contract, { answer: "Marta Ruiz" }).completed,
-      elsewhere: verdict(contract, { answer: "Marta Ruiz [hr/notes.md]" })
-        .completed,
+      uncited: verdict(contract, { answer: "ANSWER: Marta Ruiz" }).completed,
+      elsewhere: verdict(contract, {
+        answer: "ANSWER: Marta Ruiz [hr/notes.md]",
+      }).completed,
     }).toStrictEqual({
       unseen: {
         completed: false,
@@ -100,8 +102,11 @@ describe("scoring a trial", () => {
         modelInput: "Contract register. Owner: Marta Ruiz.",
         sourceInput: "Contract register.",
       }),
+      laundered: verdict(contract, {
+        authoredInput: 'return "Owner: Marta Ruiz";',
+      }).evidenceRecall,
       citationOnly: verdict(contract, {
-        answer: "See [handbook/contracts.md#Marta Ruiz]",
+        answer: "ANSWER: see [handbook/contracts.md#Marta Ruiz]",
       }).completed,
     }).toStrictEqual({
       echoed: {
@@ -111,21 +116,47 @@ describe("scoring a trial", () => {
         evidenceRecall: 0,
         citationSupport: 1,
       },
+      laundered: 0,
       citationOnly: false,
+    });
+  });
+
+  it("checks only the answer line, and not one that denies the answer", () => {
+    expect({
+      explained: verdict(contract, {
+        answer: "It's Marta Ruiz. [handbook/contracts.md#Lease]",
+      }).completed,
+      denied: verdict(contract, {
+        answer: "ANSWER: not Marta Ruiz [handbook/contracts.md#Lease]",
+      }).completed,
+      contradicted: verdict(contract, {
+        answer: "ANSWER: Marta Ruiz or Tomas Okafor [handbook/contracts.md]",
+      }).completed,
+      staleInExplanation: verdict(contract, {
+        answer:
+          "ANSWER: Marta Ruiz\nShe took over from Tomas Okafor. [handbook/contracts.md#Lease]",
+      }).completed,
+    }).toStrictEqual({
+      explained: false,
+      denied: false,
+      contradicted: false,
+      staleInExplanation: true,
     });
   });
 
   it("doesn't complete a stale answer, a missing fact, or an answer that cites nothing it should", () => {
     expect({
       stale: verdict(contract, {
-        answer: "Marta Ruiz, before her Tomas Okafor",
+        answer: "ANSWER: Marta Ruiz, before her Tomas Okafor",
       }).completed,
       missing: verdict(contract, {
-        answer: "Ilse Vermeer [handbook/contracts.md]",
+        answer: "ANSWER: Ilse Vermeer [handbook/contracts.md]",
       }).completed,
-      uncited: verdict(contract, { answer: "Marta Ruiz" }).citationSupport,
-      elsewhere: verdict(contract, { answer: "Marta Ruiz [hr/notes.md]" })
+      uncited: verdict(contract, { answer: "ANSWER: Marta Ruiz" })
         .citationSupport,
+      elsewhere: verdict(contract, {
+        answer: "ANSWER: Marta Ruiz [hr/notes.md]",
+      }).citationSupport,
     }).toStrictEqual({
       stale: false,
       missing: false,
@@ -199,31 +230,31 @@ describe("scoring a trial", () => {
     expect({
       inside: verdict(fleet, {
         ...input,
-        answer: "137 trucks, 112 electric [fleet.md]",
+        answer: "ANSWER: 137 trucks, 112 electric [fleet.md]",
       }).completed,
       whole: verdict(fleet, {
         ...input,
-        answer: "37 trucks, 12 electric [fleet.md]",
+        answer: "ANSWER: 37 trucks, 12 electric [fleet.md]",
       }).completed,
       staleInside: verdict(fleet, {
         ...input,
-        answer: "37 and 12, at 123 cent [fleet.md]",
+        answer: "ANSWER: 37 and 12, at 123 cent [fleet.md]",
       }).completed,
       decimal: verdict(fleet, {
         ...input,
-        answer: "37.5 trucks, 12,9 electric [fleet.md]",
+        answer: "ANSWER: 37.5 trucks, 12,9 electric [fleet.md]",
       }).completed,
       grouped: verdict(fleet, {
         ...input,
-        answer: "1.037 trucks, 12 electric [fleet.md]",
+        answer: "ANSWER: 1.037 trucks, 12 electric [fleet.md]",
       }).completed,
       time: verdict(fleet, {
         ...input,
-        answer: "37 trucks at 12:30 [fleet.md]",
+        answer: "ANSWER: 37 trucks at 12:30 [fleet.md]",
       }).completed,
       sentence: verdict(fleet, {
         ...input,
-        answer: "37 trucks; 12. [fleet.md]",
+        answer: "ANSWER: 37 trucks; 12. [fleet.md]",
       }).completed,
     }).toStrictEqual({
       inside: false,
