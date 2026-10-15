@@ -227,6 +227,56 @@ const answer = async (
     : JSON.stringify(admitted);
 };
 
+/**
+ * One request in flight for the whole client, and places enough for a
+ * person and an App that only the client's cap binds: eight backlog
+ * places (`placesPerClientShare`).
+ */
+const tightShares: ModelShares = {
+  client: 1,
+  person: 1,
+  app: 1,
+  queuedPerPerson: 10,
+  queuedPerApp: 5,
+};
+
+/** A request of `subject` in App `resource` under {@link tightShares}. */
+const tight = (subject: string, resource: string): Admission => {
+  const made = request(subject, resource);
+  return { ...made, fair: { ...made.fair, shares: tightShares } };
+};
+
+/**
+ * A ledger whose one share Zed holds, while Ada in one App and Ben in
+ * another each keep five places waiting: their first and four backlog
+ * places each, all eight of the client's backlog places.
+ */
+const saturated = async () => {
+  const ledger = newLedger();
+  const zed = tight("zed", "app-z");
+  await answer(ledger, zed);
+  const placed: Record<string, Admission[]> = { ada: [], ben: [] };
+  for (const [subject, app] of [
+    ["ada", "app-a"],
+    ["ben", "app-b"],
+  ] as const) {
+    for (const _ of [1, 2, 3, 4, 5]) {
+      const waiting = tight(subject, app);
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await scheduler.wait(2);
+      // oxlint-disable-next-line no-await-in-loop -- in order
+      await answer(ledger, waiting);
+      placed[subject]?.push(waiting);
+    }
+  }
+  const [ada, adaSecond] = placed.ada ?? [];
+  const [ben] = placed.ben ?? [];
+  if (ada === undefined || adaSecond === undefined || ben === undefined) {
+    throw new Error("The places weren't kept");
+  }
+  return { ledger, firstOf: { zed, ada, adaSecond, ben } };
+};
+
 describe("fair model admission", { timeout: 60_000 }, () => {
   // After the identity provider's mock is in place, which each test sets.
   beforeEach(async () => {
@@ -870,6 +920,54 @@ describe("the model ledger's queue", () => {
       second: "queued:app:placed",
       bens: "admitted",
     });
+  });
+
+  it("gives a third App a place, and its turn, however full two Apps' backlogs keep the client's queue", async () => {
+    const { ledger, firstOf } = await saturated();
+    // The client's eight backlog places are taken: Cid's first place in
+    // a third App is his all the same.
+    const cid = tight("cid", "app-c");
+    const cidWaits = await answer(ledger, cid);
+    // The running request ends, then each one served after it: the first
+    // places of each App are served first, Cid's among them, before any
+    // backlog.
+    const served: string[] = [];
+    let running = firstOf.zed;
+    for (const next of [firstOf.ada, firstOf.ben]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      await ledger.settle(running.id, { by: "refused" });
+      running = { ...next, id: crypto.randomUUID() };
+      // oxlint-disable-next-line no-await-in-loop -- one after another
+      served.push(await answer(ledger, running));
+    }
+    await ledger.settle(running.id, { by: "refused" });
+    const adaBacklog = await answer(ledger, {
+      ...firstOf.adaSecond,
+      id: crypto.randomUUID(),
+    });
+    const cidServed = await answer(ledger, { ...cid, id: crypto.randomUUID() });
+
+    expect({ cidWaits, served, adaBacklog, cidServed }).toStrictEqual({
+      cidWaits: "queued:client:placed",
+      served: ["admitted", "admitted"],
+      adaBacklog: "queued:client:placed",
+      cidServed: "admitted",
+    });
+  });
+
+  it("keeps the client's backlog places to its cap", async () => {
+    const { ledger } = await saturated();
+    const outcomes = [
+      await answer(ledger, tight("cid", "app-c")),
+      // A backlog place of Cid's: past the client's cap, though his and
+      // his App's have room.
+      await answer(ledger, tight("cid", "app-c")),
+    ];
+
+    expect(outcomes).toStrictEqual([
+      "queued:client:placed",
+      "queued:client:unplaced",
+    ]);
   });
 
   it("keeps no more places for an App than it may, whoever waits", async () => {

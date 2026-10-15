@@ -825,8 +825,15 @@ export class ModelLedger extends DurableObject<Env> {
         queued: { waitingFor, retryAfterSeconds, joined: false, placed: true },
       };
     }
+    // The client's cap counts backlogs only (places past a person's first
+    // in an App), and holds back no first place: however full the
+    // others' backlogs, a person new to an App always gets one place,
+    // and is served in turn (model-admission.ts).
+    const firstInApp = turn === 0;
     const room =
-      this.#placesWhere() < fair.shares.client * placesPerClientShare &&
+      (firstInApp ||
+        this.#placesWhere(gt(queue.turn, 0)) <
+          fair.shares.client * placesPerClientShare) &&
       this.#placesWhere(eq(queue.subject, fair.subject)) <
         fair.shares.queuedPerPerson &&
       (fair.resource === null ||

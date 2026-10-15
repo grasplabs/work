@@ -79,8 +79,12 @@ import { z } from "zod";
 // - A queue so long admission overloads the ledger: a person, and an App,
 //   may have so many places at once (`modelQueuedPerPerson`,
 //   `modelQueuedPerApp`), and the whole client {@link placesPerClientShare}
-//   times its share; past them a call is refused as queued without a
-//   place, at once, and the gateway asks the ledger nothing more for it.
+//   times its share in backlogs (places past a person's first in an App);
+//   past them a call is refused as queued without a place, at once, and
+//   the gateway asks the ledger nothing more for it. The client's cap
+//   never takes a person's first place in an App, so Apps' backlogs that
+//   fill it never keep a new App or person from a place, and its turn:
+//   first places are bounded by the per-person cap instead.
 // - A policy change missed: shares are read from the policy for every
 //   provider request (models.ts, `scopesNow`), as the run lineage's
 //   request limit is. A policy that can't be read is the last one read in
@@ -125,9 +129,10 @@ export const modelSharesOf = (policy: QuotaPolicy): ModelShares => {
 export const maxLeaseMs = 15 * 60_000;
 
 /**
- * The places the whole client's queue keeps, per request of its share in
- * flight: 128 under the platform's 16. However many people and Apps there
- * are, each ask serves a queue no longer than this.
+ * The backlog places (past a person's first in an App) the whole client's
+ * queue keeps, per request of its share in flight: 128 under the
+ * platform's 16. First places don't count, and are never refused by it:
+ * each person has one per App at most, within their own cap.
  */
 export const placesPerClientShare = 8;
 
