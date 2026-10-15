@@ -490,6 +490,54 @@ describe("the bounds on runs of JSON workflows", () => {
     });
   });
 
+  it("says a start refused at the cap on live runs as such, whatever ends after", async () => {
+    const ada = await builder();
+    const workflow = await waitingWorkflow(ada);
+    const runs: (string | null)[] = [];
+    for (let index = 0; index < maxLiveRunsPerPrincipal; index += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one start after another
+      const started = await start(ada, workflow.id);
+      runs.push(started.runId);
+    }
+    const real = env.DB;
+    const seen = { batches: 0 };
+    // One of Ada's runs ends just after the refused admission commits, as
+    // anything asked afterwards would read it.
+    const db: D1Database = {
+      prepare: (statement) => real.prepare(statement),
+      batch: async <T = unknown>(statements: D1PreparedStatement[]) => {
+        const results = await real.batch<T>(statements);
+        seen.batches += 1;
+        if (seen.batches === 1) {
+          await real
+            .prepare(
+              "UPDATE workflow_resource_runs SET status = 'completed', ended_at = ? WHERE id = ?"
+            )
+            .bind(Date.now(), runs[0] ?? "")
+            .run();
+        }
+        return results;
+      },
+      exec: async (statement) => await real.exec(statement),
+      // oxlint-disable-next-line typescript/no-deprecated -- D1Database still has it
+      dump: async () => await real.dump(),
+      withSession: (constraint) => real.withSession(constraint),
+    };
+    const refused = await refusal(
+      startWorkflow(
+        { ...env, DB: db },
+        { type: "person", person: ada },
+        workflow.id,
+        {
+          version: 1,
+          input: { who: "Ada" },
+          key: unique(),
+        }
+      )
+    );
+    expect(refused).toMatchObject({ code: "workflow.run_limit" });
+  });
+
   it("lets a builder stop a run, audited under them, and the workflow go after", async () => {
     const ada = await builder();
     const reader = await builder("user");
@@ -890,7 +938,13 @@ describe("whose word a run's row takes, and whose clock", () => {
     try {
       reads = [
         await resourceRunFor(env, by, done.id, completed.runId),
-        await resourceRunFor(shorter, by, done.id, completed.runId),
+        // Past its retention, read with the engine unreachable: the row
+        // alone says it all.
+        await whileEngineRefuses(
+          () => true,
+          async () =>
+            await resourceRunFor(shorter, by, done.id, completed.runId)
+        ),
         await resourceRunFor(shorter, by, failing.id, failed.runId),
       ];
     } finally {

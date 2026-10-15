@@ -913,8 +913,14 @@ export const admitWorkflowStart = async (
     paramsRevision: authorization.paramsRevision,
     bindingsHash,
   };
+  // Why it wasn't admitted, if it isn't: read in the admitting batch, just
+  // before its insert, so the reason is the state it was refused in.
+  let refusedFor: { under: number } | undefined;
   try {
-    await auditedBatch(env, db, [
+    const [[state]] = await auditedBatch(env, db, [
+      db
+        .select({ under: sql<number>`${underRunLimit(authorization)}` })
+        .from(sql`(SELECT 1)`),
       db
         .insert(workflowStartReceipts)
         .select(
@@ -948,6 +954,7 @@ export const admitWorkflowStart = async (
         sql`EXISTS (SELECT 1 FROM ${workflowStartReceipts} WHERE ${workflowStartReceipts.id} = ${id})`
       ),
     ]);
+    refusedFor = state;
   } catch (error) {
     if (!isUniqueViolation(error)) {
       throw error;
@@ -975,11 +982,8 @@ export const admitWorkflowStart = async (
     }
   }
   // Refused by the cap on live runs, or by authority that changed: said
-  // as which, the cap read again now.
-  const cap = await drizzle(env.DB).get<{ under: number }>(
-    sql`SELECT ${underRunLimit(authorization)} AS under`
-  );
-  const limited = cap.under === 0;
+  // as which, as the admitting batch found it.
+  const limited = refusedFor?.under === 0;
   const reason = limited ? "workflow.run_limit" : "workflow.start_denied";
   await refusedStart(
     env,

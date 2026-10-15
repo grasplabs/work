@@ -696,11 +696,20 @@ const resultOf = async (
   env: Env,
   row: RunRow
 ): Promise<Pick<WorkflowResourceRun, "output" | "error">> => {
+  const removed = detailsRemoved(env, {
+    endedAt: row.endedAt,
+    detailsRemovedAt: null,
+  });
+  // A completed run past its retention keeps nothing to say: the engine
+  // isn't asked for an output nobody may read.
+  if (removed && row.status === "completed") {
+    return {};
+  }
   const result =
     row.failureCode === null
       ? await engineResultOf(env, row.id)
       : { error: coreFailureOf(row.failureCode) };
-  if (!detailsRemoved(env, { endedAt: row.endedAt, detailsRemovedAt: null })) {
+  if (!removed) {
     return result;
   }
   return result.error === undefined
