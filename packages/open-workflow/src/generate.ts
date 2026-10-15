@@ -446,6 +446,32 @@ const sensitiveParams = (definition: JsonValue): ReadonlySet<string> => {
   );
 };
 
+/** The JSON Schema types a value with no parts of its own has. */
+const scalarTypes: ReadonlySet<unknown> = new Set([
+  "string",
+  "number",
+  "integer",
+  "boolean",
+]);
+
+/**
+ * The parameters of `definition` whose schema allows a value with parts
+ * (an object or array), or doesn't say: a binding argument is sent as a
+ * whole, and a connector's answer is checked for an echo of each whole
+ * argument and of each string within it, so a part on its own, a number
+ * or a key, could come back unseen. Only a scalar may be one.
+ */
+const compoundParams = (definition: JsonValue): ReadonlySet<string> => {
+  const params = isObject(definition) ? graspOf(definition)?.params : undefined;
+  return new Set(
+    Object.entries(isObject(params) ? params : {}).flatMap(([name, entry]) => {
+      const schema = isObject(entry) ? entry.schema : undefined;
+      const type = isObject(schema) ? schema.type : undefined;
+      return scalarTypes.has(type) ? [] : [name];
+    })
+  );
+};
+
 /** A value that is exactly one parameter's read, and nothing more. */
 const bareParam = /^\$\{\s*\$params\.(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*\}$/u;
 
@@ -1568,9 +1594,25 @@ export const sensitiveReads = (
     return [];
   }
   const passed = bindingArguments(checked);
+  const compound = compoundParams(checked.definition);
   const reads: Unsupported[] = [];
   for (const [pointer, compiled] of checked.expressions) {
-    if (passed.has(pointer)) {
+    const argument = passed.has(pointer)
+      ? bindingArgumentOf(
+          valueAt(checked.definition, pointer) ?? null,
+          sensitive
+        )
+      : undefined;
+    if (argument !== undefined && !compound.has(argument)) {
+      continue;
+    }
+    if (argument !== undefined) {
+      const { taskId } = compiled.site;
+      reads.push({
+        pointer,
+        feature: `params.${argument}`,
+        ...(taskId === undefined ? {} : { taskId }),
+      });
       continue;
     }
     const paths = compiled.paths.filter(

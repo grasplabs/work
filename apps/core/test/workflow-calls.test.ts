@@ -685,12 +685,24 @@ describe("grasp.connector calls of JSON workflows", () => {
       default: "none",
       sensitive: true,
     };
-    const problems = async (tasks: unknown[]) => {
+    // A secret with parts: one of them could come back unseen.
+    const keys = {
+      schema: {
+        type: "object",
+        properties: { key: { type: "string", maxLength: 64 } },
+        required: ["key"],
+        additionalProperties: false,
+      },
+      label: "Keys",
+      default: { key: "none" },
+      sensitive: true,
+    };
+    const problems = async (tasks: unknown[], compound?: "keys") => {
       const error = await refusal(
         publishWorkflowVersion(env, ada, workflow.id, {
           definition: definitionOf(workflow.name, {
             bindings: { mail: { kind: "connector", contract: key } },
-            params: { token },
+            params: compound === undefined ? { token } : { token, keys },
             tasks: [...tasks, { finish: { set: { status: "done" } } }],
           }),
           basedOn: null,
@@ -713,6 +725,8 @@ describe("grasp.connector calls of JSON workflows", () => {
       computed: await problems([send('${ $params.token + "!" }')]),
       // In a set, it would reach the run's output.
       set: await problems([{ leak: { set: { value: "${ $params.token }" } } }]),
+      // A whole binding argument, but of a secret with parts.
+      compound: await problems([send("${ $params.keys }")], "keys"),
       // Data shaped like a call is no call.
       lookalike: await problems([
         {
@@ -735,6 +749,12 @@ describe("grasp.connector calls of JSON workflows", () => {
         {
           code: "expression.sensitive_param",
           pointer: "/do/0/leak/set/value",
+        },
+      ],
+      compound: [
+        {
+          code: "expression.sensitive_param",
+          pointer: "/do/0/send/with/arguments/subject",
         },
       ],
       lookalike: [
