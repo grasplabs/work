@@ -915,6 +915,52 @@ describe("an App calling another App's store", () => {
   });
 });
 
+describe("a store operation's caller", () => {
+  it("is refused, and recorded, once the person it acts for has left the organization", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles, "Desk");
+    const leaver = await person("user");
+    const consumer: StoreConsumer = {
+      subject: { type: "app", id: desk.app },
+      version: 1,
+      permissionId: await deskGrant(admin, desk, crm, crmActions),
+    };
+    const served = await storeOperationFor(env, consumer, "contacts.add");
+    if (served === undefined) {
+      throw new Error("Expected the operation to be served");
+    }
+    await env.DB.prepare("DELETE FROM members WHERE user_id = ?")
+      .bind(leaver.userId)
+      .run();
+    const refused = await outcome(
+      callStoreOperation(
+        env,
+        consumer,
+        served,
+        { name: "Mallory" },
+        {
+          actor: { type: "person", userId: leaver.userId },
+          principal: leaver.userId,
+          requestId: crypto.randomUUID(),
+          deadline: Date.now() + 30_000,
+          idempotencyKey: `key-${unique()}`,
+          runId: null,
+        }
+      )
+    );
+    expect({
+      refused,
+      recorded: refusedOf(await allEvents(), desk.app),
+      crmSees: await call(crm.owner, crm, "contacts.list"),
+    }).toStrictEqual({
+      refused: "resource.unavailable",
+      recorded: [["contacts.add", "permission.person_inactive"]],
+      crmSees: [],
+    });
+  });
+});
+
 describe("a store operation's receipts", () => {
   it("refuse a key used again with other arguments as the consumer's conflict", async () => {
     const admin = await person("admin");

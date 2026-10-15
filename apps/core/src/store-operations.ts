@@ -376,6 +376,7 @@ const consumerFailure = (error: AppErrorPayload): Error => {
   // gone: the binding doesn't serve.
   if (
     error.category === "authorization" ||
+    error.code.startsWith("permission.") ||
     error.code === "operation.not_found" ||
     error.code === "operation.kind_mismatch" ||
     error.code.startsWith("version.")
