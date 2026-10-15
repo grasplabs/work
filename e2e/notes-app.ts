@@ -196,7 +196,7 @@ export function NoteEditor({ note }: { note: Note }) {
 }
 `;
 
-const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+const screen = `import { useMutation, usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
 import type { Id } from "@grasp-os/sdk";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
@@ -219,11 +219,17 @@ function SelectedNote({ id }: { id: Id<"notes"> }) {
 }
 
 export default function Notes() {
-  const notes = useQuery(api.notes.list, { pagination: { pageSize: 50 } });
+  // A live list, five notes at a time: kept current as notes are saved,
+  // edited and deleted anywhere, never with a note twice or missing.
+  const { items, hasMore, isLoading, loadMore } = usePaginatedQuery(
+    api.notes.list,
+    {},
+    { initialPageSize: 5 },
+  );
   const remove = useMutation(api.notes.remove);
   const [selected, setSelected] = useState<Id<"notes"> | null>(null);
 
-  if (notes === undefined) {
+  if (isLoading && items.length === 0) {
     return <p role="status">Loading notes…</p>;
   }
   return (
@@ -231,11 +237,11 @@ export default function Notes() {
       <h1 className="text-2xl font-semibold">Notes</h1>
       <CreateNote />
       <ImportNote />
-      {notes.items.length === 0 ? (
+      {items.length === 0 ? (
         <p>No notes yet.</p>
       ) : (
         <ul aria-label="Notes" className="flex flex-col gap-3">
-          {notes.items.map((note) => (
+          {items.map((note) => (
             <li className="flex items-center gap-3" key={note._id}>
               <span>{note.title}</span>
               <Button onClick={() => setSelected(note._id)} variant="outline">
@@ -250,6 +256,11 @@ export default function Notes() {
             </li>
           ))}
         </ul>
+      )}
+      {hasMore && (
+        <Button disabled={isLoading} onClick={() => void loadMore()}>
+          {isLoading ? "Loading…" : "Load more"}
+        </Button>
       )}
       {selected === null ? null : <SelectedNote id={selected} />}
     </main>

@@ -134,6 +134,8 @@ export const operationErrors = defineErrorFamily({
     "The operation staged a change its schema doesn't allow.",
   "contract.invalid_request":
     "The operation's code sent the host something that isn't JSON.",
+  "contract.not_paginated":
+    "That query doesn't take a pagination argument and answer pages, so it can't be read as a paginated list.",
   "mutation.too_large":
     "This change stages more than one commit can hold, with what it returns.",
   "operation.read_limit":

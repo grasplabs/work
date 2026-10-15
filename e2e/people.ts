@@ -172,6 +172,7 @@ const cast = {
   notesAppSignedOut: { first: "builder" },
   notesLive: { builder: "builder" },
   writerApp: { builder: "builder" },
+  notesPages: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },
