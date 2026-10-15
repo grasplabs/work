@@ -2907,6 +2907,7 @@ msgstr "Grasp öffnet bald für alle, sobald Stephen mit den Teams gesprochen ha
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 msgstr "Grasp speichert diese Antwort erst, wenn Sie sie hier bestätigen. Prüfen Sie, was gefragt ist und was Sie antworten."
+
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on {connection}."
 msgstr "Grasp hält Ihre Aussage fest, dass es wirksam wurde, und sendet es nie wieder; ein Lauf, der darauf wartet, macht ohne die verlorene Antwort weiter. Auf {connection} wird nichts geändert oder rückgängig gemacht."
@@ -5231,14 +5232,6 @@ msgstr "Sensibel"
 msgid "Sensitive connections: {connections}."
 msgstr "Sensible Verbindungen: {connections}."
 
-#: src/decision-confirmation.tsx
-msgctxt "what an App's screen sends with an answer to a decision"
-msgid "Sent by the app"
-msgstr "Von der App mitgesendet"
-
-#: src/brain/brain.ts
-msgid "Served by"
-msgstr "Umgesetzt durch"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Sent"
 msgstr "Gesendet"
@@ -5246,6 +5239,11 @@ msgstr "Gesendet"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Gesendet <0>{sent}</0>"
+
+#: src/decision-confirmation.tsx
+msgctxt "what an App's screen sends with an answer to a decision"
+msgid "Sent by the app"
+msgstr "Von der App mitgesendet"
 
 #: src/brain/brain.ts
 msgid "Served by"

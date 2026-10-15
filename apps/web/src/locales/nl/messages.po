@@ -2907,6 +2907,7 @@ msgstr "Grasp gaat binnenkort voor iedereen open, zodra Stephen met de teams hee
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 msgstr "Grasp legt dit antwoord pas vast als je het hier bevestigt. Controleer wat er gevraagd wordt en wat je antwoordt."
+
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on {connection}."
 msgstr "Grasp legt vast dat het volgens jou effect had en verstuurt het nooit meer; een run die erop wacht gaat verder zonder het verloren antwoord. Op {connection} wordt niets gewijzigd of ongedaan gemaakt."
@@ -5231,14 +5232,6 @@ msgstr "Gevoelig"
 msgid "Sensitive connections: {connections}."
 msgstr "Gevoelige koppelingen: {connections}."
 
-#: src/decision-confirmation.tsx
-msgctxt "what an App's screen sends with an answer to a decision"
-msgid "Sent by the app"
-msgstr "Meegestuurd door de app"
-
-#: src/brain/brain.ts
-msgid "Served by"
-msgstr "Ondersteund door"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Sent"
 msgstr "Verstuurd"
@@ -5246,6 +5239,11 @@ msgstr "Verstuurd"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Verstuurd <0>{sent}</0>"
+
+#: src/decision-confirmation.tsx
+msgctxt "what an App's screen sends with an answer to a decision"
+msgid "Sent by the app"
+msgstr "Meegestuurd door de app"
 
 #: src/brain/brain.ts
 msgid "Served by"

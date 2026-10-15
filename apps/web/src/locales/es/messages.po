@@ -2907,6 +2907,7 @@ msgstr "Grasp abre pronto para todos, en cuanto Stephen haya hablado con los equ
 #: src/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 msgstr "Grasp solo registra esta respuesta cuando la confirmas aquí. Comprueba lo que se pregunta y lo que respondes."
+
 #: src/dashboard/outcome-card.tsx
 msgid "Grasp records your word that it took effect and never sends it again; a run waiting on it goes on without the answer that was lost. Nothing is changed or undone on {connection}."
 msgstr "Grasp registra tu palabra de que surtió efecto y no lo vuelve a enviar nunca; una ejecución que lo espera continúa sin la respuesta que se perdió. No se cambia ni se deshace nada en {connection}."
@@ -5231,14 +5232,6 @@ msgstr "Sensible"
 msgid "Sensitive connections: {connections}."
 msgstr "Conexiones sensibles: {connections}."
 
-#: src/decision-confirmation.tsx
-msgctxt "what an App's screen sends with an answer to a decision"
-msgid "Sent by the app"
-msgstr "Enviado por la app"
-
-#: src/brain/brain.ts
-msgid "Served by"
-msgstr "Flujos que contribuyen"
 #: src/routes/_shell.settings.outcomes.tsx
 msgid "Sent"
 msgstr "Enviado"
@@ -5246,6 +5239,11 @@ msgstr "Enviado"
 #: src/dashboard/outcome-card.tsx
 msgid "Sent <0>{sent}</0>"
 msgstr "Enviado <0>{sent}</0>"
+
+#: src/decision-confirmation.tsx
+msgctxt "what an App's screen sends with an answer to a decision"
+msgid "Sent by the app"
+msgstr "Enviado por la app"
 
 #: src/brain/brain.ts
 msgid "Served by"
