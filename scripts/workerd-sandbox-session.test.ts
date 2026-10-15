@@ -215,10 +215,11 @@ describe("a session on the on-prem sandbox", () => {
 
   /** What `GET /verdict/<id>` answers: its status and body. */
   const verdictAnswer = async (
-    id: string
+    id: string,
+    socket?: string
   ): Promise<{ status: number; body: unknown }> => {
     const asked = httpRequest({
-      socketPath: supervisor.socket,
+      socketPath: socket ?? supervisor.socket,
       path: `/verdict/${id}`,
     });
     asked.end();
@@ -482,6 +483,87 @@ describe("a session on the on-prem sandbox", () => {
         }
         await expect(crashing).resolves.toMatchObject({ verdict: "memory" });
         expect(placeless).toStrictEqual([]);
+      } finally {
+        await small.stop();
+      }
+    }
+  );
+
+  it(
+    "judges a session whose process reset its connection as it died, as a dying process with unread bytes does on Linux",
+    { timeout: 60_000 },
+    async () => {
+      // A stand-in host: it answers the session, then ends itself (status
+      // 1, as workerd does at V8's heap limit) on the first read of core's
+      // next frame, far larger than one read takes: the rest still unread,
+      // which Linux answers with a reset, whatever the timing.
+      const host = path.join(tempDir(), "resetting-host.mjs");
+      writeFileSync(
+        host,
+        `#!${process.execPath}
+import { createServer } from "node:net";
+import { createWriteStream } from "node:fs";
+const addr = process.argv.find((arg) => arg.startsWith("--socket-addr=http=unix:"));
+const socket = addr.slice("--socket-addr=http=unix:".length);
+const server = createServer((connection) => {
+  let head = "";
+  let upgraded = false;
+  connection.on("data", (chunk) => {
+    if (upgraded) {
+      connection.pause();
+      process.exit(1);
+    }
+    head += chunk.toString("latin1");
+    if (!head.includes("\\r\\n\\r\\n")) return;
+    upgraded = true;
+    connection.write("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\n\\r\\n");
+  });
+});
+server.listen(socket, () => {
+  createWriteStream(null, { fd: 3 }).write(JSON.stringify({ event: "listen", socket: "http" }) + "\\n");
+});
+`
+      );
+      chmodSync(host, 0o755);
+      const small = await startSandboxSupervisor({
+        workerd: host,
+        processes: 1,
+        log: () => {},
+      });
+      try {
+        const id = crypto.randomUUID();
+        const opened = await rawOpen(id, {
+          owner: "app-reset",
+          socket: small.socket,
+        });
+        expect(opened.status).toBe(101);
+        const { socket } = opened;
+        if (socket === undefined) {
+          throw new TypeError("The session gave no socket");
+        }
+        // The supervisor closes it while the frame may still be going out:
+        // the write's EPIPE then is no fault of the session.
+        socket.on("error", () => {});
+        const closed = new AbortController();
+        socket.once("close", () => {
+          closed.abort();
+        });
+        // A binary frame of a MiB, masked as a client's are (with a zero
+        // key): the host reads only the start of it.
+        const frameBytes = 1024 * 1024;
+        const frame = Buffer.alloc(14 + frameBytes);
+        frame[0] = 0x82;
+        frame[1] = 0xff;
+        frame.writeBigUInt64BE(BigInt(frameBytes), 2);
+        socket.write(frame);
+        // The supervisor closes core's end once it has judged the session.
+        if (!closed.signal.aborted) {
+          await once(closed.signal, "abort");
+        }
+        await expect(verdictAnswer(id, small.socket)).resolves.toMatchObject({
+          status: 200,
+          body: { verdict: "memory" },
+        });
       } finally {
         await small.stop();
       }
