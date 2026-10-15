@@ -11,7 +11,7 @@ import { screenLimits } from "@grasp-os/shared/screens";
 import { RpcSession, WebSocketTransport } from "capnweb";
 
 import { oidcProviders, signInConfig } from "./auth/config.ts";
-import { identify } from "./auth/identity.ts";
+import { identify, signedInSession } from "./auth/identity.ts";
 import { errorResponse } from "./errors.ts";
 import {
   coreRpcAccounting,
@@ -95,6 +95,8 @@ interface ConnectionSession {
   /** Only the cookie of the upgrade request. */
   headers: Headers;
   connectedAs: Identity;
+  /** The session the cookie held: the same for as long as the connection is open. */
+  sessionId: string;
 }
 
 /**
@@ -108,7 +110,7 @@ interface ConnectionSession {
  * by the call, against the identity this hands it.
  */
 const sessionApi = (
-  { env, headers, connectedAs }: ConnectionSession,
+  { env, headers, connectedAs, sessionId }: ConnectionSession,
   server: WebSocket
 ): SessionRpc => {
   /**
@@ -179,7 +181,7 @@ const sessionApi = (
   };
   server.addEventListener("close", end);
   server.addEventListener("error", end);
-  return new SessionRpc(env, check);
+  return new SessionRpc(env, check, sessionId);
 };
 
 /**
@@ -194,9 +196,17 @@ const browserConnection = async (
   headers: Headers,
   server: WebSocket
 ): Promise<{ api: CoreRpc; signedIn: boolean }> => {
-  const connectedAs = await identify(env, headers);
-  const session = connectedAs
-    ? sessionApi({ env, headers, connectedAs }, server)
+  const signedIn = await signedInSession(env, headers);
+  const session = signedIn
+    ? sessionApi(
+        {
+          env,
+          headers,
+          connectedAs: signedIn.person,
+          sessionId: signedIn.sessionId,
+        },
+        server
+      )
     : undefined;
   return {
     api: new CoreRpc(signInOptions(env), session),
