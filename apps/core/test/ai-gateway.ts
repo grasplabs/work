@@ -569,10 +569,16 @@ const workersAiBadInput = (
 };
 
 /**
- * A fake AI binding whose gateway answers with `replies`, in order. Its
- * `requests` are what reached the gateway.
+ * A fake AI binding whose gateway answers each request with what `respond`
+ * makes of it, given the requests so far, this one last: at once, or once
+ * a provider it asks has answered. Its `requests`
+ * are what reached the gateway.
  */
-export const fakeGateway = (...replies: GatewayReply[]) => {
+export const answeringGateway = (
+  respond: (
+    requests: readonly GatewayRequest[]
+  ) => GatewayReply | undefined | Promise<GatewayReply | undefined>
+) => {
   const requests: GatewayRequest[] = [];
   const fetch = async (
     input: Request | string | URL,
@@ -585,7 +591,7 @@ export const fakeGateway = (...replies: GatewayReply[]) => {
     if (badInput !== undefined) {
       return badInput;
     }
-    const reply = replies.shift();
+    const reply = await respond(requests);
     if (reply === undefined) {
       throw new Error("The fake gateway has no reply left");
     }
@@ -618,3 +624,10 @@ export const fakeGateway = (...replies: GatewayReply[]) => {
   };
   return { binding: { aiGatewayLogId: null, fetch }, requests };
 };
+
+/**
+ * A fake AI binding whose gateway answers with `replies`, in order. Its
+ * `requests` are what reached the gateway.
+ */
+export const fakeGateway = (...replies: GatewayReply[]) =>
+  answeringGateway(() => replies.shift());
