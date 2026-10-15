@@ -14,8 +14,8 @@ import {
 } from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 
+import type { CoreConnection, SessionEnded } from "../core-connection.ts";
 import type { PendingConfirmation } from "../decision-confirmation.tsx";
-import type { CoreLink, LinkEnded } from "./core-link.ts";
 import {
   inTime,
   isMounted,
@@ -27,8 +27,8 @@ import type { ExpectedStart } from "./frame-stages.ts";
 import { openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
 import { cancelStream, followStream } from "./screen-stream.ts";
-import { frameLinks, ownLink } from "./tab-link.ts";
-import type { Joined } from "./tab-link.ts";
+import { ownLink, tabLink } from "./tab-link.ts";
+import type { FrameLink, Joined } from "./tab-link.ts";
 
 // The page's side of an App's screen. The screen runs in a sandboxed frame
 // (core's screen-frame.ts) with no network, whose document core serves for
@@ -69,22 +69,22 @@ import type { Joined } from "./tab-link.ts";
 // screen sent elsewhere before, it can't.
 //
 // A frame is for the person its page's connection was first made for
-// (core-link.ts). When the browser's session turns out to be someone
+// (core-connection.ts). When the browser's session turns out to be someone
 // else's (a connection made again, or a function call core refused with
 // `auth.principal_changed`), or ends, the frame is stopped and emptied,
 // so nothing the screen held for the first person, such as their data or
 // a save it would send again, is left on the page or sent as the next.
 //
-// A tab's frames share that connection (tab-link.ts, spec 11.2), and each
-// reaches its App on it through a way of its own (core's `screens.frame`):
-// bound to its App, its build and its person, decided on its own build
-// alone, and closed when the frame stops, which lets go in core of
-// everything the frame followed. The frames never see the connection or
-// each other. What ends the connection for its person (signed out, or
-// someone else's session) ends it for every frame on it, and the next
-// frame opens a new one; what stops one frame (its build's approval
-// taken back, a broken channel, a timeout, the page leaving) stops that
-// frame alone.
+// A tab's frames go over the shell's own connection (tab-link.ts, spec
+// 11.2), and each reaches its App on it through a way of its own (core's
+// `screens.frame`): bound to its App, its build and its person, decided
+// on its own build alone, and closed when the frame stops, which lets go
+// in core of everything the frame followed. The frames never see the
+// connection or each other. What ends the connection for its person
+// (signed out, or someone else's session) stops every frame on it before
+// the page loads again; what stops one frame (its build's approval taken
+// back, a broken channel, a timeout, the page leaving) stops that frame
+// alone.
 
 /** What the page shows about a screen besides the screen itself. */
 export type ScreenState =
@@ -155,11 +155,11 @@ const forCore = (value: unknown): never =>
   value as never;
 
 /** A signed-in session's API, as the page's link to core gives it. */
-type Session = Awaited<ReturnType<CoreLink["session"]>>;
+type Session = Awaited<ReturnType<FrameLink["session"]>>;
 
 /** Runs `run` on the link's signed-in session. */
 const on = async <T>(
-  link: CoreLink,
+  link: FrameLink,
   run: (session: Session) => Promise<T>
 ): Promise<T> => {
   const session = await link.session();
@@ -216,7 +216,7 @@ const letGo = async (frame: Promise<FrameApi>): Promise<void> => {
 };
 
 const holdFrame = (
-  link: CoreLink,
+  link: FrameLink,
   { app, lease }: Pick<ScreenBundle, "app" | "lease">
 ): FrameHold => {
   let held: { session: Session; frame: Promise<FrameApi> } | undefined;
@@ -423,6 +423,12 @@ const appTarget = (
         // core's answer to the page.
         void checkDeliveryNow(hold, refused);
       }
+      // Never acted on as `auth.principal_changed`: what a call comes back
+      // with may be the App server's own error, worded as it likes, and
+      // ending the session reloads the tab for every frame. The frame's
+      // capability is bound to its connection's session, whose person
+      // never changes; someone else's cookie shows on a connection made
+      // again (core-connection.ts) or a plain request (`plain`).
       throw error;
     }
   };
@@ -540,7 +546,7 @@ const refusedInPreview = async (): Promise<never> => {
  * workflow run, finds none, and follows none.
  */
 const previewTarget = (
-  link: CoreLink,
+  link: FrameLink,
   chatId: string,
   bundle: PreviewBundle
 ): FrameTarget => {
@@ -592,17 +598,17 @@ interface Connected {
 interface FrameSource<Bundle extends FrameCode> {
   open: (session: Session) => Promise<Bundle>;
   /**
-   * The link the frame goes over: the tab's (`frameLinks`) unless given,
-   * or one of its own, closed with the frame.
+   * Joins the connection the frame goes over: the tab's (`tabLink`), or
+   * one of its own, closed with the frame (`ownLink`).
    */
-  join?: (onEnded: (why: LinkEnded) => void) => Joined<CoreLink>;
+  join: (onEnded: (why: SessionEnded) => void) => Joined;
   /**
    * What the frame's bridge reaches on the tab's `link`: `refused` stops
    * the frame (core no longer hands its build the data, or the browser's
    * session is someone else's), and `cleanups` stop what it starts.
    */
   connect: (
-    link: CoreLink,
+    link: FrameLink,
     bundle: Bundle,
     refused: (reason: Refused) => void,
     cleanups: (() => void)[]
@@ -655,13 +661,10 @@ const runFrame = <Bundle extends FrameCode>(
     onState(state);
   };
 
-  // The link ending stops the frame, signed out or not, as it stops every
-  // frame of the tab: nothing of the person's stays on the page, in a
+  // The session ending stops the frame, signed out or not, as it stops
+  // every frame of the tab: nothing of the person's stays on the page, in a
   // frame or its bridge, for whoever uses the browser next.
-  const join =
-    source.join ??
-    ((onEnded: (why: LinkEnded) => void) => frameLinks.join(onEnded));
-  const joined = join((why) => {
+  const joined = source.join((why) => {
     fail(
       why === "signed-out"
         ? { status: "signed-out" }
@@ -675,9 +678,9 @@ const runFrame = <Bundle extends FrameCode>(
 
   /**
    * Stops the frame for `reason`. Core saying the browser's session is
-   * someone else's ends the tab's link, which stops every frame on it,
-   * this one too, and the next frame connects anew; anything else stops
-   * this frame alone.
+   * someone else's ends the person's session on the page, which stops
+   * every frame of the tab, this one too, and loads the page again;
+   * anything else stops this frame alone.
    */
   const refused = (reason: Refused): void => {
     if (reason === "principal-changed") {
@@ -799,6 +802,7 @@ const runFrame = <Bundle extends FrameCode>(
  */
 export const runScreen = (
   frame: HTMLIFrameElement,
+  core: CoreConnection,
   app: string,
   screen: string,
   onState: (state: ScreenState) => void,
@@ -809,6 +813,7 @@ export const runScreen = (
     frame,
     {
       open: async (session) => await session.screens.open(app, screen),
+      join: (onEnded) => tabLink(core, onEnded),
       connect: (link, bundle, refused, cleanups) => {
         const hold = holdFrame(link, bundle);
         cleanups.push(() => {

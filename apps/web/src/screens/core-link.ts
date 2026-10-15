@@ -1,34 +1,27 @@
 import { authErrors } from "@grasp-os/shared/errors";
 
-import { connectCore, isTransient, retrying, wait } from "../core.ts";
-
-/** A signed-in session's API, as a connection to core gives it. */
-type Session = Awaited<
-  ReturnType<ReturnType<typeof connectCore>["authenticate"]>
->;
-
-/** How long to wait before connecting again, at first and at most. */
-const reconnectMs = { first: 1000, most: 30_000 };
+import type { SessionEnded } from "../core-connection.ts";
+import type { Session } from "../core.ts";
+import {
+  connectCore,
+  isTransient,
+  reconnectDelay,
+  retrying,
+  wait,
+} from "../core.ts";
 
 /**
  * The pauses before trying again what a page needs to start: its first
- * connection, or its first call. The same growing pauses as reconnecting,
- * but only a few, so a page whose core stays out of reach says so.
+ * connection, or its first call. Growing, but only a few, so a page whose
+ * core stays out of reach says so.
  */
-const startRetryMs = [
-  reconnectMs.first,
-  reconnectMs.first * 2,
-  reconnectMs.first * 4,
-] as const;
+const startRetryMs = [1000, 2000, 4000] as const;
 
 const closedError = (): Error =>
   new Error("The page closed its connection to core.");
 
-/** Why a link ended for good, before anyone closed it. */
-export type LinkEnded = "signed-out" | "principal-changed";
-
 /** Core's refusals of a connection that end the link, and how. */
-const endings: Readonly<Record<string, LinkEnded>> = {
+const endings: Readonly<Record<string, SessionEnded>> = {
   "auth.unauthenticated": "signed-out",
   "auth.principal_changed": "principal-changed",
 };
@@ -42,6 +35,41 @@ const personOf = (identity: unknown): string | undefined => {
   return typeof userId === "string" && userId.length > 0 ? userId : undefined;
 };
 
+/**
+ * Runs `run` on the session `session` waits for, and a few times again,
+ * with a growing pause, while it fails in a way that may pass (core
+ * failing, or the connection breaking) and the connection is `open`,
+ * which is checked again right before each `run`.
+ * After a break, the next try waits for the new connection, and a
+ * connection that once worked reconnects for as long as it takes, so that
+ * wait has no bound. Not getting a session at all fails at once: the
+ * connection has tried again already, or closed.
+ */
+export const retryingOn = async <T>(
+  session: () => Promise<Session>,
+  run: (session: Session) => Promise<T>,
+  open: () => boolean
+): Promise<T> => {
+  let connected = false;
+  return await retrying(
+    async () => {
+      connected = false;
+      const current = await session();
+      // Checked in the turn `run` is called: what stopped while the
+      // session came (a frame that left) sends nothing.
+      if (!open()) {
+        throw closedError();
+      }
+      connected = true;
+      return await run(current);
+    },
+    // Jittered, so frames whose calls failed together, as when core
+    // restarts, don't all ask again at the same moment.
+    startRetryMs.map((ms) => ms / 2 + (Math.random() * ms) / 2),
+    (failure) => connected && open() && isTransient(failure)
+  );
+};
+
 /** Waits for `promise` to settle, whichever way. */
 const settled = async (promise: Promise<unknown>): Promise<void> => {
   try {
@@ -52,7 +80,9 @@ const settled = async (promise: Promise<unknown>): Promise<void> => {
 };
 
 /**
- * A page's long-lived connection to core: a Cap'n Web session that
+ * A draft preview's own long-lived connection to core (tab-link.ts says
+ * why it has one; the tab's App frames go over the tab's connection,
+ * core-connection.ts): a Cap'n Web session that
  * connects again when it drops, until the person's session has ended.
  * Stubs passed over the old connection (a screen's callbacks) break with
  * it; their owners subscribe again on the new one.
@@ -85,14 +115,15 @@ export class CoreLink {
   #session: Promise<Session>;
   #core: ReturnType<typeof connectCore> | undefined;
   #closed = false;
-  #delay = reconnectMs.first;
+  /** Reconnect attempts since the link last connected. */
+  #attempt = 0;
   /** Who the link is for, once it first connected. */
   #person: string | undefined;
   /** Core's refusal that ended the link, once one did. */
   #endedBy: Error | undefined;
-  readonly #onEnded: (why: LinkEnded) => void;
+  readonly #onEnded: (why: SessionEnded) => void;
 
-  constructor(onEnded: (why: LinkEnded) => void) {
+  constructor(onEnded: (why: SessionEnded) => void) {
     this.#onEnded = onEnded;
     // Core failing or out of reach is tried again on the first connection
     // too, a few times: only a connection that worked reconnects when it
@@ -111,23 +142,11 @@ export class CoreLink {
     void this.#started(this.#session);
   }
 
-  /**
-   * Whether the link's first connection failed for good, or it was closed
-   * before it connected: it never connects then, and whoever wants core
-   * opens a new link (tab-link.ts).
-   */
-  get failedToStart(): boolean {
-    return this.#startFailed;
-  }
-
-  #startFailed = false;
-
-  /** Notes whether `first`, the first connection, failed. */
+  /** Lets go of the link once `first`, its first connection, failed. */
   async #started(first: Promise<Session>): Promise<void> {
     try {
       await first;
     } catch {
-      this.#startFailed = true;
       // The last attempt's connection may still be open: a link that
       // never connects holds none, whether or not anyone opens another.
       this.close();
@@ -155,25 +174,12 @@ export class CoreLink {
     return person;
   }
 
-  /**
-   * Runs `run` on the signed-in session, and a few times again, with a
-   * growing pause, while it fails in a way that may pass: core failing, or
-   * the connection breaking. After a break, the next try waits for the new
-   * connection, and a connection that once worked reconnects for as long
-   * as it takes, so that wait has no bound. Not connecting at all fails at
-   * once: the first connection has tried again already.
-   */
+  /** Runs `run` on the signed-in session, as `retryingOn` says. */
   async retrying<T>(run: (session: Session) => Promise<T>): Promise<T> {
-    let connected = false;
-    return await retrying(
-      async () => {
-        connected = false;
-        const session = await this.session();
-        connected = true;
-        return await run(session);
-      },
-      startRetryMs,
-      (failure) => connected && !this.#closed && isTransient(failure)
+    return await retryingOn(
+      async () => await this.session(),
+      run,
+      () => !this.#closed
     );
   }
 
@@ -206,7 +212,7 @@ export class CoreLink {
     if (person !== this.#person) {
       throw authErrors.create("auth.principal_changed");
     }
-    this.#delay = reconnectMs.first;
+    this.#attempt = 0;
     // Only a connection that worked starts a reconnect when it breaks, and
     // only once: a failed attempt is retried by the loop that made it, so
     // nothing is awaited once this is registered. Registered after the
@@ -225,12 +231,12 @@ export class CoreLink {
   async #reconnect(): Promise<Session> {
     for (;;) {
       // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
-      await wait(this.#delay);
+      await wait(reconnectDelay(this.#attempt));
       if (this.#closed) {
         // Closed while waiting: a new connection would never be closed.
         throw closedError();
       }
-      this.#delay = Math.min(this.#delay * 2, reconnectMs.most);
+      this.#attempt += 1;
       try {
         // oxlint-disable-next-line no-await-in-loop -- one attempt at a time
         return await this.#connect();
