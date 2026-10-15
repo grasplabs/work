@@ -329,11 +329,18 @@ export const storeBuild = async (
     { app: key.id, version: key.version },
     compiled.build.artifacts.map(({ sha256 }) => sha256)
   );
-  await Promise.all(
+  // Every upload settled before any failure is thrown: a caller that then
+  // gives the reservations back must never race an upload still running,
+  // which would store bytes no reservation tracks.
+  const stored = await Promise.allSettled(
     [...compiled.bytes].map(async ([sha256, bytes]) => {
       await env.FILES.put(artifactKey(sha256), bytes, { sha256 });
     })
   );
+  const failed = stored.find((result) => result.status === "rejected");
+  if (failed !== undefined) {
+    throw failed.reason;
+  }
 };
 
 /**

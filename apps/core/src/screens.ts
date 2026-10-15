@@ -320,7 +320,12 @@ export const buildOpenWorkflow = async (
   env: BuildEnv,
   files: AppFiles
 ): Promise<OpenWorkflowBuild> =>
-  await cachedBuild<OpenWorkflowBuild>(env, "open-workflow", files, (all) => all);
+  await cachedBuild<OpenWorkflowBuild>(
+    env,
+    "open-workflow",
+    files,
+    (all) => all
+  );
 
 /** The details of a `*.build_failed` error: the version (null for a draft), and why. */
 export const buildFailed = (

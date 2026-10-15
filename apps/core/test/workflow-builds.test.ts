@@ -610,6 +610,50 @@ describe("JSON workflow builds", () => {
     });
   });
 
+  it("gives nothing back until every upload of a build has settled, one failing first", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
+    const uploads = { failed: false, running: 0, runningAtEnd: -1 };
+    // The first sealed artifact fails at once; the others take a while.
+    const files = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "put") {
+          return async (...args: Parameters<R2Bucket["put"]>) => {
+            if (!args[0].startsWith(artifactKey(""))) {
+              return await target.put(...args);
+            }
+            if (!uploads.failed) {
+              uploads.failed = true;
+              throw new Error("The bucket is unavailable");
+            }
+            uploads.running += 1;
+            await scheduler.wait(300);
+            const put = await target.put(...args);
+            uploads.running -= 1;
+            return put;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...rest: unknown[]): unknown => Reflect.apply(value, target, rest)
+          : value;
+      },
+    });
+    const failed = await outcome(
+      publishWorkflowVersion({ ...env, FILES: files }, by, workflow.id, {
+        definition: definitionOf(workflow.name, [
+          { finish: { set: { status: "first" } } },
+        ]),
+        basedOn: null,
+      })
+    );
+    uploads.runningAtEnd = uploads.running;
+    expect({
+      failed: failed === "ok",
+      runningAtEnd: uploads.runningAtEnd,
+    }).toStrictEqual({ failed: false, runningAtEnd: 0 });
+  });
+
   it("gives back what a publication reserved when storing its bytes fails, so only a saved version's stay reserved", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
