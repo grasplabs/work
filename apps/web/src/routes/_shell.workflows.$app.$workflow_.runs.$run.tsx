@@ -50,7 +50,7 @@ const RunPage = () => {
             {t`Run of ${workflow}`}
           </h1>
           <div className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1">
-            <RunResult status={summary.status} />
+            <RunResult queued={summary.queued} status={summary.status} />
             <span className="tabular-nums">
               {formatDateTime(summary.createdAt)}
             </span>

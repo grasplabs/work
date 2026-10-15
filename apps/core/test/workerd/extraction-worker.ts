@@ -37,8 +37,8 @@ const hostile: Readonly<Record<string, string>> = {
   // Never returns.
   busy: takenOver("for (;;) {}"),
   // Allocates without end while a read of the file is in flight.
-  memory: takenOver(`const first = await read(0);
-    read(first.byteLength);
+  memory: takenOver(`const first = await read("file", 0);
+    read("file", first.byteLength);
     await new Promise((resolve) => setTimeout(resolve, 0));
     const held = [];
     for (;;) {
@@ -47,8 +47,8 @@ const hostile: Readonly<Record<string, string>> = {
       while (Date.now() < until) {}
     }`),
   // Fills V8's own heap, which ends its process, with a read in flight.
-  heap: takenOver(`const first = await read(0);
-    read(first.byteLength);
+  heap: takenOver(`const first = await read("file", 0);
+    read("file", first.byteLength);
     await new Promise((resolve) => setTimeout(resolve, 0));
     const held = [];
     for (;;) {
@@ -59,9 +59,9 @@ const hostile: Readonly<Record<string, string>> = {
     'return { ok: true, markdown: "x".repeat(15_000_000) };'
   ),
   // Reads the file's start again.
-  reread: takenOver(`await read(0);
+  reread: takenOver(`await read("file", 0);
     try {
-      await read(0);
+      await read("file", 0);
       return { ok: true, markdown: "# Read twice" };
     } catch {
       return { ok: true, markdown: "# Refused" };

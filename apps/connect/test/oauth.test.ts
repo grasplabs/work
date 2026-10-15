@@ -466,7 +466,8 @@ describe("whose account", () => {
     const anna = someone();
     const ada = someone("admin");
     const personal = await connectAccount(providers, anna, ownAccount(anna));
-    const shared = await connectAccount(providers, ada, mailboxAccount(), {
+    const mailbox = mailboxAccount();
+    const shared = await connectAccount(providers, ada, mailbox, {
       scope: "shared",
     });
     await exports.default.disconnect({ person: anna, connectionId: personal });
@@ -478,8 +479,20 @@ describe("whose account", () => {
     ]);
     expect(owners.toSorted((a, b) => a.id.localeCompare(b.id))).toStrictEqual(
       [
-        { id: personal, ownerUserId: anna.userId },
-        { id: shared, ownerUserId: null },
+        {
+          id: personal,
+          ownerUserId: anna.userId,
+          source: "native",
+          provider: "microsoft",
+          accountName: anna.email,
+        },
+        {
+          id: shared,
+          ownerUserId: null,
+          source: "native",
+          provider: "microsoft",
+          accountName: mailbox.email,
+        },
       ].toSorted((a, b) => a.id.localeCompare(b.id))
     );
     await expect(

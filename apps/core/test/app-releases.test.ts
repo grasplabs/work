@@ -257,6 +257,8 @@ describe("sealing a release", { timeout: 120_000 }, () => {
         manifestHash: release.manifestHash,
         // The store's first definition (business_store_versions).
         targetVersion: 1,
+        // A store's binding names no contract key.
+        contractId: null,
       },
     ]);
     const events = await allEvents();

@@ -2,7 +2,11 @@ import type { AppsApi } from "./apps.ts";
 import type { AuditApi } from "./audit-log.ts";
 import type { BrainApi } from "./brain.ts";
 import type { ChatsApi } from "./chat.ts";
-import type { ConnectionsApi, PendingActionsApi } from "./connect.ts";
+import type {
+  ConnectionsApi,
+  PendingActionsApi,
+  UnknownOutcomesApi,
+} from "./connect.ts";
 import type { DashboardApi } from "./dashboard.ts";
 import type { DecisionsApi } from "./decisions.ts";
 import type { DependenciesApi } from "./dependencies.ts";
@@ -14,6 +18,7 @@ import type { ModelsApi } from "./models.ts";
 import type { NotificationsApi } from "./notifications.ts";
 import type { OnboardingGateApi } from "./onboarding-gate.ts";
 import type { OnboardingApi, OnboardingStaffApi } from "./onboarding.ts";
+import type { OrganizationApi } from "./organization.ts";
 import type { PermissionsApi } from "./permissions.ts";
 import type { ResourceBindingsApi, TemplatesApi } from "./resource-bindings.ts";
 import type { Role } from "./roles.ts";
@@ -22,6 +27,7 @@ import type { ScreensApi } from "./screens.ts";
 import type { SignalsApi } from "./signals.ts";
 import type { StoresApi } from "./stores.ts";
 import type { UploadsApi } from "./uploads.ts";
+import type { WorkflowResourcesApi } from "./workflow-resources.ts";
 import type { WorkflowsApi } from "./workflows.ts";
 
 /** A way to sign in to this deployment, for the sign-in screen. */
@@ -112,6 +118,11 @@ export interface SessionApi {
   /** Runs of Apps' workflows, for those with a role in the App. */
   readonly workflows: WorkflowsApi;
   /**
+   * Independent workflows: their versions and whom they are shared with,
+   * for those with a role in them.
+   */
+  readonly workflowResources: WorkflowResourcesApi;
+  /**
    * What core tells the person: the workflows that failed while acting for
    * them.
    */
@@ -135,6 +146,11 @@ export interface SessionApi {
   readonly screenTrust: ScreenTrustApi;
   /** The organization's members: offboarding. Admins only. */
   readonly members: MembersApi;
+  /**
+   * The organization's name, time zone and where its data lives: everyone
+   * reads them, its own admins change them.
+   */
+  readonly organization: OrganizationApi;
   /** The audit log: search, export and chain verification. Admins only. */
   readonly audit: AuditApi;
   /**
@@ -153,6 +169,11 @@ export interface SessionApi {
    * an App, and from any of them once it read restricted data.
    */
   readonly pendingActions: PendingActionsApi;
+  /**
+   * Side effects sent for the signed-in person whose answer was lost, and
+   * that connect couldn't recover: the person says what became of each.
+   */
+  readonly unknownOutcomes: UnknownOutcomesApi;
   /**
    * Improvement signals from runs and the audit log, computed daily: every
    * one for admins, an App's for its builders.

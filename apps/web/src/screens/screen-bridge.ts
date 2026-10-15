@@ -9,6 +9,7 @@ import { boundedRpcTarget } from "@grasp-os/shared/rpc-target";
 import { portTransport } from "@grasp-os/shared/screen-port";
 import {
   rpcArgumentDepth,
+  rateLimited,
   screenErrors,
   screenLimits,
   screenProblemSchema,
@@ -44,6 +45,16 @@ import { RpcSession, RpcStub } from "capnweb";
 export interface FrameTarget {
   call: (method: string, args: unknown[]) => Promise<unknown>;
   callFunction: (request: string) => Promise<unknown>;
+  /** Follows a streaming action's invocation (screen-stream.ts). */
+  streamFunction: (
+    what: "stream" | "attach",
+    request: string,
+    onFrame: (frame: unknown) => Promise<unknown>,
+    /** Called once the stream has ended, however it ended. */
+    onEnded: () => void
+  ) => Promise<{ release: () => void }>;
+  /** Cancels a streaming action's invocation, for everyone following it. */
+  cancelStream: (request: string) => Promise<unknown>;
   report: (problem: ScreenProblem) => Promise<void>;
   startRun: (workflow: string, input: unknown) => Promise<unknown>;
   runs: (workflow: string) => Promise<unknown>;
@@ -52,6 +63,10 @@ export interface FrameTarget {
   control: (run: string, kind: string) => Promise<unknown>;
   summary: (run: string) => Promise<unknown>;
   watchRuns: (workflow: string, onChange: unknown) => Promise<unknown>;
+  watchQuery: (
+    request: string,
+    onSnapshot: unknown
+  ) => Promise<{ release: () => Promise<void> }>;
 }
 
 /** The page's theme, as the `dark` class on its root says (theme.js). */
@@ -59,6 +74,13 @@ const pageTheme = (): Theme =>
   document.documentElement.classList.contains("dark") ? "dark" : "light";
 
 type ThemeCallback = (theme: Theme) => void;
+
+/** What the frame passes for a stream's frames: called with each. */
+type FrameCallback = (frame: unknown) => Promise<void>;
+
+/** A stub the frame passed for a stream's frames, as for its theme. */
+const isFrameCallback = (value: unknown): value is RpcStub<FrameCallback> =>
+  value instanceof RpcStub;
 
 /**
  * A stub the frame passed for its theme callback. The page only calls it;
@@ -119,7 +141,7 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
     );
     this.#requests = bucket;
     if (!taken) {
-      throw screenErrors.create("screen.rate_limited");
+      throw rateLimited();
     }
   }
 
@@ -145,6 +167,83 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
       throw screenErrors.create("screen.invalid");
     }
     return await this.#target.callFunction(request);
+  }
+
+  /**
+   * Follows a streaming action for the frame: its request checked as
+   * `callFunction` checks one, its frames handed to the frame's callback
+   * one at a time (screen-stream.ts). Answers the subscription, which the
+   * frame releases, and which closing the bridge releases too.
+   */
+  async streamFunction(
+    what: unknown,
+    request: unknown,
+    onFrame: unknown
+  ): Promise<{ release: () => void }> {
+    this.#request();
+    if (
+      (what !== "stream" && what !== "attach") ||
+      typeof request !== "string" ||
+      request.length > functionRequestMaxBytes ||
+      !isFrameCallback(onFrame)
+    ) {
+      throw screenErrors.create("screen.invalid");
+    }
+    const toFrame = onFrame.dup();
+    const deliver = async (frame: unknown): Promise<null> => {
+      await toFrame(frame);
+      return null;
+    };
+    // What the bridge keeps of the stream until it ends, or the bridge
+    // closes: let go of as soon as either happens, so a frame that starts
+    // stream after stream holds no more than those still running.
+    const held: { subscription?: { release: () => void } } = {};
+    let ended = false;
+    const cleanup = (): void => {
+      if (ended) {
+        return;
+      }
+      ended = true;
+      held.subscription?.release();
+      toFrame[Symbol.dispose]();
+      const at = this.#cleanups.indexOf(cleanup);
+      if (at !== -1) {
+        this.#cleanups.splice(at, 1);
+      }
+    };
+    // Kept before it is open: a bridge closed while the request is under
+    // way lets go of the stream as soon as it arrives.
+    this.#cleanups.push(cleanup);
+    let opened: { release: () => void };
+    try {
+      opened = await this.#target.streamFunction(
+        what,
+        request,
+        deliver,
+        cleanup
+      );
+    } catch (error) {
+      cleanup();
+      throw error;
+    }
+    held.subscription = opened;
+    if (ended) {
+      // It ended, or the bridge closed, before it was handed over.
+      opened.release();
+    }
+    return opened;
+  }
+
+  /** Cancels a streaming action's invocation, as `callFunction` checks it. */
+  async cancelStream(request: unknown): Promise<unknown> {
+    this.#request();
+    if (
+      typeof request !== "string" ||
+      request.length > functionRequestMaxBytes
+    ) {
+      throw screenErrors.create("screen.invalid");
+    }
+    return await this.#target.cancelStream(request);
   }
 
   async startRun(workflow: unknown, input: unknown): Promise<unknown> {
@@ -190,6 +289,27 @@ class Bridge extends FrameRpcTarget implements ScreenBridge {
   async watchRuns(workflow: unknown, onChange: unknown): Promise<unknown> {
     this.#request();
     return await this.#target.watchRuns(text(workflow), onChange);
+  }
+
+  /**
+   * Follows a query of the App (spec 11): its request goes on as the
+   * frame sent it, bounded as a function call's is, and its callback as
+   * `watchRuns`'s does; the subscription core answers goes back to the
+   * frame, to release. Following counts as a request; what core pushes
+   * doesn't, and core bounds what a connection follows.
+   */
+  async watchQuery(
+    request: unknown,
+    onSnapshot: unknown
+  ): Promise<{ release: () => Promise<void> }> {
+    this.#request();
+    if (
+      typeof request !== "string" ||
+      request.length > functionRequestMaxBytes
+    ) {
+      throw screenErrors.create("screen.invalid");
+    }
+    return await this.#target.watchQuery(request, onSnapshot);
   }
 
   /** Past what a screen may report, or in no valid shape: dropped here. */
@@ -299,7 +419,8 @@ export const openBridge = (
       return;
     }
     open = false;
-    for (const cleanup of cleanups) {
+    // A copy: a stream's cleanup takes itself off the list as it runs.
+    for (const cleanup of cleanups.splice(0)) {
       cleanup();
     }
     frame[Symbol.dispose]();

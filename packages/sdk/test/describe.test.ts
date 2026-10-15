@@ -130,7 +130,7 @@ describe(describeWorkflow, () => {
   await step.do("go", {
     description: "Go",
     retries: { limit: 2, delay: "1 minute", backoff: "exponential" },
-    timeout: "5 minutes",
+    timeout: "30 seconds",
   }, async () => 1);`);
 
     expect(describeWorkflow(source).steps).toMatchObject([
@@ -138,7 +138,7 @@ describe(describeWorkflow, () => {
         name: "go",
         options: {
           retries: { limit: 2, delay: "1 minute", backoff: "exponential" },
-          timeout: "5 minutes",
+          timeout: "30 seconds",
         },
       },
     ]);
@@ -218,8 +218,12 @@ describe(describeWorkflow, () => {
         "up to 365 days",
       ],
       [
-        `await step.do("go", { description: "Go", timeout: "15 minutes" }, async () => 1);`,
-        "at most 14 minutes",
+        `await step.do("go", { description: "Go", timeout: "2 minutes" }, async () => 1);`,
+        "at most 60 seconds",
+      ],
+      [
+        `await step.do("go", { description: "Go", retries: { limit: 9 } }, async () => 1);`,
+        "at most 4 times",
       ],
       [
         `await step.decision("go", { description: "Go", from: params.reviewer, ask });`,

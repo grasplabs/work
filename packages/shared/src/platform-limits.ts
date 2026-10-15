@@ -71,6 +71,38 @@ export const platformLimits = {
   workflowActiveMs: 30 * minute,
   /** A run lineage's age, from its root's start: its deadline and retention agree. */
   workflowAgeMs: 365 * day,
+  /**
+   * Workflow attempts running at once in the whole client deployment: the
+   * tenant's share of its core (core's workflows/admission.ts).
+   */
+  workflowClientAttempts: 32,
+  /**
+   * Workflow attempts running at once for one person: those of the runs
+   * that act for them. One run's branches fit.
+   */
+  workflowPersonAttempts: 8,
+  /** Workflow attempts running at once of one App's runs. One run's branches fit. */
+  workflowAppAttempts: 8,
+  /**
+   * Workflow steps waiting at once for a share of the attempts running at
+   * once, for one person: past it, a step's attempt is refused, not queued.
+   */
+  workflowQueuedPerPerson: 64,
+  /** Workflow steps waiting at once for a share, of one App's runs. */
+  workflowQueuedPerApp: 64,
+  /**
+   * How long one workflow step waits in all for a share, or for its busy
+   * lineage, before it fails (`workflow.queue_timeout`).
+   */
+  workflowQueuedStepMs: 1 * day,
+
+  /**
+   * Independent workflows one person creates, deleted ones included: their
+   * names are never released (core's workflow-resources.ts).
+   */
+  workflowResourcesPerPerson: 200,
+  /** Live independent triggers one person has (core's trigger-resources.ts). */
+  triggerResourcesPerPerson: 100,
 
   // Calls a run lineage makes.
   /** Provider requests of one run lineage, retries included. */

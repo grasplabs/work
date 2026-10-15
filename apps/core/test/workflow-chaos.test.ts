@@ -1082,7 +1082,7 @@ ${mailStep("late", "Late", { after: hangOnFirst("late") })}
     "send",
     // Retried while the first call is still out: each retry is told so
     // (connect.call_in_progress), until the answer is in.
-    { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, timeout: "${attemptTimeout}", retries: { limit: 40, delay: 250, backoff: "constant" } },
+    { description: "Send the invoice", sideEffect: true, input: ${JSON.stringify(invoiceMail)}, timeout: "${attemptTimeout}", retries: { limit: 4, delay: 250, backoff: "constant" } },
     async ({ idempotencyKey, input: mail }) => {
       await env.APP.call("hit", "send");
       return JSON.parse((await env.MAIL.call("mail.send", mail, { idempotencyKey })).output);

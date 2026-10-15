@@ -9,7 +9,7 @@ import {
 import { inspectApp } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 
-import { inspected } from "../../src/app-releases.ts";
+import { inspected } from "../../src/app-inspection.ts";
 import { transformBatch } from "../../src/migration-transform.ts";
 import type {
   TransformOutcome,

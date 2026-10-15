@@ -1,5 +1,8 @@
+import { readWhole } from "@grasp-os/shared/chunks";
+import type { ChunkRead } from "@grasp-os/shared/chunks";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
+import { extractedPart } from "./asset.ts";
 import { formats, TooLargeError } from "./formats.ts";
 
 // The extractor's sandbox: the one module of a Dynamic Worker core starts
@@ -49,35 +52,22 @@ export default class Extractor extends WorkerEntrypoint {
   }
 
   /**
-   * The same, with the file's `size` bytes read through `read`, a chunk at
-   * a time from the offset it's given: on the on-prem sandbox host
-   * (extract.ts), where one message can't carry both this module and an
-   * upload. A chunk that isn't bytes, is empty or runs past `size` makes
-   * the file unreadable.
+   * The same, with the file's `size` bytes read through `read` as part
+   * `file`, a chunk at a time: on the on-prem sandbox host (extract.ts),
+   * where one message can't carry both this module and an upload. A chunk
+   * that isn't bytes, is empty or runs past `size` makes the file
+   * unreadable.
    */
   async extractRead(
     mediaType: string,
     size: number,
-    read: (offset: number) => Promise<unknown>
+    read: ChunkRead
   ): Promise<Extracted> {
-    if (!Number.isSafeInteger(size) || size < 0) {
+    let bytes: Uint8Array;
+    try {
+      bytes = await readWhole(read, extractedPart, size);
+    } catch {
       return { ok: false, reason: "unreadable" };
-    }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    while (offset < size) {
-      // In order: each chunk starts where the last one ended.
-      // oxlint-disable-next-line no-await-in-loop
-      const chunk = await read(offset);
-      if (
-        !(chunk instanceof Uint8Array) ||
-        chunk.byteLength === 0 ||
-        offset + chunk.byteLength > size
-      ) {
-        return { ok: false, reason: "unreadable" };
-      }
-      bytes.set(chunk, offset);
-      offset += chunk.byteLength;
     }
     return await this.extract({ mediaType, bytes });
   }

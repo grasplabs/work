@@ -64,6 +64,19 @@
   --tile-foreground: #1a1a19;
   --status-agreed: #1f8a5b;
   --status-attention: #d0561c;
+  /* Time bars: what is still manual, what is saved, and what is expected but not measured. */
+  --bar-manual: #e8e8e4;
+  --bar-saved: #1a1a19;
+  --bar-expected: #f1f1ef;
+  --bar-expected-border: #9a9a94;
+  /* The dashboard's return: measured is the agreed green; expected a light tint of it, still to come. */
+  --return-expected: #cfe8dc;
+  /* The workflow canvas: Today and Proposed each have their own ground and a 20px dot grid. */
+  --canvas-today: #fbfbfa;
+  --canvas-proposed: #f6f6f3;
+  --canvas-dot: #deded9;
+  --connector: #cfcfca;
+  --row-group: #fafaf9;
   /*
    * The brain's notes are the one place with colour: one soft hue per
    * group, as a dot per note in its file tree, note pages and the atlas's
@@ -77,6 +90,17 @@
   --graph-candidates: oklch(0.64 0.16 300);
   --graph-sources: oklch(0.82 0.01 286);
   --graph-gaps: oklch(0.7 0.1 195);
+  /*
+   * A chart someone asked to have in colour: six hues of one weight,
+   * beside the agreed green and the attention orange. A chart nobody
+   * asked to colour stays in the ranked greys above.
+   */
+  --hue-blue: oklch(0.6 0.15 255);
+  --hue-purple: oklch(0.58 0.16 300);
+  --hue-pink: oklch(0.68 0.15 355);
+  --hue-red: oklch(0.6 0.19 25);
+  --hue-amber: oklch(0.78 0.14 78);
+  --hue-teal: oklch(0.66 0.1 195);
   /* Behind modals, at an opacity, in both themes: dims the page. */
   --scrim: #000000;
   /*
@@ -133,6 +157,16 @@
     --tile-foreground: oklch(0.21 0.006 285.885);
     --status-agreed: oklch(0.7 0.14 158);
     --status-attention: oklch(0.7 0.16 45);
+    --bar-manual: oklch(0.32 0.004 90);
+    --bar-saved: oklch(0.95 0.003 90);
+    --bar-expected: oklch(0.26 0.004 90);
+    --bar-expected-border: oklch(0.55 0.01 90);
+    --return-expected: oklch(0.36 0.06 158);
+    --canvas-today: oklch(0.17 0.003 90);
+    --canvas-proposed: oklch(0.2 0.003 90);
+    --canvas-dot: oklch(0.3 0.004 90);
+    --connector: oklch(0.4 0.005 90);
+    --row-group: oklch(0.19 0.003 90);
     --graph-vision: oklch(0.72 0.13 70);
     --graph-teams: oklch(0.68 0.12 150);
     --graph-tools: oklch(0.68 0.12 250);
@@ -140,6 +174,12 @@
     --graph-candidates: oklch(0.66 0.15 300);
     --graph-sources: oklch(0.5 0.01 286);
     --graph-gaps: oklch(0.68 0.1 195);
+    --hue-blue: oklch(0.68 0.14 255);
+    --hue-purple: oklch(0.68 0.15 300);
+    --hue-pink: oklch(0.74 0.13 355);
+    --hue-red: oklch(0.68 0.17 25);
+    --hue-amber: oklch(0.8 0.13 78);
+    --hue-teal: oklch(0.72 0.1 195);
     --secondary-hover: color-mix(
       in oklch,
       var(--secondary),
@@ -215,6 +255,16 @@
   --color-tile-foreground: var(--tile-foreground);
   --color-status-agreed: var(--status-agreed);
   --color-status-attention: var(--status-attention);
+  --color-bar-manual: var(--bar-manual);
+  --color-bar-saved: var(--bar-saved);
+  --color-bar-expected: var(--bar-expected);
+  --color-bar-expected-border: var(--bar-expected-border);
+  --color-return-expected: var(--return-expected);
+  --color-canvas-today: var(--canvas-today);
+  --color-canvas-proposed: var(--canvas-proposed);
+  --color-canvas-dot: var(--canvas-dot);
+  --color-connector: var(--connector);
+  --color-row-group: var(--row-group);
   --color-graph-vision: var(--graph-vision);
   --color-graph-teams: var(--graph-teams);
   --color-graph-tools: var(--graph-tools);
@@ -222,6 +272,12 @@
   --color-graph-candidates: var(--graph-candidates);
   --color-graph-sources: var(--graph-sources);
   --color-graph-gaps: var(--graph-gaps);
+  --color-hue-blue: var(--hue-blue);
+  --color-hue-purple: var(--hue-purple);
+  --color-hue-pink: var(--hue-pink);
+  --color-hue-red: var(--hue-red);
+  --color-hue-amber: var(--hue-amber);
+  --color-hue-teal: var(--hue-teal);
 }
 
 @layer base {
