@@ -15,6 +15,7 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { pastAccessRecheck } from "./apps.ts";
+import { approvalApp } from "./decisions.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { clientOrigin } from "./sign-in-config.ts";
@@ -129,6 +130,22 @@ const watcher = () => {
   };
 };
 
+/** A page's callback that is never pushed to, and whether core let go of it. */
+const releasable = () => {
+  const state = { released: false };
+  const callback = Object.assign(
+    (): void => {
+      // Nothing is pushed to it.
+    },
+    {
+      [Symbol.dispose]: (): void => {
+        state.released = true;
+      },
+    }
+  );
+  return { state, callback };
+};
+
 describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
   it("decides each frame on its own build, whatever another frame of the App on the connection runs", async () => {
     const builder = await personApi("builder");
@@ -230,35 +247,52 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
     });
   });
 
-  it("lets go at once of a callback whose call was still being admitted when its frame closed", async () => {
+  it("runs nothing of a call whose frame closed while core admitted it", async () => {
     const builder = await personApi("builder");
     const admin = await personApi("admin");
     const { app } = await twoScreenApp(builder, admin);
     const { screens } = builder.api;
     const notes = await screens.open(app, "notes");
     const frame = await screens.frame(app, notes.lease);
-    const state = { released: false };
-    const callback = Object.assign(
-      (): void => {
-        // The App never pushes in this test.
-      },
-      {
-        [Symbol.dispose]: (): void => {
-          state.released = true;
-        },
-      }
-    );
+    const other = await screens.frame(app, notes.lease);
+    const toClosed = releasable();
 
     // Sent one after the other: the close arrives while core still
-    // admits the call, before the call hands its callback to the App.
-    const call = outcome(frame.call("watchNotes", [callback]));
+    // admits the call, before the App gets anything of it.
+    const call = outcome(frame.call("watchNotes", [toClosed.callback]));
     await frame.close();
     const answered = await call;
+
+    await vi.waitFor(
+      () => {
+        expect(toClosed.state.released).toBeTruthy();
+      },
+      { timeout: 5000, interval: 50 }
+    );
+    expect({
+      answered,
+      // The App never got the callback to keep.
+      watching: await other.call("pushNotes", []),
+    }).toStrictEqual({ answered: "screen.invalid", watching: 0 });
+  });
+
+  it("lets go at once of what a frame that closed while core opened it follows", async () => {
+    const builder = await personApi("builder");
+    const app = await approvalApp(builder);
+    // No lease of core's: the App's data allows any build here.
+    const frame = await builder.api.screens.frame(app, "");
+    const toClosed = releasable();
+
+    // Sent one after the other: the close arrives while core still
+    // admits the follow, or waits for the App's host to take it.
+    const following = outcome(frame.watchRuns("approval", toClosed.callback));
+    await frame.close();
+    const answered = await following;
 
     // Nothing is pushed: only the frame having closed lets go of it.
     await vi.waitFor(
       () => {
-        expect(state.released).toBeTruthy();
+        expect(toClosed.state.released).toBeTruthy();
       },
       { timeout: 5000, interval: 50 }
     );

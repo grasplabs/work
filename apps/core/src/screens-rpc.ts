@@ -236,6 +236,11 @@ interface Frame {
    * when it closes; none for the connection's own calls.
    */
   held?: Holder;
+  /**
+   * Called right before the App runs anything for a call: refuses once
+   * the frame closed (`ScreenFrameRpc`); none for the connection's own.
+   */
+  dispatching?: () => void;
 }
 
 /**
@@ -338,8 +343,10 @@ const callServer = async (
     frame.held
   );
   try {
-    return await delivering(env, by, id, artifact, "call", async () =>
-      withinAnswer(
+    return await delivering(env, by, id, artifact, "call", async () => {
+      // A frame closed while the call was admitted runs nothing.
+      frame.dispatching?.();
+      return withinAnswer(
         await callApp(
           env,
           id,
@@ -357,8 +364,8 @@ const callServer = async (
           passed,
           Date.now() + screenCallMs
         )
-      )
-    );
+      );
+    });
   } catch (error) {
     // A failed call keeps no callback.
     for (const callback of callbacks) {
@@ -411,10 +418,14 @@ const watchRuns = async (
     refusals,
     () => {
       subscriptions.delete(callback);
+      frame.held?.forget(callback);
       ended?.();
     }
   );
   subscriptions.add(callback);
+  // The frame's from now on: one closed while its host answers lets go
+  // of it, and its slot, at once.
+  frame.held?.keep(callback);
   let watch: string;
   try {
     watch = await appHost(env, id).watchRuns(name, callback);
@@ -598,6 +609,9 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
           this.#held.delete(held);
         },
       },
+      dispatching: () => {
+        this.#open();
+      },
     };
   }
 
@@ -614,11 +628,18 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
   }
 
   /** The person behind the connection, still the frame's, if it is open. */
-  async #person(): Promise<Identity> {
+  /** Refuses once the frame closed (`screen.invalid`). */
+  #open(): void {
     if (this.#closed) {
       throw screenErrors.create("screen.invalid");
     }
+  }
+
+  async #person(): Promise<Identity> {
+    this.#open();
     const by = await this.#connection.check();
+    // Closed while the session was checked: nothing goes on.
+    this.#open();
     if (by.userId !== this.#connection.userId) {
       throw authErrors.create("auth.principal_changed");
     }
@@ -636,14 +657,11 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     const by = await this.#person();
     const { env, app, artifact } = this.#connection;
     const id = await admitted(env, by, app);
-    return await delivering(
-      env,
-      by,
-      id,
-      artifact,
-      operation,
-      async () => await run(by)
-    );
+    return await delivering(env, by, id, artifact, operation, async () => {
+      // Closed while it was admitted: nothing runs.
+      this.#open();
+      return await run(by);
+    });
   }
 
   /**
