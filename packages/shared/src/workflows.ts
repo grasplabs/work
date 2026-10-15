@@ -423,7 +423,8 @@ export const runOfStepKey = (key: string): string | undefined => {
  * connector said nothing was done); a call with the same idempotency key
  * still running, whose answer a retry gets; a model call that failed, or
  * that the model budget turned away only while other calls under way hold
- * it (nothing was sent); something unplanned in the platform, where
+ * it, that waited for a share of the model requests in flight, or that its
+ * provider's rate limit turned away (nothing was sent, or nothing billed); something unplanned in the platform, where
  * connect's idempotency keys keep a retried side effect to once; and a
  * model's answer that didn't fit, which the SDK asks for again. Any other
  * failure stops the run: a refusal, a tool's own error (it may have
@@ -435,6 +436,10 @@ const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "connect.call_in_progress",
   "model.failed",
   "model.budget_busy",
+  // Nothing was sent; a share of the model requests in flight comes back
+  // as they end, and a provider's rate as its window passes.
+  "model.queued",
+  "model.rate_limited",
   // Nothing ran; room comes back as the lineage's attempts under way settle.
   "workflow.lineage_busy",
   // Nothing ran; a share comes back as attempts running at once settle.

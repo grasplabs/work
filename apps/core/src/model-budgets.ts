@@ -110,7 +110,10 @@ export interface BudgetInput {
 }
 
 /** The person a call is made by or for, if any. */
-const personOf = ({ trigger, work }: BudgetInput): string | undefined => {
+export const personOf = ({
+  trigger,
+  work,
+}: BudgetInput): string | undefined => {
   if (trigger.type === "person" || trigger.type === "staff") {
     return trigger.userId;
   }

@@ -72,6 +72,7 @@ import type { AttemptFence } from "./attempt-fence.ts";
 import { AttemptHost } from "./attempt-host.ts";
 import type { Settled, StepError } from "./code.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
+import { modelWaitRecorded } from "./model-waits.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { heldWakeType } from "./wakes.ts";
@@ -1998,6 +1999,27 @@ export class RunHost extends RpcTarget {
           await waitWithin(attempt, budgetBusyWaitMs);
         }
       }
+      // A full share of the model requests in flight (the gateway already
+      // waited its turn for as long as a call may), or the provider's
+      // rate: the attempt waits the wait core computed, as long as its
+      // timeout lets it and no longer than a busy budget's, before it
+      // fails, unless it is the last.
+      const throttled = modelErrors.codeOf(error);
+      if (
+        (throttled === "model.queued" || throttled === "model.rate_limited") &&
+        !attempt.last
+      ) {
+        const wait = isExpectedError(error)
+          ? error.details?.retryAfterSeconds
+          : undefined;
+        await waitWithin(
+          attempt,
+          Math.min(
+            budgetBusyWaitMs,
+            typeof wait === "number" ? wait * 1000 : budgetBusyWaitMs
+          )
+        );
+      }
       throw error;
     } finally {
       this.#stopAsking(attempt.step, asking);
@@ -2134,6 +2156,16 @@ export class RunHost extends RpcTarget {
                   if (!this.#holds(attempt)) {
                     throw executionErrors.create("execution.stale_attempt");
                   }
+                },
+                // While its call waits for a share of the model requests
+                // in flight, the run shows queued (model-waits.ts).
+                onQueued: async (queued) => {
+                  await modelWaitRecorded(
+                    drizzle(this.#env.DB),
+                    this.#run.runId,
+                    attempt.step,
+                    queued
+                  );
                 },
               });
             } catch (error) {

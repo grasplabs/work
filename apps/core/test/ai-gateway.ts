@@ -56,6 +56,8 @@ export type GatewayReply =
       errorType?: string;
       /** The refusal's body, when not the provider's usual error. */
       body?: unknown;
+      /** Headers of the refusal, such as a rate limit's `retry-after`. */
+      headers?: Record<string, string>;
     }
   | { hang: true };
 
@@ -609,7 +611,7 @@ export const fakeGateway = (...replies: GatewayReply[]) => {
             message: "Refused by the fake gateway",
           },
         },
-        { status: reply.status }
+        { status: reply.status, headers: reply.headers }
       );
     }
     return providerStream(request, reply, `log-${requests.length}`);

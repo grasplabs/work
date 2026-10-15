@@ -21,6 +21,7 @@ import {
   lte,
   sql,
 } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/durable-sqlite";
 import { z } from "zod";
 
@@ -32,14 +33,23 @@ import {
   alerts,
   auditOutbox,
   policy,
+  queue,
   requestScopes,
   requests,
   spend,
 } from "./db/model-ledger/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
+import {
+  fairnessSchema,
+  maxLeaseMs,
+  servedInOrder,
+  waitOf,
+} from "./model-admission.ts";
+import type { Fairness, Lease, ModelShare } from "./model-admission.ts";
 import { costMicros, microsPerDollar } from "./model-prices.ts";
 import type { PinnedPrice } from "./model-prices.ts";
 import { endedLineages, lineagesAsked } from "./run-lineage-ends.ts";
+import { queueLiveMs } from "./workflows/admission.ts";
 
 // The model ledger: the one authority for what the deployment's model
 // requests may spend and have spent, a Durable Object per deployment,
@@ -128,6 +138,12 @@ import { endedLineages, lineagesAsked } from "./run-lineage-ends.ts";
 //   it passes on a fixed wait, and to a guest, whose user scope is the
 //   member who invited them, it says only that the budget is used up
 //   (models.ts).
+//
+// It also admits each request fairly among the client's requests in
+// flight, for one person and of one App, in the same transaction as its
+// budgets: a request's receipt is its lease on its shares, and the calls
+// waiting for one keep places in its queue. That threat model is
+// model-admission.ts's.
 
 /** The most provider requests any quota policy allows a run lineage. */
 const { lineageModelRequests } = platformLimits;
@@ -281,6 +297,8 @@ const admissionSchema = z
      * comes from; none for a request with no lineage.
      */
     policyGeneration: z.int().min(0).optional(),
+    /** Whose shares of the requests in flight it takes, and how many there are. */
+    fair: fairnessSchema,
   })
   .refine(({ deadline, reconcileAt }) => deadline <= reconcileAt, {
     message: "A request comes due no sooner than its deadline",
@@ -319,7 +337,22 @@ export type Admitted =
    */
   | { ok: false; reused: true }
   /** No price for its input or output, against a budget: refused. */
-  | { ok: false; unpriced: true };
+  | { ok: false; unpriced: true }
+  /**
+   * A share of the requests in flight it is held to is full: refused,
+   * reserving nothing, its call's place in the queue kept (`joined` when
+   * this admission gave it one; `placed` while it holds one), to ask
+   * again after `retryAfterSeconds` at the latest (model-admission.ts).
+   */
+  | {
+      ok: false;
+      queued: {
+        waitingFor: ModelShare;
+        retryAfterSeconds: number;
+        joined: boolean;
+        placed: boolean;
+      };
+    };
 
 const tokensSchema = z.strictObject({
   input: microsSchema,
@@ -501,6 +534,7 @@ export class ModelLedger extends DurableObject<Env> {
       if (existing !== undefined) {
         // A repeat of the same admission, while its request is still open
         // and unsettled; never one that settled or whose usage was lost.
+        // It holds the one lease it took: no second.
         return {
           admitted:
             existing.fingerprint === fingerprint &&
@@ -528,6 +562,7 @@ export class ModelLedger extends DurableObject<Env> {
         unpriced &&
         admission.scopes.some(({ limitMicros }) => limitMicros !== null)
       ) {
+        this.#leaveQueue(admission.fair.place);
         return { admitted: { ok: false, unpriced: true } as const, alerted: 0 };
       }
       const rows = admission.scopes.map((scope) => ({
@@ -541,6 +576,7 @@ export class ModelLedger extends DurableObject<Env> {
           scope.limitRequests !== null && row.requests >= scope.limitRequests
       );
       if (counted !== undefined) {
+        this.#leaveQueue(admission.fair.place);
         return {
           admitted: {
             ok: false,
@@ -565,16 +601,31 @@ export class ModelLedger extends DurableObject<Env> {
           row.spentMicros + row.reservedMicros + admission.reservedMicros >
             scope.limitMicros
       );
-      if (full.length > 0) {
-        return {
-          admitted: this.#refusal(
-            full,
-            admission.period,
-            admission.reservedMicros,
-            now
-          ),
-          alerted: alertedNow,
-        };
+      const refused =
+        full.length === 0
+          ? undefined
+          : this.#refusal(
+              full,
+              admission.period,
+              admission.reservedMicros,
+              now
+            );
+      // Used up for good, until its budget resets: no wait for a share
+      // helps it, so it is told so before any share is looked at, and
+      // holds no place.
+      if (refused !== undefined && !("heldBy" in refused)) {
+        this.#leaveQueue(admission.fair.place);
+        return { admitted: refused, alerted: alertedNow };
+      }
+      const queued = this.#queuedFor(admission.fair, now);
+      if (queued !== undefined) {
+        return { admitted: queued, alerted: alertedNow };
+      }
+      // A budget held only by requests under way: a wait of its own, not
+      // a share's, so the call gives its place up.
+      this.#leaveQueue(admission.fair.place);
+      if (refused !== undefined) {
+        return { admitted: refused, alerted: alertedNow };
       }
       this.#db
         .insert(requests)
@@ -593,6 +644,9 @@ export class ModelLedger extends DurableObject<Env> {
           deadline: admission.deadline,
           reconcileAt: admission.reconcileAt,
           policyGeneration: admission.policyGeneration ?? null,
+          subject: admission.fair.subject,
+          resource: admission.fair.resource,
+          leaseEndsAt: Math.min(admission.deadline, now + maxLeaseMs),
         })
         .run();
       for (const {
@@ -641,6 +695,160 @@ export class ModelLedger extends DurableObject<Env> {
     }
     this.#deliverIfStored();
     return admitted;
+  }
+
+  /**
+   * Gives up the place in the queue of call `place`: it stopped waiting,
+   * admitted or not (model-admission.ts). Nothing for a call that holds
+   * none.
+   */
+  async leaveQueue(place: string): Promise<void> {
+    const parsed = fairnessSchema.shape.place.parse(place);
+    this.ctx.storage.transactionSync(() => {
+      this.#leaveQueue(parsed);
+    });
+    await Promise.resolve();
+  }
+
+  /** Gives up call `place`'s place in the queue. Inside a transaction. */
+  #leaveQueue(place: string): void {
+    this.#db.delete(queue).where(eq(queue.place, place)).run();
+  }
+
+  /**
+   * The leases held at `now`: requests in flight before their lease ends,
+   * each with the shares it takes.
+   */
+  #leases(now: number): Lease[] {
+    return this.#db
+      .select({
+        subject: requests.subject,
+        resource: requests.resource,
+        endsAt: requests.leaseEndsAt,
+      })
+      .from(requests)
+      .where(
+        and(
+          eq(requests.state, "dispatched"),
+          gt(requests.leaseEndsAt, now),
+          isNotNull(requests.subject)
+        )
+      )
+      .all()
+      .flatMap(({ subject, resource, endsAt }) =>
+        subject === null || endsAt === null
+          ? []
+          : [{ subject, resource, endsAt }]
+      );
+  }
+
+  /** The places in the queue that `where` takes. Inside a transaction. */
+  #placesWhere(where: SQL | undefined): number {
+    return (
+      this.#db
+        .select({ count: sql<number>`count(*)` })
+        .from(queue)
+        .where(where)
+        .get()?.count ?? 0
+    );
+  }
+
+  /**
+   * Whether a request of `fair`'s call fits its shares at `now`, room left
+   * for the calls ahead of it in the queue (`servedInOrder`): nothing when
+   * it does; when it doesn't, its refusal, its call's place kept, or given
+   * one at the back of its turn while its person and its App have places
+   * left. Places that stopped asking are dropped first. Inside the
+   * transaction that admits it.
+   */
+  #queuedFor(
+    fair: Fairness,
+    now: number
+  ): (Admitted & { ok: false }) | undefined {
+    this.#db
+      .delete(queue)
+      .where(lte(queue.seenAt, now - queueLiveMs))
+      .run();
+    // A call of no App's keeps its place under no App's name.
+    const resource = fair.resource ?? "";
+    const leases = this.#leases(now);
+    const held = this.#db
+      .select({ turn: queue.turn, enqueuedAt: queue.enqueuedAt })
+      .from(queue)
+      .where(eq(queue.place, fair.place))
+      .get();
+    const nextTurn =
+      this.#db
+        .select({ next: sql<number>`coalesce(max(${queue.turn}) + 1, 0)` })
+        .from(queue)
+        .where(
+          and(eq(queue.subject, fair.subject), eq(queue.resource, resource))
+        )
+        .get()?.next ?? 0;
+    const turn = held?.turn ?? nextTurn;
+    const joined = held?.enqueuedAt ?? now;
+    // Served before it: by turn, then when it joined, then by place.
+    const ahead = this.#db
+      .select({ subject: queue.subject, resource: queue.resource })
+      .from(queue)
+      .where(
+        sql`${queue.place} <> ${fair.place} AND (${queue.turn} < ${turn} OR (${queue.turn} = ${turn} AND (${queue.enqueuedAt} < ${joined} OR (${queue.enqueuedAt} = ${joined} AND ${queue.place} < ${fair.place}))))`
+      )
+      .orderBy(asc(queue.turn), asc(queue.enqueuedAt), asc(queue.place))
+      .all()
+      .map((place) => ({
+        subject: place.subject,
+        resource: place.resource === "" ? null : place.resource,
+      }));
+    const me = { subject: fair.subject, resource: fair.resource };
+    const { fits, found } = servedInOrder(leases, ahead, me, fair.shares);
+    if (fits) {
+      return undefined;
+    }
+    const { waitingFor, retryAfterSeconds } = waitOf(
+      found,
+      me,
+      leases,
+      fair.shares,
+      now
+    );
+    const retryAt = now + retryAfterSeconds * 1000;
+    if (held !== undefined) {
+      this.#db
+        .update(queue)
+        .set({ seenAt: now, waitingFor, retryAt })
+        .where(eq(queue.place, fair.place))
+        .run();
+      return {
+        ok: false,
+        queued: { waitingFor, retryAfterSeconds, joined: false, placed: true },
+      };
+    }
+    const room =
+      this.#placesWhere(eq(queue.subject, fair.subject)) <
+        fair.shares.queuedPerPerson &&
+      (fair.resource === null ||
+        this.#placesWhere(eq(queue.resource, resource)) <
+          fair.shares.queuedPerApp);
+    if (room) {
+      this.#db
+        .insert(queue)
+        .values({
+          place: fair.place,
+          subject: fair.subject,
+          resource,
+          turn,
+          enqueuedAt: now,
+          seenAt: now,
+          waitingFor,
+          retryAt,
+        })
+        .run();
+    }
+    return {
+      ok: false,
+      queued: { waitingFor, retryAfterSeconds, joined: room, placed: room },
+    };
   }
 
   /**

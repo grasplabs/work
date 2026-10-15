@@ -63,17 +63,27 @@ import {
   permissionErrors,
   workContextSchema,
 } from "@grasp-os/shared/permissions";
+import { quotaPolicyOf } from "@grasp-os/shared/quota-policy";
+import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { modelBindingBudgetSchema } from "@grasp-os/shared/resource-bindings";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { keepAuditEvent } from "./audit-outbox.ts";
 import {
+  maxAskAgainSeconds,
+  modelSharesOf,
+  resourceOf,
+  subjectOf,
+} from "./model-admission.ts";
+import type { Fairness, ModelShare } from "./model-admission.ts";
+import {
   bindingRequestMicros,
   bindingScopes,
   budgetPeriods,
   hasBudget,
   lineageModelRequests,
+  personOf,
   scopesFor,
 } from "./model-budgets.ts";
 import { modelLedger } from "./model-ledger.ts";
@@ -95,6 +105,7 @@ import type { PinnedPrice, TokenCounts } from "./model-prices.ts";
 import { bodyBytes, outputCapOf, unboundedBy } from "./model-requests.ts";
 import { judgeCall } from "./model-rules.ts";
 import type { Judged, Refusal } from "./model-rules.ts";
+import { askAgainMs } from "./workflows/admission.ts";
 import { quotaPolicy } from "./workflows/quotas.ts";
 
 // The model gateway: every model call in a deployment goes through here, and
@@ -488,7 +499,20 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    * let go of meanwhile, resource-model.ts).
    */
   beforeSend?: () => void;
+  /**
+   * Told while the call waits in the queue for a share of the model
+   * requests in flight, each time it asks again: the share and when it
+   * asks again at the latest (ms since the epoch); and `null` once it
+   * stops waiting, admitted or not. For a workflow run to show it queued
+   * (workflows/model-waits.ts). A failure of it never fails the call.
+   */
+  onQueued?: QueuedHook;
 };
+
+/** Where a call waiting for a share stands, or `null` once it stopped waiting. */
+export type QueuedHook = (
+  queued: { waitingFor: ModelShare; retryAt: number } | null
+) => Promise<void>;
 
 /** What a call answered. */
 export interface ModelAnswer<Output> {
@@ -696,6 +720,8 @@ interface Route extends Admitted {
     period: string;
     scopes: LedgerScope[];
     policyGeneration: number | undefined;
+    /** Whose shares of the requests in flight it takes, under the policy now. */
+    fair: Fairness;
   }>;
   /**
    * What the call's provider requests may reserve together, under its
@@ -706,8 +732,12 @@ interface Route extends Admitted {
   perRequest: { limitMicros: number; heldMicros: number } | undefined;
   /** Core's env, for the model ledger. */
   env: ModelsEnv;
+  /** The call's ID: its place in the queue while it waits for a share. */
+  place: string;
   /** The caller's last check before each provider request (`ModelCall.beforeSend`). */
   beforeSend?: () => void;
+  /** Told while the call waits for a share (`ModelCall.onQueued`). */
+  onQueued?: QueuedHook;
 }
 
 interface Request extends Route {
@@ -739,6 +769,12 @@ interface GatewayResponse {
   pending: Admission | undefined;
   /** The provider requests already settled, in order: refused, failed or superseded. */
   settled: RequestSettled[];
+  /**
+   * The wait the last refusal for the provider's rate limit (429) calls
+   * for, in seconds, as core bounds it (`rateLimitedSeconds`); none when
+   * the last refusal was something else.
+   */
+  rateLimited: number | undefined;
 }
 
 /** A provider request the ledger admitted: its ID, and what it reserved. */
@@ -904,6 +940,114 @@ const retryAfterSeconds = (
   return Math.min(steps * busyRetry.stepSeconds, busyRetry.mostSeconds);
 };
 
+/**
+ * The longest a call waits in the gateway for a share of the requests in
+ * flight, asking again as it goes, before it is refused as `model.queued`:
+ * never more than half of what is left of its own time either, so a
+ * request admitted at the end of it still has time to answer.
+ */
+const queueWaitMs = 30_000;
+
+/** A `retry-after` in whole seconds, as opposed to a date. */
+const wholeSecondsPattern = /^\d+$/u;
+
+/** The least, the most and the default wait a provider's rate limit is held to. */
+const rateLimitBounds = {
+  leastSeconds: 1,
+  mostSeconds: 60,
+  defaultSeconds: 30,
+};
+
+/**
+ * The wait a provider's rate limit calls for, in seconds, read from its
+ * refusal's `retry-after-ms` or `retry-after` (seconds, or a date) as a
+ * hint, never trusted: held between {@link rateLimitBounds}, its default
+ * where it names none that can be read. Core sets the bounds, so no
+ * provider, or anything between, makes a caller wait for ever or hammer
+ * it.
+ */
+const rateLimitedSeconds = (headers: Headers, now = Date.now()): number => {
+  const { leastSeconds, mostSeconds, defaultSeconds } = rateLimitBounds;
+  const ms = Number(headers.get("retry-after-ms") ?? Number.NaN);
+  const told = headers.get("retry-after");
+  let seconds = Number.NaN;
+  if (Number.isFinite(ms)) {
+    seconds = ms / 1000;
+  } else if (told !== null && wholeSecondsPattern.test(told.trim())) {
+    seconds = Number(told.trim());
+  } else if (told !== null) {
+    seconds = (Date.parse(told) - now) / 1000;
+  }
+  if (!Number.isFinite(seconds)) {
+    return defaultSeconds;
+  }
+  return Math.min(mostSeconds, Math.max(leastSeconds, Math.ceil(seconds)));
+};
+
+/** The longest a used-up budget's refusal says to wait: a month. */
+const mostResetSeconds = 31 * 24 * 60 * 60;
+
+/**
+ * The seconds until a budget of `scope` used up at `now` resets: the next
+ * UTC day for a binding's day, the next UTC month for any other, as the
+ * ledger counts them (model-budgets.ts); none for a run lineage, which
+ * never resets, nor a binding's cap per request, which no wait helps.
+ */
+const resetSeconds = (scope: string, now = new Date()): number | undefined => {
+  if (scope === "run" || scope === "binding_request") {
+    return undefined;
+  }
+  const resetsAt =
+    scope === "binding_day"
+      ? Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1)
+      : Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  return Math.min(
+    mostResetSeconds,
+    Math.max(1, Math.ceil((resetsAt - now.getTime()) / 1000))
+  );
+};
+
+/** Waits `ms`, or until `signal` aborts, whichever comes first. */
+const pause = async (ms: number, signal: AbortSignal): Promise<void> => {
+  if (signal.aborted) {
+    return;
+  }
+  // Cut short when the call is: the loop then sees it aborted.
+  await scheduler.wait(ms, { signal }).catch(() => null);
+};
+
+/** Tells `route`'s caller where its wait stands; never fails the call. */
+const told = async (
+  route: Route,
+  queued: Parameters<QueuedHook>[0]
+): Promise<void> => {
+  try {
+    await route.onQueued?.(queued);
+  } catch (error) {
+    log.error("model.queued_hook_failed", errorFields(error));
+  }
+};
+
+/** Gives up `route`'s call's place in the queue; its place lapses should this fail. */
+const leaveQueue = async (route: Route): Promise<void> => {
+  try {
+    await modelLedger(route.env).leaveQueue(route.place);
+  } catch (error) {
+    log.warn("model.leave_queue_failed", errorFields(error));
+  }
+};
+
+/**
+ * Ends `route`'s call's wait for a share, unadmitted: its place given up,
+ * and its caller told, if it waited at all (`waited` rounds).
+ */
+const stopWaiting = async (route: Route, waited: number): Promise<void> => {
+  await leaveQueue(route);
+  if (waited > 0) {
+    await told(route, null);
+  }
+};
+
 /** The prices of a model that has none, which no budget admits. */
 const unpriced: PinnedPrice = {
   version: "unpriced",
@@ -997,6 +1141,21 @@ const heldBecause = (
     { ok: true } | { policyBehind: true; highest: number }
   >
 ): Refusal => {
+  if ("queued" in admitted) {
+    const { queued } = admitted;
+    return {
+      code: "model.queued",
+      because: queued.waitingFor,
+      waitingFor: queued.waitingFor,
+      // A guest's person share is the member who invited them: when the
+      // member's calls end is theirs to know, so a guest is told the
+      // fixed wait.
+      retryAfterSeconds:
+        call.trigger.type === "guest"
+          ? maxAskAgainSeconds
+          : queued.retryAfterSeconds,
+    };
+  }
   if ("unpriced" in admitted) {
     return { code: "model.unpriced" };
   }
@@ -1012,16 +1171,27 @@ const heldBecause = (
   }
   // A guest's user scope is the member who invited them: whether that
   // member has calls under way is theirs to know, not the guest's.
-  if ("heldUntil" in admitted && call.trigger.type !== "guest") {
+  if ("heldUntil" in admitted) {
+    if (call.trigger.type === "guest") {
+      // Only that it is used up: when it resets would be no truer.
+      return { code: "model.over_budget", because: admitted.scope };
+    }
     return {
       code: "model.budget_busy",
       because: admitted.scope,
       retryAfterSeconds: retryAfterSeconds(admitted.heldBy, admitted.heldUntil),
     };
   }
-  return admitted.scope === "run"
-    ? { code: "model.run_limit", because: "spend" }
-    : { code: "model.over_budget", because: admitted.scope };
+  if (admitted.scope === "run") {
+    return { code: "model.run_limit", because: "spend" };
+  }
+  // Used up until it resets: when, which says nothing of anyone's calls.
+  const resets = resetSeconds(admitted.scope);
+  return {
+    code: "model.over_budget",
+    because: admitted.scope,
+    ...(resets === undefined ? {} : { retryAfterSeconds: resets }),
+  };
 };
 
 /**
@@ -1043,7 +1213,7 @@ const admitRequest = async (
   if ("held" in now) {
     return now;
   }
-  const { period, scopes, policyGeneration } = now;
+  const { period, scopes, policyGeneration, fair } = now;
   const budgeted = hasBudget(scopes) || perRequest !== undefined;
   if (price === undefined && budgeted) {
     return { held: { code: "model.unpriced" } };
@@ -1094,6 +1264,7 @@ const admitRequest = async (
       deadline: callDeadline,
       reconcileAt: callDeadline + reconcileGraceMs,
       ...(policyGeneration === undefined ? {} : { policyGeneration }),
+      fair,
     });
     if ("policyBehind" in admitted) {
       if (!retried) {
@@ -1124,6 +1295,66 @@ const admitRequest = async (
     // sent, so it is released, or charged in full if even that fails.
     await settleRequest(env, id, { by: "unsent" });
     return { held: { code: "model.ledger_unavailable" } };
+  }
+};
+
+/**
+ * `admitRequest`, waiting in the queue while a share of the requests in
+ * flight is full: the call keeps its place and asks again, as soon as the
+ * ledger says (`askAgainMs`), until admitted, refused for anything else, or
+ * out of the time it may wait (`queueWaitMs`); then refused as
+ * `model.queued`, its place given up. It stops early when its caller says
+ * so (`beforeSend`, which throws) or it is cancelled. Its caller is told
+ * where it stands each round (`onQueued`).
+ */
+const admitWaiting = async (
+  route: Route,
+  body: unknown,
+  { endsAt, signal }: { endsAt: number; signal: AbortSignal }
+): Promise<Admission | { held: Refusal }> => {
+  const startedAt = Date.now();
+  const maxWaitMs = Math.min(
+    queueWaitMs,
+    Math.max(0, Math.floor((endsAt - startedAt) / 2))
+  );
+  let waited = 0;
+  let waitedMs = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- asked again after each wait
+    const admitted = await admitRequest(route, body, endsAt);
+    if (!("held" in admitted) || admitted.held.code !== "model.queued") {
+      if (waited > 0) {
+        // oxlint-disable-next-line no-await-in-loop -- once, as it ends
+        await told(route, null);
+      }
+      return admitted;
+    }
+    const ms = askAgainMs({
+      waited,
+      retryAfterSeconds: admitted.held.retryAfterSeconds ?? maxAskAgainSeconds,
+      waitedMs,
+      maxWaitMs,
+    });
+    try {
+      // The caller's word: a workflow attempt let go of stops waiting.
+      route.beforeSend?.();
+    } catch (error) {
+      // oxlint-disable-next-line no-await-in-loop -- once, as it ends
+      await stopWaiting(route, waited);
+      throw error;
+    }
+    if (ms <= 0 || signal.aborted) {
+      // oxlint-disable-next-line no-await-in-loop -- once, as it ends
+      await stopWaiting(route, waited);
+      return admitted;
+    }
+    const { waitingFor = "client" } = admitted.held;
+    // oxlint-disable-next-line no-await-in-loop -- each round
+    await told(route, { waitingFor, retryAt: Date.now() + ms });
+    // oxlint-disable-next-line no-await-in-loop -- each round
+    await pause(ms, signal);
+    waited += 1;
+    waitedMs += ms;
   }
 };
 
@@ -1168,6 +1399,7 @@ const open = (
     held: undefined,
     pending: undefined,
     settled: [],
+    rateLimited: undefined,
   };
   // Each provider request, the SDK's retries too, is admitted by the
   // model ledger before it is sent, and held back unsent when it isn't.
@@ -1179,7 +1411,7 @@ const open = (
   // when it isn't in their provider's shape (Workers AI's has no `error`,
   // so OpenAI's SDK reports "400 status code (no body)").
   const measured: FetchFunction = async (input, init) => {
-    const admitted = await admitRequest(route, init?.body, endsAt);
+    const admitted = await admitWaiting(route, init?.body, { endsAt, signal });
     if ("held" in admitted) {
       response.held = admitted.held;
       return heldResponse();
@@ -1206,6 +1438,10 @@ const open = (
       throw error;
     }
     response.refusal = undefined;
+    response.rateLimited =
+      answered.status === 429
+        ? rateLimitedSeconds(answered.headers)
+        : undefined;
     if (!answered.ok) {
       // A refusal before the provider took the request on costs nothing;
       // a server error may have come after it did.
@@ -1743,11 +1979,13 @@ const refuse = async (
   if (code === "permission.context_invalid") {
     throw permissionErrors.create(code);
   }
-  const { retryAfterSeconds: retryAfter } = refusal;
+  const { retryAfterSeconds: retryAfter, waitingFor } = refusal;
   throw modelErrors.create(code, {
     model: call.model,
     ...(because === undefined ? {} : { because }),
-    // A budget held by calls under way: worth asking again, after this.
+    ...(waitingFor === undefined ? {} : { waitingFor }),
+    // Worth asking again, after this: a budget held by calls under way, a
+    // full share, or one used up until it resets.
     ...(retryAfter === undefined ? {} : { retryAfterSeconds: retryAfter }),
   });
 };
@@ -1780,6 +2018,19 @@ const parseCall = <Schema extends z.ZodType>(
     throw modelErrors.create("model.invalid_call");
   }
   return parsed.data;
+};
+
+/**
+ * The deployment's quota policy, or the platform's own (its ceilings)
+ * when it can't be read: for a call's shares, which a policy only lowers.
+ */
+const policyOrPlatform = async (env: ModelsEnv): Promise<QuotaPolicy> => {
+  try {
+    return await quotaPolicy(env);
+  } catch (error) {
+    log.error("model.quota_policy_failed", errorFields(error));
+    return quotaPolicyOf();
+  }
 };
 
 /**
@@ -1846,6 +2097,11 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
   ) {
     return await refuse(env, call, { code: "model.unpriced" });
   }
+  // Whose shares of the requests in flight the call takes, from its
+  // trigger and work context, which core's host sets: never from App code.
+  const resource = resourceOf(call);
+  const subject = subjectOf(personOf(call), resource);
+  const place = crypto.randomUUID();
   return {
     call,
     ref,
@@ -1853,11 +2109,15 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
     model: gatewayModel(config.gateway, ref),
     transport: createAiBindingFetch(env.AI),
     price,
+    place,
     scopesNow: async () => {
       // A run lineage's request limit, as the policy stands for this
       // request: lowered for runs already under way too (model-budgets.ts).
       const lineage =
         call.trigger.type === "workflow" ? await quotaPolicy(env) : undefined;
+      // The shares, as the policy stands too; for a call with no lineage,
+      // the platform's own should the policy not be read, never more.
+      const policy = lineage ?? (await policyOrPlatform(env));
       // One clock for both, so a request at a month's last instant never
       // counts its day in one month and its month in the next.
       const { month, day } = budgetPeriods(env);
@@ -1868,6 +2128,7 @@ const admit = async (env: ModelsEnv, call: Session): Promise<Route> => {
           lineage?.limits.lineageModelRequests ?? lineageModelRequests
         ),
         policyGeneration: lineage?.generation,
+        fair: { place, subject, resource, shares: modelSharesOf(policy) },
       };
     },
     perRequest:
@@ -1913,6 +2174,14 @@ const answerCall = async <Output>(
       log.warn("model.failed", failureFields(call.model, sent, failure));
       // oxlint-disable-next-line no-await-in-loop
       await record(env, request, sent, attempt, "failed", failure);
+      // Turned away by the provider's rate limit, retries and all: it
+      // took nothing on, and asking again after the wait may get through.
+      if (sent.rateLimited !== undefined) {
+        throw modelErrors.create("model.rate_limited", {
+          model: call.model,
+          retryAfterSeconds: sent.rateLimited,
+        });
+      }
       throw modelErrors.create("model.failed");
     }
     if (schema === undefined) {
@@ -1954,12 +2223,13 @@ const answerCall = async <Output>(
 
 const callModel = async <Output>(
   env: ModelsEnv,
-  { schema, askAgain, beforeSend, ...fields }: ModelCall<Output>
+  { schema, askAgain, beforeSend, onQueued, ...fields }: ModelCall<Output>
 ): Promise<ModelAnswer<Output>> => {
   const call = parseCall(callSchema, fields);
   const route: Route = {
     ...(await admit(env, call)),
     ...(beforeSend === undefined ? {} : { beforeSend }),
+    ...(onQueued === undefined ? {} : { onQueued }),
   };
   const { model } = route;
   const limit = deadline(call.timeoutMs ?? defaultTimeoutMs);
@@ -2048,9 +2318,16 @@ const relayEvents = async (
         stopped === "cancelled" ? "cancelled" : "failed",
         failure
       );
+      const rateLimited =
+        response.rateLimited === undefined
+          ? undefined
+          : `The model's provider is taking no more requests for now. Try again in ${response.rateLimited} seconds.`;
       out.push({
         ...event,
-        error: { ...event.error, errorMessage: failureMessage(failure) },
+        error: {
+          ...event.error,
+          errorMessage: rateLimited ?? failureMessage(failure),
+        },
       });
       return;
     }

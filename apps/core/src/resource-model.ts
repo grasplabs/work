@@ -103,8 +103,10 @@ const answerSchema = (descriptor: ValueDescriptor) => {
 /**
  * What a gateway refusal means to App code, from an allow-list: a model the
  * deployment no longer lets this call use is a binding that can't serve,
- * a budget used up is that, a budget held by requests still under way is
- * busy (worth asking again, after the gateway's suggested wait), an answer
+ * a budget used up is that (with when it resets, if it does), a budget
+ * held by requests still under way is busy, a full share of the requests
+ * in flight is queued and a provider's rate limit is rate-limited (each
+ * worth asking again, after the wait core computed), an answer
  * that never fit is a contract the provider broke. Anything else stays the
  * gateway's, for the operation host to redact.
  */
@@ -120,17 +122,26 @@ const refusalOf = (error: unknown): unknown => {
   ) {
     return operationErrors.create("resource.unavailable");
   }
+  const wait = isExpectedError(error)
+    ? error.details?.retryAfterSeconds
+    : undefined;
+  const after =
+    typeof wait === "number" ? { retryAfterSeconds: wait } : undefined;
+  // Used up until the budget resets (a month's or a day's, when), or for
+  // good (a run lineage's, none).
   if (code === "model.over_budget" || code === "model.run_limit") {
-    return operationErrors.create("resource.budget_exhausted");
+    return operationErrors.create("resource.budget_exhausted", after);
   }
   if (code === "model.budget_busy") {
-    const wait = isExpectedError(error)
-      ? error.details?.retryAfterSeconds
-      : undefined;
-    return operationErrors.create(
-      "resource.budget_busy",
-      typeof wait === "number" ? { retryAfterSeconds: wait } : undefined
-    );
+    return operationErrors.create("resource.budget_busy", after);
+  }
+  // A full share of the requests in flight, and the provider's rate:
+  // throttling, worth asking again after the wait core computed.
+  if (code === "model.queued") {
+    return operationErrors.create("resource.queued", after);
+  }
+  if (code === "model.rate_limited") {
+    return operationErrors.create("resource.rate_limited", after);
   }
   if (code === "model.invalid_output") {
     return operationErrors.create("contract.invalid_resource_result");

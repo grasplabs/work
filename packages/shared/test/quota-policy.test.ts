@@ -24,6 +24,11 @@ describe("quota policy", () => {
         workflowQueuedPerApp: 64,
         workflowQueuedStepMs: 24 * 60 * 60 * 1000,
         triggerResourcesPerPerson: 100,
+        modelClientRequests: 16,
+        modelPersonRequests: 4,
+        modelAppRequests: 8,
+        modelQueuedPerPerson: 32,
+        modelQueuedPerApp: 64,
       },
     });
   });

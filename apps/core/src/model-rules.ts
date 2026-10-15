@@ -7,6 +7,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { inList } from "./db/d1.ts";
 import { collections, documents } from "./db/knowledge/schema.ts";
+import type { ModelShare } from "./model-admission.ts";
 import { isRestricted } from "./restricted.ts";
 import type { RestrictedEnv, WorkContext } from "./restricted.ts";
 
@@ -172,6 +173,8 @@ export interface Refusal {
     | "model.over_budget"
     | "model.run_limit"
     | "model.budget_busy"
+    | "model.queued"
+    | "model.rate_limited"
     | "model.unpriced"
     | "model.answer_too_long"
     | "model.ledger_unavailable"
@@ -180,10 +183,15 @@ export interface Refusal {
     | "permission.context_invalid";
   because?: string;
   /**
-   * For `model.budget_busy`: about how many seconds until the calls under
-   * way that hold the budget finish, and asking again may be admitted.
+   * When asking again may be admitted, in seconds, as core computes it:
+   * for `model.budget_busy`, about until the calls under way that hold the
+   * budget finish; for `model.queued`, until its call asks for a share
+   * again; for `model.rate_limited`, until the provider's rate may let it
+   * through; for `model.over_budget`, until the budget resets.
    */
   retryAfterSeconds?: number;
+  /** For `model.queued`: the share of the requests in flight it waits for. */
+  waitingFor?: ModelShare;
 }
 
 /**

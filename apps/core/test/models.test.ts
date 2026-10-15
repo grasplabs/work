@@ -681,14 +681,15 @@ describe("model gateway", { timeout: 30_000 }, () => {
   });
 
   it.each([
-    [anthropic, 401, "authentication_error", 1],
-    [openai, 402, "insufficient_quota", 1],
-    // Refused for a moment: tried twice more before it fails.
-    [workersAi, 429, "rate_limit_error", 3],
-    [anthropic, 503, "overloaded_error", 3],
+    [anthropic, 401, "authentication_error", 1, "model.failed"],
+    [openai, 402, "insufficient_quota", 1, "model.failed"],
+    // Refused for a moment: tried twice more before it is told it is
+    // rate-limited, not that it failed.
+    [workersAi, 429, "rate_limit_error", 3, "model.rate_limited"],
+    [anthropic, 503, "overloaded_error", 3, "model.failed"],
   ])(
     "audits a call to %s the provider refuses with %i, with the status and error type only",
-    async (model, status, errorType, requests) => {
+    async (model, status, errorType, requests, told) => {
       const trigger = newPerson();
       const { gateway, gatewayEnv } = withGateway(
         Array.from({ length: requests }, () => ({ status, errorType }))
@@ -704,7 +705,7 @@ describe("model gateway", { timeout: 30_000 }, () => {
             work: work(),
           })
         )
-      ).resolves.toBe("model.failed");
+      ).resolves.toBe(told);
       expect(gateway.requests).toHaveLength(requests);
       const [event] = await auditedFor(trigger.userId, 1);
       expect(event).toMatchObject({

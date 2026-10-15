@@ -87,6 +87,20 @@ const counted = (scope: "user" | "workflow", key: string): LedgerScope => ({
   names: {},
 });
 
+/** Shares of the requests in flight roomy enough that none fills here. */
+const roomyFair = () => ({
+  place: crypto.randomUUID(),
+  subject: "spend-settings",
+  resource: null,
+  shares: {
+    client: 1000,
+    person: 1000,
+    app: 1000,
+    queuedPerPerson: 1000,
+    queuedPerApp: 1000,
+  },
+});
+
 /** Values in order, as their JSON sorts. */
 const byJson = (one: unknown, other: unknown): number =>
   JSON.stringify(one).localeCompare(JSON.stringify(other));
@@ -372,6 +386,7 @@ describe("model settings", { timeout: 60_000 }, () => {
         actor: { type: "person", userId: "someone" },
         deadline: Date.now() + 60_000,
         reconcileAt: Date.now() + 60_000,
+        fair: roomyFair(),
       });
       await ledger.settle(id, {
         by: "usage",
@@ -455,6 +470,7 @@ describe("model settings", { timeout: 60_000 }, () => {
         actor: { type: "person", userId: key },
         deadline: Date.now() + 60_000,
         reconcileAt: Date.now() + 60_000,
+        fair: roomyFair(),
       });
     }
     await runInDurableObject(ledger, (_instance, state) => {
@@ -575,6 +591,7 @@ describe("model settings", { timeout: 60_000 }, () => {
       actor: { type: "person", userId: key },
       deadline: Date.now() + 60_000,
       reconcileAt: Date.now() + 60_000,
+      fair: roomyFair(),
     });
     // Set aside, and its person's spend gone with it.
     await runInDurableObject(ledger, (_instance, state) => {

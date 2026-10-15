@@ -3,12 +3,16 @@ import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { QuotaPolicy } from "@grasp-os/shared/quota-policy";
 import { executionErrors, workflowErrors } from "@grasp-os/shared/workflows";
 import type { RunQueue } from "@grasp-os/shared/workflows";
-import { and, asc, eq, gt, inArray, lte, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, lte, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { z } from "zod";
 
-import { workflowAdmissionQueue, workflowRuns } from "../db/core/schema.ts";
+import {
+  workflowAdmissionQueue,
+  workflowModelWaits,
+  workflowRuns,
+} from "../db/core/schema.ts";
 
 // Fair admission of workflow attempts (spec 18.3, 40.5): how many of the
 // client's workflow attempts run at once, in all, for one person and of
@@ -542,21 +546,41 @@ export const queuedRuns = async (
   if (runs.length === 0) {
     return new Map();
   }
-  const rows = await db
-    .select({
-      runId: workflowAdmissionQueue.runId,
-      waitingFor: workflowAdmissionQueue.waitingFor,
-      retryAt: workflowAdmissionQueue.retryAt,
-    })
-    .from(workflowAdmissionQueue)
-    .where(
-      and(
-        // One bound list: D1 binds at most 100 parameters.
-        sql`${workflowAdmissionQueue.runId} IN (SELECT value FROM json_each(${JSON.stringify(runs)}))`,
-        gt(workflowAdmissionQueue.seenAt, new Date(now - queueLiveMs))
-      )
-    )
-    .orderBy(asc(workflowAdmissionQueue.retryAt));
+  // One bound list: D1 binds at most 100 parameters.
+  const listed = JSON.stringify(runs);
+  const [places, modelWaits] = await db.batch([
+    db
+      .select({
+        runId: workflowAdmissionQueue.runId,
+        waitingFor: workflowAdmissionQueue.waitingFor,
+        retryAt: workflowAdmissionQueue.retryAt,
+      })
+      .from(workflowAdmissionQueue)
+      .where(
+        and(
+          sql`${workflowAdmissionQueue.runId} IN (SELECT value FROM json_each(${listed}))`,
+          gt(workflowAdmissionQueue.seenAt, new Date(now - queueLiveMs))
+        )
+      ),
+    // A step whose model call waits for a share of the model requests in
+    // flight shows the same (model-waits.ts).
+    db
+      .select({
+        runId: workflowModelWaits.runId,
+        waitingFor: workflowModelWaits.waitingFor,
+        retryAt: workflowModelWaits.retryAt,
+      })
+      .from(workflowModelWaits)
+      .where(
+        and(
+          sql`${workflowModelWaits.runId} IN (SELECT value FROM json_each(${listed}))`,
+          gt(workflowModelWaits.seenAt, new Date(now - queueLiveMs))
+        )
+      ),
+  ]);
+  const rows = [...places, ...modelWaits].toSorted(
+    (one, other) => one.retryAt.getTime() - other.retryAt.getTime()
+  );
   const byRun = new Map<string, RunQueue>();
   for (const { runId, waitingFor, retryAt } of rows) {
     if (!byRun.has(runId)) {

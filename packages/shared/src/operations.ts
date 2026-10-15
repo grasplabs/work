@@ -95,6 +95,10 @@ export const operationErrors = defineErrorFamily({
     "The model budget this request counts against is used up, so it wasn't sent.",
   "resource.budget_busy":
     "Model requests still under way hold what's left of the budget this request counts against, so it wasn't sent. Try again shortly.",
+  "resource.queued":
+    "Other requests running now fill this share of the model requests that may run at once, so this one wasn't sent yet. Try again after the wait it names.",
+  "resource.rate_limited":
+    "The model's provider is taking no more requests for now, so this request wasn't answered. Try again after the wait it names.",
   "resource.awaiting_confirmation":
     "This request waits for the person it acts for to confirm it. Make the same call again once they have.",
   "resource.declined":
@@ -156,6 +160,8 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "resource.not_allowed": "contract",
   "resource.budget_exhausted": "operational",
   "resource.budget_busy": "operational",
+  "resource.queued": "operational",
+  "resource.rate_limited": "operational",
   "resource.awaiting_confirmation": "operational",
   "resource.item_not_found": "domain",
   "resource.invalid_args": "contract",
@@ -213,6 +219,10 @@ const retryableCodes: ReadonlySet<string> = new Set([
   "submission.deadline_passed",
   // Nothing was sent; room comes back as requests under way settle.
   "resource.budget_busy",
+  // Nothing was sent; a share comes back as requests in flight end, and a
+  // provider's rate as its window passes.
+  "resource.queued",
+  "resource.rate_limited",
   "operation.sandbox_busy",
   "operation.sandbox_unavailable",
   // Nothing was published; the build runs on, cached for the next try.
