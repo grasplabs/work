@@ -9,10 +9,12 @@ import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
 import { sweepReleases } from "../src/release-retention.ts";
+import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
   workflowSource,
+  workflowVersions,
 } from "../src/workflow-resources.ts";
 import { racingDb } from "./apps.ts";
 import { artifactKey } from "./sealed-apps.ts";
@@ -386,6 +388,32 @@ describe("JSON workflow builds", () => {
     ]);
   });
 
+  it("lowers nothing at a pointer too long to seal, and names where", async () => {
+    const by = await builder();
+    const key = "k".repeat(2100);
+    const { workflow, version } = await published(by, (name) =>
+      definitionOf(name, [{ finish: { set: { [key]: "${ . }" } } }])
+    );
+    // Listed again from its stored manifest: nothing of it is corrupt.
+    const [listed] = await workflowVersions(env, by, workflow.id);
+    expect({
+      published: version.build,
+      listed: listed?.build,
+    }).toStrictEqual({
+      published: {
+        executable: false,
+        unsupported: [
+          {
+            pointer: "/do/0/finish/set",
+            taskId: "finish",
+            feature: "pointer:too_long",
+          },
+        ],
+      },
+      listed: version.build,
+    });
+  });
+
   it("refuses an expression that reads a sensitive parameter, or all of them", async () => {
     const by = await builder();
     const problemsOf = async (status: string) => {
@@ -426,6 +454,16 @@ describe("JSON workflow builds", () => {
     await expect(
       problemsOf('${ $params["to" + "ken"] }')
     ).resolves.toMatchObject(expected);
+    // Text that only looks like a read reads nothing.
+    const quoted = await createWorkflowResource(env, by, `w-${unique()}`);
+    await expect(
+      publishWorkflowVersion(env, by, quoted.id, {
+        definition: definitionOf(quoted.name, [
+          { finish: { set: { status: '${ "$params.token" }' } } },
+        ]),
+        basedOn: null,
+      })
+    ).resolves.toMatchObject({ version: 1 });
   });
 
   it("refuses a publication whose build outlasts the build wait, or dies, as one to try again", async () => {
@@ -472,6 +510,64 @@ describe("JSON workflow builds", () => {
       killed: "workflow.build_slow",
       retryable: true,
       published: 1,
+    });
+  });
+
+  it("never caches a build the sandbox host stopped: one to try again, never a failed build", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
+    const request = {
+      definition: definitionOf(workflow.name, [
+        { finish: { set: { status: `stopped ${unique()}` } } },
+      ]),
+      basedOn: null,
+    };
+    // A sandbox host whose supervisor stops every call at its CPU bound.
+    const stopping: Fetcher = {
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const sent = new Request(input, init);
+        const { pathname } = new URL(sent.url);
+        if (pathname === "/session") {
+          const [client, server] = Object.values(new WebSocketPair());
+          server?.accept();
+          setTimeout(() => {
+            server?.close(1011, "Stopped");
+          }, 10);
+          return await Promise.resolve(
+            new Response(null, {
+              status: 101,
+              webSocket: client ?? null,
+              headers: {
+                [sandboxCpuHeader]: sent.headers.get(sandboxCpuHeader) ?? "",
+              },
+            })
+          );
+        }
+        if (pathname.startsWith("/verdict/")) {
+          return Response.json({
+            verdict: "cpu",
+            message: "It ran out of CPU time.",
+          });
+        }
+        return new Response(null, { status: 404 });
+      },
+      connect: () => {
+        throw new Error("No sockets here");
+      },
+    };
+    const stopped = await outcome(
+      publishWorkflowVersion(
+        { ...env, SANDBOX_HOST: stopping },
+        by,
+        workflow.id,
+        request
+      )
+    );
+    // The same module, built again: nothing of the stop was kept.
+    const saved = await publishWorkflowVersion(env, by, workflow.id, request);
+    expect({ stopped, executable: saved.build.executable }).toStrictEqual({
+      stopped: "workflow.build_slow",
+      executable: true,
     });
   });
 

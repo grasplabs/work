@@ -8,6 +8,7 @@ import {
   generatedPath,
   generateWorkflow,
   generatorVersion,
+  maxSealedPointerLength,
 } from "@grasp-os/open-workflow/generate";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
@@ -108,7 +109,7 @@ export const sealedBuildSchema = z.discriminatedUnion("executable", [
     unsupported: z
       .array(
         z.strictObject({
-          pointer: z.string().max(2048),
+          pointer: z.string().max(maxSealedPointerLength),
           taskId: z.string().max(64).nullable(),
           feature: z.string().max(128),
         })
@@ -125,12 +126,12 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     id: z.string().min(1).max(64),
     kind: z.literal("set"),
-    pointer: z.string().max(2048),
+    pointer: z.string().max(maxSealedPointerLength),
   }),
   z.strictObject({
     id: z.string().min(1).max(64),
     kind: z.literal("wait"),
-    pointer: z.string().max(2048),
+    pointer: z.string().max(maxSealedPointerLength),
     /** How long it waits, as its statement says. */
     milliseconds: z.int().positive(),
   }),
@@ -139,7 +140,7 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
 /** One expression of the sealed table. */
 const sealedExpressionSchema = z.strictObject({
   slot: z.int().min(0),
-  pointer: z.string().max(2048),
+  pointer: z.string().max(maxSealedPointerLength),
   taskId: z.string().min(1).max(64),
   stage: z.literal("taskDefinition"),
   source: z.string().max(8192),
@@ -217,9 +218,11 @@ export const compileWorkflow = async (
     };
   }
   // A build that runs past the build wait, or whose isolate gave up (its
-  // CPU on a large module), is the platform's to finish, never the
-  // definition's fault: the publication is refused as one to try again
-  // (`workflow.build_slow`), and a late build runs on and is cached for it.
+  // CPU on a large module, or any stop of the sandbox host's: CPU, memory,
+  // a crash, its deadline, never cached, screens.ts), is the platform's to
+  // finish, never the definition's fault: the publication is refused as
+  // one to try again (`workflow.build_slow`), and a late build runs on and
+  // is cached for it.
   let built: Awaited<ReturnType<typeof buildOpenWorkflow>> | "late";
   try {
     built = await withinBuildWait(

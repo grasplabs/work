@@ -150,15 +150,36 @@ const literal = (value: string | number | boolean | null): string =>
   JSON.stringify(value);
 
 /** Collects what can't be lowered, bounded. */
+/**
+ * The longest JSON Pointer a build seals (the task and expression tables,
+ * and what it reports unsupported). A definition may hold longer ones, its
+ * keys being as long as it likes: a construct at one isn't lowered
+ * (`pointer:too_long`), so nothing sealed fails to load.
+ */
+export const maxSealedPointerLength = 2048;
+
+/**
+ * `pointer`, or its longest prefix of whole segments within
+ * `maxSealedPointerLength`: where a too-long one is reported.
+ */
+const sealablePointer = (pointer: string): string => {
+  if (pointer.length <= maxSealedPointerLength) {
+    return pointer;
+  }
+  const cut = pointer.lastIndexOf("/", maxSealedPointerLength);
+  return cut <= 0 ? "" : pointer.slice(0, cut);
+};
+
 class Refusals {
   readonly list: Unsupported[] = [];
 
   add(pointer: string, feature: string, taskId?: string): void {
     if (this.list.length < maxUnsupported) {
+      const shown = sealablePointer(pointer);
       this.list.push(
         taskId === undefined
-          ? { pointer, feature }
-          : { pointer, feature, taskId }
+          ? { pointer: shown, feature }
+          : { pointer: shown, feature, taskId }
       );
     }
   }
@@ -308,9 +329,6 @@ const lowerTask = (
  * the same definition always makes the same module and table, and labels
  * or layout never reach either.
  */
-/** Reads `$params` as a whole value: its source names it, its paths don't. */
-const paramsName = /\$params\b/u;
-
 /**
  * The expressions of `checked` that read a sensitive parameter: by name,
  * or `$params` as a whole (with a computed key, say), which could reach
@@ -339,9 +357,10 @@ export const sensitiveReads = (
     const paths = compiled.paths.filter(
       ({ variable }) => variable === "params"
     );
-    const whole =
-      paths.some(({ fields }) => fields.length === 0) ||
-      (paths.length === 0 && paramsName.test(compiled.source));
+    // Every read of `$params` is a path of the parsed source: a string
+    // literal reads nothing (the profile has no interpolation), so the
+    // source's text is never searched.
+    const whole = paths.some(({ fields }) => fields.length === 0);
     const named = paths
       .map(({ fields }) => fields[0])
       .find((name) => name !== undefined && sensitive.has(name));
@@ -385,6 +404,15 @@ export const generateWorkflow = (checked: CheckedWorkflow): Generation => {
     lowerTask(emitter, refusals, id, task, pointerJoin(pointer, id));
   }
   emitter.lines.push("  return output;", "});", "");
+  const sealed = [
+    ...emitter.tasks.map(({ id, pointer }) => ({ taskId: id, pointer })),
+    ...emitter.expressions.map(({ taskId, pointer }) => ({ taskId, pointer })),
+  ];
+  for (const { pointer, taskId } of sealed) {
+    if (pointer.length > maxSealedPointerLength) {
+      refusals.add(pointer, "pointer:too_long", taskId);
+    }
+  }
   if (refusals.list.length > 0) {
     return { ok: false, unsupported: Object.freeze([...refusals.list]) };
   }
