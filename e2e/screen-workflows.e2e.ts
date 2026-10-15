@@ -108,10 +108,16 @@ test("a screen starts a run and follows it live, and an answer on another screen
   // keep the reviewer behind the dialog; asked again after that, and
   // confirmed, the answer is recorded.
   await reviewer.getByRole("button", { name: "Approve review" }).click();
+  // Refused while paused: the dialog stays closed past the time its
+  // review would take to come back.
+  await second.waitForTimeout(1000);
   await expect(confirmation).toBeHidden();
+  // Clicked only while the dialog is closed, so no click waits behind it.
   await expect(async () => {
-    await reviewer.getByRole("button", { name: "Approve review" }).click();
-    await expect(confirmation).toBeVisible({ timeout: 1000 });
+    if (!(await confirmation.isVisible())) {
+      await reviewer.getByRole("button", { name: "Approve review" }).click();
+    }
+    await expect(confirmation).toBeVisible({ timeout: 3000 });
   }).toPass({ timeout: 20_000 });
   await confirmation.getByRole("button", { name: "Confirm" }).click();
   await expect(confirmation).toBeHidden();
