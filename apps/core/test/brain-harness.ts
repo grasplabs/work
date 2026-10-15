@@ -202,15 +202,23 @@ const asJson = (value: unknown): Json => z.json().parse(value);
 const digestOf = async (value: unknown): Promise<string> =>
   await sha256Hex(canonicalJson(asJson(value)));
 
-/** The digest of the whole suite, which `brainSuiteDigests` pins. */
+/**
+ * The digest of the whole suite, which `brainSuiteDigests` pins: the
+ * corpus, its audiences and secrets, the tasks and probes, the answer
+ * protocol and the retrieval budgets.
+ */
 export const suiteDigest = async (): Promise<string> =>
   await digestOf({
     collections: brainCollections,
+    teams: brainTeams,
     documents: brainDocuments,
     memories: brainMemories,
+    memorySecrets: brainMemorySecrets,
     updates: brainUpdates,
     tasks: brainTasks,
     probes: brainAdmissionProbes,
+    protocol: answerProtocol,
+    budgets: { searchedSections, fullContextChars },
   });
 
 /**

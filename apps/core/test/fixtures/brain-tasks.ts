@@ -35,10 +35,10 @@ export const brainSealedDigests: Record<string, string> = {
     "f39fed14e31c6ddac28a1fd6e60006eca5cdc8157819ec6b57d8fc5e7c891910",
 };
 
-/** The SHA-256 of each version's whole suite: corpus, tasks and probes. */
+/** The SHA-256 of each version's whole suite (`suiteDigest` in brain-harness.ts). */
 export const brainSuiteDigests: Record<string, string> = {
   "2026-10-15.2":
-    "9c82b61f6190087bdb045d99080ecc9c718c36673aff5fbb112279130986919f",
+    "2233b68c37869350e53c582d71d7497d7a68405b479c0c86907073b57f84e21d",
 };
 
 export const brainSplits = ["dev", "validation", "sealed"] as const;
