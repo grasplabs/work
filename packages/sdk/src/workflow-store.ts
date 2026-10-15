@@ -352,14 +352,17 @@ export class WorkflowStore {
     this.#changed();
     try {
       const handle = await this.#channel.start(this.#read, input);
-      // Only the latest admitted start is shown, and only while the hook
-      // selects automatically: a start admitted late never replaces a newer
-      // one's run, and an explicit selection is the caller's alone.
-      if (this.#committed === null && seq > this.#admittedSeq) {
+      // The latest admitted start is the automatic selection, whatever
+      // the hook shows now: a start admitted late never replaces a newer
+      // one's run. It is shown only while the hook selects automatically;
+      // an explicit selection is the caller's alone.
+      if (seq > this.#admittedSeq) {
         this.#admittedSeq = seq;
         this.#autoRunId = handle.runId;
-        this.#generation += 1;
-        this.#attach();
+        if (this.#committed === null) {
+          this.#generation += 1;
+          this.#attach();
+        }
       }
       return handle;
     } finally {

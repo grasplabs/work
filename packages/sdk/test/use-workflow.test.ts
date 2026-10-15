@@ -695,6 +695,26 @@ describe("starting runs", () => {
     expect(hook.view()).toMatchObject({ status: "loading", runId: "run-7" });
   });
 
+  it("follows the latest admitted start once it selects automatically again, whatever it showed meanwhile", async () => {
+    const page = host();
+    const older = Promise.withResolvers<Reply>();
+    const answers: Promise<Reply>[] = [
+      Promise.resolve({ value: handleOf("run-1") }),
+      older.promise,
+      Promise.resolve({ value: handleOf("run-3") }),
+    ];
+    page.answer(async () => await (answers.shift() ?? "lost"));
+    const hook = mount(page, null);
+    await hook.store.run({ noteId });
+    hook.select("run-7");
+    const late = hook.store.run({ noteId });
+    await hook.store.run({ noteId });
+    older.resolve({ value: handleOf("run-2") });
+    await late;
+    hook.select(null);
+    expect(hook.view()).toMatchObject({ status: "loading", runId: "run-3" });
+  });
+
   it("recovers an admission answer that isn't a run's handle under the same key, never as a second start", async () => {
     const page = host();
     let attempts = 0;
@@ -1078,6 +1098,16 @@ describe("losing access", () => {
       }).toStrictEqual({ open: [], commands: [] });
     }
   );
+
+  it("hears a revocation pushed after following again, whatever revision it carries", async () => {
+    const page = host();
+    const hook = await showing(page, snapshotOf(), 10);
+    page.one("run-1").lose();
+    await vi.advanceTimersByTimeAsync(31_000);
+    page.one("run-1").refuse(1, "screen.revoked", "authorization");
+    expect(hook.error()?.code).toBe("screen.revoked");
+    expect(hook.view()).toMatchObject({ status: "loading", canCancel: false });
+  });
 
   it("stops following on unmount, without pausing or cancelling the run", async () => {
     const page = host();

@@ -854,10 +854,7 @@ export class WorkflowChannel {
       typeof push.revision !== "number" ||
       !Number.isSafeInteger(push.revision) ||
       push.revision < 1 ||
-      push.revision <= live.revision ||
-      // Each push is one revision of the run or binding: one older than
-      // what is shown, from an earlier subscription, never replaces it.
-      push.revision < entry.state.revision
+      push.revision <= live.revision
     ) {
       return;
     }
@@ -866,8 +863,16 @@ export class WorkflowChannel {
     if (settled.kind === "lost") {
       return;
     }
+    // A refusal is of the access or the request, not an older snapshot:
+    // it is heard whatever revision it carries, so a revocation always
+    // fences.
     if (settled.kind === "failed") {
       this.#refused(entry, live, settled.error);
+      return;
+    }
+    // Each value is one revision of the run or binding: one older than
+    // what is shown, from an earlier subscription, never replaces it.
+    if (push.revision < entry.state.revision) {
       return;
     }
     try {
