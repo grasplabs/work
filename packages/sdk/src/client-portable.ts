@@ -316,18 +316,23 @@ export class PortableTransport {
       try {
         answer = await response.json();
       } catch {
-        throw new Error("The answer wasn't core's.");
+        answer = undefined;
       }
     } finally {
       clearTimeout(timer);
     }
-    if (response.ok) {
+    if (response.ok && answer !== undefined) {
       return answer;
     }
     const code = isPlainObject(answer) ? answer.code : undefined;
     const message = isPlainObject(answer) ? answer.message : undefined;
     if (typeof code !== "string" || typeof message !== "string") {
-      throw new TypeError("The refusal wasn't core's.");
+      // The token refused, though not in core's words: refused all the
+      // same, never a lost answer that a save would be sent again after.
+      if (response.status === unauthorized) {
+        throw refusal("auth.unauthenticated", "Sign in to continue.");
+      }
+      throw new TypeError("The answer wasn't core's.");
     }
     // Of a refusal's details, only how long to wait before asking again.
     const details = isPlainObject(answer) ? answer.details : undefined;

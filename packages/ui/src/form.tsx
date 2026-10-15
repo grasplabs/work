@@ -145,7 +145,7 @@ const TextFieldShell = <Values,>({
   const id = useId();
   const descriptionId = `${id}-description`;
   const errorId = `${id}-error`;
-  const locked = status.phase === "submitting" || status.phase === "uncertain";
+  const { locked } = status;
   return (
     // SAFETY: a text field's name is one of the form's keys (TextFieldName).
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
@@ -256,13 +256,6 @@ const TextareaField = <Values,>({
 );
 
 /**
- * What `form`'s last submission came to, when there is something to say:
- * why it failed or was refused (a conflict among them), that its outcome
- * is unknown (submitting sends it again; discarding it, once confirmed,
- * unlocks the fields), or that what came after a save failed. Each message is
- * the platform's or the App's own, safe to show.
- */
-/**
  * A submission whose outcome is unknown: what is known of it, and a way to
  * give it up that asks first, since whether it ran stays unknown.
  */
@@ -331,6 +324,13 @@ const UncertainSubmission = ({
   );
 };
 
+/**
+ * What `form`'s last submission came to, when there is something to say:
+ * why it failed or was refused (a conflict among them), that its outcome
+ * is unknown (submitting sends it again; discarding it, once confirmed,
+ * unlocks the fields), or that what came after a save failed. Each message is
+ * the platform's or the App's own, safe to show.
+ */
 const FormError = ({
   form,
   savedButFailed = "Saved, but what should happen next failed:",
