@@ -72,6 +72,7 @@ import type { AttemptFence } from "./attempt-fence.ts";
 import { AttemptHost } from "./attempt-host.ts";
 import type { Settled, StepError } from "./code.ts";
 import { attachmentOf, keptMessage } from "./kept-email.ts";
+import { modelWaitRecorded } from "./model-waits.ts";
 import { quotaPolicy } from "./quotas.ts";
 import type { AttemptAdmission, QuotaAttempt } from "./quotas.ts";
 import { heldWakeType } from "./wakes.ts";
@@ -122,6 +123,13 @@ export interface HostedRun {
   rootRunId?: RunId;
   /** Who the run acts for in this execution. */
   authority: Authority;
+  /**
+   * Whose person share its workflow attempts and model requests take, from
+   * its row (dispatcher.ts, `admissionSubjectOf`): who started it, its
+   * lineage root's, or its App's triggers' (`trigger:<app>`). Not who it
+   * acts for, which is the App's owner for a run nobody started.
+   */
+  shareSubject: string;
   /** Its collections' stubs, by binding name (`runBindingsFor`). */
   collections: Record<string, Fetcher<CollectionBinding>>;
   /** Its connection permissions, by binding name (`runBindingsFor`). */
@@ -1998,6 +2006,27 @@ export class RunHost extends RpcTarget {
           await waitWithin(attempt, budgetBusyWaitMs);
         }
       }
+      // A full share of the model requests in flight (the gateway already
+      // waited its turn for as long as a call may), or the provider's
+      // rate: the attempt waits the wait core computed, as long as its
+      // timeout lets it and no longer than a busy budget's, before it
+      // fails, unless it is the last.
+      const throttled = modelErrors.codeOf(error);
+      if (
+        (throttled === "model.queued" || throttled === "model.rate_limited") &&
+        !attempt.last
+      ) {
+        const wait = isExpectedError(error)
+          ? error.details?.retryAfterSeconds
+          : undefined;
+        await waitWithin(
+          attempt,
+          Math.min(
+            budgetBusyWaitMs,
+            typeof wait === "number" ? wait * 1000 : budgetBusyWaitMs
+          )
+        );
+      }
       throw error;
     } finally {
       this.#stopAsking(attempt.step, asking);
@@ -2097,6 +2126,8 @@ export class RunHost extends RpcTarget {
             // for every attempt, so one revoked or changed meanwhile stops
             // the next.
             const bound = await this.#hooks.modelBinding(binding);
+            // This call of the step, whose notes of its wait are its own.
+            const owner = crypto.randomUUID();
             // Last, after every read: an attempt the engine gave up on
             // meanwhile asks the gateway nothing.
             await this.#requireCurrent(attempt, "model");
@@ -2111,6 +2142,9 @@ export class RunHost extends RpcTarget {
                 schema,
                 purpose: "workflow.step",
                 trigger: this.#actor,
+                // Whose share it takes: who started the run, never the
+                // owner it acts for when nobody did.
+                shareSubject: this.#run.shareSubject,
                 // The step may have read any of them into its input.
                 connections: [
                   ...new Set(
@@ -2134,6 +2168,17 @@ export class RunHost extends RpcTarget {
                   if (!this.#holds(attempt)) {
                     throw executionErrors.create("execution.stale_attempt");
                   }
+                },
+                // While its call waits for a share of the model requests
+                // in flight, the run shows queued (model-waits.ts).
+                onQueued: async (queued) => {
+                  await modelWaitRecorded(
+                    drizzle(this.#env.DB),
+                    this.#run.runId,
+                    attempt.step,
+                    owner,
+                    queued
+                  );
                 },
               });
             } catch (error) {
