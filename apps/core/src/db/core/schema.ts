@@ -1789,6 +1789,27 @@ export const workflowParamValues = sqliteTable(
 );
 
 /**
+ * Who owns each workflow (workflows/owners.ts): the person who answers
+ * for it, shown on its line and told about its failures; one row per App
+ * and workflow, kept across the App's versions. A workflow without one is
+ * owned by its App's owner. Who owns it never changes whom its runs act
+ * for. `set_by` set it last.
+ */
+export const workflowOwners = sqliteTable(
+  "workflow_owners",
+  {
+    appId: text("app_id")
+      .notNull()
+      .references(() => apps.id),
+    workflowId: text("workflow_id").notNull(),
+    ownerId: text("owner_id").notNull(),
+    setBy: text("set_by").notNull(),
+    setAt: timestamp("set_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.appId, table.workflowId] })]
+);
+
+/**
  * The catalog entries an admin stopped offering (connections.ts): one row
  * each, by its source (`native` or `composio`) and its ID there. Nobody
  * starts connecting a hidden entry, admins included, until an admin offers
