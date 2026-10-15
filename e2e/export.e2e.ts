@@ -136,6 +136,9 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   await expect(page).toHaveURL(/[?&]chat=/u);
   const messages = page.getByRole("list", { name: "Messages" });
   await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  // The new chat opens before Chat has read its list again, under a
+  // stand-in title: the export is named once the chat's own title is in.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(question);
   const chat = page.waitForEvent("download");
   await choose(page, "Export this chat", "Markdown (.md)");
   const chatFile = await chat;
