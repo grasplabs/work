@@ -115,6 +115,9 @@ const objectSchema = (properties: Record<string, unknown>) => ({
   },
 });
 
+/** A write of the audit outbox, as a receipt is kept. */
+const auditWrite = /insert into "audit_outbox"/iu;
+
 /** The read of the quota policy, as the ledger admits a model request. */
 const quotaRead = /from "quota_policies"/iu;
 
@@ -1357,14 +1360,16 @@ describe("grasp.operation calls of JSON workflows", () => {
       reviewed: { version: 1 },
     });
     const run = await started(admin, workflow.id);
-    // The permission is revoked as the call, authorized, reads which
-    // release is the App's current one on its way to the App.
+    // The permission is revoked as the App's call, authorized and on its
+    // way, is recorded as pinned: the last thing awaited before it runs.
     const db = env.DB;
     const prepare = db.prepare.bind(db);
     const raced = { done: false };
+    const onItsWay = { read: false };
     const revoking: Promise<unknown>[] = [];
     vi.spyOn(db, "prepare").mockImplementation((statement) => {
-      if (!raced.done && currentRelease.test(statement)) {
+      onItsWay.read ||= currentRelease.test(statement);
+      if (!raced.done && onItsWay.read && auditWrite.test(statement)) {
         raced.done = true;
         revoking.push(
           prepare("UPDATE permissions SET status = 'revoked' WHERE id = ?")
@@ -1966,7 +1971,21 @@ describe("a run's host, against a forged module's calls", () => {
     });
     settledFirst.push("attempt");
     await Promise.all(leftRunning);
-    expect(settledFirst).toStrictEqual(["until", "attempt"]);
+    // Asked twice at once: one deadline, the other refused.
+    let twice: unknown[] = [];
+    const again = await hostOf(by, workflow.id);
+    await again.do("enter:later", adaData, async (attempt) => {
+      const both = await Promise.all([
+        attempt.until(adaFrame),
+        attempt.until(adaFrame),
+      ]);
+      twice = both.map((until) => codeOf(until));
+      return { ok: true, value: { output: null } };
+    });
+    expect({ settledFirst, twice }).toStrictEqual({
+      settledFirst: ["until", "attempt"],
+      twice: ["ok", "workflow.invalid"],
+    });
   });
 
   it("sleeps only until the deadline its task's enter step resolved and recorded", async () => {
