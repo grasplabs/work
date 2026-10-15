@@ -610,6 +610,74 @@ describe("JSON workflow builds", () => {
     });
   });
 
+  it("gives back only its own reservations when its upload fails as another publication of the version goes on", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `w-${unique()}`);
+    // Sealed artifacts fail to store for this publication alone.
+    const failingFiles = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "put") {
+          return async (...args: Parameters<R2Bucket["put"]>) => {
+            if (args[0].startsWith(artifactKey(""))) {
+              throw new Error("The bucket is unavailable");
+            }
+            return await target.put(...args);
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function"
+          ? (...rest: unknown[]): unknown => Reflect.apply(value, target, rest)
+          : value;
+      },
+    });
+    const failure: { code: unknown } = { code: undefined };
+    // The other publication of version 1 fails, and cleans up, just before
+    // this one's row is written.
+    const raced: Env = {
+      ...env,
+      DB: racingDb(async () => {
+        failure.code = await outcome(
+          publishWorkflowVersion(
+            { ...env, FILES: failingFiles },
+            by,
+            workflow.id,
+            {
+              definition: definitionOf(workflow.name, [
+                { finish: { set: { status: "failing" } } },
+              ]),
+              basedOn: null,
+            }
+          )
+        );
+      }, /insert into "workflow_resource_versions"/iu),
+    };
+    const saved = await outcome(
+      publishWorkflowVersion(raced, by, workflow.id, {
+        definition: definitionOf(
+          workflow.name,
+          [{ finish: { set: { status: "healthy" } } }],
+          { version: "1.0.1" }
+        ),
+        basedOn: null,
+      })
+    );
+    const reserved = await env.DB.prepare(
+      "SELECT DISTINCT sha256 FROM sdk_release_artifacts WHERE app_id = ? ORDER BY sha256"
+    )
+      .bind(workflow.id)
+      .all<{ sha256: string }>();
+    const named = await sealedArtifacts(workflow.id, 1);
+    expect({
+      failed: failure.code === "ok",
+      saved,
+      reserved: reserved.results.map(({ sha256 }) => sha256),
+    }).toStrictEqual({
+      failed: false,
+      saved: "ok",
+      reserved: [...new Set(named.map(({ sha256 }) => sha256))].toSorted(),
+    });
+  });
+
   it("gives nothing back until every upload of a build has settled, one failing first", async () => {
     const by = await builder();
     const workflow = await createWorkflowResource(env, by, `w-${unique()}`);

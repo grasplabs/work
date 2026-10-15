@@ -23,6 +23,7 @@ import {
 } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowVersionBuild } from "@grasp-os/shared/workflow-resources";
 import { and, eq, sql } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -344,11 +345,55 @@ export const storeBuild = async (
 };
 
 /**
- * Gives back what `storeBuild` reserved for version `version` of workflow
- * `id` once its row wasn't written (another publication won the number,
- * or the workflow went): every reservation of the build but those a
- * version row of that number names, so a winner's shared bytes (the SDK
- * modules, an identical module) stay reserved for it.
+ * Whose reservations one publication of workflow `workflowId` makes: its
+ * own, never another's, so publications of the same version at once never
+ * give back what another still needs (`releaseBuild`). The version's row
+ * adopts them as it is written (`adoptReservations`); one that never is
+ * gives them back, and the sweep takes any a stopped publication left once
+ * its grace is over (release-retention.ts: neither a release nor a version
+ * keeps them).
+ */
+export const publicationReservation = (workflowId: string): string =>
+  `${workflowId}~publication~${crypto.randomUUID()}`;
+
+/**
+ * The statements that hand publication `owner`'s reservations for version
+ * `version` to workflow `workflowId`'s version, in the batch that writes
+ * its row: what the version names stays reserved as long as it is.
+ */
+export const adoptReservations = (
+  db: DrizzleD1Database,
+  owner: string,
+  workflowId: string,
+  version: number
+) => {
+  const reserved = sdkReleaseArtifacts;
+  const own = and(eq(reserved.appId, owner), eq(reserved.version, version));
+  return [
+    db
+      .insert(reserved)
+      .select(
+        db
+          .select({
+            sha256: reserved.sha256,
+            appId: sql<string>`${workflowId}`.as("app_id"),
+            version: reserved.version,
+            reservedAt: reserved.reservedAt,
+          })
+          .from(reserved)
+          .where(own)
+      )
+      .onConflictDoNothing(),
+    db.delete(reserved).where(own),
+  ] as const;
+};
+
+/**
+ * Gives back what `storeBuild` reserved for publication `owner` (key.id)
+ * of version `version` once its row wasn't written (another publication
+ * won the number, the workflow went, or storing failed): all of its own
+ * reservations, and only those, so another publication's, and what a
+ * saved version adopted, stay.
  */
 export const releaseBuild = async (
   env: Env,
@@ -361,14 +406,7 @@ export const releaseBuild = async (
   const reserved = sdkReleaseArtifacts;
   await releaseReservations(
     env,
-    sql`${reserved.appId} = ${key.id} AND ${reserved.version} = ${key.version}
-      AND ${reserved.sha256} IN (SELECT value FROM json_each(${JSON.stringify(
-        compiled.build.artifacts.map(({ sha256 }) => sha256)
-      )}))
-      AND NOT EXISTS (SELECT 1 FROM workflow_resource_versions AS kept,
-          json_each(kept.manifest, '$.build.artifacts') AS named
-        WHERE kept.workflow_resource_id = ${key.id} AND kept.version = ${key.version}
-          AND json_extract(named.value, '$.sha256') = ${reserved.sha256})`
+    sql`${reserved.appId} = ${key.id} AND ${reserved.version} = ${key.version}`
   );
 };
 

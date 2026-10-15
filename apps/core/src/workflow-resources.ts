@@ -78,6 +78,8 @@ import {
   buildSummary,
   compileWorkflow,
   loadWorkflowBuild,
+  adoptReservations,
+  publicationReservation,
   releaseBuild,
   storeBuild,
 } from "./workflow-builds.ts";
@@ -1105,11 +1107,14 @@ const writeVersion = async (
   const manifestHash = await sha256Hex(manifest);
   const createdAt = new Date();
   const db = drizzle(env.DB);
+  // This publication's own reservations: another publishing the same
+  // version at once keeps its own, so neither gives back the other's.
+  const owner = publicationReservation(workflow.id);
   try {
-    // Its build's bytes, reserved for this version and stored, before the
-    // row that names them; inside the cleanup, so a store that fails
+    // Its build's bytes, reserved for this publication and stored, before
+    // the row that names them; inside the cleanup, so a store that fails
     // halfway gives its reservations back too.
-    await storeBuild(env, { id: workflow.id, version }, compiled);
+    await storeBuild(env, { id: owner, version }, compiled);
     await auditedBatch(env, db, [
       db.insert(workflowResourceVersions).values({
         // Only while the workflow is live and still at the version this
@@ -1127,17 +1132,19 @@ const writeVersion = async (
         contractHash,
         manifest,
         // The hash only while every artifact its build names is reserved for
-        // this version: otherwise NULL, which the column refuses, and the
-        // whole publication with it. So no sweep deletes bytes a version
+        // this publication: otherwise NULL, which the column refuses, and
+        // the whole publication with it. So no sweep deletes bytes a version
         // names (release-retention.ts).
         manifestHash: sql`(SELECT ${manifestHash} WHERE NOT EXISTS (
         SELECT 1 FROM json_each(${manifest}, '$.build.artifacts') AS named
         WHERE NOT EXISTS (SELECT 1 FROM sdk_release_artifacts AS reserved
-          WHERE reserved.app_id = ${workflow.id} AND reserved.version = ${version}
+          WHERE reserved.app_id = ${owner} AND reserved.version = ${version}
             AND reserved.sha256 = json_extract(named.value, '$.sha256'))))`,
         authorId: by.userId,
         createdAt,
       }),
+      // The version's from now on, as long as it is.
+      ...adoptReservations(db, owner, workflow.id, version),
       db
         .update(workflowResources)
         .set({ currentVersion: version })
@@ -1184,10 +1191,10 @@ const writeVersion = async (
       ),
     ]);
   } catch (error) {
-    // Not written: what its build reserved goes back, but for what a
-    // version of this number, the winner's, names too.
+    // Not written: what this publication reserved goes back, and only
+    // that: another's, and a saved version's, stay.
     try {
-      await releaseBuild(env, { id: workflow.id, version }, compiled);
+      await releaseBuild(env, { id: owner, version }, compiled);
     } catch (releaseError) {
       log.warn("workflow.build_release_failed", errorFields(releaseError));
     }
