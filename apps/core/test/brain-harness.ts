@@ -212,10 +212,11 @@ const rowText = (row: unknown): string =>
   );
 
 /**
- * What changes with every call whatever a trial does: the audit outbox,
- * as calls are recorded. Not something a task could ask to change.
+ * What changes with every call whatever a trial does: core's and
+ * Knowledge's audit outboxes, as calls and reads are recorded and drained.
+ * Not something a task could ask to change.
  */
-const bookkeeping = new Set(["core.audit_outbox"]);
+const bookkeeping = new Set(["core.audit_outbox", "knowledge.audit_outbox"]);
 
 /**
  * Each table's digest, in core's and Knowledge's databases, but the
@@ -637,15 +638,22 @@ const readTextsOf = async (
         ]
       : []
   );
-  return await Promise.all(
+  // A read the log recorded but Knowledge refused (a section that isn't
+  // there) returned nothing: it backs no evidence.
+  const texts = await Promise.all(
     reads.map(async ({ id, section }) => {
-      const read = await person.api.knowledge.read(
-        id,
-        section === undefined ? {} : { section }
-      );
-      return read.text;
+      try {
+        const read = await person.api.knowledge.read(
+          id,
+          section === undefined ? {} : { section }
+        );
+        return [read.text];
+      } catch {
+        return [];
+      }
     })
   );
+  return texts.flat();
 };
 
 const runTrial = async (
