@@ -562,6 +562,10 @@ msgstr "{one} and {other} both name the same handover, each from their own side.
 msgid "{oneTeam} and {otherTeam} both name the same handover, each from their own side."
 msgstr "{oneTeam} and {otherTeam} both name the same handover, each from their own side."
 
+#: src/brain/region-marks.tsx
+msgid "{open, plural, one {# open question} other {# open questions}}"
+msgstr "{open, plural, one {# open question} other {# open questions}}"
+
 #: src/brain/brain-atlas.ts
 msgid "{open} still open"
 msgstr "{open} still open"
@@ -1179,6 +1183,7 @@ msgstr "Alert admins at, in percent of a day's or month's cap"
 msgid "Alert at"
 msgstr "Alert at"
 
+#: src/brain/atlas-overlays.tsx
 #: src/routes/_shell.workflows.index.tsx
 msgid "All"
 msgstr "All"
@@ -1541,9 +1546,14 @@ msgstr "Available, direct"
 msgid "Available, via Composio"
 msgstr "Available, via Composio"
 
+#: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
 msgid "Back"
 msgstr "Back"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Back to {destination}"
+msgstr "Back to {destination}"
 
 #: src/dashboard/widget-board.tsx
 msgid "Back to how it began"
@@ -1592,6 +1602,7 @@ msgstr "Bound to"
 
 #: src/brain/brain-nav.tsx
 #: src/frame/app-sidebar.tsx
+#: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 msgid "Brain"
 msgstr "Brain"
@@ -2769,6 +2780,10 @@ msgstr "Findings"
 msgid "Finish"
 msgstr "Finish"
 
+#: src/brain/atlas-overlays.tsx
+msgid "Fit and center"
+msgstr "Fit and center"
+
 #: src/workflows/fix-in-chat.tsx
 msgid "Fix in chat"
 msgstr "Fix in chat"
@@ -3328,6 +3343,10 @@ msgstr "Kind of statement"
 #: src/routes/_shell.knowledge.index.tsx
 msgid "Knowledge"
 msgstr "Knowledge"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Known"
+msgstr "Known"
 
 #: src/onboarding/staff-words.ts
 msgid "Known: {known}% of the {threshold}% to open"
@@ -4341,6 +4360,10 @@ msgstr "Open: {open}"
 msgid "Opening the chat…"
 msgstr "Opening the chat…"
 
+#: src/brain/note-reveal.tsx
+msgid "Opening the note"
+msgstr "Opening the note"
+
 #: src/routes/_shell.onboarding.open.tsx
 msgid "Opens at {threshold}%"
 msgstr "Opens at {threshold}%"
@@ -5290,6 +5313,10 @@ msgstr "Shared code changed"
 msgid "Shared with"
 msgstr "Shared with"
 
+#: src/brain/atlas-overlays.tsx
+msgid "Show"
+msgstr "Show"
+
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Show all {count} lines ({characters} characters)"
@@ -5598,6 +5625,7 @@ msgid "Still deciding"
 msgstr "Still deciding"
 
 #: src/brain/atlas-map.ts
+#: src/brain/atlas-overlays.tsx
 #: src/brain/brain.ts
 msgid "Still open"
 msgstr "Still open"
@@ -5609,6 +5637,10 @@ msgstr "Still open: {question}"
 #: src/brain/brain-atlas.ts
 msgid "Still open: {question} {who} can answer it."
 msgstr "Still open: {question} {who} can answer it."
+
+#: src/brain/atlas-overlays.tsx
+msgid "Still waiting"
+msgstr "Still waiting"
 
 #: src/chat/composer.tsx
 msgctxt "stop the answer"
@@ -7014,6 +7046,10 @@ msgstr "Where the documents live"
 msgid "Where the onboarding stands, stage by stage."
 msgstr "Where the onboarding stands, stage by stage."
 
+#: src/brain/atlas-overlays.tsx
+msgid "Where you are in the brain"
+msgstr "Where you are in the brain"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which domains and agents hold permissions: {why}"
 msgstr "Which domains and agents hold permissions: {why}"
@@ -7322,3 +7358,11 @@ msgstr "Your session has ended. Sign in again to go on."
 #: src/routes/_shell.settings.tsx
 msgid "Your workspace, who may do what in it, and your own account."
 msgstr "Your workspace, who may do what in it, and your own account."
+
+#: src/brain/atlas-overlays.tsx
+msgid "Zoom in"
+msgstr "Zoom in"
+
+#: src/brain/atlas-overlays.tsx
+msgid "Zoom out"
+msgstr "Zoom out"

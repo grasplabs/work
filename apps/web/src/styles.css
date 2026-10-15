@@ -1155,3 +1155,9 @@
     radial-gradient(50% 100% at 50% 0, #000 96%, transparent) bottom /
       calc(var(--tear) * 2) var(--tear) round;
 }
+
+/* A name on the brain's atlas (brain/atlas-canvas.tsx): it fades, and goes invisible only once it has faded out. */
+@utility fade-shown {
+  transition-property: opacity, visibility;
+  transition-duration: 300ms;
+}
