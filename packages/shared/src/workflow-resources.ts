@@ -7,6 +7,7 @@ import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
 } from "./operation-limits.ts";
+import type { WorkflowDiagram, WorkflowRunTrace } from "./workflow-diagrams.ts";
 import { workflowModulesError } from "./workflow-modules.ts";
 
 // Independent workflows (platform specification 3, 13.2 and 24): a
@@ -699,7 +700,12 @@ export interface WorkflowDraft {
   revision: number;
   source: string;
   problems: WorkflowDefinitionProblem[];
-  checkpoint: { revision: number; source: string } | null;
+  checkpoint: {
+    revision: number;
+    source: string;
+    /** Drawn from the checkpoint's own JSON, as it passed. */
+    diagram: WorkflowDiagram;
+  } | null;
   editedBy: string | null;
   editedAt: string | null;
 }
@@ -752,6 +758,8 @@ export interface WorkflowResourcesApi {
   run: (id: string, runId: string) => Promise<WorkflowResourceRun>;
   /** Stops a run that hasn't ended; for the workflow's builders and admins. */
   terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
+  /** What run `runId` did, over its version's diagram, for builders. */
+  runTrace: (id: string, runId: string) => Promise<WorkflowRunTrace>;
   /** Its parameters' configuration, for anyone with a role. */
   params: (id: string) => Promise<WorkflowParams>;
   /** Sets parameter values, revision-checked; for builders. */
