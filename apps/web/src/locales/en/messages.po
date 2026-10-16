@@ -947,6 +947,10 @@ msgstr "A new template"
 msgid "A new version of this domain is available."
 msgstr "A new version of this domain is available."
 
+#: src/screens/screen-files.ts
+msgid "A preview keeps no files."
+msgstr "A preview keeps no files."
+
 #: src/engines/store-change-errors.ts
 msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
 msgstr "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."

@@ -40,6 +40,7 @@ const failedRequest = msg`The request failed.`;
 const notAFileCall = msg`That isn't a file call.`;
 const uploadCancelled = msg`The upload was cancelled.`;
 const clickToDownload = msg`A file is downloaded only when you ask for it, with a click.`;
+const previewKeepsNoFiles = msg`A preview keeps no files.`;
 const tooManyFiles = msg`Too many files are moving at once. Try again shortly.`;
 
 /** How a refusal reaches the frame: its code and message, nothing else. */
@@ -292,7 +293,7 @@ export const openFilePort = (
   ): Promise<void> => {
     try {
       if (channel === undefined) {
-        throw Object.assign(new Error("A preview keeps no files."), {
+        throw Object.assign(new Error(i18n._(previewKeepsNoFiles)), {
           code: "file.unavailable",
         });
       }

@@ -947,6 +947,10 @@ msgstr "Een nieuwe sjabloon"
 msgid "A new version of this domain is available."
 msgstr "Er is een nieuwe versie van dit domein."
 
+#: src/screens/screen-files.ts
+msgid "A preview keeps no files."
+msgstr "Een voorbeeld bewaart geen bestanden."
+
 #: src/engines/store-change-errors.ts
 msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
 msgstr "Er is al een nieuwe poging voor deze wijziging gestart, dus die is niet opgegeven. De pagina toont nu hoe het ervoor staat."

@@ -947,6 +947,10 @@ msgstr "Eine neue Vorlage"
 msgid "A new version of this domain is available."
 msgstr "Eine neue Version dieser Domäne ist verfügbar."
 
+#: src/screens/screen-files.ts
+msgid "A preview keeps no files."
+msgstr "Eine Vorschau behält keine Dateien."
+
 #: src/engines/store-change-errors.ts
 msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
 msgstr "Ein neuer Versuch dieser Änderung hat bereits begonnen, daher wurde sie nicht verworfen. Die Seite zeigt jetzt den aktuellen Stand."
