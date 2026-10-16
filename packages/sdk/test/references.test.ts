@@ -372,12 +372,14 @@ describe("workflow references", () => {
     expect(new Set(fingerprints).size).toBe(fingerprints.length);
   });
 
-  test("are the same bytes whatever order the workflows and their events come in", async () => {
+  test("are the same bytes whatever order the workflows, their events and their listen tasks' events come in", async () => {
     const reversed = notesWorkflows.toReversed().map((workflow) => ({
       ...workflow,
       events: Object.fromEntries(Object.entries(workflow.events).toReversed()),
       listens: Object.fromEntries(
-        Object.entries(workflow.listens).toReversed()
+        Object.entries(workflow.listens)
+          .toReversed()
+          .map(([task, events]) => [task, events.toReversed()])
       ),
     }));
     await expect(generatedWith(reversed)).resolves.toStrictEqual(
@@ -414,6 +416,15 @@ describe("workflow references", () => {
     [
       "a listen task for an event the workflow doesn't declare",
       [{ ...summarize, listens: { "do/0/wait": ["documentUploaded"] } }],
+    ],
+    [
+      "a listen task listing the same event twice",
+      [
+        {
+          ...summarize,
+          listens: { "do/2/awaitEdit": ["noteEdited", "noteEdited"] },
+        },
+      ],
     ],
     [
       "a listen task for no event at all",

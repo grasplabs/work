@@ -109,6 +109,18 @@ export const eventFingerprint = async (
   await sha256Hex(canonicalText({ type: event.type, data: event.data }));
 
 /**
+ * `listens` with each task's events in name order: which events a task
+ * listens for is a set, so the order the host listed them in changes no
+ * fingerprint and no byte.
+ */
+const sortedListens = (
+  listens: Readonly<Record<string, readonly string[]>>
+): Record<string, string[]> =>
+  Object.fromEntries(
+    Object.entries(listens).map(([task, events]) => [task, events.toSorted()])
+  );
+
+/**
  * The fingerprint of a bound workflow's exact public contract: the
  * SHA-256, in hex, of its input, output, events and listen tasks,
  * canonically. Any change to any of them changes it, so a reference pins
@@ -122,7 +134,7 @@ export const workflowFingerprint = async (
       input: workflow.input,
       output: workflow.output,
       events: workflow.events,
-      listens: workflow.listens,
+      listens: sortedListens(workflow.listens),
     })
   );
 
@@ -153,10 +165,11 @@ const checkBoundWorkflows = (workflows: readonly BoundWorkflow[]): void => {
     for (const [task, listened] of Object.entries(workflow.listens)) {
       if (
         listened.length === 0 ||
+        new Set(listened).size !== listened.length ||
         listened.some((alias) => !Object.hasOwn(workflow.events, alias))
       ) {
         throw new TypeError(
-          `Listen task ${JSON.stringify(task)} of ${workflow.alias} listens for events the workflow declares.`
+          `Listen task ${JSON.stringify(task)} of ${workflow.alias} listens for events the workflow declares, each once.`
         );
       }
     }
@@ -524,7 +537,7 @@ const sortedKeys = (record: Readonly<Record<string, unknown>>): string[] =>
  */
 const waitTypeOf = (workflow: BoundWorkflow, depth: number): string => {
   const members = sortedKeys(workflow.listens).map((task) => {
-    const events = [...new Set(workflow.listens[task])]
+    const events = (workflow.listens[task] ?? [])
       .toSorted()
       .map((alias) => {
         const event = workflow.events[alias];
@@ -718,15 +731,19 @@ const referencesText = async (
 /**
  * Every module the host generates for an App, by path (`generatedPaths`),
  * for the release `identity`, from its `manifest` as the host read it
- * (`readAppManifest`) and the `workflows` it binds, as the host resolved
- * them (`BoundWorkflow`).
+ * (`readAppManifest`) and the workflows it binds, `bound`, as the host
+ * resolved them (`BoundWorkflow`).
  */
 export const generateModules = async (
   manifest: AppManifest,
   identity: ReleaseIdentity,
-  workflows: readonly BoundWorkflow[] = []
+  bound: readonly BoundWorkflow[] = []
 ): Promise<Record<string, string>> => {
-  checkBoundWorkflows(workflows);
+  checkBoundWorkflows(bound);
+  const workflows = bound.map((workflow) => ({
+    ...workflow,
+    listens: sortedListens(workflow.listens),
+  }));
   const fingerprints = await contractFingerprints(manifest);
   const workflowFingerprints: Record<string, string> = {};
   for (const workflow of workflows) {
