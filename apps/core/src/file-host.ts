@@ -135,9 +135,11 @@ const writeLifetimeMs = 60 * 60_000;
  * How long one finish's check of an upload's bytes holds the upload's
  * claim (`publishable`), at most: another finish meanwhile waits for it
  * rather than reading and hashing the whole file again. A check that
- * never reports back (its request died) lets the next one claim it then.
+ * never reports back (its request died) lets the next one claim it then:
+ * well within the page's time for an answer (`fileLimits.chunkSendMs`), so
+ * a finish sent again after a lost answer is answered before it gives up.
  */
-export const finishClaimMs = 2 * 60_000;
+export const finishClaimMs = fileLimits.chunkSendMs / 2;
 
 /** One finish's claim on an upload: until when, and settled when it ends. */
 interface FinishClaim {
@@ -474,6 +476,11 @@ export class FileHost {
       }
       if (row.deletedHow === "cancelled") {
         return row;
+      }
+      // Its bytes weren't the file it declared: said so to whoever asks
+      // after, a finish that waited for the check among them.
+      if (row.deletedHow === "rejected") {
+        throw fileErrors.create("file.content_mismatch");
       }
       throw notFound();
     }
@@ -852,17 +859,10 @@ export class FileHost {
    * failed before it could say (R2 out, say), so the next finish checks
    * at once rather than at the claim's end.
    */
-  abandonFinish(
-    storeId: StoreId,
-    principal: string,
-    resource: unknown,
-    fileId: unknown,
-    claim: string
-  ): void {
-    const row = this.#storage.transactionSync(() =>
-      this.#ownUpload(storeId, principal, fileId, resource)
-    );
-    this.#endClaim(row.fileId, claim);
+  abandonFinish(fileId: string, claim: string): void {
+    // No lookup of the upload, which may have ended meanwhile: the claim
+    // is a key only the finish that took it has, never sent anywhere.
+    this.#endClaim(fileId, claim);
   }
 
   /**
@@ -1393,8 +1393,14 @@ export class FileHost {
         files: purgeable.length,
       });
     }
-    await this.#removeUnsettled(now);
-    await this.flushEvents();
+    try {
+      await this.#removeUnsettled(now);
+    } finally {
+      // Handed over however the removals went: R2 failing for a while
+      // never holds the audit events back. Its failure still fails the
+      // alarm, which tries again after its retry wait.
+      await this.flushEvents();
+    }
   }
 
   /**

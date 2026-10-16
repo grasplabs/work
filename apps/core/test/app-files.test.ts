@@ -2715,21 +2715,9 @@ describe("an App's files", { timeout: 120_000 }, () => {
               scheduler.wait(100).then(() => "waiting"),
             ]);
           // The first check, late, ends its own claim: not the second's.
-          host.files.abandonFinish(
-            storeId,
-            builder.userId,
-            "attachments",
-            file,
-            first
-          );
+          host.files.abandonFinish(file, first);
           seen.stale = await waiting();
-          host.files.abandonFinish(
-            storeId,
-            builder.userId,
-            "attachments",
-            file,
-            second
-          );
+          host.files.abandonFinish(file, second);
           seen.afterOwn = await waiting();
         } finally {
           vi.useRealTimers();
@@ -2772,6 +2760,189 @@ describe("an App's files", { timeout: 120_000 }, () => {
           : answer
       ),
     }).toStrictEqual({ reads: 1, answers: ["published", "published"] });
+  });
+
+  it("answers a finish waiting behind a check that never reported back before the page gives up", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    // A finish claims the upload for its check, then its request dies.
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (instance: DataStore) => {
+        await instance.publishable(
+          storeId,
+          builder.userId,
+          "attachments",
+          file
+        );
+      }
+    );
+    const started = Date.now();
+    const answer = await answerOf(await raw.finish(file));
+    expect({
+      answer,
+      inTime: Date.now() - started < fileLimits.chunkSendMs,
+    }).toMatchObject({ answer: { state: "published" }, inTime: true });
+  });
+
+  it("answers a finish whose check failed with that failure, though ending its claim failed too", async () => {
+    const { app, screen } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const unreadable = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "get") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("R2 is unavailable.");
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    // Ending the claim fails with a refusal of its own.
+    const stores = new Proxy(env.DATA_STORES, {
+      get: (target, property) => {
+        if (property === "getByName") {
+          return (name: string) =>
+            new Proxy(target.getByName(name), {
+              get: (stub, method) => {
+                const value: unknown = Reflect.get(stub, method);
+                if (typeof value !== "function") {
+                  return value;
+                }
+                if (method === "abandonFinish") {
+                  return async () => {
+                    await Promise.resolve();
+                    throw Object.assign(new Error("Expired."), {
+                      code: "file.upload_expired",
+                    });
+                  };
+                }
+                return async (...args: unknown[]) => {
+                  const answer: unknown = await Reflect.apply(
+                    value,
+                    stub,
+                    args
+                  );
+                  return answer;
+                };
+              },
+            });
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const failed = await raw.finish(file, {
+      ...env,
+      FILES: unreadable,
+      DATA_STORES: stores,
+    });
+    expect({
+      status: failed.status,
+      answer: await failed.json(),
+    }).toMatchObject({
+      status: 500,
+      answer: { code: "internal.unexpected" },
+    });
+  });
+
+  it("answers a finish that waited for a check that rejected the bytes with the rejection", async () => {
+    const { app, screen } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    // The whole is declared as other bytes than the chunk sent.
+    const file = await begunFile(
+      await raw.begin({
+        ...declaration(),
+        size: bytes.length,
+        sha256: await sha256(utf8("other bytes than the chunk sent")),
+      })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const { promise: open, resolve: letThrough } =
+      Promise.withResolvers<null>();
+    const { seen, reading } = gatedReads(open);
+    const gated = { ...env, FILES: reading };
+    const first = raw.finish(file, gated);
+    await vi.waitFor(() => {
+      expect(seen.reads).toBe(1);
+    });
+    const second = raw.finish(file, gated);
+    await scheduler.wait(250);
+    letThrough(null);
+    const answers = await Promise.all([
+      answerOf(await first),
+      answerOf(await second),
+    ]);
+    expect(answers).toStrictEqual([
+      "file.content_mismatch",
+      "file.content_mismatch",
+    ]);
+  });
+
+  it("hands the store's audit events over though removing write objects keeps failing", async () => {
+    const { release } = await openedApp();
+    const left: { before?: number; events?: number; failed?: boolean } = {};
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeIdSchema.parse(release.store?.storeId)),
+      async (_instance, state) => {
+        const host = new StoreHost(state, { ...env, FILES: failingDeletes });
+        const storeId = storeIdSchema.parse(release.store?.storeId);
+        const principal = `person-${crypto.randomUUID()}`;
+        const { file } = host.files.begin(storeId, principal, "attachments", {
+          ...declaration(),
+          size: 64,
+        });
+        // A write never recorded, due for removal; and an audit event,
+        // of its publication.
+        host.files.admitChunk(storeId, principal, "attachments", file, 0, 64);
+        host.files.publish(
+          storeId,
+          principal,
+          "attachments",
+          file,
+          true,
+          crypto.randomUUID()
+        );
+        left.before = state.storage.sql
+          .exec<{ n: number }>("SELECT count(*) AS n FROM sdk_file_events")
+          .one().n;
+        try {
+          await host.files.sweep(storeId, Date.now() + purgeGraceMs + 1);
+          left.failed = false;
+        } catch {
+          left.failed = true;
+        }
+        left.events = state.storage.sql
+          .exec<{ n: number }>("SELECT count(*) AS n FROM sdk_file_events")
+          .one().n;
+      }
+    );
+    expect(left).toStrictEqual({ before: 1, failed: true, events: 0 });
   });
 
   it("lets the next finish check an upload at once when a check failed before it could say", async () => {

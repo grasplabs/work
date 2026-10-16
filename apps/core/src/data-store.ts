@@ -351,20 +351,8 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `FileHost.abandonFinish`. */
-  abandonFinish(
-    storeId: StoreId,
-    principal: string,
-    resource: string,
-    fileId: string,
-    claim: string
-  ): void {
-    this.#live().files.abandonFinish(
-      storeId,
-      principal,
-      resource,
-      fileId,
-      claim
-    );
+  abandonFinish(fileId: string, claim: string): void {
+    this.#live().files.abandonFinish(fileId, claim);
   }
 
   /** `FileHost.publish`; its audit event, and orphan expiry, after. */

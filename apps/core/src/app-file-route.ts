@@ -576,7 +576,13 @@ const finish = async (
     verified = await verify(env, upload);
   } catch (error) {
     // The check couldn't say: the next finish checks again at once.
-    await stub.abandonFinish(storeId, principal, resource, file, upload.claim);
+    try {
+      await stub.abandonFinish(file, upload.claim);
+    } catch (abandonError) {
+      // Its claim then runs out on its own; the check's failure is the
+      // answer.
+      log.warn("app_file.abandon_failed", errorFields(abandonError));
+    }
     throw error;
   }
   return await stub.publish(
