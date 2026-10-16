@@ -2,6 +2,7 @@
  * Workflow runs as tests drive them from outside: through the engine's own
  * run objects (Workerflow), as a crash, a deploy or time passing would.
  */
+import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { runObjectName } from "@grasp-os/workerflow/identity";
 import { WorkflowInstance } from "@grasp-os/workerflow/instance";
 import { runInDurableObject } from "cloudflare:test";
@@ -9,6 +10,7 @@ import { env } from "cloudflare:workers";
 import { expect, vi } from "vite-plus/test";
 
 import { runDefinition } from "../src/workflows/engine.ts";
+import type { AttemptAdmission } from "../src/workflows/quotas.ts";
 import { allEvents } from "./audit-events.ts";
 
 /** The ID of the run's object, as the engine names it (engine.ts). */
@@ -331,4 +333,53 @@ export const leave = async (userId: string): Promise<() => Promise<void>> => {
       )
       .run();
   };
+};
+
+/**
+ * The admission of a run host built by hand, for a run core has no row
+ * of: every attempt admitted, nothing counted. The quotas have tests of
+ * their own, against real runs.
+ */
+export const admittedFreely = async (): Promise<AttemptAdmission> =>
+  await Promise.resolve({
+    attemptsAllowed: platformLimits.workflowAttemptsPerStep,
+    hostCall: async () => {
+      await Promise.resolve();
+    },
+    settle: async () => {
+      await Promise.resolve();
+    },
+  });
+
+/**
+ * What `run` returns, with core's database failing the first read of the
+ * quota policy meanwhile, as D1 can for a moment, and whether one failed.
+ */
+export const withPolicyReadFailingOnce = async <Result>(
+  run: () => Promise<Result>
+): Promise<{ failed: boolean; value: Result }> => {
+  const database = env.DB;
+  let failed = false;
+  env.DB = new Proxy(database, {
+    get: (target, property) => {
+      if (property === "prepare") {
+        return (query: string) => {
+          if (!failed && query.includes("quota_policies")) {
+            failed = true;
+            return target.prepare("SELECT broken_for_the_test()");
+          }
+          return target.prepare(query);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      return typeof value === "function"
+        ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+        : value;
+    },
+  });
+  try {
+    return { value: await run(), failed };
+  } finally {
+    env.DB = database;
+  }
 };

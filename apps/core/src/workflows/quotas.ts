@@ -23,6 +23,7 @@ import {
   runLineageAttempts,
   runLineageChildren,
   runLineages,
+  workflowResourceRuns,
   workflowRuns,
 } from "../db/core/schema.ts";
 import {
@@ -293,15 +294,72 @@ const limitReached = (limit: LineageLimit, policy: QuotaPolicy) =>
 /**
  * The statement that creates the lineage of `root` (a root run's ID) from
  * its run's row, unless it has its row already: its age counts from the
- * root's start. Nothing for a run core has no row of.
+ * root's start. A root is an App's run (`workflow_runs`) or an
+ * independent workflow's (`workflow_resource_runs`, its start's
+ * admission): the same counters and admissions hold both, so no run gets
+ * past a limit for being of either kind. Nothing for a run core has no
+ * row of.
  */
 export const lineageCreated = (db: DrizzleD1Database, root: string) =>
   db
     .insert(runLineages)
     .select(
-      sql`SELECT ${workflowRuns.id}, ${workflowRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root}`
+      sql`SELECT ${workflowRuns.id}, ${workflowRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${root}
+        UNION ALL SELECT ${workflowResourceRuns.id}, ${workflowResourceRuns.createdAt}, 0, 0, 0, 0, 0 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${root}`
     )
     .onConflictDoNothing();
+
+/**
+ * That run `run` was cancelled, as SQL: an App run's tombstone, or an
+ * independent run ended cancelled (resource-runs.ts, which ends it as
+ * the cancel is taken). Its attempts are charged up to their deadlines,
+ * as the engine stops a cancelled attempt's calls, not its isolate.
+ */
+const cancelledRun = (run: string): SQL =>
+  sql`(EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND ${workflowRuns.cancelRequestedAt} IS NOT NULL)
+    OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run} AND ${workflowResourceRuns.status} = 'cancelled'))`;
+
+/**
+ * That the engine has fenced run `run`'s attempts of activation
+ * `generation`, as SQL: the run was cancelled (`cancelledRun`), its object
+ * said its attempts of this generation, or a newer one, hold no more
+ * (`sharesReleased`), or, for an independent run, it has ended. However
+ * late an admission of such an attempt lands, it takes no share.
+ */
+const fencedRun = (run: string, generation: number): SQL =>
+  sql`(${cancelledRun(run)}
+    OR EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND ${workflowRuns.sharesFencedThrough} >= ${generation})
+    OR EXISTS (SELECT 1 FROM ${workflowResourceRuns} WHERE ${workflowResourceRuns.id} = ${run} AND (${workflowResourceRuns.sharesFencedThrough} >= ${generation} OR ${workflowResourceRuns.status} IN ('completed', 'failed', 'cancelled'))))`;
+
+/**
+ * The statements that record, for run `run` of either kind, that the
+ * engine fenced its attempts of activation generation `through` and older
+ * (`shares_fenced_through`, which only grows). An independent run that has
+ * ended is fenced by its end already (`fencedRun`), and its row never
+ * changes again (migration 0089), so only one that hasn't is written.
+ */
+const fenceRecorded = (db: DrizzleD1Database, run: string, through: number) =>
+  [
+    db
+      .update(workflowRuns)
+      .set({ sharesFencedThrough: through })
+      .where(
+        and(
+          eq(workflowRuns.id, run),
+          lt(workflowRuns.sharesFencedThrough, through)
+        )
+      ),
+    db
+      .update(workflowResourceRuns)
+      .set({ sharesFencedThrough: through })
+      .where(
+        and(
+          eq(workflowResourceRuns.id, run),
+          lt(workflowResourceRuns.sharesFencedThrough, through),
+          sql`${workflowResourceRuns.status} IN ('starting', 'running')`
+        )
+      ),
+  ] as const;
 
 /**
  * That `policy`'s generation is still the highest `quota_policies`
@@ -867,23 +925,14 @@ export const sharesReleased = async (
 ): Promise<void> => {
   const db = drizzle(env.DB);
   const held = runLineageAttempts;
-  const tombstone = sql`EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND ${workflowRuns.cancelRequestedAt} IS NOT NULL)`;
   await db.batch([
     ...fencedSettled(
       db,
       sql`${held.runId} = ${run} AND ${held.generation} <= ${through}`,
       Date.now(),
-      cancelled ? sql`1` : tombstone
+      cancelled ? sql`1` : cancelledRun(run)
     ),
-    db
-      .update(workflowRuns)
-      .set({ sharesFencedThrough: through })
-      .where(
-        and(
-          eq(workflowRuns.id, run),
-          lt(workflowRuns.sharesFencedThrough, through)
-        )
-      ),
+    ...fenceRecorded(db, run, through),
   ]);
 };
 
@@ -961,7 +1010,7 @@ const admitAttemptOnce = async (
   // the run was cancelled (its tombstone), its object said its attempts
   // of this generation hold no more (`sharesReleased`), or a newer
   // activation's attempt was admitted. However late its call lands.
-  const fencedOut = sql`(EXISTS (SELECT 1 FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${run} AND (${workflowRuns.cancelRequestedAt} IS NOT NULL OR ${workflowRuns.sharesFencedThrough} >= ${attempt.generation})) OR EXISTS (SELECT 1 FROM ${held} WHERE ${held.runId} = ${run} AND ${held.generation} > ${attempt.generation}))`;
+  const fencedOut = sql`(${fencedRun(run, attempt.generation)} OR EXISTS (SELECT 1 FROM ${held} WHERE ${held.runId} = ${run} AND ${held.generation} > ${attempt.generation}))`;
   const written = await db.batch([
     lineageCreated(db, root),
     db
@@ -990,15 +1039,7 @@ const admitAttemptOnce = async (
     // older activation's admission landing after this one, of any step,
     // takes none of what it gave back. A takeover changes no status, so
     // no notification records it.
-    db
-      .update(workflowRuns)
-      .set({ sharesFencedThrough: attempt.generation - 1 })
-      .where(
-        and(
-          eq(workflowRuns.id, run),
-          lt(workflowRuns.sharesFencedThrough, attempt.generation - 1)
-        )
-      ),
+    ...fenceRecorded(db, run, attempt.generation - 1),
     ...queuePruned(db, now),
     // The receipt, which is also the attempt's lease on its shares of the
     // attempts running at once (admission.ts), only while the lineage has
@@ -1045,9 +1086,9 @@ const admitAttemptOnce = async (
       .from(runLineages)
       .where(eq(runLineages.rootRunId, root)),
     db
-      .select({ id: workflowRuns.id })
-      .from(workflowRuns)
-      .where(and(eq(workflowRuns.id, run), fencedOut)),
+      .select({ fenced: sql<number>`1` })
+      .from(runLineages)
+      .where(and(eq(runLineages.rootRunId, root), fencedOut)),
   ]);
   const [admitted] = receipts;
   if (admitted !== undefined) {

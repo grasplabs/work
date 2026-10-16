@@ -3,6 +3,7 @@ import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import {
   maxLiveRunsPerPrincipal,
@@ -32,6 +33,7 @@ import { startWorkflow } from "../src/workflow-starts.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import type { RunStep } from "../src/workflows/host.ts";
+import { admitAttempt } from "../src/workflows/quotas.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import {
   repairResourceStarts,
@@ -41,7 +43,14 @@ import {
 } from "../src/workflows/resource-runs.ts";
 import { removedText, sweepRunDetails } from "../src/workflows/retention.ts";
 import { allEvents } from "./audit-events.ts";
-import { aroundEngine, runObject, whileEngineRefuses } from "./runs.ts";
+import { withCpuKills } from "./cpu-kills.ts";
+import {
+  admittedFreely,
+  aroundEngine,
+  runObject,
+  whileEngineRefuses,
+  withPolicyReadFailingOnce,
+} from "./runs.ts";
 import { artifactKey } from "./sealed-apps.ts";
 import { outcome, refusal, unique } from "./sign-in.ts";
 
@@ -948,6 +957,7 @@ const evaluatedWith = async (
         return lease(reads);
       },
       tampered: () => {},
+      admitAttempt: admittedFreely,
     }
   );
   let evaluated: unknown;
@@ -1072,6 +1082,7 @@ describe("an activation's share of core's CPU", () => {
           leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
           tampered: () => {},
           activationFuel: 2 ** 27,
+          admitAttempt: admittedFreely,
         }
       );
     };
@@ -1541,3 +1552,625 @@ describe("whose word a run's row takes, and whose clock", () => {
     });
   });
 });
+
+// The lineage quotas of runs of JSON workflows (workflows/quotas.ts), as an
+// App's runs have them: each run is the root of its own lineage, and each
+// of its steps' attempts is admitted against it and the client's shares of
+// attempts running at once, then settled with what it used. The engine,
+// the isolate, the host and core's database are real; the Loader's CPU
+// kill is stood in for (cpu-kills.ts), as plain workerd enforces none.
+
+/**
+ * The generation of the next quota policy a test sets: each higher than
+ * any before, as an operator's must be (quotas.ts, `quotaPolicy`).
+ */
+let generations = 100;
+
+/** The limits the tests' deployment sets (vite.config.ts). */
+const configuredLimits = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
+
+/**
+ * What `run` returns with the operator's quota policy `limits` in force,
+ * under a new generation; the deployment's own again after, under a
+ * newer one.
+ */
+const withQuotas = async <Result>(
+  limits: Record<string, number>,
+  run: () => Promise<Result>
+): Promise<Result> => {
+  generations += 1;
+  env.QUOTA_LIMITS = { generation: generations, limits };
+  try {
+    return await run();
+  } finally {
+    generations += 1;
+    env.QUOTA_LIMITS = { generation: generations, limits: configuredLimits };
+  }
+};
+
+const lineageSchema = z.object({
+  createdAt: z.number(),
+  used: z.number(),
+  held: z.number(),
+  hostCalls: z.number(),
+  descendants: z.number(),
+});
+
+/** Run `id`'s lineage counters, as core's database has them. */
+const lineageOf = async (id: string | null) =>
+  lineageSchema
+    .optional()
+    .parse(
+      (await env.DB.prepare(
+        "SELECT created_at AS createdAt, active_used_ms AS used, active_held_ms AS held, host_calls AS hostCalls, descendants FROM run_lineages WHERE root_run_id = ?"
+      )
+        .bind(id)
+        .first()) ?? undefined
+    );
+
+const receiptSchema = z.object({
+  key: z.string(),
+  attempt: z.number(),
+  root: z.string(),
+  settled: z.number(),
+  reserved: z.number(),
+  used: z.number().nullable(),
+  admittedAt: z.number(),
+  deadline: z.number(),
+  hostCalls: z.number(),
+  subject: z.string(),
+  resource: z.string(),
+});
+
+/** The receipts of run `id`'s attempts, in the order they were admitted. */
+const receiptsOf = async (id: string | null) => {
+  const { results } = await env.DB.prepare(
+    "SELECT step_key AS key, attempt, root_run_id AS root, settled_at IS NOT NULL AS settled, reserved_ms AS reserved, used_ms AS used, admitted_at AS admittedAt, deadline, host_calls AS hostCalls, subject, resource FROM run_lineage_attempts WHERE run_id = ? ORDER BY admitted_at, attempt"
+  )
+    .bind(id)
+    .all();
+  return z.array(receiptSchema).parse(results);
+};
+
+/** How many times run `id` waited for load, as its journal has it. */
+const loadWaitsOf = async (id: string | null): Promise<number> =>
+  await runInDurableObject(
+    runObject(id ?? ""),
+    (_object, state) =>
+      state.storage.sql
+        .exec<{ waits: number }>(
+          "SELECT count(*) AS waits FROM steps WHERE type = 'sleep' AND name LIKE '%:busy:%'"
+        )
+        .one().waits
+  );
+
+/** How many places in the admission queue run `id` holds. */
+const placesOf = async (id: string | null): Promise<number> => {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS places FROM workflow_admission_queue WHERE run_id = ?"
+  )
+    .bind(id)
+    .first<{ places: number }>();
+  return row?.places ?? 0;
+};
+
+/** A greeting, then the greeting called out: one expression in each task. */
+const greetThenCall = (name: string): string =>
+  definitionOf(name, [
+    {
+      greet: {
+        set: {
+          status: '${ $params.greeting + ", " + $workflow.input.who }',
+        },
+      },
+    },
+    { call: { set: { status: '${ .status + "!" }' } } },
+  ]);
+
+/**
+ * A module, sealed as the generated one, whose step of task `finish`
+ * never returns: its attempt holds what it was admitted with until the
+ * engine fences it.
+ */
+const hangingModule = `export default { metadata: { profile: "grasp-open-workflow/1" }, run: async (engine) => {
+  await engine.do("task:finish", { input: {}, context: {} }, async () => await new Promise(() => {}));
+  return { status: "never" };
+} };`;
+
+describe(
+  "the lineage quotas of runs of JSON workflows",
+  { timeout: 90_000 },
+  () => {
+    it("admits each attempt against the run's own lineage and its person's and workflow's shares, settling it with what it used and the expressions it evaluated", async () => {
+      const by = await builder();
+      const workflow = await published(by, greetThenCall);
+      // One attempt at once for the person: the call's attempt is admitted
+      // only once the greeting's has settled and given its share back.
+      const { runId, run } = await withQuotas(
+        { workflowPersonAttempts: 1 },
+        async () => {
+          const started = await start(by, workflow.id);
+          return {
+            runId: started.runId,
+            run: await ended(by, workflow.id, started.runId),
+          };
+        }
+      );
+      const receipts = await receiptsOf(runId);
+      const lineage = await lineageOf(runId);
+      expect({
+        status: run.status,
+        output: run.output,
+        waitedForLoad: await loadWaitsOf(runId),
+        lineage: { ...lineage, used: undefined },
+        startedWithRun:
+          lineage?.createdAt === (await runColumn(runId, "created_at")),
+        usedAsSettled:
+          lineage?.used ===
+          receipts.reduce((sum, { used }) => sum + (used ?? 0), 0),
+        receipts: receipts.map(
+          ({ key, attempt, root, settled, hostCalls, subject, resource }) => ({
+            key: key.length > 0,
+            attempt,
+            root,
+            settled,
+            hostCalls,
+            subject,
+            resource,
+          })
+        ),
+      }).toStrictEqual({
+        status: "completed",
+        output: { status: "Hello, Ada!" },
+        waitedForLoad: 0,
+        lineage: {
+          createdAt: lineage?.createdAt,
+          used: undefined,
+          held: 0,
+          hostCalls: 2,
+          descendants: 0,
+        },
+        startedWithRun: true,
+        usedAsSettled: true,
+        receipts: Array.from({ length: 2 }, () => ({
+          key: true,
+          attempt: 1,
+          root: runId,
+          settled: 1,
+          hostCalls: 1,
+          subject: by.userId,
+          resource: `workflow-resource:${workflow.id}`,
+        })),
+      });
+    });
+
+    it("fails a run whose expressions would take its lineage past its host calls, counting on across a CPU kill and the retry under the same key", async () => {
+      const by = await builder();
+      const workflow = await published(by, greetThenCall);
+      // Two host calls in all: the greeting's first attempt evaluates, and
+      // is cut off as it returns; its retry, under the same key, evaluates
+      // again. Nothing is left for the call.
+      const result = await withQuotas(
+        { lineageHostCalls: 2 },
+        async () =>
+          await withCpuKills(
+            "task:greet",
+            (attempt) => attempt === 1,
+            async () => {
+              const { runId } = await start(by, workflow.id);
+              const run = await ended(by, workflow.id, runId);
+              return { run, runId };
+            },
+            "end"
+          )
+      );
+      const receipts = await receiptsOf(result.runId);
+      const lineage = await lineageOf(result.runId);
+      const [first, second] = receipts;
+      expect({
+        status: result.run.status,
+        code: result.run.error?.code,
+        hostCalls: lineage?.hostCalls,
+        attempts: receipts.map(({ attempt, hostCalls }) => ({
+          attempt,
+          hostCalls,
+        })),
+        sameKey: first?.key === second?.key,
+      }).toStrictEqual({
+        status: "failed",
+        code: "workflow.lineage_limit",
+        hostCalls: 2,
+        attempts: [
+          { attempt: 1, hostCalls: 1 },
+          { attempt: 2, hostCalls: 1 },
+        ],
+        sameKey: true,
+      });
+    });
+
+    it("refuses every attempt of a lineage past its age, evaluating none of its expressions", async () => {
+      const by = await builder();
+      const workflow = await published(by, greetThenCall);
+      const run = await withQuotas({ workflowAgeMs: 1 }, async () => {
+        const { runId } = await start(by, workflow.id);
+        return await ended(by, workflow.id, runId);
+      });
+      const lineage = await lineageOf(run.id);
+      expect({
+        status: run.status,
+        code: run.error?.code,
+        hostCalls: lineage?.hostCalls,
+        receipts: await receiptsOf(run.id),
+      }).toStrictEqual({
+        status: "failed",
+        code: "workflow.lineage_limit",
+        hostCalls: 0,
+        receipts: [],
+      });
+    });
+
+    it("queues an attempt behind its person's share, and runs it once a stopped run's attempt gives the share back, charged up to its deadline", async () => {
+      const by = await builder();
+      const hanging = await published(by, (name) =>
+        definitionOf(name, [{ finish: { set: { status: "done" } } }])
+      );
+      await forgedModule(hanging.id, hangingModule);
+      const workflow = await published(by, greetThenCall);
+      const result = await withQuotas(
+        { workflowPersonAttempts: 1 },
+        async () => {
+          const holder = await start(by, hanging.id);
+          // Its attempt holds the person's only share.
+          await vi.waitFor(
+            async () => {
+              await expect(receiptsOf(holder.runId)).resolves.toHaveLength(1);
+            },
+            { timeout: 30_000, interval: 100 }
+          );
+          const { runId } = await start(by, workflow.id);
+          const { runId: stopped } = await start(by, workflow.id);
+          await vi.waitFor(
+            async () => {
+              await expect(loadWaitsOf(runId)).resolves.toBeGreaterThan(0);
+              await expect(loadWaitsOf(stopped)).resolves.toBeGreaterThan(0);
+            },
+            { timeout: 30_000, interval: 200 }
+          );
+          // One stopped while it waits gives up its place as it ends.
+          const placesBefore = await placesOf(stopped);
+          await terminateResourceRun(env, by, workflow.id, stopped);
+          const placesAfter = await placesOf(stopped);
+          await terminateResourceRun(env, by, hanging.id, holder.runId);
+          const run = await ended(by, workflow.id, runId);
+          const [held] = await vi.waitFor(
+            async () => {
+              const receipts = await receiptsOf(holder.runId);
+              expect(receipts[0]?.settled).toBe(1);
+              return receipts;
+            },
+            { timeout: 30_000, interval: 100 }
+          );
+          return {
+            run,
+            held,
+            holder: await lineageOf(holder.runId),
+            places: [placesBefore, placesAfter],
+          };
+        }
+      );
+      expect({
+        status: result.run.status,
+        output: result.run.output,
+        places: result.places,
+        chargedToDeadline:
+          result.held?.used ===
+          (result.held?.deadline ?? 0) - (result.held?.admittedAt ?? 0),
+        holderHolds: result.holder?.held,
+      }).toStrictEqual({
+        status: "completed",
+        output: { status: "Hello, Ada!" },
+        places: [1, 0],
+        chargedToDeadline: true,
+        holderHolds: 0,
+      });
+    });
+
+    it("admits no attempt of an activation the engine fenced, nor of a run that ended, however late it lands", async () => {
+      const by = await builder();
+      const waiting = await waitingWorkflow(by);
+      const { runId: sleepingRun } = await start(by, waiting.id);
+      // Its first activation is over once it sleeps: its object records the
+      // fence as the engine notifies the run waiting.
+      const fenced = await vi.waitFor(
+        async () => {
+          const row = await env.DB.prepare(
+            "SELECT shares_fenced_through AS through FROM workflow_resource_runs WHERE id = ?"
+          )
+            .bind(sleepingRun)
+            .first<{ through: number }>();
+          expect(row?.through).toBeGreaterThan(0);
+          return row?.through ?? 0;
+        },
+        { timeout: 30_000, interval: 100 }
+      );
+      const done = await published(by, greetThenCall);
+      const { runId: endedRun } = await start(by, done.id);
+      await ended(by, done.id, endedRun);
+      const late = async (
+        run: string | null,
+        workflowId: string,
+        generation: number
+      ) =>
+        await outcome(
+          admitAttempt(
+            env,
+            {
+              run: run ?? "",
+              root: run ?? "",
+              subject: by.userId,
+              resource: `workflow-resource:${workflowId}`,
+            },
+            {
+              key: `late:${unique()}`,
+              step: "late",
+              number: 1,
+              generation,
+              deadline: Date.now() + 60_000,
+            }
+          )
+        );
+      expect({
+        fencedActivation: await late(sleepingRun, waiting.id, fenced),
+        newerActivation: await late(sleepingRun, waiting.id, fenced + 1),
+        endedRun: await late(endedRun, done.id, 100),
+      }).toStrictEqual({
+        fencedActivation: "execution.stale_attempt",
+        newerActivation: "ok",
+        endedRun: "execution.stale_attempt",
+      });
+    });
+
+    it("fails a task that answers a value shaped as core's wait for load, rather than wait on it", async () => {
+      const by = await builder();
+      const workflow = await published(by, (name) =>
+        definitionOf(name, [{ finish: { set: { status: "done" } } }])
+      );
+      await forgedModule(
+        workflow.id,
+        `export default { metadata: { profile: "grasp-open-workflow/1" }, run: async (engine) => await engine.do("task:finish", { input: {}, context: {} }, async () => ({ "$grasp:busy": 1, "$grasp:busyMaxMs": 86400000 })) };`
+      );
+      const { runId } = await start(by, workflow.id);
+      const run = await ended(by, workflow.id, runId);
+      expect({
+        status: run.status,
+        waits: await loadWaitsOf(runId),
+      }).toStrictEqual({
+        status: "failed",
+        waits: 0,
+      });
+    });
+
+    it("keeps a lineage, and an attempt's receipt, to a run core has", async () => {
+      const by = await builder();
+      const workflow = await published(by, greetThenCall);
+      const { runId } = await start(by, workflow.id);
+      await ended(by, workflow.id, runId);
+      const nobody = crypto.randomUUID();
+      const lineageOfNobody = await outcome(
+        env.DB.prepare(
+          "INSERT INTO run_lineages (root_run_id, created_at) VALUES (?, ?)"
+        )
+          .bind(nobody, Date.now())
+          .run()
+      );
+      const receiptOfNobody = await outcome(
+        env.DB.prepare(
+          "INSERT INTO run_lineage_attempts (run_id, step_key, attempt, generation, root_run_id, reserved_ms, deadline, admitted_at, policy_generation) VALUES (?, 'k', 1, 1, ?, 0, 0, 0, 0)"
+        )
+          .bind(nobody, runId)
+          .run()
+      );
+      const moved = await outcome(
+        env.DB.prepare(
+          "UPDATE run_lineage_attempts SET run_id = ? WHERE run_id = ?"
+        )
+          .bind(nobody, runId)
+          .run()
+      );
+      const rooted = await outcome(
+        env.DB.prepare(
+          "UPDATE run_lineages SET root_run_id = ? WHERE root_run_id = ?"
+        )
+          .bind(nobody, runId)
+          .run()
+      );
+      expect({
+        lineageOfNobody: lineageOfNobody.includes(
+          "run_lineages are of runs core has"
+        ),
+        receiptOfNobody: receiptOfNobody.includes(
+          "run_lineage_attempts are of runs core has"
+        ),
+        moved: moved.includes("an attempt keeps its run"),
+        rooted: rooted.includes("a run lineage keeps its root"),
+      }).toStrictEqual({
+        lineageOfNobody: true,
+        receiptOfNobody: true,
+        moved: true,
+        rooted: true,
+      });
+    });
+
+    it("refuses a step past the policy's steps as it is admitted, whatever limit the run loaded with while the policy couldn't be read", async () => {
+      const by = await builder();
+      // Seven tasks, each a step of its own: the sixth is past five.
+      const workflow = await published(by, (name) =>
+        definitionOf(
+          name,
+          ["a", "b", "c", "d", "e", "f", "g"].map((id) => ({
+            [id]: { set: { status: id } },
+          }))
+        )
+      );
+      // The policy as the run's attempts are admitted: five steps. Its
+      // load can't read it, and counts by the limit it last read.
+      const result = await withQuotas(
+        { workflowSteps: 5 },
+        async () =>
+          await withPolicyReadFailingOnce(async () => {
+            const { runId } = await start(by, workflow.id);
+            return await ended(by, workflow.id, runId);
+          })
+      );
+      const receipts = await receiptsOf(result.value.id);
+      expect({
+        failed: result.failed,
+        status: result.value.status,
+        code: result.value.error?.code,
+        receipts: receipts.length,
+      }).toStrictEqual({
+        failed: true,
+        status: "failed",
+        code: "workflow.lineage_limit",
+        receipts: 5,
+      });
+    });
+
+    it("checks what an attempt records while it still holds its admission, and settles it after", async () => {
+      const by = await builder();
+      const workflow = await published(by, greetThenCall);
+      const manifest = await env.DB.prepare(
+        "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+      )
+        .bind(workflow.id)
+        .first<{ hash: string }>();
+      const build = await loadWorkflowBuild(
+        env,
+        workflow.id,
+        1,
+        manifest?.hash ?? ""
+      );
+      // What the host did, in order: its record's check refuses a record
+      // its SDK never makes (`tampered`), and the attempt settles.
+      const happened: string[] = [];
+      const runId = crypto.randomUUID();
+      const host = new ResourceRunHost(
+        env,
+        {
+          do: async (name, _config, fn) =>
+            await fn({ attempt: 1, idempotencyKey: `key:${name}` }),
+          sleep: async () => {
+            await Promise.resolve();
+          },
+          waitForEvent: async () =>
+            await Promise.reject(new Error("No waits here")),
+          sleepUntil: async () => {
+            await Promise.resolve();
+          },
+        },
+        {
+          runId,
+          workflowId: workflow.id,
+          version: 1,
+          principal: by.userId,
+          input: { who: "Ada" },
+          params: { greeting: "Hello" },
+          createdAt: Date.now(),
+          build,
+          calling: {
+            runId,
+            workflowId: workflow.id,
+            version: 1,
+            principal: by.userId,
+            invoker: { type: "person", id: by.userId, appVersion: null },
+            bindings: new Map(),
+          },
+          maxModelCalls: 1,
+        },
+        {
+          leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+          tampered: () => {
+            happened.push("record checked");
+          },
+          admitAttempt: async () => {
+            const admission = await admittedFreely();
+            return {
+              ...admission,
+              settle: async () => {
+                happened.push("settled");
+                await admission.settle();
+              },
+            };
+          },
+        }
+      );
+      const settled = await host.do("task:greet", adaCaptured, async () => {
+        await Promise.resolve();
+        // As the isolate answers: settled, a record its SDK never makes.
+        return { ok: true, value: { notARecord: true } };
+      });
+      expect({ ok: settled.ok, happened }).toStrictEqual({
+        ok: false,
+        happened: ["record checked", "settled"],
+      });
+    });
+
+    it("refuses a step's run again after a wait for load past the policy's steps, whatever limit the run loaded with while the policy couldn't be read", async () => {
+      const by = await builder();
+      const hanging = await published(by, (name) =>
+        definitionOf(name, [{ finish: { set: { status: "done" } } }])
+      );
+      await forgedModule(hanging.id, hangingModule);
+      // Its own steps: a, the pause and b, its third.
+      const workflow = await published(by, (name) =>
+        definitionOf(name, [
+          { a: { set: { status: "a" } } },
+          { pause: { wait: "PT5S" } },
+          { b: { set: { status: "b" } } },
+        ])
+      );
+      const result = await withQuotas(
+        { workflowPersonAttempts: 1 },
+        async () => {
+          const { runId } = await start(by, workflow.id);
+          // Once a has run, a hanging run takes the person's one attempt
+          // at once, so b waits for load.
+          await vi.waitFor(
+            async () => {
+              await expect(receiptsOf(runId)).resolves.toMatchObject([
+                { settled: 1 },
+              ]);
+            },
+            { timeout: 30_000, interval: 100 }
+          );
+          const holder = await start(by, hanging.id);
+          await vi.waitFor(
+            async () => {
+              await expect(loadWaitsOf(runId)).resolves.toBeGreaterThan(0);
+            },
+            { timeout: 30_000, interval: 200 }
+          );
+          // The operator lowers the steps to one; the run's next load
+          // can't read the policy, and counts by the limit it last read.
+          return await withQuotas(
+            { workflowPersonAttempts: 1, workflowSteps: 1 },
+            async () =>
+              await withPolicyReadFailingOnce(async () => {
+                await terminateResourceRun(env, by, hanging.id, holder.runId);
+                return await ended(by, workflow.id, runId);
+              })
+          );
+        }
+      );
+      expect({
+        failed: result.failed,
+        status: result.value.status,
+        code: result.value.error?.code,
+      }).toStrictEqual({
+        failed: true,
+        status: "failed",
+        code: "workflow.lineage_limit",
+      });
+    });
+  }
+);
