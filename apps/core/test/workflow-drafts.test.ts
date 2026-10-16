@@ -287,6 +287,86 @@ describe("a workflow's draft", () => {
     );
   });
 
+  it("answers an edit with the revision it wrote, though another lands right after it", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const mine = definitionOf(workflow.name, { status: "mine" });
+    const theirs = definitionOf(workflow.name, { status: "theirs" });
+    // Core's database, where another builder's edit lands as soon as this
+    // one's batch has.
+    let raced = false;
+    const racing = new Proxy(env.DB, {
+      get: (target, property): unknown => {
+        if (property === "batch" && !raced) {
+          return async (statements: D1PreparedStatement[]) => {
+            raced = true;
+            const results = await target.batch(statements);
+            await target
+              .prepare(
+                "INSERT INTO workflow_resource_drafts (workflow_resource_id, revision, source, checked, problems, edited_by, edited_at) VALUES (?, 2, ?, 1, '[]', ?, ?)"
+              )
+              .bind(workflow.id, theirs, ada.userId, Date.now())
+              .run();
+            return results;
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const saved = await editWorkflowDraft(
+      { ...env, DB: racing },
+      ada,
+      workflow.id,
+      { expectedRevision: 0, source: mine }
+    );
+    const latest = await workflowDraft(env, ada, workflow.id);
+    expect({
+      saved: [saved.revision, saved.source, saved.checkpoint?.revision],
+      latest: [latest.revision, latest.source],
+    }).toStrictEqual({
+      saved: [1, mine, 1],
+      latest: [2, theirs],
+    });
+  });
+
+  it("finds a contract too large for a version, so a draft that passes publishes", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    // Names as long as a schema allows, until the contract outgrows a
+    // version's row while the definition stays within its own bound.
+    const properties = Object.fromEntries(
+      Array.from({ length: 3000 }, (_, index) => [
+        `p${String(index).padStart(4, "0")}${"n".repeat(59)}`,
+        { type: "string" },
+      ])
+    );
+    const source = JSON.stringify({
+      ...JSON.parse(definitionOf(workflow.name)),
+      input: {
+        schema: {
+          format: "json",
+          document: {
+            type: "object",
+            properties,
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+    const saved = await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 0,
+      source,
+    });
+    expect({
+      problems: saved.problems.map(({ code, pointer }) => `${code} ${pointer}`),
+      checkpoint: saved.checkpoint,
+    }).toStrictEqual({
+      problems: ["contract.too_large /input/schema"],
+      checkpoint: null,
+    });
+  });
+
   it("refuses text that names another workflow, at its document", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);

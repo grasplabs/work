@@ -11,7 +11,7 @@ import type {
   WorkflowDraft,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, lt, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -114,15 +114,20 @@ type DraftRow = typeof workflowResourceDrafts.$inferSelect;
 /** The latest revision of workflow `id`'s draft, and its latest checkpoint. */
 const draftRows = async (
   env: Env,
-  id: string
+  id: string,
+  saved?: DraftRow
 ): Promise<{ latest?: DraftRow; checkpoint?: DraftRow }> => {
   const db = drizzle(env.DB);
-  const latest = await db
-    .select()
-    .from(workflowResourceDrafts)
-    .where(eq(workflowResourceDrafts.workflowResourceId, id))
-    .orderBy(desc(workflowResourceDrafts.revision))
-    .get();
+  // An edit's own answer is the row it wrote, never a later one: of what
+  // was there before it, only its checkpoint is read.
+  const latest =
+    saved ??
+    (await db
+      .select()
+      .from(workflowResourceDrafts)
+      .where(eq(workflowResourceDrafts.workflowResourceId, id))
+      .orderBy(desc(workflowResourceDrafts.revision))
+      .get());
   const checkpoint =
     latest?.checked === true
       ? latest
@@ -132,7 +137,10 @@ const draftRows = async (
           .where(
             and(
               eq(workflowResourceDrafts.workflowResourceId, id),
-              eq(workflowResourceDrafts.checked, true)
+              eq(workflowResourceDrafts.checked, true),
+              ...(latest === undefined
+                ? []
+                : [lt(workflowResourceDrafts.revision, latest.revision)])
             )
           )
           .orderBy(desc(workflowResourceDrafts.revision))
@@ -144,18 +152,16 @@ const draftRows = async (
 };
 
 /**
- * Workflow `id`'s draft, for `by`, who must build it (`WorkflowDraft`).
- * Before anyone edits it, it is the current version's definition, which
- * passed when it was published, or a starting definition for this
- * workflow.
+ * The draft of `workflow` as `workflowDraft` answers it; given `saved`,
+ * as that edit left it, whatever was saved after it.
  */
-export const workflowDraft = async (
+const draftOf = async (
   env: Env,
   by: Acting,
-  id: unknown
+  workflow: Awaited<ReturnType<typeof requireWorkflowRole>>,
+  saved?: DraftRow
 ): Promise<WorkflowDraft> => {
-  const workflow = await requireWorkflowRole(env, by, id, "builder");
-  const { latest, checkpoint } = await draftRows(env, workflow.id);
+  const { latest, checkpoint } = await draftRows(env, workflow.id, saved);
   const published =
     workflow.currentVersion === null
       ? undefined
@@ -186,6 +192,21 @@ export const workflowDraft = async (
 };
 
 /**
+ * Workflow `id`'s draft, for `by`, who must build it (`WorkflowDraft`).
+ * Before anyone edits it, it is the current version's definition, which
+ * passed when it was published, or a starting definition for this
+ * workflow.
+ */
+export const workflowDraft = async (
+  env: Env,
+  by: Acting,
+  id: unknown
+): Promise<WorkflowDraft> => {
+  const workflow = await requireWorkflowRole(env, by, id, "builder");
+  return await draftOf(env, by, workflow);
+};
+
+/**
  * Saves an edit of workflow `id`'s draft for `by`, who must build it and
  * isn't Grasp staff (`workflowDraftEditSchema`): checked against the
  * profile as a publication would be, stored with its problems, and a
@@ -208,6 +229,7 @@ export const editWorkflowDraft = async (
   const problems = await definitionProblems(env, by, workflow, source);
   const checked = problems.length === 0;
   const revision = expectedRevision + 1;
+  const editedAt = new Date();
   const db = drizzle(env.DB);
   try {
     await auditedBatch(env, db, [
@@ -223,7 +245,7 @@ export const editWorkflowDraft = async (
         checked,
         problems: JSON.stringify(problems),
         editedBy: by.userId,
-        editedAt: new Date(),
+        editedAt,
       }),
       // Only the latest revision and the latest checkpoint stay.
       db.delete(workflowResourceDrafts).where(
@@ -252,7 +274,15 @@ export const editWorkflowDraft = async (
     }
     throw error;
   }
-  return await workflowDraft(env, by, workflow.id);
+  return await draftOf(env, by, workflow, {
+    workflowResourceId: workflow.id,
+    revision,
+    source,
+    checked,
+    problems: JSON.stringify(problems),
+    editedBy: by.userId,
+    editedAt,
+  });
 };
 
 /**

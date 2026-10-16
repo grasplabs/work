@@ -884,6 +884,22 @@ const inspectDefinition = async (
   ) {
     return { ok: false, problems: [identityProblem(workflow)] };
   }
+  // Its contract must fit a version's row, checked here so a draft that
+  // passes is one that publishes (workflow-drafts.ts).
+  if (bytesOf(canonicalJson(contractOf(checked))) > contractMaxBytes) {
+    return {
+      ok: false,
+      problems: [
+        {
+          code: "contract.too_large",
+          message:
+            "The workflow's input, output and parameter schemas together are larger than a version may hold.",
+          pointer: "/input/schema",
+          remedy: "Keep the schemas smaller: move large constants into data.",
+        },
+      ],
+    };
+  }
   // A run's output reaches whoever started it, who may only use the
   // workflow: a sensitive parameter stays out of every expression until
   // bindings that need one come (GRA-566).
@@ -1269,19 +1285,8 @@ const writeVersion = async (
     compiled,
     modulesHash,
   } = publication;
-  const contract = contractOf(checked);
-  const contractText = canonicalJson(contract);
-  if (bytesOf(contractText) > contractMaxBytes) {
-    throw definitionInvalid([
-      {
-        code: "contract.too_large",
-        message:
-          "The workflow's input, output and parameter schemas together are larger than a version may hold.",
-        pointer: "/input/schema",
-        remedy: "Keep the schemas smaller: move large constants into data.",
-      },
-    ]);
-  }
+  // Bounded when the definition was checked (`inspectDefinition`).
+  const contractText = canonicalJson(contractOf(checked));
   const contractHash = await sha256Hex(contractText);
   const version = (workflow.currentVersion ?? 0) + 1;
   const definitionVersion = checked.identity.version;

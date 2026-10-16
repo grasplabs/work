@@ -165,8 +165,9 @@ const WorkflowResourcePage = () => {
       <SiteHeader crumbs={crumbs} />
       <div className="flex flex-col text-sm">
         <WorkflowResourceView
-          // Another workflow, or a new current version, starts afresh.
-          key={`${resource.data.id}/${resource.data.currentVersion}`}
+          // Another workflow starts afresh; a new current version of this
+          // one keeps what is typed in its editor.
+          key={resource.data.id}
           draft={draft}
           resource={resource.data}
           versions={versions}

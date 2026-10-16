@@ -94,7 +94,12 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   ).toBeVisible();
   await expect(problems).toHaveCount(0);
   await page.getByRole("button", { name: "Publish revision 2" }).click();
+  // Typed while it publishes: still there once the page shows version 1.
+  const typed = definition(name, "typed while publishing");
+  await page.getByLabel("workflow.json").fill(typed);
   await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Published as version 1.")).toBeVisible();
+  await expect(page.getByLabel("workflow.json")).toHaveValue(typed);
   await page.getByRole("tab", { name: "Versions" }).click();
   await expect(page.getByRole("cell", { name: "1.0.0" })).toBeVisible();
   await page.getByRole("tab", { name: "Definition" }).click();
