@@ -16,10 +16,11 @@ import {
   workflowChannel,
 } from "../src/client-workflow.ts";
 import type { Id } from "../src/index.ts";
+import { workflowReferenceLimits } from "../src/references.ts";
 import { isPlainObject } from "../src/value-descriptor.ts";
 import { WorkflowStore } from "../src/workflow-store.ts";
 import type { Selection } from "../src/workflow-store.ts";
-import { workflows } from "./workflow-refs.ts";
+import { workflows } from "./notes/.grasp/references.ts";
 
 // What `useWorkflow` shows and does (spec 10.4–10.4.7, 10.7.2, 10.7.3),
 // through the hook's store and the session client's workflow channel,
@@ -201,6 +202,24 @@ const snapshotOf = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+/** An event wait of `summarizeNote` as the host names it, changed by `event`. */
+const listening = (event: Record<string, unknown> = {}) => ({
+  kind: "event",
+  id: "wait-1",
+  taskId: "do/2/awaitEdit",
+  key: "do/2/awaitEdit",
+  title: "Waiting for an edit",
+  openedAt: 1000,
+  deadline: null,
+  event: {
+    kind: "workflowEvent",
+    alias: "noteEdited",
+    fingerprint: workflows.summarizeNote.events.noteEdited.fingerprint,
+    ...event,
+  },
+  canSend: true,
+});
+
 /** The control part of a snapshot. */
 const controlOf = (
   can: { pause?: boolean; resume?: boolean; cancel?: boolean },
@@ -223,10 +242,14 @@ const noteId = "01890000-0000-7000-8000-000000000001" as Id<"notes">;
  * mounted as React mounts it: how to read its view and render error, run
  * its commands, select another run (React's resubscription) and unmount.
  */
-const mount = (page: Host, selection: Selection) => {
+const mount = (
+  page: Host,
+  selection: Selection,
+  reference: unknown = workflows.summarizeNote
+) => {
   const store = new WorkflowStore(
     workflowChannel(page.client),
-    readWorkflowReference(workflows.summarizeNote)
+    readWorkflowReference(reference)
   );
   let shown = selection;
   let stop = store.subscribe(shown, unheard);
@@ -368,12 +391,12 @@ describe("what a hook shows", () => {
       ...fields,
       kind: "event",
       id: "wait-2",
-      key: "upload",
+      key: "do/2/awaitEdit",
       deadline: null,
       event: {
         kind: "workflowEvent",
-        alias: "documentUploaded",
-        fingerprint: "e".repeat(64),
+        alias: "noteEdited",
+        fingerprint: workflows.summarizeNote.events.noteEdited.fingerprint,
       },
       canSend: true,
     };
@@ -390,6 +413,38 @@ describe("what a hook shows", () => {
       { canRespond: true },
       { canSend: true },
     ]);
+  });
+
+  it("shows a run listening for an event with the event's own generated reference", async () => {
+    const page = host();
+    const hook = await showing(
+      page,
+      snapshotOf({ status: "waiting", waits: [listening()] })
+    );
+    const [wait] = hook.view().waits;
+    expect(wait?.kind === "event" && wait.event).toBe(
+      workflows.summarizeNote.events.noteEdited
+    );
+  });
+
+  it("shows an event wait keyed by a listen task's path as long as a reference holds", async () => {
+    const path = "t".repeat(workflowReferenceLimits.taskPathLength);
+    const reference = {
+      ...workflows.summarizeNote,
+      listens: { ...workflows.summarizeNote.listens, [path]: ["noteEdited"] },
+    };
+    const page = host();
+    const hook = mount(page, "run-1", reference);
+    await flush();
+    page.one("run-1").push(
+      1,
+      snapshotOf({
+        status: "waiting",
+        waits: [{ ...listening(), taskId: path, key: path }],
+      })
+    );
+    expect(hook.error()).toBeUndefined();
+    expect(hook.view().waits).toMatchObject([{ key: path }]);
   });
 
   it("waits as long as a refused subscription says before following again", async () => {
@@ -578,6 +633,30 @@ const malformed = Object.entries({
       id: `wait-${index}`,
     })),
   }),
+  "an event the workflow doesn't declare": snapshotOf({
+    status: "waiting",
+    waits: [listening({ alias: "documentUploaded" })],
+  }),
+  "a declared event under a task that doesn't listen for it": snapshotOf({
+    status: "waiting",
+    waits: [{ ...listening(), key: "do/0/chooseStyle" }],
+  }),
+  "a declared event under a task the workflow doesn't have": snapshotOf({
+    status: "waiting",
+    waits: [{ ...listening(), key: "do/9/elsewhere" }],
+  }),
+  "another contract of a declared event": snapshotOf({
+    status: "waiting",
+    waits: [listening({ fingerprint: "e".repeat(64) })],
+  }),
+  "an event as a whole reference rather than its alias": snapshotOf({
+    status: "waiting",
+    waits: [
+      listening({
+        ...workflows.summarizeNote.events.noteEdited,
+      }),
+    ],
+  }),
   "a field the contract doesn't have": snapshotOf({ owner: "user-1" }),
   "another run's snapshot": snapshotOf({ runId: "run-9" }),
 });
@@ -621,6 +700,38 @@ describe("what is never shown", () => {
     { ...workflows.summarizeNote, visibility: "internal" },
     { ...workflows.summarizeNote, fingerprint: "not a hash" },
     { ...workflows.summarizeNote, output: { kind: "anything" } },
+    { ...workflows.summarizeNote, events: undefined },
+    { ...workflows.summarizeNote, listens: undefined },
+    {
+      ...workflows.summarizeNote,
+      listens: { "do/0/chooseStyle": ["documentUploaded"] },
+    },
+    {
+      ...workflows.summarizeNote,
+      listens: { "do/0/chooseStyle": ["styleChosen", "styleChosen"] },
+    },
+    {
+      ...workflows.summarizeNote,
+      events: { noteEdited: workflows.archiveNotes.events.confirmed },
+    },
+    {
+      ...workflows.summarizeNote,
+      events: {
+        noteEdited: {
+          ...workflows.summarizeNote.events.noteEdited,
+          workflowFingerprint: workflows.archiveNotes.fingerprint,
+        },
+      },
+    },
+    {
+      ...workflows.summarizeNote,
+      events: {
+        noteEdited: {
+          ...workflows.summarizeNote.events.noteEdited,
+          data: { kind: "anything" },
+        },
+      },
+    },
   ])("refuses %o as a workflow reference", (reference) => {
     expect(() => readWorkflowReference(reference)).toThrow(
       expect.objectContaining({ code: "contract.invalid_request" })
