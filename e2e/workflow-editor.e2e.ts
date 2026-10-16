@@ -265,7 +265,9 @@ test("a builder sees every declared branch of the checked definition, and a test
   await expect(page.getByText("The run completed.")).toBeVisible({
     timeout: 30_000,
   });
-  const ran = page.getByRole("region", { name: "What the run did" });
+  const ran = page.getByRole("region", {
+    name: "What the run of version 1 did",
+  });
   for (const task of ["route", "greet-ada", "finished"]) {
     // oxlint-disable-next-line no-await-in-loop -- one task at a time
     await expect(

@@ -1,4 +1,4 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import type {
   DiagramNext,
   DiagramScope,
@@ -135,6 +135,35 @@ describe("a workflow's diagram", () => {
         "    timeout-result (set) → end",
       ],
     });
+  });
+
+  it("shows where a catch sends a caught failure, apart from where its try goes", async () => {
+    await expect(
+      diagramOf(
+        documentAround({ name: "caught", input: {}, required: [] }, [
+          {
+            guarded: {
+              try: [{ attempt: { set: { status: "tried" } } }],
+              catch: {
+                do: [{ note: { set: { status: "caught" } } }],
+                then: "fallback",
+              },
+              then: "done",
+            },
+          },
+          { fallback: { set: { status: "fallback" }, then: "end" } },
+          { done: { set: { status: "done" } } },
+        ])
+      )
+    ).resolves.toStrictEqual([
+      "guarded (try) → done",
+      "  [try]",
+      "    attempt (set)",
+      "  [catch] → fallback",
+      "    note (set)",
+      "fallback (set) → end",
+      "done (set)",
+    ]);
   });
 
   it("keeps each task's ID and place when only its label changes, and never shows an expression's value", async () => {

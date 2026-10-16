@@ -7221,8 +7221,8 @@ msgid "What the models cost that work for you in Grasp this month ({month}, UTC)
 msgstr "Was die Modelle, die in Grasp für Sie arbeiten, diesen Monat ({month}, UTC) kosten, in US-Dollar, wie sie bepreist sind."
 
 #: src/workflows/test-run.tsx
-msgid "What the run did"
-msgstr "Was der Lauf getan hat"
+msgid "What the run of version {traceVersion} did"
+msgstr "Was der Lauf der Version {traceVersion} getan hat"
 
 #: src/workflows/definition-editor.tsx
 msgid "What to fix"
