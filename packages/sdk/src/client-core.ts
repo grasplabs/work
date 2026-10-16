@@ -2200,6 +2200,9 @@ export class GraspClient {
       (settled.kind === "failed" &&
         (settled.error.retryable || nothingRanCodes.has(settled.error.code)));
     if (passing && entry.snapshot.value !== undefined) {
+      // Kept, and old: writes may have landed since (a torn read says
+      // they did), so trying again reads it, whichever list shows it.
+      entry.stale = true;
       throw settled.kind === "failed"
         ? settled.error
         : clientError("operation.unreachable");

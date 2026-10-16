@@ -1049,10 +1049,10 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     list.stop();
   });
 
-  it("fails a Load More whose larger window another list shows, when writes keep tearing it, both lists kept", async () => {
+  it("fails a Load More whose larger window another list shows, when writes keep tearing it, both lists kept, and read again when tried again", async () => {
     const notes = await notesApp();
     const token = await tokenFor(notes.builder.session, notes.app);
-    hostNetwork();
+    const network = hostNetwork();
     const client = portableClient(() => token);
     for (const title of ["One", "Two", "Three"]) {
       // oxlint-disable-next-line no-await-in-loop -- one after the other
@@ -1084,6 +1084,17 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     } finally {
       undo();
     }
+    // Writes landed while the shared window was read: trying again reads
+    // it, though the list that failed shows another.
+    const before = network.sent.length;
+    clientInternals(client).retryFailed();
+    await vi.waitFor(() => {
+      expect(network.sent.length - before).toBe(1);
+    });
+    expect({ one: one.titles(), two: two.titles() }).toStrictEqual({
+      one: ["Three"],
+      two: ["Three", "Two"],
+    });
     one.stop();
     two.stop();
   });
