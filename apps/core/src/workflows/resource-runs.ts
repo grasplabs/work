@@ -40,7 +40,9 @@ import { runEngine } from "./engine.ts";
 import type { PinnedResourceRun } from "./engine.ts";
 import { countedStep, fromIsolate, settle, stepLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
+import { quotaPolicy } from "./quotas.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
+import { callingRunOf } from "./resource-authority.ts";
 import {
   maxResultBytes,
   openRunMain,
@@ -103,7 +105,12 @@ import type { EngineStatus } from "./runs.ts";
 // Not yet: lineage quotas (a run's active time and descendants,
 // quotas.ts) are kept for App runs' lineages, which reference their rows;
 // an independent run is held to the platform's step limit, each step to
-// its attempt's time, and each expression to the evaluator's fuel.
+// its attempt's time, and each expression to the evaluator's fuel. A
+// workflow's own `limits` lower those: `maxSteps` the step limit and
+// `maxModelCalls` the model requests a lineage may make (the lower of
+// each and the host's, `loadedRun`, one request per call). A
+// `maxActiveMs` isn't lowered (generate.ts): nothing holds these runs to
+// an active time until GRA-567.
 
 /** The statuses of a run that hasn't ended. */
 const unended: WorkflowRunStatus[] = ["starting", "running"];
@@ -580,6 +587,11 @@ const loadedRun = async (
   if (contract === undefined) {
     throw workflowResourceErrors.create("workflow.version_not_found");
   }
+  const { limits } = await quotaPolicy(env);
+  const calling = await callingRunOf(env, pin.workflow, runId);
+  if (calling === undefined) {
+    throw new Error(`Run ${runId} has ended`);
+  }
   return {
     run: {
       runId,
@@ -590,6 +602,12 @@ const loadedRun = async (
       params: jsonObjectSchema.parse(JSON.parse(receipt.params)),
       createdAt: row.createdAt.getTime(),
       build,
+      calling,
+      // The workflow's own limit only ever lowers the host's ceiling.
+      maxModelCalls: Math.min(
+        limits.lineageModelRequests,
+        build.limits.maxModelCalls ?? limits.lineageModelRequests
+      ),
     },
     output: JSON.stringify(contract.output),
   };
@@ -651,7 +669,12 @@ export const runResourceWorkflow = async (
   memory: ResourceRunMemory
 ): Promise<unknown> => {
   const { run, output } = await loadedRun(env, pin, runId);
-  const step = countedStep(engineStep, await stepLimitOf(env));
+  // The workflow's own step limit only ever lowers the host's.
+  const ceiling = await stepLimitOf(env);
+  const step = countedStep(
+    engineStep,
+    Math.min(ceiling, run.build.limits.maxSteps ?? ceiling)
+  );
   const calls: AttemptCall[] = [];
   let tampered: StepError | undefined;
   const host = new ResourceRunHost(env, step, run, {

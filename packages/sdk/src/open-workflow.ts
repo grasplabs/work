@@ -42,6 +42,14 @@
  * supply, from what the start froze and the step captured. A task's
  * schemas are the host's to check, by the native validator.
  *
+ * A named call (an operation, a connector action, a model, the time, a
+ * random number) is the host's to build and make, within its task's step,
+ * from what the build sealed of the task: generated code only asks for it,
+ * by its task, and passes the task's transformed input. Its answer is the
+ * step's record, so a replay makes no call again. A deadline (a wait's
+ * expression, a `grasp.sleepUntil` call's) is resolved once, by the host,
+ * in its task's enter step, which records it.
+ *
  * It imports nothing: generated code and its type check see only this
  * module.
  */
@@ -82,12 +90,24 @@ export interface FlowState {
   readonly context: FlowValue;
 }
 
-/** The stages before a task's own work. A flag asks the host to check. */
+/**
+ * The stages before a task's own work. A flag asks the host to check, or,
+ * `until`, to resolve the task's deadline (a wait's whose duration is an
+ * expression, a `grasp.sleepUntil` call's), once, which the step records.
+ */
 export interface EnterPlan {
   readonly if?: Stage;
   readonly inputSchema?: true;
   readonly inputFrom?: Stage;
+  readonly until?: true;
 }
+
+/**
+ * A call task (a named call the host makes from what the build sealed:
+ * its binding, its operation and how its arguments are built): the stages
+ * around it.
+ */
+export interface CallPlan extends EnterPlan, LeavePlan {}
 
 /** The stages after a task's own work. */
 export interface LeavePlan {
@@ -116,6 +136,8 @@ export interface Entered {
   readonly skipped: boolean;
   /** Its transformed input; its raw input when skipped. */
   readonly input: FlowValue;
+  /** Its deadline, in ms since the epoch, as the host resolved it (`until`). */
+  readonly until: number;
 }
 
 /** A switch's outcome: the case chosen, by its index. */
@@ -134,6 +156,16 @@ export interface Flow {
     id: string,
     data: TaskData,
     plan: SetPlan
+  ) => Promise<FlowState>;
+  /**
+   * Runs call task `id` on `data`, as one recorded step: the host makes
+   * the task's call within it, once, and a replay answers what it
+   * recorded, calling nothing.
+   */
+  readonly call: (
+    id: string,
+    data: TaskData,
+    plan: CallPlan
   ) => Promise<FlowState>;
   /** Runs `switch` task `id` on `data`, its chosen case recorded. */
   readonly switch: (
@@ -161,6 +193,11 @@ export interface Flow {
   ) => Promise<FlowState>;
   /** Durably waits `milliseconds` as task `id`, holding no isolate. */
   readonly wait: (id: string, milliseconds: number) => Promise<void>;
+  /**
+   * Durably waits as task `id` until `timestamp`, the deadline its enter
+   * step recorded, holding no isolate: at once when it has passed.
+   */
+  readonly sleepUntil: (id: string, timestamp: number) => Promise<void>;
 }
 
 /** Which of a task's data the host checks against the task's schema. */
@@ -175,10 +212,24 @@ export interface StageFrame {
   readonly output: FlowValue;
 }
 
-/** The host of one attempt of a step: evaluations and schema checks. */
+/** What a task's call or deadline is built on: its transformed input. */
+export interface CallFrame {
+  readonly input: FlowValue;
+}
+
+/**
+ * The host of one attempt of a step: evaluations, schema checks, and the
+ * task's own call or deadline, which the host builds and makes from what
+ * the build sealed of the task, never from anything generated code passes
+ * but the task's transformed input.
+ */
 export interface AttemptHost {
   readonly evaluate: (slot: number, frame: StageFrame) => Promise<FlowValue>;
   readonly check: (which: DataCheck, value: FlowValue) => Promise<void>;
+  /** Makes the task's call, once: its raw output. */
+  readonly call: (frame: CallFrame) => Promise<FlowValue>;
+  /** Resolves the task's deadline, once, in ms since the epoch. */
+  readonly until: (frame: CallFrame) => Promise<number>;
 }
 
 /**
@@ -196,6 +247,7 @@ export interface OpenWorkflowEngine {
     fn: (attempt: AttemptHost) => Promise<FlowValue>
   ) => Promise<FlowValue>;
   readonly sleep: (name: string, milliseconds: number) => Promise<void>;
+  readonly sleepUntil: (name: string, timestamp: number) => Promise<void>;
 }
 
 /** What `openWorkflow` makes: frozen, so nothing puts another `run` in place. */
@@ -291,6 +343,8 @@ interface StepRecord {
   /** The context it exported, if it exported one. */
   readonly context?: FlowValue;
   readonly branch?: number;
+  /** The deadline an enter step resolved, in ms since the epoch. */
+  readonly until?: number;
 }
 
 const readRecord = (value: FlowValue): StepRecord => {
@@ -303,18 +357,25 @@ const readRecord = (value: FlowValue): StepRecord => {
   if (!hasOwn(value, "output")) {
     throw new TypeError("A task's step records its output");
   }
-  const { branch } = value;
+  const { branch, until } = value;
   if (
     branch !== undefined &&
     (typeof branch !== "number" || !isSafeInteger(branch) || branch < 0)
   ) {
     throw new TypeError("A switch records its case by number");
   }
+  if (
+    until !== undefined &&
+    (typeof until !== "number" || !isSafeInteger(until) || until < 0)
+  ) {
+    throw new TypeError("A deadline is a time in milliseconds");
+  }
   return {
     skipped: false,
     output: value.output ?? null,
     ...(hasOwn(value, "context") ? { context: value.context ?? null } : {}),
     ...(branch === undefined ? {} : { branch }),
+    ...(until === undefined ? {} : { until }),
   };
 };
 
@@ -455,6 +516,21 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
       }
       return { ...stateAfter(data, record), branch };
     },
+    call: async (id, data, plan) => {
+      const record = readRecord(
+        await engine.do(stepOf("task", id), captured(data), async (attempt) => {
+          const frame = frameOf(data.input);
+          if ((await enterStages(attempt, frame, plan)) === null) {
+            return { skipped: true };
+          }
+          // The host builds the call from what the build sealed of the
+          // task, on its transformed input, and makes it.
+          frame.output = await attempt.call({ input: frame.input });
+          return await leaveStages(attempt, frame, data.context, plan);
+        })
+      );
+      return stateAfter(data, record);
+    },
     enter: async (id, data, plan) => {
       const record = readRecord(
         await engine.do(
@@ -463,15 +539,28 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
           async (attempt): Promise<FlowValue> => {
             const frame = frameOf(data.input);
             const entered = await enterStages(attempt, frame, plan);
-            return entered === null
-              ? { skipped: true }
+            if (entered === null) {
+              return { skipped: true };
+            }
+            return plan.until === true
+              ? {
+                  output: entered.input,
+                  until: await attempt.until({ input: entered.input }),
+                }
               : { output: entered.input };
           }
         )
       );
+      if (
+        plan.until === true &&
+        !record.skipped &&
+        record.until === undefined
+      ) {
+        throw new TypeError("A task's enter step records its deadline");
+      }
       return record.skipped
-        ? { skipped: true, input: data.input }
-        : { skipped: false, input: record.output };
+        ? { skipped: true, input: data.input, until: 0 }
+        : { skipped: false, input: record.output, until: record.until ?? 0 };
     },
     leave: async (id, data, entered, output, plan) => {
       const record = readRecord(
@@ -502,6 +591,13 @@ const flowOf = (engine: OpenWorkflowEngine): Flow => {
         throw new TypeError("A wait is a positive whole number of ms");
       }
       await engine.sleep(step, milliseconds);
+    },
+    sleepUntil: async (id, timestamp) => {
+      const step = stepOf("task", id);
+      if (!isSafeInteger(timestamp) || timestamp < 0) {
+        throw new TypeError("A deadline is a time in milliseconds");
+      }
+      await engine.sleepUntil(step, timestamp);
     },
   };
   return freeze(flow);

@@ -63,6 +63,8 @@ describe("a JSON workflow's run on-prem", () => {
         output: { schema: objectSchema({ status: { type: "string" } }) },
         do: [
           { pause: { wait: "PT1S" } },
+          // A wait the host resolves to a deadline, and sleeps until.
+          { linger: { wait: '${ "PT1S" }' } },
           {
             greet: { set: { status: '${ "Hello, " + $workflow.input.who }' } },
           },

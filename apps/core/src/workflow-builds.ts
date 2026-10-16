@@ -9,6 +9,8 @@ import {
   generateWorkflow,
   generatorVersion,
   maxSealedPointerLength,
+  maxTemplateItems,
+  maxTemplateKeyLength,
 } from "@grasp-os/open-workflow/generate";
 import type { CheckedWorkflow } from "@grasp-os/open-workflow/validate";
 import { releaseArtifactSchema } from "@grasp-os/shared/app-releases";
@@ -16,6 +18,7 @@ import type { ReleaseArtifact } from "@grasp-os/shared/app-releases";
 import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
+import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
   openWorkflowProtocol,
@@ -136,20 +139,107 @@ const taskBase = {
     output: descriptorSchema.optional(),
     export: descriptorSchema.optional(),
   }),
+  /** The most an attempt of its steps may take, from its `timeout`. */
+  timeoutMs: z.int().positive().optional(),
 };
+
+/**
+ * A value the host builds at call time (generate.ts, `CallTemplate`): a
+ * literal, a sealed expression's slot, a sensitive parameter as a binding
+ * argument, or an object (its entries, in order) or array of those.
+ */
+export type SealedTemplate =
+  | { literal: Json }
+  | { slot: number }
+  | { param: string }
+  | { object: [string, SealedTemplate][] }
+  | { array: SealedTemplate[] };
+
+const templateSchema: z.ZodType<SealedTemplate> = z.lazy(() =>
+  z.union([
+    z.strictObject({ literal: z.json() }),
+    z.strictObject({ slot: z.int().min(0) }),
+    z.strictObject({ param: z.string().min(1).max(64) }),
+    z.strictObject({
+      object: z
+        .array(z.tuple([z.string().max(maxTemplateKeyLength), templateSchema]))
+        .max(maxTemplateItems),
+    }),
+    z.strictObject({ array: z.array(templateSchema).max(maxTemplateItems) }),
+  ])
+);
+
+const aliasSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u);
+
+/** A call task's named call, as the build seals it (generate.ts). */
+const sealedCallSchema = z.discriminatedUnion("name", [
+  z.strictObject({ name: z.literal("grasp.now") }),
+  z.strictObject({ name: z.literal("grasp.random") }),
+  z.strictObject({
+    name: z.literal("grasp.operation"),
+    binding: aliasSchema,
+    arguments: templateSchema,
+  }),
+  z.strictObject({
+    name: z.literal("grasp.connector"),
+    binding: aliasSchema,
+    operation: z.string().min(1).max(256),
+    arguments: templateSchema,
+  }),
+  z.strictObject({
+    name: z.literal("grasp.model"),
+    binding: aliasSchema,
+    instructions: templateSchema,
+    input: templateSchema,
+    outputSchema: descriptorSchema,
+    model: templateSchema.optional(),
+    maxOutputTokens: templateSchema.optional(),
+  }),
+  z.strictObject({
+    name: z.literal("grasp.sleepUntil"),
+    timestamp: templateSchema,
+  }),
+]);
+
+export type SealedCall = z.infer<typeof sealedCallSchema>;
 
 /** One task the generated module runs, as the host checks its steps. */
 const sealedTaskSchema = z.discriminatedUnion("kind", [
   z.strictObject({ ...taskBase, kind: z.literal("set") }),
   z.strictObject({ ...taskBase, kind: z.literal("switch") }),
   z.strictObject({ ...taskBase, kind: z.literal("do") }),
+  z
+    .strictObject({
+      ...taskBase,
+      kind: z.literal("wait"),
+      /** How long it waits, as its statement says, for a literal duration. */
+      milliseconds: z.int().positive().optional(),
+      /** Its duration's expression, which its enter step resolves. */
+      duration: templateSchema.optional(),
+      // Its input.from, of the slots its module evaluates (generate.ts).
+      inputFrom: templateSchema.optional(),
+    })
+    .refine(
+      ({ milliseconds, duration }) =>
+        (milliseconds === undefined) !== (duration === undefined)
+    ),
   z.strictObject({
     ...taskBase,
-    kind: z.literal("wait"),
-    /** How long it waits, as its statement says. */
-    milliseconds: z.int().positive(),
+    kind: z.literal("call"),
+    call: sealedCallSchema,
+    // Its input.from, output.as and export.as, of the slots its module
+    // evaluates (generate.ts).
+    inputFrom: templateSchema.optional(),
+    outputAs: templateSchema.optional(),
+    exportAs: templateSchema.optional(),
   }),
 ]);
+
+/** A workflow's own limits (`document.metadata.grasp.limits`). */
+const workflowLimitsSchema = z.strictObject({
+  maxSteps: z.int().positive().optional(),
+  maxModelCalls: z.int().positive().optional(),
+});
 
 /** One expression of the sealed table. */
 const sealedExpressionSchema = z.strictObject({
@@ -167,7 +257,7 @@ const sealedExpressionSchema = z.strictObject({
     "workflowOutputAs",
   ]),
   /** What it must answer: a condition a boolean (generate.ts). */
-  result: z.enum(["boolean", "json"]),
+  result: z.enum(["boolean", "duration", "json"]),
   source: z.string().max(8192),
 });
 
@@ -178,9 +268,12 @@ const tasksFileSchema = z.strictObject({
   workflow: z.strictObject({ input: z.boolean(), output: z.boolean() }),
   /** The parameters expressions may read: those not sensitive. */
   params: z.array(z.string().min(1).max(64)).max(64),
+  /** The workflow's own limits, which only lower the host's ceilings. */
+  limits: workflowLimitsSchema,
 });
 
 export type SealedTask = z.infer<typeof sealedTaskSchema>;
+export type WorkflowLimits = z.infer<typeof workflowLimitsSchema>;
 export type SealedExpression = z.infer<typeof sealedExpressionSchema>;
 
 /**
@@ -294,14 +387,44 @@ export const compileWorkflow = async (
       tasksArtifact,
       canonicalJson({
         tasks: generated.tasks.map(
-          ({ id, kind, pointer, milliseconds, steps, schemas }) => ({
+          ({
+            id,
+            kind,
+            pointer,
+            milliseconds,
+            duration,
+            call,
+            inputFrom,
+            outputAs,
+            exportAs,
+            timeoutMs,
+            steps,
+            schemas,
+          }) => ({
             id,
             kind,
             pointer,
             steps,
-            // The SDK's descriptors, as the plain JSON they are.
+            // The SDK's descriptors and the templates, as the plain JSON
+            // they are.
             schemas: z.json().parse(structuredClone(schemas)),
             ...(milliseconds === undefined ? {} : { milliseconds }),
+            ...(duration === undefined
+              ? {}
+              : { duration: z.json().parse(structuredClone(duration)) }),
+            ...(call === undefined
+              ? {}
+              : { call: z.json().parse(structuredClone(call)) }),
+            ...(inputFrom === undefined
+              ? {}
+              : { inputFrom: z.json().parse(structuredClone(inputFrom)) }),
+            ...(outputAs === undefined
+              ? {}
+              : { outputAs: z.json().parse(structuredClone(outputAs)) }),
+            ...(exportAs === undefined
+              ? {}
+              : { exportAs: z.json().parse(structuredClone(exportAs)) }),
+            ...(timeoutMs === undefined ? {} : { timeoutMs }),
           })
         ),
         expressions: generated.expressions.map((expression) => ({
@@ -309,6 +432,7 @@ export const compileWorkflow = async (
         })),
         workflow: { ...generated.workflow },
         params: [...generated.params],
+        limits: { ...generated.limits },
       }),
     ],
     [
@@ -480,6 +604,8 @@ export interface LoadedBuild {
   readonly workflow: { readonly input: boolean; readonly output: boolean };
   /** The parameters expressions may read: those not sensitive. */
   readonly params: readonly string[];
+  /** The workflow's own limits, which only lower the host's ceilings. */
+  readonly limits: WorkflowLimits;
   /** The generated TypeScript, for export. */
   readonly source: string;
 }
@@ -573,6 +699,7 @@ const verifiedBuild = async (
     tasks: Object.freeze(tasks.tasks.map((task) => Object.freeze(task))),
     workflow: Object.freeze(tasks.workflow),
     params: Object.freeze(tasks.params),
+    limits: Object.freeze(tasks.limits),
     expressions: Object.freeze(
       tasks.expressions.map((expression) => Object.freeze(expression))
     ),

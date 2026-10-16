@@ -154,6 +154,8 @@ export interface RunStep {
     fn: (context?: unknown) => Promise<unknown>
   ) => Promise<unknown>;
   sleep: (name: string, duration: number) => Promise<void>;
+  /** Sleeps until `timestamp`, in ms since the epoch: at once once past. */
+  sleepUntil: (name: string, timestamp: number) => Promise<void>;
   waitForEvent: (
     name: string,
     options: { type: string; timeout: WorkflowDuration }
@@ -1059,6 +1061,10 @@ export const countedStep = (step: RunStep, stepLimit: number): RunStep => {
     sleep: async (name, duration) => {
       take(name);
       await step.sleep(name, duration);
+    },
+    sleepUntil: async (name, timestamp) => {
+      take(name);
+      await step.sleepUntil(name, timestamp);
     },
     waitForEvent: async (name, options) => {
       take(name);
