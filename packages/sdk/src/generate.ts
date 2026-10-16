@@ -166,6 +166,16 @@ const checkBoundWorkflows = (workflows: readonly BoundWorkflow[]): void => {
         );
       }
     }
+    for (const event of Object.values(workflow.events)) {
+      if (
+        event.type.length === 0 ||
+        event.type.length > workflowReferenceLimits.eventTypeLength
+      ) {
+        throw new TypeError(
+          `An event's type is 1 to ${workflowReferenceLimits.eventTypeLength} characters: ${JSON.stringify(event.type.slice(0, 64))}`
+        );
+      }
+    }
     for (const [task, listened] of Object.entries(workflow.listens)) {
       if (
         task.length === 0 ||

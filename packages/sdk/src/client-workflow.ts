@@ -152,7 +152,7 @@ const isEventOf = (
     event.workflowFingerprint !== workflow.fingerprint ||
     typeof event.type !== "string" ||
     event.type.length === 0 ||
-    event.type.length > 256 ||
+    event.type.length > workflowReferenceLimits.eventTypeLength ||
     typeof event.fingerprint !== "string" ||
     !fingerprintPattern.test(event.fingerprint)
   ) {

@@ -484,6 +484,33 @@ describe("workflow references", () => {
       ],
     ],
     [
+      "an event with an empty type",
+      [
+        {
+          ...summarize,
+          events: {
+            ...summarize.events,
+            noteEdited: { type: "", data: v.null().descriptor },
+          },
+        },
+      ],
+    ],
+    [
+      "an event type longer than a reference holds",
+      [
+        {
+          ...summarize,
+          events: {
+            ...summarize.events,
+            noteEdited: {
+              type: "t".repeat(workflowReferenceLimits.eventTypeLength + 1),
+              data: v.null().descriptor,
+            },
+          },
+        },
+      ],
+    ],
+    [
       "a listen task's path longer than a reference holds",
       [
         {

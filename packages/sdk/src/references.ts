@@ -390,7 +390,8 @@ export type WorkflowWaitOf<Reference> =
 
 /**
  * The most a generated workflow reference declares: events, listen tasks
- * and decisions, and the longest listen task's path. The generator refuses
+ * and decisions, the longest listen task's path and the longest event
+ * type. The generator refuses
  * more, and the client reads no more, so what one makes the other reads.
  */
 export const workflowReferenceLimits = {
@@ -398,6 +399,7 @@ export const workflowReferenceLimits = {
   listens: 256,
   decisions: 64,
   taskPathLength: 1024,
+  eventTypeLength: 256,
 } as const;
 
 /** The event references of `Reference`, by alias. */
