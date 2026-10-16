@@ -22,6 +22,7 @@ import type {
   WorkflowStepContext,
 } from "../src/contracts.ts";
 import {
+  delivered,
   engineBinding,
   eventsOf,
   notes,
@@ -613,24 +614,14 @@ const checks: Record<Family, () => void> = {
       const seen = await onBoth(instances, async (instance) => {
         await reached(instance);
         const all = await eventsOf(instance);
-        const subscription = await instance.subscribe({
+        const filtered = await delivered(instance, {
           filter: ["step_completed"],
         });
-        const filtered: unknown[] = [];
-        for (;;) {
-          // oxlint-disable-next-line no-await-in-loop -- a subscription answers one event at a time
-          const next = await subscription.next();
-          if (next.done === true) {
-            break;
-          }
-          filtered.push(field(next.value, "stepName"));
-        }
-        const after = await instance.subscribe({ cursor: all.length - 1 });
-        const last = await after.next();
+        const after = await delivered(instance, { cursor: all.length - 1 });
         return {
           types: types(all),
-          filtered,
-          last: field(last.value, "type"),
+          filtered: filtered.map((event) => field(event, "stepName")),
+          after: after.map((event) => field(event, "type")),
         };
       });
       expect(sameOnBoth(seen)).toMatchObject({
@@ -641,7 +632,7 @@ const checks: Record<Family, () => void> = {
           "inner-1",
           "outer-1",
         ],
-        last: "workflow_completed",
+        after: ["workflow_completed"],
       });
       expect(seen.engine.types.at(0)).toStrictEqual([
         "workflow_queued",
@@ -894,7 +885,8 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
     const instances = await start("slow-rollback");
     const seen = await onBoth(instances, async (instance) => {
       const statuses = new Set<unknown>();
-      for (;;) {
+      const started = Date.now();
+      while (Date.now() - started < 10_000) {
         // oxlint-disable-next-line no-await-in-loop -- polling, one read at a time
         const status = await statusName(instance);
         if (status === "errored") {
@@ -904,6 +896,9 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
         // oxlint-disable-next-line no-await-in-loop -- polling, one read at a time
         await scheduler.wait(20);
       }
+      throw new Error(
+        `${instance.id} never ended: ${[...statuses].join(", ")}`
+      );
     });
     expect(seen.engine.has("rollingBack")).toBeTruthy();
     expect(seen.reference.has("rollingBack")).toBeFalsy();

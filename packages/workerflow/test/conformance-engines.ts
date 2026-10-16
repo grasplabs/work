@@ -29,11 +29,17 @@ export interface Instance {
     type: string;
     payload: unknown;
   }) => Promise<void>;
-  readonly subscribe: (options?: {
-    cursor?: number;
-    /** The one type the suite filters by, an event type of both engines. */
-    filter?: "step_completed"[];
-  }) => Promise<{ next: () => Promise<IteratorResult<unknown, unknown>> }>;
+  readonly subscribe: (options?: SubscribeOptions) => Promise<
+    {
+      next: () => Promise<IteratorResult<unknown, unknown>>;
+    } & Disposable
+  >;
+}
+
+export interface SubscribeOptions {
+  cursor?: number;
+  /** The one type the suite filters by, an event type of both engines. */
+  filter?: "step_completed"[];
 }
 
 export interface Pair<T> {
@@ -180,6 +186,42 @@ const instanceFields = new Set([
 ]);
 
 /**
+ * Every event a subscription with `options` delivers until the run ends,
+ * as delivered. Each read races the deadline, and the subscription is
+ * disposed however the reading ends, so a read left pending is released.
+ */
+export const delivered = async (
+  instance: Instance,
+  options?: SubscribeOptions
+): Promise<unknown[]> => {
+  const subscription = await instance.subscribe(options);
+  const deadline = Promise.withResolvers<"expired">();
+  const timer = setTimeout(() => {
+    deadline.resolve("expired");
+  }, deadlineMs);
+  const values: unknown[] = [];
+  try {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- a subscription answers one event at a time
+      const result = await Promise.race([
+        subscription.next(),
+        deadline.promise,
+      ]);
+      if (result === "expired") {
+        throw new Error(`the events of ${instance.id} never ended`);
+      }
+      if (result.done === true) {
+        return values;
+      }
+      values.push(result.value);
+    }
+  } finally {
+    clearTimeout(timer);
+    subscription[Symbol.dispose]();
+  }
+};
+
+/**
  * Every event a subscription delivers until the run ends, without what is
  * the instance's own (its ID, its event numbers and times) and without
  * `workflow_started`'s params, which the reference's adapter wraps.
@@ -187,23 +229,12 @@ const instanceFields = new Set([
 export const eventsOf = async (
   instance: Instance
 ): Promise<Record<string, unknown>[]> => {
-  const subscription = await instance.subscribe();
-  const events: Record<string, unknown>[] = [];
-  const started = Date.now();
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- a subscription answers one event at a time
-    const result = await subscription.next();
-    if (result.done === true) {
-      return events;
-    }
-    if (Date.now() - started > deadlineMs) {
-      throw new Error(`the events of ${instance.id} never ended`);
-    }
-    const { value } = result;
+  const values = await delivered(instance);
+  return values.map((value) => {
     const entries =
       typeof value === "object" && value !== null ? Object.entries(value) : [];
-    events.push(
-      Object.fromEntries(entries.filter(([key]) => !instanceFields.has(key)))
+    return Object.fromEntries(
+      entries.filter(([key]) => !instanceFields.has(key))
     );
-  }
+  });
 };
