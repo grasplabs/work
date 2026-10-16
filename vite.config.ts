@@ -224,6 +224,7 @@ export default defineConfig({
       "apps/core/vite.on-prem.config.ts",
       "packages/*",
       "packages/workerflow/vite.process.config.ts",
+      "packages/workerflow/vite.conformance.config.ts",
       "packages/connectors/*",
       // Repo tooling's pure logic, and core's build step, in Node.
       {
