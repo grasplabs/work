@@ -768,10 +768,10 @@ export const workflows: {
         "resourceVersion": 1,
         "type": "notes.archive.confirmed",
         "workflow": "workflows.archiveNotes",
-        "workflowFingerprint": "c660255b92c9a4ac63eee0695444c80ebe4aaf45579e947e62360aa1342b3cc8"
+        "workflowFingerprint": "6a47fa6768231c02db8edd52d6d41c3a9b347cd05d63bbb35d36acf61ff36196"
       }
     },
-    "fingerprint": "c660255b92c9a4ac63eee0695444c80ebe4aaf45579e947e62360aa1342b3cc8",
+    "fingerprint": "6a47fa6768231c02db8edd52d6d41c3a9b347cd05d63bbb35d36acf61ff36196",
     "input": {
       "descriptorVersion": 1,
       "fields": {},
@@ -825,7 +825,7 @@ export const workflows: {
         "resourceVersion": 1,
         "type": "notes.note.edited",
         "workflow": "workflows.summarizeNote",
-        "workflowFingerprint": "34e3d58137ab7fee666ef8cba20b3905e2c8efed9ae74c77b03bced558f1bb31"
+        "workflowFingerprint": "8691ab6d5cb8edab6c0f8d20123643e3c291dbbb28932b0c3d6173859f4259bd"
       },
       "styleChosen": {
         "alias": "styleChosen",
@@ -853,10 +853,10 @@ export const workflows: {
         "resourceVersion": 1,
         "type": "notes.summary.style_chosen",
         "workflow": "workflows.summarizeNote",
-        "workflowFingerprint": "34e3d58137ab7fee666ef8cba20b3905e2c8efed9ae74c77b03bced558f1bb31"
+        "workflowFingerprint": "8691ab6d5cb8edab6c0f8d20123643e3c291dbbb28932b0c3d6173859f4259bd"
       }
     },
-    "fingerprint": "34e3d58137ab7fee666ef8cba20b3905e2c8efed9ae74c77b03bced558f1bb31",
+    "fingerprint": "8691ab6d5cb8edab6c0f8d20123643e3c291dbbb28932b0c3d6173859f4259bd",
     "input": {
       "descriptorVersion": 1,
       "fields": {

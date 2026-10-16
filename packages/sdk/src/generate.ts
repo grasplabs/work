@@ -121,21 +121,16 @@ const sortedListens = (
   );
 
 /**
- * The fingerprint of a bound workflow's exact public contract: the
- * SHA-256, in hex, of its input, output, events and listen tasks,
- * canonically. Any change to any of them changes it, so a reference pins
- * all of them; the host refuses a run that pins another.
+ * The fingerprint of a bound workflow's contract: the SHA-256, in hex, of
+ * its input and output descriptors, canonically. What a run pins and the
+ * host checks at start and watch; its events carry their own fingerprints,
+ * and the release's contracts cover all of it.
  */
 export const workflowFingerprint = async (
-  workflow: BoundWorkflow
+  workflow: Pick<BoundWorkflow, "input" | "output">
 ): Promise<string> =>
   await sha256Hex(
-    canonicalText({
-      input: workflow.input,
-      output: workflow.output,
-      events: workflow.events,
-      listens: sortedListens(workflow.listens),
-    })
+    canonicalText({ input: workflow.input, output: workflow.output })
   );
 
 /** What the App calls a workflow and its events: plain identifiers. */

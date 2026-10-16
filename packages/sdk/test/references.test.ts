@@ -341,24 +341,35 @@ describe("workflow references", () => {
     expect(reference.events).toStrictEqual(Object.fromEntries(expected));
   });
 
-  test("pin every part of the workflow's contract, which any change to it changes", async () => {
+  test("pin the workflow's input and output, each event its own contract, and the release all of it", async () => {
     const text = v.string().descriptor;
-    const changes: BoundWorkflow[] = [
+    const workflowChanges: BoundWorkflow[] = [
       { ...summarize, input: text },
       { ...summarize, output: text },
+    ];
+    const workflowPrints = await Promise.all(
+      [summarize, ...workflowChanges].map(workflowFingerprint)
+    );
+    expect(new Set(workflowPrints).size).toBe(workflowPrints.length);
+
+    const edited = summarize.events.noteEdited;
+    if (edited === undefined) {
+      throw new Error("No noteEdited");
+    }
+    const eventPrints = await Promise.all(
+      [
+        edited,
+        { ...edited, type: "notes.note.changed" },
+        { ...edited, data: text },
+      ].map(eventFingerprint)
+    );
+    expect(new Set(eventPrints).size).toBe(eventPrints.length);
+
+    const contractChanges: BoundWorkflow[] = [
+      ...workflowChanges,
       {
         ...summarize,
-        events: {
-          ...summarize.events,
-          noteEdited: { type: "notes.note.changed", data: text },
-        },
-      },
-      {
-        ...summarize,
-        events: {
-          ...summarize.events,
-          styleChosen: { type: "notes.summary.style_chosen", data: text },
-        },
+        events: { ...summarize.events, noteEdited: { ...edited, data: text } },
       },
       {
         ...summarize,
@@ -366,10 +377,13 @@ describe("workflow references", () => {
       },
       { ...summarize, listens: { "do/0/chooseStyle": ["styleChosen"] } },
     ];
-    const fingerprints = await Promise.all(
-      [summarize, ...changes].map(workflowFingerprint)
+    const contracts = await Promise.all(
+      [summarize, ...contractChanges].map(async (workflow) => {
+        const files = await generatedWith([workflow]);
+        return files[".grasp/contracts.json"];
+      })
     );
-    expect(new Set(fingerprints).size).toBe(fingerprints.length);
+    expect(new Set(contracts).size).toBe(contracts.length);
   });
 
   test("are the same bytes whatever order the workflows, their events and their listen tasks' events come in", async () => {
