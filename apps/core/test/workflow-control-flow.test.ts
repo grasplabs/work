@@ -191,6 +191,27 @@ describe("switch and transitions in JSON workflows", () => {
     });
   });
 
+  it("gives a wait's output.as the time its task started, as its input.from saw it", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, [
+        {
+          pause: {
+            input: { from: "${ {at: $task.startedAt.epoch.milliseconds} }" },
+            wait: "PT1S",
+            output: {
+              as: "${ {status: ((.at == $task.startedAt.epoch.milliseconds) | tostring)} }",
+            },
+          },
+        },
+      ])
+    );
+    expect(endOf(await ranFor(by, workflow.id))).toStrictEqual({
+      status: "completed",
+      output: { status: "true" },
+    });
+  });
+
   it("replays a switch's recorded choice after a wait, never choosing again", async () => {
     const by = await builder();
     const { workflow } = await published(by, (name) =>

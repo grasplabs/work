@@ -284,6 +284,12 @@ const recordSchema = z.union([
   }),
 ]);
 
+/** What an enter step journals: its record, and when its task started. */
+const enteredSchema = z.strictObject({
+  record: z.json(),
+  startedAt: z.number(),
+});
+
 /**
  * The most a step's capture or an evaluation's data may take as JSON: two
  * values, each at most what a step records (each is one, or the run's
@@ -487,6 +493,11 @@ export class ResourceRunHost
   #activationFuel: number;
   /** The steps this activation asked for: each at most once. */
   readonly #asked = new Set<string>();
+  /**
+   * When each task with an enter step started, as that step recorded it:
+   * its leave step's `$task.startedAt`, in the attempt and on replay.
+   */
+  readonly #taskStarts = new Map<string, number>();
   /** The parameters expressions may read: the build's, not sensitive. */
   readonly #readableParams: Record<string, Json>;
   /**
@@ -584,106 +595,132 @@ export class ResourceRunHost
         const data = captured.data.input;
         await this.#requirePerson();
         const stepName = String(name);
-        return await this.#step.do(stepName, stepConfig, async (context) => {
-          const told = attemptContextSchema.parse(context);
-          const lease = this.#hooks.leaseOf(told.idempotencyKey, told.attempt);
-          if (lease === undefined) {
-            throw new Error(`Step "${stepName}"'s attempt holds no lease`);
-          }
-          const attempt: StepAttempt = {
-            step,
-            data,
-            startedAt: Date.now(),
-            key: told.idempotencyKey,
-            number: told.attempt,
-            generation: lease.generation,
-            deadline: lease.deadline,
-            over: false,
-            evaluated: new Set(),
-            checked: new Set(),
-            capturedSize: bounded.size,
-            ifHeld: undefined,
-            budget: { fuel: attemptFuel },
-            pending: new Set(),
-          };
-          // An activation that can't fund a whole attempt any more cuts it
-          // off as the Loader does an isolate past its CPU time: its step
-          // is retried in the next activation (see `activationFuel`). A
-          // funded one holds its whole share from the start, so attempts
-          // run at once can't each find the same fuel.
-          const funded =
-            !this.#isolateStopped && this.#activationFuel >= attemptFuel;
-          if (funded) {
-            this.#activationFuel -= attemptFuel;
-          }
-          const call = funded
-            ? fn(
-                new ResourceAttemptHost({
-                  evaluate: async (slot, frame) =>
-                    await this.#evaluate(attempt, slot, frame),
-                  check: (which, value) => this.#check(attempt, which, value),
-                })
-              )
-            : Promise.reject(new Error("Worker exceeded CPU time limit."));
-          this.#hooks.attemptCall?.(call, stepDone.promise);
-          let result: Settled<unknown>;
-          try {
-            result = fromIsolate(await call);
-          } catch (error) {
-            if (!isCpuLimitKill(error)) {
-              throw error;
+        // An enter step records when its task started beside its record,
+        // and a leave step's expressions see that time, whatever separates
+        // them (a wait, a nested do, another activation).
+        const entering = step.kind === "enter" && step.task !== undefined;
+        const taskStart =
+          step.kind === "leave" && step.task !== undefined
+            ? this.#taskStarts.get(step.task.id)
+            : undefined;
+        const recorded = await this.#step.do(
+          stepName,
+          stepConfig,
+          async (context) => {
+            const told = attemptContextSchema.parse(context);
+            const lease = this.#hooks.leaseOf(
+              told.idempotencyKey,
+              told.attempt
+            );
+            if (lease === undefined) {
+              throw new Error(`Step "${stepName}"'s attempt holds no lease`);
             }
-            this.#isolateStopped = true;
-            result = { ok: false, error: forIsolate(error) };
-          } finally {
-            attempt.over = true;
-            // What it didn't spend of its share goes back, once every
-            // evaluation it started has settled: one it left running would
-            // spend after its fuel went back. Over now, none starts jq.
-            await Promise.allSettled(attempt.pending);
+            const attempt: StepAttempt = {
+              step,
+              data,
+              startedAt: taskStart ?? Date.now(),
+              key: told.idempotencyKey,
+              number: told.attempt,
+              generation: lease.generation,
+              deadline: lease.deadline,
+              over: false,
+              evaluated: new Set(),
+              checked: new Set(),
+              capturedSize: bounded.size,
+              ifHeld: undefined,
+              budget: { fuel: attemptFuel },
+              pending: new Set(),
+            };
+            // An activation that can't fund a whole attempt any more cuts it
+            // off as the Loader does an isolate past its CPU time: its step
+            // is retried in the next activation (see `activationFuel`). A
+            // funded one holds its whole share from the start, so attempts
+            // run at once can't each find the same fuel.
+            const funded =
+              !this.#isolateStopped && this.#activationFuel >= attemptFuel;
             if (funded) {
-              this.#activationFuel += Math.max(0, attempt.budget.fuel);
+              this.#activationFuel -= attemptFuel;
             }
-          }
-          // A refusal is never retried: the same module refuses the same.
-          if (this.#tampered !== undefined) {
-            throw toStepError(forIsolate(this.#tampered));
-          }
-          if (!result.ok) {
-            throw toStepError(result.error);
-          }
-          // Written once by the bounded writer before anything else reads
-          // it: an answer past what a step records is refused having cost
-          // core no more than that much.
-          const written = writeJson(result.value, {
-            maxBytes: maxResultBytes,
-            maxDepth: evaluatorLimits.maxJsonDepth + 2,
-            maxNodes: maxResultBytes,
-            sortKeys: false,
-            safeIntegers: false,
-          });
-          if (!written.ok) {
-            throw toStepError({
-              name: "Error",
-              message:
-                written.refusal === "too_large"
-                  ? `Step "${stepName}" answered more than a step may record`
-                  : `Step "${stepName}" answered something that isn't JSON`,
+            const call = funded
+              ? fn(
+                  new ResourceAttemptHost({
+                    evaluate: async (slot, frame) =>
+                      await this.#evaluate(attempt, slot, frame),
+                    check: (which, value) => this.#check(attempt, which, value),
+                  })
+                )
+              : Promise.reject(new Error("Worker exceeded CPU time limit."));
+            this.#hooks.attemptCall?.(call, stepDone.promise);
+            let result: Settled<unknown>;
+            try {
+              result = fromIsolate(await call);
+            } catch (error) {
+              if (!isCpuLimitKill(error)) {
+                throw error;
+              }
+              this.#isolateStopped = true;
+              result = { ok: false, error: forIsolate(error) };
+            } finally {
+              attempt.over = true;
+              // What it didn't spend of its share goes back, once every
+              // evaluation it started has settled: one it left running would
+              // spend after its fuel went back. Over now, none starts jq.
+              await Promise.allSettled(attempt.pending);
+              if (funded) {
+                this.#activationFuel += Math.max(0, attempt.budget.fuel);
+              }
+            }
+            // A refusal is never retried: the same module refuses the same.
+            if (this.#tampered !== undefined) {
+              throw toStepError(forIsolate(this.#tampered));
+            }
+            if (!result.ok) {
+              throw toStepError(result.error);
+            }
+            // Written once by the bounded writer before anything else reads
+            // it: an answer past what a step records is refused having cost
+            // core no more than that much.
+            const written = writeJson(result.value, {
+              maxBytes: maxResultBytes,
+              maxDepth: evaluatorLimits.maxJsonDepth + 2,
+              maxNodes: maxResultBytes,
+              sortKeys: false,
+              safeIntegers: false,
             });
+            if (!written.ok) {
+              throw toStepError({
+                name: "Error",
+                message:
+                  written.refusal === "too_large"
+                    ? `Step "${stepName}" answered more than a step may record`
+                    : `Step "${stepName}" answered something that isn't JSON`,
+              });
+            }
+            const value = z.json().parse(JSON.parse(written.text));
+            // Its record's checks, as the host makes them, spend the
+            // activation's fuel as an evaluation of it would.
+            this.#activationFuel -=
+              evaluationFuel + fuelPerByte * written.text.length;
+            try {
+              this.#acceptRecord(attempt, value);
+            } catch (error) {
+              // A record off its task's schemas fails the same every time.
+              throw toStepError(forIsolate(error));
+            }
+            return entering
+              ? { record: value, startedAt: attempt.startedAt }
+              : value;
           }
-          const value = z.json().parse(JSON.parse(written.text));
-          // Its record's checks, as the host makes them, spend the
-          // activation's fuel as an evaluation of it would.
-          this.#activationFuel -=
-            evaluationFuel + fuelPerByte * written.text.length;
-          try {
-            this.#acceptRecord(attempt, value);
-          } catch (error) {
-            // A record off its task's schemas fails the same every time.
-            throw toStepError(forIsolate(error));
-          }
-          return value;
-        });
+        );
+        if (!entering) {
+          return recorded;
+        }
+        // The host's own journal entry, fresh or replayed.
+        const { record, startedAt } = enteredSchema.parse(recorded);
+        if (step.task !== undefined) {
+          this.#taskStarts.set(step.task.id, startedAt);
+        }
+        return record;
       });
     } finally {
       stepDone.resolve(null);
