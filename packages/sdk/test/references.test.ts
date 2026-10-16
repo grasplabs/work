@@ -553,8 +553,8 @@ describe("workflow references", () => {
     expect(references).toContain(await workflowFingerprint(archiveNotes));
     expect(JSON.parse(files[".grasp/contracts.json"] ?? "")).toMatchObject({
       workflows: {
-        archiveNotes: { events: {}, listens: {} },
-        summarizeNote: { events: {}, listens: {} },
+        archiveNotes: { events: {}, listens: {}, decisions: {} },
+        summarizeNote: { events: {}, listens: {}, decisions: {} },
       },
     });
   });
