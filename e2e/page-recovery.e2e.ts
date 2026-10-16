@@ -35,11 +35,15 @@ test("a page whose file is gone after a release loads Grasp anew on Try again", 
   });
 
   // The router loads Grasp anew once by itself; when the file is still
-  // missing after that, the page says why and how to go on.
+  // missing after that, the page says why and how to go on. The first
+  // page can say so too, a moment before the router's reload replaces
+  // it, so the message counts only once that reload has loaded.
+  const reloaded = page.waitForEvent("load");
   await page
     .getByRole("navigation", { name: "Main" })
     .getByRole("link", { name: "Knowledge", exact: true })
     .click();
+  await reloaded;
   await expect(
     page.getByText(
       "Grasp was updated while this page was open. Try again to load the new version."
