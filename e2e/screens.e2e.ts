@@ -7,10 +7,11 @@ import type { Person } from "./people.ts";
 import { screenAppFiles, serveAttacker } from "./screen-app.ts";
 
 // An App's screen in its sandboxed frame, end to end: the page, the frame,
-// core and the App's server, in a real browser. The screen reads and writes
-// through its server, sees another person's changes live, and reports its
-// errors. What it does as code nobody reviewed line by line, to get
-// anywhere else, is in screen-attacks.e2e.ts, in every browser.
+// core and the App's sealed release, in a real browser. The screen reads
+// and writes through its App's functions, sees another person's changes
+// live, and reports its errors. What it does as code nobody reviewed line
+// by line, to get anywhere else, is in screen-attacks.e2e.ts, in every
+// browser.
 
 declare global {
   interface Window {
@@ -184,17 +185,14 @@ test("a screen opens through core failing at first, subscribes again after its c
   expect(connections).toBe(3);
   await drop?.();
 
-  // Only a new subscription, on the page's new connection, can bring it.
-  const { core, api } = apiOf(two);
-  try {
-    await api.screens.call(app, "addNote", ["After the drop"]);
-  } finally {
-    core[Symbol.dispose]();
-  }
+  // Only a new subscription, on the page's new connection, can bring it:
+  // the note the other person adds on their own screen after the drop.
+  const other = await openScreen(await pageOf(two), app);
+  await other.getByRole("button", { name: "Add a note" }).click();
   await expect(
     screen
       .getByRole("list", { name: "Notes" })
-      .getByText(`After the drop by ${two.userId}`)
+      .getByText(`Call Acme by ${two.userId}`)
   ).toBeVisible({ timeout: 20_000 });
   // One refused attempt, then one that holds, and none beside or after it:
   // a failed attempt doesn't start another round of attempts of its own.

