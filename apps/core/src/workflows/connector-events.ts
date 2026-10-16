@@ -20,7 +20,7 @@ import {
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { ConnectorEvent } from "@grasp-os/shared/workflows";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
@@ -31,6 +31,7 @@ import {
   runMailStampRefusals,
   workflowTriggers,
 } from "../db/core/schema.ts";
+import { inList } from "../db/d1.ts";
 import {
   allowingPermissionSql,
   listeningPermissionSql,
@@ -135,7 +136,8 @@ const refusedAlready = async (
   const rows = await drizzle(env.DB)
     .select({ key: runMailStampRefusals.triggerKey })
     .from(runMailStampRefusals)
-    .where(inArray(runMailStampRefusals.triggerKey, [...keys]));
+    // One bound value however many workflows watch: D1 binds at most 100.
+    .where(inList(runMailStampRefusals.triggerKey, keys));
   return new Set(rows.map(({ key }) => key));
 };
 
