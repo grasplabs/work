@@ -3,14 +3,7 @@ import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { notesAppFiles } from "./notes-app.ts";
-import {
-  apiOf,
-  endSession,
-  pageOf,
-  peopleIn,
-  release,
-  signInTo,
-} from "./people.ts";
+import { apiOf, endSession, peopleIn, release, signInTo } from "./people.ts";
 
 // The Notes App end to end on the platform's own runtime and React SDK: a
 // builder's App of spec 8's layout, sealed and current, its screen in its
@@ -73,11 +66,11 @@ const createNote = async (
 };
 
 test("a person creates, loads, edits and deletes notes, and a stale save keeps the draft", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder);
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const screen = await openNotes(page, app);
   await expect(screen.getByText("No notes yet.")).toBeVisible();
 
@@ -131,7 +124,7 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
 
   // The same note open in a second tab, its draft started from the same
   // revision. The first tab saves; the second's save is stale.
-  const other = await pageOf(browser, builder);
+  const other = await pageOf(builder);
   const second = await openNotes(other, app);
   await second.getByRole("button", { name: "Edit Call Acme back" }).click();
   const draft = second.getByRole("form", { name: "Edit note" });
@@ -167,13 +160,13 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
 });
 
 test("a screen whose page connects again as someone else is stopped, and the page loads again as them, sending nothing of the first person's", async ({
-  browser,
+  pageOf,
 }) => {
   // Someone else may use the App and its data is ordinary, so a save sent
   // again under their cookie would run, and commit, as them.
   const { first, next } = peopleIn("notesAppSwitch");
   const app = await notesApp(first, next);
-  const page = await pageOf(browser, first);
+  const page = await pageOf(first);
 
   // The page's one connection (this route has no shell), dropped at will,
   // and refused while the browser's cookie changes hands.
@@ -236,11 +229,11 @@ test("a screen whose page connects again as someone else is stopped, and the pag
 });
 
 test("a screen whose function call core refuses as someone else's is stopped, and the page loads again as them", async ({
-  browser,
+  pageOf,
 }) => {
   const { first, next } = peopleIn("notesAppTwoTabs");
   const app = await notesApp(first, next);
-  const page = await pageOf(browser, first);
+  const page = await pageOf(first);
   // What core answered each save: its status.
   const answered: number[] = [];
   page.on("response", (response) => {
@@ -273,11 +266,11 @@ test("a screen whose function call core refuses as someone else's is stopped, an
 });
 
 test("a screen whose person signed out is stopped and the page loads again, so nothing of theirs stays on it", async ({
-  browser,
+  pageOf,
 }) => {
   const { first } = peopleIn("notesAppSignedOut");
   const app = await notesApp(first);
-  const page = await pageOf(browser, first);
+  const page = await pageOf(first);
   let drop: (() => Promise<void>) | undefined;
   await page.routeWebSocket("**/rpc", (socket) => {
     socket.connectToServer();
@@ -310,13 +303,13 @@ test("a screen whose person signed out is stopped and the page loads again, so n
 });
 
 test("a note saved in one session appears on another session's open screen without reloading", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("notesLive");
   const app = await notesApp(builder);
-  const watching = await openNotes(await pageOf(browser, builder), app);
+  const watching = await openNotes(await pageOf(builder), app);
   await expect(watching.getByText("No notes yet.")).toBeVisible();
-  const saving = await openNotes(await pageOf(browser, builder), app);
+  const saving = await openNotes(await pageOf(builder), app);
 
   // Saved in the second session: the first, which asks nothing, shows it.
   await createNote(saving, "Pushed to the other screen");

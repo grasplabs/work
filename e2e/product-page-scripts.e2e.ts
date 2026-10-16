@@ -1,10 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { z } from "zod";
 
+import { test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
 import { hostileName, seedHostileArtifact } from "./package-artifact.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { serveAttacker } from "./screen-app.ts";
 import { origin } from "./stack.ts";
@@ -134,10 +135,10 @@ const openScreen = async (page: Page): Promise<string> => {
 };
 
 test("the product page runs no screen module or package file, however its HTML is injected, and its screens still run theirs", async ({
-  browser,
   browserName,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const violations = await recordCspViolations(page);
   const moduleAddress = await openScreen(page);
 
@@ -187,9 +188,9 @@ test("the product page runs no screen module or package file, however its HTML i
 });
 
 test("the product page runs no screen module through an escaped path under its own files", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const moduleAddress = await openScreen(page);
   // The browser matches the policy on the path as written, so this passes
   // as one of the frontend's files; decoded, it is the module's address.

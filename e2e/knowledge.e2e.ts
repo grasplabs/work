@@ -6,7 +6,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // The Knowledge page: a person finds a document by searching, reads it
 // rendered (nothing in it runs, its `[[links]]` open here) with what links
@@ -43,7 +43,7 @@ const versionRow = (page: Page, version: number) =>
     .getByRole("listitem", { name: `Version ${version}`, exact: true });
 
 test("a person searches, edits a document, meets a newer version instead of overwriting it, and restores an earlier one", async ({
-  browser,
+  pageOf,
 }) => {
   const { one, two } = peopleIn("knowledge");
   const word = `zebrafish${crypto.randomUUID().replaceAll("-", "")}`;
@@ -100,7 +100,7 @@ test("a person searches, edits a document, meets a newer version instead of over
   }
 
   try {
-    const page = await pageOf(browser, one);
+    const page = await pageOf(one);
     await page.goto("/knowledge");
     const collections = page.getByRole("region", { name: "Collections" });
     const listed = collections
@@ -232,7 +232,7 @@ test("a person searches, edits a document, meets a newer version instead of over
 });
 
 test("a person uploads a file and follows it through core failing for a moment until it is ready, while one too large is refused, one core refuses to report on says why, one past the listed files opens from its row, and one without text fails, each with the reason", async ({
-  browser,
+  pageOf,
 }) => {
   const { one } = peopleIn("knowledgeUploads");
   const { core, api } = apiOf(one);
@@ -257,7 +257,7 @@ test("a person uploads a file and follows it through core failing for a moment u
   } finally {
     core[Symbol.dispose]();
   }
-  const page = await pageOf(browser, one);
+  const page = await pageOf(one);
   // The page's asks for an upload's status (`uploads.get`): the next
   // `dropping` fail as core out of reach does (a closed socket), and while
   // `refusing`, each asks for an upload core doesn't have, which it refuses.
@@ -379,7 +379,7 @@ test("a person uploads a file and follows it through core failing for a moment u
 });
 
 test("someone who may only read a collection is offered no upload, edit or restore", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, reader } = peopleIn("knowledgeReader");
   const { core, api } = apiOf(admin);
@@ -408,7 +408,7 @@ test("someone who may only read a collection is offered no upload, edit or resto
   }
 
   // Its owner, an admin, may change it.
-  const owner = await pageOf(browser, admin);
+  const owner = await pageOf(admin);
   await owner.goto(`/knowledge/${collectionId}?doc=${documentId}`);
   await expect(owner.getByRole("button", { name: "Edit" })).toBeVisible();
   await expect(
@@ -419,7 +419,7 @@ test("someone who may only read a collection is offered no upload, edit or resto
   await expect(owner.getByRole("region", { name: "Upload" })).toBeVisible();
 
   // Anyone else reads it, and is offered nothing core would refuse.
-  const page = await pageOf(browser, reader);
+  const page = await pageOf(reader);
   await page.goto(`/knowledge/${collectionId}?doc=${documentId}`);
   await expect(page.getByText("Twenty weeks.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Edit" })).toHaveCount(0);

@@ -4,7 +4,7 @@ import { expect } from "@playwright/test";
 import type { Download, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // Every export offers Markdown or PDF (export/export-menu.tsx): a document
 // and a chat each download as Markdown, and each prints as a page of their
@@ -72,7 +72,7 @@ const closePrint = async (page: Page, title: string): Promise<void> => {
 };
 
 test("a document and a chat each export as Markdown and as a page to print", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("exports");
   const { core, api } = apiOf(admin);
@@ -92,7 +92,7 @@ test("a document and a chat each export as Markdown and as a page to print", asy
   } finally {
     core[Symbol.dispose]();
   }
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
 
   await page.goto(`/knowledge/${collectionId}?doc=${documentId}`);
   await expect(page.getByText("Sixteen weeks")).toBeVisible(pageRead);

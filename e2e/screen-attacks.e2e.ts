@@ -3,12 +3,13 @@ import type { Socket } from "node:dgram";
 import { once } from "node:events";
 
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { attackAppFiles } from "./attack-apps.ts";
+import { test } from "./contexts.ts";
 import { recordCspViolations } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { screenAppFiles, serveAttacker } from "./screen-app.ts";
 
@@ -158,9 +159,9 @@ test.afterAll(() => {
 });
 
 test("a screen reaches nothing but its own App's server", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const popups: string[] = [];
   page.on("popup", (popup) => {
     popups.push(popup.url());
@@ -262,9 +263,9 @@ test("a screen reaches nothing but its own App's server", async ({
 });
 
 test("an approved screen runs its build and nothing else: no handler, inline script, data: or blob: module or eval it lets in", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(screenPath(approved, "injecting"));
   const screen = page.frameLocator('iframe[title="injecting app"]');
   // Its own modules run: it renders, and calls its server.
@@ -316,8 +317,8 @@ test("an approved screen runs its build and nothing else: no handler, inline scr
   });
 });
 
-test("a screen can't send its frame to another origin", async ({ browser }) => {
-  const page = await pageOf(browser, builder);
+test("a screen can't send its frame to another origin", async ({ pageOf }) => {
+  const page = await pageOf(builder);
   const violations = await recordCspViolations(page);
   await page.goto(screenPath(attacking, "leaving"));
 
@@ -337,9 +338,9 @@ test("a screen can't send its frame to another origin", async ({ browser }) => {
 });
 
 test("a screen that loads another document in its frame is stopped", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(screenPath(attacking, "wandering"));
 
   await expect(page.getByText(left)).toBeVisible({ timeout: 30_000 });
@@ -349,9 +350,9 @@ test("a screen that loads another document in its frame is stopped", async ({
 });
 
 test("a screen that sends more than its port takes is stopped, and the page says so", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(screenPath(attacking, "oversized"));
 
   await expect(page.getByText(disconnected)).toBeVisible({ timeout: 30_000 });
@@ -360,9 +361,9 @@ test("a screen that sends more than its port takes is stopped, and the page says
 });
 
 test("a frame that never says it is ready is given up on after ten seconds", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.clock.install();
   // In place of the frame's own document: one that says everything but
   // the one thing the page waits for.
@@ -405,9 +406,9 @@ test("a frame that never says it is ready is given up on after ten seconds", asy
 });
 
 test("a screen that never renders is given up on after ten seconds, whatever it says", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.clock.install();
   await page.goto(screenPath(attacking, "stuck"));
   // Its module ran, and told the page it had mounted, six ways.
@@ -428,9 +429,9 @@ test("a screen that never renders is given up on after ten seconds, whatever it 
 });
 
 test("WebRTC is left as the browser has it: nothing hidden, nothing claimed", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto(screenPath(attacking, "turn"));
   const screen = page.frameLocator('iframe[title="turn app"]');
   await expect(screen.getByRole("status", { name: "WebRTC" })).not.toBeEmpty({

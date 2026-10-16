@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release, signInTo } from "./people.ts";
+import { apiOf, peopleIn, release, signInTo } from "./people.ts";
 import type { Person } from "./people.ts";
 
 // A decision a workflow run waits for, answered from the link its ask
@@ -107,12 +107,13 @@ const askedFor = async (builder: Person, decider: Person) => {
 };
 
 test("the person a decision link was sent to approves it, and the run goes on", async ({
-  browser,
+  newContext,
+  pageOf,
 }) => {
   const { builder, decider, other } = peopleIn("decisionAnswered");
   const { run, link } = await askedFor(builder, decider);
 
-  const forwarded = await pageOf(browser, other);
+  const forwarded = await pageOf(other);
   await forwarded.goto(link);
   await expect(
     forwarded.getByText("This decision is for someone else to answer.")
@@ -121,7 +122,7 @@ test("the person a decision link was sent to approves it, and the run goes on", 
   // Opened signed out, the link only asks them to sign in. The local stack
   // has no IdP, so signing in is the session it leaves, and the browser
   // comes back to the same link.
-  const context = await browser.newContext();
+  const context = await newContext();
   const page = await context.newPage();
   await page.goto(link);
   await expect(
@@ -196,10 +197,10 @@ test("the person a decision link was sent to approves it, and the run goes on", 
 });
 
 test("says core can't be reached when a decision never loads", async ({
-  browser,
+  pageOf,
 }) => {
   const { decider } = peopleIn("decisionUnreachable");
-  const page = await pageOf(browser, decider);
+  const page = await pageOf(decider);
   const gate = await callGate(page, '["decisions","get"]');
   gate.hold();
   await page.goto(`/decisions/${crypto.randomUUID()}`);

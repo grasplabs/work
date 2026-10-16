@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 import { revokeOtherCopies } from "./playbook.ts";
 
@@ -81,13 +81,13 @@ const openMap = async (page: Page, app: string) => {
 };
 
 test("an admin copies the workflow map, approves its Playbook, draws a workflow and sees its totals, then its expected gain", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, reader } = peopleIn("workflowMap");
   // The Playbook is the deployment's: other runs' workflows are in it too.
   const title = `Pay supplier invoices ${crypto.randomUUID().slice(0, 8)}`;
   const app = await mapFor(admin);
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   const screen = await openMap(page, app);
 
   await screen.getByRole("button", { name: "Draw a workflow" }).click();
@@ -146,7 +146,7 @@ test("an admin copies the workflow map, approves its Playbook, draws a workflow 
   } finally {
     core[Symbol.dispose]();
   }
-  const readerPage = await pageOf(browser, reader);
+  const readerPage = await pageOf(reader);
   const readerScreen = await openMap(readerPage, app);
   const listed = readerScreen.getByRole("row").filter({ hasText: title });
   await expect(listed.getByRole("cell")).toHaveText([
@@ -175,12 +175,12 @@ test("an admin copies the workflow map, approves its Playbook, draws a workflow 
 });
 
 test("keeps numbers within the Playbook's limits, and never drops what is typed while saving, linking or going back", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("workflowMap");
   const title = `Big invoices ${crypto.randomUUID().slice(0, 8)}`;
   const app = await mapFor(admin);
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   // Core's answers to the page wait while `held` is set, so a save stays
   // on its way until the test lets it land.
   let held: (() => void)[] | undefined;
@@ -259,7 +259,7 @@ test("keeps numbers within the Playbook's limits, and never drops what is typed 
 });
 
 test("an answer to an earlier open, arriving late, never replaces the workflow opened since", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("workflowMap");
   const app = await mapFor(admin);
@@ -286,7 +286,7 @@ test("an answer to an earlier open, arriving late, never replaces the workflow o
   } finally {
     core[Symbol.dispose]();
   }
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   // Core's answers that name `slow` wait until the test lets them through:
   // the listing has come by then, so only the first workflow's opening.
   let slow: string | undefined;
@@ -340,7 +340,7 @@ test("an answer to an earlier open, arriving late, never replaces the workflow o
 });
 
 test("a failed overview shows only with the list, and goes once an overview comes", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("workflowMap");
   const app = await mapFor(admin);
@@ -363,7 +363,7 @@ test("a failed overview shows only with the list, and goes once an overview come
   } finally {
     core[Symbol.dispose]();
   }
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   // While `failing`, the page asks core for a method the map doesn't have
   // in place of its overview, which core refuses.
   let failing = false;

@@ -6,7 +6,7 @@ import { callGate } from "./call-gate.ts";
 import { seededConnections, seededTools } from "./connections-seed.ts";
 import type { SeededConnection } from "./connections-seed.ts";
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // The Integrations pages: a person finds the account they connected on
 // its integration's page, with where it stands, signs in again to one whose
@@ -35,11 +35,11 @@ const cardOf = (
   });
 
 test("a person comes back from connecting Microsoft 365, sees it on its page, and is offered to sign in again or disconnect one whose access ran out", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, user } = peopleIn("connections");
   const { mine, expired } = seededConnections();
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
 
   // The list: Microsoft 365 is among its kind of app, connected for them,
   // and needs signing in again; it stays so under Connected.
@@ -192,13 +192,13 @@ test("a person comes back from connecting Microsoft 365, sees it on its page, an
 });
 
 test("a person reaches their account on an integration's page while the catalog or its tools don't come", async ({
-  browser,
+  pageOf,
 }) => {
   const { user } = peopleIn("connections");
   const { mine } = seededConnections();
 
   // The tools never come: the page and its Account tab don't wait for them.
-  const slowTools = await pageOf(browser, user);
+  const slowTools = await pageOf(user);
   const toolsGate = await callGate(slowTools, '["connections","catalogTools"]');
   toolsGate.hold();
   await slowTools.goto("/integrations/native:microsoft?tab=account");
@@ -211,7 +211,7 @@ test("a person reaches their account on an integration's page while the catalog 
 
   // The catalog never comes: a connected integration still shows from its
   // connections, with its accounts, and says why its tools don't.
-  const slowCatalog = await pageOf(browser, user);
+  const slowCatalog = await pageOf(user);
   const catalogGate = await callGate(slowCatalog, '["connections","catalog"]');
   catalogGate.hold();
   await slowCatalog.goto("/integrations/native:microsoft");
@@ -239,7 +239,7 @@ test("a person reaches their account on an integration's page while the catalog 
 });
 
 test("an admin sees which Apps can use a shared connection, revokes a permission there, and reads a Composio connection's consent", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("connections");
   const { mailbox, toolkit } = seededConnections();
@@ -270,7 +270,7 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
     core[Symbol.dispose]();
   }
 
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   // The engine's Integrations tab lists the integrations of the
   // connections it may use, in those connections' state.
   await page.goto(`/domains/${appId}`);

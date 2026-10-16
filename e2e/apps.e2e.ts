@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
 
@@ -136,9 +136,9 @@ test.beforeAll(async () => {
 });
 
 test("a builder finds an engine in the list, opens it and uses its app with live data", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
   await nav.getByRole("link", { name: "Domains" }).click();
@@ -220,7 +220,7 @@ test("a builder finds an engine in the list, opens it and uses its app with live
 });
 
 test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
-  browser,
+  pageOf,
 }) => {
   const everyone = [
     "Chat",
@@ -231,7 +231,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   ];
   const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
   const sidebarOf = async (person: Person) => {
-    const page = await pageOf(browser, person);
+    const page = await pageOf(person);
     await page.goto("/");
     const links = page
       .getByRole("navigation", { name: "Main" })
@@ -292,8 +292,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
 });
 
 test("an old link to an app, opened signed out, leads through sign-in to the app in the frame", async ({
-  browser,
   page,
+  pageOf,
 }) => {
   await page.goto(`/apps/${app}/screens/counter`);
   await expect(
@@ -302,7 +302,7 @@ test("an old link to an app, opened signed out, leads through sign-in to the app
   const returnTo = new URL(page.url()).searchParams.get("returnTo");
   expect(returnTo).toBe(`/domains/${app}/apps/counter`);
 
-  const signedIn = await pageOf(browser, builder);
+  const signedIn = await pageOf(builder);
   await signedIn.goto(
     `/sign-in?returnTo=${encodeURIComponent(returnTo ?? "")}`
   );
@@ -313,9 +313,9 @@ test("an old link to an app, opened signed out, leads through sign-in to the app
 });
 
 test("someone with the user role finds no engine to open", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, user);
+  const page = await pageOf(user);
   // An old link to one engine, from before they were Domains, leads to
   // that Domain.
   await page.goto("/engines/some-engine");
@@ -332,9 +332,9 @@ test("someone with the user role finds no engine to open", async ({
 });
 
 test("signing in goes back to the page asked for, and only to a page of this site", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.goto("/sign-in?returnTo=%2Fengines");
   await expect(page.getByRole("heading", { name: "Domains" })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/domains");
@@ -356,11 +356,11 @@ test("signing in goes back to the page asked for, and only to a page of this sit
 });
 
 test("an engine whose contents can't be read, or never come, keeps its card, and the others theirs", async ({
-  browser,
+  pageOf,
 }) => {
   const brokenName = `Broken ${crypto.randomUUID()}`;
   const broken = await newApp(builder, brokenName, {});
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   // The page asks core for this engine's contents as for an App core
   // doesn't have, which core refuses.
   await page.routeWebSocket("**/rpc", (socket) => {
@@ -388,7 +388,7 @@ test("an engine whose contents can't be read, or never come, keeps its card, and
   // be reached.
   const hangingName = `Hanging ${crypto.randomUUID()}`;
   const hanging = await newApp(builder, hangingName, {});
-  const waiting = await pageOf(browser, builder);
+  const waiting = await pageOf(builder);
   const gate = await callGate(waiting, hanging);
   gate.hold();
   await waiting.goto("/domains");
@@ -406,9 +406,9 @@ test("an engine whose contents can't be read, or never come, keeps its card, and
 });
 
 test("a runs read that never comes leaves the engine usable, and says so in its tab", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const gate = await callGate(page, '["workflows","runs"]');
   gate.hold();
   // An old link to the App leads to the engine.
@@ -432,13 +432,13 @@ test("a runs read that never comes leaves the engine usable, and says so in its 
 });
 
 test("loading an app again after a new version shows that version, and the engine's first app when the one open is gone", async ({
-  browser,
+  pageOf,
 }) => {
   const swapped = await newApp(builder, `Swap ${crypto.randomUUID()}`, {
     "app/server.ts": server,
     "screens/counter.tsx": screen,
   });
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   await page.clock.install();
   await page.goto(`/domains/${swapped}/apps/counter`);
   await counterScreen(page);
