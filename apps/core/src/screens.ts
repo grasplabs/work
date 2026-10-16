@@ -173,7 +173,15 @@ const compiled = async (
     const built = await runner.run("compiler", compilerMethods[kind], [files]);
     return { built, cache: true };
   } catch (error) {
-    if (!(error instanceof PlatformBoundError) || kind === "open-workflow") {
+    // A JSON workflow's generated module is never its author's to fix,
+    // and a stop of compute modules that the load made (a deadline, a
+    // crash) isn't either: both are thrown on, for the caller to answer
+    // as a build to try again (`workflow.build_slow`).
+    if (
+      !(error instanceof PlatformBoundError) ||
+      kind === "open-workflow" ||
+      (kind === "compute" && !error.own)
+    ) {
       throw error;
     }
     const failed: FailedBuild = {

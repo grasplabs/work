@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
+import { sandboxCpuHeader } from "../src/sandbox-headers.ts";
 import { jsonTextDepth, runCompute } from "../src/workflow-modules.ts";
 import {
   createWorkflowResource,
@@ -630,6 +631,67 @@ export const keys = compute({ input: v.record(v.number()), output: v.array(v.str
       1024
     );
     expect(answer).toStrictEqual(["__proto__", "other"]);
+  });
+
+  it("answers a build of modules the sandbox host crashed as one to try again", async () => {
+    const by = await builder();
+    // A sandbox host whose supervisor reports every call crashed: the
+    // load's doing, never the modules'.
+    const crashing: Fetcher = {
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const sent = new Request(input, init);
+        const { pathname } = new URL(sent.url);
+        if (pathname === "/session") {
+          const [client, server] = Object.values(new WebSocketPair());
+          server?.accept();
+          setTimeout(() => {
+            server?.close(1011, "Crashed");
+          }, 10);
+          return await Promise.resolve(
+            new Response(null, {
+              status: 101,
+              webSocket: client ?? null,
+              headers: {
+                [sandboxCpuHeader]: sent.headers.get(sandboxCpuHeader) ?? "",
+              },
+            })
+          );
+        }
+        if (pathname.startsWith("/verdict/")) {
+          return Response.json({
+            verdict: "crashed",
+            message: "Its process crashed.",
+          });
+        }
+        return new Response(null, { status: 404 });
+      },
+      connect: () => {
+        throw new Error("No sockets here");
+      },
+    };
+    const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
+    const request = {
+      definition: definitionOf(workflow.name),
+      basedOn: null,
+      // Modules no build has cached yet.
+      modules: {
+        ...totalModules,
+        "code/sum.ts": `${sumModule}// ${unique()}\n`,
+      },
+    };
+    const crashed = await outcome(
+      publishWorkflowVersion(
+        { ...env, SANDBOX_HOST: crashing },
+        by,
+        workflow.id,
+        request
+      )
+    );
+    const saved = await publishWorkflowVersion(env, by, workflow.id, request);
+    expect({ crashed, executable: saved.build.executable }).toStrictEqual({
+      crashed: "workflow.build_slow",
+      executable: true,
+    });
   });
 
   it("refuses modules past their bounds and paths outside code/", async () => {
