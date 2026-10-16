@@ -268,6 +268,16 @@ describe("the host's catalog", () => {
     ["connector with no operations", { kind: "connector", operations: {} }],
     ["event", { kind: "event" }],
     ["event with no types", { kind: "event", events: {} }],
+    [
+      "event with two types a screen sends",
+      {
+        kind: "event",
+        events: {
+          "grasp.a": { data: emptyObject, browser: true },
+          "grasp.b": { data: emptyObject, browser: true },
+        },
+      },
+    ],
     ["workflow", { kind: "workflow", input: emptyObject, output: emptyObject }],
     ["decision", { kind: "decision", input: emptyObject }],
   ])(

@@ -227,6 +227,10 @@ const readEvents = (
     if (type.length === 0) {
       return refuse("an empty event type");
     }
+    if (browser && [...events.values()].some((known) => known.browser)) {
+      // A binding's alias names the one type a screen may send.
+      return refuse("more than one event type a screen sends");
+    }
     events.set(text(type, catalogLimits.nameLength), {
       // Required: an event type is admitted only with its data's contract.
       data: schemaOf(ownData(event, "data"), budget),
