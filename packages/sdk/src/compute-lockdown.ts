@@ -62,13 +62,14 @@ const clocklessDate = (): DateConstructor =>
     // the real `Date`.
     __proto__: null,
     apply: unavailable("the clock"),
-    construct: (target, args: unknown[]) => {
+    construct: (target, args: unknown[], newTarget: DateConstructor) => {
       if (args.length === 0) {
         return unavailable("the clock")();
       }
+      // `newTarget` passed on, so a subclass of `Date` stays one.
       // SAFETY: constructing `Date` with arguments makes a `Date`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      return construct(target, args) as Date;
+      return construct(target, args, newTarget) as Date;
     },
   } as ProxyHandler<DateConstructor>);
 

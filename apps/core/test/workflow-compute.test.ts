@@ -432,6 +432,19 @@ describe("a JSON workflow's compute modules", () => {
     ]);
   });
 
+  it("keeps dates a calculation is given working, a subclass of Date included", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, {
+      "code/total.ts": moduleAnswering(
+        'class Stamp extends Date {}\n    const stamp = new Stamp(Date.UTC(2026, 0, amounts.length));\n    return stamp instanceof Stamp ? stamp.getUTCDate() : Number("x");'
+      ),
+    });
+    await expect(ran(by, workflow.id)).resolves.toStrictEqual({
+      status: "completed",
+      output: { status: "3" },
+    });
+  });
+
   it("checks a call's arguments against the sealed contract before running anything", async () => {
     const by = await builder();
     // Its handler would answer a valid count for any list: only the
