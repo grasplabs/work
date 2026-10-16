@@ -1,11 +1,13 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { guestErrors } from "@grasp-os/shared/guests";
-import type { PermissionId } from "@grasp-os/shared/ids";
+import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 
+import { loadRelease } from "./app-releases.ts";
+import { findApp } from "./apps.ts";
 import { inviteGuest, listGuests, readGuest, revokeGuest } from "./guests.ts";
 import type { BindingCaller, ResourceAdapter } from "./resource-adapter.ts";
 import { platformGrantOf } from "./resource-platform.ts";
@@ -35,6 +37,33 @@ import { platformGrantOf } from "./resource-platform.ts";
 //
 // What a guest can reach is unchanged: the model, with the chat's guide
 // and the chat, through the gateway, and nothing else.
+
+/**
+ * Whether App `app`'s current release declares a guests resource: then
+ * only its binding governs its guest chats, and its v1 server's `GUESTS`
+ * stub serves nothing (guests-binding.ts), so no chat it invites escapes
+ * the binding's revocation. False for an App with no sealed release.
+ */
+export const declaresGuests = async (
+  env: Env,
+  app: AppId
+): Promise<boolean> => {
+  try {
+    const found = await findApp(env, app);
+    if (found.currentVersion === null) {
+      return false;
+    }
+    const release = await loadRelease(env, found.id, found.currentVersion);
+    return Object.values(release.app.resources).some(
+      (declared) => declared["~resource"] === "guests"
+    );
+  } catch (error) {
+    if (isExpectedError(error)) {
+      return false;
+    }
+    throw error;
+  }
+};
 
 /** The contract every guests binding serves. */
 const guestsContract = "grasp.guests@1";

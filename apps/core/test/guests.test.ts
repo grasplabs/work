@@ -9,10 +9,11 @@ import { z } from "zod";
 
 import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
+import { callApp } from "../src/app.ts";
 import { sweepGuestChats } from "../src/guests.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
-import { grantReviewed, release, requestGranted } from "./apps.ts";
+import { grantReviewed, release, requestGranted, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
@@ -875,6 +876,23 @@ describe("guest chats", { timeout: 60_000 }, () => {
   });
 });
 
+/** A v1 server's code that hands the `GUESTS` stub's invitation back. */
+const v1Server = `import { DurableObject } from "cloudflare:workers";
+
+export class App extends DurableObject {
+  async invite(caller, input) {
+    if (!this.env.GUESTS) {
+      return { error: "no stub" };
+    }
+    try {
+      return { ok: await this.env.GUESTS.invite(caller, input) };
+    } catch (error) {
+      return { error: error && typeof error.code === "string" ? error.code : "app.failed" };
+    }
+  }
+}
+`;
+
 /** A function of the Guests App, as a step names it. */
 const reference = (name: string) =>
   JSON.stringify({ contractId: `guests.${name}`, kind: "action" });
@@ -896,6 +914,46 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     await endLiveRuns();
   });
 
+  it("are governed by the binding alone once the App declares them: its v1 server invites nothing", async () => {
+    const builder = await signedInApi(idp, "builder");
+    const v1Invite = async (app: string) =>
+      await callApp(
+        env,
+        appIdSchema.parse(app),
+        {
+          userId: builder.userId,
+          mode: "interactive",
+        },
+        "invite",
+        [{ name: "Anna", skill: "interview-a-stakeholder" }]
+      );
+    // Both a sealed release declaring guests and a v1 server.
+    const both = await builder.api.apps.create({ name: `Both ${unique()}` });
+    const version = await release(builder, both.id, {
+      ...guestFiles(),
+      "app/server.ts": v1Server,
+    });
+    await serverBuilt(both.id, version);
+    await grantGuests(builder, both.id);
+    // A v1 server only, as the built-in intake App still is.
+    const v1Only = await builder.api.apps.create({ name: `V1 ${unique()}` });
+    const v1Version = await release(builder, v1Only.id, {
+      "app/server.ts": v1Server,
+    });
+    await serverBuilt(v1Only.id, v1Version);
+    await grantGuests(builder, v1Only.id);
+    const fromV1 = z
+      .object({ ok: z.object({ status: z.string() }) })
+      .safeParse(await v1Invite(v1Only.id));
+    expect({
+      both: await v1Invite(both.id),
+      v1Only: fromV1.data?.ok.status,
+    }).toStrictEqual({
+      both: { error: "permission.denied" },
+      v1Only: "open",
+    });
+  });
+
   it("reach nothing until an admin binds them to the App's own permission, nothing more than was approved, and no link past the binding", async () => {
     const builder = await signedInApi(idp, "builder");
     const admin = await signedInApi(idp, "admin");
@@ -907,10 +965,20 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     await release(builder, app, guestFiles('["list", "read"]'));
     const unbound = await call(app, builder.userId, "list");
     const permission = await grantGuests(builder, app);
-    // Another App's permission serves this one nothing.
+    // Another App's permission serves this one nothing, nor one of its own
+    // to do something else.
     const { permission: theirs } = await guestApp(builder);
     const othersGrant = await failure(
       async () => await bindGuests(app, theirs)
+    );
+    const statistics = await requestGranted(idp, builder, {
+      subject: { type: "app", appId: app },
+      object: { type: "platform" },
+      actions: ["statistics"],
+      binding: "STATS",
+    });
+    const otherAction = await failure(
+      async () => await bindGuests(app, statistics)
     );
     await bindGuests(app, permission);
     const bound = await call(app, builder.userId, "list");
@@ -942,6 +1010,7 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     expect({
       unbound,
       othersGrant,
+      otherAction,
       bound,
       widened,
       opened,
@@ -951,6 +1020,7 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     }).toStrictEqual({
       unbound: { error: "resource.unavailable" },
       othersGrant: "resource.target_invalid",
+      otherAction: "resource.target_invalid",
       bound: { ok: [] },
       widened: { error: "resource.unavailable" },
       opened: 200,
@@ -963,7 +1033,7 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     });
   });
 
-  it("are never invited by a workflow run, which may still list and revoke them, audited as the run", async () => {
+  it("are never invited by a workflow run, which may still list, read back and revoke them, audited as the run", async () => {
     const builder = await signedInApi(idp, "builder");
     const inviteInput = JSON.stringify({
       json: JSON.stringify({ name: "Anna", skill: "interview-a-stakeholder" }),
@@ -976,6 +1046,7 @@ export default workflow("inviter", { params: {}, input: z.object({ chat: z.strin
   await step.do("ask", { description: "Invite", sideEffect: true, input: null, retries: { limit: 0 } }, async () => ({
     invited: await env.APP.callFunction(${reference("invite")}, ${inviteInput}),
     listed: await env.APP.callFunction(${reference("list")}, {}),
+    read: await env.APP.callFunction(${reference("read")}, { id: input.chat }),
     revoked: await env.APP.callFunction(${reference("revoke")}, { id: input.chat }),
   }))
 );
@@ -1015,26 +1086,30 @@ export default workflowTests(definition, [{ name: "runs", input: { chat: "chat" 
       audited: logged
         .filter(
           ({ action, target }) =>
-            action === "guest.revoked" && target?.id === chat.id
+            (action === "guest.read" || action === "guest.revoked") &&
+            target?.id === chat.id
         )
-        .map(({ actor, detail }) => ({ actor, onBehalfOf: detail.onBehalfOf })),
+        .map(({ action, actor, detail }) => ({
+          action,
+          actor,
+          onBehalfOf: detail.onBehalfOf,
+        })),
     }).toStrictEqual({
       status: "completed",
       invited: { error: "resource.not_allowed" },
       // Only the chat its person invited: the run made none.
       listed: [chat.id],
       revoked: "revoked",
-      audited: [
-        {
-          actor: {
-            type: "workflow",
-            appId: app,
-            workflowId: "inviter",
-            runId: run.id,
-          },
-          onBehalfOf: builder.userId,
+      audited: ["guest.read", "guest.revoked"].map((action) => ({
+        action,
+        actor: {
+          type: "workflow",
+          appId: app,
+          workflowId: "inviter",
+          runId: run.id,
         },
-      ],
+        onBehalfOf: builder.userId,
+      })),
     });
   });
 });
