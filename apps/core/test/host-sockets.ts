@@ -63,6 +63,15 @@ export const hostSockets = ({ cookie }: { cookie?: string } = {}) => {
         this.dispatchEvent(new Event("error"));
         return;
       }
+      if (this.readyState === 3) {
+        // Closed by the page while it connected: never opened, as in a
+        // browser, and core's end closed too.
+        socket.accept();
+        socket.close(1000, "Closed while connecting");
+        const code = this.#seen.code ?? 1000;
+        this.dispatchEvent(new CloseEvent("close", { code }));
+        return;
+      }
       socket.addEventListener("message", (event) => {
         const data = typeof event.data === "string" ? event.data : "";
         this.dispatchEvent(new MessageEvent("message", { data }));
