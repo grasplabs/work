@@ -125,6 +125,18 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   await expect(page.getByLabel("workflow.json")).toHaveValue(
     definition(name, "theirs")
   );
+
+  // A newer revision saved before this tab publishes is the same conflict.
+  await save(other, definition(name, "again"));
+  await expect(
+    other.getByText("Revision 4 passes the profile and can be published.")
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Publish revision 3" }).click();
+  await expect(
+    page.getByText("Someone changed this draft since you read it.", {
+      exact: false,
+    })
+  ).toBeVisible();
 });
 
 test("a builder whose workflow someone else published meanwhile is told, and publishes on the new version", async ({
@@ -137,7 +149,8 @@ test("a builder whose workflow someone else published meanwhile is told, and pub
   await page.getByLabel("Name of a new workflow").fill(name);
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("heading", { name })).toBeVisible();
-  await save(page, definition(name, "first"));
+  // The definition it starts from saves as it is.
+  await page.getByRole("button", { name: "Check and save" }).click();
   await expect(
     page.getByText("Revision 1 passes the profile and can be published.")
   ).toBeVisible();

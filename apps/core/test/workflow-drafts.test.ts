@@ -340,6 +340,76 @@ describe("a workflow's draft", () => {
     });
   });
 
+  it("reads its text and its checkpoint as one saved state, though an edit that passes lands between two reads", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const passing = definitionOf(workflow.name, { status: "first" });
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 0,
+      source: passing,
+    });
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 1,
+      source: "{ not yet",
+    });
+    // Core's database, where another builder's edit that passes lands as
+    // soon as a single read of the draft has run.
+    let landed = false;
+    const land = async (target: D1Database): Promise<void> => {
+      landed = true;
+      await target
+        .prepare(
+          "INSERT INTO workflow_resource_drafts (workflow_resource_id, revision, source, checked, problems, edited_by, edited_at) VALUES (?, 3, ?, 1, '[]', ?, ?)"
+        )
+        .bind(workflow.id, passing, ada.userId, Date.now())
+        .run();
+    };
+    const racing = new Proxy(env.DB, {
+      get: (target, property): unknown => {
+        if (property !== "prepare") {
+          const value: unknown = Reflect.get(target, property);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return (query: string) => {
+          const statement = target.prepare(query);
+          if (landed || !query.includes("workflow_resource_drafts")) {
+            return statement;
+          }
+          const ran = (bound: D1PreparedStatement): D1PreparedStatement =>
+            new Proxy(bound, {
+              get: (inner, name): unknown => {
+                const value: unknown = Reflect.get(inner, name);
+                if (typeof value !== "function") {
+                  return value;
+                }
+                if (name === "bind") {
+                  return (...values: unknown[]) => ran(inner.bind(...values));
+                }
+                if (["all", "first", "raw", "run"].includes(String(name))) {
+                  return async (...args: unknown[]) => {
+                    const result: unknown = await Reflect.apply(
+                      value,
+                      inner,
+                      args
+                    );
+                    await land(target);
+                    return result;
+                  };
+                }
+                return value.bind(inner);
+              },
+            });
+          return ran(statement);
+        };
+      },
+    });
+    const read = await workflowDraft({ ...env, DB: racing }, ada, workflow.id);
+    // Whichever state it read, its checkpoint is never newer than its text.
+    expect(
+      read.checkpoint === null || read.checkpoint.revision <= read.revision
+    ).toBeTruthy();
+  });
+
   it("finds a contract too large for a version, so a draft that passes publishes", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);

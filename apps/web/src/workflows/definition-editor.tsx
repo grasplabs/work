@@ -156,7 +156,13 @@ export const DefinitionEditor = ({
       setOutcome({ kind: "published", version: version.version });
       onPublished(version);
     } catch (error) {
-      setOutcome({ kind: "failed", reason: failureText(error) });
+      // Someone saved a newer revision first: the draft conflicts, as a
+      // save of the revision read would, and the person chooses.
+      setOutcome(
+        workflowResourceErrors.codeOf(error) === "workflow.draft_unchecked"
+          ? { kind: "conflict" }
+          : { kind: "failed", reason: failureText(error) }
+      );
       // Built on a version no longer current: the page learns the current
       // one, keeping the person's text, so publishing again builds on it.
       if (
@@ -188,7 +194,9 @@ export const DefinitionEditor = ({
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Button
-          disabled={busy || !edited}
+          // The definition it starts from is saved as it is, too, as the
+          // first revision, to check and publish.
+          disabled={busy || (!edited && draft.revision > 0)}
           onClick={() => {
             void save();
           }}

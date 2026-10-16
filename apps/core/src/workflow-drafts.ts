@@ -117,26 +117,29 @@ const draftRows = async (
   id: string
 ): Promise<{ latest?: DraftRow; checkpoint?: DraftRow }> => {
   const db = drizzle(env.DB);
-  const latest = await db
-    .select()
-    .from(workflowResourceDrafts)
-    .where(eq(workflowResourceDrafts.workflowResourceId, id))
-    .orderBy(desc(workflowResourceDrafts.revision))
-    .get();
-  const checkpoint =
-    latest?.checked === true
-      ? latest
-      : await db
-          .select()
-          .from(workflowResourceDrafts)
-          .where(
-            and(
-              eq(workflowResourceDrafts.workflowResourceId, id),
-              eq(workflowResourceDrafts.checked, true)
-            )
-          )
-          .orderBy(desc(workflowResourceDrafts.revision))
-          .get();
+  // Both in one batch, so they describe one saved state: never one
+  // revision's text beside a later revision's checkpoint.
+  const [latestRows, checkpointRows] = await db.batch([
+    db
+      .select()
+      .from(workflowResourceDrafts)
+      .where(eq(workflowResourceDrafts.workflowResourceId, id))
+      .orderBy(desc(workflowResourceDrafts.revision))
+      .limit(1),
+    db
+      .select()
+      .from(workflowResourceDrafts)
+      .where(
+        and(
+          eq(workflowResourceDrafts.workflowResourceId, id),
+          eq(workflowResourceDrafts.checked, true)
+        )
+      )
+      .orderBy(desc(workflowResourceDrafts.revision))
+      .limit(1),
+  ]);
+  const [latest] = latestRows;
+  const [checkpoint] = checkpointRows;
   return {
     ...(latest === undefined ? {} : { latest }),
     ...(checkpoint === undefined ? {} : { checkpoint }),
