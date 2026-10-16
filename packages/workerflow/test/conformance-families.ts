@@ -168,13 +168,6 @@ export const discrepancies = {
       "each attempt fails with DataCloneError and is retried, as an ordinary step error",
     resolution: toOracle,
   },
-  "byob-stream": {
-    family: "streams",
-    verdict: "failed",
-    workerflow: "a step's stream result refuses a BYOB reader",
-    reference: "a byte stream: a BYOB reader reads it",
-    resolution: "GRA-647 returns stream results as byte streams",
-  },
   "invalid-stream-error": {
     family: "streams",
     verdict: "unresolved",
