@@ -4,6 +4,7 @@ import {
 } from "@grasp-os/shared/connect";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { everyPage, loadEveryPage } from "./outcome-pages.ts";
 
@@ -56,9 +57,11 @@ describe("every page of calls of unknown outcome", () => {
     // SAFETY: the session is only handed on, never used here.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const session = {} as Session;
-    const core = {
-      withSession: async <T>(read: (session: Session) => Promise<T>) =>
-        await read(session),
+    // Typed as the connection's, not as a generic literal of its own:
+    // checking a generic `withSession` over `Session` against the real one
+    // costs the type-aware linter minutes and gigabytes.
+    const core: Pick<CoreConnection, "withSession"> = {
+      withSession: async (read) => await read(session),
     };
     let reads = 0;
     const loaded = await loadEveryPage(core, async (_session, before) => {
