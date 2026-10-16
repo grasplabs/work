@@ -3,6 +3,8 @@ import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
+  accessEndedCloseCode,
+  connectAgainCloseCode,
   portableLivePath,
   tokenExpiredCloseCode,
 } from "@grasp-os/shared/portable";
@@ -25,7 +27,7 @@ import { errorResponse } from "./errors.ts";
 import { isStub } from "./page-callbacks.ts";
 import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
 import { CoreRpcTarget, coreRpcAccounting } from "./rpc-target.ts";
-import { serveRpc, sessionEndedCloseCode } from "./rpc.ts";
+import { serveRpc } from "./rpc.ts";
 import type { RunSubscription } from "./run-subscription.ts";
 import { deliveryOpen, requireDelivery } from "./screen-trust.ts";
 import { admitted, stillHasRole } from "./screens-rpc.ts";
@@ -220,12 +222,14 @@ export class PortableQueriesRpc
     }
     if (!checked.ok && checked.reason === "keys_pending") {
       // Not a refusal of the person: the host connects again.
-      this.#socket.close(sessionEndedCloseCode, "Token unreadable");
+      this.#socket.close(connectAgainCloseCode, "Token unreadable");
       throw authErrors.create("auth.token_unavailable");
     }
-    // After the refusal is on its way to the host.
+    // After the refusal is on its way to the host, if a read asked: the
+    // close code tells a host whose connection was only checked on the
+    // timer, with nothing to push, that its access ended.
     setTimeout(() => {
-      this.#socket.close(sessionEndedCloseCode, "Session ended");
+      this.#socket.close(accessEndedCloseCode, "Session ended");
     }, 0);
     throw authErrors.create("auth.unauthenticated");
   }
@@ -287,7 +291,7 @@ export class PortableQueriesRpc
     }
     if (checked.person.userId !== this.#userId) {
       setTimeout(() => {
-        this.#socket.close(sessionEndedCloseCode, "Principal changed");
+        this.#socket.close(accessEndedCloseCode, "Principal changed");
       }, 0);
       throw authErrors.create("auth.principal_changed");
     }
@@ -352,7 +356,7 @@ export class PortableLiveRpc extends CoreRpcTarget implements PortableLiveApi {
     this.#server = server;
     this.#socket = socketOf(server);
     this.#deadline = setTimeout(() => {
-      this.#socket.close(sessionEndedCloseCode, "Not authenticated");
+      this.#socket.close(connectAgainCloseCode, "Not authenticated in time");
     }, connectWithinMs);
     server.addEventListener("close", () => {
       clearTimeout(this.#deadline);
@@ -384,9 +388,15 @@ export class PortableLiveRpc extends CoreRpcTarget implements PortableLiveApi {
       );
     } catch (error) {
       // After the refusal is on its way to the host: a new connection
-      // with a new token is the way on.
+      // with a new token is the way on, or the same once it is readable.
+      const unreadable =
+        error instanceof Error &&
+        Reflect.get(error, "code") === "auth.token_unavailable";
       setTimeout(() => {
-        this.#socket.close(sessionEndedCloseCode, "Not authenticated");
+        this.#socket.close(
+          unreadable ? connectAgainCloseCode : accessEndedCloseCode,
+          "Not authenticated"
+        );
       }, 0);
       throw error;
     }

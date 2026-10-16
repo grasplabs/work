@@ -35,6 +35,21 @@ export const portableLivePath = "/api/portable/app-live";
 export const tokenExpiredCloseCode = 4408;
 
 /**
+ * The close code of a live connection whose access ended: its token was
+ * refused, or its session ended or was revoked while nothing was pushed.
+ * The host clears what it shows, as for an `auth.unauthenticated`
+ * refusal (the same code core's `/rpc` closes with when a session ends).
+ */
+export const accessEndedCloseCode = 4401;
+
+/**
+ * The close code of a live connection core couldn't authenticate yet
+ * (its token unreadable for now, or `connect` slower than it waits): no
+ * refusal of the person, so the host connects again.
+ */
+export const connectAgainCloseCode = 4503;
+
+/**
  * What a portable host's live connection reaches before it authenticates:
  * `connect`, once, with the person's App token for the connection's App.
  * Refused `auth.unauthenticated` for anything else, and the connection

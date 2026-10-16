@@ -3,7 +3,9 @@ import type { GraspError } from "@grasp-os/sdk/client";
 import { clientInternals } from "@grasp-os/sdk/host";
 import { toBase64Url } from "@grasp-os/shared/encoding";
 import {
+  accessEndedCloseCode,
   appTokenPath,
+  connectAgainCloseCode,
   portableLivePath,
   tokenExpiredCloseCode,
 } from "@grasp-os/shared/portable";
@@ -226,6 +228,8 @@ interface HostSocket {
 const hostBrowser = ({ cookie }: { cookie?: string } = {}) => {
   const calls: string[] = [];
   const sockets: HostSocket[] = [];
+  /** Whether new sockets fail to connect, as with the network down. */
+  const network = { down: false };
   const outside = globalThis.fetch;
   vi.stubGlobal(
     "fetch",
@@ -260,6 +264,12 @@ const hostBrowser = ({ cookie }: { cookie?: string } = {}) => {
     }
 
     async #open(url: URL): Promise<void> {
+      if (network.down) {
+        await Promise.resolve();
+        this.readyState = 3;
+        this.dispatchEvent(new Event("error"));
+        return;
+      }
       const response = await routed(url.pathname, {
         headers: {
           Upgrade: "websocket",
@@ -302,7 +312,7 @@ const hostBrowser = ({ cookie }: { cookie?: string } = {}) => {
     }
   }
   vi.stubGlobal("WebSocket", BrowserSocket);
-  return { calls, sockets };
+  return { calls, sockets, network };
 };
 
 /** A client a portable host makes, its token whatever `token()` says now. */
@@ -384,10 +394,13 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       anotherApps: await refused(othersToken),
       expired,
     }).toStrictEqual({
-      garbage: { code: "auth.unauthenticated", closed: 4401 },
-      forged: { code: "auth.unauthenticated", closed: 4401 },
-      anotherApps: { code: "auth.unauthenticated", closed: 4401 },
-      expired: { code: "auth.unauthenticated", closed: 4401 },
+      garbage: { code: "auth.unauthenticated", closed: accessEndedCloseCode },
+      forged: { code: "auth.unauthenticated", closed: accessEndedCloseCode },
+      anotherApps: {
+        code: "auth.unauthenticated",
+        closed: accessEndedCloseCode,
+      },
+      expired: { code: "auth.unauthenticated", closed: accessEndedCloseCode },
     });
 
     // Before `connect`, its main object has nothing else to call.
@@ -419,7 +432,7 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
     const { closed } = await openLive(notes.app);
     await vi.advanceTimersByTimeAsync(10_001);
     vi.useRealTimers();
-    await expect(closedWithin(closed)).resolves.toBe(4401);
+    await expect(closedWithin(closed)).resolves.toBe(connectAgainCloseCode);
   });
 
   it("ends every subscription with the person's role, and with the session its token came from", async () => {
@@ -475,6 +488,37 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       builder: ["auth.unauthenticated"],
       theirs: ["app.not_found"],
     });
+  });
+
+  it("clears what a host shows once its session ends with nothing written, though it can't connect again", async () => {
+    const notes = await notesApp();
+    const browser = hostBrowser();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const client = portableClient(() => token);
+    await client.mutation(notes.api.create, { title: "Mine" });
+    const list = reading(client, notes.api.list, { pagination: {} });
+    await eventually(() => {
+      expect(list.now()).toStrictEqual(["Mine"]);
+    });
+
+    // Nothing is written after: only core's own check of the token on
+    // its timer finds the session ended, and no new connection could
+    // ask again.
+    browser.network.down = true;
+    await callAuth("/sign-out", notes.builder.session, {});
+    await eventually(() => {
+      expect(list.now()).toBe("auth.unauthenticated");
+    });
+    expect({
+      shown: fromRefusal(list.seen, "auth.unauthenticated"),
+      sockets: browser.sockets.length,
+      closed: browser.sockets[0]?.code,
+    }).toStrictEqual({
+      shown: ["auth.unauthenticated"],
+      sockets: 1,
+      closed: accessEndedCloseCode,
+    });
+    list.stop();
   });
 
   it("closes a connection whose token expired unrenewed, pushing nothing more, and keeps one renewed", async () => {
@@ -549,7 +593,7 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       anotherApp: "auth.unauthenticated",
       someoneElse: "auth.principal_changed",
-      closed: 4401,
+      closed: accessEndedCloseCode,
     });
   });
 

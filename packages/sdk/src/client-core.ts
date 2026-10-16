@@ -1391,6 +1391,11 @@ export class GraspClient {
         forget: () => {
           portable.forget();
         },
+        ended: (principal) => {
+          if (principal === this.#principal) {
+            this.#fence(clientError("auth.unauthenticated"));
+          }
+        },
       });
     } else {
       throw new TypeError("A client takes { url, getToken }.");

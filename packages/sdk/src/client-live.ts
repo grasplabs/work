@@ -1,4 +1,5 @@
 import {
+  accessEndedCloseCode,
   portableLivePath,
   tokenExpiredCloseCode,
 } from "@grasp-os/shared/portable";
@@ -23,6 +24,11 @@ import type { PortableToken } from "./client-portable.ts";
 //   connection whose token expired unrenewed with `tokenExpiredCloseCode`;
 //   the client then forgets the token, so the next connection asks the
 //   host for a fresh one, and every query follows again from a fresh read.
+// - Access ending while nothing is pushed: core checks the token on a
+//   timer too, and closes a connection whose access ended with
+//   `accessEndedCloseCode`. The client clears what it shows for that
+//   person then, as for a pushed refusal, without waiting for a
+//   reconnection to be refused.
 // - One person's connection used for another: a connection is opened for
 //   the person its token names and used only while the token the client
 //   would send now names them too. A renewal or a new follow that finds
@@ -49,6 +55,8 @@ export interface LiveTokens {
   readonly token: () => Promise<PortableToken>;
   /** Core refused the token as expired: the next is asked of the host. */
   readonly forget: () => void;
+  /** Core closed `principal`'s connection: their access ended. */
+  readonly ended: (principal: string) => void;
 }
 
 /** One App's live connection. */
@@ -129,7 +137,12 @@ export class PortableLive {
       if (event.code === tokenExpiredCloseCode) {
         this.#tokens.forget();
       }
+      // Not when the client closed it itself (someone else's, a fence's).
+      const closedHere = link.closed;
       this.#gone(link);
+      if (!closedHere && event.code === accessEndedCloseCode) {
+        this.#tokens.ended(link.principal);
+      }
     });
     socket.addEventListener("error", () => {
       this.#gone(link);

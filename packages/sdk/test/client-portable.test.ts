@@ -174,6 +174,9 @@ class LiveServer extends RpcTarget {
   }
 }
 
+/** The live connections the client opened since `network` was set up. */
+const liveSockets: { close: (code: number, reason: string) => void }[] = [];
+
 /**
  * A `WebSocket` whose other end is a `LiveServer`, in memory: what the
  * client sends reaches it, what it sends back arrives as messages.
@@ -194,6 +197,7 @@ const fakeWebSocket = (
 
     constructor(url: string) {
       super();
+      liveSockets.push(this);
       const transport: RpcTransport = {
         send: (message) => {
           setTimeout(() => {
@@ -248,6 +252,7 @@ const fakeWebSocket = (
  */
 const network = (answer: (seen: Seen) => Promise<unknown>) => {
   const seen: Seen[] = [];
+  liveSockets.length = 0;
   vi.stubGlobal("WebSocket", fakeWebSocket(answer, seen));
   vi.stubGlobal(
     "fetch",
@@ -851,6 +856,37 @@ describe("a portable host's client", () => {
       refused: "auth.unauthenticated",
       sentNext: `Bearer ${next}`,
     });
+    stop();
+  });
+
+  it("follows again over a new connection when core closes one to connect again, clearing nothing", async () => {
+    let reads = 0;
+    network(async () => {
+      reads += 1;
+      return await Promise.resolve({ title: `Ann's ${reads}` });
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(tokenOf("ann", expiry())),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const shown: unknown[] = [];
+    const stop = internals.subscribe(entry, () => {
+      shown.push(entry.snapshot.error?.code ?? entry.snapshot.value);
+    });
+    await until(() => entry.snapshot.value !== undefined);
+    // Core couldn't read the token yet (`connectAgainCloseCode`).
+    liveSockets[0]?.close(4503, "Token unreadable");
+    // Followed again after the client's backoff.
+    await vi.waitFor(
+      () => {
+        expect(shown).toHaveLength(2);
+      },
+      { timeout: 10_000, interval: 20 }
+    );
+    expect(liveSockets).toHaveLength(2);
+    expect(shown).toStrictEqual([{ title: "Ann's 1" }, { title: "Ann's 2" }]);
     stop();
   });
 
