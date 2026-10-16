@@ -307,6 +307,11 @@ export class ClientFiles {
     try {
       await required(this.#transport).delete(alias, id, idempotencyKey, signal);
     } catch (error) {
+      // Stopped waiting, though a deletion already sent still goes
+      // through: its views read it again too, and show what core says.
+      if (signal?.aborted === true) {
+        this.#deleted(`${alias}/${id}`);
+      }
       throw this.#failure(error, startedUnder);
     }
     // Shown nowhere as it was: each view of it reads it again.

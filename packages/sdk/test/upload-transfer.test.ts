@@ -253,7 +253,7 @@ describe("an upload's transfer", () => {
   });
 
   it("tells the views of a file once it is deleted, and only once core recorded it", async () => {
-    const outcomes = ["refused", "deleted"];
+    const outcomes = ["refused", "deleted", "stopped"];
     const client = new GraspClient({
       call: async () => await Promise.reject(new Error("No calls here")),
       watch: async () => await Promise.reject(new Error("No follows here")),
@@ -263,13 +263,22 @@ describe("an upload's transfer", () => {
         download: async () => {
           await Promise.reject(new Error("Not here"));
         },
-        delete: async () => {
-          if (outcomes.shift() === "refused") {
+        delete: async (_resource, _file, _key, signal) => {
+          const outcome = outcomes.shift();
+          if (outcome === "refused") {
             await Promise.reject(
               Object.assign(new Error("file.referenced"), {
                 code: "file.referenced",
               })
             );
+          }
+          if (outcome === "stopped") {
+            // Sent; the caller stops waiting before core's answer.
+            const { promise, reject } = Promise.withResolvers<never>();
+            signal?.addEventListener("abort", () => {
+              reject(signal.reason);
+            });
+            await promise;
           }
         },
       },
@@ -283,11 +292,22 @@ describe("an upload's transfer", () => {
     const refused = await codeOf(client.files.delete(files, { id }));
     const toldAfterRefusal = [...told];
     await client.files.delete(files, { id });
+    // A deletion sent whose caller stopped waiting may still go through:
+    // its views read it again.
+    const other = crypto.randomUUID();
+    const stopping = new AbortController();
+    const stopped = client.files.delete(
+      files,
+      { id: other },
+      { signal: stopping.signal }
+    );
+    stopping.abort();
+    await Promise.allSettled([stopped]);
     stop();
     expect({ refused, toldAfterRefusal, told }).toStrictEqual({
       refused: "file.referenced",
       toldAfterRefusal: [],
-      told: [`attachments/${id}`],
+      told: [`attachments/${id}`, `attachments/${other}`],
     });
   });
 });
