@@ -765,7 +765,17 @@ const resultOf = async (
   if (removed) {
     return { error: { code: row.failureCode, message: removedText(env) } };
   }
-  const engine = await engineResultOf(env, row.id);
+  let engine: Pick<WorkflowResourceRun, "output" | "error">;
+  try {
+    engine = await engineResultOf(env, row.id);
+  } catch (error) {
+    // The engine unreachable: a failure its row keeps the code of is read
+    // from the row, a start core abandoned the same as any.
+    if (row.status === "failed" && row.failureCode !== null) {
+      return { error: keptFailureOf(row.failureCode) };
+    }
+    throw error;
+  }
   if (row.status === "completed") {
     return engine.output === undefined ? {} : { output: engine.output };
   }

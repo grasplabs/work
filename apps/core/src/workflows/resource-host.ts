@@ -176,6 +176,16 @@ const stepConfig = {
   timeout: maxAttemptTimeoutMs,
 };
 
+/**
+ * A time, in ms, as the expression profile gives `$workflow.startedAt` and
+ * `$task.startedAt`: the spec's date-time descriptor, its ISO 8601 text
+ * and its epoch in seconds and milliseconds.
+ */
+const timestampOf = (ms: number): Json => ({
+  iso8601: new Date(ms).toISOString(),
+  epoch: { seconds: Math.floor(ms / 1000), milliseconds: ms },
+});
+
 /** What one step's result, or a run's output, may take as JSON. */
 export const maxResultBytes = platformLimits.stepPayloadBytes;
 
@@ -557,12 +567,12 @@ export class ResourceRunHost
               reference: attempt.task.pointer,
               input: data.input,
               output: null,
-              startedAt: attempt.startedAt,
+              startedAt: timestampOf(attempt.startedAt),
             },
             workflow: {
               id: this.#run.runId,
               input: this.#run.input,
-              startedAt: this.#run.createdAt,
+              startedAt: timestampOf(this.#run.createdAt),
             },
           },
         },

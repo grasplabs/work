@@ -222,6 +222,26 @@ const ended = async (
 
 const statusSchema = z.object({ status: z.string() });
 
+/** Run `id`'s row's `column`, as the repair and the trigger see it. */
+const runColumn = async (
+  id: string | null,
+  column:
+    | "status"
+    | "start_attempts"
+    | "created_at"
+    | "ended_at"
+    | "manifest_hash"
+    | "next_start_at"
+    | "failure_code"
+): Promise<unknown> => {
+  const row = await env.DB.prepare(
+    `SELECT ${column} AS value FROM workflow_resource_runs WHERE id = ?`
+  )
+    .bind(id)
+    .first<{ value: unknown }>();
+  return row?.value;
+};
+
 /** Where the engine has run `id` now; none before it has the run. */
 const engineStatus = async (id: string | null) => {
   const live = await runEngine(env).status(id ?? "");
@@ -279,6 +299,42 @@ describe("runs of JSON workflows", () => {
     });
   });
 
+  it("gives expressions when the run and its task started as the profile's date-time descriptors", async () => {
+    const by = await builder();
+    const workflow = await published(by, (name) =>
+      definitionOf(
+        name,
+        [
+          {
+            finish: {
+              set: {
+                status:
+                  "${ $workflow.startedAt.epoch.milliseconds | tostring }",
+                note: '${ [$workflow.startedAt.epoch.seconds, ($task.startedAt.iso8601 | type), (($task.startedAt.iso8601 | .[0:19] + "Z" | fromdateiso8601) == $task.startedAt.epoch.seconds)] | tostring }',
+              },
+            },
+          },
+        ],
+        { status: { type: "string" }, note: { type: "string" } }
+      )
+    );
+    const { runId } = await start(by, workflow.id);
+    const run = await ended(by, workflow.id, runId);
+    const output = z
+      .object({ status: z.string(), note: z.string() })
+      .parse(run.output);
+    const admitted = Number(output.status);
+    expect({
+      status: run.status,
+      admitted: admitted === Number(await runColumn(runId, "created_at")),
+      note: output.note,
+    }).toStrictEqual({
+      status: "completed",
+      admitted: true,
+      note: JSON.stringify([Math.floor(admitted / 1000), "string", true]),
+    });
+  });
+
   it("runs a start's sealed build with the parameters the start froze, once per key", async () => {
     const by = await builder();
     const workflow = await published(by, (name) =>
@@ -319,7 +375,7 @@ describe("runs of JSON workflows", () => {
     const by = await builder();
     const workflow = await published(by, (name) =>
       definitionOf(name, [
-        { stamp: { set: { at: "${ $task.startedAt }" } } },
+        { stamp: { set: { at: "${ $task.startedAt.epoch.milliseconds }" } } },
         // Suspends the run: the next activation replays from the start.
         { pause: { wait: "PT1S" } },
         { finish: { set: { status: "${ .at | tostring }" } } },
@@ -506,26 +562,6 @@ const waitingWorkflow = async (by: Acting) =>
       { finish: { set: { status: "done" } } },
     ])
   );
-
-/** Run `id`'s row's `column`, as the repair and the trigger see it. */
-const runColumn = async (
-  id: string | null,
-  column:
-    | "status"
-    | "start_attempts"
-    | "created_at"
-    | "ended_at"
-    | "manifest_hash"
-    | "next_start_at"
-    | "failure_code"
-): Promise<unknown> => {
-  const row = await env.DB.prepare(
-    `SELECT ${column} AS value FROM workflow_resource_runs WHERE id = ?`
-  )
-    .bind(id)
-    .first<{ value: unknown }>();
-  return row?.value;
-};
 
 /** Runs the start repair at `when` while every engine lookup fails. */
 const repairWhileLookupsFail = async (when: number): Promise<void> => {
@@ -1267,14 +1303,21 @@ describe("whose word a run's row takes, and whose clock", () => {
     };
     // Six hours on, the engine still can't say: failed, never left starting.
     await repairWhileLookupsFail(createdAt + 7 * 3_600_000);
+    // Its person reads why while the engine still can't answer.
+    const read = await whileEngineRefuses(
+      (method) => method === "status",
+      async () => await resourceRunFor(env, by, workflow.id, id)
+    );
     expect({
       meanwhile,
       status: await runColumn(id, "status"),
       code: await runColumn(id, "failure_code"),
+      read: { status: read.status, code: read.error?.code },
     }).toStrictEqual({
       meanwhile: { attempts: 0, nextAt: true, status: "starting" },
       status: "failed",
       code: "workflow.start_unconfirmed",
+      read: { status: "failed", code: "workflow.start_unconfirmed" },
     });
   });
 
