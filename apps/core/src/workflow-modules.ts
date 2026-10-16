@@ -9,6 +9,7 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { z } from "zod";
 
@@ -40,20 +41,26 @@ import { buildComputeModules, withinBuildWait } from "./screens.ts";
 //   no Workers runtime, no other SDK entry and no package (approved
 //   packages for calculations are GRA-665), type-checked against that
 //   SDK.
-// - The clock, randomness and timers. The isolate takes them away before
-//   any module of the workflow's evaluates (the SDK's compute-lockdown.ts),
+// - The clock, randomness, timers and generated code. The isolate takes
+//   them away before any module of the workflow's evaluates (the SDK's
+//   compute-lockdown.ts), on the global object and every prototype of it,
 //   for good, and refuses to run if it couldn't; and a handler answers
-//   synchronously, so it hides no effect behind a wait. Defense in depth:
-//   the boundary is the empty env, and the step records the answer, so a
-//   replay never calls the module again.
-// - A forged contract. The contracts are read once, by an inspection in
-//   the same sandbox, and only `compute()`'s own values count (a branded
-//   registry the module can't fill). What the inspection answers is
-//   checked here: bounded, each key one of the published modules' exports,
-//   each descriptor one the SDK reads. The contracts are sealed with the
-//   version and covered by its executable identity; a run checks its call
-//   against the sealed contract on both sides, never against anything the
-//   module says then.
+//   synchronously, so it hides no effect behind a wait. Taking `eval` and
+//   `Function` away also keeps generated code from importing modules the
+//   compiler never let the module name. Defense in depth: the boundary is
+//   the empty env, and the step records the answer, so a replay never
+//   calls the module again.
+// - A contract that isn't what the module declares. The contracts are
+//   read once, by an inspection in the same sandbox; `compute()`'s brand
+//   keeps a plain object from counting by mistake, but it is a correctness
+//   aid, not a boundary (module code runs in the isolate that holds it).
+//   Nothing rests on it: a contract is whatever its author declares, so a
+//   forged one grants nothing an honest one couldn't. What the inspection
+//   answers is checked here: bounded, each key naming a published module
+//   and an export name, each descriptor one the SDK reads. The contracts
+//   are sealed with the version and covered by its executable identity; a
+//   run checks its call against the sealed contract on both sides, never
+//   against anything the module says then.
 // - Answers past their bounds or contract. The input must be what the
 //   contract takes exactly, within a step's payload; the answer is read
 //   only within that bound, and must be what the output contract takes
@@ -91,6 +98,37 @@ const maxMessage = 500;
 const inspectionMaxLength = 1024 * 1024;
 /** The most calculations one version's modules export. */
 const maxContracts = 256;
+
+/**
+ * How deep the JSON text `text` nests, its leaf included: counted in one
+ * pass over its brackets outside strings, so nothing recurses however
+ * deep it is. Text that isn't JSON counts as it reads; the parse refuses
+ * it after.
+ */
+export const jsonTextDepth = (text: string): number => {
+  let depth = 0;
+  let deepest = 0;
+  let inString = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (char === "\\") {
+        index += 1;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === "[" || char === "{") {
+      depth += 1;
+      deepest = Math.max(deepest, depth);
+    } else if (char === "]" || char === "}") {
+      depth -= 1;
+    }
+  }
+  // A leaf below the deepest container, or a bare one at the top.
+  return deepest + 1;
+};
 
 const invalid = (
   diagnostics: readonly {
@@ -176,6 +214,10 @@ const contractsOf = (
   text: string,
   sources: Readonly<Record<string, string>>
 ): Map<string, ComputeContract> => {
+  // A manifest's descriptors nest one level below its contracts' two.
+  if (jsonTextDepth(text) > valueDepth + 2) {
+    throw invalid([{ message: "The modules' contracts nest too deep." }]);
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -401,13 +443,23 @@ export const runCompute = async (
   if (!read.data.ok) {
     throw workflowResourceErrors.create("workflow.compute_failed");
   }
-  if (new TextEncoder().encode(read.data.output).byteLength > maxBytes) {
+  const { output } = read.data;
+  // Its length first: no text longer than the bound in UTF-16 code units
+  // is within it in bytes.
+  if (
+    output.length > maxBytes ||
+    new TextEncoder().encode(output).byteLength > maxBytes
+  ) {
+    throw workflowResourceErrors.create("workflow.call_invalid");
+  }
+  // Deeper than a value may nest, it is refused before anything walks it.
+  if (jsonTextDepth(output) > valueDepth) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
   // Module code may have changed what wrote it: text that isn't JSON is
   // the calculation's failure.
   try {
-    return JSON.parse(read.data.output);
+    return JSON.parse(output);
   } catch {
     throw workflowResourceErrors.create("workflow.compute_failed");
   }

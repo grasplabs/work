@@ -24,6 +24,8 @@ export type ComputeModules = Readonly<Record<string, unknown>>;
  * workflow's modules could replace it.
  */
 const { stringify } = JSON;
+/** The `Object` functions the runner uses, taken as `stringify` is. */
+const { entries, getOwnPropertyDescriptor, hasOwn, keys } = Object;
 
 /** The most of a handler's failure an answer keeps. */
 const failureMaxLength = 500;
@@ -44,7 +46,7 @@ const exportOf = (namespace: unknown, key: string): unknown => {
   if (typeof namespace !== "object" || namespace === null) {
     return undefined;
   }
-  const property = Object.getOwnPropertyDescriptor(namespace, key);
+  const property = getOwnPropertyDescriptor(namespace, key);
   return property !== undefined && "value" in property
     ? property.value
     : undefined;
@@ -59,11 +61,11 @@ const exportOf = (namespace: unknown, key: string): unknown => {
 export const computeManifestOf = (modules: ComputeModules): string => {
   requireLockedDown();
   const manifest: Record<string, unknown> = {};
-  for (const [path, namespace] of Object.entries(modules)) {
+  for (const [path, namespace] of entries(modules)) {
     if (typeof namespace !== "object" || namespace === null) {
       continue;
     }
-    for (const name of Object.keys(namespace).toSorted()) {
+    for (const name of keys(namespace)) {
       const value = exportOf(namespace, name);
       if (!exportPattern.test(name) || computeHandler(value) === undefined) {
         continue;
@@ -107,7 +109,7 @@ export const runCompute = (
   request: ComputeRequest
 ): ComputeAnswer => {
   requireLockedDown();
-  const handler = Object.hasOwn(modules, request.module)
+  const handler = hasOwn(modules, request.module)
     ? computeHandler(exportOf(modules[request.module], request.export))
     : undefined;
   if (handler === undefined) {

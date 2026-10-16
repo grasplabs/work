@@ -4,11 +4,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import type { Acting } from "../../src/auth/identity.ts";
+import { loadWorkflowBuild } from "../../src/workflow-builds.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../../src/workflow-resources.ts";
 import { startWorkflow } from "../../src/workflow-starts.ts";
+import { callCompute } from "../../src/workflows/resource-compute.ts";
 import { resourceRunFor } from "../../src/workflows/resource-runs.ts";
 import { unique } from "../sign-in.ts";
 
@@ -57,39 +59,43 @@ export const count = compute({
 });
 `;
 
+/** A definition of `name` calling `count` on [1, 2, 3], answering it as its status. */
+const definitionOf = (name: string): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: {
+          profile: "grasp-open-workflow/1",
+          params: {},
+          bindings: {
+            count: { kind: "compute", contract: "local:code/count.ts#count" },
+          },
+        },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: [
+      {
+        add: {
+          call: "grasp.compute",
+          with: { binding: "count", arguments: "${ [1, 2, 3] }" },
+        },
+      },
+      { answer: { set: { status: "${ tostring }" } } },
+    ],
+  });
+
 /** Publishes and runs a workflow calling `count` of `module`: how it ended. */
 const ran = async (by: Acting, module: string) => {
   const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
   await publishWorkflowVersion(env, by, workflow.id, {
-    definition: JSON.stringify({
-      document: {
-        dsl: "1.0.3",
-        namespace: workflowNamespace,
-        name: workflow.name,
-        version: "1.0.0",
-        title: workflow.name,
-        metadata: {
-          grasp: {
-            profile: "grasp-open-workflow/1",
-            params: {},
-            bindings: {
-              count: { kind: "compute", contract: "local:code/count.ts#count" },
-            },
-          },
-        },
-      },
-      input: { schema: objectSchema({ who: { type: "string" } }) },
-      output: { schema: objectSchema({ status: { type: "string" } }) },
-      do: [
-        {
-          add: {
-            call: "grasp.compute",
-            with: { binding: "count", arguments: "${ [1, 2, 3] }" },
-          },
-        },
-        { answer: { set: { status: "${ tostring }" } } },
-      ],
-    }),
+    definition: definitionOf(workflow.name),
     basedOn: null,
     modules: { "code/count.ts": module },
   });
@@ -135,4 +141,37 @@ describe("a JSON workflow's compute module on-prem", () => {
       code: "workflow.compute_failed",
     });
   }, 120_000);
+
+  it("gives a calculation up at its attempt's deadline, long before the sandbox would", async () => {
+    const by = await builder();
+    const workflow = await createWorkflowResource(env, by, `c-${unique()}`);
+    await publishWorkflowVersion(env, by, workflow.id, {
+      definition: definitionOf(workflow.name),
+      basedOn: null,
+      modules: { "code/count.ts": moduleRunning("for (;;) { items.length; }") },
+    });
+    const build = await loadWorkflowBuild(env, workflow.id, 1);
+    const started = Date.now();
+    const code = await callCompute(
+      env,
+      build.compute,
+      build.sdk,
+      {
+        name: "grasp.compute",
+        binding: "count",
+        module: "code/count.ts",
+        export: "count",
+        arguments: { literal: [1] },
+      },
+      [1],
+      Date.now() + 500
+    ).then(
+      () => "ok",
+      (error: unknown) =>
+        error instanceof Error && "code" in error ? error.code : String(error)
+    );
+    expect(code).toBe("workflow.compute_failed");
+    // The supervisor's deadline is 10 s: the host gave up first.
+    expect(Date.now() - started).toBeLessThan(5000);
+  }, 60_000);
 });

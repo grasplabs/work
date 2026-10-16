@@ -1,3 +1,4 @@
+import { workflowSdkModules } from "@grasp-os/compiler";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type {
@@ -9,6 +10,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
+import { runCompute } from "../src/workflow-modules.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -257,6 +259,13 @@ describe("a JSON workflow's compute modules", () => {
       "return (Date.prototype.constructor as DateConstructor).now();",
       'return typeof fetch === "function" ? 1 : Number("x");',
       'return typeof setTimeout === "function" ? 1 : Number("x");',
+      // workerd keeps its platform globals on the global's prototype.
+      'return typeof Reflect.get(Object.getPrototypeOf(globalThis), "setTimeout") === "function" ? 1 : Number("x");',
+      'return typeof Reflect.get(Object.getPrototypeOf(globalThis), "fetch") === "function" ? 1 : Number("x");',
+      'return typeof Reflect.get(Object.getPrototypeOf(globalThis), "WebSocket") === "function" ? 1 : Number("x");',
+      // Generated code would import what the compiler never let it name.
+      'return Number(Function("return 1")());',
+      'return Number(Reflect.construct(Object.getPrototypeOf(async () => 0).constructor, ["return 1"]));',
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const { workflow } = await published(by, {
@@ -326,8 +335,11 @@ describe("a JSON workflow's compute modules", () => {
   handler: (amounts: number[]) => amounts.length,
 };
 `;
+    // A module that patches the brand's registry before it exports one.
+    const patched = `WeakMap.prototype.get = (() => (amounts: number[]) => amounts.length) as never;\n${lookalike}`;
     for (const [modules, contract] of [
       [{ "code/total.ts": lookalike }, "local:code/total.ts#total"],
+      [{ "code/total.ts": patched }, "local:code/total.ts#total"],
       [totalModules, "local:code/sum.ts#sum"],
       [totalModules, "local:code/total.ts#missing"],
       [totalModules, "local:code/other.ts#total"],
@@ -400,13 +412,112 @@ describe("a JSON workflow's compute modules", () => {
     });
   });
 
+  it("refuses code generated as a module loads", async () => {
+    const by = await builder();
+    for (const generated of [
+      'Function("return 1")()',
+      'eval("1")',
+      '(() => 0).constructor("return 1")()',
+      'Object.getPrototypeOf(function* () {}).constructor("yield 1")',
+    ]) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const refused = await publicationRefusal(by, {
+        "code/total.ts": `const made: unknown = ${generated};\n${moduleAnswering("return amounts.length + (made === undefined ? 0 : 0);")}`,
+      });
+      expect(refused.code).toBe("workflow.modules_invalid");
+      expect(JSON.stringify(refused.details)).toContain(
+        "The modules failed as they loaded."
+      );
+    }
+  });
+
+  it("refuses an answer past a step's payload, or nested past a value's depth", async () => {
+    const by = await builder();
+    for (const [body, output] of [
+      ['return "x".repeat(1_100_000);', "v.string()"],
+      [
+        "let deep: unknown[] = [];\n    for (let level = 0; level < 100_000; level += 1) {\n      deep = [deep];\n    }\n    return deep as never;",
+        "v.array(v.number())",
+      ],
+    ] as const) {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      const { workflow } = await published(by, {
+        "code/total.ts": moduleAnswering(body, output),
+      });
+      // oxlint-disable-next-line no-await-in-loop -- one at a time
+      await expect(ran(by, workflow.id)).resolves.toStrictEqual({
+        status: "failed",
+        code: "workflow.call_invalid",
+      });
+    }
+  });
+
+  it("refuses modules exporting more calculations, or larger contracts, than an inspection answers", async () => {
+    const by = await builder();
+    const many = `import { compute, v } from "@grasp-os/sdk/compute";\n${Array.from(
+      { length: 257 },
+      (_, index) =>
+        `export const c${index} = compute({ input: v.number(), output: v.number(), handler: (n) => n });`
+    ).join("\n")}\n`;
+    const tooMany = await publicationRefusal(by, { "code/total.ts": many });
+    expect(tooMany.code).toBe("workflow.modules_invalid");
+    expect(JSON.stringify(tooMany.details)).toContain("more than 256");
+    // Each contract within the SDK's bounds, past 1 MiB together.
+    const fields = Array.from(
+      { length: 5000 },
+      (_, index) => `f${index}: v.string()`
+    ).join(", ");
+    const large = `import { compute, v } from "@grasp-os/sdk/compute";
+const big = v.object({ ${fields} });
+export const a = compute({ input: big, output: big, handler: (value) => value });
+export const b = compute({ input: big, output: big, handler: (value) => value });
+`;
+    const tooLarge = await publicationRefusal(by, { "code/total.ts": large });
+    expect(tooLarge.code).toBe("workflow.modules_invalid");
+  });
+
+  it('hands a calculation its input exactly, a "__proto__" key kept as its own', async () => {
+    // A compiled module, as the build makes one, run directly: the host
+    // refuses such a key in a contract's value before any call, so only
+    // the request's own encoding is checked here.
+    const sdk = await workflowSdkModules(env.ASSETS);
+    const answer = await runCompute(
+      env,
+      {
+        modules: {
+          "app~code~keys.js": `import { compute, v } from "@grasp-os~sdk~compute.js";
+export const keys = compute({ input: v.record(v.number()), output: v.array(v.string()), handler: (record) => Object.keys(record) });
+`,
+        },
+        sdk: sdk.modules,
+        paths: ["code/keys.ts"],
+        module: "code/keys.ts",
+        export: "keys",
+        input: JSON.parse('{"__proto__": 1, "other": 2}'),
+      },
+      1024
+    );
+    expect(answer).toStrictEqual(["__proto__", "other"]);
+  });
+
   it("refuses modules past their bounds and paths outside code/", async () => {
     const by = await builder();
+    const padded = (chars: number) =>
+      `${totalModule}// ${"x".repeat(chars - totalModule.length - 4)}\n`;
     for (const modules of [
       { "src/total.ts": totalModule },
       { "code/../total.ts": totalModule },
       Object.fromEntries(
         Array.from({ length: 33 }, (_, index) => [`code/m${index}.ts`, ""])
+      ),
+      // One module past 256 KiB.
+      { "code/total.ts": padded(256 * 1024 + 1), "code/sum.ts": sumModule },
+      // Each within it, past 1 MiB together.
+      Object.fromEntries(
+        Array.from({ length: 5 }, (_, index) => [
+          `code/m${index}.ts`,
+          padded(220 * 1024),
+        ])
       ),
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time

@@ -76,16 +76,40 @@ const definitionKeys: ReadonlySet<string> = new Set([
   "handler",
 ]);
 
+/** A calculation's handler, as the runner calls it. */
+type Handler = (input: unknown) => unknown;
+
+const isHandler = (value: unknown): value is Handler =>
+  typeof value === "function";
+
 /**
  * The handler of each calculation `compute` declared, by its value: what
  * makes a value one. An object shaped like a definition that `compute`
  * didn't make has no handler here, so it is no calculation.
+ *
+ * A correctness aid, not a boundary: it keeps a module from binding a
+ * plain object by mistake. A module set on forging one runs only its own
+ * code either way, in an isolate with nothing to reach, and its calls are
+ * checked against the contract sealed at publication (core's
+ * workflow-modules.ts). The intrinsics it uses are taken as this module
+ * loads, before any of the workflow's own (compute-runner.ts loads it
+ * first), so patching `WeakMap.prototype` later changes nothing here.
  */
-const handlers = new WeakMap<object, (input: unknown) => unknown>();
+const handlers = new WeakMap<object, Handler>();
+const weakGet: unknown = Reflect.getOwnPropertyDescriptor(
+  WeakMap.prototype,
+  "get"
+)?.value;
+const weakSet: unknown = Reflect.getOwnPropertyDescriptor(
+  WeakMap.prototype,
+  "set"
+)?.value;
+const { apply } = Reflect;
+const { freeze, getOwnPropertyDescriptor, keys } = Object;
 
 /** Reads `key` of `definition` as a data property: never a getter. */
 const dataOf = (definition: object, key: string): unknown => {
-  const property = Object.getOwnPropertyDescriptor(definition, key);
+  const property = getOwnPropertyDescriptor(definition, key);
   if (property !== undefined && !("value" in property)) {
     return refuse(`A calculation's \`${key}\` is a value, not a getter.`);
   }
@@ -105,7 +129,7 @@ export const compute = <
   if (!isPlainObject(definition)) {
     return refuse("Declare a calculation as `{ input, output, handler }`.");
   }
-  for (const key of Object.keys(definition)) {
+  for (const key of keys(definition)) {
     if (!definitionKeys.has(key)) {
       refuse(`A calculation has no \`${key}\`.`);
     }
@@ -114,18 +138,19 @@ export const compute = <
   if (typeof handler !== "function") {
     return refuse("A calculation's `handler` is a function.");
   }
-  const contract: ComputeContract = Object.freeze({
+  const contract: ComputeContract = freeze({
     // Each throws for anything but a `v` schema.
     input: descriptorOf(dataOf(definition, "input")),
     output: descriptorOf(dataOf(definition, "output")),
   });
-  const run = (input: unknown): unknown =>
-    Reflect.apply(handler, undefined, [input]);
-  const declared = Object.freeze({
+  const run = (input: unknown): unknown => apply(handler, undefined, [input]);
+  const declared = freeze({
     "~compute": contract,
     handler: run,
   });
-  handlers.set(declared, run);
+  if (typeof weakSet === "function") {
+    apply(weakSet, handlers, [declared, run]);
+  }
   return declared;
 };
 
@@ -133,9 +158,14 @@ export const compute = <
  * The handler of `value` if `compute` declared it; undefined for anything
  * else, a lookalike included. For the runner (compute-runner.ts) only.
  */
-export const computeHandler = (
-  value: unknown
-): ((input: unknown) => unknown) | undefined =>
-  (typeof value === "object" || typeof value === "function") && value !== null
-    ? handlers.get(value)
-    : undefined;
+export const computeHandler = (value: unknown): Handler | undefined => {
+  if (
+    (typeof value !== "object" && typeof value !== "function") ||
+    value === null ||
+    typeof weakGet !== "function"
+  ) {
+    return undefined;
+  }
+  const found: unknown = apply(weakGet, handlers, [value]);
+  return isHandler(found) ? found : undefined;
+};

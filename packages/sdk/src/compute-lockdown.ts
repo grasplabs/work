@@ -6,12 +6,16 @@
 //
 // Defense in depth, not the boundary: the isolate has no env, no bindings
 // and no outbound network, so there is nothing to reach. What this adds is
-// that a calculation can't read the time or a random number, or wait on a
-// timer, so it answers the same for the same input and can hide nothing
-// behind a delay. Each global is replaced with a refusal and made
-// non-configurable and non-writable, so module code can't put the original
-// back; `lockedDown` says whether every one of them took, and the runner
-// refuses to run a calculation in an isolate where one didn't.
+// that a calculation can't read the time or a random number, wait on a
+// timer, or generate code (which would import modules the compiler never
+// let it name, `cloudflare:sockets` among them), so it answers the same
+// for the same input and can hide nothing behind a delay. Each global is
+// replaced with a refusal and made non-configurable and non-writable, on
+// the global object and on every prototype of it that has it as its own
+// (workerd keeps most of the platform's globals there), so module code
+// can't put the original back or reach it another way; `lockedDown` says
+// whether every one of them took, and the runner refuses to run a
+// calculation in an isolate where one didn't.
 
 /** A function that refuses, for what a calculation can't use. */
 const unavailable = (what: string) => (): never => {
@@ -76,6 +80,41 @@ const removedGlobals = [
   "FinalizationRegistry",
 ] as const;
 
+/**
+ * The global object and its prototypes, as they are now: where a global
+ * may live as an own property.
+ */
+const globalChain = (): object[] => {
+  const chain: object[] = [];
+  for (
+    let level: object | null = globalThis;
+    level !== null;
+    level = Reflect.getPrototypeOf(level)
+  ) {
+    chain.push(level);
+  }
+  return chain;
+};
+
+/**
+ * The prototypes whose `constructor` generates code from text: `Function`
+ * and its generator and async kin, reached from any function a module
+ * writes. Taken as this module loads, before `Function` itself is
+ * replaced.
+ */
+const codeConstructors: readonly object[] = [
+  Function.prototype,
+  Reflect.getPrototypeOf(function* generator() {
+    // Never run: only its prototype is read.
+  }) ?? Function.prototype,
+  Reflect.getPrototypeOf(async () => {
+    // Never run: only its prototype is read.
+  }) ?? Function.prototype,
+  Reflect.getPrototypeOf(async function* asyncGenerator() {
+    // Never run: only its prototype is read.
+  }) ?? Function.prototype,
+];
+
 /** Whether `probe` throws, as everything taken away must. */
 const refuses = (probe: () => unknown): boolean => {
   try {
@@ -86,13 +125,25 @@ const refuses = (probe: () => unknown): boolean => {
   return false;
 };
 
+/** Whether `generate`, called on source text, refuses: as it must. */
+const generatesNothing = (generate: unknown): boolean =>
+  typeof generate === "function" &&
+  refuses(() => Reflect.apply(generate, undefined, ["return 1"]));
+
 /** Checks, after the fact, that what a calculation could misuse refuses. */
 const probesRefuse = (): boolean =>
   refuses(() => Date.now()) &&
   refuses(() => new Date()) &&
   refuses(() => Math.random()) &&
   refuses(() => new Intl.DateTimeFormat().format()) &&
-  removedGlobals.every((key) => Reflect.get(globalThis, key) === undefined);
+  generatesNothing(Reflect.get(globalThis, "eval")) &&
+  generatesNothing(Reflect.get(globalThis, "Function")) &&
+  codeConstructors.every((prototype) =>
+    generatesNothing(Reflect.get(prototype, "constructor"))
+  ) &&
+  globalChain().every((level) =>
+    removedGlobals.every((key) => Reflect.get(level, key) === undefined)
+  );
 
 const lockdown = (): boolean => {
   const sealed: boolean[] = [];
@@ -165,8 +216,24 @@ const lockdown = (): boolean => {
       }
     )
   );
+  // Code from text: refused wherever a module could reach a constructor.
+  const generating = unavailable("generating code");
+  sealed.push(
+    seal(globalThis, "eval", generating),
+    seal(globalThis, "Function", generating),
+    ...codeConstructors.map((prototype) =>
+      seal(prototype, "constructor", generating)
+    )
+  );
+  const chain = globalChain();
   for (const key of removedGlobals) {
     sealed.push(seal(globalThis, key));
+    // And on each prototype that has it as its own, as workerd's globals.
+    for (const level of chain.slice(1)) {
+      if (Object.hasOwn(level, key)) {
+        sealed.push(seal(level, key));
+      }
+    }
   }
   return sealed.every(Boolean) && probesRefuse();
 };
