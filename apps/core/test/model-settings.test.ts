@@ -8,7 +8,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { budgetDay } from "../src/model-budgets.ts";
 import { modelLedger } from "../src/model-ledger.ts";
-import type { LedgerScope, ModelLedger } from "../src/model-ledger.ts";
+import type { LedgerScope } from "../src/model-ledger.ts";
 import { models } from "../src/models.ts";
 import type { ModelCall, ModelsEnv } from "../src/models.ts";
 import { fakeGateway } from "./ai-gateway.ts";
@@ -59,23 +59,6 @@ const envWith = (config?: unknown) => {
     MODEL_BUDGET_MONTH: newMonth(),
   };
   return coreEnv;
-};
-
-/**
- * The ledger binding with the deployment's ledger an object of its own, as a
- * new deployment's: a test that counts in this month, which other files'
- * work counts in too, reads only the spend it made. Another file's chat
- * (two requests, $0.0021) was seen still in the deployment's ledger after
- * the reset the next file starts with (start-each-file.ts).
- */
-const ownLedger = (): DurableObjectNamespace<ModelLedger> => {
-  const name = crypto.randomUUID();
-  return new Proxy(env.MODEL_LEDGER, {
-    get: (namespace, member): unknown =>
-      member === "getByName"
-        ? () => namespace.getByName(name)
-        : Reflect.get(namespace, member, namespace),
-  });
 };
 
 /** A scope the ledger counts spend in, with no budget. */
@@ -629,7 +612,6 @@ describe("model settings", { timeout: 60_000 }, () => {
       ...env,
       MODEL_GATEWAY: { gateway: "grasp-os-test", models: [anthropic] },
       MODEL_BUDGET_MONTH: undefined,
-      MODEL_LEDGER: ownLedger(),
     };
     const builder = await signedInApi(idp, "builder");
     const app = await appWith(builder, workflowFiles("idle", "  return null;"));
