@@ -46,6 +46,9 @@ const repeats = 2;
 
 const devTasks = brainTasks.filter(({ split }) => split === "dev").length;
 
+/** The arms whose sources come from a search: the agent's and full text's. */
+const searchingArms = ["agent", "fullText"] as const;
+
 let report: Promise<BrainScaleReport> | undefined;
 
 const run = async (): Promise<BrainScaleReport> => {
@@ -121,8 +124,11 @@ describe("the Brain baseline at scale", { timeout: 300_000 }, () => {
     const { gate, distractorLeaks, distractorsReached, arms } = await run();
     // What each person's model was sent of their own teams' collections:
     // the agents are granted them, and the arms read them as the person.
-    const ownTeams = (persona: BrainPersona) =>
-      distractorsReached[persona].some(
+    // Each searching arm on its own, so one that reads them can't hide one
+    // that doesn't. Full context reads collections in order until its
+    // budget runs out, which may be before any team's: it's left out.
+    const ownTeams = (arm: string, persona: BrainPersona) =>
+      (distractorsReached[arm]?.[persona] ?? []).some(
         (collection) =>
           distractorReaders(collection).includes(persona) &&
           collection.startsWith("team")
@@ -130,12 +136,16 @@ describe("the Brain baseline at scale", { timeout: 300_000 }, () => {
     expect({
       gate,
       distractorLeaks,
-      ownTeams: brainPersonas.map(ownTeams),
+      ownTeams: searchingArms.map((arm) =>
+        brainPersonas.map((persona) => ownTeams(arm, persona))
+      ),
+      failures: arms.map(({ failures }) => failures),
       trials: arms.map(({ trials }) => trials),
     }).toStrictEqual({
       gate: { passed: true, violations: [] },
       distractorLeaks: [],
-      ownTeams: brainPersonas.map(() => true),
+      ownTeams: searchingArms.map(() => brainPersonas.map(() => true)),
+      failures: brainArms.map(() => 0),
       trials: brainArms.map(() => repeats * devTasks),
     });
   });

@@ -210,8 +210,8 @@ export interface DistractorLeak {
 /** What the models of a run were sent of the distractors. */
 interface DistractorsSeen {
   leaks: DistractorLeak[];
-  /** The distractor collections that reached each person's model. */
-  reached: Record<BrainPersona, Set<DistractorCollection>>;
+  /** The distractor collections that reached each arm's model, by person. */
+  reached: Map<string, Record<BrainPersona, Set<DistractorCollection>>>;
 }
 
 /**
@@ -231,9 +231,15 @@ const watchingStub =
         for (const collection of distractorLeaksIn(input, persona)) {
           seen.leaks.push({ taskId: id, collection });
         }
+        const arm = current.arm ?? "";
+        const byPerson = seen.reached.get(arm) ?? {
+          ana: new Set<DistractorCollection>(),
+          bram: new Set<DistractorCollection>(),
+        };
+        seen.reached.set(arm, byPerson);
         for (const collection of distractorCollections) {
           if (input.includes(distractorCanary(collection))) {
-            seen.reached[persona].add(collection);
+            byPerson[persona].add(collection);
           }
         }
       }
@@ -245,6 +251,8 @@ const watchingStub =
 export interface ScaleArm {
   arm: BrainArm;
   trials: number;
+  /** Trials that failed (a search or model call broke): not misses. */
+  failures: number;
   evidenceRecall: number | null;
   completionRate: number;
   latencyMs: {
@@ -277,8 +285,14 @@ export interface BrainScaleReport {
   gate: BrainReport["gate"];
   /** Distractors whose person may not read them that reached a model. */
   distractorLeaks: DistractorLeak[];
-  /** The distractor collections that reached each person's model, sorted. */
-  distractorsReached: Record<BrainPersona, DistractorCollection[]>;
+  /**
+   * The distractor collections that reached each arm's model, by person,
+   * sorted.
+   */
+  distractorsReached: Record<
+    string,
+    Record<BrainPersona, DistractorCollection[]>
+  >;
   /** The baseline's own report, for anything else it measured. */
   baseline: BrainReport;
 }
@@ -293,6 +307,7 @@ const scaleArm = (report: BrainReport, arm: BrainArm): ScaleArm => {
   return {
     arm,
     trials: scores.length,
+    failures: summary?.failures ?? 0,
     evidenceRecall: summary?.evidenceRecall ?? null,
     completionRate: summary?.completionRate ?? 0,
     latencyMs: {
@@ -344,7 +359,7 @@ export const runBrainScale = async (
   const stored = await storedKnowledge();
   const seen: DistractorsSeen = {
     leaks: [],
-    reached: { ana: new Set(), bram: new Set() },
+    reached: new Map(),
   };
   const baseline = await runBrainBaseline(company, {
     ...options,
@@ -371,10 +386,15 @@ export const runBrainScale = async (
     stored,
     gate: baseline.gate,
     distractorLeaks: seen.leaks,
-    distractorsReached: {
-      ana: [...seen.reached.ana].toSorted(),
-      bram: [...seen.reached.bram].toSorted(),
-    },
+    distractorsReached: Object.fromEntries(
+      [...seen.reached].map(([arm, byPerson]) => [
+        arm,
+        {
+          ana: [...byPerson.ana].toSorted(),
+          bram: [...byPerson.bram].toSorted(),
+        },
+      ])
+    ),
     baseline,
   };
 };

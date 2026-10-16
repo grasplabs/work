@@ -1136,7 +1136,7 @@ const runTrial = async (
     if (changes(arm) && arm !== "changesChatTitle") {
       await changeState(company, place, chat.id, arm);
     }
-    setTurn({ phase: "question", task, searches: arm === "agent" });
+    setTurn({ phase: "question", task, searches: arm === "agent", arm });
     const reply = await place.stub.ask(chat.id, {
       text: renderPrompt(task.question, handed.sources),
       model,
