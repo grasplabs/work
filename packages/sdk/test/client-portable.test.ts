@@ -1,4 +1,8 @@
+// oxlint-disable max-classes-per-file -- the fake live connection: its socket, its two targets and a subscription
 import { toBase64Url } from "@grasp-os/shared/encoding";
+import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
+import { RpcSession, RpcTarget } from "capnweb";
+import type { RpcStub, RpcTransport } from "capnweb";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
@@ -46,13 +50,180 @@ interface Seen {
   body: string;
 }
 
+/** Core's `{ result }` for what `answer` gave: a value, or a response. */
+const resultOf = async (value: unknown): Promise<unknown> => {
+  if (!(value instanceof Response)) {
+    return { ok: true, value };
+  }
+  const body: unknown = await value.json();
+  return typeof body === "object" && body !== null && "result" in body
+    ? body.result
+    : undefined;
+};
+
+/** A subscription of the fake live connection's: released once. */
+class Subscription extends RpcTarget {
+  readonly #release: () => void;
+
+  constructor(release: () => void) {
+    super();
+    this.#release = release;
+  }
+
+  release(): void {
+    this.#release();
+  }
+}
+
+/** A followed query of the fake live connection's, as its token's person. */
+class LiveQueries extends RpcTarget {
+  readonly #url: string;
+  readonly #answer: (seen: Seen) => Promise<unknown>;
+  readonly #seen: Seen[];
+  #token: string;
+
+  constructor(
+    url: string,
+    answer: (seen: Seen) => Promise<unknown>,
+    seen: Seen[],
+    token: string
+  ) {
+    super();
+    this.#url = url;
+    this.#answer = answer;
+    this.#seen = seen;
+    this.#token = token;
+  }
+
+  async watchQuery(
+    request: string,
+    onSnapshot: RpcStub<(push: QuerySnapshotPush) => void>
+  ): Promise<Subscription> {
+    const call = {
+      url: this.#url,
+      authorization: `Bearer ${this.#token}`,
+      credentials: undefined,
+      redirect: undefined,
+      body: request,
+    };
+    this.#seen.push(call);
+    const result = await resultOf(await this.#answer(call));
+    const held = onSnapshot.dup();
+    setTimeout(() => {
+      void held({ revision: 1, result });
+    }, 0);
+    return new Subscription(() => {
+      held[Symbol.dispose]();
+    });
+  }
+
+  renew(token: string): { expiresAt: number } {
+    this.#token = token;
+    return { expiresAt: Date.now() + 60_000 };
+  }
+}
+
 /**
- * The host's network: answers each call as `answer` says, with core's
- * `{ result }` or the response it gives; `answer` may throw to lose the
- * answer.
+ * The host's live connection as core answers it (core's portable-live.ts
+ * is tested end to end in apps/core): each followed query is read with
+ * `answer` as the connection's token, and pushed once.
+ */
+class LiveServer extends RpcTarget {
+  readonly #url: string;
+  readonly #answer: (seen: Seen) => Promise<unknown>;
+  readonly #seen: Seen[];
+
+  constructor(
+    url: string,
+    answer: (seen: Seen) => Promise<unknown>,
+    seen: Seen[]
+  ) {
+    super();
+    this.#url = url;
+    this.#answer = answer;
+    this.#seen = seen;
+  }
+
+  connect(token: string): LiveQueries {
+    return new LiveQueries(this.#url, this.#answer, this.#seen, token);
+  }
+}
+
+/**
+ * A `WebSocket` whose other end is a `LiveServer`, in memory: what the
+ * client sends reaches it, what it sends back arrives as messages.
+ */
+const fakeWebSocket = (
+  answer: (seen: Seen) => Promise<unknown>,
+  seen: Seen[]
+) =>
+  class FakeWebSocket extends EventTarget {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSING = 2;
+    static readonly CLOSED = 3;
+    readyState = FakeWebSocket.OPEN;
+    binaryType = "blob";
+    readonly #sent: string[] = [];
+    #waiting: PromiseWithResolvers<string> | undefined;
+
+    constructor(url: string) {
+      super();
+      const transport: RpcTransport = {
+        send: (message) => {
+          setTimeout(() => {
+            if (this.readyState === FakeWebSocket.OPEN) {
+              this.dispatchEvent(
+                new MessageEvent("message", { data: message })
+              );
+            }
+          }, 0);
+        },
+        receive: async () => {
+          const next = this.#sent.shift();
+          if (next !== undefined) {
+            return next;
+          }
+          if (this.readyState !== FakeWebSocket.OPEN) {
+            throw new Error("Closed");
+          }
+          this.#waiting = Promise.withResolvers<string>();
+          return await this.#waiting.promise;
+        },
+      };
+      // oxlint-disable-next-line no-new -- the session runs from its transport
+      new RpcSession(transport, new LiveServer(url, answer, seen));
+    }
+
+    send(message: string): void {
+      const waiting = this.#waiting;
+      this.#waiting = undefined;
+      if (waiting === undefined) {
+        this.#sent.push(message);
+      } else {
+        waiting.resolve(message);
+      }
+    }
+
+    close(code = 1000, reason = ""): void {
+      if (this.readyState !== FakeWebSocket.OPEN) {
+        return;
+      }
+      this.readyState = FakeWebSocket.CLOSED;
+      this.#waiting?.reject(new Error("Closed"));
+      this.#waiting = undefined;
+      this.dispatchEvent(Object.assign(new Event("close"), { code, reason }));
+    }
+  };
+
+/**
+ * The host's network: answers each call, and each query followed over
+ * the live connection, as `answer` says, with core's `{ result }` or the
+ * response it gives; `answer` may throw to lose the answer.
  */
 const network = (answer: (seen: Seen) => Promise<unknown>) => {
   const seen: Seen[] = [];
+  vi.stubGlobal("WebSocket", fakeWebSocket(answer, seen));
   vi.stubGlobal(
     "fetch",
     async (input: string, init: RequestInit): Promise<Response> => {

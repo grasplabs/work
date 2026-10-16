@@ -20,9 +20,10 @@ import type { SignedInSession } from "./identity.ts";
 // - A token used for more than it was made for. It is typed as an App
 //   token (`typ`), names one person (`sub`), the session it came from
 //   (`sid`) and one App (`app`), and its audience is the portable
-//   function route alone: another App, or any other route of core's,
+//   routes alone (the function route, and the live connection,
+//   portable-live.ts): another App, or any other route of core's,
 //   refuses it. Nothing else of core's reads a bearer token, and the
-//   cookie route ignores it.
+//   cookie routes ignore it.
 // - A stolen token replayed. It is good for `appTokenMs` at most, and
 //   never past its session: a thief gets minutes, in one App, with what
 //   that person may do there. Each call is still counted against that
@@ -126,6 +127,7 @@ const claimsSchema = z.object({
   sub: z.string().min(1),
   sid: z.string().min(1),
   app: z.string().min(1),
+  exp: z.number(),
 });
 
 /**
@@ -135,7 +137,13 @@ const claimsSchema = z.object({
  * log line.
  */
 export type TokenCheck =
-  | { ok: true; person: Identity; sessionId: string }
+  | {
+      ok: true;
+      person: Identity;
+      sessionId: string;
+      /** When the token expires, in epoch milliseconds (its `exp`). */
+      expiresAt: number;
+    }
   | { ok: false; reason: "invalid" }
   /** Signed, maybe, by a key another isolate made since this one read them. */
   | { ok: false; reason: "keys_pending" }
@@ -196,5 +204,5 @@ export const checkAppToken = async (
   const person = await sessionIdentity(env, { userId, ...session });
   return person === undefined
     ? { ok: false, reason: "no_access", userId, sessionId }
-    : { ok: true, person, sessionId };
+    : { ok: true, person, sessionId, expiresAt: read.data.exp * 1000 };
 };

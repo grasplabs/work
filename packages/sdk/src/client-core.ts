@@ -23,8 +23,12 @@ import {
   settlesSubmission,
 } from "./client-error.ts";
 import type { Settled } from "./client-error.ts";
+import { PortableLive } from "./client-live.ts";
 import { PortableTransport } from "./client-portable.ts";
-import type { PortableClientOptions } from "./client-portable.ts";
+import type {
+  PortableClientOptions,
+  PortableToken,
+} from "./client-portable.ts";
 import { DraftStore } from "./form-drafts.ts";
 import type { DraftPersistence } from "./form-drafts.ts";
 import type {
@@ -50,13 +54,13 @@ import { readDescriptor } from "./value-read.ts";
 // generated reference, normalizing the arguments with the same native
 // interpreter the host uses, one logical submission per explicit call,
 // receipt recovery after a lost response, and live queries (spec 11):
-// over the platform's frame, one subscription per query, shared by the
+// over the platform's frame, or a portable host's live connection to
+// core (client-live.ts), one subscription per query, shared by the
 // components that read it, whose snapshots core pushes after every write
 // that changed what the query read, whoever made it, ordered and
-// authorized, followed again after a lost connection; a screen there
-// never reads a query again on its own. A portable host has no such
-// connection yet: its queries are read again after a change this client
-// confirmed. Failure modes, and how each is closed:
+// authorized, followed again after a lost connection; a client never
+// reads a followed query again on its own. Failure modes, and how each
+// is closed:
 //
 // - A lost response turns a saved change into a second one: every
 //   mutation carries an idempotency key, the caller's or a fresh random
@@ -72,8 +76,7 @@ import { readDescriptor } from "./value-read.ts";
 //   outcome the host itself can't tell (`operation.sandbox_lost`) is that
 //   receipt: it rejects at once, with its key.
 // - Retries spend the person's request budget: reads run at most
-//   `maxReadsInFlight` at once (re-reads after changes, on a portable
-//   host, gathered first), a refusal for the budget waits as long as it
+//   `maxReadsInFlight` at once, a refusal for the budget waits as long as it
 //   says, a save is sent again for `submissionBudgetMs` rather than a few
 //   quick tries, and a followed query waits as a refusal of it says.
 // - Cancelling unlocks a duplicate: aborting stops the caller waiting,
@@ -158,12 +161,6 @@ import { readDescriptor } from "./value-read.ts";
 //   its last push), which rejects the Load More and keeps the window
 //   shown; a shown window core couldn't read again keeps what it shows
 //   and follows again, backing off.
-// - A portable host shows a cached larger window older than the one
-//   shown, or a Load More never ends: there, a Load More reads the larger
-//   window afresh and settles by that one read (`#settleWindow`): shown,
-//   or the Load More rejects with its failure (writes tearing it, the
-//   person's budget spent partway, with when to try again), the window
-//   shown kept; a window is never read again on its own.
 // - One person's list carries over to the next: when someone else signs
 //   in, every list starts again at its first page, its failure cleared.
 
@@ -179,8 +176,8 @@ export interface ClientTransport {
    * Follows the query `request` names (spec 11): `onSnapshot` gets each
    * push of core's (`{ revision, result }`), and `onLost` is called once
    * core, or the connection to it, let go of the subscription. Resolves
-   * with what releases it, or rejects as `call` does. A portable host
-   * has no transport, and reads its queries again after changes.
+   * with what releases it, or rejects as `call` does. A portable host's
+   * client follows its queries over its own live connection instead.
    */
   watch: (
     request: string,
@@ -785,9 +782,6 @@ const lostBudgetMs = 5 * 60_000;
 /** How many queries read at once: the rest wait, keeping room for saves. */
 const maxReadsInFlight = 4;
 
-/** How long confirmed changes are gathered into one round of re-reads. */
-const changeGatherMs = 50;
-
 /**
  * What the React hooks and the platform reach of a client, and App code
  * doesn't: the shared query entries, and trying failed queries again.
@@ -1025,11 +1019,6 @@ interface Extension {
   readonly since: number;
   /** Whether its entry was current already: followed, and pushed to. */
   current: boolean;
-  /**
-   * On a portable host, until its own read settles: no other answer (a
-   * read from before the Load More, say) is taken for its window.
-   */
-  awaitingRead: boolean;
   readonly done: PromiseWithResolvers<null>;
 }
 
@@ -1348,6 +1337,8 @@ const openedUnlessAborted = async (
 export class GraspClient {
   readonly #transport: ClientTransport | undefined;
   readonly #portable: PortableTransport | undefined;
+  /** A portable host's live connections (client-live.ts). */
+  readonly #live: PortableLive | undefined;
   /** Whose token a portable host's latest call was sent with. */
   #principal: string | undefined;
   readonly #queries = new Map<string, QueryEntry>();
@@ -1358,9 +1349,6 @@ export class GraspClient {
   /** Reads under way, and the reads waiting for room (`maxReadsInFlight`). */
   #readsInFlight = 0;
   readonly #readWaiters: (() => void)[] = [];
-  /** The Apps whose queries a gathered round of re-reads refreshes. */
-  readonly #changedApps = new Set<string>();
-  #gathering: ReturnType<typeof setTimeout> | undefined;
   /** What the latest fence was for. */
   #fencedBy: GraspError | undefined;
   /**
@@ -1392,10 +1380,18 @@ export class GraspClient {
       this.#transport = connection;
       this.#drafts = new DraftStore(connection.drafts);
       this.#portable = undefined;
+      this.#live = undefined;
     } else if ("url" in connection) {
+      const portable = new PortableTransport(connection);
       this.#transport = undefined;
-      this.#portable = new PortableTransport(connection);
+      this.#portable = portable;
       this.#drafts = new DraftStore();
+      this.#live = new PortableLive(portable.origin, {
+        token: async () => await this.#portableToken(),
+        forget: () => {
+          portable.forget();
+        },
+      });
     } else {
       throw new TypeError("A client takes { url, getToken }.");
     }
@@ -1881,16 +1877,7 @@ export class GraspClient {
     if (!this.#queries.has(entry.key)) {
       this.#queries.set(entry.key, entry);
     }
-    if (this.#transport === undefined) {
-      const current = entry.snapshot.value !== undefined && !entry.stale;
-      if (
-        entry.reading === undefined &&
-        !current &&
-        entry.snapshot.error === undefined
-      ) {
-        this.#refresh(entry);
-      }
-    } else if (entry.live === undefined && entry.snapshot.error === undefined) {
+    if (entry.live === undefined && entry.snapshot.error === undefined) {
       this.#follow(entry, 0);
     }
     return () => {
@@ -1918,20 +1905,9 @@ export class GraspClient {
         if (entry.listeners.size === 0) {
           continue;
         }
-        if (this.#transport === undefined) {
-          this.#refresh(entry);
-        } else if (entry.live === undefined) {
+        if (entry.live === undefined) {
           this.#follow(entry, 0);
         }
-      } else if (
-        // A window shown whose refresh failed in a way that may pass: it
-        // stays shown, and old, until it is tried again (`#settleWindow`).
-        this.#transport === undefined &&
-        entry.stale &&
-        entry.reading === undefined &&
-        entry.listeners.size > 0
-      ) {
-        this.#refresh(entry);
       }
     }
     for (const pager of this.#pagers.values()) {
@@ -2145,14 +2121,12 @@ export class GraspClient {
       stop: undefined,
       since: entry.settled,
       current: false,
-      awaitingRead: this.#transport === undefined,
       done: Promise.withResolvers<null>(),
     };
     void observe(extension.done.promise);
     pager.extension = extension;
-    // A read of it under way from before: older than the Load More. And
-    // a follow from before, pushed to or not yet: its answer may be too.
-    const older = entry.reading;
+    // A follow from before, pushed to or not yet: its answer may be older
+    // than the Load More.
     const followedBefore = entry.live;
     // Its handle is installed before it subscribes: a transport may push
     // at once, which can settle the Load More, and the list then takes
@@ -2173,16 +2147,7 @@ export class GraspClient {
     // The larger window is shown only from an answer that came after the
     // Load More began: one cached, or pushed to another list that follows
     // it, may be older than the window shown, as windows of one query are
-    // read and pushed on their own. So it is read afresh: followed anew
-    // over the frame, read again on a portable host.
-    if (this.#transport === undefined) {
-      // On a portable host, the read itself settles the Load More; its
-      // readers see it loading at once.
-      GraspClient.#pagerChanged(pager);
-      void this.#readExtension(pager, extension, older);
-      await extension.done.promise;
-      return;
-    }
+    // read and pushed on their own. So it is followed afresh.
     if (followedBefore !== undefined && entry.live === followedBefore) {
       GraspClient.#unfollow(entry);
       this.#follow(entry, 0);
@@ -2195,8 +2160,8 @@ export class GraspClient {
   }
 
   /**
-   * Settles one read of a window on a portable host, the one way every
-   * such read ends (core's query-windows.ts): its window is shown; or its
+   * Settles one read of a window (an imperative one: windows are
+   * otherwise followed), the one way every such read ends (core's query-windows.ts): its window is shown; or its
    * failure (writes kept tearing it, the person's budget spent partway, a
    * lost answer) is thrown to the read's caller, the window already shown
    * kept, or shown when nothing is, so a first load throws it. Never read
@@ -2223,50 +2188,6 @@ export class GraspClient {
         : clientError("operation.unreachable");
     }
     return settleRead(entry, read, settled);
-  }
-
-  /**
-   * Reads the larger window `extension` waits for afresh, on a portable
-   * host, after any read of it from before the Load More (`older`), and
-   * settles the Load More with
-   * what that read came to (`#settleWindow`): shown, it is promoted;
-   * failed, the Load More rejects, whoever else shows that window keeping
-   * it.
-   */
-  async #readExtension(
-    pager: Pager,
-    extension: Extension,
-    older: QueryEntry["reading"]
-  ): Promise<void> {
-    const { entry } = extension;
-    // A read from before the Load More is waited out; one it started
-    // (`#subscribe` reads a window it has nothing current of) is joined.
-    if (older !== undefined && entry.reading === older) {
-      await observe(older.done);
-      // Given up on meanwhile (the list closed, a fence, someone else
-      // signed in): nothing more is read for it.
-      if (pager.extension !== extension) {
-        return;
-      }
-    }
-    try {
-      await this.#read(entry);
-    } catch (error) {
-      if (pager.extension === extension) {
-        GraspClient.#failExtension(
-          pager,
-          extension,
-          error instanceof GraspError
-            ? error
-            : clientError("operation.unreachable")
-        );
-      }
-      return;
-    }
-    // Its own read settled: only now is its window taken.
-    extension.awaitingRead = false;
-    extension.current = true;
-    GraspClient.#pagerChanged(pager);
   }
 
   /**
@@ -2377,9 +2298,7 @@ export class GraspClient {
     const { extension } = pager;
     if (extension !== undefined) {
       const { entry } = extension;
-      const fresh =
-        !extension.awaitingRead &&
-        (extension.current || entry.settled > extension.since);
+      const fresh = extension.current || entry.settled > extension.since;
       const { error } = entry.snapshot;
       if (fresh && error !== undefined) {
         // Writes kept the larger window from being read whole, say: the
@@ -2494,8 +2413,19 @@ export class GraspClient {
     return entry.live === live && !live.stopped;
   }
 
+  /** How `entry`'s query is followed: over the frame, or the live connection. */
+  #watchOf(entry: QueryEntry): ClientTransport["watch"] | undefined {
+    const live = this.#live;
+    if (live === undefined) {
+      return this.#transport?.watch;
+    }
+    const app = entry.reference.resourceId;
+    return async (request, onSnapshot, onLost) =>
+      await live.watch(app, request, onSnapshot, onLost);
+  }
+
   async #connect(entry: QueryEntry, live: Live): Promise<void> {
-    const watch = this.#transport?.watch;
+    const watch = this.#watchOf(entry);
     if (watch === undefined) {
       return;
     }
@@ -2640,11 +2570,6 @@ export class GraspClient {
     return await this.#read(entry);
   }
 
-  /** Reads `entry` again for its readers, failures shown through its snapshot. */
-  #refresh(entry: QueryEntry): void {
-    void observe(this.#read(entry));
-  }
-
   /**
    * Reads `entry` from the host, joining a read already under way:
    * resolves with its value, or rejects with why it failed. The answer
@@ -2725,28 +2650,11 @@ export class GraspClient {
     };
     const done = attempt();
     entry.reading = { done, stop };
-    let failed = false;
     try {
       return await done;
-    } catch (error) {
-      failed = true;
-      throw error;
     } finally {
       if (entry.reading?.done === done) {
         entry.reading = undefined;
-        // A window whose read failed (writes tearing it, the person's
-        // budget spent) is read again only at the next change, never at
-        // once: an immediate read would only fail, and spend, again.
-        if (
-          !(failed && entry.window) &&
-          entry.stale &&
-          entry.listeners.size > 0 &&
-          entry.live === undefined &&
-          this.#transport === undefined &&
-          generation === this.#generation
-        ) {
-          this.#refresh(entry);
-        }
       }
     }
   }
@@ -2795,11 +2703,7 @@ export class GraspClient {
     if (portable === undefined) {
       return await this.#transport?.call(request, app);
     }
-    const token = await portable.token();
-    if (this.#principal !== undefined && token.principal !== this.#principal) {
-      this.#switchPrincipal();
-    }
-    this.#principal = token.principal;
+    const token = await this.#portableToken();
     if (bound.principal !== undefined && bound.principal !== token.principal) {
       throw unsent(clientError("auth.principal_changed"));
     }
@@ -2807,6 +2711,24 @@ export class GraspClient {
     this.#refuseIfFenced(bound);
     bound.principal = token.principal;
     return await portable.send(request, app, token.text);
+  }
+
+  /**
+   * The person's token for a portable host, from the host: when it is
+   * someone else's than the last one's, all the client holds is cleared
+   * first (`#switchPrincipal`).
+   */
+  async #portableToken(): Promise<PortableToken> {
+    const portable = this.#portable;
+    if (portable === undefined) {
+      throw new Error("Only a portable host's client has a token.");
+    }
+    const token = await portable.token();
+    if (this.#principal !== undefined && token.principal !== this.#principal) {
+      this.#switchPrincipal();
+    }
+    this.#principal = token.principal;
+    return token;
   }
 
   /** Refuses, unsent, a call bound to a generation before the latest fence. */
@@ -2821,9 +2743,10 @@ export class GraspClient {
 
   /**
    * Someone else signed in on a portable host: drops every result held
-   * and every answer still to come for the person before, and reads
-   * again what is read now, for the person now. Submissions in flight
-   * are no longer joined; theirs stay theirs (`#send`).
+   * and every answer still to come for the person before, closes their
+   * live connections, and follows again what is read now, for the person
+   * now. Submissions in flight are no longer joined; theirs stay theirs
+   * (`#send`).
    */
   #switchPrincipal(): void {
     this.#generation += 1;
@@ -2832,7 +2755,9 @@ export class GraspClient {
     this.#fencedBy = clientError("auth.principal_changed");
     this.#submissions.clear();
     this.#cancelExtensions(this.#fencedBy);
+    this.#live?.closeAll();
     for (const entry of this.#queries.values()) {
+      GraspClient.#unfollow(entry);
       entry.reading?.stop.abort();
       entry.reading = undefined;
       entry.shown = entry.sent;
@@ -2843,8 +2768,8 @@ export class GraspClient {
     // the person now pays for no window loaded by the person before.
     this.#restartPagers();
     for (const entry of this.#queries.values()) {
-      if (entry.listeners.size > 0 && entry.reading === undefined) {
-        this.#refresh(entry);
+      if (entry.listeners.size > 0 && entry.live === undefined) {
+        this.#follow(entry, 0);
       }
     }
     this.#tellFence(this.#fencedBy);
@@ -2874,6 +2799,7 @@ export class GraspClient {
     this.#principal = undefined;
     this.#submissions.clear();
     this.#cancelExtensions(refusal);
+    this.#live?.closeAll();
     for (const entry of this.#queries.values()) {
       GraspClient.#unfollow(entry);
       entry.reading?.stop.abort();
@@ -2936,43 +2862,18 @@ export class GraspClient {
 
   /**
    * After a change the host confirmed: every query of the same App is
-   * read again where it is read (after a read under way, which may not
-   * see the change), and marked old where it isn't, so no screen keeps
-   * showing what the change made out of date.
+   * marked old, so an imperative read doesn't join one sent before it.
    */
   #changed(resourceId: string): void {
+    // Core pushes what the change made out of date to every followed
+    // query: the marks only keep a later imperative read from joining an
+    // older one (`#readCurrent`).
     for (const entry of this.#queries.values()) {
       if (entry.reference.resourceId === resourceId) {
         entry.stale = true;
         entry.changes += 1;
       }
     }
-    // Over the frame, core pushes what the change made out of date: the
-    // marks above only keep a later imperative read from joining an
-    // older one (`#readCurrent`). Elsewhere, changes in quick succession
-    // share one round of re-reads.
-    if (this.#transport !== undefined) {
-      return;
-    }
-    this.#changedApps.add(resourceId);
-    if (this.#gathering !== undefined) {
-      return;
-    }
-    this.#gathering = setTimeout(() => {
-      this.#gathering = undefined;
-      const changed = new Set(this.#changedApps);
-      this.#changedApps.clear();
-      for (const entry of this.#queries.values()) {
-        if (
-          changed.has(entry.reference.resourceId) &&
-          entry.stale &&
-          entry.listeners.size > 0 &&
-          entry.reading === undefined
-        ) {
-          this.#refresh(entry);
-        }
-      }
-    }, changeGatherMs);
   }
 
   /**
