@@ -297,7 +297,7 @@ const maxPassedBytes = 2 * platformLimits.stepPayloadBytes + 64;
  * once by the bounded writer, so nothing larger is walked, then read back
  * from that text. `undefined` otherwise.
  */
-export const boundedJson = (
+const boundedJson = (
   value: unknown
 ): { value: Json; size: number } | undefined => {
   const written = writeJson(value, {
