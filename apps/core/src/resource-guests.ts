@@ -42,7 +42,9 @@ import { platformGrantOf } from "./resource-platform.ts";
  * Whether App `app`'s current release declares a guests resource: then
  * only its binding governs its guest chats, and its v1 server's `GUESTS`
  * stub serves nothing (guests-binding.ts), so no chat it invites escapes
- * the binding's revocation. False for an App with no sealed release.
+ * the binding's revocation. False only for an App with no current version
+ * or none sealed; a release that can't be read throws, so the v1 path is
+ * refused rather than let through.
  */
 export const declaresGuests = async (
   env: Env,
@@ -58,7 +60,9 @@ export const declaresGuests = async (
       (declared) => declared["~resource"] === "guests"
     );
   } catch (error) {
-    if (isExpectedError(error)) {
+    // Only a version with no sealed release is the v1 server's alone; any
+    // other refusal (revoked, corrupt, unsupported) fails closed.
+    if (isExpectedError(error) && error.code === "version.not_sealed") {
       return false;
     }
     throw error;

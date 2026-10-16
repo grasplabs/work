@@ -11,6 +11,7 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import { callApp } from "../src/app.ts";
 import { sweepGuestChats } from "../src/guests.ts";
+import { revokeRelease } from "../src/release-retention.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import type { GatewayReply } from "./ai-gateway.ts";
 import { grantReviewed, release, requestGranted, serverBuilt } from "./apps.ts";
@@ -18,7 +19,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
 import { endLiveRuns, finished as runFinished, leave } from "./runs.ts";
-import { failure } from "./sealed-apps.ts";
+import { failure, person } from "./sealed-apps.ts";
 import { outcome, routed, signedInApi, unique } from "./sign-in.ts";
 
 // Guest chats (src/guests.ts) through an App's sealed functions: a guests
@@ -945,11 +946,23 @@ describe("guest chats through a binding", { timeout: 90_000 }, () => {
     const fromV1 = z
       .object({ ok: z.object({ status: z.string() }) })
       .safeParse(await v1Invite(v1Only.id));
+    const refusedBoth = await v1Invite(both.id);
+    // Its release revoked: what it declares can't be read, and the v1
+    // path is refused rather than let through.
+    await revokeRelease(
+      env,
+      await person("admin"),
+      { app: appIdSchema.parse(both.id), version },
+      "Compromised"
+    );
+    const afterRevoke = await v1Invite(both.id);
     expect({
-      both: await v1Invite(both.id),
+      both: refusedBoth,
+      afterRevoke: z.object({ ok: z.unknown() }).safeParse(afterRevoke).success,
       v1Only: fromV1.data?.ok.status,
     }).toStrictEqual({
       both: { error: "permission.denied" },
+      afterRevoke: false,
       v1Only: "open",
     });
   });
