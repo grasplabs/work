@@ -36,8 +36,14 @@ export interface CatalogContract {
   operations?: Readonly<
     Record<string, { input: DescriptorText; output: DescriptorText }>
   >;
-  /** event: the event types it admits. */
-  eventTypes?: readonly string[];
+  /**
+   * event: the event types it admits, each with the descriptor of its data
+   * and whether a person's screen may send it (`browser`): only those
+   * become App references. A type without its data isn't admitted.
+   */
+  events?: Readonly<
+    Record<string, { readonly data: DescriptorText; readonly browser: boolean }>
+  >;
   /** workflow: the exact workflow the binding pins. */
   workflow?: { namespace: string; name: string; version: string };
 }
@@ -67,7 +73,13 @@ export interface ResolvedContract {
       output: ValueSchema<unknown, unknown>;
     }
   >;
+  /** event: the types it admits. */
   eventTypes?: ReadonlySet<string>;
+  /** event: each admitted type's data schema, and whether a screen sends it. */
+  events?: ReadonlyMap<
+    string,
+    { data: ValueSchema<unknown, unknown>; browser: boolean }
+  >;
   workflow?: { namespace: string; name: string; version: string };
 }
 
@@ -195,23 +207,33 @@ const readOperations = (
   return operations;
 };
 
-const readEventTypes = (value: unknown): ReadonlySet<string> | undefined => {
+const readEvents = (
+  value: unknown,
+  budget: CatalogBudget
+): ResolvedContract["events"] | undefined => {
   if (value === undefined) {
     return undefined;
   }
-  if (!Array.isArray(value)) {
-    return refuse("event types aren't a list");
+  const events = new Map<
+    string,
+    { data: ValueSchema<unknown, unknown>; browser: boolean }
+  >();
+  for (const type of ownStringKeys(value, catalogLimits.eventTypes)) {
+    const event = ownData(value, type);
+    const browser = ownData(event, "browser");
+    if (typeof browser !== "boolean") {
+      return refuse("an event type that doesn't say whether a screen sends it");
+    }
+    if (type.length === 0) {
+      return refuse("an empty event type");
+    }
+    events.set(text(type, catalogLimits.nameLength), {
+      // Required: an event type is admitted only with its data's contract.
+      data: schemaOf(ownData(event, "data"), budget),
+      browser,
+    });
   }
-  // Read once: a proxy's length could change from one read to the next.
-  const length = ownData(value, "length");
-  if (typeof length !== "number" || length > catalogLimits.eventTypes) {
-    return refuse("too many event types");
-  }
-  const types = new Set<string>();
-  for (let index = 0; index < length; index += 1) {
-    types.add(text(ownData(value, String(index)), catalogLimits.nameLength));
-  }
-  return types;
+  return events;
 };
 
 const readWorkflow = (value: unknown): ResolvedContract["workflow"] => {
@@ -242,7 +264,7 @@ const requiredFields: Readonly<
   model: [],
   workflow: ["workflow", "input", "output"],
   decision: ["input", "response"],
-  event: ["eventTypes"],
+  event: ["events"],
 };
 
 const checkComplete = (contract: ResolvedContract): void => {
@@ -251,7 +273,7 @@ const checkComplete = (contract: ResolvedContract): void => {
       refuse(`a ${contract.kind} contract without ${field}`);
     }
   }
-  if (contract.operations?.size === 0 || contract.eventTypes?.size === 0) {
+  if (contract.operations?.size === 0 || contract.events?.size === 0) {
     refuse("an empty list of operations or event types");
   }
 };
@@ -269,7 +291,7 @@ const readContract = (
   const output = optionalSchema(contract, "output", budget);
   const response = optionalSchema(contract, "response", budget);
   const operations = readOperations(ownData(contract, "operations"), budget);
-  const eventTypes = readEventTypes(ownData(contract, "eventTypes"));
+  const events = readEvents(ownData(contract, "events"), budget);
   const workflow = readWorkflow(ownData(contract, "workflow"));
   if (input !== undefined) {
     resolved.input = input;
@@ -283,8 +305,9 @@ const readContract = (
   if (operations !== undefined) {
     resolved.operations = operations;
   }
-  if (eventTypes !== undefined) {
-    resolved.eventTypes = eventTypes;
+  if (events !== undefined) {
+    resolved.events = events;
+    resolved.eventTypes = new Set(events.keys());
   }
   if (workflow !== undefined) {
     resolved.workflow = workflow;

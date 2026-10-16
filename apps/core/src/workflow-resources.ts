@@ -492,11 +492,14 @@ interface ResolvedWorkflow {
 
 /**
  * A version's contract, as stored: the SDK descriptors of its input and
- * output, and its parameters' descriptors, labels and sensitivity.
+ * output, its parameters' descriptors, labels and sensitivity, and its
+ * listen tasks, by task ID, with the event bindings each listens through:
+ * what an App binding it may be held at, and sent.
  */
 const storedContractSchema = z.strictObject({
   input: z.json(),
   output: z.json(),
+  listens: z.record(z.string(), z.array(z.string())),
   params: z.record(
     z.string(),
     z.strictObject({
@@ -681,6 +684,47 @@ const descriptorAt = (
   return z.json().parse(schema.descriptor);
 };
 
+/** What is at JSON Pointer `pointer` in `value`, if anything. */
+const valueAt = (value: unknown, pointer: string): unknown => {
+  let node = value;
+  for (const segment of pointer.split("/").slice(1)) {
+    const key = segment.replaceAll("~1", "/").replaceAll("~0", "~");
+    node =
+      typeof node === "object" && node !== null && Object.hasOwn(node, key)
+        ? Reflect.get(node, key)
+        : undefined;
+  }
+  return node;
+};
+
+/**
+ * The listen tasks of a checked definition, by task ID (unique in the
+ * definition, and what a run's waits name), with the event binding each
+ * listens through: the alias its `metadata.grasp.binding` names, which
+ * validation required to be a declared event binding.
+ */
+const listensOf = (checked: CheckedWorkflow): Record<string, string[]> => {
+  const listens: Record<string, string[]> = {};
+  for (const task of checked.tasks) {
+    if (task.kind === "listen") {
+      const alias = valueAt(
+        checked.definition,
+        `${task.pointer}/metadata/grasp/binding`
+      );
+      if (
+        typeof alias !== "string" ||
+        checked.bindings.get(alias)?.kind !== "event"
+      ) {
+        throw new Error(
+          `A checked listen task has no event binding: ${task.id}`
+        );
+      }
+      listens[task.id] = [alias];
+    }
+  }
+  return listens;
+};
+
 /** The contract of a checked definition: what a caller of it relies on. */
 const contractOf = (checked: CheckedWorkflow): StoredContract => {
   const declared =
@@ -698,6 +742,7 @@ const contractOf = (checked: CheckedWorkflow): StoredContract => {
   return {
     input: descriptorAt(checked, "/input/schema"),
     output: descriptorAt(checked, "/output/schema"),
+    listens: listensOf(checked),
     params,
   };
 };

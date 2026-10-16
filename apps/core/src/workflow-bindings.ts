@@ -59,7 +59,7 @@ import type { PinnedBinding } from "./workflow-resources.ts";
 
 // Approved bindings of independent workflows (platform specification 13.2):
 // which concrete resource serves each catalog binding a workflow declares
-// (an operation, connector, model or decision contract). A declaration is
+// (an operation, connector, model, decision or event contract). A declaration is
 // the workflow's requirement and grants nothing; an admin's approval, with
 // the live grant it names, is what a start freezes and a run calls.
 // Threat model, and how each is closed:
@@ -599,7 +599,12 @@ export const requireTargetServes = async (
     }
     case "decision": {
       await requireDeciders(env, target.deciders);
-      return;
+      break;
+    }
+    case "event": {
+      // Nothing to load: the contract says which types it admits and with
+      // what data, and every send is checked on its own.
+      break;
     }
     default: {
       target satisfies never;
@@ -643,6 +648,9 @@ const targetDetail = (
     }
     case "decision": {
       return { targetKind: target.kind, deciders: target.deciders.length };
+    }
+    case "event": {
+      return { targetKind: target.kind };
     }
     default: {
       return target satisfies never;

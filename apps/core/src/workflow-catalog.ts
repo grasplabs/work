@@ -9,6 +9,7 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { requireBuilder, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
+  catalogBindingKinds,
   catalogContractSchema,
   workflowResourceErrors,
 } from "@grasp-os/shared/workflow-resources";
@@ -26,9 +27,9 @@ import { isUniqueViolation } from "./db/d1.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 
 // The host catalog of contracts independent workflows bind besides each
-// other (platform specification 13.2): operation, connector, model and
-// decision contracts, each a key and the SDK descriptors of what a call
-// passes and returns. A workflow's validation resolves its bindings'
+// other (platform specification 13.2): operation, connector, model,
+// decision and event contracts, each a key and the SDK descriptors of
+// what a call passes and returns, or of each event type's data. A workflow's validation resolves its bindings'
 // contract keys here; an admin's approval (workflow-bindings.ts) then names
 // what serves each. Threat model, and how each is closed:
 //
@@ -44,7 +45,7 @@ import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 
 /** A stored contract, as a validation resolves it. */
 const storedSchema = z.strictObject({
-  kind: z.enum(["operation", "connector", "model", "decision"]),
+  kind: z.enum(catalogBindingKinds),
   input: z.string().optional(),
   output: z.string().optional(),
   response: z.string().optional(),
@@ -52,6 +53,12 @@ const storedSchema = z.strictObject({
     .record(
       z.string(),
       z.strictObject({ input: z.string(), output: z.string() })
+    )
+    .optional(),
+  events: z
+    .record(
+      z.string(),
+      z.strictObject({ data: z.string(), browser: z.boolean() })
     )
     .optional(),
 });

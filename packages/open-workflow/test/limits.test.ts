@@ -267,7 +267,7 @@ describe("the host's catalog", () => {
     ["connector", { kind: "connector" }],
     ["connector with no operations", { kind: "connector", operations: {} }],
     ["event", { kind: "event" }],
-    ["event with no types", { kind: "event", eventTypes: [] }],
+    ["event with no types", { kind: "event", events: {} }],
     ["workflow", { kind: "workflow", input: emptyObject, output: emptyObject }],
     ["decision", { kind: "decision", input: emptyObject }],
   ])(
@@ -312,7 +312,12 @@ describe("the host's catalog", () => {
       JSON.stringify(noteSummary),
       withContract({
         kind: "event",
-        eventTypes: Array.from({ length: 65 }, (_, index) => `e${index}`),
+        events: Object.fromEntries(
+          Array.from({ length: 65 }, (_, index) => [
+            `e${index}`,
+            { data: emptyObject, browser: false },
+          ])
+        ),
       })
     );
     expect(
