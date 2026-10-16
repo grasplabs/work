@@ -53,6 +53,7 @@
     "./permissions": "./src/permissions.ts",
     "./platform-change": "./src/platform-change.ts",
     "./platform-limits": "./src/platform-limits.ts",
+    "./platform-measures": "./src/platform-measures.ts",
     "./portable": "./src/portable.ts",
     "./quota-policy": "./src/quota-policy.ts",
     "./record-ids": "./src/record-ids.ts",

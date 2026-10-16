@@ -38,7 +38,13 @@ const modelNameSchema = z
  * - `template`: one immutable version of a published template;
  * - `store`: one of the App's store permissions: another business store's
  *   public operations, run by the App that owns the store, checked on
- *   every call (core's store-operations.ts).
+ *   every call (core's store-operations.ts);
+ * - `statistics`: the platform's statistics, for the App's own measures,
+ *   with no permission: the admin's approval is what grants them. For a
+ *   declaration that reads the platform's measures, one of the App's
+ *   `{ type: "platform" }` permissions to read them (`statistics`),
+ *   checked on every read; a declaration of its own measures only takes
+ *   none.
  */
 export const bindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("model"), model: modelNameSchema }),
@@ -66,6 +72,10 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("store"),
     permissionId: permissionIdSchema,
+  }),
+  z.strictObject({
+    kind: z.literal("statistics"),
+    permissionId: permissionIdSchema.optional(),
   }),
 ]);
 export type BindingTarget = z.infer<typeof bindingTargetSchema>;
@@ -174,7 +184,9 @@ export interface ResourceBinding {
  *   the same one changed, since it was approved;
  * - `grant_lost`: its binding's target can't be bound any more: the
  *   permission it names was revoked, the deployment no longer allows its
- *   model, or its template version can't be served;
+ *   model, its template version can't be served, or a statistics binding
+ *   names a permission its declaration doesn't read with, or none for
+ *   one that does;
  * - `unchecked`: the review couldn't ask connect about its binding within
  *   its limit, so it is never reported served; the next request checks it
  *   live;
@@ -216,6 +228,14 @@ export interface StoreChoice {
 }
 
 /**
+ * One of the App's permissions to read the platform's statistics, as a
+ * statistics resource's choice.
+ */
+export interface StatisticsChoice {
+  permissionId: string;
+}
+
+/**
  * What an admin may bind a declared resource to now, by its kind:
  *
  * - `model`: the models the deployment allows;
@@ -225,7 +245,10 @@ export interface StoreChoice {
  *   one for each declared collection;
  * - `template`: the published versions of the declared contract;
  * - `store`: the App's own active store permissions whose store serves
- *   every declared operation, of exactly the declared shape, and allows it.
+ *   every declared operation, of exactly the declared shape, and allows it;
+ * - `statistics`: for a declaration that reads the platform's measures
+ *   (`platform`), the App's own active permissions to read them, one of
+ *   which it needs; none, and nothing to choose, for its own measures.
  *
  * Approving checks the choice again: one that stopped serving since is
  * refused (`resource.target_invalid`). `truncated` says some were left
@@ -238,6 +261,7 @@ export type BindingChoices = { truncated: boolean } & (
   | { kind: "knowledge"; permissions: CollectionChoice[] }
   | { kind: "template"; versions: PublishedTemplate[] }
   | { kind: "store"; permissions: StoreChoice[] }
+  | { kind: "statistics"; platform: boolean; permissions: StatisticsChoice[] }
 );
 
 /**
@@ -266,10 +290,12 @@ export interface DeclaredResource {
   /** A connector's declared actions; empty for the other kinds. */
   actions: string[];
   /**
-   * Knowledge's declared operations, or a store's, by path; empty for the
-   * other kinds.
+   * Knowledge's declared operations, a store's, by path, or statistics';
+   * empty for the other kinds.
    */
   operations: string[];
+  /** The platform's measures a statistics resource reads; empty otherwise. */
+  measures: string[];
   /** Knowledge's declared collections, by the names App code uses. */
   collections: string[];
   /** A model's output token ceiling; null for the other kinds. */

@@ -114,6 +114,7 @@ export const screenTests = [
   "test/run-summary.test.ts",
   "test/run-history.test.ts",
   "test/rpc-targets.test.ts",
+  "test/statistics.test.ts",
 ];
 
 /** Core's Worker test setup, shared by each of core's test projects. */
