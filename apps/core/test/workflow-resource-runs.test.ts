@@ -1200,6 +1200,30 @@ describe("whose word a run's row takes, and whose clock", () => {
     });
   });
 
+  it("keeps what a run returned removed once the sweep removed it, though the retention is lengthened after", async () => {
+    const by = await builder();
+    const done = await published(by, (name) =>
+      definitionOf(name, [{ finish: { set: { status: "done" } } }])
+    );
+    const { runId } = await start(by, done.id);
+    await ended(by, done.id, runId);
+    // Swept two days on under a retention of one day, then read under the
+    // thirty days it was admitted with: the engine still holds it.
+    const later = Date.now() + 2 * 86_400_000;
+    await sweepRunDetails({ ...env, RUN_RETENTION_DAYS: "1" }, new Date(later));
+    const spied = vi.spyOn(Date, "now").mockReturnValue(later);
+    let read: WorkflowResourceRun;
+    try {
+      read = await resourceRunFor(env, by, done.id, runId);
+    } finally {
+      spied.mockRestore();
+    }
+    expect({ status: read.status, output: read.output }).toStrictEqual({
+      status: "completed",
+      output: undefined,
+    });
+  });
+
   it("cancels a run still starting before the engine hears, so a start already on its way runs nothing", async () => {
     const by = await builder();
     const workflow = await waitingWorkflow(by);

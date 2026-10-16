@@ -735,8 +735,9 @@ const keptFailureOf = (code: string): WorkflowResourceRun["error"] => {
  * What run `row` returned or why it failed: where the engine has its
  * result, or else why its row says it failed (its `failureCode`: core's
  * reason, or the engine's code, kept as it ended). Once its retention, as
- * the deployment has it now, is over (`detailsRemoved`, by the row alone,
- * as every reader of a run), nothing of what it returned, and of why it
+ * the deployment has it now, is over, or the sweep removed them from its
+ * receipt (`detailsRemoved`, by the rows alone, as every reader of a run),
+ * nothing of what it returned, and of why it
  * failed only the code: the engine keeps a run for the retention it was
  * admitted with, which may since have been shortened, or lengthened.
  */
@@ -744,9 +745,16 @@ const resultOf = async (
   env: Env,
   row: RunRow
 ): Promise<Pick<WorkflowResourceRun, "output" | "error">> => {
+  // The sweep's mark on its receipt too: details removed once stay removed,
+  // whatever the retention says after.
+  const receipt = await drizzle(env.DB)
+    .select({ detailsRemovedAt: workflowStartReceipts.detailsRemovedAt })
+    .from(workflowStartReceipts)
+    .where(eq(workflowStartReceipts.id, row.id))
+    .get();
   const removed = detailsRemoved(env, {
     endedAt: row.endedAt,
-    detailsRemovedAt: null,
+    detailsRemovedAt: receipt?.detailsRemovedAt ?? null,
   });
   // Only what the row's own end says: an output for a completed run, why
   // for a failed one, nothing for any other, whatever the engine holds (a
