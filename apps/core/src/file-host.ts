@@ -29,6 +29,7 @@ import {
   gt,
   min,
   not,
+  or,
   sql,
 } from "drizzle-orm";
 import { drizzle as drizzleD1 } from "drizzle-orm/d1";
@@ -866,25 +867,58 @@ export class FileHost {
    * may read, as anyone else.
    */
   async #readable(reader: FileReader, row: FileRow): Promise<boolean> {
-    const holdersOf = () =>
+    // The holders a page at a time, in a fixed order, after `after`: every
+    // record holding it is looked at, however many there are.
+    const pageAfter = (after?: FileHolder) =>
       this.#db
         .select({ tableId: fileRefs.tableId, recordId: fileRefs.recordId })
         .from(fileRefs)
-        .where(eq(fileRefs.fileId, row.fileId))
+        .where(
+          and(
+            eq(fileRefs.fileId, row.fileId),
+            after === undefined
+              ? undefined
+              : or(
+                  gt(fileRefs.tableId, after.tableId),
+                  and(
+                    eq(fileRefs.tableId, after.tableId),
+                    gt(fileRefs.recordId, after.recordId)
+                  )
+                )
+          )
+        )
+        .orderBy(asc(fileRefs.tableId), asc(fileRefs.recordId))
         .limit(holdersRead)
         .all();
-    // The holders looked at again once the records' check answered: a
+    // Each page looked at again once the records' check answered: a
     // commit meanwhile that moved the file to other records is checked
     // afresh, never answered for the holders it had before.
     for (let attempt = 0; attempt < readableAttempts; attempt += 1) {
-      const holders = holdersOf();
-      if (holders.length === 0) {
-        return row.ownerId === reader.principal;
+      let after: FileHolder | undefined;
+      let held = false;
+      let changed = false;
+      for (;;) {
+        const page = pageAfter(after);
+        if (page.length === 0) {
+          break;
+        }
+        held = true;
+        // oxlint-disable-next-line no-await-in-loop -- page after page
+        const readable = await this.#store.readable(reader, page);
+        if (!sameHolders(page, pageAfter(after))) {
+          changed = true;
+          break;
+        }
+        if (readable) {
+          return true;
+        }
+        if (page.length < holdersRead) {
+          break;
+        }
+        after = page.at(-1);
       }
-      // oxlint-disable-next-line no-await-in-loop -- checked again only when it changed
-      const readable = await this.#store.readable(reader, holders);
-      if (sameHolders(holders, holdersOf())) {
-        return readable;
+      if (!changed) {
+        return held ? false : row.ownerId === reader.principal;
       }
     }
     return false;

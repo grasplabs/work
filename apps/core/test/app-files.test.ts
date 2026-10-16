@@ -135,6 +135,18 @@ export const keepTwice = mutation({
   },
 });
 
+/** Puts a file in the vault \`count\` times, in one commit. */
+export const stashMany = mutation({
+  args: { file: v.file(), count: v.number().integer().min(1).max(90) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    for (let at = 0; at < args.count; at += 1) {
+      await ctx.db.insert("vault", { file: args.file });
+    }
+    return null;
+  },
+});
+
 /** Puts a file in the vault, which only the App's builders read. */
 export const stash = mutation({
   args: { file: v.file() },
@@ -167,7 +179,7 @@ export const unpin = mutation({
 });
 `,
   "app.ts": `import { app, resource } from "@grasp-os/sdk";
-import { attachFile, create, detachFile, get, keepTwice, pin, pinById, remove, renew, stash, unpin } from "./operations/notes.ts";
+import { attachFile, create, detachFile, get, keepTwice, pin, pinById, remove, renew, stash, stashMany, unpin } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export const attachments = resource.files("attachments", {
@@ -188,7 +200,7 @@ export default app({
       board: { read: "appMembers", write: "appMembers" },
     },
   },
-  operations: { notes: { get, create, attachFile, detachFile, remove, renew, keepTwice, stash, pin, pinById, unpin } },
+  operations: { notes: { get, create, attachFile, detachFile, remove, renew, keepTwice, stash, stashMany, pin, pinById, unpin } },
   internalOperations: {},
   screens: [{ name: "notes", path: "/", source: "screens/notes.tsx" }],
   uses: [attachments, photos, avatars],
@@ -284,6 +296,11 @@ const apiOf = (release: Release) => ({
     null,
     "mutation"
   >(release, "notes.keepTwice"),
+  stashMany: referenceTo<
+    { file: { id: string }; count: number },
+    null,
+    "mutation"
+  >(release, "notes.stashMany"),
   pinById: referenceTo<{ fileId: string }, string, "mutation">(
     release,
     "notes.pinById"
@@ -2733,6 +2750,19 @@ describe("an App's files", { timeout: 120_000 }, () => {
       loose: "string",
       read: "file.not_found",
     });
+  });
+
+  it("lets a person read a file through the one record of many holding it they may read", async () => {
+    const { builder, app, client, api, screen } = await openedApp();
+    const colleague = await colleagueOf(builder, app);
+    const id = await upload(screen.channel, blobOf(png(), "image/png"));
+    // Many vault entries, which only builders read; then the board, which
+    // every member reads.
+    await client.mutation(api.stashMany, { file: { id }, count: 80 });
+    await client.mutation(api.pin, { file: { id } });
+    await expect(
+      colleague.screen.channel.describe("attachments", id)
+    ).resolves.toMatchObject({ id });
   });
 
   it("attaches only a file uploaded through a resource that declares attach", async () => {
