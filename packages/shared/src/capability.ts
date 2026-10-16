@@ -116,6 +116,14 @@ export const capabilityClaimsSchema = z.strictObject({
    */
   readOnly: z.boolean().default(false),
   /**
+   * The call's input holds a value core keeps from people: a workflow's
+   * sensitive parameter, put in as a binding argument. Connect keeps none
+   * of its input under its key, so no listing of a call of unknown
+   * outcome shows it, and saying such a call didn't happen is refused, as
+   * for one whose input is no longer kept. Only the capability says it.
+   */
+  sensitive: z.boolean().default(false),
+  /**
    * What core checks again if connect holds the call, or loses its
    * answer, and the person decides it: the permission that allowed it and
    * the context it came from.
@@ -158,6 +166,8 @@ export interface CapabilityScope extends CapabilityCall {
   restricted?: boolean | undefined;
   /** The caller may only read: signed, not compared. */
   readOnly?: boolean | undefined;
+  /** The call's input holds a sensitive value: signed, not compared. */
+  sensitive?: boolean | undefined;
   /** What core checks again when a held call is confirmed: signed. */
   origin: z.input<typeof originSchema>;
   /** Where the call is made, for the audit log: signed, not compared. */
@@ -220,6 +230,7 @@ export const signCapability = async (
     idempotencyKey: scope.idempotencyKey ?? null,
     restricted: scope.restricted === true,
     readOnly: scope.readOnly === true,
+    sensitive: scope.sensitive === true,
     origin: scope.origin,
     ...(scope.context === undefined ? {} : { context: scope.context }),
     ...(scope.decision === undefined ? {} : { decision: scope.decision }),

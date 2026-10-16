@@ -573,13 +573,17 @@ const hostOf = async (
     sleep: async () => {
       await Promise.resolve();
     },
+    sleepUntil: async () => {
+      await Promise.resolve();
+    },
     waitForEvent: async () => await Promise.reject(new Error("No waits here")),
   };
+  const runId = crypto.randomUUID();
   return new ResourceRunHost(
     env,
     step,
     {
-      runId: crypto.randomUUID(),
+      runId,
       workflowId: id,
       version: 1,
       principal: by.userId,
@@ -587,6 +591,15 @@ const hostOf = async (
       params: z.record(z.string(), z.json()).parse(params ?? { limit: 5 }),
       createdAt: Date.now(),
       build,
+      calling: {
+        runId,
+        workflowId: id,
+        version: 1,
+        principal: by.userId,
+        invoker: { type: "person", id: by.userId, appVersion: null },
+        bindings: new Map(),
+      },
+      maxModelCalls: 1,
     },
     {
       leaseOf: () => {
@@ -1088,6 +1101,42 @@ describe("what one attempt of a JSON workflow's step may spend", () => {
     expect(endOf(await ranFor(by, workflow.id))).toStrictEqual({
       status: "failed",
       code: "expression.budget_exhausted",
+    });
+  });
+
+  it("holds a sleeping task's enter step to what one attempt evaluates, counting its if, input.from and deadline", async () => {
+    const by = await builder();
+    const sleeping = (inputs: number) => [
+      {
+        nap: {
+          if: "${ true }",
+          input: { from: fields(inputs) },
+          call: "grasp.sleepUntil",
+          with: { timestamp: "${ $workflow.startedAt.epoch.milliseconds }" },
+        },
+      },
+      { finish: { set: { status: "done" } } },
+    ];
+    const unsupported = async (inputs: number) => {
+      const { version } = await published(by, (name) =>
+        definitionOf(name, sleeping(inputs))
+      );
+      return version.build.executable ? [] : version.build.unsupported;
+    };
+    // 66 expressions in its enter step: within an attempt's 128, though
+    // more than one stage may hold. One more input is past its stage's 64.
+    expect({
+      full: await unsupported(64),
+      over: await unsupported(65),
+    }).toStrictEqual({
+      full: [],
+      over: [
+        {
+          pointer: "/do/0/nap/input/from",
+          taskId: "nap",
+          feature: "input.from:expressions",
+        },
+      ],
     });
   });
 

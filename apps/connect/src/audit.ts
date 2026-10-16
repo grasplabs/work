@@ -16,6 +16,7 @@ import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectCall } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { codeSubjectId } from "@grasp-os/shared/permissions";
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -189,6 +190,27 @@ const provenanceGroups = (ids: readonly string[]): string[][] => {
 };
 
 /**
+ * Whose code made a verified call, by its subject's type and ID, and the
+ * run of an independent workflow it is a call of: such a run is the
+ * system as an actor (`delegateActorOf`), so these name it.
+ */
+const callerOf = (
+  claims: CapabilityClaims | undefined
+): Record<string, AuditDetailValue> => {
+  if (claims === undefined) {
+    return {};
+  }
+  const { authority, context } = claims;
+  return {
+    onBehalfOf: authority.onBehalfOf,
+    mode: authority.mode,
+    subjectType: authority.subject.type,
+    subjectId: codeSubjectId(authority.subject),
+    ...(context?.type === "workflowRun" ? { run: context.runId } : {}),
+  };
+};
+
+/**
  * Records one call: who made it (the platform, while its capability isn't
  * verified), on which connection, what it did and read, and how it ended.
  * Identifiers only, never the input or the output. A call that read more
@@ -226,8 +248,9 @@ export const auditCall = async (
       ? undefined
       : await sha256Hex(call.idempotencyKey)
   );
-  add("onBehalfOf", claims?.authority.onBehalfOf);
-  add("mode", claims?.authority.mode);
+  for (const [key, value] of Object.entries(callerOf(claims))) {
+    add(key, value);
+  }
   // Which of the App's versions made the call, for a call from App code.
   add("appVersion", claims?.authority.appVersion);
   add("sideEffect", sideEffect);

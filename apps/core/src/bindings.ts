@@ -50,6 +50,11 @@ export interface CallGrant {
    */
   readOnly?: boolean;
   /**
+   * The call's input holds a value core keeps from people (a workflow's
+   * sensitive parameter as a binding argument): connect keeps none of it.
+   */
+  sensitive?: boolean;
+  /**
    * When the work the call comes from must end, in milliseconds since the
    * epoch: the capability expires by then, whatever its usual lifetime.
    */
@@ -81,6 +86,7 @@ export const signedCall = async (
     connection,
     permissionId,
     readOnly,
+    sensitive,
     notAfter,
     binding,
   }: CallGrant,
@@ -102,6 +108,7 @@ export const signedCall = async (
       ...scope,
       restricted,
       readOnly,
+      sensitive,
       notAfter,
       origin: {
         permissionId,
@@ -191,6 +198,8 @@ export const requireStepKey = (
 export interface StubCaller {
   authority: Authority;
   readOnly?: boolean;
+  /** Its input holds a sensitive value (`CallGrant.sensitive`). */
+  sensitive?: boolean;
   /** When the work it comes from must end: the capability expires by then. */
   notAfter?: number;
   /**
@@ -248,6 +257,7 @@ const signedStub = async (
       {
         authority: caller.authority,
         readOnly: caller.readOnly,
+        sensitive: caller.sensitive,
         notAfter: caller.notAfter,
         context,
         connection,

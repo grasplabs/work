@@ -130,6 +130,14 @@ export const workflowResourceErrors = defineErrorFamily({
   "workflow.app_binding_invalid":
     "That isn't a workflow version this App can bind.",
   "workflow.app_binding_unavailable": "This App has no such workflow binding.",
+  "workflow.call_denied":
+    "This run may no longer make that call: the person it acts for, the approval or permission behind the binding, or the trigger, App or agent that started it lost what it needed since the run started.",
+  "workflow.call_invalid":
+    "A task's call, or what it answered, doesn't match the binding's contract, so the run failed.",
+  "workflow.call_release_not_current":
+    "The App release this call's approval pins is no longer the App's current version, so the call can't run. Approve the binding for the App's current release, then start the workflow again.",
+  "workflow.model_call_limit":
+    "The run made as many model calls as its workflow allows, so it failed.",
 });
 
 /** The binding kinds the host catalog serves, beside other workflows. */
@@ -537,7 +545,7 @@ export interface WorkflowBinders {
  * A version built for another one doesn't run
  * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
  */
-export const openWorkflowProtocol = 2;
+export const openWorkflowProtocol = 3;
 
 /**
  * Something of a definition the code generator doesn't lower yet: its

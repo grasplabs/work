@@ -28,7 +28,8 @@ import type {
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
-  codeSubjectSchema,
+  codeSubjectId,
+  codeSubjectOf,
   workContextSchema,
 } from "@grasp-os/shared/permissions";
 import type { WorkContext } from "@grasp-os/shared/permissions";
@@ -86,12 +87,7 @@ type Row = typeof pendingActions.$inferSelect;
 /** A held action, as connect keeps it: the row. */
 export type HeldAction = Row;
 
-const subjectOf = (row: Row) =>
-  codeSubjectSchema.parse(
-    row.subjectType === "app"
-      ? { type: "app", appId: row.subjectId }
-      : { type: "agent", agentId: row.subjectId }
-  );
+const subjectOf = (row: Row) => codeSubjectOf(row.subjectType, row.subjectId);
 
 /** The call a held action makes once confirmed. */
 export const callOf = (row: Row): Omit<ConnectCall, "capability"> => {
@@ -508,7 +504,7 @@ export const hold = async (
   const db = drizzle(env.DB);
   const { subject } = authority;
   const subjectType = subject.type;
-  const subjectId = subject.type === "app" ? subject.appId : subject.agentId;
+  const subjectId = codeSubjectId(subject);
   const id = crypto.randomUUID();
   const context = JSON.stringify(origin.context);
   const sameCaller = and(
@@ -874,10 +870,7 @@ export const waitingUnder = async (
     .where(
       and(
         eq(pendingActions.subjectType, subject.type),
-        eq(
-          pendingActions.subjectId,
-          subject.type === "app" ? subject.appId : subject.agentId
-        ),
+        eq(pendingActions.subjectId, codeSubjectId(subject)),
         eq(pendingActions.onBehalfOf, authority.onBehalfOf),
         eq(pendingActions.connectionId, connectionId),
         eq(pendingActions.action, action),

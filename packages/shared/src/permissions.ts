@@ -34,16 +34,65 @@ const agentSubjectSchema = z.strictObject({
   type: z.literal("agent"),
   agentId: agentIdSchema,
 });
+const workflowSubjectSchema = z.strictObject({
+  type: z.literal("workflow"),
+  workflowId: workflowResourceIdSchema,
+});
 
 /**
- * Whose code makes a call: an App's or an agent's. What a call's
- * authority names (`authoritySchema`).
+ * Whose code makes a call: an App's, an agent's, or an independent
+ * workflow's (a run of its sealed build, on the grants the workflow holds
+ * itself: core's workflows/resource-calls.ts). What a call's authority
+ * names (`authoritySchema`).
  */
 export const codeSubjectSchema = z.discriminatedUnion("type", [
   appSubjectSchema,
   agentSubjectSchema,
+  workflowSubjectSchema,
 ]);
 export type CodeSubject = z.infer<typeof codeSubjectSchema>;
+
+/** The ID of the App, agent or workflow `subject` names. */
+export const codeSubjectId = (subject: CodeSubject): string => {
+  switch (subject.type) {
+    case "app": {
+      return subject.appId;
+    }
+    case "agent": {
+      return subject.agentId;
+    }
+    case "workflow": {
+      return subject.workflowId;
+    }
+    default: {
+      return subject satisfies never;
+    }
+  }
+};
+
+/**
+ * The subject of type `type` and ID `id`, as a store keeps the two
+ * apart: refused, as any parse is, when `id` can't be one of that type.
+ */
+export const codeSubjectOf = (
+  type: CodeSubject["type"],
+  id: string
+): CodeSubject => {
+  switch (type) {
+    case "app": {
+      return codeSubjectSchema.parse({ type, appId: id });
+    }
+    case "agent": {
+      return codeSubjectSchema.parse({ type, agentId: id });
+    }
+    case "workflow": {
+      return codeSubjectSchema.parse({ type, workflowId: id });
+    }
+    default: {
+      return type satisfies never;
+    }
+  }
+};
 
 /**
  * Who a permission is for: an App, an agent, or an independent resource
@@ -54,10 +103,7 @@ export type CodeSubject = z.infer<typeof codeSubjectSchema>;
 export const permissionSubjectSchema = z.discriminatedUnion("type", [
   appSubjectSchema,
   agentSubjectSchema,
-  z.strictObject({
-    type: z.literal("workflow"),
-    workflowId: workflowResourceIdSchema,
-  }),
+  workflowSubjectSchema,
   z.strictObject({
     type: z.literal("store"),
     storeId: storeIdSchema,
@@ -472,13 +518,21 @@ export const authoritySchema = z
       path: ["appVersion"],
       message: "An App's call names its version; an agent's none",
     }
+  )
+  .refine(
+    ({ subject, mode }) => subject.type !== "workflow" || mode === "workflow",
+    {
+      path: ["mode"],
+      message: "An independent workflow's call is a run's, never interactive",
+    }
   );
 export type Authority = z.infer<typeof authoritySchema>;
 
 /**
- * Where an App or agent works, and keeps its restricted mode: a chat, an
- * App, or a run of one of the App's workflows. The host sets it, like the
- * authority.
+ * Where an App, agent or independent workflow works, and keeps its
+ * restricted mode: a chat, an App, a run of one of the App's workflows, or
+ * a run of an independent workflow (`workflowRun`, core's
+ * workflows/resource-calls.ts). The host sets it, like the authority.
  */
 export const workContextSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -490,6 +544,11 @@ export const workContextSchema = z.discriminatedUnion("type", [
   z.strictObject({
     type: z.literal("run"),
     appId: appIdSchema,
+    runId: runIdSchema,
+  }),
+  z.strictObject({
+    type: z.literal("workflowRun"),
+    workflowId: workflowResourceIdSchema,
     runId: runIdSchema,
   }),
 ]);

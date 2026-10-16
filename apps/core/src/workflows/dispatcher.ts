@@ -187,6 +187,9 @@ const runStepOf = (env: Env, step: WorkflowStep): RunStep => {
     sleep: async (name, duration) => {
       await step.sleep(name, duration);
     },
+    sleepUntil: async (name, timestamp) => {
+      await step.sleepUntil(name, timestamp);
+    },
     waitForEvent: async (name, options) =>
       await step.waitForEvent(name, options),
   };

@@ -6,7 +6,8 @@ import type {
 } from "@grasp-os/shared/capability";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { canonicalJson } from "@grasp-os/shared/json";
-import type { WorkContext } from "@grasp-os/shared/permissions";
+import { codeSubjectId } from "@grasp-os/shared/permissions";
+import type { CodeSubject, WorkContext } from "@grasp-os/shared/permissions";
 
 // A person's decision on a call that waits for them (confirming a held
 // action, resolving a call of unknown outcome) reaches connect as a
@@ -30,7 +31,7 @@ export interface DecidedOrigin {
 
 /** The call a decision is about, as connect recorded it. */
 export interface DecidedCall {
-  subjectType: "app" | "agent";
+  subjectType: CodeSubject["type"];
   subjectId: string;
   onBehalfOf: string;
   /** Null when what it came from can't be read: it can't be decided. */
@@ -56,10 +57,7 @@ const decides = (
   { decision, person, call }: ExpectedDecision
 ): boolean => {
   const { authority, origin } = claims;
-  const subjectId =
-    authority.subject.type === "app"
-      ? authority.subject.appId
-      : authority.subject.agentId;
+  const subjectId = codeSubjectId(authority.subject);
   return (
     call.origin !== null &&
     claims.decision !== undefined &&

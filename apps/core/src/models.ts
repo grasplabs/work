@@ -505,6 +505,13 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    */
   beforeSend?: () => void;
   /**
+   * The caller's own authority, decided again once the ledger admitted
+   * each provider request, before `beforeSend`: it throws to stop the
+   * request, which is then never sent (a workflow run's call whose
+   * approval or grant went while it waited, resource-calls.ts).
+   */
+  reauthorize?: () => Promise<void>;
+  /**
    * Told while the call waits in the queue for a share of the model
    * requests in flight, each time it asks again: the share and when it
    * asks again at the latest (ms since the epoch); and `null` once it
@@ -517,6 +524,13 @@ export type ModelCall<Output> = z.input<typeof callSchema> & {
    * share stops waiting, and one under way is cut off.
    */
   signal?: AbortSignal;
+  /**
+   * Whether a request the provider refused for a moment (429 or 5xx), or
+   * that didn't connect, is sent again (the default, `maxRetries`). False
+   * where one call must be one request: a workflow run's model call, which
+   * its run's limit of calls counts (resource-calls.ts).
+   */
+  providerRetries?: boolean;
 };
 
 /** Where a call waiting for a share stands, or `null` once it stopped waiting. */
@@ -748,10 +762,14 @@ interface Route extends Admitted {
   disclose: ShareIdentity["disclose"];
   /** The caller's last check before each provider request (`ModelCall.beforeSend`). */
   beforeSend?: () => void;
+  /** The caller's authority, decided again (`ModelCall.reauthorize`). */
+  reauthorize?: () => Promise<void>;
   /** Told while the call waits for a share (`ModelCall.onQueued`). */
   onQueued?: QueuedHook;
   /** The call's notes of its wait, one after another (`told`). */
   notes: Promise<void>;
+  /** Whether a refused request is sent again (`ModelCall.providerRetries`). */
+  providerRetries?: boolean;
 }
 
 interface Request extends Route {
@@ -1543,6 +1561,7 @@ const open = (
     // awaited before the request is sent: refused, it is never sent, and
     // its reservation goes back.
     try {
+      await route.reauthorize?.();
       route.beforeSend?.();
       // Cancelled while it was admitted, or while its wait was cleared: it
       // is never sent, and its reservation goes back whole.
@@ -1600,7 +1619,7 @@ const open = (
     fetch: measured,
     headers: gatewayHeaders(call),
     maxTokens: answerTokens(call, model),
-    maxRetries,
+    maxRetries: route.providerRetries === false ? 0 : maxRetries,
     // Without a level pi turns reasoning off.
     reasoning: thinkingOf(model, call.effort),
     signal,
@@ -1874,6 +1893,22 @@ const chatOf = ({ work }: Session): string | null =>
     ? work.context.chatId
     : null;
 
+/**
+ * The run of an independent workflow a call works for, if it does: its
+ * actor is the system (`delegateActorOf`), so its workflow, run and
+ * person are named here.
+ */
+const workflowRunOf = ({
+  work,
+}: Session): { workflow: string; run: string; person: string } | object =>
+  work !== undefined && "context" in work && work.context.type === "workflowRun"
+    ? {
+        workflow: work.context.workflowId,
+        run: work.context.runId,
+        person: work.authority.onBehalfOf,
+      }
+    : {};
+
 /** Whether `entry` makes an event the audit log takes. */
 const fitsAuditLog = (entry: AuditEntry): boolean => {
   try {
@@ -1954,6 +1989,7 @@ const auditEntry = (
       provenanceDropped: dropped,
       chat: chatOf(call),
       ...bindingOf(call),
+      ...workflowRunOf(call),
     },
   }));
 };
@@ -2091,6 +2127,7 @@ const refusedEntry = (
       provenanceDropped: dropped,
       chat: chatOf(call),
       ...bindingOf(call),
+      ...workflowRunOf(call),
     },
   }));
 };
@@ -2384,8 +2421,10 @@ const callModel = async <Output>(
     schema,
     askAgain,
     beforeSend,
+    reauthorize,
     onQueued,
     signal,
+    providerRetries = true,
     ...fields
   }: ModelCall<Output>
 ): Promise<ModelAnswer<Output>> => {
@@ -2393,7 +2432,9 @@ const callModel = async <Output>(
   const route: Route = {
     ...(await admit(env, call)),
     ...(beforeSend === undefined ? {} : { beforeSend }),
+    ...(reauthorize === undefined ? {} : { reauthorize }),
     ...(onQueued === undefined ? {} : { onQueued }),
+    providerRetries,
   };
   const { model } = route;
   const limit = deadline(call.timeoutMs ?? defaultTimeoutMs, signal);

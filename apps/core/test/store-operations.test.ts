@@ -12,13 +12,14 @@ import type {
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appFor, commitFiles, setCurrentVersion } from "../src/apps.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
+import { liveRuns } from "../src/live-runs.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { permissionsOpenTo } from "../src/permissions-open.ts";
 import {
@@ -47,6 +48,8 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
+import { startWorkflow } from "../src/workflow-starts.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { allEvents } from "./audit-events.ts";
 import { appWith, person, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
@@ -1083,7 +1086,8 @@ const byName = { name: "${ $workflow.input.who }" };
 const workflowOf = async (
   owner: Person,
   key: string,
-  args: Record<string, string>
+  args: Record<string, string>,
+  before: unknown[] = []
 ) => {
   const workflow = await createWorkflowResource(env, owner, `crm-${unique()}`);
   await publishWorkflowVersion(env, owner, workflow.id, {
@@ -1125,6 +1129,7 @@ const workflowOf = async (
         },
       },
       do: [
+        ...before,
         {
           add: {
             call: "grasp.operation",
@@ -1490,6 +1495,130 @@ describe("a workflow calling a store's public operation", () => {
         ["contacts.add", "store.restricted"],
       ],
       crmSees: ["Ada"],
+    });
+  });
+});
+
+/** Starts version 1 of workflow `id` for `by`, its input `who`: its run's ID. */
+const startedFor = async (by: Person, id: string, who: string) => {
+  const { runId } = await startWorkflow(
+    env,
+    { type: "person", person: by },
+    id,
+    {
+      version: 1,
+      input: { who },
+      key: unique(),
+    }
+  );
+  return runId ?? "";
+};
+
+/** Run `runId` of workflow `id` once it has ended, as `by` reads it. */
+const endedRun = async (by: Person, id: string, runId: string) =>
+  await vi.waitFor(
+    async () => {
+      const run = await resourceRunFor(env, by, id, runId);
+      expect(run.endedAt).not.toBeNull();
+      return run;
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
+describe("a JSON workflow's run calling a store's public operation", () => {
+  it("calls it through the approval its start froze, as its person, its receipt kept while the run lives", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const key = await contractOf(admin, crm.release, "contacts.add");
+    // Waits before its call, so its receipt's run is seen live first.
+    const workflow = await workflowOf(ada, key, byName, [
+      { hold: { wait: "PT1S" } },
+    ]);
+    const permissionId = await granted(
+      admin,
+      {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "store", storeId: crm.store },
+        actions: ["contacts.add"],
+      },
+      null
+    );
+    const approve = async () =>
+      await approveWorkflowBinding(env, admin, workflow.id, {
+        alias: "lookup",
+        target: {
+          kind: "storeOperation",
+          permissionId,
+          operation: "contacts.add",
+          operationKind: "mutation",
+        },
+        reviewed: { version: 1 },
+      });
+    const approval = await approve();
+    const first = await startedFor(ada, workflow.id, "Ada");
+    const liveWhileRunning = await liveRuns(env, [first]);
+    const firstEnd = await endedRun(ada, workflow.id, first);
+    // Its approval revoked and given again while the next waits: a start
+    // runs only through the approval it froze.
+    const second = await startedFor(ada, workflow.id, "Bob");
+    await revokeWorkflowBinding(env, admin, workflow.id, approval.id);
+    await approve();
+    const secondEnd = await endedRun(ada, workflow.id, second);
+    const liveOnceEnded = await liveRuns(env, [first]);
+    expect({
+      live: liveWhileRunning.has(first),
+      liveOnceEnded: liveOnceEnded.has(first),
+      first: firstEnd.status,
+      second: { status: secondEnd.status, code: secondEnd.error?.code },
+      crmSees: await call(crm.owner, crm, "contacts.list"),
+    }).toStrictEqual({
+      live: true,
+      liveOnceEnded: false,
+      first: "completed",
+      second: { status: "failed", code: "workflow.call_denied" },
+      crmSees: ["Ada"],
+    });
+  });
+
+  it("gets nothing from a store whose App is restricted, and records it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const key = await contractOf(admin, crm.release, "contacts.add");
+    const workflow = await workflowOf(ada, key, byName);
+    const permissionId = await granted(
+      admin,
+      {
+        subject: { type: "workflow", workflowId: workflow.id },
+        object: { type: "store", storeId: crm.store },
+        actions: ["contacts.add"],
+      },
+      null
+    );
+    await approveWorkflowBinding(env, admin, workflow.id, {
+      alias: "lookup",
+      target: {
+        kind: "storeOperation",
+        permissionId,
+        operation: "contacts.add",
+        operationKind: "mutation",
+      },
+      reviewed: { version: 1 },
+    });
+    await restrict(env, authorityOf(crm), contextOf(crm), ["test"]);
+    const runId = await startedFor(ada, workflow.id, "Mallory");
+    const run = await endedRun(ada, workflow.id, runId);
+    expect({
+      status: run.status,
+      code: run.error?.code,
+      refusals: refusedOf(await allEvents(), workflow.id),
+      crmSees: await call(crm.owner, crm, "contacts.list"),
+    }).toStrictEqual({
+      status: "failed",
+      code: "resource.unavailable",
+      refusals: [["contacts.add", "store.restricted"]],
+      crmSees: [],
     });
   });
 });
