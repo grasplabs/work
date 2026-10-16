@@ -34,6 +34,7 @@ import type {
   ProgressSink,
   ResourceBindings,
 } from "./operations.ts";
+import { requireApprovedVersion } from "./permissions.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
@@ -224,13 +225,18 @@ export const runInvocationFor = async (
 ): Promise<Invocation> => {
   const { app, runId, version, authority } = run;
   // The one gate, as for a screen's call: before the call starts, each
-  // mutation commits and each resource request. The release, and the
-  // person, still a member with a role in the App; then, last, after
-  // every read, the step's attempt, so nothing runs for an attempt the
-  // engine let go of meanwhile. The commit and the request check the
-  // lease once more, synchronously, just before they start.
+  // mutation commits and each resource request. The release; the version
+  // an admin approved, while the App holds a permission that changes
+  // things (`requireApprovedVersion`), as a run's calls into the App
+  // always were: a run waiting on a version nobody approved does nothing
+  // more once an admin grants for a later one, not even to the App's own
+  // data. Then the person, still a member with a role in the App; then,
+  // last, after every read, the step's attempt, so nothing runs for an
+  // attempt the engine let go of meanwhile. The commit and the request
+  // check the lease once more, synchronously, just before they start.
   const authorize = async () => {
     await requireNotRevoked(env, app, version);
+    await requireApprovedVersion(env, app, version);
     const role = await memberRole(env.DB, authority.onBehalfOf);
     if (role === undefined) {
       throw permissionErrors.create("permission.person_inactive");

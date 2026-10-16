@@ -24,6 +24,7 @@ import { release } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
 import { consentCode, graphSentUrl } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
+import { isolationFiles } from "./isolation-app.ts";
 import { endLiveRuns, finished, liveStatus, sleeping, woken } from "./runs.ts";
 import { person } from "./sealed-apps.ts";
 import { acmeTenant } from "./sign-in-config.ts";
@@ -392,13 +393,14 @@ const mailerApp = async (workflow: Record<string, string>) => {
 };
 
 /**
- * What `who`'s screen gets calling the query `contractId` of the App's
- * current version, as a screen calls it.
+ * What `who`'s screen gets calling the function `contractId` of the App's
+ * first version, current, with `input`, as a screen calls it.
  */
-const queryAs = async (
+const callAs = async (
   who: Person,
   app: string,
-  { contractId }: { contractId: string }
+  { contractId, kind = "query" }: { contractId: string; kind?: string },
+  input: unknown = {}
 ): Promise<OperationResult> => {
   const released = await loadRelease(env, appIdSchema.parse(app), 1);
   const answered = await callAppFunction(
@@ -411,9 +413,9 @@ const queryAs = async (
         resourceVersion: 1,
         contractId,
         fingerprint: released.fingerprints[contractId] ?? "",
-        kind: "query",
+        kind,
       },
-      input: {},
+      input,
     })
   );
   return answered.result;
@@ -707,6 +709,81 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     });
   });
 
+  it("refuse a run on a version no admin approved, whatever is granted again for another", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const subject = `Unapproved ${crypto.randomUUID()}`;
+    const count = { contractId: "mail.count", kind: "query" };
+    // Each version the same functions, told apart by a mark: the run waits
+    // a day between counting and sending.
+    const version = (mark: string) => ({
+      ...mailFiles(),
+      ...callingWorkflow(
+        "mailer",
+        [
+          { name: "count", reference: count, input: {} },
+          {
+            name: "send",
+            reference: send,
+            input: { subject },
+            after: `// ${mark}`,
+          },
+        ],
+        { between: aDay }
+      ),
+    });
+    const app = await appWith(builder, version("First."));
+    const connectionId = await connectShared(admin);
+    const permission = await builder.api.permissions.request({
+      subject: { type: "app", appId: app },
+      object: { type: "connection", connectionId },
+      actions: ["mail.send"],
+      binding: "MAIL",
+    });
+    await admin.api.permissions.grant(permission.id, { version: 1 });
+    await admin.api.resourceBindings.approve({
+      app,
+      alias: "mail",
+      target: { kind: "connector", permissionId: permission.id },
+      reviewed: { version: 1 },
+    });
+    // The attack: the builder's own version, which an admin's run starts
+    // on and waits in; then a harmless one, which the admin grants again for.
+    await release(builder, app, version("Mails whatever it likes."));
+    const run = await admin.api.workflows.start(app, "mailer");
+    await sleeping(run.id, "go");
+    await release(builder, app, version("Harmless."));
+    await admin.api.permissions.grant(permission.id, { version: 3 });
+    await woken(run.id);
+    // A run on the version the admin granted for sends.
+    const approved = await admin.api.workflows.start(app, "mailer");
+    await sleeping(approved.id, "go");
+    await woken(approved.id);
+    expect({
+      attacked: await endedRun(admin, run.id),
+      approved: await endedRun(admin, approved.id),
+      sent: await sentCount(subject),
+    }).toMatchObject({
+      attacked: {
+        version: 2,
+        status: "completed",
+        output: [
+          { ok: true, value: 0 },
+          { ok: false, error: { code: "permission.denied" } },
+        ],
+      },
+      approved: {
+        version: 3,
+        status: "completed",
+        output: [
+          { ok: true, value: 0 },
+          { ok: true, value: true },
+        ],
+      },
+      sent: 1,
+    });
+  });
+
   it("serve a run only its own App's bindings and functions", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
@@ -862,7 +939,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         .map(({ detail }) => String(detail.outcome))
         .toSorted((one, other) => one.localeCompare(other)),
       keys: new Set(calls.map(({ detail }) => detail.idempotencyKeyHash)).size,
-      notes: await queryAs(builder, app, { contractId: "mail.count" }),
+      notes: await callAs(builder, app, { contractId: "mail.count" }),
     }).toStrictEqual({
       status: "failed",
       sent: 2,
@@ -1210,3 +1287,137 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     });
   });
 });
+
+describe(
+  "a workflow run's calls of its App's functions, beside other callers'",
+  { timeout: 120_000 },
+  () => {
+    afterEach(async () => {
+      await endLiveRuns();
+    });
+
+    /** The functions of the App of `isolationFiles`, as callers name them. */
+    const notes = {
+      create: { contractId: "notes.create", kind: "mutation" },
+      titles: { contractId: "notes.titles", kind: "query" },
+      hold: { contractId: "notes.hold", kind: "action" },
+      useKept: { contractId: "notes.useKept", kind: "mutation" },
+      keepAfter: { contractId: "notes.keepAfter", kind: "action" },
+      late: { contractId: "notes.late", kind: "action" },
+    };
+
+    /**
+     * The App of `isolationFiles`, a builder's, with a workflow for each
+     * function a run calls in these tests, and another person who uses it.
+     */
+    const isolatedApp = async () => {
+      const builder = await personApi("builder");
+      const other = await personApi("user");
+      const app = await appWith(builder, {
+        ...isolationFiles,
+        ...callingWorkflow("holder", [
+          { name: "hold", reference: notes.hold, input: {} },
+        ]),
+        ...callingWorkflow("user", [
+          { name: "use", reference: notes.useKept, input: {} },
+        ]),
+        ...callingWorkflow("keeper", [
+          { name: "keep", reference: notes.keepAfter, input: {} },
+        ]),
+        // Its step's attempt has 2 seconds; the function waits 4.
+        ...callingWorkflow(
+          "hurried",
+          [{ name: "late", reference: notes.late, input: {} }],
+          { options: 'retries: { limit: 0 }, timeout: "2 seconds"' }
+        ),
+      });
+      await builder.api.apps.members.add(app, {
+        type: "person",
+        id: other.userId,
+        role: "user",
+      });
+      return { builder, other, app };
+    };
+
+    it("never hand what a run's held call keeps to another person's run or screen", async () => {
+      const { builder, other, app } = await isolatedApp();
+      // GRA-383's held call, made by a run: A keeps its channel in module
+      // state and holds its call open until a "release" note appears.
+      const holding = await builder.api.workflows.start(app, "holder");
+      await vi.waitFor(
+        async () => {
+          await expect(
+            callAs(builder, app, notes.titles)
+          ).resolves.toStrictEqual({ ok: true, value: ["A holding"] });
+        },
+        { timeout: 20_000, interval: 100 }
+      );
+      // B, another person, calls while A holds: from a run, and from a screen.
+      const using = await other.api.workflows.start(app, "user");
+      const fromRun = await endedRun(other, using.id);
+      const fromScreen = await callAs(other, app, notes.useKept);
+      // Only now is A let go.
+      await callAs(builder, app, notes.create, { title: "release" });
+      expect({
+        fromRun,
+        fromScreen,
+        held: await endedRun(builder, holding.id),
+        titles: await callAs(builder, app, notes.titles),
+      }).toMatchObject({
+        fromRun: {
+          status: "completed",
+          output: [{ ok: true, value: "nothing kept" }],
+        },
+        fromScreen: { ok: true, value: "nothing kept" },
+        held: { status: "completed", output: [{ ok: true, value: null }] },
+        titles: { ok: true, value: ["A holding", "release"] },
+      });
+    });
+
+    it("end a run's call with it: work its code schedules past it never runs", async () => {
+      const { builder, app } = await isolatedApp();
+      const keeping = await builder.api.workflows.start(app, "keeper");
+      await expect(endedRun(builder, keeping.id)).resolves.toMatchObject({
+        status: "completed",
+        output: [{ ok: true, value: null }],
+      });
+      await scheduler.wait(1000);
+      await expect(callAs(builder, app, notes.titles)).resolves.toStrictEqual({
+        ok: true,
+        value: [],
+      });
+    });
+
+    it("cut a run's call short at its step's deadline, after which it writes nothing", async () => {
+      const { builder, app } = await isolatedApp();
+      const hurried = await builder.api.workflows.start(app, "hurried");
+      const ended = await endedRun(builder, hurried.id);
+      // Past the function's own wait, had it gone on.
+      await scheduler.wait(4000);
+      expect({
+        status: ended.status,
+        titles: await callAs(builder, app, notes.titles),
+      }).toStrictEqual({ status: "failed", titles: { ok: true, value: [] } });
+    });
+
+    it("hold a step's call to its attempt's deadline, while the attempt still holds its lease", async () => {
+      const asleep = await sleepingRun(isolationFiles);
+      const late = await callRunFunction(
+        env,
+        { ...stepOf(asleep, { holds: true }), deadline: Date.now() + 2000 },
+        notes.late,
+        {},
+        `step:${crypto.randomUUID()}`
+      );
+      // Past the function's own wait, had it gone on.
+      await scheduler.wait(4000);
+      expect({
+        late,
+        titles: await callAs(asleep.builder, asleep.app, notes.titles),
+      }).toMatchObject({
+        late: { ok: false, error: { code: "operation.deadline_exceeded" } },
+        titles: { ok: true, value: [] },
+      });
+    });
+  }
+);

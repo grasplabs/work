@@ -1295,8 +1295,10 @@ export const listeningPermissionSql = (
  * approved, while the App holds a permission that changes things, as
  * `authorize` does: for a run on it calling its App's server methods
  * (workflows/host.ts), which run the current version as the run's person
- * and can't be told apart by what they change. An App with no such
- * permission changes nothing for the person but its own data.
+ * and can't be told apart by what they change, and at every protected step
+ * of a function it calls in its pinned release (`runInvocationFor`,
+ * app-functions.ts). An App with no such permission changes nothing for
+ * the person but its own data.
  */
 export const requireApprovedVersion = async (
   env: Env,
