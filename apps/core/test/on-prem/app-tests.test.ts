@@ -14,6 +14,7 @@ import {
 } from "../../src/app-tests.ts";
 import { commitFiles, createApp, findApp } from "../../src/apps.ts";
 import type { Acting } from "../../src/auth/identity.ts";
+import { sandboxOwnerHeader } from "../../src/sandbox-headers.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
 import { runOwnerOf } from "../../src/workflows/code.ts";
@@ -149,6 +150,14 @@ const activation = async (
 
 const host = env.SANDBOX_HOST;
 
+/** The sandbox supervisor these tests run with. */
+const supervisor = (): Fetcher => {
+  if (host === undefined) {
+    throw new Error("These tests run with SANDBOX_HOST bound.");
+  }
+  return host;
+};
+
 /**
  * Holds one of `owner`'s places in the sandbox with a session that spins,
  * until it's given up on (`signal`).
@@ -182,6 +191,40 @@ export class Spin extends WorkerEntrypoint { run() { for (;;) {} } }
   } catch (error) {
     return signal.aborted ? "given up" : `refused: ${String(error)}`;
   }
+};
+
+/**
+ * The supervisor, but answering each ask for a session of `owner`'s only
+ * `ms` later: a place granted that long after it was asked for, however
+ * fast or slow the machine. Says how many asks it held back.
+ */
+const slowToAdmit = (
+  owner: string,
+  ms: number
+): { host: Fetcher; delayed: () => number } => {
+  let delayed = 0;
+  return {
+    host: {
+      ...supervisor(),
+      fetch: async (input, init) => {
+        const headers: unknown = init?.headers;
+        const of: unknown =
+          typeof headers === "object" && headers !== null
+            ? Reflect.get(headers, sandboxOwnerHeader)
+            : undefined;
+        if (
+          of === owner &&
+          new URL(input instanceof Request ? input.url : input).pathname ===
+            "/session"
+        ) {
+          delayed += 1;
+          await scheduler.wait(ms);
+        }
+        return await supervisor().fetch(input, init);
+      },
+    },
+    delayed: () => delayed,
+  };
 };
 
 /** How long a session takes to start, at most, in these tests. */
@@ -321,43 +364,39 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
 
   it("give a suite its time from when it has a place, not while it waits for one", async () => {
     const built = await appWith(suiteOf("t.equal(1, 1);"));
-    const giveUp = new AbortController();
-    const { ended: held } = await heldPlace(
-      appTestOwnerOf(built.app),
-      giveUp.signal
-    );
-    // Each suite gets 2 seconds: less than one wait for a place (3).
-    const activating = activation(
-      built,
-      envWith({ APP_TEST_LIMITS_MS: "20000/2000" })
-    );
-    await scheduler.wait(5000);
-    giveUp.abort();
-    await expect(held).resolves.toBe("given up");
-    await expect(activating).resolves.toBe(1);
+    // The sandbox answers the suite's ask for a place a second after the
+    // suite's own time would be up, were it counted from the ask.
+    const suiteMs = 5000;
+    const admitting = slowToAdmit(appTestOwnerOf(built.app), suiteMs + 1000);
+    await expect(
+      activation(
+        built,
+        envWith({
+          APP_TEST_LIMITS_MS: `20000/${suiteMs}`,
+          SANDBOX_HOST: admitting.host,
+        })
+      )
+    ).resolves.toBe(1);
+    expect(admitting.delayed()).toBe(1);
   });
 
   it("run no suite that got its place after the run's time was up", async () => {
-    // Its build already made, by an App of the same files: the run's
-    // second starts as soon as it's asked.
-    const trivial = suiteOf("t.equal(1, 1);");
-    await expect(activation(await appWith(trivial))).resolves.toBe(1);
-    const built = await appWith(trivial);
-    const giveUp = new AbortController();
-    const { ended: held } = await heldPlace(
-      appTestOwnerOf(built.app),
-      giveUp.signal
-    );
-    // A run of 1 second, whose suite waits for a place (up to 3) that
-    // frees 2 seconds in: past the run's time, within one wait.
-    const activating = activation(
-      built,
-      envWith({ APP_TEST_LIMITS_MS: "20000/60000/1000" })
-    );
-    await scheduler.wait(2000);
-    giveUp.abort();
-    await expect(held).resolves.toBe("given up");
-    await expect(activating).resolves.toBe("unavailable");
+    const built = await appWith(suiteOf("t.equal(1, 1);"));
+    // The sandbox answers the suite's ask for a place only once the run's
+    // time is surely up: the run starts before the suite asks, so its
+    // second is over a second after the ask, whatever the build took.
+    const runMs = 1000;
+    const admitting = slowToAdmit(appTestOwnerOf(built.app), runMs + 1000);
+    await expect(
+      activation(
+        built,
+        envWith({
+          APP_TEST_LIMITS_MS: `20000/60000/${runMs}`,
+          SANDBOX_HOST: admitting.host,
+        })
+      )
+    ).resolves.toBe("unavailable");
+    expect(admitting.delayed()).toBe(1);
   });
 
   it("aren't held up by the App's own runs", async () => {
