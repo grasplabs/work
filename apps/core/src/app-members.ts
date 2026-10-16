@@ -19,6 +19,7 @@ import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { accessMayHaveDropped } from "./access-revocations.ts";
 import { hasSources, sourcesOf, unreadableBy } from "./app-provenance.ts";
 import { appFor } from "./apps.ts";
 import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
@@ -146,6 +147,14 @@ const closeScreens = async (env: Env, app: App): Promise<void> => {
     log.error("app.restart_failed", { appId: app.id, ...errorFields(error) });
   }
 };
+
+/**
+ * Whose role a change of `member`'s row can lower, for the App's host to
+ * tell (access-revocations.ts): the person, or everyone, for a team,
+ * whose members each connection's own check sorts out.
+ */
+const peopleOf = (member: AppMemberRef): string[] | null =>
+  member.type === "person" ? [member.id] : null;
 
 /**
  * Whom sharing `app` with `member` reaches now, as far as provenance goes:
@@ -309,6 +318,11 @@ export const addMember = async (
       appMemberEntry(by, "app.member.added", found, member)
     ),
   ]);
+  // Shared in the lowest role: a builder may have just become a user, whose
+  // open screens must stop showing what only builders read.
+  if (member.role === "user") {
+    await accessMayHaveDropped(env, [found.id], peopleOf(member));
+  }
   const [added] = await namedMembers(env, rowOf(found, member));
   // Unshared since the batch above: nothing of it stands.
   if (!added) {
@@ -321,7 +335,9 @@ export const addMember = async (
  * Stops sharing an App with a person or team. Their next call is refused,
  * and their open screens of it stop: at once, as the App's server code
  * restarts and lets go of their subscriptions, and within seconds anyway,
- * as every push checks their role again (screens-rpc.ts). Unsharing with
+ * as every push checks their role again (screens-rpc.ts); their live
+ * queries are cleared as soon as the App's host tells their connections
+ * (access-revocations.ts), with no commit needed. Unsharing with
  * someone it isn't shared with changes, records and restarts nothing.
  */
 export const removeMember = async (
@@ -358,6 +374,7 @@ export const removeMember = async (
   ]);
   if (removed) {
     await closeScreens(env, found);
+    await accessMayHaveDropped(env, [found.id], peopleOf(member));
     return;
   }
   const kept = await db

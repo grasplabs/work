@@ -1,5 +1,6 @@
 import { errorFields, log } from "@grasp-os/shared/log";
 
+import { retryAccessRevocations } from "./access-revocations.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
@@ -71,7 +72,8 @@ export default {
   },
   // Every minute: audit events waiting in core's outboxes and connect's
   // (see src/audit-outbox.ts), personal connections of removed people still
-  // connected (see src/members.ts), Apps copied from a blueprint left
+  // connected (see src/members.ts), revocations an App's host couldn't be
+  // told of, told again (see src/access-revocations.ts), Apps copied from a blueprint left
   // pending (see src/app-blueprints.ts), uploads left behind
   // (see src/knowledge/uploads.ts), a new version of core, audited as
   // a platform update (see src/platform-updates.ts), and workflows'
@@ -129,6 +131,7 @@ export default {
             drainAuditOutboxes(env),
             drainSubmissionOutbox(env),
             retryDisconnects(env),
+            retryAccessRevocations(env),
             sweepUploads(env),
             // Deploys apply migrations first (CI's db:migrate, and the
             // console's deploy), so `platform_versions` exists. A version

@@ -507,6 +507,8 @@ export const screenErrors = defineErrorFamily({
     "The app or its approvals changed since they were reviewed. Review them again.",
   "screen.not_approved": "That build of the app isn't approved.",
   "screen.reload_required": "This page is out of date. Reload it to go on.",
+  "screen.access_changed":
+    "Your access to this app changed. What it shows is being read again.",
 });
 
 /**
