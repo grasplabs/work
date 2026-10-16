@@ -1,4 +1,3 @@
-import { Toaster } from "@grasp-os/ui/components/toast";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
@@ -17,13 +16,9 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 const Shell = () => {
   const { core, identity } = Route.useRouteContext();
   return (
-    // What the shell says of an action outside any page, such as a
-    // sign-out from the person menu that core didn't carry out.
-    <Toaster>
-      <AppFrame aside={<ChatDock />} core={core} identity={identity}>
-        <Outlet />
-      </AppFrame>
-    </Toaster>
+    <AppFrame aside={<ChatDock />} core={core} identity={identity}>
+      <Outlet />
+    </AppFrame>
   );
 };
 
