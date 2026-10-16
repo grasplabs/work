@@ -9,6 +9,8 @@ import tanstack from "ultracite/oxlint/tanstack";
 import vitest from "ultracite/oxlint/vitest";
 import { defineConfig } from "vite-plus";
 
+import DurationSequencer from "./scripts/test-sequencer.ts";
+
 // Node 24's V8 has a Sparkplug bug that segfaults the Vitest process
 // mid-run (exit 139) in GC: BaselineOutOfLinePrologue pushes a stale
 // register that the GC reads as a pointer
@@ -252,6 +254,9 @@ export default defineConfig({
       },
     ],
     passWithNoTests: true,
+    // CI's shards split by how long each file takes, and each shard's
+    // longest files first (scripts/test-sequencer.ts).
+    sequence: { sequencer: DurationSequencer },
   },
   staged: {
     "*": ["secretlint", "vp check --fix"],
