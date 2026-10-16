@@ -67,16 +67,6 @@ const toOracle =
   "GRA-382 observes managed Cloudflare; GRA-649 decides and records the scope decision";
 
 export const discrepancies = {
-  "context-type": {
-    family: "step-context",
-    verdict: "failed",
-    workerflow:
-      "one context type, its retry delay optional, so neither the context nor the step type is Cloudflare's",
-    reference:
-      "Cloudflare's types discriminate a static delay's context, its delay always present",
-    resolution:
-      "GRA-648 makes Workerflow's contract types assignable to Cloudflare's",
-  },
   "default-retry-delay": {
     family: "step-context",
     verdict: "decided",

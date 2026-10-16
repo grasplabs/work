@@ -47,12 +47,13 @@ export class ReferenceFlow extends WorkflowEntrypoint<
     if (fixture === undefined) {
       throw new Error(`no fixture ${event.payload.fixture}`);
     }
-    // SAFETY: the reference's step has every method Workerflow's has, with
-    // the same arguments and results; only their types differ, where the
-    // context-type discrepancy (conformance-families.ts) says. Workerflow's
-    // context also promises an idempotencyKey, which no fixture reads.
+    // SAFETY: Workerflow's step is a Cloudflare step (the step-context
+    // family's type check), so this narrows it. What Workerflow's adds, the
+    // reference lacks: a context's idempotencyKey, which no fixture reads,
+    // and callbacks that answer synchronously or with any value, which the
+    // fixtures don't rely on.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    const shared: WorkflowStep = step as never;
+    const shared = step as WorkflowStep;
     // The reference's event as it is, its payload the fixture's params.
     return await fixture.run(
       { ...event, payload: event.payload.params },
