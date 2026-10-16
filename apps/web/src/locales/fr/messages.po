@@ -2348,10 +2348,9 @@ msgstr "Outils de développement"
 msgid "Diagram"
 msgstr "Diagramme"
 
-#. placeholder {0}: draft.checkpoint.revision
 #: src/workflows/definition-editor.tsx
-msgid "Diagram of revision {0}"
-msgstr "Diagramme de la révision {0}"
+msgid "Diagram of revision {checkpointRevision}"
+msgstr "Diagramme de la révision {checkpointRevision}"
 
 #: src/workflows/definition-editor.tsx
 msgid "Diagram of the current version"
@@ -5236,7 +5235,6 @@ msgstr "Exécution de {workflow}"
 #: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/workflow-diagram.tsx
 msgid "Running"
 msgstr "En production"
 
@@ -5246,6 +5244,7 @@ msgid "Running"
 msgstr "En cours"
 
 #: src/workflows/history-view.tsx
+#: src/workflows/workflow-diagram.tsx
 msgctxt "an attempt of a step"
 msgid "Running"
 msgstr "En cours"
@@ -6464,10 +6463,9 @@ msgstr "Leurs outils"
 msgid "Theme"
 msgstr "Thème"
 
-#. placeholder {0}: next.task
 #: src/workflows/workflow-diagram.tsx
-msgid "Then {0}"
-msgstr "Puis {0}"
+msgid "Then {task}"
+msgstr "Puis {task}"
 
 #: src/routes/_shell.knowledge.index.tsx
 msgid "There are no collections you can read yet."

@@ -27,7 +27,8 @@ const NextText = ({ next }: { next: DiagramNext | null }) => {
   if (next.kind === "exit") {
     return <Badge variant="outline">{t`Leaves this list`}</Badge>;
   }
-  return <Badge variant="outline">{t`Then ${next.task}`}</Badge>;
+  const { task } = next;
+  return <Badge variant="outline">{t`Then ${task}`}</Badge>;
 };
 
 /** How a run's journal left a task, in words. */
@@ -38,7 +39,7 @@ const StateBadge = ({ state }: { state: TraceState | undefined }) => {
   }
   const label = {
     reached: t`Reached`,
-    running: t`Running`,
+    running: t({ message: "Running", context: "an attempt of a step" }),
     waiting: t`Waiting`,
     failed: t`Failed`,
   }[state];
