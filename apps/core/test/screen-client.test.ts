@@ -2379,8 +2379,10 @@ const unreachableRevocations = (namespace: Env["APPS"]): Env["APPS"] =>
               if (typeof value !== "function") {
                 return value;
               }
-              const bound: unknown = value.bind(stub);
-              return bound;
+              // A stub's method answers any property as another method,
+              // `bind` included: called through, never bound.
+              return (...args: unknown[]): unknown =>
+                Reflect.apply(value, stub, args);
             },
           });
       }

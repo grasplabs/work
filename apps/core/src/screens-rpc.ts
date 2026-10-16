@@ -452,19 +452,6 @@ const watchRuns = async (
 };
 
 /**
- * Whether the person behind the connection still has `role` in `app`
- * (any role: `user`), before each push: the connection's own session check
- * (`check`), the reading of their session, role and teams that every call
- * shares, Grasp staff's window included, then the App's rules (`appFor`),
- * read again with each new reading of the session and kept until the next.
- * So a push never rests on an older reading than a call would, and a
- * stream of pushes costs one look at the App's rules every few seconds.
- * Anything that goes wrong on the way is a no: a callback must not
- * outlive access because a check failed. A session that ended also closes
- * the connection, as on any call. For the callbacks of an App's screens,
- * and of a draft's preview (chats-rpc.ts).
- */
-/**
  * Whether `by` has a role in `app` now, for a live query's gate before
  * each push (query-subscriptions.ts): false when refused, while a failure
  * nobody expected (the database away for a moment) is thrown, so the gate
@@ -488,6 +475,19 @@ const hasRoleNow = async (
   }
 };
 
+/**
+ * Whether the person behind the connection still has `role` in `app`
+ * (any role: `user`), before each push: the connection's own session check
+ * (`check`), the reading of their session, role and teams that every call
+ * shares, Grasp staff's window included, then the App's rules (`appFor`),
+ * read again with each new reading of the session and kept until the next.
+ * So a push never rests on an older reading than a call would, and a
+ * stream of pushes costs one look at the App's rules every few seconds.
+ * Anything that goes wrong on the way is a no: a callback must not
+ * outlive access because a check failed. A session that ended also closes
+ * the connection, as on any call. For the callbacks of an App's screens,
+ * and of a draft's preview (chats-rpc.ts).
+ */
 export const stillHasRole = (
   env: Env,
   check: SessionCheck,
