@@ -33,7 +33,7 @@ import { startWorkflow } from "../src/workflow-starts.ts";
 import type { Settled } from "../src/workflows/code.ts";
 import { runEngine } from "../src/workflows/engine.ts";
 import type { RunStep } from "../src/workflows/host.ts";
-import { admitAttempt } from "../src/workflows/quotas.ts";
+import { admitAttempt, quotaPolicy } from "../src/workflows/quotas.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
 import {
   repairResourceStarts,
@@ -2014,14 +2014,19 @@ describe(
       );
       // The policy as the run's attempts are admitted: five steps. Its
       // load can't read it, and counts by the limit it last read.
-      const result = await withQuotas(
-        { workflowSteps: 5 },
-        async () =>
-          await withPolicyReadFailingOnce(async () => {
+      const result = await withQuotas({ workflowSteps: 5 }, async () => {
+        // Recorded first, so each read of it later is one query.
+        await quotaPolicy(env);
+        // The load reads the policy for its model calls, then for its
+        // step limit: that read fails.
+        return await withPolicyReadFailingOnce(
+          async () => {
             const { runId } = await start(by, workflow.id);
             return await ended(by, workflow.id, runId);
-          })
-      );
+          },
+          { skip: 1 }
+        );
+      });
       const receipts = await receiptsOf(result.value.id);
       expect({
         failed: result.failed,
@@ -2154,11 +2159,19 @@ describe(
           // can't read the policy, and counts by the limit it last read.
           return await withQuotas(
             { workflowPersonAttempts: 1, workflowSteps: 1 },
-            async () =>
-              await withPolicyReadFailingOnce(async () => {
-                await terminateResourceRun(env, by, hanging.id, holder.runId);
-                return await ended(by, workflow.id, runId);
-              })
+            async () => {
+              // Recorded first, so each read of it later is one query; the
+              // load reads it for its model calls, then for its step limit,
+              // and that read fails.
+              await quotaPolicy(env);
+              return await withPolicyReadFailingOnce(
+                async () => {
+                  await terminateResourceRun(env, by, hanging.id, holder.runId);
+                  return await ended(by, workflow.id, runId);
+                },
+                { skip: 1 }
+              );
+            }
           );
         }
       );

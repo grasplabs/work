@@ -352,19 +352,27 @@ export const admittedFreely = async (): Promise<AttemptAdmission> =>
   });
 
 /**
- * What `run` returns, with core's database failing the first read of the
- * quota policy meanwhile, as D1 can for a moment, and whether one failed.
+ * What `run` returns, with core's database failing one read of the quota
+ * policy meanwhile, as D1 can for a moment, and whether one failed: the
+ * first, or the one after `skip` reads went through (a run's load may
+ * read the policy for more than its step limit).
  */
 export const withPolicyReadFailingOnce = async <Result>(
-  run: () => Promise<Result>
+  run: () => Promise<Result>,
+  { skip = 0 }: { skip?: number } = {}
 ): Promise<{ failed: boolean; value: Result }> => {
   const database = env.DB;
   let failed = false;
+  let passed = 0;
   env.DB = new Proxy(database, {
     get: (target, property) => {
       if (property === "prepare") {
         return (query: string) => {
           if (!failed && query.includes("quota_policies")) {
+            if (passed < skip) {
+              passed += 1;
+              return target.prepare(query);
+            }
             failed = true;
             return target.prepare("SELECT broken_for_the_test()");
           }
