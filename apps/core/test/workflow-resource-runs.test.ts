@@ -411,6 +411,7 @@ const runColumn = async (
     | "ended_at"
     | "manifest_hash"
     | "next_start_at"
+    | "failure_code"
 ): Promise<unknown> => {
   const row = await env.DB.prepare(
     `SELECT ${column} AS value FROM workflow_resource_runs WHERE id = ?`
@@ -418,6 +419,16 @@ const runColumn = async (
     .bind(id)
     .first<{ value: unknown }>();
   return row?.value;
+};
+
+/** Runs the start repair at `when` while every engine lookup fails. */
+const repairWhileLookupsFail = async (when: number): Promise<void> => {
+  await whileEngineRefuses(
+    (method) => method === "status",
+    async () => {
+      await repairResourceStarts(env, new Date(when));
+    }
+  );
 };
 
 /** `runId`'s audited events named `action`. */
@@ -1081,7 +1092,7 @@ describe("whose word a run's row takes, and whose clock", () => {
     });
   });
 
-  it("moves a run whose engine lookup fails back in the repair's queue, neither sent again nor counted", async () => {
+  it("moves a run whose engine lookup fails back in the repair's queue, neither sent again nor counted, until it is abandoned", async () => {
     const by = await builder();
     const workflow = await waitingWorkflow(by);
     const { runId } = await whileEngineRefuses(
@@ -1092,17 +1103,23 @@ describe("whose word a run's row takes, and whose clock", () => {
     const createdAt = Number(await runColumn(id, "created_at"));
     const at = createdAt + 2 * 60_000;
     // The engine can't say where the run is: every lookup fails.
-    await whileEngineRefuses(
-      (method) => method === "status",
-      async () => {
-        await repairResourceStarts(env, new Date(at));
-      }
-    );
-    expect({
+    await repairWhileLookupsFail(at);
+    const meanwhile = {
       attempts: await runColumn(id, "start_attempts"),
       nextAt: Number(await runColumn(id, "next_start_at")) > at,
       status: await runColumn(id, "status"),
-    }).toStrictEqual({ attempts: 0, nextAt: true, status: "starting" });
+    };
+    // Six hours on, the engine still can't say: failed, never left starting.
+    await repairWhileLookupsFail(createdAt + 7 * 3_600_000);
+    expect({
+      meanwhile,
+      status: await runColumn(id, "status"),
+      code: await runColumn(id, "failure_code"),
+    }).toStrictEqual({
+      meanwhile: { attempts: 0, nextAt: true, status: "starting" },
+      status: "failed",
+      code: "workflow.start_unconfirmed",
+    });
   });
 
   it("terminates a run the repair abandons when a start sent again made an instance after the repair asked", async () => {

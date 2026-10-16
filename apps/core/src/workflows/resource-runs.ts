@@ -376,10 +376,19 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
     repairAfterMs * 2 ** row.startAttempts,
     maxStartBackoffMs
   );
+  const pastStarting = now.getTime() - row.createdAt.getTime() > maxStartingMs;
   let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
   try {
     live = await runEngine(env).status(row.id);
   } catch (error) {
+    // Past its time to start, the run is abandoned all the same: the
+    // termination that owes the engine (`startAbandoned`) ends any instance
+    // it had, so an engine whose lookup keeps failing never keeps a run
+    // starting, or its workflow undeletable, for good.
+    if (pastStarting) {
+      await startAbandoned(env, row, now);
+      throw error;
+    }
     // The engine couldn't say: the run may well be there, so it is neither
     // sent again nor counted, but it yields its place in the queue until
     // its backoff is over, so runs whose lookup keeps failing never keep
@@ -408,10 +417,7 @@ const repairStart = async (env: Env, row: RunRow, now: Date): Promise<void> => {
       );
     return;
   }
-  if (
-    row.startAttempts >= maxStartAttempts ||
-    now.getTime() - row.createdAt.getTime() > maxStartingMs
-  ) {
+  if (row.startAttempts >= maxStartAttempts || pastStarting) {
     await startAbandoned(env, row, now);
     return;
   }
