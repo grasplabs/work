@@ -1138,21 +1138,29 @@ describe("whose word a run's row takes, and whose clock", () => {
           async () =>
             await resourceRunFor(shorter, by, failing.id, failed.runId)
         ),
+        // Or unreachable: the row alone says it.
+        await whileEngineRefuses(
+          () => true,
+          async () =>
+            await resourceRunFor(shorter, by, failing.id, failed.runId)
+        ),
       ];
     } finally {
       later.mockRestore();
     }
-    const [kept, removed, removedFailure, purgedFailure] = reads;
+    const [kept, removed, removedFailure, purgedFailure, unreachable] = reads;
     expect({
       kept: kept?.output,
       removed: removed?.output,
       failure: removedFailure?.error,
       purged: purgedFailure?.error,
+      unreachable: unreachable?.error,
     }).toStrictEqual({
       kept: { status: "done" },
       removed: undefined,
       failure: { code: "expression.failed", message: removedText(shorter) },
       purged: { code: "expression.failed", message: removedText(shorter) },
+      unreachable: { code: "expression.failed", message: removedText(shorter) },
     });
   });
 

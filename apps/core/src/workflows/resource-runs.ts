@@ -759,6 +759,13 @@ const resultOf = async (
   ) {
     return {};
   }
+  // Past its retention, a failed run says only the code its row kept: the
+  // engine, which may be unreachable, or no longer hold it, isn't asked.
+  if (removed && row.failureCode !== null) {
+    return {
+      error: { code: row.failureCode, message: removedText(env) },
+    };
+  }
   const engine = await engineResultOf(env, row.id);
   let result: Pick<WorkflowResourceRun, "output" | "error">;
   if (row.status === "completed") {
