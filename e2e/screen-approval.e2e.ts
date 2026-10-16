@@ -12,23 +12,42 @@ import { apiOf, peopleIn } from "./people.ts";
 
 const secret = "Acme owes 4,200";
 
-const serverCode = `import { DurableObject } from "cloudflare:workers";
+const schema = `import { defineSchema } from "@grasp-os/sdk";
 
-export class App extends DurableObject {
-  notes(): string[] {
-    return [${JSON.stringify(secret)}];
-  }
-}
+export default defineSchema({});
 `;
 
-const screenCode = `import { callServer } from "@grasp-os/sdk/screen";
+const operations = `import { v } from "@grasp-os/sdk";
+import { query } from "#grasp/server";
+
+export const notes = query({ args: {}, returns: v.array(v.string()), handler: () => [${JSON.stringify(secret)}] });
+`;
+
+const registration = `import { app } from "@grasp-os/sdk";
+import { notes } from "./operations/ledger.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Ledger",
+  schema,
+  access: { tables: {} },
+  operations: { ledger: { notes } },
+  internalOperations: {},
+  screens: [{ name: "ledger", path: "/", source: "screens/ledger.tsx" }],
+  uses: [],
+});
+`;
+
+const screenCode = `import { useClient } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
 import { useEffect, useState } from "react";
+import { api } from "#grasp";
 
 export default function Ledger() {
+  const client = useClient();
   const [notes, setNotes] = useState<string[]>([]);
   const load = async () => {
-    setNotes(await callServer<string[]>("notes"));
+    setNotes(await client.query(api.ledger.notes, {}));
   };
   useEffect(() => {
     void load();
@@ -58,7 +77,12 @@ test("a screen gets its engine's data only while an admin's approval of its code
     ({ id: app } = await api.apps.create({ name }));
     const { version } = await api.apps.files.commit(
       app,
-      { "app/server.ts": serverCode, "screens/ledger.tsx": screenCode },
+      {
+        "schema.ts": schema,
+        "operations/ledger.ts": operations,
+        "app.ts": registration,
+        "screens/ledger.tsx": screenCode,
+      },
       name
     );
     await api.apps.versions.setCurrent(app, version);

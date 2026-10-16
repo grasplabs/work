@@ -8,51 +8,73 @@ import type { Person } from "./people.ts";
 import { origin } from "./stack.ts";
 
 // Reaching Apps from the product: sign in, find an App in the Apps list,
-// open it, and use its screen with live data from its server; its
+// open it, and use its screen with live data from its App's functions; its
 // workflows and who opens it are a tab away. Only the people core opens
 // Apps to see them.
 
-const server = `import { DurableObject } from "cloudflare:workers";
+const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-type Watcher = ((count: number) => Promise<void>) & { dup(): Watcher };
-
-export class App extends DurableObject {
-  #watchers = new Set<Watcher>();
-
-  #count(): number {
-    return Number(this.ctx.storage.kv.get("count") ?? 0);
-  }
-
-  watchCount(_caller: unknown, onChange: Watcher): void {
-    const watcher = onChange.dup();
-    this.#watchers.add(watcher);
-    void watcher(this.#count());
-  }
-
-  addOne(): void {
-    const count = this.#count() + 1;
-    this.ctx.storage.kv.put("count", count);
-    for (const watcher of this.#watchers) {
-      void watcher(count).catch(() => this.#watchers.delete(watcher));
-    }
-  }
-}
+export default defineSchema({ clicks: defineTable({ at: v.number() }) });
 `;
 
-const screen = `import { callServer, useLive } from "@grasp-os/sdk/screen";
+const operations = `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
+
+export const count = query({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => (await ctx.db.query("clicks").take(100)).length,
+});
+
+export const addOne = mutation({
+  args: {},
+  returns: v.id("clicks"),
+  handler: async (ctx) => await ctx.db.insert("clicks", { at: Date.now() }),
+});
+`;
+
+/** The counter's registration, its one screen `screen`. */
+const registration = (
+  screen: string
+): string => `import { app } from "@grasp-os/sdk";
+import { addOne, count } from "./operations/counter.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Counter",
+  schema,
+  access: { tables: { clicks: { read: "appMembers", write: "appMembers" } } },
+  operations: { counter: { count, addOne } },
+  internalOperations: {},
+  screens: [{ name: "${screen}", path: "/", source: "screens/${screen}.tsx" }],
+  uses: [],
+});
+`;
+
+const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
+import { api } from "#grasp";
 
 export default function Counter() {
-  const count = useLive<number>("watchCount", 0);
+  const count = useQuery(api.counter.count, {});
+  const addOne = useMutation(api.counter.addOne);
   return (
     <main className="flex flex-col gap-4 p-4">
       <h2 className="text-lg font-medium">Counter</h2>
-      <output aria-label="Count">{count}</output>
-      <Button onClick={() => void callServer("addOne")}>Add one</Button>
+      <output aria-label="Count">{count ?? 0}</output>
+      <Button onClick={() => void addOne({})}>Add one</Button>
     </main>
   );
 }
 `;
+
+/** The counter App's code: its schema, functions and one screen, `name`. */
+const counterApp = (name = "counter"): Record<string, string> => ({
+  "schema.ts": schema,
+  "operations/counter.ts": operations,
+  "app.ts": registration(name),
+  [`screens/${name}.tsx`]: screen,
+});
 
 const tally = `import { workflow, z } from "@grasp-os/sdk/workflow";
 
@@ -72,8 +94,7 @@ export default workflowTests(tally, [{ name: "counts", mocks: { count: 1 }, expe
 
 /** The counter App's files: a screen and a workflow. */
 const counterFiles = {
-  "app/server.ts": server,
-  "screens/counter.tsx": screen,
+  ...counterApp(),
   "workflows/tally.ts": tally,
   "workflows/tally.workflow-tests.ts": tallyTests,
 };
@@ -434,10 +455,11 @@ test("a runs read that never comes leaves the engine usable, and says so in its 
 test("loading an app again after a new version shows that version, and the engine's first app when the one open is gone", async ({
   pageOf,
 }) => {
-  const swapped = await newApp(builder, `Swap ${crypto.randomUUID()}`, {
-    "app/server.ts": server,
-    "screens/counter.tsx": screen,
-  });
+  const swapped = await newApp(
+    builder,
+    `Swap ${crypto.randomUUID()}`,
+    counterApp()
+  );
   const page = await pageOf(builder);
   await page.clock.install();
   await page.goto(`/domains/${swapped}/apps/counter`);
@@ -447,7 +469,7 @@ test("loading an app again after a new version shows that version, and the engin
     await release(
       api,
       swapped,
-      { "screens/counter.tsx": null, "screens/tally.tsx": screen },
+      { ...counterApp("tally"), "screens/counter.tsx": null },
       "Rename the screen"
     );
   });
