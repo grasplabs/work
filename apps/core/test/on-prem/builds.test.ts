@@ -273,7 +273,7 @@ describe("the screen compiler on-prem", () => {
     }).toStrictEqual({ heldToItsDeadline: true, built: true });
   }, 60_000);
 
-  it("builds a fresh save's screens, server and workflows, its compiles taking turns for the App's part of the builders' share", async () => {
+  it("builds a fresh save's screens, server and workflows, its compiles waiting for the App's part of the builders' share", async () => {
     // Fresh, so nothing is read from the cache: three compiles at once,
     // where the App's part of the share is one place.
     const fresh = crypto.randomUUID();
@@ -297,13 +297,10 @@ describe("the screen compiler on-prem", () => {
     }).toStrictEqual({ screens: "ok", server: "ok", workflows: "ok" });
   }, 90_000);
 
-  it("takes one App's builds in turns, asks again while refused, and builds another App's same files in its own part", async () => {
+  it("asks again while refused, and builds another App's same files in its own part", async () => {
     // A sandbox that refuses every session as busy, a moment after each
-    // ask, and says whose each ask was and how many of an App's were open
-    // at once.
+    // ask, and says whose each ask was.
     const asks: string[] = [];
-    const open = new Map<string, number>();
-    const mostOpen = new Map<string, number>();
     const refusing: Fetcher = {
       connect: () => {
         throw new Error("The sandbox takes no sockets.");
@@ -315,13 +312,7 @@ describe("the screen compiler on-prem", () => {
         }
         const whose = request.headers.get("x-grasp-sandbox-sub-owner") ?? "";
         asks.push(whose);
-        open.set(whose, (open.get(whose) ?? 0) + 1);
-        mostOpen.set(
-          whose,
-          Math.max(mostOpen.get(whose) ?? 0, open.get(whose) ?? 0)
-        );
         await scheduler.wait(200);
-        open.set(whose, (open.get(whose) ?? 1) - 1);
         return new Response("busy", { status: 429 });
       },
     };
@@ -329,23 +320,13 @@ describe("the screen compiler on-prem", () => {
     const same = screen(`// the same ${crypto.randomUUID()}`);
     await Promise.allSettled([
       buildScreens(refused, same, "app-a"),
-      buildServer(
-        refused,
-        { "app/server.ts": `${server}\n// ${crypto.randomUUID()}\n` },
-        "app-a"
-      ),
       buildScreens(refused, same, "app-b"),
     ]);
 
     expect({
-      appAOneAtATime: mostOpen.get("app-a"),
       appAAskedAgain: asks.filter((whose) => whose === "app-a").length > 2,
       appBAskedItself: asks.includes("app-b"),
-    }).toStrictEqual({
-      appAOneAtATime: 1,
-      appAAskedAgain: true,
-      appBAskedItself: true,
-    });
+    }).toStrictEqual({ appAAskedAgain: true, appBAskedItself: true });
   }, 90_000);
 
   it("builds the same screen again once the sandbox stopped it at its deadline, as that stop isn't cached", async () => {

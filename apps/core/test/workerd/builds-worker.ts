@@ -371,6 +371,27 @@ export default {
         })
       );
     }
+    if (pathname === "/cancelled-build") {
+      // A request starts a build that holds the builder, and its caller
+      // gives up on it: then the same App's next build is asked for.
+      const caller = new AbortController();
+      const first = env.SELF.fetch(
+        `http://core/inspect?builder=busy&app=${searchParams.get("app") ?? ""}`,
+        { method: "POST", signal: caller.signal }
+      );
+      await scheduler.wait(500);
+      caller.abort();
+      try {
+        await first;
+      } catch {
+        // Given up on, as meant.
+      }
+      const next = await env.SELF.fetch(
+        `http://core/inspect?app=${searchParams.get("app") ?? ""}`,
+        { method: "POST" }
+      );
+      return new Response(next.body, next);
+    }
     if (pathname === "/cancelled-code") {
       // A request starts reading the builder's code, slowly, and its
       // caller gives up on it: then another asks for the code.

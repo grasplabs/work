@@ -295,6 +295,12 @@ describe("the package builder on the on-prem sandbox", () => {
     await expect(first).resolves.toMatchObject({ status: "bound" });
   }, 60_000);
 
+  it("runs an App's next build once a build of its was given up on by its caller, never waiting on that one for good", async () => {
+    const next = await call("app=app-cancelled", "/cancelled-build", wideUrl);
+
+    expect(next.status).toBe("ok");
+  }, 60_000);
+
   it("holds one App's builds to part of the builders' share, so another App's build still runs", async () => {
     // The builders' share of four processes is two. One App's build holds
     // one; its build from another isolate of core waits for that one.

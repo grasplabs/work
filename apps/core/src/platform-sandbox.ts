@@ -71,9 +71,8 @@ import { callStub, SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
 //   core's own record), sent as the session's sub-owner; the supervisor
 //   holds one sub-owner to part of its owner's share, places and waiting
 //   room both (`maxPerSubOwner`, half of it, at least one), leaving the
-//   rest to other Apps. One App's own builds in an isolate run one at a
-//   time (`inTurn`), and a build with no place asks again within the
-//   build wait (`askingForPlace`), so a save's three compiles queue for
+//   rest to other Apps. A build with no place asks again within the
+//   build wait (`askingForPlace`), so a save's three compiles wait for
 //   the App's part rather than be refused. The part is per App, not per
 //   author: an App's builders share it (accepted, GRA-563). Only core
 //   reaches the supervisor's socket, so no
@@ -399,45 +398,13 @@ const placeWaitMs = 15_000;
 const placeRetryMs = 2000;
 
 /**
- * The end of the turn of each sub-owner's build running or queued in this
- * isolate: one App's builds here run one at a time (`inTurn`).
- */
-const buildTurns = new Map<string, Promise<void>>();
-
-/**
- * Runs `build` once `whose` builds before it in this isolate have ended:
- * one save's compiles (screens, server and workflows at once) queue here
- * rather than ask the supervisor for more of the App's part of the share
- * than it gives one App, and be refused.
- */
-const inTurn = async <T>(
-  whose: string,
-  build: () => Promise<T>
-): Promise<T> => {
-  const before = buildTurns.get(whose) ?? Promise.resolve();
-  const { promise: ended, resolve: end } = Promise.withResolvers<null>();
-  const turn = (async (): Promise<void> => {
-    await before;
-    await ended;
-  })();
-  buildTurns.set(whose, turn);
-  try {
-    await before;
-    return await build();
-  } finally {
-    end(null);
-    if (buildTurns.get(whose) === turn) {
-      buildTurns.delete(whose);
-    }
-  }
-};
-
-/**
  * Runs `build`, asking again while the supervisor has no place for it
  * (`noPlaceOf`: refused before anything ran, so nothing it was handed was
  * read), backing off up to {@link placeRetryMs}, for up to
- * {@link placeWaitMs}: the App's other builds, in other isolates, may hold
- * its part of the share for a moment.
+ * {@link placeWaitMs}: the App's other builds (a save's other compiles,
+ * or builds in other isolates) may hold its part of the share for a
+ * moment. Holds nothing while it waits: a cancelled request's waits end
+ * with it.
  */
 const askingForPlace = async <T>(build: () => Promise<T>): Promise<T> => {
   const until = Date.now() + placeWaitMs;
@@ -457,8 +424,11 @@ const askingForPlace = async <T>(build: () => Promise<T>): Promise<T> => {
 
 /**
  * The runner on the sandbox host: a session for each call, as
- * `platform:builder`, each of `whose` builds within its share, one at a
- * time in this isolate and asking again for a place while it has none.
+ * `platform:builder`, each of `whose` builds within its share, asking
+ * again for a place while it has none. Nothing is queued in core: a
+ * request workerd cancels never runs its continuations or `finally`
+ * (@grasp-os/shared/shared-runs), so a queue here would wait for a build
+ * that never ends; the supervisor's waiting room is the one queue.
  */
 const onHost = (
   env: PlatformEnv,
@@ -472,20 +442,16 @@ const onHost = (
     run: async (program, method, args) => {
       const code = await programCode[program](env.ASSETS);
       const passed = sessionArgs(args);
-      return await inTurn(
-        whose,
+      return await askingForPlace(
         async () =>
-          await askingForPlace(
-            async () =>
-              await runPlatformCode(host, code, {
-                method,
-                args: passed,
-                wallMs: wallMs(program),
-                owner: builderOwner,
-                subOwner: whose,
-                memoryMib: builderMemoryMib,
-              })
-          )
+          await runPlatformCode(host, code, {
+            method,
+            args: passed,
+            wallMs: wallMs(program),
+            owner: builderOwner,
+            subOwner: whose,
+            memoryMib: builderMemoryMib,
+          })
       );
     },
     // Its place waited for too, beyond one call's own bounds.
