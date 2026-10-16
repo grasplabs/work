@@ -5,7 +5,13 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { activateVersion } from "../../src/app-activation.ts";
-import { appTestOwnerOf } from "../../src/app-tests.ts";
+import { loadRelease } from "../../src/app-releases.ts";
+import type { Release } from "../../src/app-releases.ts";
+import {
+  appTestOwnerOf,
+  fixtureHostFor,
+  suiteCapability,
+} from "../../src/app-tests.ts";
 import { commitFiles, createApp, findApp } from "../../src/apps.ts";
 import type { Acting } from "../../src/auth/identity.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
@@ -66,6 +72,30 @@ const catching = suiteOf(`
 /** What a suite stopped past its CPU time fails with. */
 const stoppedOnCpu = /^tests\/notes\.test\.ts: it stopped: .*CPU time/u;
 
+/** Three calls at once, and a live query read again as they write. */
+const parallel = suiteOf(`
+      const live = await owner.subscribe(api.notes.list, page);
+      const ids = await Promise.all([
+        owner.mutation(api.notes.create, { title: "One" }),
+        owner.mutation(api.notes.create, { title: "Two" }),
+        owner.mutation(api.notes.create, { title: "Three" }),
+      ]);
+      const lists = await Promise.all([
+        owner.query(api.notes.list, page),
+        owner.query(api.notes.list, page),
+        owner.query(api.notes.list, page),
+      ]);
+      t.equal(lists.map((list) => list.items.length), [3, 3, 3]);
+      await live.next((found) => ids.every((id) => found.items.some((note) => note._id === id)));
+      await live.close();
+`);
+
+/** Catches the refusal it gets while the App's calls have no place, then spins. */
+const refusedThenStopped = suiteOf(`
+      await owner.query(api.notes.list, page).catch(() => null);
+      for (;;) {}
+`);
+
 /** Spins in a test, past any CPU time. */
 const spinning = suiteOf("for (;;) {}");
 
@@ -88,10 +118,22 @@ const appWith = async (suite: string): Promise<Built> => {
   return { owner, app: id };
 };
 
+/** Core's env as code reads it, with `changes` over it; env itself unchanged. */
+const envWith = (changes: Partial<Env>): Env =>
+  new Proxy(env, {
+    get: (target, key, receiver): unknown =>
+      Object.hasOwn(changes, key)
+        ? Reflect.get(changes, key)
+        : Reflect.get(target, key, receiver),
+  });
+
 /** What making version 1 current did: made it current, or why not. */
-const activation = async ({ owner, app }: Built): Promise<unknown> => {
+const activation = async (
+  { owner, app }: Built,
+  on: Env = env
+): Promise<unknown> => {
   try {
-    await activateVersion(env, owner, app, 1);
+    await activateVersion(on, owner, app, 1);
     const found = await findApp(env, app);
     return found?.currentVersion;
   } catch (error) {
@@ -157,9 +199,81 @@ const heldPlace = async (
   return { ended };
 };
 
+/** The Notes App made current with no suites: a release to open hosts on. */
+const notesRelease = async (): Promise<Release> => {
+  const owner = await person("builder");
+  const { id } = await createApp(env, owner, { name: "Notes" });
+  await commitFiles(env, owner, id, appFiles, "First version");
+  await activateVersion(env, owner, id, 1);
+  return await loadRelease(env, id, 1);
+};
+
+/** `release`'s function `path` called with `input`, as a test's call names it. */
+const requestFor = (release: Release, path: string, input: unknown): string =>
+  JSON.stringify({
+    reference: {
+      resourceId: release.manifest.resourceId,
+      resourceVersion: release.manifest.resourceVersion,
+      contractId: path,
+      fingerprint: release.fingerprints[path],
+      kind: release.app.operations[path]?.kind,
+    },
+    input,
+  });
+
+/**
+ * What `body` answers, run as a suite's code would be in a session of its
+ * own, over `host` as a suite gets it (`suiteCapability`), as `numbered`,
+ * with `values` after it.
+ */
+const inSuiteSession = async (
+  release: Release,
+  body: string,
+  { values = [], lingerMs }: { values?: unknown[]; lingerMs?: number } = {}
+): Promise<{ answer: unknown; opened: readonly string[] }> => {
+  if (host === undefined) {
+    throw new Error("These tests run with SANDBOX_HOST bound.");
+  }
+  const suiteHost = fixtureHostFor(env, release, appFiles, {
+    parent: () => {},
+  });
+  try {
+    const answer = await runInSession(host, {
+      mainModule: "probe.js",
+      modules: {
+        "probe.js": `import { WorkerEntrypoint } from "cloudflare:workers";
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+export class Probe extends WorkerEntrypoint {
+  async run(numbered, ...values) {
+    ${body}
+  }
+}
+`,
+      },
+      entrypoint: "Probe",
+      method: "run",
+      args: [
+        { capability: suiteCapability(suiteHost) },
+        ...values.map((value) => ({ value })),
+      ],
+      owner: appTestOwnerOf(release.manifest.resourceId),
+      cpuMs: 30_000,
+      wallMs: 30_000,
+      ...(lingerMs === undefined ? {} : { lingerMs }),
+    });
+    return { answer, opened: [...suiteHost.opened] };
+  } finally {
+    await suiteHost.closeAll();
+  }
+};
+
 describe("an App's tests on-prem", { timeout: 180_000 }, () => {
   it("make the version current when they pass, a live query included", async () => {
     await expect(activation(await appWith(passing))).resolves.toBe(1);
+  });
+
+  it("make the version current with three calls at once and a live query", async () => {
+    await expect(activation(await appWith(parallel))).resolves.toBe(1);
   });
 
   it("fail a suite whose test spins on its CPU time, while core keeps serving", async () => {
@@ -247,4 +361,96 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
       });
     }
   );
+
+  it("take a suite stopped after the sandbox refused a test's call as the sandbox's", async () => {
+    const built = await appWith(refusedThenStopped);
+    const giveUp = new AbortController();
+    const { ended: held } = await heldPlace(built.app, giveUp.signal);
+    try {
+      // A suite stops 8 seconds in: past the refusal, which waits 3.
+      await expect(
+        activation(built, envWith({ APP_TEST_LIMITS_MS: "20000/8000" }))
+      ).resolves.toBe("unavailable");
+    } finally {
+      giveUp.abort();
+      await held;
+    }
+  });
+
+  it("refuse a session a suite wasn't answered: forged, or no number", async () => {
+    const { answer } = await inSuiteSession(
+      await notesRelease(),
+      `const said = [];
+    const real = await numbered.open("notes", "real");
+    for (const id of [real + 7, String(real), real + 0.5, -1, null]) {
+      try {
+        await numbered.principal(id, "note-owner");
+        said.push("answered");
+      } catch (error) {
+        said.push(error.message);
+      }
+    }
+    said.push((await numbered.principal(real, "note-owner")) ?? "known");
+    await numbered.close(real);
+    return said;`
+    );
+    const refused = "No test of this suite was opened as that session.";
+    expect(answer).toStrictEqual([
+      refused,
+      refused,
+      refused,
+      refused,
+      refused,
+      "known",
+    ]);
+  });
+
+  // Two things refuse it: the sandbox host lets go of the call's
+  // capabilities as it returns, and core's forwarder refuses once the call
+  // is over (`sessionForwarder`). Keep either and it's refused; drop both
+  // and the late call opens a test.
+  it("refuse a suite's call once its session's call is over", async () => {
+    const { answer, opened } = await inSuiteSession(
+      await notesRelease(),
+      `const kept = numbered.dup();
+    this.ctx.waitUntil(scheduler.wait(300).then(() => kept.open("notes", "late")).catch(() => null));
+    return "answered";`,
+      { lingerMs: 1500 }
+    );
+    expect({ answer, opened }).toStrictEqual({
+      answer: "answered",
+      opened: [],
+    });
+  });
+
+  it("let go of a live query's callbacks a test left open before its process ends", async () => {
+    const release = await notesRelease();
+    const { answer } = await inSuiteSession(
+      release,
+      `const [request] = values;
+    const released = [];
+    const session = await numbered.open("notes", "left-open");
+    const callback = (name) =>
+      Object.assign(() => undefined, {
+        [Symbol.dispose]: () => {
+          released.push(name);
+        },
+      });
+    const answer = await numbered.subscribe(session, "note-owner", request, callback("snapshot"), callback("lost"));
+    await numbered.close(session);
+    for (let waited = 0; released.length < 2 && waited < 5000; waited += 100) {
+      await wait(100);
+    }
+    return { subscribed: "subscription" in answer, released: released.toSorted() };`,
+      {
+        values: [
+          requestFor(release, "notes.list", { pagination: { pageSize: 50 } }),
+        ],
+      }
+    );
+    expect(answer).toStrictEqual({
+      subscribed: true,
+      released: ["lost", "snapshot"],
+    });
+  });
 });

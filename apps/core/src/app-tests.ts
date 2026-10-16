@@ -53,6 +53,7 @@ import type {
 import { hostedRelease, noStore } from "./release-runner.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { capability, noPlaceOf } from "./sandbox-session.ts";
+import type { SessionCapability } from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
 import { SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
 import { buildAppTests } from "./screens.ts";
@@ -536,6 +537,57 @@ interface SessionContext {
    * the sandbox's doing then.
    */
   readonly sandbox: { refused: boolean };
+  /** How long one test may run: its session's calls wait no longer. */
+  readonly testMs: number;
+  /**
+   * On-prem, what runs the suite's calls one at a time (`OneAtATime`);
+   * undefined where they run as they come.
+   */
+  readonly calls: OneAtATime | undefined;
+}
+
+/** A call that waited for the test's calls before it past the test's time. */
+const waitedTooLong = (): Error =>
+  operationErrors.create("operation.deadline_exceeded");
+
+/**
+ * Runs a suite's calls one at a time, in the order they came: on-prem,
+ * where each runs in a child session of the suite's, and the sandbox runs
+ * one child of a session and lets one more wait, refusing any past them
+ * (scripts/workerd-sandbox.ts, `#childRoom`). A test that makes three at
+ * once (`Promise.all`, or a live query read again meanwhile) would have
+ * the third refused for the sandbox's reasons, not its own.
+ */
+class OneAtATime {
+  #last: Promise<void> = Promise.resolve();
+
+  /**
+   * What `work` answers, run once every call that came before it has
+   * settled; refused (`operation.deadline_exceeded`) once `until` (a time
+   * in milliseconds) passes while it waits.
+   */
+  async run<T>(until: number, work: () => Promise<T>): Promise<T> {
+    const before = this.#last;
+    const done = Promise.withResolvers<null>();
+    this.#last = (async (): Promise<void> => {
+      await before;
+      await done.promise;
+    })();
+    try {
+      const left = until - Date.now();
+      if (left <= 0) {
+        throw waitedTooLong();
+      }
+      try {
+        await within(before, left);
+      } catch {
+        throw waitedTooLong();
+      }
+      return await work();
+    } finally {
+      done.resolve(null);
+    }
+  }
 }
 
 /**
@@ -557,6 +609,9 @@ class FixtureSession extends TestTarget {
   readonly #cleanupMs: number;
   readonly #parent: () => string | undefined;
   readonly #sandbox: { refused: boolean };
+  readonly #calls: OneAtATime | undefined;
+  /** When the test's time is up: its calls wait for others no longer. */
+  readonly #endsAt: number;
   readonly #fixtures: string;
   readonly #fixture: Fixture;
   #store: Promise<OpenStore> | undefined;
@@ -573,6 +628,8 @@ class FixtureSession extends TestTarget {
     this.#cleanupMs = context.cleanupMs;
     this.#parent = context.parent;
     this.#sandbox = context.sandbox;
+    this.#calls = context.calls;
+    this.#endsAt = Date.now() + context.testMs;
     this.#fixtures = fixtures;
     this.#fixture = fixture;
   }
@@ -659,56 +716,65 @@ class FixtureSession extends TestTarget {
       }
       const path = publicOperationOf(this.#release, call.reference);
       const store = await this.#storeOf();
-      const wallEnd = Date.now() + platformLimits.serverInvocationWallMs;
-      const invocation: Invocation = {
-        principal: `fixture-${name}`,
-        consumer: {
-          resourceId: this.#release.manifest.resourceId,
-          resourceVersion: this.#release.manifest.resourceVersion,
-        },
-        store,
-        requestId,
-        deadline: Math.min(wallEnd, live?.deadline ?? wallEnd),
-        runId: null,
-        // The fixture's role, which nothing changes while the test runs.
-        authorize: async () =>
-          await Promise.resolve({
-            appMember: true,
-            appBuilder: role === "builder",
-          }),
-        // No resources: outside systems aren't the tests' to reach.
-        ...(live === undefined || this.#release.store === null
-          ? {}
-          : {
-              observeReads: (readSet: Record<string, number>) => {
-                live.observe(store.id, readSet);
-              },
+      // On-prem, after the suite's calls before it: its time starts then.
+      const run = async (): Promise<OperationResult> => {
+        const wallEnd = Date.now() + platformLimits.serverInvocationWallMs;
+        const invocation: Invocation = {
+          principal: `fixture-${name}`,
+          consumer: {
+            resourceId: this.#release.manifest.resourceId,
+            resourceVersion: this.#release.manifest.resourceVersion,
+          },
+          store,
+          requestId,
+          deadline: Math.min(wallEnd, live?.deadline ?? wallEnd),
+          runId: null,
+          // The fixture's role, which nothing changes while the test runs.
+          authorize: async () =>
+            await Promise.resolve({
+              appMember: true,
+              appBuilder: role === "builder",
             }),
-      };
-      // On-prem, in the suite's session's process: a child of it.
-      const parentSession = this.#parent();
-      const result = await callOperation(
-        hostedRelease(this.#env, this.#release),
-        invocation,
-        { path, kind: call.reference.kind },
-        call.input,
-        {
-          ...(call.idempotencyKey === undefined
+          // No resources: outside systems aren't the tests' to reach.
+          ...(live === undefined || this.#release.store === null
             ? {}
-            : { idempotencyKey: call.idempotencyKey }),
-          ...(parentSession === undefined ? {} : { parentSession }),
+            : {
+                observeReads: (readSet: Record<string, number>) => {
+                  live.observe(store.id, readSet);
+                },
+              }),
+        };
+        // On-prem, in the suite's session's process: a child of it.
+        const parentSession = this.#parent();
+        const result = await callOperation(
+          hostedRelease(this.#env, this.#release),
+          invocation,
+          { path, kind: call.reference.kind },
+          call.input,
+          {
+            ...(call.idempotencyKey === undefined
+              ? {}
+              : { idempotencyKey: call.idempotencyKey }),
+            ...(parentSession === undefined ? {} : { parentSession }),
+          }
+        );
+        // Only while the test runs: a call it didn't wait for, refused as
+        // the suite's session ends, tells nothing of how the tests went.
+        if (
+          !result.ok &&
+          sandboxRefusals.has(result.error.code) &&
+          !this.#closed
+        ) {
+          this.#sandbox.refused = true;
         }
-      );
-      // Only while the test runs: a call it didn't wait for, refused as
-      // the suite's session ends, tells nothing of how the tests went.
-      if (
-        !result.ok &&
-        sandboxRefusals.has(result.error.code) &&
-        !this.#closed
-      ) {
-        this.#sandbox.refused = true;
-      }
-      return result;
+        return result;
+      };
+      return this.#calls === undefined
+        ? await run()
+        : await this.#calls.run(
+            Math.min(this.#endsAt, live?.deadline ?? this.#endsAt),
+            run
+          );
     } catch (error) {
       return { ok: false, error: refusalOf(error, requestId) };
     }
@@ -938,11 +1004,30 @@ export const fixtureHostFor = (
   env: Env,
   release: Release,
   files: AppFiles,
-  cleanupMs = defaultLimits.cleanupMs,
-  parent: () => string | undefined = noParent
+  {
+    cleanupMs = defaultLimits.cleanupMs,
+    testMs = defaultLimits.testMs,
+    parent,
+  }: {
+    cleanupMs?: number;
+    testMs?: number;
+    /**
+     * On-prem, the suite's session (its call ID) once it's open: each of
+     * the tests' calls runs in a child of it, one at a time.
+     */
+    parent?: () => string | undefined;
+  } = {}
 ): FixtureHost =>
   new FixtureHost(
-    { env, release, cleanupMs, parent, sandbox: { refused: false } },
+    {
+      env,
+      release,
+      cleanupMs,
+      testMs,
+      parent: parent ?? noParent,
+      sandbox: { refused: false },
+      calls: parent === undefined ? undefined : new OneAtATime(),
+    },
     files
   );
 
@@ -1036,6 +1121,10 @@ const numberedMethods = [
   "close",
 ] as const;
 
+/** `host` as the one capability a suite's session passes (`NumberedFixtureHost`). */
+export const suiteCapability = (host: FixtureHost): SessionCapability =>
+  capability(new NumberedFixtureHost(host), numberedMethods);
+
 /**
  * How long a suite waits, at most, for a place in the sandbox its App
  * holds no more of (`busy`), asking again with a growing wait in between:
@@ -1098,14 +1187,7 @@ const runInSuiteSession = async (
           modules: { ...modules, [mainModule]: sessionTestsMain(path, testMs) },
           entrypoint: "AppTests",
           method: "run",
-          args: [
-            {
-              capability: capability(
-                new NumberedFixtureHost(host),
-                numberedMethods
-              ),
-            },
-          ],
+          args: [{ capability: suiteCapability(host) }],
           owner,
           cpuMs: testSandbox.limits.cpuMs,
           wallMs: suiteMs,
@@ -1163,11 +1245,26 @@ const suiteFailures = async (
     cleanupMs,
   }: Pick<TestLimits, "testMs" | "suiteMs" | "cleanupMs">
 ): Promise<string[]> => {
-  const failed = (failure: string): string[] => [
-    `${path}: ${failure}`.slice(0, maxFailureLength),
-  ];
   let parent: string | undefined;
-  const host = fixtureHostFor(env, release, files, cleanupMs, () => parent);
+  const host = fixtureHostFor(env, release, files, {
+    cleanupMs,
+    testMs,
+    ...(sandboxHost === undefined ? {} : { parent: () => parent }),
+  });
+  // Once the sandbox refused a function a test called, for its own
+  // reasons, how the tests went isn't known, failed or passed (a test may
+  // have caught the refusal), stopped or not: the sandbox's, to try
+  // again, never read as the code's failure or its pass.
+  const known = (failures: string[]): string[] => {
+    if (host.sandboxRefused) {
+      throw new SandboxUnavailableError(
+        `${path}: the sandbox refused a function its tests called, for want of a place or as it was lost, so whether they pass isn't known: try again.`
+      );
+    }
+    return failures;
+  };
+  const failed = (failure: string): string[] =>
+    known([`${path}: ${failure}`.slice(0, maxFailureLength)]);
   let answer: unknown;
   try {
     if (sandboxHost === undefined) {
@@ -1233,21 +1330,13 @@ const suiteFailures = async (
       `its report doesn't hold one result for each of the ${host.opened.length} tests it ran`
     );
   }
-  const failures = results.flatMap(({ name, failures: of }) =>
-    of.map((failure) =>
-      `${path}, "${name}": ${failure}`.slice(0, maxFailureLength)
+  return known(
+    results.flatMap(({ name, failures: of }) =>
+      of.map((failure) =>
+        `${path}, "${name}": ${failure}`.slice(0, maxFailureLength)
+      )
     )
   );
-  // Once the sandbox refused a function a test called, for its own
-  // reasons, how the tests went isn't known, failed or passed (a test may
-  // have caught the refusal): the sandbox's, to try again, never read as
-  // the code's failure or its pass.
-  if (host.sandboxRefused) {
-    throw new SandboxUnavailableError(
-      `${path}: the sandbox refused a function its tests called, for want of a place or as it was lost, so whether they pass isn't known: try again.`
-    );
-  }
-  return failures;
 };
 
 /**
@@ -1317,12 +1406,30 @@ export const appTestFailures = async (
         `${path}: didn't run: the version's tests ran past their ${limits.runMs / 1000} seconds`
       );
     } else {
-      const runSuite = async (): Promise<string[]> =>
-        await suiteFailures(env, sandboxHost, release, files, path, modules, {
-          testMs: limits.testMs,
-          suiteMs: Math.min(limits.suiteMs, left),
-          cleanupMs: limits.cleanupMs,
-        });
+      // What is left of the run once it has a place: a wait for one
+      // takes from it.
+      const runSuite = async (): Promise<string[]> => {
+        const now = limits.runMs - (Date.now() - started);
+        if (now <= 0) {
+          throw new SandboxUnavailableError(
+            `${path}: the version's tests waited for a place in the sandbox past their ${limits.runMs / 1000} seconds: try again.`,
+            { started: false }
+          );
+        }
+        return await suiteFailures(
+          env,
+          sandboxHost,
+          release,
+          files,
+          path,
+          modules,
+          {
+            testMs: limits.testMs,
+            suiteMs: Math.min(limits.suiteMs, now),
+            cleanupMs: limits.cleanupMs,
+          }
+        );
+      };
       failures.push(
         // One suite at a time: each runs its own isolate and stores; on
         // the sandbox, asked for again while it has no place for it.
