@@ -366,6 +366,14 @@ describe("a workflow's draft", () => {
     };
     const racing = new Proxy(env.DB, {
       get: (target, property): unknown => {
+        // A batch's reads all see one state; the edit lands after it.
+        if (property === "batch" && !landed) {
+          return async (statements: D1PreparedStatement[]) => {
+            const results = await target.batch(statements);
+            await land(target);
+            return results;
+          };
+        }
         if (property !== "prepare") {
           const value: unknown = Reflect.get(target, property);
           return typeof value === "function" ? value.bind(target) : value;
@@ -404,10 +412,13 @@ describe("a workflow's draft", () => {
       },
     });
     const read = await workflowDraft({ ...env, DB: racing }, ada, workflow.id);
-    // Whichever state it read, its checkpoint is never newer than its text.
-    expect(
-      read.checkpoint === null || read.checkpoint.revision <= read.revision
-    ).toBeTruthy();
+    // The edit landed while it read, and whichever state it read, its
+    // checkpoint is never newer than its text.
+    expect({
+      landed,
+      consistent:
+        read.checkpoint === null || read.checkpoint.revision <= read.revision,
+    }).toStrictEqual({ landed: true, consistent: true });
   });
 
   it("finds a contract too large for a version, so a draft that passes publishes", async () => {
