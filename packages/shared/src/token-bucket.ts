@@ -33,17 +33,23 @@ const filled = (
       );
 
 /**
- * Takes a token from `bucket` (a full one when undefined) at `now`:
- * whether there was one, and the bucket after.
+ * Takes `count` tokens from `bucket` (a full one when undefined) at
+ * `now`, all or none: whether it had them, and the bucket after. A count
+ * past the burst takes the whole burst, so no charge waits forever.
  */
 export const takeToken = (
   bucket: TokenBucket | undefined,
   rate: BucketRate,
-  now: number
+  now: number,
+  count = 1
 ): { taken: boolean; bucket: TokenBucket } => {
   const tokens = filled(bucket, rate, now);
-  const taken = tokens >= 1;
-  return { taken, bucket: { tokens: taken ? tokens - 1 : tokens, at: now } };
+  const charge = Math.min(Math.max(1, count), rate.burst);
+  const taken = tokens >= charge;
+  return {
+    taken,
+    bucket: { tokens: taken ? tokens - charge : tokens, at: now },
+  };
 };
 
 /**
@@ -62,12 +68,13 @@ export class TokenBuckets {
     this.#rate = rate;
   }
 
-  /** Takes a token of `key`'s bucket, if it has one. */
-  take(key: string, now: number = Date.now()): boolean {
+  /** Takes `count` tokens of `key`'s bucket, if it has them. */
+  take(key: string, now: number = Date.now(), count = 1): boolean {
     const { taken, bucket } = takeToken(
       this.#buckets.get(key),
       this.#rate,
-      now
+      now,
+      count
     );
     this.#buckets.set(key, bucket);
     if (this.#buckets.size > pruneAbove && now - this.#prunedAt >= minuteMs) {

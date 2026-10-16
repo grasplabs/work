@@ -792,6 +792,47 @@ describe("a streaming action", { timeout: 120_000 }, () => {
       '"code":"operation.mode_mismatch"'
     );
   });
+
+  it("refuses a stream sent with a paginated list's window, before it runs", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const key = crypto.randomUUID();
+    const reference = {
+      resourceId: api.counts.resourceId,
+      resourceVersion: api.counts.resourceVersion,
+      contractId: api.counts.contractId,
+      fingerprint: api.counts.fingerprint,
+      kind: "action",
+    };
+    const windowed = await post(
+      opened.app,
+      opened.builder,
+      "/stream",
+      JSON.stringify({
+        reference,
+        input: {},
+        idempotencyKey: key,
+        window: { extent: 10 },
+      })
+    );
+    // Nothing started under the key: attaching to it finds no invocation.
+    const attached = await post(
+      opened.app,
+      opened.builder,
+      "/attach",
+      JSON.stringify({ reference, input: {}, idempotencyKey: key })
+    );
+    const [windowedText, attachedText] = [
+      await windowed.text(),
+      await attached.text(),
+    ];
+    expect({
+      refused: windowedText.includes('"code":"contract.invalid_request"'),
+      ran: [windowedText, attachedText].some((text) =>
+        text.includes('"ok":true')
+      ),
+    }).toStrictEqual({ refused: true, ran: false });
+  });
 });
 
 /** The request of a call of `reference` with `input` under `key`, as the client sends it. */
