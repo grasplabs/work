@@ -199,7 +199,12 @@ const scopesOf = (
           tasksOf(
             catchBlock?.do,
             pointerJoin(pointerJoin(pointer, "catch"), "do")
-          )
+          ),
+          // Where a caught failure goes, when the catch says, which may
+          // differ from where the try goes when nothing failed.
+          catchBlock !== undefined && Object.hasOwn(catchBlock, "then")
+            ? { next: nextOf(catchBlock.then) }
+            : {}
         ),
       ];
     }

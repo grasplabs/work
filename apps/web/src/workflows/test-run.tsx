@@ -113,6 +113,7 @@ export const TestRun = ({
     setBusy(false);
   };
 
+  const traceVersion = trace?.version;
   const states = new Map(
     (trace?.tasks ?? []).map(({ task, state }) => [task, state])
   );
@@ -162,7 +163,7 @@ export const TestRun = ({
           </output>
           <WorkflowDiagramView
             diagram={trace.diagram}
-            label={t`What the run did`}
+            label={t`What the run of version ${traceVersion} did`}
             states={states}
           />
         </div>
