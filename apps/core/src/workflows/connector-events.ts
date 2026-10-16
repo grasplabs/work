@@ -20,7 +20,7 @@ import {
   workflowErrors,
 } from "@grasp-os/shared/workflows";
 import type { ConnectorEvent } from "@grasp-os/shared/workflows";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
@@ -122,6 +122,24 @@ const receiversOf = async (env: Env, event: ConnectorEvent) =>
     );
 
 /**
+ * The trigger keys of `keys` a stamp's lineage refused already
+ * (`run_mail_stamp_refusals`).
+ */
+const refusedAlready = async (
+  env: Env,
+  keys: readonly string[]
+): Promise<Set<string>> => {
+  if (keys.length === 0) {
+    return new Set();
+  }
+  const rows = await drizzle(env.DB)
+    .select({ key: runMailStampRefusals.triggerKey })
+    .from(runMailStampRefusals)
+    .where(inArray(runMailStampRefusals.triggerKey, [...keys]));
+  return new Set(rows.map(({ key }) => key));
+};
+
+/**
  * Starts the runs an event a connection reported starts; how many
  * workflows it started (or had started, delivered before).
  */
@@ -184,8 +202,21 @@ export const deliverConnectorEvent = async (
   // lineage; anything else is a root. Asked only when a workflow listens.
   const parent =
     receivers.length === 0 ? undefined : await stampedEventRun(env, delivered);
+  // A refusal recorded is final for its delivery: one delivered again
+  // (its acknowledgement lost) starts nothing, even once an operator
+  // raised the limits that refused it.
+  const refusedBefore =
+    parent === undefined
+      ? new Set<string>()
+      : await refusedAlready(
+          env,
+          withRoom.map((receiver) => keyOf(receiver))
+        );
+  const toStart = withRoom.filter(
+    (receiver) => !refusedBefore.has(keyOf(receiver))
+  );
   const started = await Promise.allSettled(
-    withRoom.map(
+    toStart.map(
       async (receiver) =>
         await startRun(env, {
           app: appIdSchema.parse(receiver.appId),
@@ -204,7 +235,7 @@ export const deliverConnectorEvent = async (
         })
     )
   );
-  const refused = lineageRefusals(started, withRoom);
+  const refused = lineageRefusals(started, toStart);
   const failures = started.flatMap((result): unknown[] =>
     result.status === "rejected" &&
     workflowErrors.codeOf(result.reason) !== "workflow.lineage_limit"
@@ -275,7 +306,7 @@ export const deliverConnectorEvent = async (
       })
     );
   }
-  return { runs: receivers.length - refused.length };
+  return { runs: receivers.length - refused.length - refusedBefore.size };
 };
 
 /**

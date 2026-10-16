@@ -477,12 +477,23 @@ describe(
             .run();
           await arrive(watching.user);
           // Settled, then delivered once more, as when connect never heard
-          // it settled.
-          await deliverConnectorEvent(env, JSON.parse(held?.event ?? "null"));
+          // it settled, after an operator raised the nesting limit: a
+          // refusal recorded is final for that delivery.
+          await withQuotas(
+            { ...configuredLimits, workflowNestingLevels: 5 },
+            async () => {
+              await deliverConnectorEvent(
+                env,
+                JSON.parse(held?.event ?? "null")
+              );
+            }
+          );
+          const runs = await admin.api.workflows.list(watching.app);
           const events = await allEvents();
 
           expect({
             whileCapped,
+            runs: runs.length,
             refused: events
               .filter(
                 ({ action, target }) =>
@@ -496,6 +507,9 @@ describe(
               .toSorted((a, b) => a.localeCompare(b)),
           }).toStrictEqual({
             whileCapped: [],
+            // The customer's mail's two roots, and nothing the refused
+            // delivery started later.
+            runs: 2,
             refused: ["echo nesting", "listen nesting"],
           });
         }
