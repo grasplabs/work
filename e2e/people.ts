@@ -173,6 +173,7 @@ const cast = {
   notesLive: { builder: "builder" },
   writerApp: { builder: "builder" },
   notesPages: { builder: "builder" },
+  notesDrafts: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },
