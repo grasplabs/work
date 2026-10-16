@@ -188,12 +188,39 @@ describe("a workflow's runs on-prem", runTime, () => {
     ]);
   });
 
-  it("fails a run whose step spins, as the App's, once: its process killed mid-step, the step never tried again", async () => {
+  it("retries a step whose attempt the sandbox cut off past its CPU time in a fresh session, and the run completes", async () => {
+    const { builder, app } = await appWith(
+      workflowFiles(
+        "spendsOnce",
+        `  const started = await step.do("start", { description: "Start" }, async () => Date.now());
+  return await step.do("spin", { description: "Spin", retries: { limit: 1, delay: "1 second" } }, async () => {
+    // Its first attempt, in the run's first session, spins past its CPU
+    // time; its retry, in a session of its own past that time, answers.
+    if (Date.now() - started < 10_000) {
+      for (;;) {}
+    }
+    return 2;
+  });`,
+        { start: 0, spin: 2 }
+      )
+    );
+    const run = await builder.api.workflows.start(app, "spendsOnce");
+    await endedPastCpuTime(run.id);
+    expect({
+      status: await builder.api.workflows.status(run.id),
+      spin: await journaled(run.id, "spin"),
+    }).toMatchObject({
+      status: { status: "completed", output: 2 },
+      spin: [{ state: "succeeded", attempt: 2 }],
+    });
+  });
+
+  it("fails a run whose step's last attempt the sandbox cut off past its CPU time, with that timeout", async () => {
     const { builder, app } = await appWith(
       workflowFiles(
         "spinner",
         `  await step.do("before", { description: "Before" }, async () => 1);
-  return await step.do("spin", { description: "Spin", retries: { limit: 3, delay: "1 second" } }, async () => {
+  return await step.do("spin", { description: "Spin", retries: { limit: 0 } }, async () => {
     for (;;) {}
   });`,
         { before: 1, spin: 1 }
@@ -208,22 +235,56 @@ describe("a workflow's runs on-prem", runTime, () => {
       (error: unknown) => (error instanceof Error ? error.message : "refused")
     );
     await endedPastCpuTime(run.id);
-    const { status, error } = await builder.api.workflows.status(run.id);
+    const { status, failure } = await builder.api.workflows.status(run.id);
     expect({
       released,
       status,
-      stoppedForCpu: error?.message.includes("CPU time"),
+      step: failure?.step,
+      message: failure?.error.message,
       spin: await journaled(run.id, "spin"),
       steps: await stepsOf(run.id),
     }).toStrictEqual({
       released: "released",
       status: "failed",
-      stoppedForCpu: true,
+      step: "spin",
+      message: "The step ran out of CPU time.",
       spin: [{ state: "failed", attempt: 1 }],
       steps: [
         "workflow.step.completed $params",
         "workflow.step.completed before",
         "workflow.step.failed spin",
+      ],
+    });
+  });
+
+  it("fails a run whose code spins past its CPU time outside any step, retrying nothing", async () => {
+    const { builder, app } = await appWith(
+      workflowFiles(
+        "spinsBetween",
+        `  const spins = await step.do("before", { description: "Before" }, async () => true);
+  // Its tests mock the step: only a run spins.
+  if (spins) {
+    for (;;) {}
+  }
+  return await step.do("after", { description: "After" }, async () => 1);`,
+        { before: false, after: 1 }
+      )
+    );
+    const run = await builder.api.workflows.start(app, "spinsBetween");
+    await endedPastCpuTime(run.id);
+    const { status, failure } = await builder.api.workflows.status(run.id);
+    expect({
+      status,
+      step: failure?.step ?? null,
+      stoppedForCpu: failure?.error.message.includes("CPU time"),
+      steps: await stepsOf(run.id),
+    }).toStrictEqual({
+      status: "failed",
+      step: null,
+      stoppedForCpu: true,
+      steps: [
+        "workflow.step.completed $params",
+        "workflow.step.completed before",
       ],
     });
   });
