@@ -95,7 +95,7 @@ export interface RunStart {
 
 /** The run's main module, as core calls it. */
 export interface RunEntrypoint extends Rpc.WorkerEntrypointBranded {
-  run: (host: RpcTarget, start: RunStart) => Promise<Settled<unknown>>;
+  run: (host: RpcTarget, start: unknown) => Promise<Settled<unknown>>;
 }
 
 /**
@@ -305,7 +305,7 @@ export type DryRuns = z.infer<typeof dryRunsSchema>;
  * The shared part of both main modules: settling a call into plain data
  * and back.
  */
-const settling = `
+export const settling = `
 const described = (error) => ({
   name: String(error?.name ?? "Error"),
   message: String(error?.message ?? error),
@@ -619,11 +619,16 @@ export interface RunCode {
  * module calls only these (`runMain`), and on-prem the isolate gets no
  * other.
  */
-export interface RunHostCalls {
+export interface RunHostCalls<Attempt = AttemptHost> {
   do: (
     name: unknown,
     options: unknown,
-    fn: (attempt: AttemptHost) => Promise<unknown>
+    /**
+     * The attempt's function in the isolate, handed the host minted for
+     * that attempt: an App run's `AttemptHost`, or an independent
+     * workflow's (resource-host.ts).
+     */
+    fn: (attempt: Attempt) => Promise<unknown>
   ) => Promise<Settled<unknown>>;
   sleep: (name: unknown, duration: unknown) => Promise<Settled<null>>;
   waitForDecision: (
@@ -802,10 +807,12 @@ const stepCodeFailure = async (
  * open (`passedCapability`). A function that fails rather than answering
  * fails its step as `stepCodeFailure` says.
  */
-export const sessionRunHost = (
-  host: RunHostCalls,
-  session: RunSession
-): RunHostCalls => ({
+export const sessionRunHost = <Attempt extends object = AttemptHost>(
+  host: RunHostCalls<Attempt>,
+  session: RunSession,
+  /** The calls each attempt host passes: an App run's, unless given. */
+  methods: readonly string[] = attemptMethods
+): RunHostCalls<Attempt> => ({
   do: async (name, options, fn) => {
     if (typeof fn !== "function") {
       return await host.do(name, options, fn);
@@ -819,7 +826,7 @@ export const sessionRunHost = (
           // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
           passedCapability(
             attempt,
-            attemptMethods,
+            methods,
             () => live && session.live()
           ) as never
         );
@@ -851,47 +858,47 @@ const runLoadFailure = (error: unknown): unknown => {
   return failure;
 };
 
+/** How a run's load is let go of (`loadRun`). */
+export interface LoadOptions {
+  over?: AbortSignal;
+  /**
+   * Whether the run is still its activation's: not cancelled, nor taken
+   * over by a newer activation (run-object.ts).
+   */
+  current?: () => boolean;
+}
+
 /**
- * The run's main module, in an isolate of its own running the run's
- * pinned version. Each load is a new isolate, which nothing else shares
- * (it has no name): its env is empty, as every binding it has goes
- * through the host, and no two runs, or loads of one run, share memory.
- * Loads are few: a run's start, and each resume after a wait.
- *
- * On-prem it runs as a sandbox session of its own, owned by the App's runs
- * (`runOwnerOf`), its CPU time and memory bounded by the supervisor, with
- * only the host's calls (`sessionRunHost`). `over` says the activation it
- * runs for is over (a wait suspended it, which never settles its call):
- * the session ends then, freeing its process, and a load waiting for a
- * place stops waiting: a cancel, which ends the activation, so stops it.
- * A pause is taken at the first step boundary once loaded, as the engine
- * takes every pause.
+ * What a run's isolate is loaded with, whatever workflow runs in it: an
+ * App's (`loadRun`) or an independent workflow's sealed build
+ * (resource-runs.ts). Its main module's `Run` entrypoint takes the host's
+ * calls and the run's start.
  */
-export const loadRun = (
+export interface RunIsolate {
+  /** Whose runs it is among, which the sandbox caps per owner. */
+  owner: string;
+  mainModule: string;
+  modules: () => Promise<Record<string, string>>;
+  /** The calls each step's attempt host passes its code on-prem. */
+  attemptMethods: readonly string[];
+}
+
+/** A run's isolate, loaded as `loadRun` loads an App's (see there). */
+export const loadRunIsolate = <Attempt extends object = AttemptHost>(
   env: Env,
-  { app, version, workflow, files }: RunCode,
-  {
-    over,
-    current = () => true,
-  }: {
-    over?: AbortSignal;
-    /**
-     * Whether the run is still its activation's: not cancelled, nor taken
-     * over by a newer activation (run-object.ts).
-     */
-    current?: () => boolean;
-  } = {}
-): RunLoad => {
-  const modules = async () => ({
-    ...(await modulesOf(env, version, files)),
-    [runBindingsModule]: runBindings,
-    [runModule]: runMain(workflow),
-  });
+  { owner, mainModule, modules, attemptMethods: methods }: RunIsolate,
+  { over, current = () => true }: LoadOptions = {}
+): {
+  run: (
+    host: RunHostCalls<Attempt> & RpcTarget,
+    start: unknown
+  ) => Promise<unknown>;
+} => {
   const sandboxHost = sessionHost(env);
   if (sandboxHost === undefined) {
     const entrypoint = env.LOADER.get(null, async () => ({
       ...workflowSandbox,
-      mainModule: runModule,
+      mainModule,
       modules: await modules(),
       env: {},
     })).getEntrypoint<RunEntrypoint>("Run");
@@ -906,13 +913,13 @@ export const loadRun = (
         ended: ended.promise,
       };
       const call = {
-        mainModule: runModule,
+        mainModule,
         modules: await modules(),
         entrypoint: "Run",
         method: "run",
         args: [
           {
-            capability: capability(sessionRunHost(host, session), [
+            capability: capability(sessionRunHost(host, session, methods), [
               "do",
               "sleep",
               "waitForDecision",
@@ -920,7 +927,7 @@ export const loadRun = (
           },
           { value: start },
         ],
-        owner: runOwnerOf(app),
+        owner,
         cpuMs: workflowSandbox.limits.cpuMs,
         wallMs: runLoadMs,
       };
@@ -968,6 +975,42 @@ export const loadRun = (
     },
   };
 };
+
+/**
+ * The run's main module, in an isolate of its own running the run's
+ * pinned version. Each load is a new isolate, which nothing else shares
+ * (it has no name): its env is empty, as every binding it has goes
+ * through the host, and no two runs, or loads of one run, share memory.
+ * Loads are few: a run's start, and each resume after a wait.
+ *
+ * On-prem it runs as a sandbox session of its own, owned by the App's runs
+ * (`runOwnerOf`), its CPU time and memory bounded by the supervisor, with
+ * only the host's calls (`sessionRunHost`). `over` says the activation it
+ * runs for is over (a wait suspended it, which never settles its call):
+ * the session ends then, freeing its process, and a load waiting for a
+ * place stops waiting: a cancel, which ends the activation, so stops it.
+ * A pause is taken at the first step boundary once loaded, as the engine
+ * takes every pause.
+ */
+export const loadRun = (
+  env: Env,
+  { app, version, workflow, files }: RunCode,
+  options: LoadOptions = {}
+): RunLoad =>
+  loadRunIsolate(
+    env,
+    {
+      owner: runOwnerOf(app),
+      mainModule: runModule,
+      modules: async () => ({
+        ...(await modulesOf(env, version, files)),
+        [runBindingsModule]: runBindings,
+        [runModule]: runMain(workflow),
+      }),
+      attemptMethods,
+    },
+    options
+  );
 
 /** The most of why an isolate didn't start that a failure keeps. */
 const maxLoadFailure = 500;

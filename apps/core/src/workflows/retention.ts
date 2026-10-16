@@ -47,7 +47,9 @@ import { runEngine, runRetentionDays } from "./engine.ts";
 //
 // The same retention removes what independent workflows keep of what a
 // person put in (`sweepWorkflowStartDetails`): a start receipt's input and
-// the parameter values it froze, once it was admitted that long ago, and
+// the parameter values it froze, once it was admitted that long ago and
+// the run it admitted, if any, ended that long ago (the run reads them
+// from the receipt until it ends: resource-runs.ts), and
 // the values of a parameter revision once another replaced it that long
 // ago, or its workflow was deleted. The database lets nothing else of
 // either change (migration 0080): their IDs, hashes, revisions and who
@@ -329,7 +331,14 @@ export const sweepWorkflowStartDetails = async (
             .where(
               and(
                 isNull(receipts.detailsRemovedAt),
-                lt(receipts.createdAt, before)
+                lt(receipts.createdAt, before),
+                // Not while its run reads them: a run that hasn't ended
+                // loads its input and parameters from its receipt on every
+                // activation (resource-runs.ts). Once it ended, its
+                // retention counts from its end, as an App run's does.
+                sql`NOT EXISTS (SELECT 1 FROM workflow_resource_runs AS run
+                  WHERE run.id = ${receipts.id}
+                    AND (run.ended_at IS NULL OR run.ended_at >= ${before.getTime()}))`
               )
             )
             .orderBy(asc(receipts.createdAt))

@@ -19,6 +19,7 @@ import { pinOf } from "./engine.ts";
 import { newAiCalls } from "./host.ts";
 import type { AiCalls, BusyRefusals } from "./host.ts";
 import { sharesReleased } from "./quotas.ts";
+import { projectResourceRun } from "./resource-runs.ts";
 import { completeCancel, projectStatus } from "./runs.ts";
 
 /**
@@ -585,6 +586,24 @@ export class WorkflowRuns extends WorkflowRun<Env> {
       definition: latest.workflow,
       version: latest.version,
     });
+    if (pin?.type === "resource") {
+      // An independent workflow's run: no cancel or control of it exists
+      // yet, so its row follows the engine's status alone.
+      // Why it failed, from its own journal: kept on its row, so the code
+      // outlives the engine's record of the run.
+      const live = this.status();
+      await projectResourceRun(
+        this.env,
+        latest.instanceId,
+        {
+          status: latest.status,
+          at: latest.timestamp,
+          sequence: latest.sequence,
+        },
+        live?.status === "errored" ? (live.error.code ?? null) : null
+      );
+      return;
+    }
     if (pin?.type !== "app") {
       return;
     }

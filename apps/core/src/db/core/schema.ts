@@ -2557,6 +2557,92 @@ export const workflowStartReceipts = sqliteTable(
 );
 
 /**
+ * Each run of an independent workflow (src/workflows/resource-runs.ts):
+ * the run a start's receipt admitted, under the receipt's own ID, written
+ * in the receipt's statement for a version with an executable build. It
+ * pins the exact version, its manifest and its build's executable
+ * identity, and the person it acts for; the engine runs it (engine.ts,
+ * pinned to the same) and is the only authority on where it is, which
+ * `status` follows by the engine's notifications, each applied only if
+ * newer than the last (`engine_sequence`). A run that hasn't ended keeps
+ * its workflow from being deleted (workflow-resources.ts). It holds no
+ * details: its input and parameters are the receipt's, its output and
+ * failure the engine's, both under run retention.
+ *
+ * Not a `workflow_runs` row: those are an App's runs (`app_id` is
+ * required), and making it optional would rebuild that table, which D1
+ * can't do under the tables that reference it.
+ */
+export const workflowResourceRuns = sqliteTable(
+  "workflow_resource_runs",
+  {
+    id: text()
+      .primaryKey()
+      .references(() => workflowStartReceipts.id),
+    workflowResourceId: text("workflow_resource_id")
+      .notNull()
+      .references(() => workflowResources.id),
+    version: integer().notNull(),
+    manifestHash: text("manifest_hash").notNull(),
+    buildHash: text("build_hash").notNull(),
+    principalId: text("principal_id").notNull(),
+    status: text({
+      enum: ["starting", "running", "completed", "failed", "cancelled"],
+    }).notNull(),
+    engineSequence: integer("engine_sequence").notNull().default(0),
+    createdAt: timestamp("created_at").notNull(),
+    endedAt: timestamp("ended_at"),
+    /**
+     * How often the repair sent its start (workflows/resource-runs.ts), and
+     * when it may next: each run backs off on its own, and ends failed
+     * past a bound, so runs that can't start never crowd out newer ones.
+     */
+    startAttempts: integer("start_attempts").notNull().default(0),
+    nextStartAt: timestamp("next_start_at"),
+    /**
+     * Why core ended a run the engine never had (its start abandoned), as
+     * an error code with nothing of the run in it: the engine, which
+     * holds every other run's error, has nothing to say of it.
+     */
+    failureCode: text("failure_code"),
+  },
+  (table) => [
+    // A workflow's runs that haven't ended, for its deletion check.
+    index("workflow_resource_runs_workflow_idx").on(
+      table.workflowResourceId,
+      table.status
+    ),
+    // Starts the engine is still to confirm, for the repair.
+    index("workflow_resource_runs_starting_idx")
+      .on(table.createdAt)
+      .where(sql`${table.status} = 'starting'`),
+  ]
+);
+
+/**
+ * Terminations core owes the engine for runs it ended while they were
+ * still starting, cancelled or abandoned (workflows/resource-runs.ts):
+ * the run's row ends at once and never changes again, so what is still
+ * to tell the engine is kept here, written with that end, until the
+ * engine confirms. The repair
+ * sends each again, backing off, so an instance the engine made before
+ * that end never keeps its lease or alarm.
+ */
+export const workflowResourceRunTerminations = sqliteTable(
+  "workflow_resource_run_terminations",
+  {
+    runId: text("run_id")
+      .primaryKey()
+      .references(() => workflowResourceRuns.id),
+    attempts: integer().notNull().default(0),
+    nextAt: timestamp("next_at").notNull(),
+  },
+  (table) => [
+    index("workflow_resource_run_terminations_next_idx").on(table.nextAt),
+  ]
+);
+
+/**
  * The host catalog of contracts independent workflows bind besides each
  * other (spec 13.2; src/workflow-catalog.ts): operation, connector, model
  * and decision contracts, each published once by an admin and never
