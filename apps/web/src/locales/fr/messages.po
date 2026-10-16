@@ -2970,6 +2970,10 @@ msgstr "Chats invités. Ce domaine peut inviter des personnes non membres à un 
 msgid "Guest of {domain}, invited for {person}"
 msgstr "Invité de {domain}, invité pour {person}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Guests"
+msgstr "Invités"
+
 #: src/brain/brain.ts
 msgid "Handover"
 msgstr "Passation"
@@ -4500,6 +4504,10 @@ msgstr "Autorisation {permission}"
 msgid "Permission for the platform's statistics"
 msgstr "Autorisation pour les statistiques de la plateforme"
 
+#: src/engines/resource-bindings.tsx
+msgid "Permission to invite guests"
+msgstr "Autorisation d'inviter des invités"
+
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
 msgstr "Autorisations demandées"
@@ -5949,6 +5957,10 @@ msgstr "L’annuaire et la connexion via Microsoft ou Google. Ajoute les équipe
 #: src/brain/brain-atlas.ts
 msgid "The directory brought in the teams and their roles."
 msgstr "L’annuaire a apporté les équipes et leurs rôles."
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain has no permission to invite guests. Grant one first."
+msgstr "Le domaine n'a aucune autorisation d'inviter des invités. Accordez-en une d'abord."
 
 #: src/engines/resource-bindings.tsx
 msgid "The domain has no permission to read a collection. Grant one first."

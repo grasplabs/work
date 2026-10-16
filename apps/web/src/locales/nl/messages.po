@@ -2970,6 +2970,10 @@ msgstr "Gastchats. Dit domein kan mensen die geen lid zijn via een link uitnodig
 msgid "Guest of {domain}, invited for {person}"
 msgstr "Gast van {domain}, uitgenodigd voor {person}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Guests"
+msgstr "Gasten"
+
 #: src/brain/brain.ts
 msgid "Handover"
 msgstr "Overdracht"
@@ -4500,6 +4504,10 @@ msgstr "Recht {permission}"
 msgid "Permission for the platform's statistics"
 msgstr "Recht voor de platformstatistieken"
 
+#: src/engines/resource-bindings.tsx
+msgid "Permission to invite guests"
+msgstr "Recht om gasten uit te nodigen"
+
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
 msgstr "Gevraagde toestemmingen"
@@ -5949,6 +5957,10 @@ msgstr "De directory en het inloggen via Microsoft of Google. Voegt teams en rol
 #: src/brain/brain-atlas.ts
 msgid "The directory brought in the teams and their roles."
 msgstr "De directory bracht de teams en hun rollen binnen."
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain has no permission to invite guests. Grant one first."
+msgstr "Het domein heeft geen recht om gasten uit te nodigen. Verleen er eerst een."
 
 #: src/engines/resource-bindings.tsx
 msgid "The domain has no permission to read a collection. Grant one first."

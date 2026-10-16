@@ -73,9 +73,12 @@ import type {
   ConnectionGrantRow,
   ContractReader,
 } from "./resource-connector.ts";
+import { guestsAdapter } from "./resource-guests.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter, modelAnswers, tokensOfBound } from "./resource-model.ts";
-import { platformGrantsOf, statisticsAdapter } from "./resource-statistics.ts";
+import { platformGrantsOf } from "./resource-platform.ts";
+import type { PlatformAction } from "./resource-platform.ts";
+import { statisticsAdapter } from "./resource-statistics.ts";
 import { appStoreGrant, grantServes, storeAdapter } from "./resource-store.ts";
 import { templateAdapter, templateVersionsOf } from "./resource-templates.ts";
 import { auditStoreRefusal } from "./store-operations.ts";
@@ -135,6 +138,7 @@ const adapters: {
   template: templateAdapter,
   store: storeAdapter,
   statistics: statisticsAdapter,
+  guests: guestsAdapter,
 };
 
 /** The SHA-256 of `declaration`, canonical, as a release sealed it. */
@@ -293,6 +297,9 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
     return joined.length <= identifierMaxLength
       ? { permissionIds: joined }
       : { permissionCount: ids.length };
+  }
+  if (target.kind === "guests") {
+    return { permissionId: target.permissionId };
   }
   if (target.kind === "statistics") {
     return target.permissionId === undefined
@@ -722,11 +729,13 @@ interface ReviewGrants {
     permissionId: string
   ) => Promise<StoreGrant | undefined | typeof unchecked>;
   /**
-   * The App's own active permissions to read the platform's statistics,
-   * newest first, at most `choicesMax`: read once, when a statistics
-   * resource that reads them asks.
+   * The App's own active `{ type: "platform" }` permissions of `action`,
+   * newest first, at most `choicesMax`: read once for each action, when a
+   * statistics or guests resource asks.
    */
-  readonly platform: () => Promise<{ ids: string[]; truncated: boolean }>;
+  readonly platform: (
+    action: PlatformAction
+  ) => Promise<{ ids: string[]; truncated: boolean }>;
 }
 
 /** The App's grants and their collections' names, read once for a review. */
@@ -754,11 +763,14 @@ const reviewGrants = async (
           .select({ id: collections.id, name: collections.name })
           .from(collections)
           .where(inList(collections.id, ids));
-  let platform: Promise<string[]> | undefined;
+  const platform = new Map<PlatformAction, Promise<string[]>>();
   return {
-    platform: async () => {
-      platform ??= platformGrantsOf(env, app, choicesMax + 1);
-      const granted = await platform;
+    platform: async (action) => {
+      const reading =
+        platform.get(action) ??
+        platformGrantsOf(env, app, action, choicesMax + 1);
+      platform.set(action, reading);
+      const granted = await reading;
       return {
         ids: granted.slice(0, choicesMax),
         truncated: granted.length > choicesMax,
@@ -840,11 +852,19 @@ const choicesFor = async (
   if (declaration["~resource"] === "statistics") {
     const platform = declaration.platform.length > 0;
     const granted = platform
-      ? await grants.platform()
+      ? await grants.platform("statistics")
       : { ids: [], truncated: false };
     return {
       kind: "statistics",
       platform,
+      permissions: granted.ids.map((permissionId) => ({ permissionId })),
+      truncated: granted.truncated,
+    };
+  }
+  if (declaration["~resource"] === "guests") {
+    const granted = await grants.platform("guests");
+    return {
+      kind: "guests",
       permissions: granted.ids.map((permissionId) => ({ permissionId })),
       truncated: granted.truncated,
     };
@@ -1033,13 +1053,14 @@ const targetLabels = async (
 };
 
 /**
- * Knowledge's or statistics' declared operations, or a store's paths; none
+ * Knowledge's, statistics' or guests' declared operations, or a store's paths; none
  * for other kinds.
  */
 const operationsOf = (declaration: AnyResource): string[] => {
   if (
     declaration["~resource"] === "knowledge" ||
-    declaration["~resource"] === "statistics"
+    declaration["~resource"] === "statistics" ||
+    declaration["~resource"] === "guests"
   ) {
     return [...declaration.operations];
   }

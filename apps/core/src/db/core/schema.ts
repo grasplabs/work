@@ -956,6 +956,7 @@ export const appResourceBindings = sqliteTable(
         "template",
         "store",
         "statistics",
+        "guests",
       ],
     }).notNull(),
     target: text().notNull(),
@@ -2382,6 +2383,13 @@ export const guestChats = sqliteTable(
     /** When the guest finished it, or it was revoked. */
     endedAt: timestamp("ended_at"),
     ended: text({ enum: ["finished", "revoked"] }),
+    /**
+     * The alias of the guests binding a sealed function invited it through
+     * (resource-guests.ts): its link works only while an active binding of
+     * that alias still names its permission. Null for one an App's v1
+     * server invited, under its permission alone.
+     */
+    bindingAlias: text("binding_alias"),
   },
   (table) => [
     uniqueIndex("guest_chats_token_idx").on(table.tokenHash),

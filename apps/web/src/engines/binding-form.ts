@@ -89,7 +89,11 @@ export const targetOf = (
       ? { kind: "model", model: picked }
       : undefined;
   }
-  if (choices.kind === "connector" || choices.kind === "store") {
+  if (
+    choices.kind === "connector" ||
+    choices.kind === "store" ||
+    choices.kind === "guests"
+  ) {
     return choices.permissions.some(
       ({ permissionId }) => permissionId === picked
     )
