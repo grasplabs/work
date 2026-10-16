@@ -67,7 +67,7 @@ describe("the package builder on the on-prem sandbox", () => {
   /** A pool of four, so the builder's share is two: one each for two Apps. */
   let wide: SandboxSupervisor;
   let wideUrl: string;
-  /** A second core isolate on that pool: core takes one App's builds in turns only within an isolate. */
+  /** A second core isolate on that pool, so one App's builds come from two isolates at once. */
   let otherUrl: string;
 
   beforeAll(async () => {
