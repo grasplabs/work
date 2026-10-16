@@ -59,7 +59,8 @@ export const TestRun = ({
         }
         setTrace(read);
         setFailure(undefined);
-        if (!ended(read)) {
+        // Ended, or nothing more of it is shown: no need to read again.
+        if (!(ended(read) || read.detailsRemoved)) {
           timer = setTimeout(() => {
             void follow();
           }, followMs);
