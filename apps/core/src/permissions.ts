@@ -1298,12 +1298,15 @@ export const listeningPermissionSql = (
  * and can't be told apart by what they change, and at every protected step
  * of a function it calls in its pinned release (`runInvocationFor`,
  * app-functions.ts). An App with no such permission changes nothing for
- * the person but its own data.
+ * the person but its own data, so the refusal holds only while one is
+ * active: a version nobody approved runs again once none is.
  */
 export const requireApprovedVersion = async (
   env: Env,
   app: AppId,
-  version: number
+  version: number,
+  /** Records the refusal, before it is thrown (`runInvocationFor`). */
+  refused?: () => Promise<void>
 ): Promise<void> => {
   const changing = and(
     ofSubject({ type: "app", appId: app }),
@@ -1314,6 +1317,7 @@ export const requireApprovedVersion = async (
     sql`SELECT (${unapprovedSql(app, version)} AND EXISTS (SELECT 1 FROM ${permissions} WHERE ${changing})) AS unapproved`
   );
   if (row.unapproved !== 0) {
+    await refused?.();
     throw permissionErrors.create("permission.denied", { action: "call" });
   }
 };
