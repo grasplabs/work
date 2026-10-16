@@ -425,8 +425,8 @@ export const fixtures: Record<string, WorkflowDefinition> = {
     },
   },
   // One step, a sleep, a second step: paused in the sleep, it must not
-  // run the second until resumed. The sleep is long enough to pause in
-  // however slowly the test gets there after the first step's note.
+  // run the second until resumed. The sleep is long enough for the pause
+  // the test sends once it sees sleep_started to land inside it.
   pausable: {
     run: async (event, step) => {
       await step.do("one", counted(event.instanceId, "one"));

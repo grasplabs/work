@@ -35,7 +35,6 @@ import {
   start,
   statusName,
   threwWith,
-  until,
 } from "./conformance-engines.ts";
 import type { Instance, Pair } from "./conformance-engines.ts";
 import {
@@ -45,7 +44,7 @@ import {
   profileId,
 } from "./conformance-families.ts";
 import type { DiscrepancyName, Family } from "./conformance-families.ts";
-import { notesOf, pausableSleepMs } from "./conformance-fixtures.ts";
+import { pausableSleepMs } from "./conformance-fixtures.ts";
 
 const sameOnBoth = <T>(pair: Pair<T>): T => {
   expect(pair.engine).toStrictEqual(pair.reference);
@@ -472,10 +471,8 @@ const checks: Record<Family, () => void> = {
     test("a run paused in a sleep stays paused past its deadline, and resumed, finishes without repeating a step; pause and resume are idempotent", async () => {
       const instances = await start("pausable");
       await onBoth(instances, async (instance) => {
-        // Paused once its first step is done: in its sleep.
-        await until(`${instance.id}'s first step`, () =>
-          notesOf(instance.id).includes("one") ? true : undefined
-        );
+        // Paused once it has got to its sleep.
+        await arrived(instance, "sleep_started");
         await instance.pause();
         await reached(instance, paused);
         await instance.pause();
@@ -801,9 +798,14 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
       status: "complete",
       output: { id: 1 },
     });
-    // Given the time the engine took and more, the reference hasn't ended.
-    await scheduler.wait(500);
-    await expect(statusName(instances.reference)).resolves.toBe("running");
+    // The reference refuses each attempt's result, as a retryable error.
+    const refused = await arrived(instances.reference, "attempt_errored");
+    expect(refused).toMatchObject({
+      stepName: "value-1",
+      attempt: 1,
+      error: { name: "DataCloneError" },
+    });
+    expect(field(refused, "retryDelayMs")).toBeGreaterThan(0);
   },
   "byob-stream": async () => {
     const { reference, engine } = await ran("byob-stream");

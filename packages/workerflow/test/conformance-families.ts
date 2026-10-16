@@ -164,7 +164,8 @@ export const discrepancies = {
     verdict: "unresolved",
     workerflow:
       "a class instance a step returns is kept as its own fields, as structured clone keeps it",
-    reference: "refused (DataCloneError), and the run never ends",
+    reference:
+      "each attempt fails with DataCloneError and is retried, as an ordinary step error",
     resolution: toOracle,
   },
   "byob-stream": {
