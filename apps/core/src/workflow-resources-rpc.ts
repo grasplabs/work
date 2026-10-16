@@ -2,6 +2,7 @@ import type {
   AppWorkflowBinding,
   CatalogContractEntry,
   WorkflowBindingApproval,
+  WorkflowDraft,
   WorkflowMember,
   WorkflowParams,
   WorkflowResource,
@@ -28,6 +29,11 @@ import {
   catalogContracts,
   publishCatalogContract,
 } from "./workflow-catalog.ts";
+import {
+  editWorkflowDraft,
+  publishWorkflowDraft,
+  workflowDraft,
+} from "./workflow-drafts.ts";
 import { setWorkflowParams, workflowParams } from "./workflow-params.ts";
 import {
   createWorkflowResource,
@@ -91,6 +97,30 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) =>
         await publishWorkflowVersion(this.#env, person, id, input)
+    );
+  }
+
+  async draft(id: string): Promise<WorkflowDraft> {
+    return await withPerson(
+      this.#check,
+      async (person) => await workflowDraft(this.#env, person, id)
+    );
+  }
+
+  async editDraft(id: string, input: unknown): Promise<WorkflowDraft> {
+    return await withPerson(
+      this.#check,
+      async (person) => await editWorkflowDraft(this.#env, person, id, input)
+    );
+  }
+
+  async publishDraft(
+    id: string,
+    input: unknown
+  ): Promise<WorkflowResourceVersion> {
+    return await withPerson(
+      this.#check,
+      async (person) => await publishWorkflowDraft(this.#env, person, id, input)
     );
   }
 

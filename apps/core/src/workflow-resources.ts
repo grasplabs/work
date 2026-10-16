@@ -63,6 +63,7 @@ import type { PinnedEventBinding } from "./bound-workflow-events.ts";
 import {
   sdkReleasePins,
   sdkResourceBindings,
+  workflowResourceDrafts,
   workflowResourceMembers,
   workflowResources,
   workflowResourceVersions,
@@ -787,16 +788,29 @@ const contractOf = (checked: CheckedWorkflow): StoredContract => {
   };
 };
 
+const identityCode = "workflow.identity_mismatch";
+
+/** A definition that names another workflow than `workflow`, as a problem. */
+const identityProblem = (
+  workflow: Pick<Live, "name">
+): WorkflowDefinitionProblem => ({
+  code: identityCode,
+  message:
+    "The definition names another workflow than this one: its namespace and name must be the workflow's own.",
+  pointer: "/document",
+  remedy: `Name this workflow: namespace "${workflowNamespace}" and name "${workflow.name}".`,
+});
+
 /**
- * Refuses a definition with more listen tasks an App's references would
- * carry as event waits (those waiting only on a browser-callable type)
- * than a reference holds: sealing an App bound to it would fail later,
- * where the builder can't see why.
+ * The problem with a definition that has more listen tasks an App's
+ * references would carry as event waits (those waiting only on a
+ * browser-callable type) than a reference holds: sealing an App bound to
+ * it would fail later, where the builder can't see why.
  */
-const requireReferenceableListens = (
+const referenceableListensProblem = (
   checked: CheckedWorkflow,
   catalog: Map<string, ResolvedCatalogContract>
-): void => {
+): WorkflowDefinitionProblem | undefined => {
   const bindings: PinnedEventBinding[] = [];
   for (const [alias, binding] of checked.bindings) {
     const events = catalog.get(binding.contract)?.contract.events;
@@ -807,17 +821,16 @@ const requireReferenceableListens = (
   const referenced = Object.keys(
     boundEventsOf(bindings, listensOf(checked)).listens
   ).length;
-  if (referenced > workflowReferenceLimits.listens) {
-    throw definitionInvalid([
-      {
-        code: "listen.too_many",
-        message: `More than ${workflowReferenceLimits.listens} tasks listen for events a screen sends, which an App's references can't hold.`,
-        pointer: "/do",
-        remedy:
-          "Listen for a screen's events in fewer tasks: a bounded loop of one listen covers repeats.",
-      },
-    ]);
+  if (referenced <= workflowReferenceLimits.listens) {
+    return undefined;
   }
+  return {
+    code: "listen.too_many",
+    message: `More than ${workflowReferenceLimits.listens} tasks listen for events a screen sends, which an App's references can't hold.`,
+    pointer: "/do",
+    remedy:
+      "Listen for a screen's events in fewer tasks: a bounded loop of one listen covers repeats.",
+  };
 };
 
 /**
@@ -827,16 +840,16 @@ const requireReferenceableListens = (
  * otherwise), and names this workflow (`workflow.identity_mismatch`).
  * Returns it with what each binding resolved to.
  */
-const checkDefinition = async (
+const inspectDefinition = async (
   env: Env,
   by: Acting,
-  workflow: Live,
+  workflow: Pick<Live, "name">,
   definition: string,
   modules: CompiledModules | undefined
-): Promise<{
-  checked: CheckedWorkflow;
-  bindings: PinnedBinding[];
-}> => {
+): Promise<
+  | { ok: true; checked: CheckedWorkflow; bindings: PinnedBinding[] }
+  | { ok: false; problems: WorkflowDefinitionProblem[] }
+> => {
   // Every contract the definition names, resolved before validation,
   // which looks contracts up as it goes: workflows for `by`, catalog
   // contracts from the host catalog.
@@ -862,30 +875,31 @@ const checkDefinition = async (
     },
   });
   if (!result.ok) {
-    throw definitionInvalid(problemsOf(result.diagnostics));
+    return { ok: false, problems: problemsOf(result.diagnostics) };
   }
   const checked = result.workflow;
   if (
     checked.identity.namespace !== workflowNamespace ||
     checked.identity.name !== workflow.name
   ) {
-    throw workflowResourceErrors.create("workflow.identity_mismatch");
+    return { ok: false, problems: [identityProblem(workflow)] };
   }
   // A run's output reaches whoever started it, who may only use the
   // workflow: a sensitive parameter stays out of every expression until
   // bindings that need one come (GRA-566).
   const sensitive = sensitiveReads(checked);
   if (sensitive.length > 0) {
-    throw definitionInvalid(
-      sensitive.map((read) => ({
+    return {
+      ok: false,
+      problems: sensitive.map((read) => ({
         code: "expression.sensitive_param",
         message:
           "An expression reads a sensitive parameter, or all parameters at once, which could pass its value on.",
         pointer: read.pointer,
         ...(read.taskId === undefined ? {} : { taskId: read.taskId }),
         remedy: "Read only parameters that aren't sensitive, each by its name.",
-      }))
-    );
+      })),
+    };
   }
   const bindings: PinnedBinding[] = [];
   for (const [alias, binding] of checked.bindings) {
@@ -922,8 +936,42 @@ const checkDefinition = async (
     });
   }
   bindings.sort((a, b) => (a.alias < b.alias ? -1 : 1));
-  requireReferenceableListens(checked, catalog);
-  return { checked, bindings };
+  const listens = referenceableListensProblem(checked, catalog);
+  if (listens !== undefined) {
+    return { ok: false, problems: [listens] };
+  }
+  return { ok: true, checked, bindings };
+};
+
+/**
+ * `definition` checked for publication (`inspectDefinition`): refused as
+ * `workflow.definition_invalid` with its problems otherwise.
+ */
+const checkDefinition = async (
+  env: Env,
+  by: Acting,
+  workflow: Pick<Live, "name">,
+  definition: string,
+  modules: CompiledModules | undefined
+): Promise<{
+  checked: CheckedWorkflow;
+  bindings: PinnedBinding[];
+}> => {
+  const inspected = await inspectDefinition(
+    env,
+    by,
+    workflow,
+    definition,
+    modules
+  );
+  if (!inspected.ok) {
+    const [first] = inspected.problems;
+    if (inspected.problems.length === 1 && first?.code === identityCode) {
+      throw workflowResourceErrors.create("workflow.identity_mismatch");
+    }
+    throw definitionInvalid(inspected.problems);
+  }
+  return { checked: inspected.checked, bindings: inspected.bindings };
 };
 
 /**
@@ -1563,6 +1611,31 @@ const publish = async (
  * published answers that version if the definition is the same, and is
  * refused otherwise.
  */
+/**
+ * What keeps `definition` from being published to `workflow` by `by`, as
+ * `checkDefinition` checks it: empty when nothing does. Its refusals of
+ * the definition are answered as problems, at their pointers; anything
+ * else (the catalog unreachable) is thrown. What drafts are checked with
+ * (workflow-drafts.ts), so a checkpoint is exactly what would publish.
+ * A draft is its definition alone and publishes without modules, so it is
+ * checked without them: a `local:` binding is a problem in a draft.
+ */
+export const definitionProblems = async (
+  env: Env,
+  by: Acting,
+  workflow: Pick<Live, "name">,
+  definition: string
+): Promise<WorkflowDefinitionProblem[]> => {
+  const inspected = await inspectDefinition(
+    env,
+    by,
+    workflow,
+    definition,
+    undefined
+  );
+  return inspected.ok ? [] : inspected.problems;
+};
+
 export const publishWorkflowVersion = async (
   env: Env,
   by: Acting,
@@ -2005,6 +2078,12 @@ export const deleteWorkflowResource = async (
     // Packages asked for it wait for nobody once it is gone, and the locks
     // only they named go, their files to cleanup (dependencies/requests.ts).
     ...withdrawnWithWorkflow(db, by.actor ?? actorOf(by), workflow.id),
+    // Its draft (workflow-drafts.ts) is never read again, and may hold a
+    // sensitive parameter's default: it goes once it is deleted.
+    db.delete(workflowResourceDrafts).where(
+      sql`${workflowResourceDrafts.workflowResourceId} IN (SELECT id
+        FROM workflow_resources WHERE id = ${workflow.id} AND deleted_at IS NOT NULL)`
+    ),
     // The releases its approvals kept (workflow-bindings.ts) go back to
     // their retention once it is deleted.
     db.delete(sdkReleasePins).where(

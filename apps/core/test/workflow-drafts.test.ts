@@ -1,0 +1,359 @@
+import type { Role } from "@grasp-os/shared/roles";
+import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
+import { env } from "cloudflare:workers";
+import { describe, expect, it } from "vite-plus/test";
+
+import type { Acting } from "../src/auth/identity.ts";
+import {
+  editWorkflowDraft,
+  publishWorkflowDraft,
+  workflowDraft,
+} from "../src/workflow-drafts.ts";
+import {
+  createWorkflowResource,
+  deleteWorkflowResource,
+  publishWorkflowVersion,
+  shareWorkflowResource,
+  workflowVersions,
+} from "../src/workflow-resources.ts";
+import { allEvents } from "./audit-events.ts";
+import { outcome, unique } from "./sign-in.ts";
+
+// A workflow's draft (workflow-drafts.ts), from its threat model: two
+// edits at once never both land, text that doesn't pass is kept but never
+// becomes a checkpoint or a version, only builders read it, and it keeps
+// only what it needs. Each test makes its own people and workflows.
+
+/** A member of the organization in `role`, as their session has them. */
+const person = async (role: Role, staff = false): Promise<Acting> => {
+  const userId = crypto.randomUUID();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT OR IGNORE INTO organizations (id, name, slug, created_at) VALUES ('organization', 'Acme', 'acme', ?)"
+    ).bind(Date.now()),
+    env.DB.prepare(
+      "INSERT INTO users (id, name, email, email_verified, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)"
+    ).bind(userId, "Person", `${userId}@acme.test`, Date.now(), Date.now()),
+    env.DB.prepare(
+      "INSERT INTO members (id, organization_id, user_id, role, created_at) VALUES (?, 'organization', ?, ?, ?)"
+    ).bind(crypto.randomUUID(), userId, role, Date.now()),
+  ]);
+  return { userId, role, teams: [], staff };
+};
+
+const objectSchema = (properties: Record<string, unknown>) => ({
+  format: "json",
+  document: {
+    type: "object",
+    properties,
+    required: Object.keys(properties),
+    additionalProperties: false,
+  },
+});
+
+/** A definition of workflow `name` that passes, ending in `status`. */
+const definitionOf = (
+  name: string,
+  { status = "done", tasks }: { status?: string; tasks?: unknown[] } = {}
+): string =>
+  JSON.stringify({
+    document: {
+      dsl: "1.0.3",
+      namespace: workflowNamespace,
+      name,
+      version: "1.0.0",
+      title: name,
+      metadata: {
+        grasp: { profile: "grasp-open-workflow/1", params: {}, bindings: {} },
+      },
+    },
+    input: { schema: objectSchema({ who: { type: "string" } }) },
+    output: { schema: objectSchema({ status: { type: "string" } }) },
+    do: tasks ?? [{ finish: { set: { status } } }],
+  });
+
+/** How many revisions of workflow `id`'s draft are stored. */
+const storedRevisions = async (id: string): Promise<number[]> => {
+  const { results } = await env.DB.prepare(
+    "SELECT revision FROM workflow_resource_drafts WHERE workflow_resource_id = ? ORDER BY revision"
+  )
+    .bind(id)
+    .all<{ revision: number }>();
+  return results.map(({ revision }) => revision);
+};
+
+const workflowOf = async (by: Acting) =>
+  await createWorkflowResource(env, by, `draft-${unique()}`);
+
+describe("a workflow's draft", () => {
+  it("starts from a definition that passes, and publishes its checkpoint as the next version", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const started = await workflowDraft(env, ada, workflow.id);
+    expect(started).toMatchObject({
+      revision: 0,
+      problems: [],
+      checkpoint: null,
+    });
+
+    const saved = await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 0,
+      source: started.source,
+    });
+    expect(saved).toMatchObject({
+      revision: 1,
+      problems: [],
+      checkpoint: { revision: 1, source: started.source },
+      editedBy: ada.userId,
+    });
+    const version = await publishWorkflowDraft(env, ada, workflow.id, {
+      revision: 1,
+      basedOn: null,
+    });
+    expect(version).toMatchObject({ version: 1 });
+    // Once published, a later edit builds on that version.
+    const next = definitionOf(workflow.name, { status: "later" }).replace(
+      '"1.0.0"',
+      '"1.1.0"'
+    );
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 1,
+      source: next,
+    });
+    await expect(
+      outcome(
+        publishWorkflowDraft(env, ada, workflow.id, {
+          revision: 2,
+          basedOn: null,
+        })
+      )
+    ).resolves.toBe("workflow.version_conflict");
+    await publishWorkflowDraft(env, ada, workflow.id, {
+      revision: 2,
+      basedOn: 1,
+    });
+    await expect(workflowVersions(env, ada, workflow.id)).resolves.toHaveLength(
+      2
+    );
+  });
+
+  it("is the current version's definition before anyone edits it", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const definition = definitionOf(workflow.name);
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition,
+      basedOn: null,
+    });
+    await expect(workflowDraft(env, ada, workflow.id)).resolves.toMatchObject({
+      revision: 0,
+      source: definition,
+      checkpoint: { revision: 0, source: definition },
+    });
+  });
+
+  it("keeps the first of two edits of the same revision, and refuses the second", async () => {
+    const ada = await person("builder");
+    const bo = await person("builder");
+    const workflow = await workflowOf(ada);
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bo.userId,
+      role: "builder",
+    });
+    const first = definitionOf(workflow.name, { status: "ada" });
+    const second = definitionOf(workflow.name, { status: "bo" });
+    const outcomes = await Promise.all([
+      outcome(
+        editWorkflowDraft(env, ada, workflow.id, {
+          expectedRevision: 0,
+          source: first,
+        })
+      ),
+      outcome(
+        editWorkflowDraft(env, bo, workflow.id, {
+          expectedRevision: 0,
+          source: second,
+        })
+      ),
+    ]);
+    expect(outcomes.toSorted()).toStrictEqual([
+      "ok",
+      "workflow.draft_conflict",
+    ]);
+    const kept = await workflowDraft(env, ada, workflow.id);
+    expect({
+      revision: kept.revision,
+      source: outcomes[0] === "ok" ? first : second,
+    }).toStrictEqual({ revision: 1, source: kept.source });
+    // An edit of the revision it read lands; one of an older one doesn't.
+    await expect(
+      outcome(
+        editWorkflowDraft(env, bo, workflow.id, {
+          expectedRevision: 0,
+          source: second,
+        })
+      )
+    ).resolves.toBe("workflow.draft_conflict");
+    await expect(
+      outcome(
+        editWorkflowDraft(env, bo, workflow.id, {
+          expectedRevision: 1,
+          source: second,
+        })
+      )
+    ).resolves.toBe("ok");
+    // A stale edit is refused though the revision after the one it read
+    // is no longer stored: only the latest and the checkpoint are.
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 2,
+      source: "{",
+    });
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 3,
+      source: "{ still",
+    });
+    const stale = await outcome(
+      editWorkflowDraft(env, bo, workflow.id, {
+        expectedRevision: 2,
+        source: second,
+      })
+    );
+    const latest = await workflowDraft(env, ada, workflow.id);
+    expect({
+      stale,
+      revision: latest.revision,
+      source: latest.source,
+    }).toStrictEqual({
+      stale: "workflow.draft_conflict",
+      revision: 4,
+      source: "{ still",
+    });
+  });
+
+  it("keeps text that doesn't pass with its problems, never as a checkpoint or a version", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const good = definitionOf(workflow.name);
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 0,
+      source: good,
+    });
+    const secret = `secret-${unique()}`;
+    const invalid = await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 1,
+      source: definitionOf(workflow.name, {
+        tasks: [{ finish: { set: { status: secret }, unknown: true } }],
+      }),
+    });
+    const incomplete = await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 2,
+      source: good.slice(0, 40),
+    });
+    expect({
+      invalid: invalid.problems.map(
+        ({ code, pointer, taskId }) => `${code} ${pointer} ${taskId}`
+      ),
+      invalidCheckpoint: invalid.checkpoint,
+      incomplete: incomplete.problems.map(({ code }) => code),
+      incompleteCheckpoint: incomplete.checkpoint,
+      leaked: JSON.stringify(invalid.problems).includes(secret),
+    }).toStrictEqual({
+      invalid: ["profile.unknown_property /do/0/finish/unknown finish"],
+      invalidCheckpoint: { revision: 1, source: good },
+      incomplete: ["json.invalid"],
+      incompleteCheckpoint: { revision: 1, source: good },
+      leaked: false,
+    });
+    // Only the latest revision, once it passed, publishes.
+    await expect(
+      outcome(
+        publishWorkflowDraft(env, ada, workflow.id, {
+          revision: 3,
+          basedOn: null,
+        })
+      )
+    ).resolves.toBe("workflow.draft_unchecked");
+    await expect(
+      outcome(
+        publishWorkflowDraft(env, ada, workflow.id, {
+          revision: 1,
+          basedOn: null,
+        })
+      )
+    ).resolves.toBe("workflow.draft_unchecked");
+    await expect(workflowVersions(env, ada, workflow.id)).resolves.toHaveLength(
+      0
+    );
+  });
+
+  it("refuses text that names another workflow, at its document", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const saved = await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 0,
+      source: definitionOf(`other-${unique()}`),
+    });
+    expect(
+      saved.problems.map(({ code, pointer }) => `${code} ${pointer}`)
+    ).toStrictEqual(["workflow.identity_mismatch /document"]);
+  });
+
+  it("is read and edited only by the workflow's builders, never by Grasp staff", async () => {
+    const ada = await person("builder");
+    const user = await person("builder");
+    const staff = await person("admin", true);
+    const workflow = await workflowOf(ada);
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    const edit = {
+      expectedRevision: 0,
+      source: definitionOf(workflow.name),
+    };
+    expect({
+      read: await outcome(workflowDraft(env, user, workflow.id)),
+      edit: await outcome(editWorkflowDraft(env, user, workflow.id, edit)),
+      publish: await outcome(
+        publishWorkflowDraft(env, user, workflow.id, {
+          revision: 1,
+          basedOn: null,
+        })
+      ),
+      staff: await outcome(editWorkflowDraft(env, staff, workflow.id, edit)),
+    }).toStrictEqual({
+      read: "role.forbidden",
+      edit: "role.forbidden",
+      publish: "role.forbidden",
+      staff: "role.forbidden",
+    });
+  });
+
+  it("keeps only its latest revision and its latest checkpoint, audits each edit, and goes with its workflow", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    const good = definitionOf(workflow.name);
+    for (const [revision, source] of [good, good, "{", "{ not yet"].entries()) {
+      // oxlint-disable-next-line no-await-in-loop -- one edit after the other
+      await editWorkflowDraft(env, ada, workflow.id, {
+        expectedRevision: revision,
+        source,
+      });
+    }
+    const kept = await storedRevisions(workflow.id);
+    const events = await allEvents();
+    const audited = events.filter(
+      (event) =>
+        event.action === "workflow.draft.edited" &&
+        event.target?.id === workflow.id
+    );
+    expect({ kept, audited: audited.length }).toStrictEqual({
+      kept: [2, 4],
+      audited: 4,
+    });
+    await deleteWorkflowResource(env, ada, workflow.id);
+    await expect(storedRevisions(workflow.id)).resolves.toStrictEqual([]);
+  });
+});

@@ -158,6 +158,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "The workflow's code modules don't build: fix what the diagnostics name, then publish again.",
   "workflow.compute_failed":
     "A task's calculation threw, or the sandbox stopped it, so the run failed.",
+  "workflow.draft_conflict":
+    "Someone changed this draft since you read it. Read it again, then make your change.",
+  "workflow.draft_unchecked":
+    "Only the latest draft can be published, and only once it passes the profile.",
 });
 
 /** The binding kinds the host catalog serves, beside other workflows. */
@@ -653,6 +657,42 @@ export interface WorkflowMember {
   addedAt: string;
 }
 
+/**
+ * An edit of a workflow's draft: its whole new text, and the revision it
+ * read (0 before the first edit), which must still be the latest.
+ */
+export const workflowDraftEditSchema = z.strictObject({
+  expectedRevision: z.int().min(0),
+  // The profile's own bound on a definition (1 MiB), counted in UTF-16
+  // units here; its parser counts UTF-8 bytes again.
+  source: z.string().max(1024 * 1024),
+});
+
+/**
+ * Publishing a draft: its revision, which must be the latest and pass the
+ * profile, and the current version it built on (`workflowPublishSchema`).
+ */
+export const workflowDraftPublishSchema = z.strictObject({
+  revision: z.int().min(1),
+  basedOn: z.number().int().positive().nullable(),
+});
+
+/**
+ * A workflow's draft, for its builders: its latest text and revision (0
+ * while nobody has edited it: then the current version's definition, or
+ * a starting one), what the profile said of it, and its latest checkpoint,
+ * the latest text that passed (the current version's definition at
+ * revision 0), which is what may be published and what its diagram shows.
+ */
+export interface WorkflowDraft {
+  revision: number;
+  source: string;
+  problems: WorkflowDefinitionProblem[];
+  checkpoint: { revision: number; source: string } | null;
+  editedBy: string | null;
+  editedAt: string | null;
+}
+
 /** A refused publication's diagnostics, as the profile reports them. */
 export interface WorkflowDefinitionProblem {
   code: string;
@@ -671,6 +711,15 @@ export interface WorkflowResourcesApi {
   get: (id: string) => Promise<WorkflowResource>;
   /** Publishes a version from a workflow.json; for its builders. */
   publish: (id: string, input: unknown) => Promise<WorkflowResourceVersion>;
+  /** Its draft, for its builders (`WorkflowDraft`). */
+  draft: (id: string) => Promise<WorkflowDraft>;
+  /** Saves an edit of its draft (`workflowDraftEditSchema`), checked. */
+  editDraft: (id: string, input: unknown) => Promise<WorkflowDraft>;
+  /** Publishes its draft's checkpoint (`workflowDraftPublishSchema`). */
+  publishDraft: (
+    id: string,
+    input: unknown
+  ) => Promise<WorkflowResourceVersion>;
   versions: (id: string) => Promise<WorkflowResourceVersion[]>;
   /** One version's definition text, exactly as published; for builders. */
   definition: (id: string, version: number) => Promise<string>;
