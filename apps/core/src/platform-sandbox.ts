@@ -399,6 +399,13 @@ const sessionArgs = (args: readonly unknown[]): SessionArgument[] =>
  */
 const placeWaitMs = 15_000;
 
+/**
+ * The longest one platform call waits for its place, every ask included
+ * ({@link placeWaitMs}): what a caller that asks again past it counts as
+ * one ask (app-tests.ts, a version's test build).
+ */
+export const platformPlaceWaitMs = placeWaitMs;
+
 /** The longest a build waits between asks for a place. */
 const placeRetryMs = 2000;
 
