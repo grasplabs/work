@@ -1,0 +1,1 @@
+ALTER TABLE `sdk_file_writes` ADD `removed_at` integer;

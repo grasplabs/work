@@ -336,13 +336,28 @@ export class DataStore extends DurableObject<Env> {
   }
 
   /** `FileHost.publishable`. */
-  publishable(
+  async publishable(
     storeId: StoreId,
     principal: string,
     resource: string,
     fileId: string
-  ): Publishable | UploadState {
-    return this.#live().files.publishable(storeId, principal, resource, fileId);
+  ): Promise<Publishable | UploadState> {
+    return await this.#live().files.publishable(
+      storeId,
+      principal,
+      resource,
+      fileId
+    );
+  }
+
+  /** `FileHost.abandonFinish`. */
+  abandonFinish(
+    storeId: StoreId,
+    principal: string,
+    resource: string,
+    fileId: string
+  ): void {
+    this.#live().files.abandonFinish(storeId, principal, resource, fileId);
   }
 
   /** `FileHost.publish`; its audit event, and orphan expiry, after. */

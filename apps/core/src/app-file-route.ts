@@ -571,7 +571,14 @@ const finish = async (
   if (isUploadState(upload)) {
     return upload;
   }
-  const verified = await verify(env, upload);
+  let verified: boolean;
+  try {
+    verified = await verify(env, upload);
+  } catch (error) {
+    // The check couldn't say: the next finish checks again at once.
+    await stub.abandonFinish(storeId, principal, resource, file);
+    throw error;
+  }
   return await stub.publish(storeId, principal, resource, file, verified);
 };
 

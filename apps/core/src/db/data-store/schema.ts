@@ -672,6 +672,12 @@ export const fileWrites = sqliteTable(
     issuedAt: integer("issued_at").notNull(),
     /** Set once the alarm is removing its object: it is recorded no more. */
     condemned: integer({ mode: "boolean" }).notNull().default(false),
+    /**
+     * When the alarm last removed its object, once condemned: until then a
+     * removal that failed is due again at the alarm's next try, never only
+     * at the write's lifetime.
+     */
+    removedAt: integer("removed_at"),
   },
   (table) => [index("sdk_file_writes_issued").on(table.issuedAt)]
 );

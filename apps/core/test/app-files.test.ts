@@ -25,7 +25,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import type { DataStore } from "../src/data-store.ts";
-import { purgeGraceMs } from "../src/file-host.ts";
+import { finishClaimMs, purgeGraceMs } from "../src/file-host.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { allEvents } from "./audit-events.ts";
@@ -635,13 +635,59 @@ const rawChannel = (screen: Screen, app: string) => {
       ),
     status: async (file: string) =>
       await screen.fetch(`${base}/${file}`, { headers: leased }),
-    finish: async (file: string) =>
-      await screen.fetch(`${base}/${file}/finish`, {
-        method: "POST",
-        headers: leased,
-      }),
+    finish: async (file: string, coreEnv?: Env) =>
+      await screen.fetch(
+        `${base}/${file}/finish`,
+        { method: "POST", headers: leased },
+        coreEnv
+      ),
   };
 };
+
+/**
+ * R2 as core sees it, but that each read of an object counts in `reads`
+ * and waits for `open` to resolve first.
+ */
+const gatedReads = (open: Promise<null>) => {
+  const seen = { reads: 0 };
+  const reading = new Proxy(env.FILES, {
+    get: (target, property) => {
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      if (property === "get") {
+        return async (...args: unknown[]) => {
+          seen.reads += 1;
+          await open;
+          const read: unknown = await Reflect.apply(value, target, args);
+          return read;
+        };
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
+  return { seen, reading };
+};
+
+/** R2 as core sees it, but that every deletion fails. */
+const failingDeletes = new Proxy(env.FILES, {
+  get: (target, property) => {
+    if (property === "delete") {
+      return async () => {
+        await Promise.resolve();
+        throw new Error("R2 is unavailable.");
+      };
+    }
+    const value: unknown = Reflect.get(target, property);
+    if (typeof value !== "function") {
+      return value;
+    }
+    const bound: unknown = value.bind(target);
+    return bound;
+  },
+});
 
 /**
  * `stub` of a store, but that the answer of `chunkStored` never arrives:
@@ -2498,6 +2544,133 @@ describe("an App's files", { timeout: 120_000 }, () => {
     await env.FILES.put(admitted.key ?? "", bytes);
     await sweepIn(release, purgeGraceMs + 2);
     await expect(storedObjects(release)).resolves.toStrictEqual([]);
+  });
+
+  it("tries again at the alarm's next try to remove a write's object whose removal failed", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    const admitted: { key: string | null } = { key: null };
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (instance: DataStore) => {
+        admitted.key = await instance.admitChunk(
+          storeId,
+          builder.userId,
+          "attachments",
+          file,
+          0,
+          bytes.length
+        );
+      }
+    );
+    // Its put lands, and its writer never records it.
+    await env.FILES.put(admitted.key ?? "", bytes);
+    const due: { failed?: unknown; next: number | null } = { next: null };
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (_instance, state) => {
+        const host = new StoreHost(state, { ...env, FILES: failingDeletes });
+        try {
+          await host.files.sweep(storeId, Date.now() + purgeGraceMs + 1);
+        } catch (error) {
+          due.failed = error;
+        }
+        due.next = host.files.nextDue();
+      }
+    );
+    const kept = await storedObjects(release);
+    await sweepIn(release, purgeGraceMs + 2);
+    expect({
+      failed: due.failed instanceof Error,
+      // Due again at once, which the alarm puts off by its retry wait:
+      // never only once the write could no longer land.
+      dueSoon: (due.next ?? Number.POSITIVE_INFINITY) <= Date.now(),
+      kept: kept.length,
+      after: await storedObjects(release),
+    }).toStrictEqual({ failed: true, dueSoon: true, kept: 1, after: [] });
+  });
+
+  it("checks an upload's bytes once however many finishes arrive at once, answering each with the file", async () => {
+    const { app, screen } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const { promise: open, resolve: letThrough } =
+      Promise.withResolvers<null>();
+    const { seen, reading } = gatedReads(open);
+    const gated = { ...env, FILES: reading };
+    const first = raw.finish(file, gated);
+    await vi.waitFor(() => {
+      expect(seen.reads).toBe(1);
+    });
+    const second = raw.finish(file, gated);
+    // The second has reached the store, where it waits for the first.
+    await scheduler.wait(250);
+    letThrough(null);
+    const answers = await Promise.all([
+      answerOf(await first),
+      answerOf(await second),
+    ]);
+    expect({
+      reads: seen.reads,
+      answers: answers.map((answer) =>
+        typeof answer === "object" && answer !== null && "state" in answer
+          ? answer.state
+          : answer
+      ),
+    }).toStrictEqual({ reads: 1, answers: ["published", "published"] });
+  });
+
+  it("lets the next finish check an upload at once when a check failed before it could say", async () => {
+    const { app, screen } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const unreadable = new Proxy(env.FILES, {
+      get: (target, property) => {
+        if (property === "get") {
+          return async () => {
+            await Promise.resolve();
+            throw new Error("R2 is unavailable.");
+          };
+        }
+        const value: unknown = Reflect.get(target, property);
+        if (typeof value !== "function") {
+          return value;
+        }
+        const bound: unknown = value.bind(target);
+        return bound;
+      },
+    });
+    const failed = await statusOf(
+      raw.finish(file, { ...env, FILES: unreadable })
+    );
+    const started = Date.now();
+    const again = await answerOf(await raw.finish(file));
+    expect({
+      failed,
+      again,
+      // Not held back until the failed check's claim ran out.
+      atOnce: Date.now() - started < finishClaimMs / 2,
+    }).toMatchObject({
+      failed: 500,
+      again: { state: "published" },
+      atOnce: true,
+    });
   });
 
   it("sets the alarm for a chunk write's cleanup once it admits one", async () => {
