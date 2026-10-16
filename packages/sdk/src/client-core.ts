@@ -2037,15 +2037,20 @@ export class GraspClient {
       // As a query's: kept across a resubscribe within one task.
       queueMicrotask(() => {
         if (pager.listeners.size === 0) {
-          GraspClient.#idlePager(pager);
+          this.#idlePager(pager);
         }
       });
       this.#releasePager(pager);
     };
   }
 
-  /** No one reads `pager` now: its window and its Load More stop. */
-  static #idlePager(pager: Pager): void {
+  /**
+   * No one reads `pager` now: its window and its Load More stop, and the
+   * list ends. A later reader, such as a screen that switched its
+   * arguments away and back, starts it again at its first page with no
+   * Load More's failure of before (`usePaginatedQuery`).
+   */
+  #idlePager(pager: Pager): void {
     pager.stopCurrent?.();
     pager.stopCurrent = undefined;
     const { extension, first } = pager;
@@ -2055,6 +2060,15 @@ export class GraspClient {
     extension?.stop?.();
     extension?.done.resolve(null);
     first?.resolve(null);
+    pager.failure = undefined;
+    if (pager.extent !== pager.initialPageSize) {
+      pager.extent = pager.initialPageSize;
+      pager.current = this.#entryFor(
+        pager.reference,
+        pager.input,
+        pager.initialPageSize
+      );
+    }
     GraspClient.#pagerChanged(pager);
   }
 

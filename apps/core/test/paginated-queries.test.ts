@@ -937,6 +937,46 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
     list.stop();
   });
 
+  it("starts a list again at its first page, with no failure of before, once its readers left and one comes back", async () => {
+    const opened = await openedApp();
+    const api = apiOf(opened.release);
+    const { client } = clientFor(opened);
+    for (let note = 1; note <= 4; note += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(api.create, { title: `Note ${note}` });
+    }
+    const first = listing(client, api.list, 2);
+    await eventually(() => {
+      expect(first.titles()).toStrictEqual(["Note 4", "Note 3"]);
+    });
+    await first.pager.loadMore();
+    await expect(first.pager.loadMore(0)).rejects.toThrow(Error);
+    expect({
+      titles: first.titles(),
+      error: first.pager.snapshot.error?.code,
+    }).toStrictEqual({
+      titles: ["Note 4", "Note 3", "Note 2", "Note 1"],
+      error: "contract.invalid_args",
+    });
+    // The screen shows another list, then this one again, well within
+    // the time a list is kept for.
+    first.stop();
+    const other = listing(client, api.list, 3);
+    await eventually(() => {
+      expect(other.titles()).toHaveLength(3);
+    });
+    other.stop();
+    await scheduler.wait(0);
+    const again = listing(client, api.list, 2);
+    await eventually(() => {
+      expect({
+        titles: again.titles(),
+        error: again.pager.snapshot.error?.code,
+      }).toStrictEqual({ titles: ["Note 4", "Note 3"], error: undefined });
+    });
+    again.stop();
+  });
+
   it("fills a window from a query that answers short pages, and loads more of it", async () => {
     const opened = await openedApp();
     const { client } = clientFor(opened);
