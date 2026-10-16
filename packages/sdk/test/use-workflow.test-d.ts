@@ -12,8 +12,7 @@ import { expectTypeOf } from "vite-plus/test";
 import type { Id, RunHandle, WorkflowReference } from "../src/index.ts";
 import { useWorkflow } from "../src/react.ts";
 import type { AppErrorPayload, PendingControl } from "../src/react.ts";
-import { api } from "./notes/.grasp/references.ts";
-import { workflows } from "./workflow-refs.ts";
+import { api, workflows } from "./notes/.grasp/references.ts";
 
 declare const noteId: Id<"notes">;
 declare const taskId: Id<"tasks">;
@@ -145,9 +144,15 @@ export const useWaitChecks = (): void => {
       expectTypeOf(wait.purpose).toEqualTypeOf<"sleep" | "retry">();
       expectTypeOf(wait.deadline).toEqualTypeOf<number>();
     }
-    if (wait.kind === "decision") {
-      expectTypeOf(wait.canRespond).toEqualTypeOf<boolean>();
+    if (wait.kind === "event" && wait.key === "do/0/chooseStyle") {
+      // The hook's waits are the reference's: narrowed to the very event.
+      expectTypeOf(wait.event).toEqualTypeOf<
+        typeof workflows.summarizeNote.events.styleChosen
+      >();
+      expectTypeOf(wait.canSend).toEqualTypeOf<boolean>();
     }
+    // @ts-expect-error -- summarizeNote declares no decision
+    void (wait.kind === "decision");
     if (wait.kind === "child") {
       expectTypeOf(wait.child).toEqualTypeOf<RunHandle>();
     }

@@ -198,6 +198,8 @@ const contractsSchema = z.strictObject({
   resourceVersion: z.int(),
   manifest: z.unknown(),
   fingerprints: z.record(z.string(), z.string()),
+  workflows: z.record(z.string(), z.unknown()),
+  workflowFingerprints: z.record(z.string(), z.string()),
 });
 
 /** Releases loaded and verified, by manifest hash: their content never changes. */
