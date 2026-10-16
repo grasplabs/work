@@ -372,11 +372,16 @@ export const runCompute = async (
         modules: {
           ...call.modules,
           ...call.sdk,
-          "grasp-compute-request.js": `export default ${JSON.stringify({
-            module: call.module,
-            export: call.export,
-            input: call.input,
-          })};\n`,
+          // Parsed from JSON text, as the host checked it: in an object
+          // literal, a "__proto__" key would set a prototype instead. It
+          // evaluates before any of the workflow's modules (`runMain`).
+          "grasp-compute-request.js": `export default JSON.parse(${JSON.stringify(
+            JSON.stringify({
+              module: call.module,
+              export: call.export,
+              input: call.input,
+            })
+          )});\n`,
           [computeMain]: runMain(call.paths),
         },
       },
@@ -399,5 +404,11 @@ export const runCompute = async (
   if (new TextEncoder().encode(read.data.output).byteLength > maxBytes) {
     throw workflowResourceErrors.create("workflow.call_invalid");
   }
-  return JSON.parse(read.data.output);
+  // Module code may have changed what wrote it: text that isn't JSON is
+  // the calculation's failure.
+  try {
+    return JSON.parse(read.data.output);
+  } catch {
+    throw workflowResourceErrors.create("workflow.compute_failed");
+  }
 };

@@ -293,6 +293,17 @@ describe("a JSON workflow's compute modules", () => {
     }
   });
 
+  it("serializes a calculation's answer with what module code can't replace", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, {
+      "code/total.ts": `JSON.stringify = () => "{";\n${moduleAnswering("return amounts.length;")}`,
+    });
+    await expect(ran(by, workflow.id)).resolves.toStrictEqual({
+      status: "completed",
+      output: { status: "3" },
+    });
+  });
+
   it("checks a call's arguments against the sealed contract before running anything", async () => {
     const by = await builder();
     // Its handler would answer a valid count for any list: only the

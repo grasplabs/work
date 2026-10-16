@@ -19,6 +19,12 @@ import { computeHandler } from "./compute.ts";
 /** A module's exports, by its path (`code/<file>.ts`). */
 export type ComputeModules = Readonly<Record<string, unknown>>;
 
+/**
+ * `JSON.stringify` as it was when the runner loaded, before any of the
+ * workflow's modules could replace it.
+ */
+const { stringify } = JSON;
+
 /** The most of a handler's failure an answer keeps. */
 const failureMaxLength = 500;
 
@@ -69,7 +75,7 @@ export const computeManifestOf = (modules: ComputeModules): string => {
       };
     }
   }
-  return JSON.stringify(manifest);
+  return stringify(manifest);
 };
 
 /** One calculation to run: its module and export, and its input. */
@@ -117,7 +123,7 @@ export const runCompute = (
       };
     }
     // Serialized here, so a `toJSON` on the answer runs locked down too.
-    const text = JSON.stringify(output);
+    const text = stringify(output);
     return text === undefined
       ? { ok: false, message: "The calculation answered no JSON value." }
       : { ok: true, output: text };
