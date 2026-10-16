@@ -318,8 +318,12 @@ const followUp = resource.workflow("followUp", {
     noteId: v.id("notes"),
     reason: v.string().default("new"),
   }),
+  output: v.null(),
 });
-const unlisted = resource.workflow("unlisted", { input: v.object({}) });
+const unlisted = resource.workflow("unlisted", {
+  input: v.object({}),
+  output: v.null(),
+});
 declare const engineWorkflow: ReturnType<typeof invoiceWorkflow>;
 
 action({
@@ -396,9 +400,13 @@ mutation({
 });
 // A choice of workflows keeps each one's input: never another's, and
 // optional only for one that takes none.
-const counted = resource.workflow("counted", { input: v.number() });
+const counted = resource.workflow("counted", {
+  input: v.number(),
+  output: v.null(),
+});
 const optional = resource.workflow("optional", {
   input: v.string().default("ready"),
+  output: v.null(),
 });
 declare const pick: boolean;
 action({
