@@ -9,7 +9,7 @@
 // Several runs make it steadier: each file takes the median of the runs
 // it ran in. Files the logs don't name keep the time they had. Rewrites
 // scripts/test-durations.json.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
@@ -84,6 +84,10 @@ if (import.meta.main) {
       known,
       logs.map((log) => readFileSync(log, "utf-8"))
     );
-    writeFileSync(durationsFile, `${JSON.stringify(durations, null, 2)}\n`);
+    // Through a file of its own, so an interrupted write never leaves the
+    // sequencer, which reads this file, half a file.
+    const written = `${durationsFile}.tmp`;
+    writeFileSync(written, `${JSON.stringify(durations, null, 2)}\n`);
+    renameSync(written, durationsFile);
   }
 }
