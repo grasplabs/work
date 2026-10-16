@@ -7,8 +7,7 @@ import type {
   PortableLiveApi,
   PortableQueriesApi,
 } from "@grasp-os/shared/portable";
-import { RpcSession, WebSocketTransport } from "capnweb";
-import type { RpcStub } from "capnweb";
+import type { RpcSession, RpcStub, WebSocketTransport } from "capnweb";
 
 import type { PortableToken } from "./client-portable.ts";
 
@@ -36,6 +35,16 @@ import type { PortableToken } from "./client-portable.ts";
 //   client-core.ts), and core refuses a renewal for anyone else.
 // - Connections piling up: one per App, closed `idleMs` after the last of
 //   its queries is released, and at once on a fence.
+
+/**
+ * Cap'n Web, loaded only once a portable host follows a query: the
+ * client's module, which hosts and the values in a browser share
+ * (host.ts), stays free of it until then.
+ */
+interface Capnweb {
+  readonly RpcSession: typeof RpcSession;
+  readonly WebSocketTransport: typeof WebSocketTransport;
+}
 
 /** How long a connection with nothing followed stays open for the next. */
 const idleMs = 30_000;
@@ -137,7 +146,11 @@ export class PortableLive {
    * `app`'s connection for the person `token` names: the one open, or a
    * new one. One open for someone else is closed first.
    */
-  #linkFor(app: string, token: PortableToken): Link {
+  #linkFor(
+    { RpcSession, WebSocketTransport }: Capnweb,
+    app: string,
+    token: PortableToken
+  ): Link {
     const open = this.#links.get(app);
     if (open !== undefined && !open.closed) {
       if (open.principal === token.principal) {
@@ -284,13 +297,14 @@ export class PortableLive {
     onLost: () => void
   ): Promise<{ release: () => void }> {
     const generation = this.#generation;
+    const rpc: Capnweb = await import("capnweb");
     const token = await tokenOrLost(this.#tokens);
     // Everything was closed while the token was asked for (a fence, or
     // someone else signed in): nothing is opened for this follow.
     if (generation !== this.#generation) {
       throw new Error("The live connections were closed meanwhile.");
     }
-    const link = this.#linkFor(app, token);
+    const link = this.#linkFor(rpc, app, token);
     link.followed += 1;
     clearTimeout(link.idle);
     link.idle = undefined;
