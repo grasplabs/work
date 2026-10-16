@@ -11,6 +11,7 @@ import {
   maxAttemptTimeoutMs,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
+import { encode } from "@grasp-os/workerflow/codec";
 import type { AttemptLease } from "@grasp-os/workerflow/run";
 import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
 import { expressionError } from "@grasp-os/workflow-expressions/errors";
@@ -707,9 +708,21 @@ export class ResourceRunHost
               // A record off its task's schemas fails the same every time.
               throw toStepError(forIsolate(error));
             }
-            return entering
-              ? { record: value, startedAt: attempt.startedAt }
-              : value;
+            if (!entering) {
+              return value;
+            }
+            const journaled = { record: value, startedAt: attempt.startedAt };
+            // Measured as the engine measures what a step returns: the
+            // record fit, but with its start beside it may not.
+            try {
+              encode(journaled);
+            } catch {
+              throw toStepError({
+                name: "Error",
+                message: `Step "${stepName}" answered more than a step may record`,
+              });
+            }
+            return journaled;
           }
         );
         if (!entering) {

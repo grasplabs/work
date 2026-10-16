@@ -766,6 +766,32 @@ describe("a run's host, against a forged module", () => {
     });
   });
 
+  it("refuses an enter step's record that fits but doesn't with its task's start beside it", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, [
+        { pause: { wait: "PT1S", output: { as: '${ {status: "waited"} }' } } },
+      ])
+    );
+    const thrown: string[] = [];
+    const host = await hostOf(
+      by,
+      workflow.id,
+      undefined,
+      undefined,
+      undefined,
+      thrown
+    );
+    // Its JSON just within a step's result: as the engine counts it, too
+    // much once the host journals its task's start with it.
+    const output = "x".repeat(1024 * 1024 - 1 - '{"output":""}'.length);
+    const code = await forged(host, "enter:pause", { who: "Ada" }, { output });
+    expect({ refused: code !== "ok", thrown }).toStrictEqual({
+      refused: true,
+      thrown: ["NonRetryableError"],
+    });
+  });
+
   it("spends the activation's fuel on a step's schema checks, as on its expressions", async () => {
     const by = await builder();
     const { workflow } = await published(by, (name) =>
