@@ -97,4 +97,27 @@ describe("splitting the test files between shards", () => {
       "short",
     ]);
   });
+
+  it("spreads the files recorded as taking no time, which still take time to load", () => {
+    const instant = Array.from({ length: 40 }, (_, index) =>
+      file(`instant ${index}`, 0)
+    );
+    const counts = splitIntoShards(instant, 4).map((shard) => shard.length);
+
+    expect(counts).toStrictEqual([10, 10, 10, 10]);
+  });
+
+  it("spreads short files evenly beside long ones that set every shard's time", () => {
+    const long = Array.from({ length: 4 }, (_, index) =>
+      file(`long ${index}`, 100)
+    );
+    const short = Array.from({ length: 20 }, (_, index) =>
+      file(`short ${index}`, 2)
+    );
+    const counts = splitIntoShards([...long, ...short], 4).map(
+      (shard) => shard.length
+    );
+
+    expect(counts).toStrictEqual([6, 6, 6, 6]);
+  });
 });

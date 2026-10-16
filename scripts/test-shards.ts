@@ -33,6 +33,20 @@ export interface ShardFile {
 export const concurrentFiles = 2.5;
 
 /**
+ * The least a file is taken to take: loading it and the reset before it,
+ * which the progress logs don't time. A file of tests that each finish
+ * within a millisecond is recorded as taking none.
+ */
+export const fileOverheadSeconds = 1;
+
+const costOf = (file: ShardFile): number =>
+  Math.max(file.seconds, fileOverheadSeconds);
+
+/** All of `files`' time, however it overlaps. */
+const workOf = (files: readonly ShardFile[]): number =>
+  files.reduce((total, file) => total + costOf(file), 0);
+
+/**
  * How long a shard with `files` takes, roughly: its groups one after
  * another, each as long as its work spread over the files it runs at
  * once, and never shorter than its longest file.
@@ -48,8 +62,8 @@ export const shardSeconds = (files: readonly ShardFile[]): number => {
       longest: 0,
       serial: file.serial,
     };
-    group.work += file.seconds;
-    group.longest = Math.max(group.longest, file.seconds);
+    group.work += costOf(file);
+    group.longest = Math.max(group.longest, costOf(file));
     groups.set(file.group, group);
   }
   let total = 0;
@@ -61,8 +75,9 @@ export const shardSeconds = (files: readonly ShardFile[]): number => {
 
 /**
  * `files` split into `count` shards: the longest first, each into the
- * shard it lengthens least. The same files always split the same way, on
- * every runner.
+ * shard it lengthens least, and of shards it lengthens alike, the one
+ * with the least work. The same files always split the same way, on every
+ * runner.
  */
 export const splitIntoShards = (
   files: readonly ShardFile[],
@@ -75,11 +90,17 @@ export const splitIntoShards = (
   for (const file of longestFirst) {
     let best = 0;
     let bestSeconds = Number.POSITIVE_INFINITY;
+    let bestWork = Number.POSITIVE_INFINITY;
     for (const [index, shard] of shards.entries()) {
       const seconds = shardSeconds([...shard, file]);
-      if (seconds < bestSeconds) {
+      const work = workOf(shard);
+      if (
+        seconds < bestSeconds ||
+        (seconds === bestSeconds && work < bestWork)
+      ) {
         best = index;
         bestSeconds = seconds;
+        bestWork = work;
       }
     }
     shards[best]?.push(file);
