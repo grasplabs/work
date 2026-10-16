@@ -1332,6 +1332,14 @@ export class FileHost {
    * audit events over.
    */
   async sweep(storeId: StoreId, now = Date.now()): Promise<void> {
+    // Claims of finishes that never reported back (their request died),
+    // let go of once expired, so none outlives its upload in memory.
+    for (const [fileId, claim] of this.#finishing) {
+      if (claim.until <= now) {
+        this.#finishing.delete(fileId);
+        claim.end();
+      }
+    }
     this.#storage.transactionSync(() => {
       const due = this.#db
         .select()
