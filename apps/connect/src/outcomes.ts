@@ -342,7 +342,7 @@ export const unknownOutcomeFor = async (
   return summaryOf({ row, connection: connection ?? null });
 };
 
-/** What a resolution's events say of the call: identifiers, never input. */
+/** What a resolution's events say of the call: identifiers, never input or its hash. */
 const detailOf = async (
   key: UnknownOutcomeKey,
   choice: ResolutionChoice,
@@ -359,7 +359,9 @@ const detailOf = async (
     : {
         resource: row.resource,
         onBehalfOf: row.onBehalfOf,
-        inputHash: row.inputHash,
+        // Never the input's hash: unsalted, it would let a reader of the
+        // log guess a short value the input held (a workflow's sensitive
+        // parameter), and the key's hash with the claim names the call.
       }),
 });
 

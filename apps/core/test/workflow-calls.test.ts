@@ -37,6 +37,7 @@ import {
   revokePermission,
 } from "../src/permissions.ts";
 import { createTriggerResource } from "../src/trigger-resources.ts";
+import { resolveUnknownOutcome } from "../src/unknown-outcomes.ts";
 import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
@@ -63,7 +64,12 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
-import { refusal, signedInApi, unique } from "./sign-in.ts";
+import {
+  outcome as resultOf,
+  refusal,
+  signedInApi,
+  unique,
+} from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
 // The named calls of JSON workflows (@grasp-os/open-workflow's
@@ -710,6 +716,26 @@ describe("grasp.connector calls of JSON workflows", () => {
       await personOf(env, ada)
     );
     const ours = listed.filter(({ key }) => key.subject.type === "workflow");
+    // Its person says it didn't happen, then that it did: whatever connect
+    // makes of each, what it records of the call holds no hash of its input.
+    for (const choice of ["not_happened", "happened"]) {
+      for (const unknown of ours) {
+        // oxlint-disable-next-line no-await-in-loop -- one decision after the other
+        await resultOf(
+          resolveUnknownOutcome(env, ada, unknown.key, choice, unknown.claim)
+        );
+      }
+    }
+    const events = await allEvents();
+    const resolutions = events.filter(
+      ({ action, detail }) =>
+        action.startsWith("connection.call.resolve") &&
+        detail?.subjectId === workflow.id
+    );
+    expect({
+      resolutions: resolutions.length > 0,
+      inputHashes: resolutions.filter(({ detail }) => "inputHash" in detail),
+    }).toStrictEqual({ resolutions: true, inputHashes: [] });
     expect({
       status: run.status,
       calls: sent.calls,
