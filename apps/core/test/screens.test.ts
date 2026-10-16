@@ -370,7 +370,7 @@ export default function Desk() {
     await expect(
       buildScreens(
         { ...env, LOADER: noBuilds },
-        { ...files, "app/server.ts": "export class App {}\n" }
+        { ...files, "operations/notes.ts": "export {};\n" }
       )
     ).resolves.toStrictEqual(built);
 

@@ -43,7 +43,16 @@ const unboundedTarget =
 export default defineConfig({
   lint: {
     extends: [core, react, tanstack, vitest, shadcn],
-    ignorePatterns: [...(core.ignorePatterns ?? []), ...generated],
+    ignorePatterns: [
+      ...(core.ignorePatterns ?? []),
+      ...generated,
+      // The tests' own built-in, an App of spec 8's layout: its operations
+      // import what its seal generates (`#grasp/server`), which nothing
+      // here maps, so its files are untyped, like any inline test App's
+      // (the seal strips types without checking them), and
+      // builtin-blueprints.test.ts covers what they do at runtime.
+      "apps/core/test/fixtures/blueprints/*/files/**",
+    ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),
       ...(antiSlop.jsPlugins ?? []),

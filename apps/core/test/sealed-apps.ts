@@ -1,11 +1,14 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { env } from "cloudflare:workers";
 
-import { sealRelease } from "../src/app-releases.ts";
+import { callAppFunction } from "../src/app-functions.ts";
+import { loadRelease, sealRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
-import { commitFiles, createApp } from "../src/apps.ts";
+import { commitFiles, createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
 import { createStore, shareStore } from "../src/data-stores.ts";
 import {
@@ -79,6 +82,55 @@ export const seal = async (
   version = 1
 ): Promise<Release> =>
   await sealRelease(env, { app, version, store, by: owner });
+
+/** A public function of an App's release, as a screen names it. */
+export interface FunctionName {
+  /** Its contract, `<module>.<name>` as the App's `operations` group it. */
+  readonly contractId: string;
+  readonly kind: "query" | "mutation" | "action";
+}
+
+/**
+ * The fingerprint a reference names for a function the release lacks:
+ * well formed, so the call is refused for what it names, not its shape.
+ */
+const noFingerprint = "0".repeat(64);
+
+/**
+ * What `by` gets calling `name` of App `app` with `input`, as a screen
+ * calls it (`callAppFunction`): against the release of the App's current
+ * version, by its reference there, or one of no version when it has none.
+ */
+export const calledAs = async (
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: string,
+  { contractId, kind }: FunctionName,
+  input: unknown = {}
+): Promise<OperationResult> => {
+  const id = appIdSchema.parse(app);
+  const { currentVersion } = await findApp(env, id);
+  const released =
+    currentVersion === null
+      ? undefined
+      : await loadRelease(env, id, currentVersion);
+  const fingerprints = released?.fingerprints ?? {};
+  const answered = await callAppFunction(
+    env,
+    by,
+    app,
+    JSON.stringify({
+      reference: {
+        resourceId: app,
+        resourceVersion: currentVersion ?? 1,
+        contractId,
+        fingerprint: fingerprints[contractId] ?? noFingerprint,
+        kind,
+      },
+      input,
+    })
+  );
+  return answered.result;
+};
 
 /** The error code `work` fails with. */
 export const failure = async (
