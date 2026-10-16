@@ -2,10 +2,13 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import {
   accessRevocations,
+  apps,
   appMembers,
   teamMembers,
 } from "./db/core/schema.ts";
@@ -13,11 +16,16 @@ import { inList } from "./db/d1.ts";
 import { appHost } from "./durable-objects.ts";
 
 // Telling an App's open screens that someone's access to it may have
-// dropped (spec 11.4): every write that can take a role in an App away
-// (unsharing it or lowering whom it is shared with, app-members.ts; a team
-// left or deleted, auth/auth.ts; a member removed from the organization or
-// given a lower role, members.ts) calls `accessMayHaveDropped` once it has
-// committed. The App's host tells each connection of those people that
+// dropped (spec 11.4). Our own writes that can take a role in an App away
+// (unsharing it or lowering whom it is shared with, app-members.ts; a
+// member removed from the organization or given a lower role, members.ts)
+// keep a revocation for each App they reached in their own batch
+// (`revocationsOf`), so it commits with the change or not at all, and tell
+// the hosts from those rows once it has (`tellKept`); the cron trigger
+// tells again whatever is still kept (`retryAccessRevocations`). Better
+// Auth's team endpoints (a team left or deleted, auth/auth.ts) commit in
+// the plugin's own batch, so they look the Apps up after it and call
+// `accessMayHaveDropped`. The App's host tells each connection of those people that
 // follows the App's live queries, and the connection checks their access
 // again at once (query-subscriptions.ts): a screen of someone who lost it
 // is cleared within the event's delivery, with no commit and no periodic
@@ -38,17 +46,17 @@ const toldAtOnce = 16;
 const retryDelaysMs = [100, 500] as const;
 
 /**
- * `look`, run again after `retryDelaysMs` while it fails: which Apps a
- * committed change reached is looked up once more when the database is
- * away for a moment. Throws what the last attempt threw.
+ * `attempt`, run again after `retryDelaysMs` while it fails: a lookup or
+ * a host away for a moment is tried once more. Throws what the last
+ * attempt threw.
  */
-export const withRetries = async <T>(look: () => Promise<T>): Promise<T> => {
-  for (let attempt = 0; ; attempt += 1) {
+const withRetries = async <T>(attempt: () => Promise<T>): Promise<T> => {
+  for (let tried = 0; ; tried += 1) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
-      return await look();
+      return await attempt();
     } catch (error) {
-      const delay = retryDelaysMs[attempt];
+      const delay = retryDelaysMs[tried];
       if (delay === undefined) {
         throw error;
       }
@@ -119,16 +127,17 @@ const tellHost = async (
 
 /**
  * Tells the hosts of `apps` that `userIds` (everyone, when `null`) may
- * have lost their role in them, after the change committed. A host that
- * still can't be reached after its retries is told again by the cron
- * trigger (`retryAccessRevocations`). No periodic recheck (spec 11.4).
+ * have lost their role in them, after a change that couldn't keep its
+ * revocations in its own batch committed. A host that still can't be
+ * reached after its retries is told again by the cron trigger
+ * (`retryAccessRevocations`). No periodic recheck (spec 11.4).
  */
-export const accessMayHaveDropped = async (
+const accessMayHaveDropped = async (
   env: Env,
-  apps: Iterable<AppId>,
+  reached: Iterable<AppId>,
   userIds: readonly string[] | null
 ): Promise<void> => {
-  const pending = [...new Set(apps)];
+  const pending = [...new Set(reached)];
   for (let at = 0; at < pending.length; at += toldAtOnce) {
     // oxlint-disable-next-line no-await-in-loop -- a few hosts at a time
     await Promise.all(
@@ -139,12 +148,93 @@ export const accessMayHaveDropped = async (
   }
 };
 
+/** A revocation kept in the table, told until its host takes it. */
+export type KeptRevocation = typeof accessRevocations.$inferSelect;
+
+/**
+ * Keeps, in a change's batch, a revocation for each App `reached` (a
+ * condition on `apps`, every App when undefined) once `changed` holds when
+ * the statement runs, for `userIds` (everyone, when `null`): so the change
+ * and what it must tell commit together, and a database away after the
+ * commit loses nothing. The Apps are read at that point of the batch, so
+ * put it before anything there that takes away what found them (a
+ * removal's team memberships). Only Apps that exist are kept: an App
+ * deleted meanwhile gives no row, and never fails the change.
+ *
+ * Returns the rows kept, for `tellKept` to tell straight away.
+ */
+export const revocationsOf = (
+  db: DrizzleD1Database,
+  reached: SQL | undefined,
+  userIds: readonly string[] | null,
+  changed: SQL
+) =>
+  db
+    .insert(accessRevocations)
+    // The table's columns, in its order.
+    .select(
+      sql`SELECT lower(hex(randomblob(16))), ${apps.id}, ${userIds === null ? null : JSON.stringify(userIds)}, 0, ${Date.now()} FROM ${apps} WHERE ${and(reached, changed)}`
+    )
+    .returning();
+
+/**
+ * Tells the host of one revocation a change kept (`revocationsOf`), and
+ * drops the row once it took it. A host that still can't be reached after
+ * `retryDelaysMs`, or a row the database won't drop, is left to the cron
+ * trigger, which tells it (again): a second word changes nothing.
+ */
+const tellKeptOne = async (env: Env, row: KeptRevocation): Promise<void> => {
+  try {
+    await withRetries(async () => {
+      await appHost(env, appIdSchema.parse(row.appId)).accessRevoked(
+        row.userIds
+      );
+    });
+  } catch (error) {
+    log.warn("app.access_revocation_failed", {
+      appId: row.appId,
+      ...errorFields(error),
+    });
+    return;
+  }
+  try {
+    await drizzle(env.DB)
+      .delete(accessRevocations)
+      .where(eq(accessRevocations.id, row.id));
+  } catch (error) {
+    log.warn("app.access_revocation_keep_failed", {
+      appId: row.appId,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Tells the hosts of the revocations a change kept in its batch
+ * (`revocationsOf`), a few at a time, from the rows themselves: no read
+ * of the database, which may be away. Never throws: the change has
+ * committed, and whatever isn't told now the cron trigger tells.
+ */
+export const tellKept = async (
+  env: Env,
+  kept: readonly KeptRevocation[]
+): Promise<void> => {
+  for (let at = 0; at < kept.length; at += toldAtOnce) {
+    // oxlint-disable-next-line no-await-in-loop -- a few hosts at a time
+    await Promise.all(
+      kept.slice(at, at + toldAtOnce).map(async (row) => {
+        await tellKeptOne(env, row);
+      })
+    );
+  }
+};
+
 /** Most kept revocations one run of the cron trigger tells. */
 const retriedAtOnce = 100;
 
 /**
- * How long a kept revocation is told again for: a day, counted from when
- * it was kept, however often it was tried. One whose host is away longer
+ * How long a kept revocation is told for: a day, counted from when it was
+ * kept, however often it was tried. One whose host is away longer
  * is logged and dropped; the screens then fall back on the check before
  * each push.
  */
@@ -190,7 +280,8 @@ const dropExpired = async (env: Env): Promise<void> => {
 };
 
 /**
- * Tells the hosts again of the revocations they couldn't be told of
+ * Tells the hosts of the revocations still kept: those a change kept that
+ * weren't told yet (`revocationsOf`), and those a host couldn't be told of
  * (`keepForLater`), least tried first, once those a day old are dropped.
  * The cron trigger runs it every minute.
  */
@@ -262,7 +353,7 @@ const appsSharedWithPeople = async (
 };
 
 /** Every App shared with someone: whom a change of unknown people may reach. */
-export const appsSharedWithAnyone = async (env: Env): Promise<AppId[]> => {
+const appsSharedWithAnyone = async (env: Env): Promise<AppId[]> => {
   const rows = await drizzle(env.DB)
     .selectDistinct({ appId: appMembers.appId })
     .from(appMembers);
@@ -276,12 +367,12 @@ export const appsSharedWithAnyone = async (env: Env): Promise<AppId[]> => {
  * (`null`): every App shared with anyone, for everyone. Never throws:
  * Better Auth's change has committed already.
  *
- * Residual, accepted (GRA-564, follow-up GRA-635): a database away for longer than the
- * lookup's retries loses this event, logged. Nothing leaks: every push
+ * Residual, accepted (GRA-564, GRA-635): a database away for longer than
+ * the lookup's retries loses this event, logged. Nothing leaks: every push
  * still checks access first, so nothing new reaches the person; their
- * screen is only cleared later. Our own writes may persist the lookup in
- * their batch later; Better Auth's team endpoints stay best effort while
- * the plugin is native.
+ * screen is only cleared later. Our own writes keep it in their batch
+ * (`revocationsOf`); Better Auth's team endpoints stay best effort while
+ * the plugin is native: our hook runs after its commit, so can't join it.
  */
 export const teamAccessMayHaveDropped = async (
   env: Env,

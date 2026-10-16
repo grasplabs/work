@@ -2331,9 +2331,6 @@ const sharedWithQueries = /from "app_members"/u;
 /** The look at an App by its ID (apps.ts `findApp`). */
 const appLookup = /^select "id", "name", "description"/u;
 
-/** The look at which Apps someone reaches (members.ts). */
-const appsLookup = /^select "id" from "apps"/u;
-
 /**
  * Core's database for a connection of its own, which fails the
  * statements `failing` matches once `fail` is called, as D1 does when it
@@ -2365,6 +2362,43 @@ const flakyDb = (failing: RegExp) => {
       state.failing = true;
     },
   };
+};
+
+/** Fails as D1 does while it is away. */
+const refuse = (): never => {
+  throw new Error("D1 is away.");
+};
+
+/**
+ * Core's database for a connection of its own that goes away right after
+ * the first batch it commits, as D1 can: every statement after it fails.
+ */
+const awayAfterTheChange = (): D1Database => {
+  const state = { away: false };
+  return new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      if (property === "prepare") {
+        return (query: string) =>
+          state.away ? refuse() : target.prepare(query);
+      }
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          if (state.away) {
+            refuse();
+          }
+          const results = await target.batch(statements);
+          state.away = true;
+          return results;
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
 };
 
 /**
@@ -3055,21 +3089,6 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     });
   });
 
-  it("removes someone from the organization, and lowers a role, even when looking up their Apps fails", async () => {
-    const admin = await personApi("admin");
-    const removed = await personApi("user");
-    const lowered = await personApi("builder");
-    const flaky = flakyDb(appsLookup);
-    const { core } = await openRpc(admin.session, { coreEnv: flaky.env });
-    const session = core.authenticate();
-    flaky.fail();
-
-    expect({
-      removed: await outcome(session.members.remove(removed.userId)),
-      lowered: await outcome(session.members.setRole(lowered.userId, "user")),
-    }).toStrictEqual({ removed: "ok", lowered: "ok" });
-  });
-
   it("tells an App's host later, from the cron trigger, when it can't be reached when access drops", async () => {
     const opened = await openedApp();
     const { them, lease, member } = await memberOf(opened);
@@ -3116,7 +3135,30 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     expect(left).toBeNull();
   });
 
-  it("clears the screen of someone removed who reached the App through a team, even when looking up their Apps fails", async () => {
+  it("clears the screen from the cron trigger when the database goes away right after an unsharing commits", async () => {
+    const opened = await openedApp();
+    const { them, lease, member } = await memberOf(opened);
+    const follower = await followedList(opened, member.api.screens, lease);
+    // The builder's own connection: nothing after the unsharing's batch
+    // reaches the database, and the App's host can't be told.
+    const { core } = await openRpc(opened.cookie, {
+      coreEnv: {
+        ...env,
+        DB: awayAfterTheChange(),
+        APPS: unreachableRevocations(env.APPS),
+      },
+    });
+
+    await outcome(core.authenticate().apps.members.remove(opened.app, them));
+    await scheduler.wait(1500);
+    const before = follower.state.released;
+    await runCron();
+
+    expect(before).toBeFalsy();
+    await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
+  });
+
+  it("clears the screen of someone removed who reached the App through a team, from the cron trigger when the database goes away right after", async () => {
     const opened = await openedApp();
     const admin = await personApi("admin");
     const member = await personApi("user");
@@ -3129,17 +3171,111 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     const { lease } = await member.api.screens.open(opened.app, "notes");
     await member.api.screens.present(opened.app, lease);
     const follower = await followedList(opened, member.api.screens, lease);
-    // The admin's own connection, whose look at the Apps someone reaches
-    // fails, before the removal and after it.
-    const flaky = flakyDb(appsLookup);
-    const { core } = await openRpc(admin.session, { coreEnv: flaky.env });
-    flaky.fail();
+    // The admin's own connection: nothing after the removal's batch, which
+    // takes their teams away too, reaches the database, and the App's host
+    // can't be told.
+    const { core } = await openRpc(admin.session, {
+      coreEnv: {
+        ...env,
+        DB: awayAfterTheChange(),
+        APPS: unreachableRevocations(env.APPS),
+      },
+    });
 
-    await core.authenticate().members.remove(member.userId);
+    await outcome(core.authenticate().members.remove(member.userId));
+    await scheduler.wait(1500);
+    const before = follower.state.released;
+    await runCron();
 
+    expect(before).toBeFalsy();
     await expect(whenLetGo(follower)).resolves.toStrictEqual({
       last: "auth.unauthenticated",
       released: true,
+    });
+  });
+
+  it("stops showing builders' data to someone lowered to user, from the cron trigger when the database goes away right after", async () => {
+    const opened = await openedApp(withSecrets());
+    const tell = referenceTo<{ text: string }, unknown, "mutation">(
+      opened.release,
+      "notes.tell"
+    );
+    const secrets = referenceTo<Record<never, never>, unknown, "query">(
+      opened.release,
+      "notes.secrets"
+    );
+    await clientFor(opened).client.mutation(tell, { text: "Builders only" });
+    const admin = await personApi("admin");
+    const member = await personApi("builder");
+    await opened.builder.api.apps.members.add(opened.app, {
+      type: "person",
+      id: member.userId,
+      role: "builder",
+    });
+    const { lease } = await member.api.screens.open(opened.app, "notes");
+    await member.api.screens.present(opened.app, lease);
+    const follower = pageFollower();
+    await member.api.screens.watchQuery(
+      opened.app,
+      lease,
+      requestOf(secrets, {}),
+      follower.callback
+    );
+    const showsSecret = () =>
+      JSON.stringify(follower.received.at(-1)?.result).includes(
+        "Builders only"
+      );
+    await eventually(() => {
+      expect(showsSecret()).toBeTruthy();
+    });
+    // The admin's own connection: nothing after the change's batch
+    // reaches the database, and the App's host can't be told.
+    const { core } = await openRpc(admin.session, {
+      coreEnv: {
+        ...env,
+        DB: awayAfterTheChange(),
+        APPS: unreachableRevocations(env.APPS),
+      },
+    });
+
+    await outcome(core.authenticate().members.setRole(member.userId, "user"));
+    await scheduler.wait(1500);
+    const before = showsSecret();
+    await runCron();
+
+    expect(before).toBeTruthy();
+    await vi.waitFor(() => {
+      expect(showsSecret()).toBeFalsy();
+    }, deliveryWait);
+  });
+
+  it("keeps no revocation once the App's host is told, nor for a sharing that changed nothing", async () => {
+    const opened = await openedApp();
+    const { them } = await memberOf(opened);
+    const keptFor = async () =>
+      await env.DB.prepare(
+        "select count(*) as kept from access_revocations where app_id = ?"
+      )
+        .bind(opened.app)
+        .first<number>("kept");
+    // A connection that can't tell the App's host: whatever it keeps
+    // stays for the cron trigger.
+    const { core } = await openRpc(opened.cookie, {
+      coreEnv: { ...env, APPS: unreachableRevocations(env.APPS) },
+    });
+
+    // Shared again in the role it has: nothing changes.
+    await core.authenticate().apps.members.add(opened.app, {
+      ...them,
+      role: "user",
+    });
+    const keptForNothing = await keptFor();
+    // Unshared over a connection that tells the App's host at once.
+    await opened.builder.api.apps.members.remove(opened.app, them);
+
+    expect({ keptForNothing, keptOnceTold: await keptFor() }).toStrictEqual({
+      keptForNothing: 0,
+      keptOnceTold: 0,
     });
   });
 

@@ -254,6 +254,24 @@ export const appsFoundBy = (env: Env, by: Person): SQL | undefined => {
 };
 
 /**
+ * The Apps someone with organization role `role` has a role in when the
+ * statement runs, as a condition on `apps`: every App for an admin
+ * (undefined), otherwise their own and those shared with them, as a person
+ * or through a team they are in then. `appsFoundBy`, with their teams read
+ * by the statement itself, for a write that must see the teams its own
+ * batch has not taken away yet.
+ */
+export const appsOpenNowTo = (
+  userId: string,
+  role: Identity["role"]
+): SQL | undefined => {
+  if (isAdmin(role)) {
+    return undefined;
+  }
+  return sql`(${apps.ownerId} = ${userId} OR EXISTS (SELECT 1 FROM ${appMembers} WHERE ${appMembers.appId} = ${apps.id} AND ((${appMembers.memberType} = 'person' AND ${appMembers.memberId} = ${userId}) OR (${appMembers.memberType} = 'team' AND ${appMembers.memberId} IN (SELECT ${teamMembers.teamId} FROM ${teamMembers} WHERE ${teamMembers.userId} = ${userId})))))`;
+};
+
+/**
  * That `by` still has a role in `app` when the statement runs, as SQL: an
  * admin (as their session said), the App's owner, or someone it is shared
  * with, as a person or through a team they are in then. For guarding a
