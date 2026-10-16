@@ -516,3 +516,15 @@ test("a draft survives a newer note, a stale save and a refresh, and is re-appli
     restoredKey
   );
 });
+
+test("a screen's frame speaks the page's language", async ({ pageOf }) => {
+  const { builder } = peopleIn("notesLanguage");
+  const app = await notesApp(builder);
+  const page = await pageOf(builder, { locale: "de-DE" });
+  await page.goto(`/engines/${app}/apps/notes/full`);
+  const screen = page.frameLocator("iframe");
+  await expect(screen.getByRole("heading", { name: "Notes" })).toBeVisible({
+    timeout: 20_000,
+  });
+  await expect(screen.locator("html")).toHaveAttribute("lang", "de");
+});

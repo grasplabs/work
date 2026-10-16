@@ -174,6 +174,8 @@ const cast = {
   writerApp: { builder: "builder" },
   notesPages: { builder: "builder" },
   notesDrafts: { builder: "builder" },
+  notesLanguage: { builder: "builder" },
+  signOutFailure: { member: "user" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },

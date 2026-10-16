@@ -626,6 +626,33 @@ describe("screens", { timeout: 60_000 }, () => {
     }).toStrictEqual({ ends: 3, css: true });
   });
 
+  it("says the page's language in a frame's document, only one the page speaks, and English otherwise", async () => {
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const bundle = await builder.api.screens.open(app, "notes");
+    const langOf = async (lang?: string): Promise<string | undefined> => {
+      const response = await frameDocument(
+        bundle,
+        lang === undefined ? {} : { lang }
+      );
+      return /<html lang="(?<lang>[^"]*)">/u.exec(await response.text())?.groups
+        ?.lang;
+    };
+    expect({
+      german: await langOf("de"),
+      french: await langOf("fr"),
+      unknown: await langOf("ja"),
+      injected: await langOf('de"><script>'),
+      none: await langOf(),
+    }).toStrictEqual({
+      german: "de",
+      french: "fr",
+      unknown: "en",
+      injected: "en",
+      none: "en",
+    });
+  });
+
   it("deletes staged builds the cron finds past their days, and stages a build in use again before then", async () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);

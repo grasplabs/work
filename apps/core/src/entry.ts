@@ -41,6 +41,7 @@ import {
   withoutArtifactToken,
 } from "./packages/serve.ts";
 import { platformUpdateResponse } from "./platform-updates.ts";
+import { liveConnectionApp, portableLiveResponse } from "./portable-live.ts";
 import { checkRouterSecret } from "./router-secret.ts";
 import { rpcResponse } from "./rpc.ts";
 import { screenFrameResponse, screenModuleResponse } from "./screen-frame.ts";
@@ -181,7 +182,8 @@ const connectionRouteResponse = async (
 
 /**
  * A call of an App's functions, from a screen's page or a portable host,
- * or a portable host's token request; `undefined` for any other path.
+ * a portable host's live connection, or its token request; `undefined`
+ * for any other path.
  */
 const appCallResponse = async (
   pathname: string,
@@ -198,6 +200,10 @@ const appCallResponse = async (
   const portableApp = portableCallApp(pathname);
   if (portableApp !== undefined) {
     return await portableFunctionResponse(request, env, portableApp, requestId);
+  }
+  const liveApp = liveConnectionApp(pathname);
+  if (liveApp !== undefined) {
+    return portableLiveResponse(request, env, liveApp, requestId);
   }
   const tokenApp = tokenRequestApp(pathname);
   return tokenApp === undefined

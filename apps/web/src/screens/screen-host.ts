@@ -861,6 +861,8 @@ const runFrame = <Bundle extends FrameCode>(
       load,
       artifact: bundle.artifact,
       token: bundle.frameToken,
+      // The page's language, which the kit's helpers in the frame speak.
+      lang: document.documentElement.lang,
     })}`;
     await ready;
     if (stopped.signal.aborted) {

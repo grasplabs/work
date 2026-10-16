@@ -250,7 +250,7 @@ const tokenLog = { window: 0, written: 0, dropped: 0 };
  * minute per isolate, the rest counted in one line when the next window
  * starts, so someone holding a token can't flood the logs with it.
  */
-const logRefusedToken = (fields: LogFields): void => {
+export const logRefusedToken = (fields: LogFields): void => {
   const window = Math.floor(Date.now() / tokenLogWindowMs);
   if (window !== tokenLog.window) {
     if (tokenLog.dropped > 0) {
@@ -271,7 +271,7 @@ const logRefusedToken = (fields: LogFields): void => {
  * session its token came from: once a window per person, session and App
  * (the App host's `auditOnce`), not a row a call.
  */
-const recordPortableUse = async (
+export const recordPortableUse = async (
   env: Env,
   person: Identity,
   app: AppId,
