@@ -330,7 +330,8 @@ const testsOf = async (
   app: AppId,
   base: number | null,
   files: Record<string, string>,
-  workflows: SavedBuild
+  workflows: SavedBuild,
+  signal?: AbortSignal
 ): Promise<DraftCheck["tests"]> => {
   if (workflows.status === "none") {
     return { status: "none", failures: [] };
@@ -338,7 +339,13 @@ const testsOf = async (
   if (!buildPassed(workflows)) {
     return { status: "not_run", failures: [] };
   }
-  const failures = await workflowTestFailures(env, app, base ?? 0, files);
+  const failures = await workflowTestFailures(
+    env,
+    app,
+    base ?? 0,
+    files,
+    signal
+  );
   return {
     status: failures.length === 0 ? "passed" : "failed",
     failures: failures.slice(0, maxReported),
@@ -410,21 +417,27 @@ export const checkFiles = async (
   { base, revision }: Pick<Draft, "base" | "revision">,
   files: Record<string, string>,
   /**
-   * Called before each of its phases starts, the first included (what ran
-   * before it, a read of the draft, may have outlived a build job's
-   * lease): throws to stop it starting that phase.
+   * Aborted once the check is no one's (a build job's step lost its
+   * lease): it starts nothing more, a phase, a compile or a workflow's
+   * tests, gives up the test it runs, and throws its reason. Checked
+   * before its first phase too: what ran before, a read of the draft, may
+   * have outlived the lease.
    */
-  between?: () => void
+  signal?: AbortSignal
 ): Promise<Omit<DraftCheck, "failedInARow" | "maxFailedChecks">> => {
-  between?.();
-  const saved = await buildOnSave(env, { app, version: base ?? 0, files });
-  between?.();
+  signal?.throwIfAborted();
+  const saved = await buildOnSave(
+    env,
+    { app, version: base ?? 0, files },
+    signal
+  );
+  signal?.throwIfAborted();
   const builds = {
     ...saved,
     workflows: withBindingsRead(saved.workflows, files),
   };
-  const tests = await testsOf(env, app, base, files, builds.workflows);
-  between?.();
+  const tests = await testsOf(env, app, base, files, builds.workflows, signal);
+  signal?.throwIfAborted();
   const built =
     [builds.screens, builds.server, builds.workflows].every(buildPassed) &&
     tests.status !== "failed";

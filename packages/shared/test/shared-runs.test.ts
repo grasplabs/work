@@ -91,4 +91,41 @@ describe("work shared across requests", () => {
     ]);
     expect(starts).toBe(0);
   });
+
+  it("starts no replacement for a waiter given up on while it waited, and leaves it to another", async () => {
+    const runs = new Map<string, SharedRun<string>>();
+    const abandoned = held<string>();
+    runs.set("build", { promise: abandoned.promise, started: Date.now() });
+    let starts = 0;
+    const start = async (): Promise<string> => {
+      starts += 1;
+      return await Promise.resolve("rebuilt");
+    };
+    const giveUp = new AbortController();
+    const givenUp = sharedRun(
+      runs,
+      "build",
+      abandonAfterMs,
+      start,
+      giveUp.signal
+    );
+    // Its lease lost while it waits on the abandoned build.
+    await sleep(abandonAfterMs / 2);
+    giveUp.abort(new Error("lost its lease"));
+    let first: string;
+    try {
+      first = await givenUp;
+    } catch (error) {
+      first = error instanceof Error ? error.message : String(error);
+    }
+    const startsThen = starts;
+    // Another waiter still replaces the abandoned build, and shares it.
+    const other = await sharedRun(runs, "build", abandonAfterMs, start);
+    expect({ first, startsThen, other, starts }).toStrictEqual({
+      first: "lost its lease",
+      startsThen: 0,
+      other: "rebuilt",
+      starts: 1,
+    });
+  });
 });

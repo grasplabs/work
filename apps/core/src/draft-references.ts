@@ -74,11 +74,16 @@ export const withDraftReferences = async (
   env: Env,
   app: AppId,
   version: number,
-  files: Record<string, string>
+  files: Record<string, string>,
+  /**
+   * Given up on (a build job's lease lost): generating them starts no
+   * compile nor inspection, and it throws its reason.
+   */
+  signal?: AbortSignal
 ): Promise<Record<string, string>> =>
   await withReferencesFrom(
     app,
     version,
     files,
-    async () => await filesManifest(env, files, app)
+    async () => await filesManifest(env, files, app, signal)
   );
