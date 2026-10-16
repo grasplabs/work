@@ -333,11 +333,11 @@ test("a note saved in one session appears on another session's open screen witho
 });
 
 test("a list loads five notes at a time and keeps the loaded notes current across sessions", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("notesPages");
   const app = await notesApp(builder);
-  const watching = await openNotes(await pageOf(browser, builder), app);
+  const watching = await openNotes(await pageOf(builder), app);
   await expect(watching.getByText("No notes yet.")).toBeVisible();
   const notes = watching.getByRole("list", { name: "Notes" });
   for (let note = 1; note <= 6; note += 1) {
@@ -365,7 +365,7 @@ test("a list loads five notes at a time and keeps the loaded notes current acros
 
   // Another session saves a note and deletes one inside the loaded list:
   // the open list follows, every note once, the rest closing up.
-  const saving = await openNotes(await pageOf(browser, builder), app);
+  const saving = await openNotes(await pageOf(builder), app);
   await createNote(saving, "Note 7");
   await expect(notes.getByRole("listitem")).toHaveCount(7);
   await saving.getByRole("button", { name: "Delete Note 4" }).click();
