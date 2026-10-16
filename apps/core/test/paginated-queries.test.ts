@@ -49,11 +49,18 @@ const files: Record<string, string> = {
   ...notesFiles,
   "operations/notes.ts": `${notesFiles["operations/notes.ts"] ?? ""}
 export const seed = mutation({
-  args: { prefix: v.string(), count: v.number().integer().min(1).max(100) },
+  args: {
+    prefix: v.string(),
+    count: v.number().integer().min(1).max(100),
+    body: v.string().max(100_000).default(""),
+  },
   returns: v.null(),
   handler: async (ctx, args) => {
     for (let at = 0; at < args.count; at += 1) {
-      await ctx.db.insert("notes", { title: args.prefix + " " + String(at) });
+      await ctx.db.insert("notes", {
+        title: args.prefix + " " + String(at),
+        body: args.body,
+      });
     }
     return null;
   },
@@ -975,6 +982,46 @@ describe("live paginated lists", { timeout: 180_000 }, () => {
       }).toStrictEqual({ titles: ["Note 4", "Note 3"], error: undefined });
     });
     again.stop();
+  });
+
+  it("refuses a window too large for one answer as soon as its records pass the bound, reading no page more", async () => {
+    const opened = await openedApp();
+    const { client } = clientFor(opened);
+    const seed = referenceTo<
+      { prefix: string; count: number; body: string },
+      null,
+      "mutation"
+    >(opened.release, "notes.seed");
+    // Two pages of these pass what one answer may be; one doesn't.
+    const body = "x".repeat(2000);
+    for (const prefix of ["A", "B", "C"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(seed, { prefix, count: 100, body });
+    }
+    let laterPages = 0;
+    const restore = await beforePageReads(
+      opened,
+      { times: Number.POSITIVE_INFINITY, which: "later" },
+      async () => {
+        laterPages += 1;
+        await Promise.resolve();
+      }
+    );
+    try {
+      const { call } = pageTransport(opened, opened.screens, { follows: 0 });
+      const answered = answerOf(
+        await call(
+          windowRequest(opened, "notes.list", {}, { extent: 300 }),
+          opened.app
+        )
+      );
+      expect({ answered, laterPages }).toStrictEqual({
+        answered: "screen.answer_too_large",
+        laterPages: 1,
+      });
+    } finally {
+      restore();
+    }
   });
 
   it("fills a window from a query that answers short pages, and loads more of it", async () => {

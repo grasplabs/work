@@ -2,6 +2,11 @@ import type { Json } from "@grasp-os/shared/json";
 import { operationErrors } from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import {
+  jsonBytes,
+  screenErrors,
+  screenLimits,
+} from "@grasp-os/shared/screens";
+import {
   liveWindowMaxItems,
   queryMaxResults,
 } from "@grasp-os/shared/store-limits";
@@ -265,6 +270,10 @@ const readOnce = async (
 ): Promise<WindowRead> => {
   const { app, invocation, reference, extent } = request;
   const items: Json[] = [];
+  // What the items taken so far come to as JSON: past what one answer may
+  // be, the window is refused at once, never held whole only to be
+  // refused once read (`screen.answer_too_large`, as its push would be).
+  let bytes = 0;
   const readSet: Record<string, number> = {};
   let cursor: string | null = null;
   // Read until the window is full or the query ends: a handler may answer
@@ -307,6 +316,10 @@ const readOnce = async (
     // extent, more following.
     const room = extent - items.length;
     for (const item of answered.items.slice(0, room)) {
+      bytes += jsonBytes(item, screenLimits.answerBytes + 1);
+      if (bytes > screenLimits.answerBytes) {
+        throw screenErrors.create("screen.answer_too_large");
+      }
       items.push(item);
     }
     const beyond = answered.items.length > room;
