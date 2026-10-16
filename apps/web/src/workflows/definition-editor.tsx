@@ -15,6 +15,7 @@ import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
+import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's definition as its builders edit it: the draft's JSON, each
 // save one revision-checked edit that core checks against the profile,
@@ -276,6 +277,19 @@ export const DefinitionEditor = ({
       <ErrorText>
         {outcome?.kind === "failed" ? outcome.reason : undefined}
       </ErrorText>
+      {draft.checkpoint === null ? null : (
+        <div className="flex flex-col gap-2">
+          <h2 className="font-medium">
+            {draft.checkpoint.revision === 0
+              ? t`Diagram of the current version`
+              : t`Diagram of revision ${draft.checkpoint.revision}`}
+          </h2>
+          <WorkflowDiagramView
+            diagram={draft.checkpoint.diagram}
+            label={t`Diagram`}
+          />
+        </div>
+      )}
       {draft.problems.length === 0 ? null : (
         <section aria-labelledby="definition-problems">
           <h2 className="font-medium" id="definition-problems">

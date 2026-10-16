@@ -1,3 +1,4 @@
+import type { WorkflowRunTrace } from "@grasp-os/shared/workflow-diagrams";
 import type {
   AppWorkflowBinding,
   CatalogContractEntry,
@@ -49,6 +50,7 @@ import {
   workflowVersions,
 } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
+import { resourceRunTrace } from "./workflows/resource-run-trace.ts";
 import {
   resourceRunFor,
   terminateResourceRun,
@@ -176,6 +178,13 @@ export class WorkflowResourcesRpc
     return await withPerson(
       this.#check,
       async (person) => await resourceRunFor(this.#env, person, id, runId)
+    );
+  }
+
+  async runTrace(id: string, runId: string): Promise<WorkflowRunTrace> {
+    return await withPerson(
+      this.#check,
+      async (person) => await resourceRunTrace(this.#env, person, id, runId)
     );
   }
 
