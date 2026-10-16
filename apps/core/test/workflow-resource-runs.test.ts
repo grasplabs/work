@@ -1000,19 +1000,29 @@ describe("whose word a run's row takes, and whose clock", () => {
             await resourceRunFor(shorter, by, done.id, completed.runId)
         ),
         await resourceRunFor(shorter, by, failing.id, failed.runId),
+        // The engine's record of it gone too, its retention over there: the
+        // code the row kept as it failed.
+        await aroundEngine(
+          async (method, call) =>
+            method === "status" ? undefined : await call(),
+          async () =>
+            await resourceRunFor(shorter, by, failing.id, failed.runId)
+        ),
       ];
     } finally {
       later.mockRestore();
     }
-    const [kept, removed, removedFailure] = reads;
+    const [kept, removed, removedFailure, purgedFailure] = reads;
     expect({
       kept: kept?.output,
       removed: removed?.output,
       failure: removedFailure?.error,
+      purged: purgedFailure?.error,
     }).toStrictEqual({
       kept: { status: "done" },
       removed: undefined,
       failure: { code: "expression.failed", message: removedText(shorter) },
+      purged: { code: "expression.failed", message: removedText(shorter) },
     });
   });
 

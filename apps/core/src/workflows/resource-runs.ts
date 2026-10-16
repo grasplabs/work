@@ -186,12 +186,15 @@ const endActions: Partial<Record<WorkflowRunStatus, string>> = {
 /**
  * Makes run `id`'s row say where the engine says it is: a notification no
  * newer than the last the row took changes nothing, and an ended run never
- * changes again. Its end is audited with the change, once.
+ * changes again. Its end is audited with the change, once. A failed end
+ * keeps the engine's error code (`failureCode`), which outlives the
+ * engine's record of the run.
  */
 export const projectResourceRun = async (
   env: Env,
   id: string,
-  engine: EngineStatus
+  engine: EngineStatus,
+  failureCode: string | null = null
 ): Promise<void> => {
   const row = await runOf(env, id);
   if (row === undefined || !unended.includes(row.status)) {
@@ -210,6 +213,7 @@ export const projectResourceRun = async (
           ? {}
           : { engineSequence: engine.sequence }),
         ...(ended ? { endedAt: new Date(engine.at) } : {}),
+        ...(status === "failed" && failureCode !== null ? { failureCode } : {}),
       })
       .where(
         and(
@@ -678,25 +682,30 @@ const engineResultOf = async (
   return {};
 };
 
-/** Why core ended a run the engine never had, as its row keeps it. */
-const coreFailureOf = (code: string): WorkflowResourceRun["error"] => {
+/**
+ * Why a run failed as its row keeps it (`failureCode`): core's own reason
+ * for a run the engine never had, or the engine's code once the engine no
+ * longer holds the run.
+ */
+const keptFailureOf = (code: string): WorkflowResourceRun["error"] => {
   const known = workflowResourceErrors.codeOf({ code });
   return {
     code,
     message:
       known === undefined
-        ? "The run ended before it started."
+        ? "The run failed."
         : workflowResourceErrors.create(known).message,
   };
 };
 
 /**
- * What run `row` returned or why it failed: why core ended it, if core did
- * (its `failureCode`), or else where the engine has its result. Once its
- * retention, as the deployment has it now, is over (`detailsRemoved`, by
- * the row alone, as every reader of a run), nothing of what it returned,
- * and of why it failed only the code: the engine keeps a run for the
- * retention it was admitted with, which may since have been shortened.
+ * What run `row` returned or why it failed: where the engine has its
+ * result, or else why its row says it failed (its `failureCode`: core's
+ * reason, or the engine's code, kept as it ended). Once its retention, as
+ * the deployment has it now, is over (`detailsRemoved`, by the row alone,
+ * as every reader of a run), nothing of what it returned, and of why it
+ * failed only the code: the engine keeps a run for the retention it was
+ * admitted with, which may since have been shortened, or lengthened.
  */
 const resultOf = async (
   env: Env,
@@ -711,10 +720,11 @@ const resultOf = async (
   if (removed && row.status === "completed") {
     return {};
   }
+  const engine = await engineResultOf(env, row.id);
   const result =
-    row.failureCode === null
-      ? await engineResultOf(env, row.id)
-      : { error: coreFailureOf(row.failureCode) };
+    engine.error === undefined && row.failureCode !== null
+      ? { error: keptFailureOf(row.failureCode) }
+      : engine;
   if (!removed) {
     return result;
   }
