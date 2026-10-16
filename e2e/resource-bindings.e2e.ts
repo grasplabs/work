@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // An engine's declared resources and their bindings, end to end in a real
 // browser: a builder's engine declares a template its action reads; an
@@ -119,7 +119,7 @@ const letterOn = async (page: Page, app: string) =>
 const unbound = "The domain's actions can't use it until an admin binds it.";
 
 test("an admin binds an engine's declared template and revokes it; its builder only sees", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, admin } = peopleIn("resourceBindings");
   // Templates are the organization's: a contract of this run's own.
@@ -127,7 +127,7 @@ test("an admin binds an engine's declared template and revokes it; its builder o
   const app = await engineOf(builder, deskFiles(contract));
 
   // Declared, and so far bound to nothing, with nothing published yet.
-  const deciding = await pageOf(browser, admin);
+  const deciding = await pageOf(admin);
   const letter = await letterOn(deciding, app);
   await expect(letter).toContainText(unbound);
   await expect(letter).toContainText(contract);
@@ -156,7 +156,7 @@ test("an admin binds an engine's declared template and revokes it; its builder o
   await expect(letter).not.toContainText(unbound);
 
   // The builder sees it bound, and nothing to bind, publish or revoke.
-  const building = await pageOf(browser, builder);
+  const building = await pageOf(builder);
   const seen = await letterOn(building, app);
   await expect(seen).toContainText("Bound to");
   await expect(seen.getByRole("button")).toHaveCount(0);
@@ -183,11 +183,11 @@ test("an admin binds an engine's declared template and revokes it; its builder o
 });
 
 test("an admin binds an engine's model with a daily cap, and replacing it keeps the cap", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, admin } = peopleIn("resourceBindings");
   const app = await engineOf(builder, writerFiles());
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   const writer = await resourceOn(page, app, "writer");
   await expect(writer).toContainText(unbound);
   const form = writer.getByRole("form", { name: "Bind writer" });

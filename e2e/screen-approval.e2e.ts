@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // An App's screen and its approval, end to end in a real browser: a
 // screen whose code nobody approved isn't started, an admin finds it on
@@ -48,7 +48,7 @@ export default function Ledger() {
 `;
 
 test("a screen gets its engine's data only while an admin's approval of its code stands", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, admin } = peopleIn("screenApproval");
   const name = `Ledger ${crypto.randomUUID().slice(0, 8)}`;
@@ -67,7 +67,7 @@ test("a screen gets its engine's data only while an admin's approval of its code
   }
 
   // Nobody approved its code: the screen isn't started, and says why.
-  const using = await pageOf(browser, builder);
+  const using = await pageOf(builder);
   await using.goto(`/domains/${app}/apps/ledger/full`);
   const frame = using.locator('iframe[title="ledger app"]');
   await expect(
@@ -79,7 +79,7 @@ test("a screen gets its engine's data only while an admin's approval of its code
 
   // A current version nobody approved is in front of the admins, who read
   // its code and approve it on the engine's page.
-  const deciding = await pageOf(browser, admin);
+  const deciding = await pageOf(admin);
   await deciding.goto("/dashboard");
   await deciding
     .getByRole("region", { name: "Waiting elsewhere" })

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import { toCard } from "./pile.ts";
 
 // The Activity page: an admin approves one App's permission request and
@@ -12,7 +12,7 @@ import { toCard } from "./pile.ts";
 // themselves are core's tests.
 
 test("an admin approves a permission request, finds it in the audit log, and exports it", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, builder } = peopleIn("activity");
   const appName = `Board pack ${crypto.randomUUID()}`;
@@ -38,7 +38,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   } finally {
     core[Symbol.dispose]();
   }
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   // An admin's permission requests wait on the dashboard; the old
   // Settings link leads there.
   await page.goto("/settings/approvals");
@@ -148,7 +148,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
 });
 
 test("an admin sees a grant asked for again after a new version, and approves only the version the list shows", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin, builder } = peopleIn("activityAgain");
   const appName = `Minutes ${crypto.randomUUID()}`;
@@ -175,7 +175,7 @@ test("an admin sees a grant asked for again after a new version, and approves on
   }
 
   try {
-    const page = await pageOf(browser, admin);
+    const page = await pageOf(admin);
     // An old link to them leads there too.
     await page.goto("/activity?tab=pending");
     await expect(page).toHaveURL(/\/dashboard$/u);

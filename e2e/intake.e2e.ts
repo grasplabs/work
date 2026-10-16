@@ -3,7 +3,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 import { revokeOtherCopies } from "./playbook.ts";
 
@@ -97,13 +97,13 @@ const playbookPaths = async (
 };
 
 test("an admin takes an interview as a draft, reviews it again, and saves its tagged statements to the Playbook", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("intake");
   const tag = crypto.randomUUID().slice(0, 8);
   const title = `Interview ${tag}`;
   const app = await intakeFor(admin);
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   const screen = await openIntake(page, app);
 
   await screen.getByRole("button", { name: "New source" }).click();
@@ -166,13 +166,13 @@ test("an admin takes an interview as a draft, reviews it again, and saves its ta
 });
 
 test("an admin sends notes to be read, and follows the reading to its end", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("intake");
   const title = `Notes ${crypto.randomUUID().slice(0, 8)}`;
   const app = await intakeFor(admin);
   // Its binding's cap refuses the reading's request at once (`intakeFor`).
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   const screen = await openIntake(page, app);
 
   await screen.getByRole("button", { name: "Read notes" }).click();
@@ -198,12 +198,13 @@ test("an admin sends notes to be read, and follows the reading to its end", asyn
 });
 
 test("an admin invites a stakeholder, who opens the link without an account, writes, and finishes the chat", async ({
-  browser,
+  newContext,
+  pageOf,
 }) => {
   const { admin } = peopleIn("intake");
   const name = `Ben ${crypto.randomUUID().slice(0, 8)}`;
   const app = await intakeFor(admin);
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   const screen = await openIntake(page, app);
 
   const chats = screen;
@@ -215,7 +216,7 @@ test("an admin invites a stakeholder, who opens the link without an account, wri
   expect(new URL(link).pathname).toBe("/guest");
 
   // The guest: a browser with nobody signed in.
-  const context = await browser.newContext();
+  const context = await newContext();
   const guestPage = await context.newPage();
   await guestPage.goto(link);
   await expect(
@@ -248,7 +249,6 @@ test("an admin invites a stakeholder, who opens the link without an account, wri
   await expect(guestPage.getByRole("alert")).toHaveText(
     /^This link doesn't work\. Ask whoever sent it for a new one\. Reference: [\da-f-]{36}$/u
   );
-  await context.close();
 
   // Back on the intake: the chat has ended.
   await page.reload();

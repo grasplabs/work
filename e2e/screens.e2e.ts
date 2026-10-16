@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 import { screenAppFiles, serveAttacker } from "./screen-app.ts";
 
@@ -89,12 +89,9 @@ test.afterAll(() => {
 });
 
 test("two people see each other's notes live, in their theme, and a failing screen lands in the App's error log", async ({
-  browser,
+  pageOf,
 }) => {
-  const [first, second] = await Promise.all([
-    pageOf(browser, one),
-    pageOf(browser, two),
-  ]);
+  const [first, second] = await Promise.all([pageOf(one), pageOf(two)]);
   await first.emulateMedia({ colorScheme: "light" });
   const [firstScreen, secondScreen] = await Promise.all([
     openScreen(first, app),
@@ -139,9 +136,9 @@ test("two people see each other's notes live, in their theme, and a failing scre
 });
 
 test("a screen opens through core failing at first, subscribes again after its connection drops, and tries one connection at a time", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, one);
+  const page = await pageOf(one);
   let drop: (() => Promise<void>) | undefined;
   let dropped = false;
   let connections = 0;
@@ -207,9 +204,9 @@ test("a screen opens through core failing at first, subscribes again after its c
 });
 
 test("a screen whose open core never answers is given up on in its time, and opens when tried again", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, one);
+  const page = await pageOf(one);
   await page.clock.install();
   let stall = true;
   const stalled = Promise.withResolvers<boolean>();
@@ -243,10 +240,10 @@ test("a screen whose open core never answers is given up on in its time, and ope
 });
 
 test("moving to another App's screen never shows the App it left in the chrome", async ({
-  browser,
+  pageOf,
 }) => {
   const other = await releaseApp(one, attacker.url, "Tasks");
-  const page = await pageOf(browser, one);
+  const page = await pageOf(one);
   await openScreen(page, app);
   await expect(page.getByRole("heading", { name: "Notes" })).toBeVisible();
 
@@ -301,10 +298,10 @@ test("moving to another App's screen never shows the App it left in the chrome",
 });
 
 test("a tab holds one connection to core for its shell and every App frame it opens", async ({
-  browser,
+  pageOf,
 }) => {
   const other = await releaseApp(one, attacker.url, "Board");
-  const page = await pageOf(browser, one);
+  const page = await pageOf(one);
   const sockets: string[] = [];
   page.on("websocket", (socket) => {
     if (new URL(socket.url()).pathname === "/rpc") {
@@ -352,9 +349,9 @@ test("a tab holds one connection to core for its shell and every App frame it op
 });
 
 test("a new current version is offered while the screen is open", async ({
-  browser,
+  pageOf,
 }) => {
-  const page = await pageOf(browser, one);
+  const page = await pageOf(one);
   await page.clock.install();
   await openScreen(page, app);
   const { core, api } = apiOf(one);
