@@ -44,6 +44,13 @@ test("a control's icon moves when pointed at, and never for less motion", async 
   const { member } = peopleIn("iconMoves");
   const page = await pageOf(browser, member);
   await page.goto("/");
+  // The page itself first: while it loads, a header of its own stands in
+  // (frame/page-states.tsx), and the page's header replaces it with a
+  // trigger of its own, which isn't pointed at until the browser next
+  // looks where the pointer is. Measured across that, the move is gone.
+  await expect(
+    page.getByRole("heading", { name: "What should we look at today?" })
+  ).toBeVisible();
   const trigger = page.getByRole("button", {
     name: "Show or hide the sidebar",
   });
