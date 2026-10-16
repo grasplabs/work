@@ -6469,7 +6469,7 @@ msgstr "Vandaag ({day}, UTC)"
 
 #: src/screens/screen-files.ts
 msgid "Too many files are moving at once. Try again shortly."
-msgstr "Er worden te veel bestanden tegelijk verplaatst. Probeer het zo opnieuw."
+msgstr "Er worden te veel bestanden tegelijk overgedragen. Probeer het zo opnieuw."
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"
