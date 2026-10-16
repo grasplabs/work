@@ -140,7 +140,7 @@ import {
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
-import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
+import { Form, FormChanges, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { useState } from "react";
 import { api } from "#grasp";
 
@@ -149,7 +149,8 @@ export type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
 /**
  * One note, edited with explicit Save: the draft keeps the revision it
  * started from, and a save someone else's overtook keeps the draft until
- * the person chooses to load the latest version.
+ * the person chooses to load the latest version, or to re-apply their
+ * changes on it. The draft outlives the editor and a refresh of the page.
  */
 export function NoteEditor({ note }: { note: Note }) {
   const form = useForm(api.notes.update, {
@@ -163,6 +164,7 @@ export function NoteEditor({ note }: { note: Note }) {
       <TextField form={form} label="Title" name="title" />
       <TextareaField form={form} label="Body" name="body" />
       <FormError form={form} />
+      <FormChanges form={form} labels={{ title: "Title", body: "Body" }} />
       <div className="flex gap-2">
         <SubmitButton form={form}>Save changes</SubmitButton>
         <AlertDialog onOpenChange={setConfirming} open={confirming}>

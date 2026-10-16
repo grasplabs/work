@@ -16,6 +16,7 @@ import {
   withTimeout,
 } from "./core.ts";
 import type { Session } from "./core.ts";
+import { stopDraftsFor, sweepDrafts } from "./screens/form-drafts.ts";
 
 /** Why the person's session ended under the page. */
 export type SessionEnded = "signed-out" | "principal-changed";
@@ -478,6 +479,12 @@ const askCoreStatus = async (
     api.signInOptions(),
     signedInAs(core, signal),
   ]);
+  if (pong === "pong") {
+    // Core says who is signed in: the screens' drafts of anyone else, or
+    // all of them when nobody is, and every expired one, go now, so a tab
+    // the browser restored holds none (screens/form-drafts.ts).
+    sweepDrafts(identity?.userId);
+  }
   return { connected: pong === "pong", signInOptions, identity };
 };
 
@@ -522,15 +529,57 @@ export const readWithin = async <T>(
   signal = deadline()
 ): Promise<T> => await unlessAborted(core.withSession(read, signal), signal);
 
+/** How long to wait between asks of who is signed in, at most. */
+const confirmMaxMs = 30_000;
+
+/**
+ * Asks core who is signed in until it answers, waiting longer each time
+ * (`loadCoreStatus` sweeps the drafts by its answer).
+ */
+const confirmSignedIn = async (core: CoreConnection): Promise<void> => {
+  for (let waitMs = 1000; ; waitMs = Math.min(waitMs * 2, confirmMaxMs)) {
+    const waiting = Promise.withResolvers<null>();
+    setTimeout(() => {
+      waiting.resolve(null);
+    }, waitMs);
+    // oxlint-disable-next-line no-await-in-loop -- one ask after the other
+    await waiting.promise;
+    // oxlint-disable-next-line no-await-in-loop -- one ask after the other
+    const status = await loadCoreStatus(core);
+    if (status.connected) {
+      return;
+    }
+  }
+};
+
 /**
  * Ends this browser's session and the tab's connection, which stops every
  * App frame on it and loads the page again, signed out (`onSessionEnded`).
  */
 export const signOut = async (core: CoreConnection): Promise<void> => {
-  await fetch("/api/auth/sign-out", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: "{}",
-  });
+  // The unsaved drafts of the Apps' screens were this person's: no frame
+  // writes one from now on, and every one goes once core signed them out.
+  try {
+    await stopDraftsFor(async () => {
+      const response = await fetch("/api/auth/sign-out", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      // Core didn't sign the person out (it failed, or a proxy answered).
+      if (!response.ok) {
+        throw new Error(`Signing out failed (${response.status}).`);
+      }
+    });
+  } catch (error) {
+    // Whether they are still signed in is core's to say: asked now, and
+    // again while core is out of reach, its answer keeps their drafts
+    // again, or drops them all (sweepDrafts); none is written meanwhile.
+    const status = await loadCoreStatus(core);
+    if (!status.connected) {
+      void confirmSignedIn(core);
+    }
+    throw error;
+  }
   core.end("signed-out");
 };
