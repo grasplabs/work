@@ -93,12 +93,13 @@ export interface BoundWorkflowDecision {
 }
 
 /**
- * A workflow the App binds (spec 3, 10.4.1, 10.4.5, 10.4.6), as the host
- * resolved its binding against the approved records: the App's alias for
- * it, the pinned version's input and output, the events it declares by
- * their binding's alias, its listen tasks, by path, with the aliases of
- * the events each listens for, and its decisions by their binding's
- * alias. Never from App code: what a reference pins is the host's word.
+ * A workflow the App declares (spec 3, 10.4.1, 10.4.5, 10.4.6), as its
+ * reference is generated: the App's alias for it and the input and output
+ * the App declared (`resource.workflow`), the contract its reference pins;
+ * and, as the host resolved the App's binding against the approved
+ * records, the events it declares by their binding's alias, its listen
+ * tasks, by path, with the aliases of the events each listens for, and its
+ * decisions by their binding's alias.
  */
 export interface BoundWorkflow {
   readonly alias: string;
@@ -119,6 +120,50 @@ export const decisionFingerprint = async (
   await sha256Hex(
     canonicalText({ value: decision.value, context: decision.context })
   );
+
+/**
+ * What the host resolved of a workflow the App declares, beside the
+ * contract the declaration gives (`BoundWorkflow`): never from App code.
+ */
+export type WorkflowBindingExtras = Omit<BoundWorkflow, "input" | "output">;
+
+/**
+ * The workflows the App declares, in alias order, each with the contract
+ * its declaration gives and what the host resolved of it in `bound`; an
+ * alias without a resolution has none of its own (no events, listen
+ * tasks or decisions). A resolution for a workflow the App doesn't
+ * declare throws: a reference is made only for a declaration.
+ */
+const declaredWorkflows = (
+  manifest: AppManifest,
+  bound: readonly WorkflowBindingExtras[]
+): BoundWorkflow[] => {
+  const extras = new Map<string, WorkflowBindingExtras>();
+  for (const resolved of bound) {
+    if (!Object.hasOwn(manifest.workflows, resolved.alias)) {
+      throw new TypeError(
+        `${JSON.stringify(resolved.alias)} isn't a workflow the App declares.`
+      );
+    }
+    if (extras.has(resolved.alias)) {
+      throw new TypeError(
+        `A bound workflow's alias is unique and plain: ${JSON.stringify(resolved.alias)}`
+      );
+    }
+    extras.set(resolved.alias, resolved);
+  }
+  return Object.values(manifest.workflows)
+    .toSorted((a, b) => (a.alias < b.alias ? -1 : 1))
+    .map((declared) => ({
+      events: {},
+      listens: {},
+      decisions: {},
+      ...extras.get(declared.alias),
+      alias: declared.alias,
+      input: declared.input,
+      output: declared.output,
+    }));
+};
 
 /**
  * The fingerprint of an event's exact contract: the SHA-256, in hex, of
@@ -818,16 +863,17 @@ const referencesText = async (
 /**
  * Every module the host generates for an App, by path (`generatedPaths`),
  * for the release `identity`, from its `manifest` as the host read it
- * (`readAppManifest`) and the workflows it binds, `bound`, as the host
- * resolved them (`BoundWorkflow`).
+ * (`readAppManifest`) and what the host resolved of the workflows it
+ * declares, `bound` (`WorkflowBindingExtras`).
  */
 export const generateModules = async (
   manifest: AppManifest,
   identity: ReleaseIdentity,
-  bound: readonly BoundWorkflow[] = []
+  bound: readonly WorkflowBindingExtras[] = []
 ): Promise<Record<string, string>> => {
-  checkBoundWorkflows(bound);
-  const workflows = bound.map((workflow) => ({
+  const declared = declaredWorkflows(manifest, bound);
+  checkBoundWorkflows(declared);
+  const workflows = declared.map((workflow) => ({
     ...workflow,
     listens: sortedListens(workflow.listens),
   }));

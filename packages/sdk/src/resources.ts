@@ -336,23 +336,38 @@ export type BrowserResource = FilesResource | LinksResource;
 export interface WorkflowResource<
   Alias extends string = string,
   Input = unknown,
+  Output = unknown,
 > {
   readonly "~resource": "workflow";
   readonly alias: Alias;
   /**
    * The descriptor of the input the App starts it with: what the host
-   * checks a start's input against before it goes anywhere. The bound
-   * version's own contract is checked again as the start is admitted.
+   * checks a start's input against before it goes anywhere.
    */
   readonly input: ValueDescriptor;
+  /**
+   * The descriptor of the output a completed run gives. With the input, it
+   * is the contract the App relies on: the host refuses a start whose bound
+   * version's contract isn't exactly this one (`contract.mismatch`), and
+   * the App's screens get a reference to it pinned to that contract's
+   * fingerprint (`workflows.<alias>` in `#grasp`).
+   */
+  readonly output: ValueDescriptor;
   /** The input as a caller passes it, for types only: never set. */
   readonly "~input"?: Input;
+  /** The output a completed run gives, for types only: never set. */
+  readonly "~output"?: Output;
 }
 
 /** What a workflow declaration's config says. */
-export interface WorkflowConfig<Input extends AnySchema> {
+export interface WorkflowConfig<
+  Input extends AnySchema,
+  Output extends AnySchema,
+> {
   /** The input the App starts it with. */
   readonly input: Input;
+  /** The output a completed run gives. */
+  readonly output: Output;
 }
 
 /** Any resource requirement. */
@@ -1104,12 +1119,17 @@ export const resource = Object.freeze({
    * builders bind under the alias, started through the App's own
    * permission; never the engine.
    */
-  workflow: <const Alias extends string, Input extends AnySchema>(
+  workflow: <
+    const Alias extends string,
+    Input extends AnySchema,
+    Output extends AnySchema,
+  >(
     alias: Alias,
-    config: WorkflowConfig<Input>
-  ): WorkflowResource<Alias, InferInput<Input>> => {
-    const checked = checkedConfig(config, ["input"]);
+    config: WorkflowConfig<Input, Output>
+  ): WorkflowResource<Alias, InferInput<Input>, Infer<Output>> => {
+    const checked = checkedConfig(config, ["input", "output"]);
     const input = descriptorOf(checked.input);
+    const output = descriptorOf(checked.output);
     // A start left without input takes the schema's default; an input that
     // may be absent with none would be no JSON for the run to start with.
     if (input.presence === "optional") {
@@ -1118,14 +1138,15 @@ export const resource = Object.freeze({
       );
     }
     // SAFETY: built from what was checked of the arguments the type is
-    // inferred from: the alias given and the input schema's descriptor.
+    // inferred from: the alias given and the schemas' descriptors.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     return declaredWorkflow({
       "~resource": "workflow",
       alias: checkedAlias(alias),
-      // The descriptor, as data: what the host checks a start against.
+      // The descriptors, as data: what the host checks a start against.
       input: structuredClone(input),
-    }) as WorkflowResource<Alias, InferInput<Input>>;
+      output: structuredClone(output),
+    }) as WorkflowResource<Alias, InferInput<Input>, Infer<Output>>;
   },
   /**
    * Guest chats, under a permission an admin binds: inviting a guest for
@@ -1278,12 +1299,13 @@ export const readResourceDeclaration = (
     return resource.files(alias, loose);
   }
   if (kind === "workflow") {
-    const { input, ...rest } = config;
-    // SAFETY: as above: `workflow` refuses any key but `input`.
+    const { input, output, ...rest } = config;
+    // SAFETY: as above: `workflow` refuses any key but `input` and `output`.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     const workflowConfig = {
       ...rest,
       input: schemaOf(readDescriptor(input, 1, { nodes: 0 })),
+      output: schemaOf(readDescriptor(output, 1, { nodes: 0 })),
     } as never;
     return resource.workflow(alias, workflowConfig);
   }

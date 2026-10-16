@@ -588,6 +588,7 @@ describe("uses", () => {
   test("a workflow is started by an action or staged by a mutation, only one the App lists, and reads back as declared", () => {
     const followUp = resource.workflow("followUp", {
       input: v.object({ title: v.string().trim() }),
+      output: v.object({ done: v.boolean() }),
     });
     const start = server.action({
       args: {},
@@ -608,11 +609,13 @@ describe("uses", () => {
     const { manifest } = inspectApp(registered);
     const lookalike = resource.workflow("followUp", {
       input: v.object({ title: v.string().trim() }),
+      output: v.object({ done: v.boolean() }),
     });
     expect({
       start: manifest.operations["notes.start"]?.uses,
       stage: manifest.operations["notes.stage"]?.uses,
       declared: manifest.workflows.followUp?.input,
+      declaredOutput: manifest.workflows.followUp?.output,
       // A workflow is neither an action's resource nor a screen's.
       resources: Object.keys(manifest.resources),
       readBack:
@@ -638,6 +641,7 @@ describe("uses", () => {
         { type: "workflow", alias: "followUp" },
       ],
       declared: v.object({ title: v.string().trim() }).descriptor,
+      declaredOutput: v.object({ done: v.boolean() }).descriptor,
       resources: [],
       readBack: true,
       unlisted: true,
@@ -648,19 +652,35 @@ describe("uses", () => {
 
   test("a workflow's input is there, or its default, when a start leaves it out", () => {
     const optional = refusal(() =>
-      resource.workflow("followUp", { input: v.string().optional() })
+      resource.workflow("followUp", {
+        input: v.string().optional(),
+        output: v.null(),
+      })
     );
     const defaulted = resource.workflow("followUp", {
       input: v.string().default("Today"),
+      output: v.null(),
     });
+    // Declared without the output a run gives, it is refused, whatever
+    // the types let through.
+    const noOutput = refusal(() =>
+      Reflect.apply(resource.workflow, resource, [
+        "followUp",
+        { input: v.object({}) },
+      ])
+    );
     expect({
       optional: optional.includes("never only optional"),
       defaulted: defaulted.input.presence,
-    }).toStrictEqual({ optional: true, defaulted: "default" });
+      noOutput: noOutput.length > 0,
+    }).toStrictEqual({ optional: true, defaulted: "default", noOutput: true });
   });
 
   test("a manifest can't make a workflow out of something else", () => {
-    const followUp = resource.workflow("followUp", { input: v.object({}) });
+    const followUp = resource.workflow("followUp", {
+      input: v.object({}),
+      output: v.null(),
+    });
     const start = server.action({
       args: {},
       returns: v.null(),
@@ -707,10 +727,20 @@ describe("uses", () => {
           alias: "followUp",
         });
       }).includes("A query uses nothing"),
+      // A workflow without the output a run gives.
+      noOutput:
+        altered((copy) => {
+          const declared = manifest.workflows.followUp;
+          if (declared !== undefined) {
+            const { output: _output, ...withoutOutput } = declared;
+            copy.workflows = { followUp: withoutOutput };
+          }
+        }).length > 0,
     }).toStrictEqual({
       undeclared: true,
       asResource: true,
       byQuery: true,
+      noOutput: true,
     });
   });
 

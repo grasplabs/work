@@ -10,7 +10,11 @@ import {
   symbolicModules,
   workflowFingerprint,
 } from "../src/host.ts";
-import type { AppManifest, BoundWorkflow } from "../src/host.ts";
+import type {
+  AppManifest,
+  BoundWorkflow,
+  WorkflowBindingExtras,
+} from "../src/host.ts";
 import { app, resource, v } from "../src/index.ts";
 import { workflowReferenceLimits } from "../src/references.ts";
 import { runFunction } from "../src/runner.ts";
@@ -33,7 +37,7 @@ import serverReferencesText from "./notes/.grasp/server-references.ts?raw";
 import { internal } from "./notes/.grasp/server-references.ts";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
 import serverText from "./notes/.grasp/server.ts?raw";
-import notes from "./notes/app.ts";
+import notes, { archiveNotes, summarizeNote } from "./notes/app.ts";
 
 // References and generated modules (spec 7.3, 8, 32.1), and reading an
 // App's manifest back as the host does: pure logic, so unit tests. The
@@ -275,8 +279,11 @@ describe("generated modules", () => {
     expect(files[".grasp/references.ts"]).not.toContain("preferences");
   });
 
-  test("export no workflows for an App that binds none", async () => {
-    const files = await generateModules(notesManifest(), identity);
+  test("export no workflows for an App that declares none", async () => {
+    const files = await generateModules(
+      { ...notesManifest(), workflows: {} },
+      identity
+    );
     expect(files[".grasp/references.ts"]).toContain(
       "export const workflows: Readonly<Record<never, never>> = frozen({});"
     );
@@ -284,14 +291,35 @@ describe("generated modules", () => {
 });
 
 describe("workflow references", () => {
-  const [summarize, archive] = notesWorkflows;
-  if (summarize === undefined || archive === undefined) {
+  const [summarize] = notesWorkflows;
+  if (summarize === undefined) {
     throw new Error("No bound workflows");
   }
 
-  /** The fixture's references to bound workflows, generated with `bound`. */
-  const generatedWith = async (bound: readonly BoundWorkflow[]) =>
-    await generateModules(notesManifest(), identity, bound);
+  /**
+   * The fixture's generated modules, with what the host resolved of its
+   * workflows, `bound`, and its declaration of `summarizeNote` changed by
+   * `declared`, if given.
+   */
+  const generatedWith = async (
+    bound: readonly WorkflowBindingExtras[],
+    declared?: Partial<Pick<BoundWorkflow, "input" | "output">>
+  ) => {
+    const manifest = notesManifest();
+    return await generateModules(
+      declared === undefined
+        ? manifest
+        : {
+            ...manifest,
+            workflows: {
+              ...manifest.workflows,
+              summarizeNote: { ...summarizeNote, ...declared },
+            },
+          },
+      identity,
+      bound
+    );
+  };
 
   test("hold their contract and their events as data, and have no .start, .get or .cancel", () => {
     for (const reference of Object.values(workflows)) {
@@ -319,15 +347,17 @@ describe("workflow references", () => {
       ...identity,
       alias: "summarizeNote",
       contractId: "workflows.summarizeNote",
-      input: summarize.input,
-      output: summarize.output,
+      input: summarizeNote.input,
+      output: summarizeNote.output,
       listens: summarize.listens,
     });
   });
 
   test("bind each event to its workflow binding, the contract it pins and its event type", async () => {
     const reference = workflows.summarizeNote;
-    expect(reference.fingerprint).toBe(await workflowFingerprint(summarize));
+    expect(reference.fingerprint).toBe(
+      await workflowFingerprint(summarizeNote)
+    );
     const expected = await Promise.all(
       Object.entries(summarize.events).map(async ([alias, declared]) => [
         alias,
@@ -394,12 +424,12 @@ describe("workflow references", () => {
 
   test("pin the workflow's input and output, each event and decision its own contract, and the release all of it", async () => {
     const text = v.string().descriptor;
-    const workflowChanges: BoundWorkflow[] = [
-      { ...summarize, input: text },
-      { ...summarize, output: text },
-    ];
+    const declarationChanges = [{ input: text }, { output: text }];
     const workflowPrints = await Promise.all(
-      [summarize, ...workflowChanges].map(workflowFingerprint)
+      [{}, ...declarationChanges].map(
+        async (change) =>
+          await workflowFingerprint({ ...summarizeNote, ...change })
+      )
     );
     expect(new Set(workflowPrints).size).toBe(workflowPrints.length);
 
@@ -427,8 +457,7 @@ describe("workflow references", () => {
     );
     expect(new Set(decisionPrints).size).toBe(decisionPrints.length);
 
-    const contractChanges: BoundWorkflow[] = [
-      ...workflowChanges,
+    const contractChanges: WorkflowBindingExtras[] = [
       {
         ...summarize,
         events: { ...summarize.events, noteEdited: { ...edited, data: text } },
@@ -457,12 +486,16 @@ describe("workflow references", () => {
       },
       { ...summarize, decisions: {} },
     ];
-    const contracts = await Promise.all(
-      [summarize, ...contractChanges].map(async (workflow) => {
+    const contracts = await Promise.all([
+      ...[summarize, ...contractChanges].map(async (workflow) => {
         const files = await generatedWith([workflow]);
         return files[".grasp/contracts.json"];
-      })
-    );
+      }),
+      ...declarationChanges.map(async (change) => {
+        const files = await generatedWith([summarize], change);
+        return files[".grasp/contracts.json"];
+      }),
+    ]);
     expect(new Set(contracts).size).toBe(contracts.length);
   });
 
@@ -482,14 +515,14 @@ describe("workflow references", () => {
   });
 
   test("are covered by the contracts the release's hash covers", async () => {
-    const files = await generatedWith([
-      { ...summarize, output: v.string().descriptor },
-    ]);
+    const files = await generatedWith(notesWorkflows, {
+      output: v.string().descriptor,
+    });
     expect(files[".grasp/contracts.json"]).not.toBe(contractsText);
     expect(JSON.parse(contractsText)).toMatchObject({
       workflowFingerprints: {
-        archiveNotes: await workflowFingerprint(archive),
-        summarizeNote: await workflowFingerprint(summarize),
+        archiveNotes: await workflowFingerprint(archiveNotes),
+        summarizeNote: await workflowFingerprint(summarizeNote),
       },
     });
   });
@@ -512,8 +545,26 @@ describe("workflow references", () => {
     );
   });
 
-  test.each<[string, readonly BoundWorkflow[]]>([
+  test("are made for every workflow the App declares, with the contract it declares, whatever the host resolved of it", async () => {
+    const files = await generatedWith([]);
+    const references = files[".grasp/references.ts"] ?? "";
+    // Pinned to what the App declares: the same contract, and fingerprint.
+    expect(references).toContain(await workflowFingerprint(summarizeNote));
+    expect(references).toContain(await workflowFingerprint(archiveNotes));
+    expect(JSON.parse(files[".grasp/contracts.json"] ?? "")).toMatchObject({
+      workflows: {
+        archiveNotes: { events: {}, listens: {} },
+        summarizeNote: { events: {}, listens: {} },
+      },
+    });
+  });
+
+  test.each<[string, readonly WorkflowBindingExtras[]]>([
     ["the same alias twice", [summarize, summarize]],
+    [
+      "a workflow the App doesn't declare",
+      [{ ...summarize, alias: "translateNote" }],
+    ],
     ["an alias that isn't plain", [{ ...summarize, alias: "summarize-note" }]],
     [
       "an event alias that isn't plain",

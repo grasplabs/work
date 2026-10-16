@@ -90,6 +90,7 @@ const { query, mutation, action } = serverModule(schema);
 const followUp = resource.workflow("followUp", {
   // Started with no input, it takes its declared default.
   input: v.object({ who: v.string().trim().min(1) }).default({ who: "Anyone" }),
+  output: v.object({ status: v.string() }),
 });
 
 const handleSchema = v.object({
