@@ -2723,6 +2723,12 @@ export const workflowStartReceipts = sqliteTable(
     createdAt: timestamp("created_at").notNull(),
     /** When retention removed its input and parameter values. */
     detailsRemovedAt: timestamp("details_removed_at"),
+    /**
+     * Whether the start was decided in restricted mode (restricted.ts): an
+     * App's start while the App, or the chat of the agent whose call made
+     * it, had read restricted data. Its run is restricted for good.
+     */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     uniqueIndex("workflow_start_receipts_key").on(
@@ -2799,6 +2805,11 @@ export const workflowResourceRuns = sqliteTable(
      * hasn't ended.
      */
     sharesFencedThrough: integer("shares_fenced_through").notNull().default(0),
+    /**
+     * Its start's `restricted`, pinned with it: every call of the run reads
+     * it here (restricted.ts), so no step, retry or replay runs without it.
+     */
+    restricted: integer({ mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     // A workflow's runs that haven't ended, for its deletion check.

@@ -756,7 +756,7 @@ export const waitStepPrefix = `${coreStepPrefix}wait:`;
 const defaultWaitMs = 60_000;
 
 /** The longest wait between checks, in first waits: 15 minutes. */
-const maxWaits = 15;
+export const maxWaits = 15;
 
 /**
  * The longest wait between checks of a call of unknown outcome, in first
@@ -807,7 +807,7 @@ const waitRunStep =
  * Tries of one check whether a held side effect still waits, after the
  * first: a connect that fails that often in a row fails the step.
  */
-const heldCheckRetries = 5;
+export const heldCheckRetries = 5;
 
 /**
  * A short, stable key for the step `name` a wait holds, as the wait's own
@@ -822,7 +822,7 @@ export const waitKeyOf = async (name: unknown): Promise<string> => {
 };
 
 /** The first wait between checks for this deployment; tests shorten it. */
-const waitMsOf = (env: Env): number => {
+export const waitMsOf = (env: Env): number => {
   const set = Number(env.WORKFLOW_OFF_WAIT_MS);
   return Number.isInteger(set) && set > 0 && set < defaultWaitMs
     ? set

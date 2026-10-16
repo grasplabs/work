@@ -17,7 +17,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { personOf } from "./connections.ts";
-import { workflowRuns } from "./db/core/schema.ts";
+import { workflowResourceRuns, workflowRuns } from "./db/core/schema.ts";
 import { reauthorizedCapability, refusedForBinding } from "./decided-calls.ts";
 import { workspace } from "./durable-objects.ts";
 import { isProviderUnreachable } from "./resource-adapter.ts";
@@ -25,6 +25,7 @@ import { isRestricted } from "./restricted.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
+import { requireHeldRunCallAllowed } from "./workflows/resource-authority.ts";
 import { wakingHeld } from "./workflows/wakes.ts";
 import type { HeldOutcome } from "./workspace.ts";
 
@@ -50,11 +51,27 @@ const endedStatuses: ReadonlySet<string> = new Set([
 
 /**
  * Whether the workflow run a held action came from has ended (or isn't
- * the App's): its step's key names the run, whichever of its App's code
- * made the call. A paused run hasn't: it may be resumed.
+ * the App's, or the workflow's): its step's key names the run, whichever
+ * of its App's code made the call. A paused run hasn't: it may be resumed.
  */
 const runEnded = async (env: Env, held: PendingAction): Promise<boolean> => {
   const runId = runOfStepKey(held.idempotencyKey);
+  if (runId !== undefined && held.subject.type === "workflow") {
+    // A run of an independent workflow (a restricted one's call).
+    const run = await drizzle(env.DB)
+      .select({
+        workflowId: workflowResourceRuns.workflowResourceId,
+        status: workflowResourceRuns.status,
+      })
+      .from(workflowResourceRuns)
+      .where(eq(workflowResourceRuns.id, runId))
+      .get();
+    return (
+      run === undefined ||
+      run.workflowId !== held.subject.workflowId ||
+      endedStatuses.has(run.status)
+    );
+  }
   if (runId === undefined || held.subject.type !== "app") {
     return true;
   }
@@ -132,6 +149,11 @@ const confirmHeld = async (
     // A binding connect can no longer read is refused, never skipped.
     if (held.binding === "unreadable") {
       throw operationErrors.create("resource.unavailable");
+    }
+    // A run of an independent workflow's call: only while the run's own
+    // authority for it holds, as its next call would need.
+    if (held.subject.type === "workflow") {
+      await requireHeldRunCallAllowed(env, held, identity.userId);
     }
     capability = await reauthorizedCapability(
       env,

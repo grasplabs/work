@@ -1,5 +1,6 @@
 import { kitModuleName } from "@grasp-os/compiler";
 import { generatedImport } from "@grasp-os/open-workflow/generate";
+import { connectErrors } from "@grasp-os/shared/connect";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -45,14 +46,17 @@ import {
   cpuLimitKill,
   forIsolate,
   fromIsolate,
+  heldCheckRetries,
   isCpuLimitKill,
   loadWaitAfter,
   loadWaitStart,
   markerOf,
+  maxWaits,
   queueTimedOut,
   settle,
   toStepError,
   waitKeyOf,
+  waitMsOf,
   waitStep,
 } from "./host.ts";
 import type { Busy, LoadWait, RunStep } from "./host.ts";
@@ -152,6 +156,12 @@ import { callCompute } from "./resource-compute.ts";
 //   `grasp.sleepUntil`'s) are made by the host within a step that records
 //   them; a sleep must be until exactly the deadline its task's enter step
 //   recorded (`#deadlines`), however it was reached.
+// - A held side effect taken for a failure, or run twice. A restricted
+//   run's connector call that connect holds for its person
+//   (`connect.held`) ends its step as held, using no retry, whatever the
+//   isolate made of it; the run waits, checking connect, and runs the
+//   step again under the same key once they decided, so connect answers
+//   what they decided, never a second send (`#waitWhileHeld`).
 // - Limits raising the host's ceilings. A task's timeout and the
 //   workflow's model calls are held to the lower of the build's sealed
 //   limit and the host's own (`configOf`, `HostedResourceRun`).
@@ -491,6 +501,14 @@ const boundedJson = (
     : undefined;
 };
 
+/**
+ * What a step whose call connect held records (`StepAttempt.held`): never
+ * a record (`recordSchema` takes no such object), so it can't be taken
+ * for one, fresh or replayed.
+ */
+const heldMarker = { held: true } as const;
+const heldMarkerSchema = z.strictObject({ held: z.literal(true) });
+
 /** What core reads of the context the engine gives an attempt. */
 const attemptContextSchema = z.object({
   attempt: z.int().positive(),
@@ -656,6 +674,11 @@ interface StepAttempt {
   until: number | undefined;
   /** Whether it asked for its deadline: once, however it went. */
   untilAsked: boolean;
+  /**
+   * Whether connect held its call for the run's person (`connect.held`):
+   * the step then ends as held, whatever the isolate made of the answer.
+   */
+  held: boolean;
   /** Its admission: what admits each evaluation as a host call. */
   admission: AttemptAdmission;
 }
@@ -1078,13 +1101,29 @@ export class ResourceRunHost
         // Refused for load: the step runs again after a durable sleep, in
         // steps of core's own outside the run's step allowance, as an App
         // run's does (host.ts, `RunHost.do`), until it has waited as long
-        // as a step may.
+        // as a step may. Held for its person: waited for, then run again
+        // under a step of its own, its call under the same key, so connect
+        // answers what they decided. Fresh or replayed alike, each round
+        // as recorded.
         const waitKey = await waitKeyOf(stepName);
         for (
           let marker = markerOf(recorded), round = 1;
-          marker !== undefined;
+          marker !== undefined || heldMarkerSchema.safeParse(recorded).success;
           marker = markerOf(recorded), round += 1
         ) {
+          if (marker === undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- one round at a time
+            await this.#waitWhileHeld(stepName, round);
+            // oxlint-disable-next-line no-await-in-loop -- one round at a time
+            await this.#requirePerson();
+            // oxlint-disable-next-line no-await-in-loop -- one round at a time
+            recorded = await this.#step.do(
+              `${stepName}:held:${round}:run`,
+              configOf(step),
+              attemptStep
+            );
+            continue;
+          }
           // Only the host records a marker, and only a busy one.
           if (marker.kind !== "busy") {
             throw new Error(`Step "${stepName}" recorded a hold it can't have`);
@@ -1119,6 +1158,32 @@ export class ResourceRunHost
     } finally {
       stepDone.resolve(null);
     }
+  }
+
+  /**
+   * What attempt `attempt` of step `run` records, its function having
+   * settled as `result`: core's held marker when connect held its call
+   * for the run's person (a restricted run's side effect), so the step
+   * ends as held, not failed, using no retry, whatever the isolate made of
+   * the answer, and runs again once they decided (`#waitWhileHeld`);
+   * otherwise its record, or the failure it ended with.
+   */
+  #outcomeOf(
+    run: StepRun,
+    attempt: StepAttempt | undefined,
+    result: Settled<unknown>
+  ): unknown {
+    if (attempt?.held === true) {
+      return heldMarker;
+    }
+    if (!result.ok || attempt === undefined) {
+      throw toStepError(
+        result.ok
+          ? forIsolate(new Error("The attempt was cut off"))
+          : result.error
+      );
+    }
+    return this.#recordOf(run, attempt, result.value);
   }
 
   /**
@@ -1217,14 +1282,7 @@ export class ResourceRunHost
       if (this.#tampered !== undefined) {
         throw toStepError(forIsolate(this.#tampered));
       }
-      if (!result.ok || attempt === undefined) {
-        throw toStepError(
-          result.ok
-            ? forIsolate(new Error("The attempt was cut off"))
-            : result.error
-        );
-      }
-      return this.#recordOf(run, attempt, result.value);
+      return this.#outcomeOf(run, attempt, result);
     } finally {
       // Settled last, however it ended: what it held of its lineage's time
       // turns into what it used, its evaluations' and its record's checks'
@@ -1293,6 +1351,7 @@ export class ResourceRunHost
       exportAs: new Map(),
       until: undefined,
       untilAsked: false,
+      held: false,
       admission,
     };
   }
@@ -1421,6 +1480,50 @@ export class ResourceRunHost
       !this.#modelCallsMade.has(task.id)
     ) {
       this.#modelCalls += 1;
+    }
+  }
+
+  /**
+   * Waits, in round `round`, while the call of step `stepName` (a call
+   * task's, whose key its call carries) is held for the run's person:
+   * each check a step of its own (retried, and replayed without asking
+   * connect again), then a durable sleep, a first wait (`waitMsOf`)
+   * doubling up to `maxWaits` of them, in steps named after the round.
+   * What connect says
+   * decides; a confirmation, a decline or a drop ends the wait, and the
+   * step's next run gets the answer. Each check and sleep is a step of
+   * the run's, so the run's step limit bounds the wait.
+   */
+  async #waitWhileHeld(stepName: string, round: number): Promise<void> {
+    const first = waitMsOf(this.#env);
+    const prefix = `${stepName}:held:${round}`;
+    // The key `#made` gives the task's call, in every attempt and round.
+    const idempotencyKey = stepIdempotencyKey(this.#run.runId, stepName);
+    for (let checks = 0; ; checks += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one check at a time
+      const held = await this.#step.do(
+        `${prefix}:${checks}:check`,
+        {
+          retries: {
+            limit: heldCheckRetries,
+            delay: first,
+            backoff: "exponential",
+          },
+        },
+        async () =>
+          await this.#env.CONNECT.anyPending({
+            onBehalfOf: this.#run.principal,
+            idempotencyKey,
+          })
+      );
+      if (held !== true) {
+        return;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- one wait at a time
+      await this.#step.sleep(
+        `${prefix}:${checks}`,
+        first * Math.min(2 ** checks, maxWaits)
+      );
     }
   }
 
@@ -2007,6 +2110,7 @@ export class ResourceRunHost
         return answer;
       } catch (error) {
         attempt.call = "failed";
+        attempt.held ||= connectErrors.codeOf(error) === "connect.held";
         throw error;
       }
     });

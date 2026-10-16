@@ -1146,25 +1146,39 @@ const agentOf = async (
 };
 
 describe("what a start rechecks, and records", () => {
-  it("refuses a restricted App's starts, now and from its outbox, so restricted data never reaches a run", async () => {
+  it("starts a restricted App's runs restricted, now and from its outbox, and its unrestricted starts not", async () => {
     const fx = await fixture();
+    const before = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
     const staged = await call(fx, fx.bob, "requests.submit", { who: "Bob" });
     await appHost(env, fx.app).restrict();
-    const started = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
+    // Dispatched after the App read restricted data: what it staged may
+    // carry it.
     await runDurableObjectAlarm(objectOf(fx.store));
-    const refusals = await detailsOf("workflow.start_intent.refused", fx.app);
+    const after = await call(fx, fx.bob, "requests.kickOff", { who: "Bob" });
+    const { results } = await env.DB.prepare(
+      "SELECT receipt.idempotency_key AS key, receipt.restricted AS receipt, run.restricted AS run FROM workflow_start_receipts AS receipt JOIN workflow_resource_runs AS run ON run.id = receipt.id WHERE receipt.invoker_type = 'app' AND receipt.invoker_id = ? ORDER BY receipt.created_at, receipt.id"
+    )
+      .bind(fx.app)
+      .all<{ key: string; receipt: number; run: number }>();
+    const admitted = await detailsOf("workflow.start.admitted", fx.workflowId);
     expect({
-      staged: staged.ok,
-      started: answerOf(started),
-      receipts: await receiptsOf(fx.app),
+      calls: [before.ok, staged.ok, after.ok],
+      pinned: results.map(({ key, receipt, run }) => ({
+        kind: key.includes("after-commit") ? "commit" : "action",
+        receipt,
+        run,
+      })),
+      audited: admitted.map((detail) => detail?.restricted),
       outbox: await settledOf(fx.store),
-      audited: refusals.map((detail) => detail?.reason),
     }).toStrictEqual({
-      staged: true,
-      started: "workflow.start_restricted",
-      receipts: [],
-      outbox: [{ settled: true, undeliverable: "workflow.start_restricted" }],
-      audited: ["workflow.start_restricted"],
+      calls: [true, true, true],
+      pinned: [
+        { kind: "action", receipt: 0, run: 0 },
+        { kind: "commit", receipt: 1, run: 1 },
+        { kind: "action", receipt: 1, run: 1 },
+      ],
+      audited: [false, true, true],
+      outbox: [{ settled: true, undeliverable: null }],
     });
   });
 
