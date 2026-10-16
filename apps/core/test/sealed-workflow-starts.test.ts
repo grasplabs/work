@@ -38,6 +38,7 @@ import { action, mutation } from "#grasp/server";
 
 export const followUp = resource.workflow("followUp", {
   input: v.object({ who: v.string().trim().min(1) }),
+  output: v.object({ status: v.string() }),
 });
 
 export const submit = mutation({

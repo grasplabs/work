@@ -134,6 +134,7 @@ export type {
   BoundWorkflow,
   BoundWorkflowDecision,
   BoundWorkflowEvent,
+  WorkflowBindingExtras,
   CatalogAction,
   ReleaseIdentity,
 } from "./generate.ts";
