@@ -1104,6 +1104,42 @@ describe("what one attempt of a JSON workflow's step may spend", () => {
     });
   });
 
+  it("holds a sleeping task's enter step to what one attempt evaluates, counting its if, input.from and deadline", async () => {
+    const by = await builder();
+    const sleeping = (inputs: number) => [
+      {
+        nap: {
+          if: "${ true }",
+          input: { from: fields(inputs) },
+          call: "grasp.sleepUntil",
+          with: { timestamp: "${ $workflow.startedAt.epoch.milliseconds }" },
+        },
+      },
+      { finish: { set: { status: "done" } } },
+    ];
+    const unsupported = async (inputs: number) => {
+      const { version } = await published(by, (name) =>
+        definitionOf(name, sleeping(inputs))
+      );
+      return version.build.executable ? [] : version.build.unsupported;
+    };
+    // 66 expressions in its enter step: within an attempt's 128, though
+    // more than one stage may hold. One more input is past its stage's 64.
+    expect({
+      full: await unsupported(64),
+      over: await unsupported(65),
+    }).toStrictEqual({
+      full: [],
+      over: [
+        {
+          pointer: "/do/0/nap/input/from",
+          taskId: "nap",
+          feature: "input.from:expressions",
+        },
+      ],
+    });
+  });
+
   it("doesn't lower a step with more expressions than one attempt evaluates", async () => {
     const by = await builder();
     const { version } = await published(by, (name) =>

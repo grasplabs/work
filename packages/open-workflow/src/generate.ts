@@ -1353,7 +1353,9 @@ const lowerSleep = (
   item: ListTask,
   stages: Stages,
   place: ListPlace,
-  sealed: TaskBase
+  sealed: TaskBase,
+  /** Where the task's expressions start, before its stages were compiled. */
+  taskBefore: number
 ): void => {
   const { id, task, pointer } = item;
   const steps: TaskStep[] = ["task"];
@@ -1369,7 +1371,6 @@ const lowerSleep = (
     );
     return;
   }
-  const before = emitter.expressions.length;
   const inputFrom = inputFromOf(emitter, item);
   const transformed = inputFrom === undefined ? {} : { inputFrom };
   let sleeping: GeneratedTask;
@@ -1395,8 +1396,15 @@ const lowerSleep = (
       ...transformed,
     };
   }
-  // The enter step evaluates its stages and the deadline's expressions.
-  if (emitter.expressions.length - before > maxTaskExpressions) {
+  // The enter step evaluates everything of the task but its leave stages:
+  // its if, its input.from (as stage code and as the sealed template) and
+  // the deadline's expressions, all within what one attempt evaluates.
+  const entering = emitter.expressions
+    .slice(taskBefore)
+    .filter(
+      ({ stage }) => stage !== "taskOutputAs" && stage !== "taskExportAs"
+    ).length;
+  if (entering > maxStepExpressions) {
     emitter.refusals.add(pointer, "step:expressions", id);
   }
   emitter.tasks.push(sleeping);
@@ -1510,7 +1518,7 @@ const lowerTask = (
       emitter.refusals.add(pointer, "step:expressions", id);
     }
   } else if (sleeps) {
-    lowerSleep(emitter, item, stages, place, sealed);
+    lowerSleep(emitter, item, stages, place, sealed, before);
   } else {
     const steps: TaskStep[] = [];
     emitter.tasks.push({ ...sealed, kind: "do", steps });
