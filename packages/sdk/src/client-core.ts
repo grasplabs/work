@@ -2165,8 +2165,7 @@ export class GraspClient {
   }
 
   /**
-   * Settles one read of a window (an imperative one: windows are
-   * otherwise followed), the one way every such read ends (core's query-windows.ts): its window is shown; or its
+   * Settles one read of a window, the one way every such read ends (core's query-windows.ts): its window is shown; or its
    * failure (writes kept tearing it, the person's budget spent partway, a
    * lost answer) is thrown to the read's caller, the window already shown
    * kept, or shown when nothing is, so a first load throws it. Never read

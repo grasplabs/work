@@ -26,6 +26,7 @@ import { z } from "zod";
 import { loadRelease } from "../src/app-releases.ts";
 import { portableLiveAccounting } from "../src/portable-live.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
+import { hostOrigin, hostSockets } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
@@ -114,9 +115,6 @@ const requestFor = (
     },
     input,
   });
-
-/** Where another site's page runs: the token is all it has. */
-const hostOrigin = "https://notes.elsewhere.test";
 
 /**
  * Opens `app`'s live connection as a browser on another site would, with
@@ -249,13 +247,6 @@ const titlesOf = (push: QuerySnapshotPush | undefined) => {
     : read.data.error.code;
 };
 
-/** One socket the host's page opened, as the browser shows it. */
-interface HostSocket {
-  readonly url: string;
-  /** Its close code, once closed. */
-  code: number | undefined;
-}
-
 /**
  * The host page's browser: `fetch` and `WebSocket` of the deployment
  * reach core through the router; each socket's upgrade carries `cookie`,
@@ -264,9 +255,6 @@ interface HostSocket {
  */
 const hostBrowser = ({ cookie }: { cookie?: string } = {}) => {
   const calls: string[] = [];
-  const sockets: HostSocket[] = [];
-  /** Whether new sockets fail to connect, as with the network down. */
-  const network = { down: false };
   const outside = globalThis.fetch;
   vi.stubGlobal(
     "fetch",
@@ -283,73 +271,7 @@ const hostBrowser = ({ cookie }: { cookie?: string } = {}) => {
       });
     }
   );
-  class BrowserSocket extends EventTarget {
-    static readonly CONNECTING = 0;
-    static readonly OPEN = 1;
-    static readonly CLOSING = 2;
-    static readonly CLOSED = 3;
-    readyState = 0;
-    binaryType = "blob";
-    readonly #seen: HostSocket;
-    #socket: WebSocket | undefined;
-
-    constructor(url: string) {
-      super();
-      this.#seen = { url, code: undefined };
-      sockets.push(this.#seen);
-      void this.#open(new URL(url));
-    }
-
-    async #open(url: URL): Promise<void> {
-      if (network.down) {
-        await Promise.resolve();
-        this.readyState = 3;
-        this.dispatchEvent(new Event("error"));
-        return;
-      }
-      const response = await routed(url.pathname, {
-        headers: {
-          Upgrade: "websocket",
-          Origin: hostOrigin,
-          ...(cookie === undefined ? {} : { cookie }),
-        },
-      });
-      const socket = response.webSocket;
-      if (!socket) {
-        this.readyState = 3;
-        this.dispatchEvent(new Event("error"));
-        return;
-      }
-      socket.addEventListener("message", (event) => {
-        const data = typeof event.data === "string" ? event.data : "";
-        this.dispatchEvent(new MessageEvent("message", { data }));
-      });
-      socket.addEventListener("close", (event) => {
-        this.readyState = 3;
-        this.#seen.code ??= event.code;
-        this.dispatchEvent(
-          new CloseEvent("close", { code: event.code, reason: event.reason })
-        );
-      });
-      socket.accept();
-      closeWhenTestEnds(socket);
-      this.#socket = socket;
-      this.readyState = 1;
-      this.dispatchEvent(new Event("open"));
-    }
-
-    send(data: string): void {
-      this.#socket?.send(data);
-    }
-
-    close(code = 1000, reason = ""): void {
-      this.#seen.code ??= code;
-      this.readyState = 3;
-      this.#socket?.close(code, reason);
-    }
-  }
-  vi.stubGlobal("WebSocket", BrowserSocket);
-  return { calls, sockets, network };
+  return { calls, ...hostSockets({ cookie }) };
 };
 
 /** A client a portable host makes, its token whatever `token()` says now. */
