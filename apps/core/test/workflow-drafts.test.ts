@@ -458,6 +458,20 @@ describe("a workflow's draft", () => {
     });
   });
 
+  it("refuses a draft past 1 MiB of UTF-8, however few characters it has", async () => {
+    const ada = await person("builder");
+    const workflow = await workflowOf(ada);
+    // Under a million characters, each three bytes in UTF-8.
+    await expect(
+      outcome(
+        editWorkflowDraft(env, ada, workflow.id, {
+          expectedRevision: 0,
+          source: "界".repeat(700_000),
+        })
+      )
+    ).resolves.toBe("workflow.resource_invalid");
+  });
+
   it("refuses text that names another workflow, at its document", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);

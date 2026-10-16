@@ -663,9 +663,14 @@ export interface WorkflowMember {
  */
 export const workflowDraftEditSchema = z.strictObject({
   expectedRevision: z.int().min(0),
-  // The profile's own bound on a definition (1 MiB), counted in UTF-16
-  // units here; its parser counts UTF-8 bytes again.
-  source: z.string().max(1024 * 1024),
+  // The profile's own bound on a definition: 1 MiB of UTF-8, as stored.
+  source: z
+    .string()
+    .max(1024 * 1024)
+    .refine(
+      (text) => new TextEncoder().encode(text).byteLength <= 1024 * 1024,
+      "A draft is at most 1 MiB of UTF-8."
+    ),
 });
 
 /**
