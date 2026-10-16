@@ -29,6 +29,8 @@ describe("quota policy", () => {
         modelAppRequests: 8,
         modelQueuedPerPerson: 32,
         modelQueuedPerApp: 64,
+        tenantBuildJobs: 2,
+        keyBuildJobs: 1,
       },
     });
   });

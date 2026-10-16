@@ -79,6 +79,7 @@ import type { TurnContext, TurnResult } from "./agent.ts";
 import type { AppAnswer } from "./app.ts";
 import { drainObjectOutbox } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
+import { buildDequeued } from "./build-admission.ts";
 import { BuildJobRecords } from "./build-job-records.ts";
 import type {
   BuildJobAdmission,
@@ -1754,6 +1755,10 @@ export class Workspace extends DurableObject<Env> {
               ...errorFields(error),
             });
           }
+          // A job ended while it waited for a share of builds asks no
+          // more: its place goes now, not once it lapses, so it holds no
+          // one back meanwhile (build-admission.ts).
+          await buildDequeued(this.env, { job: id }, Number.MAX_SAFE_INTEGER);
         })
       )
     );

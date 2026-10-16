@@ -4,6 +4,7 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { chatIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { executionErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowStepConfig } from "@grasp-os/workerflow/contracts";
 import { z } from "zod";
 
@@ -33,12 +34,21 @@ import {
 } from "./apps.ts";
 import type { Acting } from "./auth/identity.ts";
 import { memberOf } from "./auth/identity.ts";
+import {
+  admitBuild,
+  buildDequeued,
+  buildSeqOf,
+  holding,
+  maxBuildWaitMs,
+} from "./build-admission.ts";
+import type { BuildLease, BuildShare, BuildStep } from "./build-admission.ts";
 import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff } from "./build-job-records.ts";
 import type { BuildJobEnd } from "./build-job-records.ts";
 import { workspace } from "./durable-objects.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { keepTests, reviewVersion } from "./version-review.ts";
+import { askAgainMs } from "./workflows/admission.ts";
 import type { RunStep } from "./workflows/host.ts";
 import type { BuildJob, Draft } from "./workspace.ts";
 
@@ -100,6 +110,12 @@ import type { BuildJob, Draft } from "./workspace.ts";
 // - The repair loop: each job takes one of its draft's checks this turn,
 //   as an in-call check does, and settles it as it ends (workspace.ts), so
 //   jobs can't get the agent past the checks failed in a row it may make.
+// - Builds of other chats and Apps: each step that builds (its check, its
+//   commit) holds a lease on a share of the client's build jobs and of
+//   its App's while it runs (build-admission.ts), so one App's jobs never
+//   take every build slot, and one App never builds twice at once. A step
+//   with no share waits in the queue, journaled, its job queued, not
+//   failed, and asks again; it holds no lease while it waits.
 // - Exhaustion: a chat has at most three jobs running at once, and keeps
 //   the records of its latest hundred (build-job-records.ts). A job whose
 //   instance ended or is gone while its record says it runs is failed,
@@ -172,6 +188,18 @@ const admitJob = async (
   }
 };
 
+/** A round a step of a job waited for a share in, as its step journals it. */
+interface Queued {
+  queued: {
+    waitingFor: BuildShare;
+    retryAfterSeconds: number;
+    /** How long the job sleeps before it asks again. */
+    sleepMs: number;
+    /** When it asked, by the clock of the attempt that asked: journaled. */
+    askedAt: number;
+  };
+}
+
 /** What one step of a job comes to: what it made, or how the job ends. */
 type StepOutcome<T> = { ok: true; value: T } | { ok: false; end: BuildJobEnd };
 
@@ -202,7 +230,36 @@ interface JobStep {
   scope: Omit<AgentScope, "runId">;
   app: AppId;
   by: Acting;
+  /** The lease on its share of builds the step holds while it runs. */
+  lease: BuildLease;
+  /** Aborted once the lease is lost: the step starts nothing more. */
+  lost: AbortSignal;
 }
+
+/** What a step of a job asks its admission to a share with. */
+interface Asking {
+  step: BuildStep;
+  /** The engine's context for the step's attempt. */
+  context: unknown;
+  /** The rounds this step waited in a row. */
+  waited: number;
+  /** How long the job waited for a share in its steps before this one. */
+  waitedBefore: number;
+  /** When this step first waited for its share, if it has. */
+  queuedSince: number | null;
+}
+
+/** What core reads of the engine's context for an attempt of a job's step. */
+const stepContextSchema = z.object({
+  attempt: z.int().positive(),
+  step: z.object({ count: z.int().positive() }),
+});
+
+/** The job's sequence at the attempt of its step `asking` names. */
+const seqOf = ({ step, context }: Pick<Asking, "step" | "context">): number => {
+  const told = stepContextSchema.parse(context);
+  return buildSeqOf(step, told.step.count, told.attempt);
+};
 
 /**
  * The chat's person as the job acts for them, and the job's App, once the
@@ -229,6 +286,82 @@ const authorize = async (
 };
 
 /**
+ * A lease for the step `asking` names of job `job` on its share of the
+ * client's builds and its App's (build-admission.ts), or the round it
+ * waits, journaled by its step; the join recorded in the audit log, once
+ * each time it joins the queue. A job that may wait no more, or whose
+ * person or App has as many places as it may, ends failed. An attempt the
+ * job has gone on without is thrown, for the engine, which takes only its
+ * step's latest attempt.
+ */
+const admittedToBuild = async (
+  env: Env,
+  input: JobInput,
+  scope: Omit<AgentScope, "runId">,
+  job: BuildJob,
+  { step, context, waited, waitedBefore, queuedSince }: Asking
+): Promise<
+  { lease: BuildLease } | Queued | { ok: false; end: BuildJobEnd }
+> => {
+  const seq = seqOf({ step, context });
+  // How long it has waited, as time passed, not as it slept: a wakeup
+  // that came late, or an engine that was down, counts in full.
+  const askedAt = Date.now();
+  const waitedMs =
+    waitedBefore + (queuedSince === null ? 0 : askedAt - queuedSince);
+  const owner = {
+    job: input.jobId,
+    subject: job.personId,
+    resource: job.appId,
+  };
+  const method = `build.job.${step}`;
+  try {
+    const admitted = await admitBuild(env, owner, { seq, waited, waitedMs });
+    if ("lease" in admitted) {
+      return admitted;
+    }
+    const { wait } = admitted;
+    if (wait.joined) {
+      await auditAgentCall(env, scope, {
+        method: "build.job.queued",
+        detail: { job: job.id, app: job.appId, waitingFor: wait.waitingFor },
+      });
+    }
+    return {
+      queued: {
+        waitingFor: wait.waitingFor,
+        retryAfterSeconds: wait.retryAfterSeconds,
+        sleepMs: askAgainMs({
+          waited,
+          retryAfterSeconds: wait.retryAfterSeconds,
+          waitedMs,
+          maxWaitMs: maxBuildWaitMs,
+        }),
+        askedAt,
+      },
+    };
+  } catch (error) {
+    // A stale attempt is the engine's; an unexpected error (the database
+    // out of reach for a moment) is retried by it, the job keeping its
+    // place. Only a refusal ends the job here.
+    if (
+      executionErrors.codeOf(error) === "execution.stale_attempt" ||
+      !isExpectedError(error)
+    ) {
+      throw error;
+    }
+    await buildDequeued(env, owner, seq);
+    await auditAgentCall(
+      env,
+      scope,
+      { method, detail: { job: job.id } },
+      { outcome: "refused", reason: error.code }
+    );
+    return { ok: false, end: endFor(error) };
+  }
+};
+
+/**
  * Runs one step of the job as its chat's person, once it is admitted
  * (`admitJob`) and the agent may still build the App for them, as a
  * build call checks it: recorded as `agent.call` however it ends.
@@ -237,8 +370,9 @@ const asJob = async <T>(
   env: Env,
   input: JobInput,
   method: string,
+  asking: Asking,
   run: (step: JobStep) => Promise<T>
-): Promise<StepOutcome<T>> => {
+): Promise<StepOutcome<T> | Queued> => {
   const job = await workspace(env, input.workspaceId).buildJob(
     input.chatId,
     input.jobId
@@ -252,6 +386,8 @@ const asJob = async <T>(
     await admitJob(env, scope, job.id);
   } catch (error) {
     const end = endFor(error);
+    // Ended while it waited: it waits for a share no more.
+    await buildDequeued(env, { job: input.jobId }, seqOf(asking));
     await auditAgentCall(
       env,
       scope,
@@ -260,16 +396,25 @@ const asJob = async <T>(
     );
     return { ok: false, end };
   }
+  const admitted = await admittedToBuild(env, input, scope, job, asking);
+  if (!("lease" in admitted)) {
+    return admitted;
+  }
+  const { lease } = admitted;
   try {
-    const value = await auditedCall(
-      env,
-      { ...scope, runId: job.runId },
-      // The run that submitted it, recorded with each of its calls.
-      { method, detail: { job: job.id, app: job.appId, run: job.runId } },
-      async () => {
-        const { by, app } = await authorize(env, scope, job);
-        return await run({ job, scope, app, by });
-      }
+    const value = await holding(
+      lease,
+      async (lost) =>
+        await auditedCall(
+          env,
+          { ...scope, runId: job.runId },
+          // The run that submitted it, recorded with each of its calls.
+          { method, detail: { job: job.id, app: job.appId, run: job.runId } },
+          async () => {
+            const { by, app } = await authorize(env, scope, job);
+            return await run({ job, scope, app, by, lease, lost });
+          }
+        )
     );
     return { ok: true, value };
   } catch (error) {
@@ -293,6 +438,15 @@ const submittedDraft = async (
   return draft;
 };
 
+/**
+ * Refuses to go on, between a check's phases, once the step lost its
+ * lease (`lost`): what it built so far is no one's, and another job of
+ * its App may build now.
+ */
+const startsNothingOnceLost = (lost: AbortSignal) => (): void => {
+  lost.throwIfAborted();
+};
+
 /** What a job's check comes to: the check, and the commit it would make. */
 interface Checked {
   check: DraftCheck;
@@ -311,7 +465,8 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
       scope,
       app,
       draft,
-      Object.fromEntries(files)
+      Object.fromEntries(files),
+      startsNothingOnceLost(step.lost)
     );
     // A check of files the draft no longer has says nothing of it.
     await submittedDraft(env, step);
@@ -331,7 +486,8 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
     scope,
     app,
     draft,
-    Object.fromEntries(over.files)
+    Object.fromEntries(over.files),
+    startsNothingOnceLost(step.lost)
   );
   const { tree } = await versionTree(over.files);
   await submittedDraft(env, step);
@@ -393,7 +549,12 @@ const commitStep = async (
         await authorize(env, scope, job);
         await submittedDraft(env, step);
         await admitJob(env, scope, job.id);
-      }
+      },
+      // Its lease lapsed (it stalled): another job of the App may build
+      // now, so the database refuses its commit, in the commit's own
+      // transaction; the engine tries the step again, which waits for its
+      // share.
+      step.lease.fence()
     );
     ({ version, tree } = proposed);
   }
@@ -427,18 +588,51 @@ const completed = (result: DraftCheck | Proposal): BuildJobEnd => ({
 
 /**
  * Runs `run` as the engine's step `name` (`asJob`), journaled: run again
- * after a restart only when it never finished.
+ * after a restart only when it never finished. A round with no share of
+ * builds sleeps its wait, journaled too, and runs the step again, as a
+ * new occurrence of it: so a restart replays the rounds it waited, and
+ * how long, as they were.
  */
 const jobStep = async <T>(
   step: RunStep,
-  name: string,
-  run: () => Promise<StepOutcome<T>>
-): Promise<StepOutcome<T>> => {
-  const outcome = await step.do(name, stepConfig, run);
-  // SAFETY: the engine hands back what `run` returned, as it stored it:
-  // plain data, as `run` makes nothing else.
-  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-  return outcome as StepOutcome<T>;
+  name: BuildStep,
+  /** How long the job waited for a share in its steps before this one. */
+  waitedBefore: number,
+  run: (asking: Asking) => Promise<StepOutcome<T> | Queued>
+): Promise<{ outcome: StepOutcome<T>; waitedMs: number }> => {
+  let waited = 0;
+  // A job's wait is held to its cap across its steps, not each step's: as
+  // time passed since this step first waited (journaled), after the
+  // waits of the steps before it.
+  let queuedSince: number | null = null;
+  let waitedUntil: number | null = null;
+  for (;;) {
+    const asked = { waited, waitedBefore, queuedSince };
+    // oxlint-disable-next-line no-await-in-loop -- one round after another
+    const journaled = await step.do(
+      name,
+      stepConfig,
+      async (context) => await run({ step: name, context, ...asked })
+    );
+    // SAFETY: the engine hands back what `run` returned, as it stored it:
+    // plain data, as `run` makes nothing else.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const outcome = journaled as StepOutcome<T> | Queued;
+    if (!("queued" in outcome)) {
+      // This step's wait, up to its last sleep's end at least.
+      const waitedMs =
+        waitedBefore +
+        (queuedSince === null || waitedUntil === null
+          ? 0
+          : waitedUntil - queuedSince);
+      return { outcome, waitedMs };
+    }
+    queuedSince ??= outcome.queued.askedAt;
+    waitedUntil = outcome.queued.askedAt + outcome.queued.sleepMs;
+    // oxlint-disable-next-line no-await-in-loop -- one round after another
+    await step.sleep(`${name}.queued.${waited + 1}`, outcome.queued.sleepMs);
+    waited += 1;
+  }
 };
 
 /** Runs the job's steps up to how it ends; throws when a step failed for good. */
@@ -447,14 +641,16 @@ const jobSteps = async (
   input: JobInput,
   step: RunStep
 ): Promise<BuildJobEnd> => {
-  const checked = await jobStep(
+  const { outcome: checked, waitedMs } = await jobStep(
     step,
     "check",
-    async () =>
+    0,
+    async (asking) =>
       await asJob(
         env,
         input,
         "build.job.check",
+        asking,
         async (job) => await checkStep(env, job)
       )
   );
@@ -473,16 +669,22 @@ const jobSteps = async (
       reviewUnavailable: false,
     });
   }
-  const proposed = await jobStep(step, "commit", async () => {
-    // Before it asks to be admitted: what it committed stays its receipt.
-    await reconcileReceipt(env, input.workspaceId, input.chatId, input.jobId);
-    return await asJob(
-      env,
-      input,
-      "build.job.commit",
-      async (job) => await commitStep(env, job, { check, over })
-    );
-  });
+  const { outcome: proposed } = await jobStep(
+    step,
+    "commit",
+    waitedMs,
+    async (asking) => {
+      // Before it asks to be admitted: what it committed stays its receipt.
+      await reconcileReceipt(env, input.workspaceId, input.chatId, input.jobId);
+      return await asJob(
+        env,
+        input,
+        "build.job.commit",
+        asking,
+        async (job) => await commitStep(env, job, { check, over })
+      );
+    }
+  );
   return proposed.ok ? completed(proposed.value) : proposed.end;
 };
 

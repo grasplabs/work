@@ -41,6 +41,7 @@ import {
   proposeDraft,
 } from "./apps.ts";
 import type { Acting, Member } from "./auth/identity.ts";
+import { queuedJob } from "./build-admission.ts";
 import { reconcileReceipt } from "./build-job-receipts.ts";
 import { brokenOff, jobView } from "./build-job-records.ts";
 import type { BuildJobView } from "./build-job-records.ts";
@@ -407,14 +408,23 @@ export const checkFiles = async (
   scope: Pick<AgentScope, "workspaceId" | "chatId">,
   app: AppId,
   { base, revision }: Pick<Draft, "base" | "revision">,
-  files: Record<string, string>
+  files: Record<string, string>,
+  /**
+   * Called before each of its phases starts, the first included (what ran
+   * before it, a read of the draft, may have outlived a build job's
+   * lease): throws to stop it starting that phase.
+   */
+  between?: () => void
 ): Promise<Omit<DraftCheck, "failedInARow" | "maxFailedChecks">> => {
+  between?.();
   const saved = await buildOnSave(env, { app, version: base ?? 0, files });
+  between?.();
   const builds = {
     ...saved,
     workflows: withBindingsRead(saved.workflows, files),
   };
   const tests = await testsOf(env, app, base, files, builds.workflows);
+  between?.();
   const built =
     [builds.screens, builds.server, builds.workflows].every(buildPassed) &&
     tests.status !== "failed";
@@ -1115,7 +1125,8 @@ export class BuildApi extends WorkerEntrypoint<Env, AgentScope> {
         await failDeadJobs(this.env, workspaceId, chatId);
         await reconcileReceipt(this.env, workspaceId, chatId, found.id);
         const now = await chats.buildJob(chatId, found.id);
-        return jobView(now ?? found);
+        // Its own place in the queue for a share of builds, if it holds one.
+        return jobView(now ?? found, await queuedJob(this.env, found.id));
       },
       (view) => ({ job: view.id, status: view.status })
     );
@@ -1370,14 +1381,18 @@ build: {
    * A build job this chat submitted: how it stands and, once completed,
    * what it came to: for a check, what \`check\` returns; for a proposal,
    * what \`propose\` returns. \`version\` is the version it proposed, if it
-   * did. A cancelled or revoked job does nothing more.
+   * did. A cancelled or revoked job does nothing more. \`queued\` while it
+   * waits for its turn to build (the organization's builds, each person's
+   * and each App's take turns): it isn't failed, and builds once a turn comes free.
    */
   job(id: string): Promise<{
     id: string;
     kind: "check" | "propose";
     app: string;
     revision: number;
-    status: "running" | "completed" | "failed" | "cancelled" | "revoked";
+    status: "running" | "queued" | "completed" | "failed" | "cancelled" | "revoked";
+    /** While queued: whose builds are full (the organization's, the person's, or this App's), and when it asks again. */
+    queued: { waitingFor: "client" | "person" | "key"; retryAt: string } | null;
     result: unknown;
     version: number | null;
     error: { code: string; message: string } | null;

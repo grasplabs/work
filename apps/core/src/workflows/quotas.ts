@@ -26,6 +26,7 @@ import {
   workflowRuns,
 } from "../db/core/schema.ts";
 import {
+  attemptPool,
   dequeued,
   queuedRefusal,
   queuePlaceOf,
@@ -308,7 +309,7 @@ export const lineageCreated = (db: DrizzleD1Database, root: string) =>
  * policy read just before a newer generation was recorded admits nothing
  * under it (`policyStill`).
  */
-const stillCurrent = (policy: QuotaPolicy): SQL =>
+export const stillCurrent = (policy: QuotaPolicy): SQL =>
   sql`${policy.generation} >= coalesce((SELECT max(${quotaPolicies.generation}) FROM ${quotaPolicies}), 0)`;
 
 /**
@@ -316,7 +317,7 @@ const stillCurrent = (policy: QuotaPolicy): SQL =>
  * recorded since it was read. One that isn't is read again, and the
  * admission tried again under it, once.
  */
-const policyStill = async (
+export const policyStill = async (
   db: DrizzleD1Database,
   policy: QuotaPolicy
 ): Promise<boolean> => {
@@ -1007,7 +1008,7 @@ const admitAttemptOnce = async (
     db
       .insert(held)
       .select(
-        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource}, ${place.stepHash}, 0 FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND NOT ${fencedOut} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.hostCalls} < ${policy.limits.lineageHostCalls} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(owner, place, standing, now, shares)}`
+        sql`SELECT ${run}, ${attempt.key}, ${attempt.number}, ${attempt.generation}, ${root}, ${reserved}, ${attempt.deadline}, NULL, ${now}, NULL, ${policy.generation}, 0, ${owner.subject}, ${owner.resource}, ${place.stepHash}, 0 FROM ${runLineages} WHERE ${runLineages.rootRunId} = ${root} AND NOT ${fencedOut} AND ${runLineages.activeUsedMs} + ${runLineages.activeHeldMs} < ${policy.limits.workflowActiveMs} AND ${runLineages.hostCalls} < ${policy.limits.lineageHostCalls} AND ${runLineages.createdAt} > ${bornAfter} AND ${stillCurrent(policy)} AND ${roomFor(attemptPool, owner, place, standing, now, shares)}`
       )
       .onConflictDoNothing(),
     // Held on the lineage only if that statement took the receipt.
