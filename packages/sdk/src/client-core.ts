@@ -2553,7 +2553,11 @@ export class GraspClient {
         this.#fence(error);
         return;
       }
-      if (error.retryable && entry.snapshot.value !== undefined) {
+      if (
+        entry.window &&
+        error.retryable &&
+        entry.snapshot.value !== undefined
+      ) {
         // A paginated list's window core couldn't read whole while writes
         // landed (`query.concurrent_change`, its last push): what it
         // shows stays, and it follows again, backing off, once core lets
