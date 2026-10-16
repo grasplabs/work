@@ -32,6 +32,7 @@ import type { RunSubscription } from "./run-subscription.ts";
 import { deliveryOpen, requireDelivery } from "./screen-trust.ts";
 import { admitted, stillHasRole } from "./screens-rpc.ts";
 import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
+import type { SessionCheck } from "./session-check.ts";
 
 // A portable host's live connection (spec 10.7.1, 11): the App's UI
 // outside Grasp's shell follows the App's live queries as a screen does,
@@ -156,7 +157,7 @@ export class PortableQueriesRpc
   readonly #userId: string;
   readonly #socket: Socket;
   readonly #held: Held;
-  readonly #check: () => Promise<Identity>;
+  readonly #check: SessionCheck;
   readonly #queries: QuerySubscriptions;
   #ended = false;
   #recheck: ReturnType<typeof setTimeout> | undefined;

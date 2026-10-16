@@ -477,7 +477,10 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       type: "person",
       id: removed.userId,
     });
-    await commitUntil(() => theirList.now() === "app.not_found");
+    // Losing the role reaches the connection without a write.
+    await eventually(() => {
+      expect(theirList.now()).toBe("app.not_found");
+    });
     await callAuth("/sign-out", notes.builder.session, {});
     await commitUntil(() => builderList.now() === "auth.unauthenticated");
 
