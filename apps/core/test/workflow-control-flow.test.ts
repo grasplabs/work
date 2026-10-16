@@ -200,13 +200,13 @@ describe("switch and transitions in JSON workflows", () => {
             switch: [
               {
                 even: {
-                  when: "${ $task.startedAt % 2 == 0 }",
+                  when: "${ $task.startedAt.epoch.milliseconds % 2 == 0 }",
                   then: "even",
                 },
               },
               { odd: { then: "odd" } },
             ],
-            export: { as: "${ {at: $task.startedAt} }" },
+            export: { as: "${ {at: $task.startedAt.epoch.milliseconds} }" },
           },
         },
         { even: { set: { parity: 0 }, then: "pause" } },
