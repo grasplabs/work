@@ -10,21 +10,31 @@ import type {
   AppMembersApi,
   NewAppMember,
 } from "@grasp-os/shared/apps";
-import { actorOf, auditProvenanceMaxItems } from "@grasp-os/shared/audit";
+import {
+  actorOf,
+  auditProvenanceMaxItems,
+  createAuditEvent,
+} from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, isNotNull, ne, or } from "drizzle-orm";
+import { and, asc, eq, isNotNull, ne, or, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { accessMayHaveDropped } from "./access-revocations.ts";
+import { revocationsOf, tellKept } from "./access-revocations.ts";
 import { hasSources, sourcesOf, unreadableBy } from "./app-provenance.ts";
 import { appFor } from "./apps.ts";
-import { auditedBatch, outboxed, outboxedIfChanged } from "./audit-outbox.ts";
+import {
+  auditedBatch,
+  outboxed,
+  outboxedEventWhere,
+  storedEvent,
+} from "./audit-outbox.ts";
 import { activeMember, notRemoved, organizationId } from "./auth/auth.ts";
 import {
+  apps,
   appMembers,
   members,
   teamMembers,
@@ -304,7 +314,11 @@ export const addMember = async (
     addedBy: by.userId,
     addedAt: new Date(),
   };
-  await auditedBatch(env, db, [
+  const event = createAuditEvent(
+    appMemberEntry(by, "app.member.added", found, member),
+    "core"
+  );
+  const results = await auditedBatch(env, db, [
     db
       .insert(appMembers)
       .values(row)
@@ -313,16 +327,18 @@ export const addMember = async (
         set: { role: row.role, addedBy: row.addedBy, addedAt: row.addedAt },
         setWhere: ne(appMembers.role, row.role),
       }),
-    outboxedIfChanged(
+    outboxedEventWhere(db, event, sql`changes() > 0`),
+    // Shared in the lowest role: a builder may have just become a user,
+    // whose open screens must stop showing what only builders read. Kept
+    // with the change, so a database away after it loses nothing.
+    revocationsOf(
       db,
-      appMemberEntry(by, "app.member.added", found, member)
+      eq(apps.id, found.id),
+      peopleOf(member),
+      member.role === "user" ? storedEvent(event.id) : sql`0`
     ),
   ]);
-  // Shared in the lowest role: a builder may have just become a user, whose
-  // open screens must stop showing what only builders read.
-  if (member.role === "user") {
-    await accessMayHaveDropped(env, [found.id], peopleOf(member));
-  }
+  await tellKept(env, results[2]);
   const [added] = await namedMembers(env, rowOf(found, member));
   // Unshared since the batch above: nothing of it stands.
   if (!added) {
@@ -358,23 +374,32 @@ export const removeMember = async (
   if (!before) {
     return;
   }
+  const event = createAuditEvent(
+    appMemberEntry(by, "app.member.removed", found, {
+      ...member,
+      role: before.role,
+    }),
+    "core"
+  );
   // Only in the role read above, so the event records the role it ended.
-  const [[removed]] = await auditedBatch(env, db, [
+  // The revocation is kept with the change, so a database away after it
+  // loses nothing (access-revocations.ts).
+  const [[removed], , revocations] = await auditedBatch(env, db, [
     db
       .delete(appMembers)
       .where(and(rowOf(found, member), eq(appMembers.role, before.role)))
       .returning(),
-    outboxedIfChanged(
+    outboxedEventWhere(db, event, sql`changes() > 0`),
+    revocationsOf(
       db,
-      appMemberEntry(by, "app.member.removed", found, {
-        ...member,
-        role: before.role,
-      })
+      eq(apps.id, found.id),
+      peopleOf(member),
+      storedEvent(event.id)
     ),
   ]);
   if (removed) {
     await closeScreens(env, found);
-    await accessMayHaveDropped(env, [found.id], peopleOf(member));
+    await tellKept(env, revocations);
     return;
   }
   const kept = await db
