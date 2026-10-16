@@ -29,6 +29,7 @@ import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
 import { personOf } from "../src/connections.ts";
+import { appHost } from "../src/durable-objects.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -1258,6 +1259,84 @@ export class App extends DurableObject {
 }
 `;
 
+/** `appServer`, its export taking a moment before it answers. */
+const slowServer = appServer.replace(
+  "async lookUp(caller: Caller, input: { who: string }): Promise<unknown> {",
+  "async lookUp(caller: Caller, input: { who: string }): Promise<unknown> {\n    await new Promise((resolve) => setTimeout(resolve, 500));"
+);
+
+/**
+ * A workflow of an admin's calling App `server`'s export `lookUp`, sealed
+ * and approved, in a task of its own.
+ */
+const lookingUp = async (server: string) => {
+  const signedIn = await signedInApi(idp, "admin");
+  const admin = identityOf(signedIn.userId, "admin");
+  const input = descriptorOf(v.object({ who: v.string() }));
+  const output = descriptorOf(
+    v.object({ greeting: v.string(), key: v.string() })
+  );
+  const key = `lookup-${unique()}`;
+  await publishCatalogContract(env, admin, {
+    key,
+    kind: "operation",
+    input,
+    output,
+  });
+  const { id: app } = await signedIn.api.apps.create({
+    name: `Desk ${unique()}`,
+  });
+  const version = await release(signedIn, app, {
+    "app/server.ts": server,
+    "app/exports.json": JSON.stringify({
+      lookUp: {
+        access: "read",
+        input: shapeOf(input),
+        output: shapeOf(output),
+      },
+    }),
+  });
+  await serverBuilt(app, version);
+  await sealedRelease(app, version);
+  const { workflow } = await published(admin, {
+    bindings: { lookup: { kind: "operation", contract: key } },
+    tasks: [
+      {
+        look: {
+          call: "grasp.operation",
+          with: { binding: "lookup", arguments: { who: "Ada" } },
+        },
+      },
+      { finish: { set: { status: "called" } } },
+    ],
+  });
+  const permissionId = await granted(admin, admin, {
+    subject: { type: "workflow", workflowId: workflow.id },
+    object: { type: "app", appId: appIdSchema.parse(app) },
+    actions: ["read"],
+    binding: `DESK_${unique().toUpperCase().replaceAll("-", "_")}`,
+  });
+  await approveWorkflowBinding(env, admin, workflow.id, {
+    alias: "lookup",
+    target: {
+      kind: "operation",
+      permissionId,
+      appVersion: version,
+      export: "lookUp",
+    },
+    reviewed: { version: 1 },
+  });
+  return { admin, app, workflowId: workflow.id };
+};
+
+/** Whether an App took run `runId`'s call, as the audit log has it. */
+const appCalled = async (runId: string): Promise<boolean> => {
+  const events = await allEvents();
+  return events.some(
+    ({ action, target }) => action === "app.called" && target?.id === runId
+  );
+};
+
 describe("grasp.operation calls of JSON workflows", () => {
   it("calls the approved export once per run, under its step's key, and stops once the permission is revoked", async () => {
     const signedIn = await signedInApi(idp, "admin");
@@ -1442,6 +1521,51 @@ describe("grasp.operation calls of JSON workflows", () => {
     expect({ raced: raced.done, end }).toStrictEqual({
       raced: true,
       end: { status: "failed", code: "workflow.call_denied" },
+    });
+  });
+
+  it("never calls an App already in restricted mode", async () => {
+    const { admin, app, workflowId } = await lookingUp(appServer);
+    await appHost(env, app).restrict();
+    const runId = await started(admin, workflowId);
+    const end = endOf(await ended(admin, workflowId, runId));
+    expect({ end, called: await appCalled(runId) }).toStrictEqual({
+      end: { status: "failed", code: "permission.restricted" },
+      called: false,
+    });
+  });
+
+  it("withholds the answer of an App that enters restricted mode as it takes the call", async () => {
+    // Its method takes long enough that its answer comes back after.
+    const { admin, app, workflowId } = await lookingUp(slowServer);
+    const db = env.DB;
+    const prepare = db.prepare.bind(db);
+    const onItsWay = { read: false, restricted: false };
+    const restricting: Promise<unknown>[] = [];
+    vi.spyOn(db, "prepare").mockImplementation((statement) => {
+      onItsWay.read ||= currentRelease.test(statement);
+      if (!onItsWay.restricted && onItsWay.read && auditWrite.test(statement)) {
+        onItsWay.restricted = true;
+        restricting.push(appHost(env, app).restrict());
+      }
+      return prepare(statement);
+    });
+    const runId = await started(admin, workflowId);
+    let end: ReturnType<typeof endOf>;
+    try {
+      end = endOf(await ended(admin, workflowId, runId));
+    } finally {
+      vi.restoreAllMocks();
+    }
+    await Promise.all(restricting);
+    expect({
+      restricted: onItsWay.restricted,
+      end,
+      called: await appCalled(runId),
+    }).toStrictEqual({
+      restricted: true,
+      end: { status: "failed", code: "permission.restricted" },
+      called: true,
     });
   });
 
