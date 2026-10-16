@@ -1178,8 +1178,13 @@ const runInSuiteSession = async (
   }
 ): Promise<unknown> => {
   const giveUp = new AbortController();
+  // Its time runs from when the sandbox gave it a place, not while it
+  // waits for one: a wait that runs out is the sandbox's (`busy`, asked
+  // for again, then unavailable), never the suite's failure.
+  const overrun = Promise.withResolvers<never>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await within(
+    return await Promise.race([
       codeSession(
         sandboxHost,
         {
@@ -1192,11 +1197,22 @@ const runInSuiteSession = async (
           cpuMs: testSandbox.limits.cpuMs,
           wallMs: suiteMs,
         },
-        { signal: giveUp.signal, opened }
+        {
+          signal: giveUp.signal,
+          opened: (callId) => {
+            opened(callId);
+            timer = setTimeout(() => {
+              overrun.reject(
+                new Error(`didn't finish within ${suiteMs / 1000} seconds`)
+              );
+            }, suiteMs);
+          },
+        }
       ),
-      suiteMs
-    );
+      overrun.promise,
+    ]);
   } finally {
+    clearTimeout(timer);
     giveUp.abort();
   }
 };

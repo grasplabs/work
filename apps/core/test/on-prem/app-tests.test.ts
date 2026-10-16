@@ -319,6 +319,24 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
     await expect(activating).resolves.toBe(1);
   });
 
+  it("give a suite its time from when it has a place, not while it waits for one", async () => {
+    const built = await appWith(suiteOf("t.equal(1, 1);"));
+    const giveUp = new AbortController();
+    const { ended: held } = await heldPlace(
+      appTestOwnerOf(built.app),
+      giveUp.signal
+    );
+    // Each suite gets 2 seconds: less than one wait for a place (3).
+    const activating = activation(
+      built,
+      envWith({ APP_TEST_LIMITS_MS: "20000/2000" })
+    );
+    await scheduler.wait(5000);
+    giveUp.abort();
+    await expect(held).resolves.toBe("given up");
+    await expect(activating).resolves.toBe(1);
+  });
+
   it("aren't held up by the App's own runs", async () => {
     const built = await appWith(passing);
     const giveUp = new AbortController();
