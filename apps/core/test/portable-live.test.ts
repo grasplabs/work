@@ -30,7 +30,7 @@ import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { callAuth, outcome, routed, signedInApi } from "./sign-in.ts";
+import { callAuth, outcome, routed, signedIn, signedInApi } from "./sign-in.ts";
 
 // A portable host (spec 10.7.1) following its App's live queries (spec
 // 11) over core's token-authenticated connection
@@ -698,6 +698,25 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       vi.useRealTimers();
     }
     await expect(closedWithin(closed)).resolves.toBe(tokenExpiredCloseCode);
+  });
+
+  it("reads a renewed token's own session at once, never the last one's reading", async () => {
+    const notes = await notesApp();
+    // The builder signed in a second time: a second session of theirs.
+    const second = await signedIn(idp, "microsoft", notes.builder.person);
+    const first = await tokenFor(notes.builder.session, notes.app);
+    const next = await tokenFor(second, notes.app);
+    const { live } = await openLive(notes.app);
+    const queries = live.connect(first);
+    await queries.watchQuery(listOf(notes), pushes().onSnapshot);
+    await queries.renew(next);
+    // The renewed token's session ends within the window the first
+    // token's reading would still hold for.
+    await callAuth("/sign-out", second, {});
+    const signedOut = await outcome(
+      queries.watchQuery(listOf(notes), pushes().onSnapshot)
+    );
+    expect(signedOut).not.toBe("ok");
   });
 
   it("refuses a renewal for anyone else, closing the connection, and one for another App, keeping it", async () => {

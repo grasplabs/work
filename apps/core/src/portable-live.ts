@@ -251,13 +251,13 @@ export class PortableQueriesRpc
       throw authErrors.create("auth.unauthenticated");
     }
     const checked = await checkAppToken(this.#env, token, this.#app);
-    if (checked.ok && checked.person.userId === this.#userId) {
-      return checked.person;
-    }
     // Renewed while this token was read: what it says no longer counts,
-    // and the one held now is read instead.
+    // either way, and the one held now is read instead.
     if (this.#held.token !== token) {
       return await this.#read();
+    }
+    if (checked.ok && checked.person.userId === this.#userId) {
+      return checked.person;
     }
     // It expired while it was read: as expired, not as access ended.
     if (Date.now() >= this.#held.expiresAt) {
@@ -355,6 +355,9 @@ export class PortableQueriesRpc
       expiresAt: checked.expiresAt,
       sessionId: checked.sessionId,
     });
+    // Its session may carry other rights than the last one's: nothing
+    // read for the token before goes on standing for this one.
+    this.#check.forget?.();
     this.#expireWhenDue();
     return { expiresAt: checked.expiresAt };
   }

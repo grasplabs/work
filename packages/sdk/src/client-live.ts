@@ -115,6 +115,8 @@ export class PortableLive {
   readonly #origin: string;
   readonly #tokens: LiveTokens;
   readonly #links = new Map<string, Link>();
+  /** How many times every connection was closed (`closeAll`). */
+  #generation = 0;
 
   constructor(origin: string, tokens: LiveTokens) {
     this.#origin = origin;
@@ -231,10 +233,20 @@ export class PortableLive {
     let next: PortableToken;
     try {
       next = await this.#tokens.token();
-    } catch {
-      // No token now: tried again shortly, and core closes the connection
-      // at the old one's `exp` meanwhile; the queries follow again once
-      // there is one.
+    } catch (error) {
+      if (link.closed) {
+        return;
+      }
+      // The host has nobody signed in: their connection goes now, and
+      // what it showed with it, not at the old token's `exp`.
+      if (coded(error, "auth.unauthenticated")) {
+        this.#close(link);
+        this.#tokens.ended(link.principal);
+        return;
+      }
+      // The host failed to say: tried again shortly, and core closes the
+      // connection at the old one's `exp` meanwhile; the queries follow
+      // again once there is a token.
       this.#renewIn(link, renewAgainMs);
       return;
     }
@@ -267,7 +279,13 @@ export class PortableLive {
     onSnapshot: (push: unknown) => void,
     onLost: () => void
   ): Promise<{ release: () => void }> {
+    const generation = this.#generation;
     const token = await tokenOrLost(this.#tokens);
+    // Everything was closed while the token was asked for (a fence, or
+    // someone else signed in): nothing is opened for this follow.
+    if (generation !== this.#generation) {
+      throw new Error("The live connections were closed meanwhile.");
+    }
     const link = this.#linkFor(app, token);
     link.followed += 1;
     clearTimeout(link.idle);
@@ -341,6 +359,7 @@ export class PortableLive {
 
   /** Closes every connection: the person changed, or lost access. */
   closeAll(): void {
+    this.#generation += 1;
     for (const link of this.#links.values()) {
       this.#close(link);
     }

@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
+import { PortableLive } from "../src/client-live.ts";
+import type { PortableToken } from "../src/client-portable.ts";
 import type { Id } from "../src/index.ts";
 import { api } from "./notes/.grasp/references.ts";
 
@@ -294,6 +296,16 @@ const failureOf = async (promise: Promise<unknown>): Promise<GraspError> => {
     throw error;
   }
   throw new Error("It resolved");
+};
+
+/** Whether `promise` was refused, or resolved. */
+const failureOrNothing = async (promise: Promise<unknown>): Promise<string> => {
+  try {
+    await promise;
+    return "resolved";
+  } catch {
+    return "refused";
+  }
 };
 
 /** A note ID, as the App's store makes them. */
@@ -988,6 +1000,63 @@ describe("a portable host's client", () => {
       shown: entry.snapshot.value,
       scheduled: vi.getTimerCount(),
     }).toStrictEqual({ shown: { title: "Ann's" }, scheduled: scheduled - 1 });
+  });
+
+  it("clears what it shows once a renewal finds the host signed out, before the old token expires", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    let token: string | null = tokenOf("ann", expiry());
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    const shown = entry.snapshot.value;
+    // Signed out on the host: the renewal, ten seconds on, finds nobody.
+    token = null;
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect({
+      shown,
+      now: entry.snapshot.error?.code,
+      value: entry.snapshot.value,
+    }).toStrictEqual({
+      shown: { title: "Ann's" },
+      now: "auth.unauthenticated",
+      value: undefined,
+    });
+    stop();
+  });
+
+  it("opens nothing for a follow whose token arrives after every connection was closed", async () => {
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    const asked = Promise.withResolvers<PortableToken>();
+    const live = new PortableLive(origin, {
+      token: async () => await asked.promise,
+      forget: () => {},
+      ended: () => {},
+    });
+    const following = failureOrNothing(
+      live.watch(
+        app,
+        "{}",
+        () => {},
+        () => {}
+      )
+    );
+    // A fence, or someone else signing in, closes everything meanwhile.
+    live.closeAll();
+    asked.resolve({
+      text: tokenOf("ann"),
+      principal: "ann",
+      expiresAt: undefined,
+    });
+    expect({
+      followed: await following,
+      sockets: liveSockets.length,
+    }).toStrictEqual({ followed: "refused", sockets: 0 });
   });
 
   it("gives up on a host that never answers for a token, and never keeps its late answer", async () => {
