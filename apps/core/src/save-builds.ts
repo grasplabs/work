@@ -62,7 +62,8 @@ const savedBuild = async (
   { app, version, files }: SavedSource,
   select: (files: Record<string, string>) => Record<string, string>,
   build: () => Promise<{ ok: boolean; diagnostics?: Diagnostic[] }>,
-  env: Env
+  env: Env,
+  signal?: AbortSignal
 ): Promise<SavedBuild> => {
   try {
     if (Object.keys(select(files)).length === 0) {
@@ -78,6 +79,10 @@ const savedBuild = async (
       diagnostics: (built.diagnostics ?? []).map((item) => toDiagnostic(item)),
     };
   } catch (error) {
+    // Given up on, not failed: whoever gave up on it hears why.
+    if (signal?.aborted === true) {
+      throw signal.reason;
+    }
     log.warn("app.save_build_failed", {
       appId: app,
       version,
@@ -93,12 +98,19 @@ const savedBuild = async (
  * once, into the build cache (screens.ts), so the version opens, answers
  * and runs without building. Answers once all three are done with how each
  * went, for whoever saved (an agent repairs what failed); none takes
- * longer than the build wait (`buildWaitMs` in screens.ts). Never throws: a build is never a reason
+ * longer than the build wait (`buildWaitMs` in screens.ts). Never throws, unless `signal` gave up on it: a build is never a reason
  * for a save to fail.
  */
 export const buildOnSave = async (
   env: Env,
-  source: SavedSource
+  source: SavedSource,
+  /**
+   * Aborted once the build is no one's (a build job's lease lost): no
+   * build starts the compiler after, and it throws its reason, rather than
+   * report the builds it gave up as errors. A compile already running
+   * goes on (screens.ts, `cachedBuild`).
+   */
+  signal?: AbortSignal
 ): Promise<SavedBuilds> => {
   const { files } = source;
   const [screens, server, workflows] = await Promise.all([
@@ -112,23 +124,27 @@ export const buildOnSave = async (
         await buildScreens(
           env,
           await withDraftReferences(env, source.app, source.version, files),
-          source.app
+          source.app,
+          signal
         ),
-      env
+      env,
+      signal
     ),
     savedBuild(
       "server",
       source,
       serverFiles,
-      async () => await buildServer(env, files, source.app),
-      env
+      async () => await buildServer(env, files, source.app, signal),
+      env,
+      signal
     ),
     savedBuild(
       "workflows",
       source,
       workflowFiles,
-      async () => await buildWorkflows(env, files, source.app),
-      env
+      async () => await buildWorkflows(env, files, source.app, signal),
+      env,
+      signal
     ),
   ]);
   return { screens, server, workflows };

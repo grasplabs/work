@@ -58,13 +58,16 @@ const settledWithin = async <T>(
  * else the work that took its place, started by `start` here if no other
  * waiter started it first. The entry goes once its work settled; one
  * whose request was cancelled stays until the next request finds it
- * abandoned.
+ * abandoned. Given up on (`signal`) by the time it would start its own,
+ * it starts none, and takes no one's place: whoever waits besides it
+ * starts the replacement.
  */
 export const sharedRun = async <T>(
   runs: Map<string, SharedRun<T>>,
   key: string,
   abandonAfterMs: number,
-  start: () => Promise<T>
+  start: () => Promise<T>,
+  signal?: AbortSignal
 ): Promise<T> => {
   let running = runs.get(key);
   let replaced: SharedRun<T> | undefined;
@@ -85,6 +88,9 @@ export const sharedRun = async <T>(
     // Another waiter replaced it already, finished or not: share that.
     running = running.replacedBy;
   }
+  // Given up on while it waited: it starts nothing, and leaves the
+  // abandoned work for another waiter to replace.
+  signal?.throwIfAborted();
   const run: SharedRun<T> = { promise: start(), started: Date.now() };
   if (replaced !== undefined) {
     replaced.replacedBy = run;

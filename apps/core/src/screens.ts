@@ -211,7 +211,8 @@ const cachedBuild = async <Build>(
   appFiles: AppFiles,
   select: (files: AppFiles) => AppFiles,
   /** Whose build it is: the App's, or an independent workflow's, ID. */
-  whose: string
+  whose: string,
+  signal?: AbortSignal
 ): Promise<Build | FailedBuild> => {
   const files = select(appFiles);
   const tooMuch = limitsOf(kind)(files);
@@ -232,6 +233,11 @@ const cachedBuild = async <Build>(
   if (cached) {
     return await cached.json<Build>();
   }
+  // Given up on (a build job's lease lost): it starts no compile, nor
+  // after waiting on another's (`sharedRun`). One already running goes
+  // on, shared by whoever else waits for it and bounded by the compiler's
+  // own time, and lands in the cache whole.
+  signal?.throwIfAborted();
   const built = await sharedRun(
     buildsRunning,
     // One sub-owner's: another App building the same files builds them in
@@ -250,7 +256,8 @@ const cachedBuild = async <Build>(
         await env.FILES.put(cacheKey, JSON.stringify(answer.built));
       }
       return answer.built;
-    }
+    },
+    signal
   );
   if (!isBuild(built)) {
     throw new TypeError("The compiler answered something else than a build.");
@@ -268,9 +275,17 @@ export const buildScreens = async (
   env: BuildEnv,
   appFiles: AppFiles,
   /** Whose build it is: the App's ID. */
-  whose: string
+  whose: string,
+  signal?: AbortSignal
 ): Promise<ScreenBuild> =>
-  await cachedBuild<ScreenBuild>(env, "screen", appFiles, buildFiles, whose);
+  await cachedBuild<ScreenBuild>(
+    env,
+    "screen",
+    appFiles,
+    buildFiles,
+    whose,
+    signal
+  );
 
 /**
  * Builds an App's server code (`app/**.ts`) into ES modules, in the
@@ -280,9 +295,17 @@ export const buildServer = async (
   env: BuildEnv,
   appFiles: AppFiles,
   /** Whose build it is: the App's ID. */
-  whose: string
+  whose: string,
+  signal?: AbortSignal
 ): Promise<ServerBuild> =>
-  await cachedBuild<ServerBuild>(env, "server", appFiles, serverFiles, whose);
+  await cachedBuild<ServerBuild>(
+    env,
+    "server",
+    appFiles,
+    serverFiles,
+    whose,
+    signal
+  );
 
 /**
  * Builds an App's server code of spec 8's layout (its schema, values,
@@ -327,14 +350,16 @@ export const buildWorkflows = async (
   env: BuildEnv,
   appFiles: AppFiles,
   /** Whose build it is: the App's ID. */
-  whose: string
+  whose: string,
+  signal?: AbortSignal
 ): Promise<WorkflowBuild> =>
   await cachedBuild<WorkflowBuild>(
     env,
     "workflow",
     appFiles,
     workflowFiles,
-    whose
+    whose,
+    signal
   );
 
 /**

@@ -438,15 +438,6 @@ const submittedDraft = async (
   return draft;
 };
 
-/**
- * Refuses to go on, between a check's phases, once the step lost its
- * lease (`lost`): what it built so far is no one's, and another job of
- * its App may build now.
- */
-const startsNothingOnceLost = (lost: AbortSignal) => (): void => {
-  lost.throwIfAborted();
-};
-
 /** What a job's check comes to: the check, and the commit it would make. */
 interface Checked {
   check: DraftCheck;
@@ -466,7 +457,7 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
       app,
       draft,
       Object.fromEntries(files),
-      startsNothingOnceLost(step.lost)
+      step.lost
     );
     // A check of files the draft no longer has says nothing of it.
     await submittedDraft(env, step);
@@ -487,7 +478,7 @@ const checkStep = async (env: Env, step: JobStep): Promise<Checked> => {
     app,
     draft,
     Object.fromEntries(over.files),
-    startsNothingOnceLost(step.lost)
+    step.lost
   );
   const { tree } = await versionTree(over.files);
   await submittedDraft(env, step);
