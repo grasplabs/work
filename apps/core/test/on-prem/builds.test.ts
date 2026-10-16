@@ -63,7 +63,7 @@ const answerTime = async (): Promise<number> => {
 
 describe("the screen compiler on-prem", () => {
   it("builds an App's screens on the sandbox host, not in core", async () => {
-    const built = await buildScreens(onPrem, screen(""));
+    const built = await buildScreens(onPrem, screen(""), "app-test");
 
     expect({
       ok: built.ok,
@@ -72,9 +72,13 @@ describe("the screen compiler on-prem", () => {
   });
 
   it("builds an App's server code on the sandbox host", async () => {
-    const built = await buildServer(onPrem, {
-      "app/server.ts": `import { DurableObject } from "cloudflare:workers";\n\nexport class App extends DurableObject {\n  book(): string {\n    return "booked";\n  }\n}\n`,
-    });
+    const built = await buildServer(
+      onPrem,
+      {
+        "app/server.ts": `import { DurableObject } from "cloudflare:workers";\n\nexport class App extends DurableObject {\n  book(): string {\n    return "booked";\n  }\n}\n`,
+      },
+      "app-test"
+    );
 
     expect(built.ok).toBeTruthy();
   });
@@ -82,7 +86,8 @@ describe("the screen compiler on-prem", () => {
   it("says what fails to type-check, as it does on Cloudflare", async () => {
     const built = await buildScreens(
       onPrem,
-      screen('export const count: number = "seven";')
+      screen('export const count: number = "seven";'),
+      "app-test"
     );
 
     expect(built.ok ? [] : built.diagnostics.map(({ rule }) => rule)).toContain(
@@ -94,7 +99,8 @@ describe("the screen compiler on-prem", () => {
     const started = Date.now();
     const building = buildScreens(
       { ...onPrem, SANDBOX_DEADLINE_MS: String(DEADLINE_MS) },
-      screen(recursiveTypes)
+      screen(recursiveTypes),
+      "app-test"
     );
     // Asked while the checker spins on the sandbox host.
     await scheduler.wait(DEADLINE_MS / 2);
@@ -128,10 +134,10 @@ describe("the screen compiler on-prem", () => {
     const files = screen(`${recursiveTypes}\n// viewed`);
     // Three views at once, then one more once they're done.
     const views = await Promise.all(
-      [1, 2, 3].map(async () => await buildScreens(counting, files))
+      [1, 2, 3].map(async () => await buildScreens(counting, files, "app-test"))
     );
     const started = Date.now();
-    const later = await buildScreens(counting, files);
+    const later = await buildScreens(counting, files, "app-test");
     const tookLater = Date.now() - started;
 
     expect(
@@ -163,8 +169,16 @@ describe("the screen compiler on-prem", () => {
         connect: env.ASSETS.connect.bind(env.ASSETS),
       },
     };
-    const first = await buildScreens(counting, screen("// first read"));
-    const second = await buildScreens(counting, screen("// second read"));
+    const first = await buildScreens(
+      counting,
+      screen("// first read"),
+      "app-test"
+    );
+    const second = await buildScreens(
+      counting,
+      screen("// second read"),
+      "app-test"
+    );
 
     expect({ first: first.ok, second: second.ok, read }).toStrictEqual({
       first: true,
@@ -196,7 +210,7 @@ describe("the screen compiler on-prem", () => {
     await scheduler.wait(500);
     let refused: unknown;
     try {
-      await buildScreens(onPrem, screen("// waits for a place"));
+      await buildScreens(onPrem, screen("// waits for a place"), "app-test");
     } catch (error) {
       refused = error;
     }
@@ -212,9 +226,9 @@ describe("the screen compiler on-prem", () => {
   it("builds the same screen again once the sandbox stopped it at its deadline, as that stop isn't cached", async () => {
     const files = screen(`${recursiveTypes}\n// again`);
     const stopped = { ...onPrem, SANDBOX_DEADLINE_MS: "1500" };
-    const first = await buildScreens(stopped, files);
+    const first = await buildScreens(stopped, files, "app-test");
     const started = Date.now();
-    const second = await buildScreens(stopped, files);
+    const second = await buildScreens(stopped, files, "app-test");
 
     expect({ first: first.ok, second: second.ok }).toStrictEqual({
       first: false,

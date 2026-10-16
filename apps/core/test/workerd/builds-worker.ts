@@ -408,10 +408,12 @@ export default {
       SANDBOX_IN_PROCESS: undefined,
     } satisfies PackageBuilderEnv;
     const pkg = await packageOf(searchParams.get("package") ?? "plain");
+    // Whose build it is: the builder's sub-owner on the sandbox host.
+    const whose = searchParams.get("app") ?? "app-stand-in";
     if (pathname === "/build") {
       return Response.json(
         await outcomeOf(async () => {
-          const builder = packageBuilder(builderEnv);
+          const builder = packageBuilder(builderEnv)(whose);
           return await builtFiles(
             await builder.build({
               limits: { ...packageLimits, artifactBytes: 2 * 1024 * 1024 },
@@ -428,7 +430,7 @@ export default {
       return Response.json(
         await outcomeOf(async () => {
           for (const _ of [1, 2]) {
-            const builder = packageBuilder(builderEnv);
+            const builder = packageBuilder(builderEnv)(whose);
             // oxlint-disable-next-line no-await-in-loop -- one after the other
             await builder.inspect(packageLimits, [pkg]);
           }
@@ -438,7 +440,7 @@ export default {
     }
     return Response.json(
       await outcomeOf(async () => {
-        const builder = packageBuilder(builderEnv);
+        const builder = packageBuilder(builderEnv)(whose);
         return await builder.inspect(packageLimits, [pkg]);
       })
     );

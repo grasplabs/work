@@ -208,7 +208,9 @@ const cachedBuild = async <Build>(
   env: BuildEnv,
   kind: BuildKind,
   appFiles: AppFiles,
-  select: (files: AppFiles) => AppFiles
+  select: (files: AppFiles) => AppFiles,
+  /** Whose build it is: the App's, or an independent workflow's, ID. */
+  whose: string
 ): Promise<Build | FailedBuild> => {
   const files = select(appFiles);
   const tooMuch = limitsOf(kind)(files);
@@ -221,7 +223,7 @@ const cachedBuild = async <Build>(
   // (platform-sandbox.ts). Where nothing bounds it, refused before the
   // cache is read: a deployment where nothing compiles has nothing cached
   // to serve.
-  const runner = platformRunner(env);
+  const runner = platformRunner(env, whose);
   const cacheKey = `${kind}-builds/${await buildKey(files)}.json`;
   const isBuild = (value: unknown): value is Build | FailedBuild =>
     isBuildShaped(value);
@@ -260,9 +262,11 @@ const cachedBuild = async <Build>(
  */
 export const buildScreens = async (
   env: BuildEnv,
-  appFiles: AppFiles
+  appFiles: AppFiles,
+  /** Whose build it is: the App's ID. */
+  whose: string
 ): Promise<ScreenBuild> =>
-  await cachedBuild<ScreenBuild>(env, "screen", appFiles, buildFiles);
+  await cachedBuild<ScreenBuild>(env, "screen", appFiles, buildFiles, whose);
 
 /**
  * Builds an App's server code (`app/**.ts`) into ES modules, in the
@@ -270,9 +274,11 @@ export const buildScreens = async (
  */
 export const buildServer = async (
   env: BuildEnv,
-  appFiles: AppFiles
+  appFiles: AppFiles,
+  /** Whose build it is: the App's ID. */
+  whose: string
 ): Promise<ServerBuild> =>
-  await cachedBuild<ServerBuild>(env, "server", appFiles, serverFiles);
+  await cachedBuild<ServerBuild>(env, "server", appFiles, serverFiles, whose);
 
 /**
  * Builds an App's server code of spec 8's layout (its schema, values,
@@ -283,9 +289,11 @@ export const buildServer = async (
  */
 export const buildAppCode = async (
   env: BuildEnv,
-  appFiles: AppFiles
+  appFiles: AppFiles,
+  /** Whose build it is: the App's ID. */
+  whose: string
 ): Promise<AppCodeBuild> =>
-  await cachedBuild<AppCodeBuild>(env, "app", appFiles, appCodeFiles);
+  await cachedBuild<AppCodeBuild>(env, "app", appFiles, appCodeFiles, whose);
 
 /**
  * Builds an App's tests (`tests/**.ts`) into ES modules, in the
@@ -295,9 +303,17 @@ export const buildAppCode = async (
  */
 export const buildAppTests = async (
   env: BuildEnv,
-  appFiles: AppFiles
+  appFiles: AppFiles,
+  /** Whose build it is: the App's ID. */
+  whose: string
 ): Promise<AppCodeBuild> =>
-  await cachedBuild<AppCodeBuild>(env, "app-tests", appFiles, appTestFiles);
+  await cachedBuild<AppCodeBuild>(
+    env,
+    "app-tests",
+    appFiles,
+    appTestFiles,
+    whose
+  );
 
 /**
  * Builds an App's workflows (`workflows/**.ts`) into ES modules, in the
@@ -305,9 +321,17 @@ export const buildAppTests = async (
  */
 export const buildWorkflows = async (
   env: BuildEnv,
-  appFiles: AppFiles
+  appFiles: AppFiles,
+  /** Whose build it is: the App's ID. */
+  whose: string
 ): Promise<WorkflowBuild> =>
-  await cachedBuild<WorkflowBuild>(env, "workflow", appFiles, workflowFiles);
+  await cachedBuild<WorkflowBuild>(
+    env,
+    "workflow",
+    appFiles,
+    workflowFiles,
+    whose
+  );
 
 /**
  * Builds the module the host generated from a JSON workflow
@@ -318,13 +342,16 @@ export const buildWorkflows = async (
  */
 export const buildOpenWorkflow = async (
   env: BuildEnv,
-  files: AppFiles
+  files: AppFiles,
+  /** Whose build it is: the independent workflow's ID. */
+  whose: string
 ): Promise<OpenWorkflowBuild> =>
   await cachedBuild<OpenWorkflowBuild>(
     env,
     "open-workflow",
     files,
-    (all) => all
+    (all) => all,
+    whose
   );
 
 /** The details of a `*.build_failed` error: the version (null for a draft), and why. */
@@ -383,7 +410,9 @@ export type VersionScreens = (screen: unknown) => Promise<BuiltScreen>;
 export const versionScreens = async (
   env: Env,
   files: Record<string, string>,
-  version: number | null
+  version: number | null,
+  /** Whose screens they are: the App's ID. */
+  app: string
 ): Promise<VersionScreens> => {
   if (!Object.keys(files).some((path) => screenPath.test(path))) {
     return async () => {
@@ -394,7 +423,7 @@ export const versionScreens = async (
   const loaded = await withinBuildWait(
     env,
     async () =>
-      await Promise.all([buildScreens(env, files), kitModules(env.ASSETS)])
+      await Promise.all([buildScreens(env, files, app), kitModules(env.ASSETS)])
   );
   if (loaded === "late") {
     throw screenErrors.create("screen.build_slow");
@@ -448,12 +477,14 @@ export const screenCode = async (
   env: Env,
   files: Record<string, string>,
   screen: unknown,
-  version: number | null
+  version: number | null,
+  /** Whose screen it is: the App's ID. */
+  app: string
 ): Promise<BuiltScreen> => {
   const name = screenErrors.parse("screen.invalid", screenNameSchema, screen);
   if (!Object.hasOwn(files, `screens/${name}.tsx`)) {
     throw screenErrors.create("screen.not_found");
   }
-  const built = await versionScreens(env, files, version);
+  const built = await versionScreens(env, files, version, app);
   return await built(name);
 };

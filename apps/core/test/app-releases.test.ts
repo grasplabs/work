@@ -1022,10 +1022,14 @@ describe("screens", { timeout: 120_000 }, () => {
   ])(
     "never import %s: the build fails before it starts",
     async (_case, line) => {
-      const build = await buildScreens(env, {
-        ...notesFiles(),
-        "screens/notes.tsx": `${line}\nexport default function Notes() {\n  return null;\n}\n`,
-      });
+      const build = await buildScreens(
+        env,
+        {
+          ...notesFiles(),
+          "screens/notes.tsx": `${line}\nexport default function Notes() {\n  return null;\n}\n`,
+        },
+        "app-test"
+      );
       expect(build.ok).toBeFalsy();
       expect(build.diagnostics.map(({ message }) => message)).toStrictEqual([
         expect.stringContaining(

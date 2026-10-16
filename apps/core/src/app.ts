@@ -737,7 +737,7 @@ export const loadServer = async (
   // says that's fine, until GRA-500 moves Apps onto sealed functions.
   requireBoundedHere(env, "an App's server object");
   const files = await versionFiles(env, app, version);
-  const build = await buildServer(env, files);
+  const build = await buildServer(env, files, app);
   if (!build.ok) {
     throw appErrors.create("app.build_failed", buildFailed(version, build));
   }

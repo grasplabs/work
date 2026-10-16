@@ -64,6 +64,9 @@ const inspectionsSchema = z.array(
 describe("the package builder on the on-prem sandbox", () => {
   let supervisor: SandboxSupervisor;
   let coreUrl: string;
+  /** A pool of four, so the builder's share is two: one each for two Apps. */
+  let wide: SandboxSupervisor;
+  let wideUrl: string;
 
   beforeAll(async () => {
     supervisor = await startSandboxSupervisor({
@@ -84,25 +87,34 @@ describe("the package builder on the on-prem sandbox", () => {
     );
     const [release] = readdirSync(path.join(assets, "_compiler"));
     const built = path.join(assets, "_compiler", release ?? "");
-    coreUrl = await serveStandIn(
-      "builds-worker.ts",
-      supervisor.socket,
-      { SANDBOX_DEADLINE_MS: String(DEADLINE_MS) },
-      { PACKAGE_BUILDER: path.join(built, "package-builder.js") },
-      { ESBUILD_WASM: path.join(built, "esbuild.wasm") }
-    );
+    const standIn = async (socket: string): Promise<string> =>
+      await serveStandIn(
+        "builds-worker.ts",
+        socket,
+        { SANDBOX_DEADLINE_MS: String(DEADLINE_MS) },
+        { PACKAGE_BUILDER: path.join(built, "package-builder.js") },
+        { ESBUILD_WASM: path.join(built, "esbuild.wasm") }
+      );
+    coreUrl = await standIn(supervisor.socket);
+    wide = await startSandboxSupervisor({
+      workerd: nativeWorkerd,
+      processes: 4,
+      log: () => {},
+    });
+    wideUrl = await standIn(wide.socket);
   }, 300_000);
 
   afterAll(async () => {
-    await supervisor.stop();
+    await Promise.all([supervisor.stop(), wide.stop()]);
     cleanUp();
   });
 
   const call = async (
     query: string,
-    route = "/inspect"
+    route = "/inspect",
+    url = coreUrl
   ): Promise<z.infer<typeof outcomeSchema>> => {
-    const response = await fetch(`${coreUrl}${route.slice(1)}?${query}`, {
+    const response = await fetch(`${url}${route.slice(1)}?${query}`, {
       method: "POST",
     });
     return outcomeSchema.parse(await response.json());
@@ -277,5 +289,37 @@ describe("the package builder on the on-prem sandbox", () => {
       httpStatus: second.httpStatus,
     }).toStrictEqual({ status: "unavailable", httpStatus: 429 });
     await expect(first).resolves.toMatchObject({ status: "bound" });
+  }, 60_000);
+
+  it("holds one App's builds to part of the builders' share, so another App's build still runs", async () => {
+    // The builders' share of four processes is two; one App holds one of
+    // them and has one more waiting for it, at most.
+    const held = call("builder=busy&app=app-a", "/inspect", wideUrl);
+    await sleep(500);
+    const waiting = call("builder=busy&app=app-a", "/inspect", wideUrl);
+    await sleep(500);
+    const past = await call("builder=busy&app=app-a", "/inspect", wideUrl);
+    // The other place is another App's, while the first App's builds hold
+    // theirs and wait.
+    const other = await call("builder=busy&app=app-b", "/inspect", wideUrl);
+    const [first, second] = await Promise.all([held, waiting]);
+
+    expect({
+      past: { status: past.status, httpStatus: past.httpStatus },
+      pastAtOnce: past.ms < ANSWER_MS,
+      other: other.status,
+      held: first.status,
+      waiting: second.status,
+    }).toStrictEqual({
+      past: { status: "unavailable", httpStatus: 429 },
+      pastAtOnce: true,
+      other: "bound",
+      held: "bound",
+      waiting: "unavailable",
+    });
+    // Every App's place given back once its process is gone.
+    await expect
+      .poll(() => wide.stats().subOwnerPlaces, { timeout: 5000, interval: 100 })
+      .toBe(0);
   }, 60_000);
 });

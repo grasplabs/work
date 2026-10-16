@@ -49,7 +49,7 @@ export const loadPreview = async (
   // Loader): refused unless the deployment says that's fine (GRA-501).
   requireBoundedHere(env, "a draft's preview");
   const files = Object.fromEntries(await draftFiles(env, app, draft));
-  const build = await buildServer(env, files);
+  const build = await buildServer(env, files, app);
   if (!build.ok) {
     throw appErrors.create("app.build_failed", buildFailed(null, build));
   }

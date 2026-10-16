@@ -225,7 +225,7 @@ const setUp = async (replies: GatewayReply[], agentBuilds = true) => {
   await Promise.all(
     [false, true].map(
       async (fixed) =>
-        await buildServer(env, { "app/server.ts": server(fixed) })
+        await buildServer(env, { "app/server.ts": server(fixed) }, "app-test")
     )
   );
   const chat = await builder.api.chats.create("Invoice desk");
@@ -441,7 +441,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       actions: ["mail.send"],
       binding: "MAIL",
     });
-    await buildServer(env, { "app/server.ts": mailing });
+    await buildServer(env, { "app/server.ts": mailing }, "app-test");
     const id = chatIdSchema.parse(chatId);
     const { chats } = builder.api;
     const writeDraft = async (revision: number) => {
@@ -534,7 +534,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
 
   it("keeps what the draft's server code writes with console, bounded, and fails nothing with it", async () => {
     const { builder, app, chatId, stub } = await setUp([], false);
-    await buildServer(env, { "app/server.ts": mailing });
+    await buildServer(env, { "app/server.ts": mailing }, "app-test");
     const id = chatIdSchema.parse(chatId);
     const { chats } = builder.api;
     const writeDraft = async (revision: number) => {
@@ -607,7 +607,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
       codeStep(checkLogs),
       says("Checked again."),
     ]);
-    await buildServer(env, { "app/server.ts": mailing });
+    await buildServer(env, { "app/server.ts": mailing }, "app-test");
     const id = chatIdSchema.parse(chatId);
     const { chats } = builder.api;
     const writeDraft = async (revision: number) => {
@@ -699,7 +699,7 @@ describe("the repair loop, fed by the preview", { timeout: 180_000 }, () => {
     });
     // The App live, with the same server code, and a count of its own.
     await release(builder, app, { "app/server.ts": mailing });
-    await buildServer(env, { "app/server.ts": mailing });
+    await buildServer(env, { "app/server.ts": mailing }, "app-test");
     const live = async () => await builder.api.screens.call(app, "count", []);
     const before = [await live(), await live()];
 

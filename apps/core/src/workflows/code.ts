@@ -585,10 +585,11 @@ const callsOf = (files: AppFiles, id: WorkflowId): string =>
  */
 const modulesOf = async (
   env: Env,
+  app: AppId,
   version: number,
   files: AppFiles
 ): Promise<Record<string, string>> => {
-  const build = await buildWorkflows(env, files);
+  const build = await buildWorkflows(env, files, app);
   if (!build.ok) {
     throw workflowErrors.create("workflow.build_failed", {
       version,
@@ -1003,7 +1004,7 @@ export const loadRun = (
       owner: runOwnerOf(app),
       mainModule: runModule,
       modules: async () => ({
-        ...(await modulesOf(env, version, files)),
+        ...(await modulesOf(env, app, version, files)),
         [runBindingsModule]: runBindings,
         [runModule]: runMain(workflow),
       }),
@@ -1082,7 +1083,7 @@ const declaredMetadata = async (
         owner: app,
         mainModule: metadataModule,
         modules: async () => ({
-          ...(await modulesOf(env, version, files)),
+          ...(await modulesOf(env, app, version, files)),
           [metadataModule]: metadataMain(id),
         }),
         entrypoint: "Metadata",
@@ -1267,7 +1268,7 @@ export const dryRunTests = async (
         owner: app,
         mainModule: dryRunModule,
         modules: async () => ({
-          ...(await modulesOf(env, version, files)),
+          ...(await modulesOf(env, app, version, files)),
           [dryRunModule]: dryRunMain(id, calls),
         }),
         entrypoint: "DryRuns",
@@ -1310,7 +1311,7 @@ export const workflowTestOutcome = async (
   }
   // Refused before anything is built where no sandbox may run them.
   sessionHost(env);
-  const modules = await modulesOf(env, version, files);
+  const modules = await modulesOf(env, app, version, files);
   const failures: string[] = [];
   let keep = true;
   for (const id of ids) {

@@ -63,6 +63,17 @@ import { callStub, SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
 //   per-owner share of the pool like any App; past it, or with the pool
 //   full, the call is refused as the sandbox unavailable, before it
 //   started (`noPlaceOf`), never as the input's fault.
+// - One App's builds take the whole builder's share (many distinct
+//   screens, or builds that run to their deadline, which isn't cached),
+//   so every other App's are refused as busy. Each build names whose it
+//   is (`platformRunner`'s `whose`, the App or independent workflow, from
+//   core's own record), sent as the session's sub-owner; the supervisor
+//   holds one sub-owner to part of its owner's share, places and waiting
+//   room both (`maxPerSubOwner`, half of it, at least one), leaving the
+//   rest to other Apps. Only core reaches the supervisor's socket, so no
+//   App names another's sub-owner. Enforced there rather than in core,
+//   where builds run in many isolates and objects, and with no queue of
+//   its own: the supervisor holds the places already.
 // - One owner's build reaches another's, or an App's code. One call per
 //   process, killed once the session ends: nothing a build leaves in
 //   memory is there for the next call, whoever's it is. The isolate gets
@@ -197,6 +208,8 @@ export interface PlatformCall {
   readonly wallMs: number;
   /** Who it runs as: an owner of the platform's own (`builderOwner`). */
   readonly owner: string;
+  /** Whose build it is, within that owner's share (an App's ID). */
+  readonly subOwner?: string;
   /** Its process's memory, where it needs more than App code gets. */
   readonly memoryMib?: number;
 }
@@ -212,7 +225,7 @@ export interface PlatformCall {
 export const runPlatformCode = async (
   host: Fetcher,
   code: PlatformCode,
-  { method, args, wallMs, owner, memoryMib }: PlatformCall
+  { method, args, wallMs, owner, subOwner, memoryMib }: PlatformCall
 ): Promise<unknown> => {
   try {
     return await runInSession(host, {
@@ -227,6 +240,7 @@ export const runPlatformCode = async (
       wallMs,
       ...(memoryMib === undefined ? {} : { memoryMib }),
       owner,
+      ...(subOwner === undefined ? {} : { subOwner }),
     });
   } catch (error) {
     throw stopOf(error, false);
@@ -367,8 +381,15 @@ const sessionArgs = (args: readonly unknown[]): SessionArgument[] =>
       : { value: arg }
   );
 
-/** The runner on the sandbox host: a session for each call, as `platform:builder`. */
-const onHost = (env: PlatformEnv, host: Fetcher): PlatformRunner => {
+/**
+ * The runner on the sandbox host: a session for each call, as
+ * `platform:builder`, each of `whose` builds within its share.
+ */
+const onHost = (
+  env: PlatformEnv,
+  host: Fetcher,
+  whose: string
+): PlatformRunner => {
   const wallMs = (program: PlatformProgram): number =>
     platformWallMs(env, programWallMs[program]);
   return {
@@ -379,6 +400,7 @@ const onHost = (env: PlatformEnv, host: Fetcher): PlatformRunner => {
         args: sessionArgs(args),
         wallMs: wallMs(program),
         owner: builderOwner,
+        subOwner: whose,
         memoryMib: builderMemoryMib,
       }),
     callMs: (program) => platformCodeReadMs + sessionCallMs(wallMs(program)),
@@ -386,12 +408,19 @@ const onHost = (env: PlatformEnv, host: Fetcher): PlatformRunner => {
 };
 
 /**
- * The runner of the release's platform code for `env`: on the sandbox host
- * where `SANDBOX_HOST` is bound, else in core's Loader where the runtime
- * bounds it (`sessionHost`). Throws `SandboxUnavailableError`, at once,
- * where nothing bounds it: before anything is read or fetched for it.
+ * The runner of the release's platform code for `env`, building for
+ * `whose` (the App, or the independent workflow, whose build it is; core's
+ * own record, never App code's word): on the sandbox host where
+ * `SANDBOX_HOST` is bound, held to that sub-owner's part of the builder's
+ * share (scripts/workerd-sandbox.ts, `maxPerSubOwner`), so one App's
+ * builds never keep every other App's out; else in core's Loader where the
+ * runtime bounds it (`sessionHost`). Throws `SandboxUnavailableError`, at
+ * once, where nothing bounds it: before anything is read or fetched for it.
  */
-export const platformRunner = (env: PlatformEnv): PlatformRunner => {
+export const platformRunner = (
+  env: PlatformEnv,
+  whose: string
+): PlatformRunner => {
   const host = sessionHost(env);
-  return host === undefined ? inCore(env) : onHost(env, host);
+  return host === undefined ? inCore(env) : onHost(env, host, whose);
 };

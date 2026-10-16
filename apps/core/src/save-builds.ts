@@ -111,7 +111,8 @@ export const buildOnSave = async (
       async () =>
         await buildScreens(
           env,
-          await withDraftReferences(env, source.app, source.version, files)
+          await withDraftReferences(env, source.app, source.version, files),
+          source.app
         ),
       env
     ),
@@ -119,14 +120,14 @@ export const buildOnSave = async (
       "server",
       source,
       serverFiles,
-      async () => await buildServer(env, files),
+      async () => await buildServer(env, files, source.app),
       env
     ),
     savedBuild(
       "workflows",
       source,
       workflowFiles,
-      async () => await buildWorkflows(env, files),
+      async () => await buildWorkflows(env, files, source.app),
       env
     ),
   ]);

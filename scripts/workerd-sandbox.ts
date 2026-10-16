@@ -84,6 +84,7 @@ import {
   sandboxMemoryHeader,
   sandboxOwnerHeader,
   sandboxParentHeader,
+  sandboxSubOwnerHeader,
   sandboxVerdictHeader,
   sandboxWaitHeader,
 } from "../apps/core/src/sandbox-headers.ts";
@@ -131,6 +132,7 @@ export const cpuHeader = sandboxCpuHeader;
 export const memoryHeader = sandboxMemoryHeader;
 export const callIdHeader = sandboxCallIdHeader;
 export const ownerHeader = sandboxOwnerHeader;
+export const subOwnerHeader = sandboxSubOwnerHeader;
 export const parentHeader = sandboxParentHeader;
 export const verdictHeader = sandboxVerdictHeader;
 
@@ -148,6 +150,13 @@ export interface SandboxSupervisorOptions {
    * every process while it waits.
    */
   maxPerOwner?: number;
+  /**
+   * How many of an owner's places one of its sub-owners (an App, for the
+   * builder's owner) may hold at once, and how many of its sessions may
+   * wait: half the owner's share, rounded down, at least one, by default,
+   * so one App's builds leave the rest of the builder's share to others.
+   */
+  maxPerSubOwner?: number;
   /** The longest deadline a call may ask for. */
   maxDeadlineMs?: number;
   /** The longest a call may wait for a free process, whatever it asks for. */
@@ -194,6 +203,8 @@ export interface SandboxStats {
   waitingForOwners: number;
   /** Owners' places held now, by sessions waiting, running or dying. */
   ownerPlaces: number;
+  /** Of those, the places held by sessions of a sub-owner. */
+  subOwnerPlaces: number;
   /** Child sessions running, and those waiting for their parent's place. */
   children: number;
   waitingForParents: number;
@@ -265,6 +276,7 @@ type Settings = typeof defaults & {
   workerd: string;
   parent: string;
   maxPerOwner?: number;
+  maxPerSubOwner?: number;
   log: (event: Record<string, unknown>) => void;
 };
 
@@ -671,6 +683,36 @@ const MAX_VERDICTS = 1024;
 /** An owner as core names one: an App's ID, or `person:` and a person's. */
 const ownerPattern = /^[A-Za-z0-9:_.-]{1,200}$/u;
 
+/**
+ * A sub-owner's key, under its owner: the same App's builds and its own
+ * code are two owners' sub-owners, never one. The separator is outside
+ * `ownerPattern`, so no two pairs share a key.
+ */
+const placeOf = (owner: string, subOwner: string): string =>
+  `${owner} ${subOwner}`;
+
+/**
+ * The sub-owner a session names (`subOwnerHeader`): undefined for none,
+ * null for one that is no owner's name.
+ */
+const subOwnerOf = (request: IncomingMessage): string | undefined | null => {
+  const named = request.headers[subOwnerHeader];
+  if (named === undefined) {
+    return undefined;
+  }
+  return typeof named === "string" && ownerPattern.test(named) ? named : null;
+};
+
+/** One less of `key` in `counts`, forgotten at none. */
+const countDown = (counts: Map<string, number>, key: string): void => {
+  const left = (counts.get(key) ?? 1) - 1;
+  if (left <= 0) {
+    counts.delete(key);
+  } else {
+    counts.set(key, left);
+  }
+};
+
 /** A call ID as core makes them: a random UUID. */
 const callIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
@@ -761,6 +803,10 @@ class SandboxPool {
   readonly #ownerWaiters = new Map<string, number>();
   #waitingForOwners = 0;
   readonly #maxPerOwner: number;
+  /** Places each sub-owner holds, and its sessions waiting, by `placeOf`. */
+  readonly #subOwners = new Map<string, number>();
+  readonly #subOwnerWaiters = new Map<string, number>();
+  readonly #maxPerSubOwner: number;
   /** Verdicts on sessions, by call ID, oldest first. */
   readonly #verdicts = new Map<string, Verdict>();
 
@@ -770,6 +816,8 @@ class SandboxPool {
     this.#config = writeSandboxHost(dir);
     this.#maxPerOwner =
       settings.maxPerOwner ?? Math.ceil(settings.processes / 2);
+    this.#maxPerSubOwner =
+      settings.maxPerSubOwner ?? Math.max(1, Math.floor(this.#maxPerOwner / 2));
     // Every waiting call listens; there may be many.
     setMaxListeners(0, this.#released);
   }
@@ -785,6 +833,10 @@ class SandboxPool {
       inFlight: this.#inFlight,
       waitingForOwners: this.#waitingForOwners,
       ownerPlaces: [...this.#owners.values()].reduce(
+        (sum, held) => sum + held,
+        0
+      ),
+      subOwnerPlaces: [...this.#subOwners.values()].reduce(
         (sum, held) => sum + held,
         0
       ),
@@ -1239,6 +1291,7 @@ class SandboxPool {
       );
       return;
     }
+
     // A child of a session running now (an App function a Code Mode run
     // calls, which the run waits for): one at a time for each parent, on a
     // process past the pool's size, so it never waits for the process its
@@ -1333,15 +1386,26 @@ class SandboxPool {
     }
   ): Promise<void> {
     const settings = this.#settings;
+    const subOwner = subOwnerOf(request);
+    if (subOwner === null) {
+      refuse(400, `A session's ${subOwnerHeader} names no sub-owner.`);
+      return;
+    }
     const parentEnded = (): boolean =>
       parent !== undefined && (orphaned.aborted || !this.#running.has(parent));
     // One owner holds at most its share of the pool, waiting or running: a
     // session past it waits, as for a process, then is refused. Its place
     // first, then its parent's child place.
-    const ownerRoom = await this.#ownerRoom(owner, waitMs, client, orphaned);
+    const ownerRoom = await this.#ownerRoom(
+      owner,
+      subOwner,
+      waitMs,
+      client,
+      orphaned
+    );
     if (!ownerRoom || parentEnded()) {
       if (ownerRoom) {
-        this.#giveOwnerBack(owner);
+        this.#giveOwnerBack(owner, subOwner);
       }
       if (parentEnded()) {
         refuse(409, "This session's parent has ended.");
@@ -1358,7 +1422,7 @@ class SandboxPool {
     const giveBack = (): void => {
       if (ownerHeld) {
         ownerHeld = false;
-        this.#giveOwnerBack(owner);
+        this.#giveOwnerBack(owner, subOwner);
       }
     };
     if (
@@ -1709,25 +1773,41 @@ class SandboxPool {
   }
 
   /**
-   * Takes a place for one more session of `owner`, waiting up to `waitMs`
-   * (or until the caller leaves) for one of its sessions to end; false if
-   * none comes. At most as many of an owner's sessions wait as it may
-   * hold: one past that is refused at once.
+   * Takes a place for one more session of `owner` (and of its `subOwner`,
+   * if it names one), waiting up to `waitMs` (or until the caller leaves)
+   * for one of its sessions to end; false if none comes. At most as many
+   * of an owner's sessions wait as it may hold: one past that is refused
+   * at once. A sub-owner holds at most `maxPerSubOwner` of its owner's
+   * places, and has at most as many sessions waiting: one App's builds
+   * never take the whole builder's share, nor its whole waiting room, so
+   * another App's build finds a place or a turn to wait for one.
    */
   async #ownerRoom(
     owner: string,
+    subOwner: string | undefined,
     waitMs: number,
     client: Socket,
     stop?: AbortSignal
   ): Promise<boolean> {
+    const sub = subOwner === undefined ? undefined : placeOf(owner, subOwner);
     const hasRoom = (): boolean =>
-      (this.#owners.get(owner) ?? 0) < this.#maxPerOwner;
+      (this.#owners.get(owner) ?? 0) < this.#maxPerOwner &&
+      (sub === undefined ||
+        (this.#subOwners.get(sub) ?? 0) < this.#maxPerSubOwner);
     if (!hasRoom()) {
       const waiters = this.#ownerWaiters.get(owner) ?? 0;
-      if (waiters >= this.#maxPerOwner) {
+      const subWaiters =
+        sub === undefined ? 0 : (this.#subOwnerWaiters.get(sub) ?? 0);
+      if (
+        waiters >= this.#maxPerOwner ||
+        (sub !== undefined && subWaiters >= this.#maxPerSubOwner)
+      ) {
         return false;
       }
       this.#ownerWaiters.set(owner, waiters + 1);
+      if (sub !== undefined) {
+        this.#subOwnerWaiters.set(sub, subWaiters + 1);
+      }
       this.#waitingForOwners += 1;
       const gone = new AbortController();
       const leave = (): void => {
@@ -1749,17 +1829,18 @@ class SandboxPool {
       } finally {
         client.off("close", leave);
         this.#waitingForOwners -= 1;
-        const left = (this.#ownerWaiters.get(owner) ?? 1) - 1;
-        if (left <= 0) {
-          this.#ownerWaiters.delete(owner);
-        } else {
-          this.#ownerWaiters.set(owner, left);
+        countDown(this.#ownerWaiters, owner);
+        if (sub !== undefined) {
+          countDown(this.#subOwnerWaiters, sub);
         }
       }
     }
     // Taken at once, in the same turn as the check: two waiters woken by
     // one session's end never both take its place.
     this.#owners.set(owner, (this.#owners.get(owner) ?? 0) + 1);
+    if (sub !== undefined) {
+      this.#subOwners.set(sub, (this.#subOwners.get(sub) ?? 0) + 1);
+    }
     return true;
   }
 
@@ -1845,12 +1926,10 @@ class SandboxPool {
   }
 
   /** Gives one of `owner`'s places back, for a session that ended or never ran. */
-  #giveOwnerBack(owner: string): void {
-    const left = (this.#owners.get(owner) ?? 1) - 1;
-    if (left <= 0) {
-      this.#owners.delete(owner);
-    } else {
-      this.#owners.set(owner, left);
+  #giveOwnerBack(owner: string, subOwner: string | undefined): void {
+    countDown(this.#owners, owner);
+    if (subOwner !== undefined) {
+      countDown(this.#subOwners, placeOf(owner, subOwner));
     }
     this.#released.dispatchEvent(new Event("released"));
   }
@@ -2268,6 +2347,18 @@ export const startSandboxSupervisor = async (
   ) {
     throw new Error(
       `The sandbox's maxPerOwner must be a whole number from 1 to its processes, not ${String(settings.maxPerOwner)}.`
+    );
+  }
+  // A sub-owner's share is at least one place and at most its owner's.
+  const ownerShare = settings.maxPerOwner ?? Math.ceil(settings.processes / 2);
+  if (
+    settings.maxPerSubOwner !== undefined &&
+    (!Number.isInteger(settings.maxPerSubOwner) ||
+      settings.maxPerSubOwner < 1 ||
+      settings.maxPerSubOwner > ownerShare)
+  ) {
+    throw new Error(
+      `The sandbox's maxPerSubOwner must be a whole number from 1 to its maxPerOwner, not ${String(settings.maxPerSubOwner)}.`
     );
   }
   // A bound that isn't a positive number (NaN, say) would bound nothing.

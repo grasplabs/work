@@ -202,7 +202,9 @@ export interface CompiledBuild {
 export const compileWorkflow = async (
   env: Env,
   checked: CheckedWorkflow,
-  definition: string
+  definition: string,
+  /** Whose build it is: the workflow resource's ID. */
+  whose: string
 ): Promise<CompiledBuild> => {
   const generated = generateWorkflow(checked);
   if (!generated.ok) {
@@ -229,7 +231,11 @@ export const compileWorkflow = async (
     built = await withinBuildWait(
       env,
       async () =>
-        await buildOpenWorkflow(env, { [openWorkflowEntry]: generated.source })
+        await buildOpenWorkflow(
+          env,
+          { [openWorkflowEntry]: generated.source },
+          whose
+        )
     );
   } catch (error) {
     // A refusal of the platform's own (no bounded compiler here) stays one.

@@ -101,7 +101,7 @@ const builtScreens = async (
     version,
     await versionFiles(env, app, version)
   );
-  const codeOf = await versionScreens(env, files, version);
+  const codeOf = await versionScreens(env, files, version, app);
   const built = await Promise.all(
     screensIn(new Map(Object.entries(files))).map(async (name) => {
       const { screen, artifact } = await codeOf(name);
@@ -153,7 +153,7 @@ const reviewedBuilds = async (
   };
   let codeOf: VersionScreens | null;
   try {
-    codeOf = await versionScreens(env, files, version);
+    codeOf = await versionScreens(env, files, version, app);
   } catch (error) {
     codeOf = noted(error);
   }
