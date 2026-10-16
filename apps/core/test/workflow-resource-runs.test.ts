@@ -1,5 +1,7 @@
-import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { sha256Hex, sha256HexOfBytes } from "@grasp-os/shared/encoding";
+import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import { canonicalJson } from "@grasp-os/shared/json";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Role } from "@grasp-os/shared/roles";
 import {
@@ -122,6 +124,73 @@ const published = async (by: Acting, definition: (name: string) => string) => {
     basedOn: null,
   });
   return workflow;
+};
+
+/**
+ * Seals `code` as version 1 of workflow `id`'s generated module, as if the
+ * compiler had made it: its artifact, the build's identity and the
+ * manifest's hash all made to match, past the records' immutability.
+ */
+const forgedModule = async (id: string, code: string): Promise<void> => {
+  const row = await env.DB.prepare(
+    "SELECT manifest FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+  )
+    .bind(id)
+    .first<{ manifest: string }>();
+  const manifest = z
+    .looseObject({
+      build: z.looseObject({
+        generator: z.string(),
+        protocol: z.number(),
+        compilerVersion: z.string(),
+        hash: z.string(),
+        artifacts: z.array(
+          z.looseObject({
+            path: z.string(),
+            sha256: z.string(),
+            bytes: z.number(),
+          })
+        ),
+      }),
+    })
+    .parse(JSON.parse(row?.manifest ?? "{}"));
+  const bytes = new TextEncoder().encode(code);
+  const sha256 = await sha256HexOfBytes(bytes);
+  await env.FILES.put(artifactKey(sha256), bytes);
+  const { build } = manifest;
+  build.artifacts = build.artifacts.map((artifact) =>
+    artifact.path === "modules/app~.grasp~workflow.js"
+      ? { ...artifact, sha256, bytes: bytes.byteLength }
+      : artifact
+  );
+  build.hash = await sha256Hex(
+    canonicalJson({
+      generator: build.generator,
+      protocol: build.protocol,
+      compilerVersion: build.compilerVersion,
+      artifacts: build.artifacts
+        // As workflow-builds.ts names it: not the definition or source map.
+        .filter(
+          ({ path }) =>
+            path !== "source/workflow.json" && path !== "source-map.json"
+        )
+        .map(({ path, sha256: hash, bytes: size }) => ({
+          path,
+          sha256: hash,
+          bytes: size,
+        })),
+    })
+  );
+  const text = canonicalJson(z.json().parse(manifest));
+  await env.DB.batch([
+    env.DB.prepare("DROP TRIGGER workflow_resource_versions_immutable_update"),
+    env.DB.prepare(
+      "UPDATE workflow_resource_versions SET manifest = ?, manifest_hash = ? WHERE workflow_resource_id = ? AND version = 1"
+    ).bind(text, await sha256Hex(text), id),
+    env.DB.prepare(
+      "CREATE TRIGGER workflow_resource_versions_immutable_update BEFORE UPDATE ON workflow_resource_versions BEGIN SELECT RAISE(ABORT, 'workflow_resource_versions are immutable'); END"
+    ),
+  ]);
 };
 
 /** `by` starts version 1 of workflow `id` for Ada, under `key`. */
@@ -343,6 +412,24 @@ describe("runs of JSON workflows", () => {
     expect({ status: run.status, code: run.error?.code }).toStrictEqual({
       status: "failed",
       code: "workflow.version_corrupt",
+    });
+  });
+
+  it("fails a run whose module answers more than a step's result may take, reading none of it", async () => {
+    const by = await builder();
+    const workflow = await published(by, (name) =>
+      definitionOf(name, [{ finish: { set: { status: "done" } } }])
+    );
+    // A module that misbehaves, sealed as if it were the generated one.
+    await forgedModule(
+      workflow.id,
+      `export default { metadata: { profile: "grasp-open-workflow/1" }, run: async () => ({ status: "x".repeat(${2 * platformLimits.stepPayloadBytes}) }) };`
+    );
+    const { runId } = await start(by, workflow.id);
+    const run = await ended(by, workflow.id, runId);
+    expect({ status: run.status, code: run.error?.code }).toStrictEqual({
+      status: "failed",
+      code: "workflow.output_invalid",
     });
   });
 

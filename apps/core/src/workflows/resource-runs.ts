@@ -39,6 +39,8 @@ import { countedStep, fromIsolate, settle, stepLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import {
+  boundedJson,
+  maxResultBytes,
   openRunMain,
   openRunModule,
   resourceAttemptMethods,
@@ -592,15 +594,27 @@ const loadedRun = async (
 };
 
 /**
- * `value` if it is what the version's output schema (`descriptor`) takes,
- * by the SDK's own validator; `workflow.output_invalid` otherwise.
+ * `value`, from the isolate, if it is what the version's output schema
+ * (`descriptor`) takes, by the SDK's own validator, and within what a
+ * step's result may take, before and after its defaults are filled in:
+ * the module's own result, never read past that bound, as a task's isn't
+ * (resource-host.ts). `workflow.output_invalid` otherwise.
  */
 const acceptedOutput = (descriptor: string, value: unknown): unknown => {
-  const checked = schemaFromDescriptor(descriptor)["~standard"].validate(value);
+  const bounded = boundedJson(value, maxResultBytes);
+  if (!bounded.ok) {
+    throw workflowResourceErrors.create("workflow.output_invalid");
+  }
+  const checked = schemaFromDescriptor(descriptor)["~standard"].validate(
+    bounded.value
+  );
   if ("then" in checked || checked.issues !== undefined) {
     throw workflowResourceErrors.create("workflow.output_invalid");
   }
   // As the validator answered it: its defaults filled in.
+  if (!boundedJson(checked.value, maxResultBytes).ok) {
+    throw workflowResourceErrors.create("workflow.output_invalid");
+  }
   return checked.value;
 };
 

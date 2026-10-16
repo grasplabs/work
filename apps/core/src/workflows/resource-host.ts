@@ -176,7 +176,8 @@ const stepConfig = {
   timeout: maxAttemptTimeoutMs,
 };
 
-const maxResultBytes = platformLimits.stepPayloadBytes;
+/** What one step's result, or a run's output, may take as JSON. */
+export const maxResultBytes = platformLimits.stepPayloadBytes;
 
 /**
  * What a step captures may take as JSON: its input and context, each at
@@ -190,7 +191,7 @@ const maxCapturedBytes = 2 * platformLimits.stepPayloadBytes + 64;
  * bound (or a small graph of shared references that expands past it) costs
  * core no more than that much. Why it isn't, otherwise.
  */
-const boundedJson = (
+export const boundedJson = (
   value: unknown,
   maxBytes: number
 ):
