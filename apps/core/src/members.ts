@@ -1,12 +1,11 @@
 import type { AuditEntry } from "@grasp-os/shared/audit";
-import { actorOf } from "@grasp-os/shared/audit";
+import { actorOf, createAuditEvent } from "@grasp-os/shared/audit";
 import {
   disconnectPersonalMaxOwners,
   oauthFlowLifetimeMs,
 } from "@grasp-os/shared/connect";
 import type { CodedError } from "@grasp-os/shared/errors";
-import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
-import type { AppId } from "@grasp-os/shared/ids";
+import { identifierSchema } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type { Invitation, Member, MembersApi } from "@grasp-os/shared/members";
@@ -23,13 +22,15 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { revocationsOf, tellKept } from "./access-revocations.ts";
+import type { KeptRevocation } from "./access-revocations.ts";
+import { appsOwnedOrSharedNow } from "./app-access.ts";
 import {
-  accessMayHaveDropped,
-  appsSharedWithAnyone,
-  withRetries,
-} from "./access-revocations.ts";
-import { appsFoundBy } from "./app-access.ts";
-import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
+  auditedBatch,
+  outboxedEventWhere,
+  outboxedIfChanged,
+  storedEvent,
+} from "./audit-outbox.ts";
 import {
   activeAdminExists,
   activeMember,
@@ -40,11 +41,9 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
-import { teamsOf } from "./auth/identity.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
-  apps,
   invitations,
   memberRemovals,
   members,
@@ -123,87 +122,27 @@ const membershipOf = async (
 
 /**
  * The Apps `userId` has a role in as a member in role `role`, with the
- * teams they are in now (app-access.ts): what removing them or lowering
- * their role can take away, for those Apps' hosts to tell their open
- * screens (access-revocations.ts). Read before the change.
+ * teams they are in when the statement runs, as a condition on `apps`
+ * (`revocationsOf`): what lowering their role can take away, for those
+ * Apps' hosts to tell their open screens (access-revocations.ts). Every
+ * App for an admin; a role that isn't ours reaches nothing.
  */
-const appsReachedBy = async (
-  env: Env,
-  userId: string,
-  role: string
-): Promise<AppId[]> => {
+const reachedAs = (userId: string, role: string): SQL | undefined => {
   const known = roleSchema.safeParse(role);
   if (!known.success) {
-    return [];
+    return sql`0`;
   }
-  const rows = await drizzle(env.DB)
-    .select({ id: apps.id })
-    .from(apps)
-    .where(
-      appsFoundBy(env, {
-        userId,
-        role: known.data,
-        teams: await teamsOf(env.DB, userId),
-      })
-    );
-  return rows.map(({ id }) => appIdSchema.parse(id));
+  return isAdmin(known.data) ? undefined : appsOwnedOrSharedNow(userId);
 };
 
 /**
- * `appsReachedBy`, read before a change, or `undefined` when that read
- * fails: the change goes ahead all the same, and `tellReached` makes up
- * for it.
+ * The Apps `userId` has a role in as the member they are when the
+ * statement runs, in the role and teams they have then, as a condition on
+ * `apps`: what removing them takes away. Read in the removal's own
+ * statement, so a role changed since it was read before can't narrow it.
  */
-const appsReachedBefore = async (
-  env: Env,
-  userId: string,
-  role: string
-): Promise<AppId[] | undefined> => {
-  try {
-    return await appsReachedBy(env, userId, role);
-  } catch (error) {
-    log.error("app.access_revocation_failed", errorFields(error));
-    return undefined;
-  }
-};
-
-/**
- * Tells the Apps `reached` before the change, and those `userId` reaches
- * in role `role` now (an App shared with them while it ran), that their
- * role there may have dropped. Never throws: the change has committed,
- * and what follows it must still run; a second look that fails tells
- * the first look's Apps all the same. When the first look failed
- * (`undefined`), every App shared with anyone is told too: a removal
- * deletes the person's teams, so the look after it can't find the Apps
- * they reached through them.
- *
- * Residual, accepted (GRA-564, follow-up GRA-635): a database away for longer than the
- * looks' retries loses what they would have found, logged. Nothing leaks:
- * every push still checks access first, so nothing new reaches the
- * person; their screen is only cleared later.
- */
-const tellReached = async (
-  env: Env,
-  reached: readonly AppId[] | undefined,
-  userId: string,
-  role: string
-): Promise<void> => {
-  const looks = await Promise.allSettled([
-    withRetries(async () => await appsReachedBy(env, userId, role)),
-    reached === undefined
-      ? withRetries(async () => await appsSharedWithAnyone(env))
-      : Promise.resolve([]),
-  ]);
-  const found: AppId[] = [...(reached ?? [])];
-  for (const look of looks) {
-    if (look.status === "fulfilled") {
-      found.push(...look.value);
-    } else {
-      log.error("app.access_revocation_failed", errorFields(look.reason));
-    }
-  }
-  await accessMayHaveDropped(env, found, [userId]);
-};
+const reachedNow = (userId: string): SQL =>
+  sql`(${activeMember(userId, ["admin"])} OR (${activeMember(userId)} AND ${appsOwnedOrSharedNow(userId)}))`;
 
 /** Whether going from role `from` to `to` can take a role in an App away. */
 const lowers = (from: string, to: Role): boolean =>
@@ -269,23 +208,29 @@ const listMembers = async (env: Env, by: Identity): Promise<Member[]> => {
  * still is one, checked in the same statement, so a removal racing any
  * other change of membership or role (see `setMemberRole`) never leaves
  * the organization without an admin: the admin making it is never the one
- * removed. Everything after it runs only once the marker is there.
- * Returns whether this call removed them.
+ * removed. Everything after it runs only once the marker is there. Before
+ * it, under the same condition, a revocation is kept for every App they
+ * reached, in the role and through the teams they had then.
+ * Returns whether this call removed them, and the revocations it kept.
  */
 const recordRemoval = async (
   env: Env,
   by: Identity,
   userId: string,
   memberId: string
-): Promise<boolean> => {
+): Promise<{ removed: boolean; kept: KeptRevocation[] }> => {
   const db = drizzle(env.DB);
   const removed = sql`NOT ${notRemoved(userId)}`;
-  const [inserted] = await auditedBatch(env, db, [
+  const removing = sql`${activeMember(userId)} AND ${isActiveAdmin(by.userId)}`;
+  const [kept, inserted] = await auditedBatch(env, db, [
+    // First, under the marker's own condition, while their membership and
+    // teams are still there to say what they reached.
+    revocationsOf(db, reachedNow(userId), [userId], removing),
     db
       .insert(memberRemovals)
       .select(
         sql`SELECT ${organizationId}, ${userId}, ${Date.now()}, NULL
-          WHERE ${activeMember(userId)} AND ${isActiveAdmin(by.userId)}`
+          WHERE ${removing}`
       )
       .onConflictDoNothing()
       .returning({ userId: memberRemovals.userId }),
@@ -305,7 +250,7 @@ const recordRemoval = async (
       .delete(notifications)
       .where(and(eq(notifications.personId, userId), removed)),
   ]);
-  return inserted.length > 0;
+  return { removed: inserted.length > 0, kept };
 };
 
 /**
@@ -380,18 +325,18 @@ const removeMember = async (
   const target = targetOf(by, userId);
   const membership = await membershipOf(env, target);
   if (membership) {
-    const removedNow = await recordRemoval(env, by, target, membership.id);
+    const { removed, kept } = await recordRemoval(
+      env,
+      by,
+      target,
+      membership.id
+    );
     // Someone else's removal of them may have landed first; otherwise the
     // admin stopped being one since their session was checked.
-    if (!(removedNow || (await isRemoved(env, target)))) {
+    if (!(removed || (await isRemoved(env, target)))) {
       throw refusal(by, roleErrors.create("role.forbidden"));
     }
-    if (removedNow) {
-      // Every App shared with anyone, not only those a look before found:
-      // the removal deletes their teams, one joined meanwhile included,
-      // so no look before or after it finds every App they reached.
-      await tellReached(env, undefined, target, membership.role);
-    }
+    await tellKept(env, kept);
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
@@ -467,13 +412,29 @@ const setMemberRole = async (
   if (membership.role === newRole) {
     return;
   }
-  const reached = lowers(membership.role, newRole)
-    ? await appsReachedBefore(env, target.data, membership.role)
-    : [];
   const db = drizzle(env.DB);
   const keepsAnAdmin =
     newRole === "admin" ? sql`1` : activeAdminExists(target.data);
-  const [[changed]] = await auditedBatch(env, db, [
+  const event = createAuditEvent(
+    {
+      actor: actorOf(by),
+      action: "member.role.updated",
+      target: { type: "member", id: membership.id },
+      detail: {
+        userId: target.data,
+        previousRole: membership.role,
+        role: newRole,
+      },
+    },
+    "core"
+  );
+  // The Apps they reached in the role they had, kept in the change's
+  // batch so that a database away after it loses none of them; none when
+  // the new role takes nothing away.
+  const reached = lowers(membership.role, newRole)
+    ? reachedAs(target.data, membership.role)
+    : sql`0`;
+  const [[changed], , kept] = await auditedBatch(env, db, [
     db
       .update(members)
       .set({ role: newRole })
@@ -486,21 +447,11 @@ const setMemberRole = async (
         )
       )
       .returning({ id: members.id }),
-    outboxedIfChanged(db, {
-      actor: actorOf(by),
-      action: "member.role.updated",
-      target: { type: "member", id: membership.id },
-      detail: {
-        userId: target.data,
-        previousRole: membership.role,
-        role: newRole,
-      },
-    }),
+    outboxedEventWhere(db, event, sql`changes() > 0`),
+    revocationsOf(db, reached, [target.data], storedEvent(event.id)),
   ]);
   if (changed) {
-    if (lowers(membership.role, newRole)) {
-      await tellReached(env, reached, target.data, membership.role);
-    }
+    await tellKept(env, kept);
     return;
   }
   const now = await membershipOf(env, target.data);
