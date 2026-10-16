@@ -25,6 +25,10 @@ const ended = (trace: WorkflowRunTrace): boolean =>
   trace.status === "failed" ||
   trace.status === "cancelled";
 
+/** Ended, or nothing more of it is shown: no need to read it again. */
+const settled = (trace: WorkflowRunTrace): boolean =>
+  ended(trace) || trace.detailsRemoved;
+
 export const TestRun = ({
   workflow,
   version,
@@ -59,8 +63,7 @@ export const TestRun = ({
         }
         setTrace(read);
         setFailure(undefined);
-        // Ended, or nothing more of it is shown: no need to read again.
-        if (!(ended(read) || read.detailsRemoved)) {
+        if (!settled(read)) {
           timer = setTimeout(() => {
             void follow();
           }, followMs);
