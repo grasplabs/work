@@ -40,4 +40,8 @@ export const agentErrors = defineErrorFamily({
     "This build job was cancelled, so it does nothing more.",
   "agent.job_revoked":
     "A permission of this chat's agent was revoked since this build job was submitted, so it does nothing more.",
+  "agent.build_queue_full":
+    "As many build jobs of this person, or of this App, are already waiting for their turn as may wait at once. Submit it again once some have built.",
+  "agent.build_queue_timeout":
+    "This build job waited an hour for its turn to build and didn't get one. Submit it again later.",
 });

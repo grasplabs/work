@@ -32,6 +32,7 @@ import { workflowErrors } from "@grasp-os/shared/workflows";
 import type { WorkflowCalls } from "@grasp-os/shared/workflows";
 import { waitUntil } from "cloudflare:workers";
 import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -855,7 +856,13 @@ export const proposeDraft = async (
   { parent, files }: DraftOverLatest,
   message: unknown,
   /** Admits the write, called right before it is committed: throws to refuse it. */
-  admit?: () => Promise<void>
+  admit?: () => Promise<void>,
+  /**
+   * Statements the write's own transaction opens and closes with: one the
+   * database refuses fails the whole write (a build job's lease, build-
+   * admission.ts).
+   */
+  fence?: { open: BatchItem<"sqlite">; close: BatchItem<"sqlite"> }
 ): Promise<AppVersion> => {
   const { id: appId } = await appFor(env, by, app, "builder");
   const text = appErrors.parse("app.invalid", commitMessageSchema, message);
@@ -891,7 +898,7 @@ export const proposeDraft = async (
   try {
     // Admitted last, with nothing slow left before the write.
     await admit?.();
-    await auditedBatch(env, db, [
+    const write = [
       db.insert(appVersions).values(row),
       outboxed(
         db,
@@ -912,7 +919,10 @@ export const proposeDraft = async (
           version: row.version,
         })
       ),
-    ]);
+    ] as const;
+    await (fence === undefined
+      ? auditedBatch(env, db, write)
+      : auditedBatch(env, db, [fence.open, ...write, fence.close]));
   } catch (error) {
     if (isUniqueViolation(error)) {
       throw appErrors.create("app.conflict");

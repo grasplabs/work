@@ -242,7 +242,19 @@ export interface BuildJobView {
   app: string;
   /** The draft's revision it was submitted for. */
   revision: number;
-  status: "running" | "completed" | "failed" | "cancelled" | "revoked";
+  /**
+   * `queued` while it runs but waits for its turn to build: a share of the
+   * client's builds, or of its App's (build-admission.ts).
+   */
+  status:
+    | "running"
+    | "queued"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "revoked";
+  /** What it waits for while queued, and when it asks again at the latest. */
+  queued: { waitingFor: "client" | "person" | "key"; retryAt: string } | null;
   /** What it came to, once completed: a check, or a proposal. */
   result: unknown;
   /** The version it proposed, its receipt, whatever happened after. */
@@ -253,8 +265,14 @@ export interface BuildJobView {
 
 const storedErrorSchema = z.object({ code: z.string(), message: z.string() });
 
-/** A job's record as its chat's code reads it. */
-export const jobView = (job: BuildJobRow): BuildJobView => {
+/**
+ * A job's record as its chat's code reads it, with its wait for a share,
+ * if it runs and waits for one (`queued`).
+ */
+export const jobView = (
+  job: BuildJobRow,
+  queued: BuildJobView["queued"] = null
+): BuildJobView => {
   // Core wrote both as JSON (`end`): the result is a check or a proposal.
   const result: unknown = job.result === null ? null : JSON.parse(job.result);
   const error: unknown = job.error === null ? null : JSON.parse(job.error);
@@ -263,7 +281,8 @@ export const jobView = (job: BuildJobRow): BuildJobView => {
     kind: job.kind,
     app: appIdSchema.parse(job.appId),
     revision: job.revision,
-    status: job.status,
+    status: job.status === "running" && queued !== null ? "queued" : job.status,
+    queued: job.status === "running" ? queued : null,
     result,
     version: job.version,
     error: error === null ? null : storedErrorSchema.parse(error),
