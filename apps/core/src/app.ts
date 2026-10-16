@@ -1737,6 +1737,48 @@ export class App extends DurableObject<Env> {
   }
 
   /**
+   * Counts one statistics `use` of a sealed function's statistics resource
+   * (resource-statistics.ts) against the App's minute: the same minute
+   * `claimStatistic` counts, all the App's calls together, so the bound
+   * holds whichever path records or reads. `statistics.rate_limited` past
+   * it. Each call's own bound is core's (the invocation's counts).
+   */
+  claimStatisticMinute(use: StatisticUse): void {
+    const minute = Math.floor(Date.now() / 60_000);
+    if (this.#statisticsMinute.minute !== minute) {
+      this.#statisticsMinute = { minute, point: 0, read: 0 };
+    }
+    const { perCall, perMinute } = statisticLimitsOf(
+      use,
+      use === "point"
+        ? this.env.STATISTICS_POINT_LIMITS
+        : this.env.STATISTICS_READ_LIMITS
+    );
+    if (this.#statisticsMinute[use] >= perMinute) {
+      throw statisticErrors.create("statistics.rate_limited", {
+        use,
+        perCall,
+        perMinute,
+      });
+    }
+    this.#statisticsMinute[use] += 1;
+  }
+
+  /**
+   * Whether a sealed function's platform read refused past its bounds is
+   * the App's first in this minute, the one audited (`limitedReadAudit`,
+   * whose minute it shares), so a loop can't flood the audit log.
+   */
+  limitedReadAuditDue(): boolean {
+    const minute = Math.floor(Date.now() / 60_000);
+    if (this.#limitedAuditMinute === minute) {
+      return false;
+    }
+    this.#limitedAuditMinute = minute;
+    return true;
+  }
+
+  /**
    * Stops the App's server code after its permissions changed: the next
    * call starts it again in a new isolate, with an env as the permissions
    * are then. Calls running now fail.

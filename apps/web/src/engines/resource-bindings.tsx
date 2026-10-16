@@ -94,6 +94,7 @@ const kindLabels: Readonly<
   knowledge: msg`Knowledge`,
   template: msg`Template`,
   store: msg`Store`,
+  statistics: msg`Statistics`,
 };
 
 const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
@@ -197,6 +198,17 @@ const BoundTo = ({
     const { permissionId: permission } = target;
     return <Trans>Permission {permission}</Trans>;
   }
+  if (target.kind === "statistics") {
+    const { permissionId: permission } = target;
+    return permission === undefined ? (
+      <Trans>The domain&apos;s own statistics</Trans>
+    ) : (
+      <Trans>
+        The domain&apos;s own statistics, and the platform&apos;s under
+        permission {permission}
+      </Trans>
+    );
+  }
   if (target.kind === "connector") {
     // Core names the bound connection for everyone who reads the review,
     // while they can see it; its permission otherwise.
@@ -297,6 +309,12 @@ const NothingToChoose = ({
       <Trans>
         None of the domain&apos;s store permissions serves every operation it
         declares, exactly as declared. Grant one first.
+      </Trans>
+    ),
+    statistics: (
+      <Trans>
+        The domain has no permission to read the platform&apos;s statistics.
+        Grant one first.
       </Trans>
     ),
   };
@@ -541,6 +559,19 @@ const BindForm = ({
           ))}
         </Choice>
       ) : null}
+      {choices.kind === "statistics" && choices.platform ? (
+        <Choice
+          label={t`Permission for the platform's statistics`}
+          onChange={setPicked}
+          value={picked}
+        >
+          {choices.permissions.map(({ permissionId: permission }) => (
+            <NativeSelectOption key={permission} value={permission}>
+              {t`Permission ${permission}`}
+            </NativeSelectOption>
+          ))}
+        </Choice>
+      ) : null}
       {choices.kind === "template" ? (
         <Choice label={t`Template version`} onChange={setPicked} value={picked}>
           {choices.versions.map((published) => {
@@ -734,7 +765,8 @@ const Revoke = ({
 
 /** What `resource` declares, as a list of terms. */
 const Declared = ({ resource }: { resource: DeclaredResource }) => {
-  const { contract, actions, operations, collections, usedBy } = resource;
+  const { contract, actions, operations, collections, measures, usedBy } =
+    resource;
   const tokens = resource.maxOutputTokens;
   return (
     <dl className="flex flex-col gap-1">
@@ -751,6 +783,11 @@ const Declared = ({ resource }: { resource: DeclaredResource }) => {
       )}
       {collections.length === 0 ? null : (
         <Term term={<Trans>Collections</Trans>}>{formatList(collections)}</Term>
+      )}
+      {measures.length === 0 ? null : (
+        <Term term={<Trans>Platform measures</Trans>}>
+          <span className="font-mono">{formatList(measures)}</span>
+        </Term>
       )}
       {tokens === null ? null : (
         <Term term={<Trans>Output</Trans>}>

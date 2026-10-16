@@ -46,6 +46,7 @@ import type {
 } from "@grasp-os/shared/operations";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { mintRecordId } from "@grasp-os/shared/record-ids";
+import { statisticMaxGroups } from "@grasp-os/shared/statistics";
 import {
   readRequestSchema,
   writeRequestSchema,
@@ -1203,6 +1204,63 @@ const knowledgeDocumentSchema = z.strictObject({
 });
 
 /**
+ * Whether a statistics read of `query` reads one of the App's own measures,
+ * or a platform measure `declaration` lists. Anything else it names, a
+ * measure that isn't one or none, is left to the read's own check.
+ */
+const readsDeclaredMeasure = (
+  declaration: Extract<AnyResource, { "~resource": "statistics" }>,
+  query: JsonObject
+): boolean => {
+  const { measure } = query;
+  return (
+    typeof measure !== "string" ||
+    !measure.startsWith("platform.") ||
+    declaration.platform.some((declared) => declared === measure)
+  );
+};
+
+/**
+ * Whether `method` with `args` is one of the operations a statistics
+ * `declaration` declares, with one object: a point, or a query of the
+ * App's own measures or of a platform measure (any `platform.` one: an
+ * App's own has no dot) it lists.
+ */
+const allowsStatistics = (
+  declaration: Extract<AnyResource, { "~resource": "statistics" }>,
+  method: unknown,
+  args: readonly Json[]
+): boolean => {
+  const [first] = args;
+  return (
+    (method === "record" || method === "read") &&
+    declaration.operations.some((operation) => operation === method) &&
+    args.length === 1 &&
+    isJsonObject(first) &&
+    (method === "record" || readsDeclaredMeasure(declaration, first))
+  );
+};
+
+/** What a statistics read answers, checked as the contract allows it. */
+const statisticGroupSchema = z.strictObject({
+  dimensions: z.record(z.string(), z.string().nullable()),
+  count: z.number(),
+  sum: z.number(),
+  min: z.number(),
+  max: z.number(),
+});
+
+const statisticAnswerSchema = z.strictObject({
+  measure: z.string(),
+  from: z.string(),
+  to: z.string(),
+  groups: z.array(statisticGroupSchema).max(statisticMaxGroups),
+  truncated: z.boolean(),
+  unavailable: z.array(z.string()).optional(),
+  computation: z.string().nullable().optional(),
+});
+
+/**
  * Whether `method` with `args` is a `call` of one name `declares`, with an
  * object of arguments: a connector's action, a store's operation.
  */
@@ -1262,6 +1320,8 @@ const allowedRequest = (
     allowed = isNamedCall(method, args, (path) =>
       Object.hasOwn(operations, path)
     );
+  } else if (declaration["~resource"] === "statistics") {
+    allowed = allowsStatistics(declaration, method, args);
   } else {
     allowed = method === "read" && args.length === 0;
   }
@@ -1314,6 +1374,11 @@ const checkedResourceResult = (
     valid = (
       method === "search" ? knowledgeHitsSchema : knowledgeDocumentSchema
     ).safeParse(result).success;
+  } else if (declaration["~resource"] === "statistics") {
+    valid =
+      method === "record"
+        ? result === null
+        : statisticAnswerSchema.safeParse(result).success;
   } else if (declaration["~resource"] === "template") {
     valid = z
       .strictObject({
@@ -1364,6 +1429,12 @@ const exhaustedDetailsSchema = z.object({
     .int()
     .positive()
     .max(31 * 24 * 60 * 60),
+});
+
+/** Which bound of a resource's a request reached, and when to ask again. */
+const limitDetailsSchema = z.strictObject({
+  limit: z.enum(["call", "minute", "day"]),
+  retryAfterSeconds: z.int().positive().max(60).optional(),
 });
 
 /** What a binding's adapter may refuse a request with, in the host's words. */
@@ -1427,6 +1498,18 @@ const providerFailure = (error: unknown, requestId: string): Error => {
       operationErrors.create(
         code,
         busyDetails(isExpectedError(error) ? error.details : undefined)
+      )
+    );
+  }
+  // A bound of the resource's reached: which one, and for a minute's, when
+  // it starts again, the only details passed on.
+  if (code === "resource.limit_reached") {
+    return hostError(
+      operationErrors.create(
+        code,
+        limitDetailsSchema.safeParse(
+          isExpectedError(error) ? error.details : undefined
+        ).data
       )
     );
   }

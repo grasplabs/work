@@ -175,6 +175,25 @@ export interface BindingCaller {
    * before that commit.
    */
   readonly admit?: () => Promise<unknown>;
+  /**
+   * For a workflow run's call: the step it was made from, by the step's
+   * idempotency key and the attempt (its lease ID, never the isolate's),
+   * which statistics points it records are kept by until that attempt
+   * completes the step (statistics.ts, `recordStatistic`). `recording`
+   * runs before a point is kept, so the step adds them up then.
+   */
+  readonly step?: {
+    readonly key: string;
+    readonly attempt: string;
+    readonly recording: () => void;
+  };
+  /**
+   * What the invocation has used of the bounds an adapter holds it to per
+   * invocation, by the adapter's own names (resource-statistics.ts): one
+   * map for the whole invocation, whichever of its requests resolved its
+   * binding (`resourceBindingsFor` makes it).
+   */
+  readonly counts?: Map<string, number>;
 }
 
 /** A declaration of one kind, as an adapter is given it. */

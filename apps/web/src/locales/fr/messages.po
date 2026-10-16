@@ -4496,6 +4496,10 @@ msgstr "Autorisation"
 msgid "Permission {permission}"
 msgstr "Autorisation {permission}"
 
+#: src/engines/resource-bindings.tsx
+msgid "Permission for the platform's statistics"
+msgstr "Autorisation pour les statistiques de la plateforme"
+
 #: src/chat/builds.tsx
 msgid "Permissions asked for"
 msgstr "Autorisations demandées"
@@ -4512,6 +4516,10 @@ msgstr "Personne"
 #: src/brain/brain-atlas.ts
 msgid "Plans and goals"
 msgstr "Plans et objectifs"
+
+#: src/engines/resource-bindings.tsx
+msgid "Platform measures"
+msgstr "Mesures de la plateforme"
 
 #: src/activity/pending.tsx
 msgid "Platform statistics. This domain can read run and signal counts for every domain, and may show them to anyone who uses it"
@@ -5546,6 +5554,10 @@ msgstr "Affirmation"
 msgid "Statements"
 msgstr "Affirmations"
 
+#: src/engines/resource-bindings.tsx
+msgid "Statistics"
+msgstr "Statistiques"
+
 #: src/connections/connection-list.tsx
 #: src/engines/package-approvals.tsx
 #: src/engines/screen-approval.tsx
@@ -5939,6 +5951,10 @@ msgid "The domain has no permission to read a collection. Grant one first."
 msgstr "Le domaine n'a aucune autorisation de lire une collection. Accordez-en une d'abord."
 
 #: src/engines/resource-bindings.tsx
+msgid "The domain has no permission to read the platform's statistics. Grant one first."
+msgstr "Le domaine n'a aucune autorisation de lire les statistiques de la plateforme. Accordez-en une d'abord."
+
+#: src/engines/resource-bindings.tsx
 msgid "The domain has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
 msgstr "Le domaine a trop d'intégrations pour toutes les vérifier sur cette page : cette liaison n'a donc pas été vérifiée. Sa prochaine requête est vérifiée comme toujours."
 
@@ -5961,6 +5977,14 @@ msgstr "La version actuelle du domaine ne déclare aucune ressource pour ses act
 #: src/engines/resource-bindings.tsx
 msgid "The domain's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again."
 msgstr "La prochaine requête du domaine qui passe par elle est refusée, et les actions qui l'attendent sont abandonnées. Liez-la à nouveau pour l'utiliser de nouveau."
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain's own statistics"
+msgstr "Les statistiques propres au domaine"
+
+#: src/engines/resource-bindings.tsx
+msgid "The domain's own statistics, and the platform's under permission {permission}"
+msgstr "Les statistiques propres au domaine, et celles de la plateforme sous l'autorisation {permission}"
 
 #: src/chat/builds.tsx
 msgid "The domains this chat builds didn't load."
