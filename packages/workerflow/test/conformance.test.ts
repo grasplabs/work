@@ -10,6 +10,8 @@ import { env } from "cloudflare:workers";
 import type {
   WorkflowEvent as ReferenceEvent,
   WorkflowInstanceStatus as ReferenceStatus,
+  WorkflowDelayFunction as ReferenceDelayFunction,
+  WorkflowRollbackContext as ReferenceRollbackContext,
   WorkflowStep as ReferenceStep,
   WorkflowStepContext as ReferenceContext,
 } from "cloudflare:workers";
@@ -17,7 +19,9 @@ import { describe, expect, expectTypeOf, test } from "vite-plus/test";
 
 import type {
   InstanceStatus,
+  WorkflowDelayFunction,
   WorkflowEvent,
+  WorkflowRollbackContext,
   WorkflowStep,
   WorkflowStepContext,
 } from "../src/contracts.ts";
@@ -144,6 +148,24 @@ const checks: Record<Family, () => void> = {
     });
   },
   "step-context": () => {
+    test("Workerflow's step and contexts are Cloudflare's, by delay kind: a static delay's context has its delay, a delay function's has none", () => {
+      expectTypeOf<WorkflowStepContext>().toExtend<ReferenceContext>();
+      expectTypeOf<WorkflowStepContext<WorkflowDelayFunction>>().toExtend<
+        ReferenceContext<ReferenceDelayFunction>
+      >();
+      expectTypeOf<WorkflowStepContext["config"]["retries"]>().toHaveProperty(
+        "delay"
+      );
+      expectTypeOf<
+        WorkflowStepContext<WorkflowDelayFunction>["config"]["retries"]
+      >().not.toHaveProperty("delay");
+      expectTypeOf<WorkflowRollbackContext>().toExtend<ReferenceRollbackContext>();
+      expectTypeOf<
+        WorkflowRollbackContext<unknown, WorkflowDelayFunction>
+      >().toExtend<ReferenceRollbackContext<unknown, ReferenceDelayFunction>>();
+      expectTypeOf<WorkflowStep>().toExtend<ReferenceStep>();
+    });
+
     test("occurrences of a name count from 1, attempts count from 1 across retries, and a given config comes back resolved", async () => {
       const { reference, engine } = await ran("context");
       const shared = (output: unknown): unknown => ({
@@ -673,27 +695,6 @@ const checks: Record<Family, () => void> = {
 };
 
 const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
-  "context-type": async () => {
-    expectTypeOf<WorkflowStepContext["step"]>().toExtend<
-      ReferenceContext["step"]
-    >();
-    // A static delay's context always has its delay on Cloudflare's type;
-    // Workerflow's one context type leaves it optional, for a delay
-    // function's context. So its step type isn't Cloudflare's either.
-    expectTypeOf<
-      NonNullable<WorkflowStepContext["config"]["retries"]>
-    >().not.toExtend<NonNullable<ReferenceContext["config"]["retries"]>>();
-    expectTypeOf<WorkflowStep>().not.toExtend<ReferenceStep>();
-    // At run time both give a static delay's context its delay.
-    const { reference, engine } = await ran("context");
-    const delayOf = (output: unknown): unknown =>
-      field(
-        field(field(field(output, "attempts"), "config"), "retries"),
-        "delay"
-      );
-    expect(delayOf(engine.output)).toBe(10);
-    expect(delayOf(reference.output)).toBe(10);
-  },
   "default-retry-delay": async () => {
     const { reference, engine } = await ran("context");
     expect(

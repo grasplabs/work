@@ -20,11 +20,11 @@
 // engine Wrangler ships (miniflare's) waits 1 second instead; the
 // documented value is the one this profile takes.
 import type {
+  AnyWorkflowRollbackContext,
+  AnyWorkflowStepContext,
   WorkflowBackoff,
   WorkflowDelayFunction,
   WorkflowDuration,
-  WorkflowRollbackContext,
-  WorkflowStepContext,
 } from "./contracts.ts";
 import { maxWaitMs, parseDuration } from "./durations.ts";
 
@@ -94,7 +94,7 @@ export const maxStepTimeoutMs = handlerBudgetMs;
 /** How long a dynamic delay function may take to say its delay. */
 export const delayFunctionTimeoutMs = 5000;
 
-export type StepWork = (context: WorkflowStepContext) => unknown;
+export type StepWork = (context: AnyWorkflowStepContext) => unknown;
 
 /** A step's config as the engine runs it. */
 export interface StepConfig {
@@ -116,13 +116,13 @@ export interface StepConfig {
    */
   readonly journal: string;
   /** What the step's callback is told, as Cloudflare tells it. */
-  readonly context: WorkflowStepContext["config"];
+  readonly context: AnyWorkflowStepContext["config"];
   /** Whether the step registered a rollback. */
   readonly rollback: boolean;
 }
 
 /** A rollback as a step registers it. */
-export type RollbackWork = (context: WorkflowRollbackContext) => unknown;
+export type RollbackWork = (context: AnyWorkflowRollbackContext) => unknown;
 
 export interface StepCall {
   readonly work: StepWork;
