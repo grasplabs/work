@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
@@ -11,21 +12,69 @@ import type { Person } from "./people.ts";
 // nothing), and the run goes on with their answer. Anyone else who opens the same link
 // only sees that it isn't for them.
 
-/** Keeps each ask's recipients, as a workflow that mails them would. */
-const server = `import { DurableObject } from "cloudflare:workers";
+/**
+ * Keeps each ask's recipients, as a workflow that mails them would, in the
+ * App's store: its `remember` mutation, and a screen that shows the last
+ * ones kept.
+ */
+const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export class App extends DurableObject {
-  remember(_caller, recipients) {
-    this.ctx.storage.kv.put("recipients", recipients);
-  }
+export default defineSchema({
+  asks: defineTable({ recipients: v.string().max(16_000) }).index("by_created", ["_createdAt"]),
+});
+`;
 
-  recipients(_caller) {
-    return this.ctx.storage.kv.get("recipients") ?? [];
-  }
+const operations = `import { v } from "@grasp-os/sdk";
+import { mutation, query } from "#grasp/server";
+
+export const remember = mutation({
+  args: { recipients: v.string().max(16_000) },
+  returns: v.id("asks"),
+  handler: async (ctx, args) => await ctx.db.insert("asks", args),
+});
+
+/** The recipients the newest ask kept, as JSON text: "[]" before any. */
+export const recipients = query({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) =>
+    (await ctx.db.query("asks").withIndex("by_created").order("desc").take(1)).at(0)?.recipients ?? "[]",
+});
+`;
+
+const registration = `import { app } from "@grasp-os/sdk";
+import { recipients, remember } from "./operations/asks.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Approvals",
+  schema,
+  access: { tables: { asks: { read: "appMembers", write: "appMembers" } } },
+  operations: { asks: { remember, recipients } },
+  internalOperations: {},
+  screens: [{ name: "asks", path: "/", source: "screens/asks.tsx" }],
+  uses: [],
+});
+`;
+
+const screen = `import { useQuery } from "@grasp-os/sdk/react";
+import { api } from "#grasp";
+
+export default function Asks() {
+  const recipients = useQuery(api.asks.recipients, {});
+  return (
+    <main className="p-4">
+      <h1>Asks</h1>
+      <output aria-label="Recipients">{recipients ?? ""}</output>
+    </main>
+  );
 }
 `;
 
 const approval = `import { workflow, z } from "@grasp-os/sdk/workflow";
+
+/** The App's \`remember\`, as the ask names it. */
+const remember = { contractId: "asks.remember", kind: "mutation" } as const;
 
 export default workflow(
   "approval",
@@ -35,7 +84,10 @@ export default workflow(
       description: "Approve invoice INV-7",
       from: input.from,
       ask: async ({ recipients }) => {
-        await env.APP.call("remember", recipients);
+        const kept = await env.APP.callFunction(remember, { recipients: JSON.stringify(recipients) });
+        if (!kept.ok) {
+          throw kept.error;
+        }
       },
       timeout: "7 days",
     })
@@ -65,7 +117,7 @@ export default workflowTests(approval, [
  */
 const pageRead = { timeout: 15_000 };
 
-/** The first recipient's link, from what the App's server kept. */
+/** The first recipient's link, from what the App kept. */
 const linkIn = (recipients: unknown): string => {
   const first: unknown = Array.isArray(recipients) ? recipients.at(0) : null;
   return typeof first === "object" &&
@@ -76,8 +128,11 @@ const linkIn = (recipients: unknown): string => {
     : "";
 };
 
-/** Starts a run that asks `decider`; returns it and the link they got. */
-const askedFor = async (builder: Person, decider: Person) => {
+/**
+ * Starts a run that asks `decider`; returns it and the link they got, read
+ * on the App's screen as `builder` sees it on `page`.
+ */
+const askedFor = async (builder: Person, decider: Person, page: Page) => {
   const { core, api } = apiOf(builder);
   try {
     const { id: app } = await api.apps.create({ name: "Approvals" });
@@ -85,20 +140,36 @@ const askedFor = async (builder: Person, decider: Person) => {
       api,
       app,
       {
-        "app/server.ts": server,
+        "schema.ts": schema,
+        "operations/asks.ts": operations,
+        "app.ts": registration,
+        "screens/asks.tsx": screen,
         "workflows/approval.ts": approval,
         "workflows/approval.workflow-tests.ts": approvalTests,
       },
       "Approvals"
     );
+    await page.goto(`/domains/${app}/apps/asks/full`);
+    const kept = page
+      .frameLocator('iframe[title="asks app"]')
+      .getByRole("status", { name: "Recipients" });
+    // The screen follows the query from before any ask: nothing kept yet.
+    await expect(kept).toHaveText("[]", { timeout: 20_000 });
+    // Marked, so a reload of the frame or the page would show.
+    const frame = page.frame({ url: /\/screen-frame\?load=/u });
+    await frame?.evaluate(() => {
+      document.body.dataset.sameDocument = "yes";
+    });
     const run = await api.workflows.start(app, "approval", {
       from: `person:${decider.userId}`,
     });
-    let link = "";
-    await expect(async () => {
-      link = linkIn(await api.screens.call(app, "recipients", []));
-      expect(link).toMatch(/\/decisions\/[^?]+$/u);
-    }).toPass({ timeout: 30_000 });
+    // The ask's write reaches the open screen live, without a reload.
+    await expect(kept).toHaveText(/\/decisions\//u, { timeout: 30_000 });
+    expect(
+      await frame?.evaluate(() => document.body.dataset.sameDocument)
+    ).toBe("yes");
+    const link = linkIn(JSON.parse((await kept.textContent()) ?? "[]"));
+    expect(link).toMatch(/\/decisions\/[^?]+$/u);
     const { pathname, search } = new URL(link);
     return { run: run.id, link: `${pathname}${search}` };
   } finally {
@@ -111,7 +182,7 @@ test("the person a decision link was sent to approves it, and the run goes on", 
   pageOf,
 }) => {
   const { builder, decider, other } = peopleIn("decisionAnswered");
-  const { run, link } = await askedFor(builder, decider);
+  const { run, link } = await askedFor(builder, decider, await pageOf(builder));
 
   const forwarded = await pageOf(other);
   await forwarded.goto(link);
