@@ -350,6 +350,14 @@ const checks: Record<Family, () => void> = {
         output: "hi",
       });
     });
+
+    test("a step's stream result is a byte stream: a BYOB reader reads it", async () => {
+      const { instances: _instances, ...outcomes } = await ran("byob-stream");
+      expect(sameOnBoth(outcomes)).toStrictEqual({
+        status: "complete",
+        output: [104, 105],
+      });
+    });
   },
   "sensitive-output": () => {
     test("a sensitive step's output is redacted for observers and given to the run", async () => {
@@ -806,17 +814,6 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
       error: { name: "DataCloneError" },
     });
     expect(field(refused, "retryDelayMs")).toBeGreaterThan(0);
-  },
-  "byob-stream": async () => {
-    const { reference, engine } = await ran("byob-stream");
-    expect(engine).toStrictEqual({
-      status: "errored",
-      error: {
-        name: "TypeError",
-        message: "This ReadableStream does not support BYOB reads.",
-      },
-    });
-    expect(reference).toStrictEqual({ status: "complete", output: [104, 105] });
   },
   "invalid-stream-error": async () => {
     const locked = await ran("locked-stream");
