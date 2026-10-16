@@ -122,17 +122,30 @@ export const sealedBuildSchema = z.discriminatedUnion("executable", [
 
 export type SealedBuild = z.infer<typeof sealedBuildSchema>;
 
+/** A task's schema descriptor, as sealed: the SDK's native validator reads it. */
+const descriptorSchema = z.json();
+
+const taskBase = {
+  id: z.string().min(1).max(64),
+  pointer: z.string().max(maxSealedPointerLength),
+  /** Its durable steps besides a wait's sleep (generate.ts, `TaskStep`). */
+  steps: z.array(z.enum(["task", "enter", "leave"])).max(3),
+  /** The descriptors of its input, output and export schemas. */
+  schemas: z.strictObject({
+    input: descriptorSchema.optional(),
+    output: descriptorSchema.optional(),
+    export: descriptorSchema.optional(),
+  }),
+};
+
 /** One task the generated module runs, as the host checks its steps. */
 const sealedTaskSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ ...taskBase, kind: z.literal("set") }),
+  z.strictObject({ ...taskBase, kind: z.literal("switch") }),
+  z.strictObject({ ...taskBase, kind: z.literal("do") }),
   z.strictObject({
-    id: z.string().min(1).max(64),
-    kind: z.literal("set"),
-    pointer: z.string().max(maxSealedPointerLength),
-  }),
-  z.strictObject({
-    id: z.string().min(1).max(64),
+    ...taskBase,
     kind: z.literal("wait"),
-    pointer: z.string().max(maxSealedPointerLength),
     /** How long it waits, as its statement says. */
     milliseconds: z.int().positive(),
   }),
@@ -142,14 +155,29 @@ const sealedTaskSchema = z.discriminatedUnion("kind", [
 const sealedExpressionSchema = z.strictObject({
   slot: z.int().min(0),
   pointer: z.string().max(maxSealedPointerLength),
-  taskId: z.string().min(1).max(64),
-  stage: z.literal("taskDefinition"),
+  /** Its task; null for the workflow's own input.from and output.as. */
+  taskId: z.string().min(1).max(64).nullable(),
+  stage: z.enum([
+    "workflowInputFrom",
+    "taskIf",
+    "taskInputFrom",
+    "taskDefinition",
+    "taskOutputAs",
+    "taskExportAs",
+    "workflowOutputAs",
+  ]),
+  /** What it must answer: a condition a boolean (generate.ts). */
+  result: z.enum(["boolean", "json"]),
   source: z.string().max(8192),
 });
 
 const tasksFileSchema = z.strictObject({
   tasks: z.array(sealedTaskSchema).max(10_000),
   expressions: z.array(sealedExpressionSchema).max(10_000),
+  /** Whether the workflow has its own input.from and output.as steps. */
+  workflow: z.strictObject({ input: z.boolean(), output: z.boolean() }),
+  /** The parameters expressions may read: those not sensitive. */
+  params: z.array(z.string().min(1).max(64)).max(64),
 });
 
 export type SealedTask = z.infer<typeof sealedTaskSchema>;
@@ -259,15 +287,22 @@ export const compileWorkflow = async (
     [
       tasksArtifact,
       canonicalJson({
-        tasks: generated.tasks.map(({ id, kind, pointer, milliseconds }) => ({
-          id,
-          kind,
-          pointer,
-          ...(milliseconds === undefined ? {} : { milliseconds }),
-        })),
+        tasks: generated.tasks.map(
+          ({ id, kind, pointer, milliseconds, steps, schemas }) => ({
+            id,
+            kind,
+            pointer,
+            steps,
+            // The SDK's descriptors, as the plain JSON they are.
+            schemas: z.json().parse(structuredClone(schemas)),
+            ...(milliseconds === undefined ? {} : { milliseconds }),
+          })
+        ),
         expressions: generated.expressions.map((expression) => ({
           ...expression,
         })),
+        workflow: { ...generated.workflow },
+        params: [...generated.params],
       }),
     ],
     [
@@ -435,6 +470,10 @@ export interface LoadedBuild {
   readonly sdk: Readonly<Record<string, string>>;
   readonly tasks: readonly SealedTask[];
   readonly expressions: readonly SealedExpression[];
+  /** Whether the workflow has its own input.from and output.as steps. */
+  readonly workflow: { readonly input: boolean; readonly output: boolean };
+  /** The parameters expressions may read: those not sensitive. */
+  readonly params: readonly string[];
   /** The generated TypeScript, for export. */
   readonly source: string;
 }
@@ -526,6 +565,8 @@ const verifiedBuild = async (
     modules: Object.freeze(modules),
     sdk: Object.freeze(sdk),
     tasks: Object.freeze(tasks.tasks.map((task) => Object.freeze(task))),
+    workflow: Object.freeze(tasks.workflow),
+    params: Object.freeze(tasks.params),
     expressions: Object.freeze(
       tasks.expressions.map((expression) => Object.freeze(expression))
     ),
