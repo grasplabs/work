@@ -546,6 +546,9 @@ test("a screen's frame speaks the page's language", async ({ pageOf }) => {
   await expect(screen.locator("html")).toHaveAttribute("lang", "de");
 });
 
+/** How long the activation a page has as a screen opens can last. */
+const openingActivationMs = 5000;
+
 /** A 1×1 PNG, as a person's file picker hands it over. */
 const pixel = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -559,6 +562,11 @@ test("a person attaches a file to a note, previews and downloads it, and removes
   const app = await notesApp(builder);
   const page = await pageOf(builder);
   const screen = await openNotes(page, app);
+  // Playwright's checks give the page activation as the screen opens,
+  // which the page takes for the click that opened it: one that admits
+  // no download for as long as it can last (screen-files.ts). The
+  // person's clicks below keep the page's activation going all the while.
+  await page.waitForTimeout(openingActivationMs);
   await createNote(screen, "Trip");
   await screen.getByRole("button", { name: "Edit Trip" }).click();
   const attachments = screen.getByRole("region", { name: "Attachments" });

@@ -1,6 +1,6 @@
 import { fileChannel } from "@grasp-os/sdk/host";
 import { fileLimits } from "@grasp-os/shared/app-file-limits";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 
 import { frameGesture, openFilePort } from "./screen-files.ts";
 
@@ -302,18 +302,19 @@ describe("a screen's file port", () => {
     }
   });
 
-  it("counts a click elsewhere on the page for no frame, though the frame focuses itself, until it ends", () => {
+  it("counts a click elsewhere on the page for no frame, though the frame focuses itself, for as long as it can last", () => {
     const events = new EventTarget();
     const frame = {};
-    const page: { active: boolean; focused: unknown } = {
+    const page: { active: boolean; focused: unknown; now: number } = {
       active: false,
       focused: null,
+      now: 0,
     };
-    vi.useFakeTimers();
     const gesture = frameGesture(frame, {
       events,
       active: () => page.active,
       focused: () => page.focused,
+      now: () => page.now,
     });
     try {
       // A click inside the frame: the page has activation, the frame focus.
@@ -324,11 +325,10 @@ describe("a screen's file port", () => {
       page.focused = null;
       events.dispatchEvent(new Event("pointerdown"));
       page.focused = frame;
+      page.now += 4000;
       const borrowed = gesture.asked();
-      // The page's activation ends; a click in the frame counts again.
-      page.active = false;
-      vi.advanceTimersByTime(1000);
-      page.active = true;
+      // That click's activation is over; a click in the frame counts again.
+      page.now += 1000;
       expect([inFrame, borrowed, gesture.asked()]).toStrictEqual([
         true,
         false,
@@ -336,29 +336,32 @@ describe("a screen's file port", () => {
       ]);
     } finally {
       gesture.close();
-      vi.useRealTimers();
     }
   });
 
-  it("counts the click that opened a frame for none of its downloads", () => {
-    vi.useFakeTimers();
+  it("counts the click that opened a frame for none of its downloads, however soon the person clicks on in the frame", () => {
     const frame = {};
-    const page = { active: true };
-    // The page has activation as the frame opens, which then takes focus.
+    const page = { now: 0 };
+    // The page has activation as the frame opens, which then takes focus,
+    // and the person's clicks in the frame keep the page's going.
     const gesture = frameGesture(frame, {
       events: new EventTarget(),
-      active: () => page.active,
+      active: () => true,
       focused: () => frame,
+      now: () => page.now,
     });
     try {
       const opening = gesture.asked();
-      page.active = false;
-      vi.advanceTimersByTime(1000);
-      page.active = true;
-      expect([opening, gesture.asked()]).toStrictEqual([false, true]);
+      page.now += 2000;
+      const soon = gesture.asked();
+      page.now += 3000;
+      expect([opening, soon, gesture.asked()]).toStrictEqual([
+        false,
+        false,
+        true,
+      ]);
     } finally {
       gesture.close();
-      vi.useRealTimers();
     }
   });
 

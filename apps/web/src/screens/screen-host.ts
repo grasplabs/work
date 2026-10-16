@@ -933,6 +933,7 @@ const runFrame = <Bundle extends FrameCode>(
       events: window,
       active: () => navigator.userActivation.isActive,
       focused: () => document.activeElement,
+      now: () => performance.now(),
     });
     cleanups.push(
       gesture.close,

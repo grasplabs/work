@@ -184,8 +184,16 @@ const workOf =
     }
   };
 
-/** How often a spent activation is looked at, for when it ends. */
-const activationWatchMs = 250;
+/**
+ * How long one input's activation lasts at most: 5 s in Chromium and
+ * Firefox (HTML leaves it to the browser). The page can't tell which input
+ * the activation it has came from, and every click in a frame renews it,
+ * so what is the page's own, or spent on a download, lasts this long from
+ * that input or download. Never "until the activation ends": a person
+ * clicking on in the frame within that time keeps it from ever ending,
+ * and would never be let download.
+ */
+const activationLifetimeMs = 5000;
 
 /**
  * The events by which the page itself gains activation (a click or a key
@@ -208,6 +216,8 @@ export interface GesturePage {
   readonly active: () => boolean;
   /** What the page has focused now. */
   readonly focused: () => unknown;
+  /** A monotonic clock, in milliseconds. */
+  readonly now: () => number;
 }
 
 /**
@@ -215,24 +225,18 @@ export interface GesturePage {
  * activation, `frame` is focused, and that activation isn't the page's
  * own. A frame can focus itself, so focus alone would let it borrow a
  * click elsewhere on the page; activation the page gained from its own
- * input counts for no frame until it ends. Returns the check and a
- * function that stops listening.
+ * input counts for no frame for as long as it can last
+ * (`activationLifetimeMs`). Returns the check and a function that stops
+ * listening.
  */
 export const frameGesture = (
   frame: unknown,
   page: GesturePage
 ): { readonly asked: () => boolean; readonly close: () => void } => {
-  let pageOwn = false;
-  let watching: ReturnType<typeof setInterval> | undefined;
+  /** When the page last gained activation of its own. */
+  let ownAt = Number.NEGATIVE_INFINITY;
   const own = (): void => {
-    pageOwn = true;
-    clearInterval(watching);
-    watching = setInterval(() => {
-      if (!page.active()) {
-        pageOwn = false;
-        clearInterval(watching);
-      }
-    }, activationWatchMs);
+    ownAt = page.now();
   };
   for (const type of pageActivationEvents) {
     page.events.addEventListener(type, own, { capture: true });
@@ -244,9 +248,11 @@ export const frameGesture = (
     own();
   }
   return {
-    asked: () => !pageOwn && page.active() && page.focused() === frame,
+    asked: () =>
+      page.now() - ownAt >= activationLifetimeMs &&
+      page.active() &&
+      page.focused() === frame,
     close: () => {
-      clearInterval(watching);
       for (const type of pageActivationEvents) {
         page.events.removeEventListener(type, own, { capture: true });
       }
@@ -267,22 +273,12 @@ export const openFilePort = (
 ): (() => void) => {
   const calls: Calls = new Map();
   /**
-   * Whether the activation the page has now admitted a download already:
-   * one click, one download. Spent until the activation ends, which the
-   * page looks for while it is spent.
+   * When the page last admitted a download: one click, one download. The
+   * activation that admitted it is spent for as long as it can last.
    */
-  let spent = false;
-  let watching: ReturnType<typeof setInterval> | undefined;
-  const spend = (): void => {
-    spent = true;
-    clearInterval(watching);
-    watching = setInterval(() => {
-      if (!navigator.userActivation.isActive) {
-        spent = false;
-        clearInterval(watching);
-      }
-    }, activationWatchMs);
-  };
+  let spentAt = Number.NEGATIVE_INFINITY;
+  const spent = (): boolean =>
+    performance.now() - spentAt < activationLifetimeMs;
   const send = (message: PageFileMessage): void => {
     port.postMessage(message);
   };
@@ -362,7 +358,7 @@ export const openFilePort = (
     // screen's code can't fake) and that the frame has the focus, so a
     // click elsewhere on the page admits none. One per activation: a
     // screen can't turn one click into many downloads.
-    if (message.type === "download" && (spent || !asked())) {
+    if (message.type === "download" && (spent() || !asked())) {
       send({
         type: "failed",
         call: message.call,
@@ -374,7 +370,7 @@ export const openFilePort = (
       return;
     }
     if (message.type === "download") {
-      spend();
+      spentAt = performance.now();
     }
     if (calls.size < fileLimits.frameTransfers) {
       void start(message);
@@ -397,7 +393,6 @@ export const openFilePort = (
   port.start();
   return () => {
     port.removeEventListener("message", onMessage);
-    clearInterval(watching);
     waiting.clear();
     for (const stop of calls.values()) {
       stop.abort();
