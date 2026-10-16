@@ -23,7 +23,9 @@ import {
 // (quotas.ts, `run_lineage_attempts`) is its lease, taken in the same
 // statement that checks its shares, and the waiting are a persistent
 // queue (`workflow_admission_queue`). The client is the tenant: core runs
-// once per client, so its shares are the tenant's.
+// once per client, so its shares are the tenant's. Build jobs are held to
+// their shares by the same rule and statements, over tables of their own
+// (`Pool`, build-admission.ts).
 //
 // From the threat model, each way an attempt could get more than its
 // share, or keep another from its own, and what closes it:
@@ -258,8 +260,30 @@ export const queueLiveMs = 90_000;
 /** The least wait a refusal for a full share names, in seconds. */
 const minRetryAfterSeconds = 1;
 
-/** The most a lease counts for after its admission: an attempt's wall time. */
-const leaseMs = platformLimits.workflowAttemptWallMs;
+/**
+ * A pool of leases and the queue of those waiting for one: what the one
+ * ordering rule below (`servedInOrder`) and the counts beside it read. Two
+ * pools share it, each in tables of its own: workflow attempts (this
+ * file's own, `attemptPool`) and build jobs (build-admission.ts). A pool's
+ * leases are rows with `subject`, `resource`, `admitted_at`,
+ * `reserved_ms` and `settled_at`; its places, rows with `run_id`,
+ * `step_hash`, `subject`, `resource`, `enqueued_at`, `seen_at` and
+ * `turn`. Each is core's own SQL, never a caller's.
+ */
+export interface Pool {
+  leases: SQL;
+  queue: SQL;
+  /** The most a lease counts for after its admission, whatever it holds. */
+  leaseMs: number;
+}
+
+/** Workflow attempts: their lineage receipts are their leases (quotas.ts). */
+export const attemptPool: Pool = {
+  leases: sql.raw("run_lineage_attempts"),
+  queue: sql.raw("workflow_admission_queue"),
+  // An attempt's wall time.
+  leaseMs: platformLimits.workflowAttemptWallMs,
+};
 
 /** The shares of `policy`: an App's and a person's below the client's. */
 export const sharesOf = (policy: QuotaPolicy): Shares => {
@@ -324,16 +348,16 @@ const noNewerLease = (place: QueuePlace): SQL =>
  * their receipt's hold ends, an attempt's wall time after admission at
  * most (`reserved_ms`), whatever their deadline.
  */
-const holding = (now: number, where: SQL): SQL =>
-  sql`h.settled_at IS NULL AND h.admitted_at > ${literal(now - leaseMs)} AND h.admitted_at + h.reserved_ms > ${literal(now)} AND ${where}`;
+const holding = (pool: Pool, now: number, where: SQL): SQL =>
+  sql`h.settled_at IS NULL AND h.admitted_at > ${literal(now - pool.leaseMs)} AND h.admitted_at + h.reserved_ms > ${literal(now)} AND ${where}`;
 
 /** The leases held at `now` that `where` takes, as SQL counting them. */
-const running = (now: number, where: SQL): SQL =>
-  sql`(SELECT count(*) FROM run_lineage_attempts AS h WHERE ${holding(now, where)})`;
+const running = (pool: Pool, now: number, where: SQL): SQL =>
+  sql`(SELECT count(*) FROM ${pool.leases} AS h WHERE ${holding(pool, now, where)})`;
 
 /** When the first of the leases held at `now` that `where` takes ends. */
-const firstEnds = (now: number, where: SQL): SQL =>
-  sql`(SELECT min(h.admitted_at + h.reserved_ms) FROM run_lineage_attempts AS h WHERE ${holding(now, where)})`;
+const firstEnds = (pool: Pool, now: number, where: SQL): SQL =>
+  sql`(SELECT min(h.admitted_at + h.reserved_ms) FROM ${pool.leases} AS h WHERE ${holding(pool, now, where)})`;
 
 /** Where a step stands in the queue: its turn, and when it joined. */
 export interface Standing {
@@ -361,6 +385,7 @@ export interface Standing {
  * under the hex of its name: any name is a safe path.
  */
 const servedInOrder = (
+  pool: Pool,
   scope: AdmissionScope,
   place: QueuePlace,
   { turn, joined }: Standing,
@@ -383,17 +408,17 @@ const servedInOrder = (
         u.me AS me,
         '$.x' || hex(u.subject) AS person_key,
         '$.x' || hex(u.resource) AS app_key,
-        ${running(now, sql`h.subject = u.subject`)} AS person_held,
-        ${running(now, sql`h.resource = u.resource`)} AS app_held
+        ${running(pool, now, sql`h.subject = u.subject`)} AS person_held,
+        ${running(pool, now, sql`h.resource = u.resource`)} AS app_held
       FROM (
         SELECT q.turn AS turn, q.enqueued_at AS joined, q.run_id AS run_id, q.step_hash AS step_hash, 0 AS me, q.subject AS subject, q.resource AS resource
-        FROM workflow_admission_queue AS q WHERE ${ahead}
+        FROM ${pool.queue} AS q WHERE ${ahead}
         UNION ALL
         SELECT ${literal(turn)}, ${literal(joined)}, ${place.runId}, ${place.stepHash}, 1, ${scope.subject}, ${scope.resource}
       ) AS u
     ),
     served (i, me, client, persons, apps, person, app, fits) AS (
-      SELECT 0, 0, ${running(now, sql`1`)}, '{}', '{}', 0, 0, 0
+      SELECT 0, 0, ${running(pool, now, sql`1`)}, '{}', '{}', 0, 0, 0
       UNION ALL
       SELECT w.i, w.me,
         s.client + ${fits},
@@ -413,7 +438,8 @@ const servedClient = sql`s.client - s.fits`;
  * its person and of its App, and what it would find of each once those
  * ahead of it took theirs (`servedInOrder`), as JSON.
  */
-const admissionCounts = (
+export const admissionCounts = (
+  pool: Pool,
   scope: AdmissionScope,
   place: QueuePlace,
   standing: Standing,
@@ -421,26 +447,26 @@ const admissionCounts = (
   shares: Shares
 ) =>
   ({
-    client: running(now, sql`1`),
-    person: running(now, sql`h.subject = ${scope.subject}`),
-    app: running(now, sql`h.resource = ${scope.resource}`),
-    served: sql`(${servedInOrder(scope, place, standing, now, shares)} SELECT json_object('client', ${servedClient}, 'person', s.person, 'app', s.app) FROM served AS s WHERE s.me = 1)`,
-    appEnds: firstEnds(now, sql`h.resource = ${scope.resource}`),
-    personEnds: firstEnds(now, sql`h.subject = ${scope.subject}`),
-    clientEnds: firstEnds(now, sql`1`),
+    client: running(pool, now, sql`1`),
+    person: running(pool, now, sql`h.subject = ${scope.subject}`),
+    app: running(pool, now, sql`h.resource = ${scope.resource}`),
+    served: sql`(${servedInOrder(pool, scope, place, standing, now, shares)} SELECT json_object('client', ${servedClient}, 'person', s.person, 'app', s.app) FROM served AS s WHERE s.me = 1)`,
+    appEnds: firstEnds(pool, now, sql`h.resource = ${scope.resource}`),
+    personEnds: firstEnds(pool, now, sql`h.subject = ${scope.subject}`),
+    clientEnds: firstEnds(pool, now, sql`1`),
   }) satisfies Record<string, SQL>;
 
 /** The live places of `scope`'s person and App as SQL counting them. */
-const placesOf = (where: SQL, now: number): SQL =>
-  sql`(SELECT count(*) FROM workflow_admission_queue AS p WHERE p.seen_at > ${literal(now - queueLiveMs)} AND ${where})`;
+export const placesOf = (pool: Pool, where: SQL, now: number): SQL =>
+  sql`(SELECT count(*) FROM ${pool.queue} AS p WHERE p.seen_at > ${literal(now - queueLiveMs)} AND ${where})`;
 
 /**
  * The turn a new place of `scope`'s person in its App takes at `now`: one
  * past the latest of their places still waiting there, the first when
  * none is.
  */
-const nextTurn = (scope: AdmissionScope, now: number): SQL =>
-  sql`(SELECT coalesce(max(p.turn) + 1, 0) FROM workflow_admission_queue AS p WHERE p.seen_at > ${literal(now - queueLiveMs)} AND p.subject = ${scope.subject} AND p.resource = ${scope.resource})`;
+export const nextTurn = (pool: Pool, scope: AdmissionScope, now: number): SQL =>
+  sql`(SELECT coalesce(max(p.turn) + 1, 0) FROM ${pool.queue} AS p WHERE p.seen_at > ${literal(now - queueLiveMs)} AND p.subject = ${scope.subject} AND p.resource = ${scope.resource})`;
 
 /**
  * Where the step at `place` stands in the queue: its place's turn and
@@ -470,7 +496,7 @@ export const standingOf = async (
     // The turn as a new place takes it (`nextTurn`), off the run's row,
     // which every run has.
     db
-      .select({ next: sql<number>`${nextTurn(scope, now)}` })
+      .select({ next: sql<number>`${nextTurn(attemptPool, scope, now)}` })
       .from(workflowRuns)
       .where(eq(workflowRuns.id, place.runId)),
   ]);
@@ -487,13 +513,14 @@ export const standingOf = async (
  * condition of the statement that takes its lease (quotas.ts).
  */
 export const roomFor = (
+  pool: Pool,
   scope: AdmissionScope,
   place: QueuePlace,
   standing: Standing,
   now: number,
   shares: Shares
 ): SQL => {
-  const served = servedInOrder(scope, place, standing, now, shares);
+  const served = servedInOrder(pool, scope, place, standing, now, shares);
   return sql`EXISTS (${served} SELECT 1 FROM served AS s WHERE s.me = 1 AND s.fits)`;
 };
 
@@ -637,7 +664,7 @@ export const sharesRead = (
 ) =>
   // Read off the run's row, which every run has: one row of counts.
   db
-    .select(admissionCounts(scope, place, standing, now, shares))
+    .select(admissionCounts(attemptPool, scope, place, standing, now, shares))
     .from(workflowRuns)
     .where(and(eq(workflowRuns.id, place.runId), sql`NOT (${admitted})`));
 
@@ -647,7 +674,7 @@ const foundSchema = z.object({
   person: z.number(),
   app: z.number(),
 });
-const sharesRowSchema = z.object({
+export const sharesRowSchema = z.object({
   client: z.number(),
   person: z.number(),
   app: z.number(),
@@ -670,7 +697,7 @@ const sharesRowSchema = z.object({
  * comes free as they take it, or lose their place: as long as a waiting
  * step waits.
  */
-const waitOf = (
+export const waitOf = (
   row: z.infer<typeof sharesRowSchema> | undefined,
   shares: Shares,
   now: number
@@ -787,7 +814,7 @@ export const queuedRefusal = async (
     db
       .insert(queue)
       .select(
-        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(scope, now)}, ${place.deadline} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${place.runId} AND ${runActive} AND ${noNewerLease(place)} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
+        sql`SELECT ${place.runId}, ${place.stepHash}, ${scope.subject}, ${scope.resource}, ${now}, ${now}, ${waitingFor}, ${retryAt.getTime()}, ${nextTurn(attemptPool, scope, now)}, ${place.deadline} FROM ${workflowRuns} WHERE ${workflowRuns.id} = ${place.runId} AND ${runActive} AND ${noNewerLease(place)} AND NOT EXISTS (SELECT 1 FROM ${queue} WHERE ${mine}) AND ${placesOf(attemptPool, sql`p.subject = ${scope.subject}`, now)} < ${shares.queuedPerPerson} AND ${placesOf(attemptPool, sql`p.resource = ${scope.resource}`, now)} < ${shares.queuedPerApp}`
       )
       .onConflictDoNothing()
       .returning({ runId: queue.runId }),

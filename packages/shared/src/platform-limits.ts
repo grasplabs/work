@@ -136,10 +136,13 @@ export const platformLimits = {
   /** Requests in a burst. */
   browserRequestBurst: 20,
 
-  // Builds.
-  /** Build jobs one tenant has running at once. */
+  // Builds (core's build-admission.ts).
+  /** Build jobs one tenant has building at once: the client's share. */
   tenantBuildJobs: 2,
-  /** Build jobs one resource or content key has running at once. */
+  /**
+   * Build jobs one resource or content key has building at once: for an
+   * App's build jobs, the App.
+   */
   keyBuildJobs: 1,
 
   // Dependencies.

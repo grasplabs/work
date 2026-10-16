@@ -1340,6 +1340,104 @@ export const workflowAdmissionQueue = sqliteTable(
 );
 
 /**
+ * The build jobs building now, a lease each (src/build-admission.ts): the
+ * client's share of build jobs at once, and each App's, held to the quota
+ * policy (`tenantBuildJobs`, `keyBuildJobs`). A lease counts while it is
+ * unsettled, up to `admitted_at + reserved_ms` at most, whatever becomes
+ * of the step that took it. One row per lease a job's step took, in the
+ * order of the job's own sequence (`seq`): its step, the round it waited
+ * and the engine's attempt.
+ */
+export const buildLeases = sqliteTable(
+  "build_leases",
+  {
+    jobId: text("job_id").notNull(),
+    seq: integer().notNull(),
+    /** The person the job's chat is: whose turn among an App's places it takes. */
+    subject: text().notNull(),
+    /** The job's App: its key, of which one job builds at once. */
+    resource: text().notNull(),
+    admittedAt: timestamp("admitted_at").notNull(),
+    reservedMs: integer("reserved_ms").notNull(),
+    settledAt: timestamp("settled_at"),
+    policyGeneration: integer("policy_generation").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.jobId, table.seq] }),
+    // By when they were taken: what admission counts (those unsettled),
+    // what a lease checks it still holds by (any taken since it ended),
+    // and what retention drops.
+    index("build_leases_admitted_idx").on(table.admittedAt),
+    index("build_leases_resource_idx")
+      .on(table.resource, table.admittedAt)
+      .where(sql`settled_at IS NULL`),
+  ]
+);
+
+/**
+ * A build job's commit, fenced by its lease (src/build-admission.ts): a
+ * row written first in the commit's own transaction, and removed last.
+ * The database refuses the row, and so the whole commit, unless the lease
+ * named still holds as the transaction runs (the trigger in migration
+ * 0091): a commit whose step stalled past its lease never lands beside
+ * another job of its App.
+ */
+export const buildCommitFences = sqliteTable(
+  "build_commit_fences",
+  {
+    jobId: text("job_id").notNull(),
+    seq: integer().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.jobId, table.seq] })]
+);
+
+/**
+ * The build jobs waiting for a lease (src/build-admission.ts), one place
+ * per job, served as workflow attempts' places are (src/workflows/
+ * admission.ts): by turn, then first come, first served, never behind an
+ * App whose own share is full. A place lasts while its job asks again.
+ */
+export const buildAdmissionQueue = sqliteTable(
+  "build_admission_queue",
+  {
+    jobId: text("job_id").primaryKey(),
+    subject: text().notNull(),
+    resource: text().notNull(),
+    enqueuedAt: timestamp("enqueued_at").notNull(),
+    seenAt: timestamp("seen_at").notNull(),
+    /** Which share it waits for: the client's, its person's, or its App's (`key`). */
+    waitingFor: text("waiting_for", {
+      enum: ["client", "person", "key"],
+    }).notNull(),
+    /** When it asks again at the latest: the job's view shows it. */
+    retryAt: timestamp("retry_at").notNull(),
+    turn: integer().notNull(),
+    /**
+     * The job's sequence as it last wrote the place: an older step or
+     * attempt of the job neither writes nor gives up a place a newer one
+     * wrote.
+     */
+    ownerSeq: integer("owner_seq").notNull(),
+  },
+  (table) => [
+    index("build_admission_queue_order_idx").on(
+      table.seenAt,
+      table.turn,
+      table.enqueuedAt
+    ),
+    index("build_admission_queue_subject_idx").on(
+      table.subject,
+      table.resource,
+      table.seenAt
+    ),
+    index("build_admission_queue_resource_idx").on(
+      table.resource,
+      table.seenAt
+    ),
+  ]
+);
+
+/**
  * The steps of workflow runs whose model call waits in the model ledger's
  * queue for a share of the model requests in flight (model-admission.ts),
  * so the run's summary shows it queued (src/workflows/model-waits.ts): one
