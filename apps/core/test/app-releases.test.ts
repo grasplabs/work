@@ -1151,7 +1151,50 @@ const targets = {
   },
 } as const;
 
+/** A screen that imports `Props` by `line` and names it. */
+const screenShowingProps = (line: string): string =>
+  `${line}\nexport type Shown = Props;\nexport default function Notes() {\n  return null;\n}\n`;
+
 describe("screens", { timeout: 120_000 }, () => {
+  it("name for their types the App's own declarations, a folder's index among them", async () => {
+    const declarations = {
+      "components/types/index.d.ts":
+        "export interface Props {\n  title: string;\n}\n",
+      "components/named.d.ts":
+        "export interface Props {\n  title: string;\n}\n",
+    };
+    const [folder, extension, outside] = await Promise.all(
+      [
+        'import type { Props } from "../components/types";',
+        'import type { Props } from "../components/named.js";',
+        // A folder whose index would be the kit's, never an App file.
+        'import type { Props } from "../node_modules/@grasp-os/sdk/src";',
+      ].map(
+        async (line) =>
+          await buildScreens(
+            env,
+            {
+              ...notesFiles(),
+              ...declarations,
+              "screens/notes.tsx": screenShowingProps(line),
+            },
+            "app-test"
+          )
+      )
+    );
+    expect({
+      folder: errorsOf(folder ?? {}),
+      extension: errorsOf(extension ?? {}),
+      outside: errorsOf(outside ?? {}),
+    }).toStrictEqual({
+      folder: [],
+      extension: [],
+      outside: [
+        '"../node_modules/@grasp-os/sdk/src" is not a file of this App\'s screens.',
+      ],
+    });
+  });
+
   it("type-check a screen's files against only the modules the kit gives it, however a file names one", async () => {
     // A declaration's type naming a module by `import()` in a namespace:
     // the compiler's check runs no import check (GRA-683), so only the

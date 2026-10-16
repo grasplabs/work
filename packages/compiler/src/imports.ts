@@ -313,16 +313,48 @@ const iconError = (
 };
 
 /**
- * The App file a screen's type import names, if there is one: as a value
- * import finds it, or a declaration file (`./types` for `types.d.ts`).
+ * How a type import may name an App file, as TypeScript resolves one:
+ * as written, by its extension (declarations included), or as a folder's
+ * index.
+ */
+const typeSuffixes = [
+  "",
+  ".ts",
+  ".tsx",
+  ".d.ts",
+  "/index.ts",
+  "/index.tsx",
+  "/index.d.ts",
+];
+
+const scriptExtension = /\.(?:js|jsx)$/u;
+
+/**
+ * The App file a screen's type import names, if there is one: resolved
+ * as TypeScript would (`./types` for `types.d.ts` or `types/index.d.ts`,
+ * `./x.js` for `x.ts`), but only ever among `files`, the build's own, so
+ * no path, folder or extension reaches anything else.
  */
 const resolveTypeFile = (
   file: string,
   specifier: string,
   files: ReadonlySet<string>
-): string | undefined =>
-  resolveRelative(file, specifier, files) ??
-  resolveRelative(file, `${specifier}.d.ts`, files);
+): string | undefined => {
+  const parts = file.split("/").slice(0, -1);
+  for (const part of specifier.replace(scriptExtension, "").split("/")) {
+    if (part === "..") {
+      if (parts.pop() === undefined) {
+        return undefined;
+      }
+    } else if (part !== ".") {
+      parts.push(part);
+    }
+  }
+  const path = parts.join("/");
+  return typeSuffixes
+    .map((suffix) => `${path}${suffix}`)
+    .find((candidate) => files.has(candidate));
+};
 
 /**
  * Why a type-only import in a screen, component or declaration file isn't
