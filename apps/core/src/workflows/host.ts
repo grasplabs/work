@@ -1105,7 +1105,7 @@ export const settle = async <T>(run: () => Promise<T>): Promise<Settled<T>> => {
  * the engine journals with its attempt, so a run's history tells what
  * failed by the same code the run's report does.
  */
-const toStepError = (error: StepError): Error =>
+export const toStepError = (error: StepError): Error =>
   namedError(
     isRetryable(error) ? error.name : "NonRetryableError",
     error.message,

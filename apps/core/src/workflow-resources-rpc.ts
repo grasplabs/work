@@ -6,6 +6,7 @@ import type {
   WorkflowParams,
   WorkflowResource,
   WorkflowResourcesApi,
+  WorkflowResourceRun,
   WorkflowResourceVersion,
   WorkflowStart,
   WorkflowVersionSource,
@@ -42,6 +43,10 @@ import {
   workflowVersions,
 } from "./workflow-resources.ts";
 import { startWorkflow } from "./workflow-starts.ts";
+import {
+  resourceRunFor,
+  terminateResourceRun,
+} from "./workflows/resource-runs.ts";
 
 // Independent workflows over `/rpc` (workflow-resources.ts, where who may
 // do what is decided).
@@ -134,6 +139,20 @@ export class WorkflowResourcesRpc
       this.#check,
       async (person) =>
         await startWorkflow(this.#env, { type: "person", person }, id, input)
+    );
+  }
+
+  async run(id: string, runId: string): Promise<WorkflowResourceRun> {
+    return await withPerson(
+      this.#check,
+      async (person) => await resourceRunFor(this.#env, person, id, runId)
+    );
+  }
+
+  async terminateRun(id: string, runId: string): Promise<WorkflowResourceRun> {
+    return await withPerson(
+      this.#check,
+      async (person) => await terminateResourceRun(this.#env, person, id, runId)
     );
   }
 

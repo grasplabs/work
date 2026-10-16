@@ -18,7 +18,7 @@ import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   bindWorkflowToApp,
@@ -51,6 +51,7 @@ import type {
   StartAuthorization,
   StartInvoker,
 } from "../src/workflow-starts.ts";
+import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { sweepRunDetails } from "../src/workflows/retention.ts";
 import { racingDb } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -181,6 +182,8 @@ interface Draft {
   tokenSensitive?: boolean;
   /** Another workflow's name, run at its 1.0.0 through binding `child`. */
   child?: string;
+  /** Whether it waits an hour before it finishes. */
+  waits?: boolean;
 }
 
 /**
@@ -194,6 +197,7 @@ const definitionOf = ({
   model,
   tokenSensitive = true,
   child,
+  waits = false,
 }: Draft): string =>
   JSON.stringify({
     document: {
@@ -270,6 +274,7 @@ const definitionOf = ({
               },
             },
           ]),
+      ...(waits ? [{ pause: { wait: "PT1H" } }] : []),
       { finish: { set: { status: "done" } } },
     ],
   });
@@ -1661,6 +1666,14 @@ describe("retention", () => {
       workflow.id,
       request
     );
+    // Its run reads them until it ends: retention counts from then.
+    await vi.waitFor(
+      async () => {
+        const run = await resourceRunFor(env, ada, workflow.id, first.runId);
+        expect(run.endedAt).not.toBeNull();
+      },
+      { timeout: 30_000, interval: 100 }
+    );
     // Run retention, past the deployment's retention (30 days).
     await sweepRunDetails(env, new Date(Date.now() + 31 * 24 * 3_600_000));
     const receipt = await receiptRow(first.id);
@@ -1698,6 +1711,33 @@ describe("retention", () => {
       ],
       limit: 4,
       again: first.id,
+    });
+  });
+});
+
+describe("deleting a workflow", () => {
+  it("is refused while a run of it hasn't ended, and the refusal audited with it", async () => {
+    const ada = await person("builder");
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `greet-${unique()}`
+    );
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({ name: workflow.name, waits: true }),
+      basedOn: null,
+    });
+    // Its run waits an hour: it hasn't ended as the deletion is asked.
+    await start(ada, workflow.id);
+    const error = await refusal(deleteWorkflowResource(env, ada, workflow.id));
+    const events = await allEvents();
+    const refused = events.find(
+      ({ action, target }) =>
+        action === "workflow.delete_refused" && target?.id === workflow.id
+    );
+    expect({ error, audited: refused?.detail }).toMatchObject({
+      error: { code: "workflow.resource_bound", details: { liveRuns: 1 } },
+      audited: { liveRuns: 1 },
     });
   });
 });

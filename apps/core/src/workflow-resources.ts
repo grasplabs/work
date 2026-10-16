@@ -1712,13 +1712,22 @@ const pinningAppsSql = (id: string) => sql`SELECT pinned.id AS id,
           AND EXISTS (SELECT 1 FROM json_each(allowed.actions) WHERE value = 'start'))`;
 
 /**
+ * How many runs of `id` haven't ended, as SQL: a run admitted is
+ * `starting` until the engine's first word of it (workflows/
+ * resource-runs.ts), so it counts from its receipt's statement on.
+ */
+const liveRunsSql = (id: string) => sql`(SELECT COUNT(*)
+    FROM workflow_resource_runs AS run
+    WHERE run.workflow_resource_id = ${id}
+      AND run.status IN ('starting', 'running'))`;
+
+/**
  * That something still pins a version of `id`, as SQL: the current version
  * of another live workflow binds it, a live trigger's current version
  * starts it, or an active App binding whose App may start it pins one of
- * its versions. Runs of independent workflows don't exist yet: what keeps
- * a version alive while one runs comes with them. Only another workflow's
- * current version counts, so an
- * older, immutable version can't keep a workflow from ever being deleted;
+ * its versions, or a run of it hasn't ended: its builders terminate one
+ * (workflows/resource-runs.ts) to delete it sooner. Only another
+ * workflow's current version counts, so an older, immutable version can't keep a workflow from ever being deleted;
  * a workflow has no rollback of its own, and an App rolls back to a
  * binding by binding it again, so a removed App binding pins nothing.
  */
@@ -1730,7 +1739,8 @@ const boundSql = (
       AND bound.resource_version = binder.current_version
       AND binder.id <> ${id} AND binder.deleted_at IS NULL)
   OR EXISTS (${pinningTriggersSql(id)})
-  OR EXISTS (${pinningAppsSql(id)}))`;
+  OR EXISTS (${pinningAppsSql(id)})
+  OR ${liveRunsSql(id)} > 0)`;
 
 /** The live workflows whose current version binds `id`. */
 const bindersOf = async (env: Env, id: string): Promise<Live[]> =>
@@ -1822,6 +1832,10 @@ export const deleteWorkflowResource = async (
   const appBindings = await drizzle(env.DB).all<{ id: string; app: string }>(
     sql`${pinningAppsSql(workflow.id)} ORDER BY pinned.app_id, pinned.id`
   );
+  const [live] = await drizzle(env.DB).all<{ count: number }>(
+    sql`SELECT ${liveRunsSql(workflow.id)} AS count`
+  );
+  const liveRuns = live?.count ?? 0;
   await auditedBatch(env, db, [
     outboxed(
       db,
@@ -1835,6 +1849,7 @@ export const deleteWorkflowResource = async (
             binders: binders.length,
             triggers: triggers.length,
             appBindings: appBindings.length,
+            liveRuns,
           },
           [
             binders.map(({ id: binder }) => ({ binder })),
@@ -1864,11 +1879,13 @@ export const deleteWorkflowResource = async (
       id: binding,
       app,
     })),
+    liveRuns,
   };
   throw workflowResourceErrors.create("workflow.resource_bound", {
     binders: details.binders,
     hidden: details.hidden,
     triggers: details.triggers,
     appBindings: details.appBindings,
+    liveRuns: details.liveRuns,
   });
 };
