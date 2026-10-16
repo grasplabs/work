@@ -17,6 +17,7 @@ import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { findApp } from "../src/apps.ts";
+import { callMaxNested } from "../src/call-limits.ts";
 import {
   approveScreens,
   classifyOutput,
@@ -51,6 +52,20 @@ const idp = mockIdp();
 
 const secret = "Acme owes 4,200";
 
+/**
+ * How often a held action looks whether the test let it go: each look is
+ * one of its nested calls, of which its two marks spend two and a call may
+ * make `callMaxNested`. So it gives up, with its own error, before the
+ * platform's limit would end it.
+ */
+const maxLooks = callMaxNested - 2;
+
+/**
+ * The longest a held action waits between looks: its looks, backed off up
+ * to this, all fit in a screen call's 30 seconds.
+ */
+const lookCapMs = 400;
+
 // The App, in spec 8's layout and sealed as each version becomes current:
 // its notes stand for a client's data. Its actions mark each step they
 // take in the store, so the test sees how far one got: what it read, and
@@ -64,13 +79,15 @@ const secret = ${JSON.stringify(secret)};
 
 const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
 
-// Waits until \`released\` says so; a test that never lets go fails it.
+// Waits until \`released\` says so, looking at most \`maxLooks\` times, each
+// look one nested call of the action's: a test that never lets go fails it,
+// well within the call's nested calls and its deadline.
 const until = async (released: () => Promise<boolean>) => {
-  for (let look = 0; look < 400; look += 1) {
+  for (let look = 0; look < ${maxLooks}; look += 1) {
     if (await released()) {
       return;
     }
-    await pause(50);
+    await pause(Math.min(${lookCapMs}, 50 * 2 ** look));
   }
   throw new AppError("notes.never_released", "The test never let this step go.");
 };
@@ -1215,6 +1232,32 @@ describe("screen trust", { timeout: 60_000 }, () => {
       },
       carriesData: false,
       refused: ["call/delivery: revoked"],
+    });
+  });
+
+  it("ends a held action nobody lets go with its own error, within its nested calls", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    await approveCurrent(admin, app);
+    const bundle = await openFrame(builder, app);
+
+    // Every look spent, never let go: the action's own error, never the
+    // platform's limit on nested calls or the call's deadline.
+    const failed = await failureOf(
+      called(builder, app, {
+        lease: bundle.lease,
+        contractId: "notes.slow",
+        input: { step: "never", held: true },
+      })
+    );
+
+    expect({
+      failed,
+      read: await tookStep(builder, app, "never: read"),
+    }).toStrictEqual({
+      failed: { code: "notes.never_released", carriesData: false },
+      read: true,
     });
   });
 
