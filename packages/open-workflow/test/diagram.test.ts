@@ -166,6 +166,30 @@ describe("a workflow's diagram", () => {
     ]);
   });
 
+  it("names a reusable error a raise raises", async () => {
+    await expect(
+      diagramOf(
+        documentAround(
+          {
+            name: "raising",
+            input: {},
+            required: [],
+            use: {
+              errors: {
+                overBudget: {
+                  type: "urn:grasp:error:budget.over",
+                  status: 400,
+                  title: "Over budget.",
+                },
+              },
+            },
+          },
+          [{ refuse: { raise: { error: "overBudget" } } }]
+        )
+      )
+    ).resolves.toStrictEqual(["refuse (raise) overBudget"]);
+  });
+
   it("keeps each task's ID and place when only its label changes, and never shows an expression's value", async () => {
     const [first, second] = await Promise.all([
       labelled("Pause"),

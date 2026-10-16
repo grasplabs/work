@@ -89,8 +89,11 @@ const detailOf = (kind: string, task: JsonObject): string | null => {
         : `${name}${version === null ? "" : ` ${version}`}`;
     }
     case "raise": {
-      const error = objectOf(objectOf(task.raise)?.error);
-      return literal(error?.title) ?? literal(error?.type);
+      const raised = objectOf(task.raise)?.error;
+      // A reusable error (`use.errors`) by its name; an inline one by its
+      // title, else its type.
+      const error = objectOf(raised);
+      return literal(raised) ?? literal(error?.title) ?? literal(error?.type);
     }
     case "wait": {
       return literal(task.wait);
