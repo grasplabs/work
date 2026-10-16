@@ -15,7 +15,6 @@ import { DurableObject } from "cloudflare:workers";
 
 import migrations from "./db/data-store/migrations/migrations.js";
 import { migrateOnWake } from "./db/migrate.ts";
-import { outboxConsumers } from "./outbox-delivery.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
 import type {
@@ -30,6 +29,7 @@ import type {
 } from "./store-host.ts";
 import { StoreWatches } from "./store-watches.ts";
 import type { StoreWatcher } from "./store-watches.ts";
+import { storeOutboxConsumers } from "./workflow-start-intents.ts";
 
 // A business store: one Durable Object per store, named by the store's ID
 // (data-stores.ts), with a SQLite database of its own. What it does, and
@@ -235,7 +235,9 @@ export class DataStore extends DurableObject<Env> {
    * JSON text of its `Committed`, as for `claim`.
    */
   async commit(input: Commit): Promise<string> {
-    return JSON.stringify(await this.#live().commit(input, outboxConsumers));
+    return JSON.stringify(
+      await this.#live().commit(input, storeOutboxConsumers(this.env))
+    );
   }
 
   /**
@@ -327,7 +329,7 @@ export class DataStore extends DurableObject<Env> {
     if (this.#discarded()) {
       return;
     }
-    await this.#live().runAlarm(outboxConsumers);
+    await this.#live().runAlarm(storeOutboxConsumers(this.env));
     if (this.#watches.size > 0) {
       await this.#watches.sweep();
       const next = await this.ctx.storage.getAlarm();

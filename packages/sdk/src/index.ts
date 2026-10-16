@@ -37,6 +37,8 @@ export type {
   ModelResource,
   ResourceKind,
   TemplateResource,
+  WorkflowConfig,
+  WorkflowResource,
 } from "./resources.ts";
 // References (spec 8, 32.1): what the generated `#grasp` modules hold.
 export type {
