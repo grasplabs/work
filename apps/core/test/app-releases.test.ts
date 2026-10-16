@@ -641,10 +641,21 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
 
     const loaded = await loadRelease(env, fixture.app, 1);
 
-    expect([failed, loaded.manifestHash]).toStrictEqual([
-      "version.artifact_corrupt",
-      sealed.manifestHash,
-    ]);
+    expect({
+      failed,
+      manifestHash: loaded.manifestHash,
+      manifest: loaded.manifest,
+      app: loaded.app,
+      modules: loaded.modules,
+      sdk: loaded.sdk,
+    }).toStrictEqual({
+      failed: "version.artifact_corrupt",
+      manifestHash: sealed.manifestHash,
+      manifest: sealed.manifest,
+      app: sealed.app,
+      modules: sealed.modules,
+      sdk: sealed.sdk,
+    });
   });
 
   it("is refused when an artifact is gone", async () => {
