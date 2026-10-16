@@ -1,3 +1,5 @@
+import { workflowErrors } from "@grasp-os/shared/workflows";
+
 import { isCpuLimitKill } from "./host.ts";
 
 // The calls of a run's activation into its isolate, one per step attempt,
@@ -48,6 +50,17 @@ export const trackAttemptCalls =
   };
 
 /**
+ * What a run fails with when its code spent its CPU time outside any step:
+ * the run's failure, not a step's timeout.
+ */
+const spentOutsideSteps = (thrown: unknown): Error => {
+  const failure = workflowErrors.create("workflow.run_failed");
+  failure.message = "The workflow's code ran out of CPU time outside any step.";
+  failure.cause = thrown;
+  return failure;
+};
+
+/**
  * What an activation does once the Loader stopped the run's isolate past
  * its CPU time (`thrown`, by the run's call into it): fails the run, as for
  * any error of its isolate, unless an attempt was cut off with it. The
@@ -58,7 +71,8 @@ export const trackAttemptCalls =
  * isolate, with a fresh limit, rather than the run fail for CPU earlier
  * steps spent. Should such a step end in this activation instead (its
  * last attempt, or every retry due at once), the run fails with its
- * failure. Code spending the time outside any attempt fails the run.
+ * failure. Code spending the time outside any attempt fails the run
+ * (`spentOutsideSteps`).
  */
 export const afterCpuKill = async (
   thrown: unknown,
@@ -74,16 +88,16 @@ export const afterCpuKill = async (
     attempts.push(call);
   }
   const outcomes = await Promise.allSettled(attempts);
+  const killed = calls.filter((_attempt, index) => {
+    const outcome = outcomes[index];
+    return outcome?.status === "rejected" && isCpuLimitKill(outcome.reason);
+  });
+  if (killed.length === 0) {
+    throw spentOutsideSteps(thrown);
+  }
   // Only attempts whose steps are still under way: one whose step ended
   // before (it timed out, and the workflow went on) is no step to retry.
-  const cutOff = calls.filter((attempt, index) => {
-    const outcome = outcomes[index];
-    return (
-      !attempt.ended &&
-      outcome?.status === "rejected" &&
-      isCpuLimitKill(outcome.reason)
-    );
-  });
+  const cutOff = killed.filter((attempt) => !attempt.ended);
   if (cutOff.length > 0) {
     const steps: Promise<unknown>[] = [];
     for (const { stepDone } of cutOff) {
