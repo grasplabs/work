@@ -3,6 +3,7 @@ import { actorOf } from "@grasp-os/shared/audit";
 import type { AuditEntry } from "@grasp-os/shared/audit";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { workflowResourceIdSchema } from "@grasp-os/shared/ids";
+import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
@@ -12,6 +13,8 @@ import type {
 } from "@grasp-os/shared/workflow-resources";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import { namedError } from "@grasp-os/workerflow/errors";
+import { writeJson } from "@grasp-os/workflow-expressions/bounded-json";
+import { evaluatorLimits } from "@grasp-os/workflow-expressions/limits";
 import { jqProvenance } from "@grasp-os/workflow-expressions/provenance";
 import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -39,7 +42,6 @@ import { countedStep, fromIsolate, settle, stepLimitOf } from "./host.ts";
 import type { RunStep } from "./host.ts";
 import type { ResourceAttemptHost } from "./resource-attempt-host.ts";
 import {
-  boundedJson,
   maxResultBytes,
   openRunMain,
   openRunModule,
@@ -594,6 +596,24 @@ const loadedRun = async (
 };
 
 /**
+ * `value` as plain JSON if it is within what a step's result may take:
+ * written once by the bounded writer, so nothing larger is walked, then
+ * read back from that text. `undefined` otherwise.
+ */
+const resultJson = (value: unknown): Json | undefined => {
+  const written = writeJson(value, {
+    maxBytes: maxResultBytes,
+    maxDepth: evaluatorLimits.maxJsonDepth + 2,
+    maxNodes: maxResultBytes,
+    sortKeys: false,
+    safeIntegers: false,
+  });
+  return written.ok
+    ? z.json().safeParse(JSON.parse(written.text)).data
+    : undefined;
+};
+
+/**
  * `value`, from the isolate, if it is what the version's output schema
  * (`descriptor`) takes, by the SDK's own validator, and within what a
  * step's result may take, before and after its defaults are filled in:
@@ -601,18 +621,17 @@ const loadedRun = async (
  * (resource-host.ts). `workflow.output_invalid` otherwise.
  */
 const acceptedOutput = (descriptor: string, value: unknown): unknown => {
-  const bounded = boundedJson(value, maxResultBytes);
-  if (!bounded.ok) {
+  const bounded = resultJson(value);
+  if (bounded === undefined) {
     throw workflowResourceErrors.create("workflow.output_invalid");
   }
-  const checked = schemaFromDescriptor(descriptor)["~standard"].validate(
-    bounded.value
-  );
+  const checked =
+    schemaFromDescriptor(descriptor)["~standard"].validate(bounded);
   if ("then" in checked || checked.issues !== undefined) {
     throw workflowResourceErrors.create("workflow.output_invalid");
   }
   // As the validator answered it: its defaults filled in.
-  if (!boundedJson(checked.value, maxResultBytes).ok) {
+  if (resultJson(checked.value) === undefined) {
     throw workflowResourceErrors.create("workflow.output_invalid");
   }
   return checked.value;
@@ -729,16 +748,31 @@ const resultOf = async (
     endedAt: row.endedAt,
     detailsRemovedAt: null,
   });
-  // A completed run past its retention keeps nothing to say: the engine
+  // Only what the row's own end says: an output for a completed run, why
+  // for a failed one, nothing for any other, whatever the engine holds (a
+  // late start of a run core ended runs on to a failure of its own). A
+  // completed run past its retention keeps nothing to say: the engine
   // isn't asked for an output nobody may read.
-  if (removed && row.status === "completed") {
+  if (
+    (row.status !== "completed" && row.status !== "failed") ||
+    (removed && row.status === "completed")
+  ) {
     return {};
   }
   const engine = await engineResultOf(env, row.id);
-  const result =
-    engine.error === undefined && row.failureCode !== null
-      ? { error: keptFailureOf(row.failureCode) }
-      : engine;
+  let result: Pick<WorkflowResourceRun, "output" | "error">;
+  if (row.status === "completed") {
+    result = engine.output === undefined ? {} : { output: engine.output };
+  } else if (
+    row.failureCode !== null &&
+    engine.error?.code !== row.failureCode
+  ) {
+    // Core's reason for a run it ended, or the engine's code once the
+    // engine no longer has the run: as the row keeps it.
+    result = { error: keptFailureOf(row.failureCode) };
+  } else {
+    result = engine.error === undefined ? {} : { error: engine.error };
+  }
   if (!removed) {
     return result;
   }

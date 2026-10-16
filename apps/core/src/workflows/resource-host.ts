@@ -191,7 +191,7 @@ const maxCapturedBytes = 2 * platformLimits.stepPayloadBytes + 64;
  * bound (or a small graph of shared references that expands past it) costs
  * core no more than that much. Why it isn't, otherwise.
  */
-export const boundedJson = (
+const boundedJson = (
   value: unknown,
   maxBytes: number
 ):

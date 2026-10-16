@@ -222,6 +222,25 @@ const ended = async (
 
 const statusSchema = z.object({ status: z.string() });
 
+/** Where the engine has run `id` now; none before it has the run. */
+const engineStatus = async (id: string | null) => {
+  const live = await runEngine(env).status(id ?? "");
+  return live?.status;
+};
+
+/** Once the engine has run `id` somewhere other than `running` or `queued`. */
+const settledInEngine = async (id: string | null) =>
+  await vi.waitFor(
+    async () => {
+      const status = await engineStatus(id);
+      expect(["waiting", "complete", "errored", "terminated"]).toContain(
+        status
+      );
+      return status;
+    },
+    { timeout: 30_000, interval: 100 }
+  );
+
 describe("runs of JSON workflows", () => {
   it("fails a run of a version published for another expression evaluator, evaluating nothing", async () => {
     const by = await builder();
@@ -724,6 +743,18 @@ describe("the bounds on runs of JSON workflows", () => {
     // Six hours on, it hasn't started: failed, and its workflow free to go.
     await attemptsAt(7 * 60);
     const failed = await runEvents(runId, "workflow.run.failed");
+    // A start that was on its way all along reaches the engine after, and
+    // its instance fails on the ended row: the row's reason stands.
+    await runEngine(env).createResource({
+      id: runId ?? "",
+      pinned: {
+        workflow: workflowResourceIdSchema.parse(workflow.id),
+        version: 1,
+        manifest: String(await runColumn(runId, "manifest_hash")),
+      },
+      input: { who: "Ada" },
+    });
+    await settledInEngine(runId);
     // Its person reads why, though the engine never had it.
     const read = await resourceRunFor(env, by, workflow.id, runId);
     expect({
@@ -761,25 +792,6 @@ describe("the bounds on runs of JSON workflows", () => {
     }).toStrictEqual({ reopened: true, status: "completed" });
   });
 });
-
-/** Where the engine has run `id` now; none before it has the run. */
-const engineStatus = async (id: string | null) => {
-  const live = await runEngine(env).status(id ?? "");
-  return live?.status;
-};
-
-/** Once the engine has run `id` somewhere other than `running` or `queued`. */
-const settledInEngine = async (id: string | null) =>
-  await vi.waitFor(
-    async () => {
-      const status = await engineStatus(id);
-      expect(["waiting", "complete", "errored", "terminated"]).toContain(
-        status
-      );
-      return status;
-    },
-    { timeout: 30_000, interval: 100 }
-  );
 
 /**
  * Holds the notifications run `id`'s object hands core until `released`
@@ -1142,10 +1154,18 @@ describe("whose word a run's row takes, and whose clock", () => {
       },
       async () => await terminateResourceRun(env, by, workflow.id, runId)
     );
+    const inEngine = await engineStatus(runId);
+    // Its person reads it cancelled, nothing of what the late start did.
+    const read = await resourceRunFor(env, by, workflow.id, runId);
     expect({
       status: stopped.status,
-      waitingInEngine: (await engineStatus(runId)) === "waiting",
-    }).toStrictEqual({ status: "cancelled", waitingInEngine: false });
+      inEngine,
+      read: { status: read.status, error: read.error, output: read.output },
+    }).toStrictEqual({
+      status: "cancelled",
+      inEngine: "errored",
+      read: { status: "cancelled", error: undefined, output: undefined },
+    });
   });
 
   it("keeps telling the engine to terminate a run cancelled while starting until the engine takes it", async () => {
