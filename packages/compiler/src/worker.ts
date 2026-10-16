@@ -31,6 +31,7 @@ import {
   maxAppTestSuites,
   strayTestFileMessage,
   strayTestFiles,
+  typeImportError,
 } from "./app-code.ts";
 import { extractCandidates } from "./candidates.ts";
 import { compileModule, stripTypes, transformModule } from "./compile.ts";
@@ -229,6 +230,35 @@ const compileFile = (
   }
 };
 
+/**
+ * What an App's declaration file (`*.d.ts`) names that a screen must
+ * never reach: all it imports is types (`typeImportError`).
+ */
+const declarationImportErrors = (
+  path: string,
+  source: string
+): Diagnostic[] => {
+  const imports: ImportSite[] = [];
+  try {
+    stripTypes(source, path, [collectImports(imports)]);
+  } catch (error) {
+    const message = messageIn(path, error);
+    return [problem("compile", message, { file: path, ...locationOf(error) })];
+  }
+  return imports.flatMap(({ specifier, line }) => {
+    const message = typeImportError(path, specifier, true);
+    return message === undefined
+      ? []
+      : [
+          problem(
+            "imports",
+            message,
+            line === undefined ? { file: path } : { file: path, line }
+          ),
+        ];
+  });
+};
+
 /** These modules and every module they import, through `importsOf`. */
 const closureOf = (
   roots: Iterable<string>,
@@ -359,6 +389,14 @@ export const buildScreens = async (
       errors.push(...result.errors);
     }
   }
+  // The App's declarations aren't modules, but they name modules for
+  // their types: held to what a screen must never reach, as a screen's
+  // own types are.
+  for (const [path, source] of Object.entries(app)) {
+    if (declarationFile.test(path)) {
+      errors.push(...declarationImportErrors(path, source));
+    }
+  }
   // The checks would only say it again, less clearly.
   if (errors.length > 0) {
     return { ok: false, diagnostics: errors };
@@ -417,8 +455,8 @@ const compileCodeFile = (
       ],
     };
   }
-  const errors = imports.flatMap(({ specifier, line }) => {
-    const message = codeImportError(kind, specifier, path, files);
+  const errors = imports.flatMap(({ specifier, line, typeOnly }) => {
+    const message = codeImportError(kind, { specifier, typeOnly }, path, files);
     return message === undefined
       ? []
       : [
@@ -560,6 +598,15 @@ export type AppCodeBuild =
   | { ok: true; modules: Record<string, string> }
   | { ok: false; diagnostics: Diagnostic[] };
 
+/** `typeImportError` for App code, as `appCodeImport` answers. */
+const typeImportErrorAsResult = (
+  path: string,
+  specifier: string | undefined
+): { module: undefined } | { error: string } => {
+  const error = typeImportError(path, specifier, false);
+  return error === undefined ? { module: undefined } : { error };
+};
+
 /** Compiles one file of an App's server code, or says why it can't be. */
 const compileAppCodeFile = (
   path: string,
@@ -578,8 +625,11 @@ const compileAppCodeFile = (
       ],
     };
   }
-  const errors = imports.flatMap(({ specifier, line }) => {
-    const resolved = appCodeImport(path, specifier, files);
+  const errors = imports.flatMap(({ specifier, line, typeOnly }) => {
+    // A type is erased: held only to what no App code may name.
+    const resolved = typeOnly
+      ? typeImportErrorAsResult(path, specifier)
+      : appCodeImport(path, specifier, files);
     return "error" in resolved
       ? [
           problem(

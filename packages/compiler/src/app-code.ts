@@ -302,6 +302,19 @@ const platformOnly: ReadonlySet<string> = new Set([
   "@grasp-os/sdk/screen-runtime",
 ]);
 
+/**
+ * The modules only the platform's bootstrap imports (spec 10.7.1): the
+ * session client a host makes, the host's own SDK and the frame's
+ * runtime. No App code imports them, screens, server, tests or
+ * workflows, not even for their types: a type names what the module
+ * gives, and App code is never given it.
+ */
+const bootstrapOnly: ReadonlySet<string> = new Set([
+  "@grasp-os/sdk/client",
+  "@grasp-os/sdk/host",
+  "@grasp-os/sdk/screen-runtime",
+]);
+
 /** A server file a screen's relative import would reach, by its path. */
 const serverPath = (
   importer: string,
@@ -350,4 +363,29 @@ export const screenImportError = (
   return reached === undefined
     ? undefined
     : `"${specifier}" is the App's server code, which screens never import: what a screen calls comes from the App's references, never its handlers, schema, migrations or server modules.`;
+};
+
+/**
+ * Why a type-only import of `specifier` (`import type`, `export type …
+ * from`, `typeof import()`) in `file` isn't allowed, or undefined when it
+ * is. Types are erased, so they are held only to what the file must
+ * never reach: for a screen, the App's server code, its internal
+ * references and the platform's modules (`screenImportError`); for any
+ * other App code, the bootstrap's modules (`bootstrapOnly`). Everything
+ * else a type may name, as the type check reads it.
+ */
+export const typeImportError = (
+  file: string,
+  specifier: string | undefined,
+  screen: boolean
+): string | undefined => {
+  if (specifier === undefined) {
+    return undefined;
+  }
+  if (screen) {
+    return screenImportError(file, specifier);
+  }
+  return bootstrapOnly.has(specifier)
+    ? `"${specifier}" is the platform's bootstrap, which only the code that makes and mounts the client imports (spec 10.7.1): never an App's server code, tests or workflows, not even for its types.`
+    : undefined;
 };

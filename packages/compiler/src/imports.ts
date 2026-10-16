@@ -1,4 +1,8 @@
-import { appCodeImport, screenImportError } from "./app-code.ts";
+import {
+  appCodeImport,
+  screenImportError,
+  typeImportError,
+} from "./app-code.ts";
 import {
   appModuleName,
   kitModuleName,
@@ -16,6 +20,12 @@ export interface ImportSite {
   line: number | undefined;
   /** The names it imports, or undefined for a default or namespace import. */
   names: string[] | undefined;
+  /**
+   * Whether it brings in types alone (`import type`, `export type … from`,
+   * `typeof import()`), which compiling erases: held only to what the file
+   * must never reach (`typeImportError`).
+   */
+  typeOnly?: true;
 }
 
 /** The parts of Babel's AST the import scan and rewrite read and write. */
@@ -128,10 +138,17 @@ const stringArgument = (call: Call): string | undefined => {
     : undefined;
 };
 
+/** A type's `import("…")` (`typeof import()`, `import("…").Name`). */
+interface ImportType {
+  argument: { type: string; value?: unknown };
+  loc?: Call["loc"];
+}
+
 /**
  * A Babel plugin that lists a file's imports into `imports`, as written:
  * it reads the top-level statements before anything else runs. Type-only
- * imports are skipped; they are erased.
+ * imports are listed as such (`typeOnly`): erased by the compile, they
+ * still name modules, and some no file may name.
  */
 export const collectImports = (imports: ImportSite[]) => () => {
   const collect = (call: Call): void => {
@@ -143,16 +160,48 @@ export const collectImports = (imports: ImportSite[]) => () => {
       });
     }
   };
+  const collectImportType = ({ argument, loc }: ImportType): void => {
+    imports.push({
+      specifier:
+        argument.type === "StringLiteral" && typeof argument.value === "string"
+          ? argument.value
+          : undefined,
+      line: loc?.start.line,
+      names: undefined,
+      typeOnly: true,
+    });
+  };
   return {
     visitor: {
-      Program: (path: { node: { body: Statement[] } }) => {
+      Program: (path: {
+        node: { body: Statement[] };
+        traverse: (visitor: {
+          TSImportType: (inner: { node: ImportType }) => void;
+        }) => void;
+      }) => {
+        // A type's `import("…")` sits in types the TypeScript transform
+        // removes as it goes: read them all now, before it runs.
+        path.traverse({
+          TSImportType: (inner) => {
+            collectImportType(inner.node);
+          },
+        });
         for (const statement of path.node.body) {
-          if (isModuleStatement(statement) && !isTypeOnly(statement)) {
-            imports.push({
-              specifier: statement.source?.value,
-              line: statement.loc?.start.line,
-              names: namesOf(statement),
-            });
+          if (isModuleStatement(statement)) {
+            imports.push(
+              isTypeOnly(statement)
+                ? {
+                    specifier: statement.source?.value,
+                    line: statement.loc?.start.line,
+                    names: undefined,
+                    typeOnly: true,
+                  }
+                : {
+                    specifier: statement.source?.value,
+                    line: statement.loc?.start.line,
+                    names: namesOf(statement),
+                  }
+            );
           }
         }
       },
@@ -221,13 +270,16 @@ const iconError = (
     : `${unknown.map((name) => `"${name}"`).join(", ")} is not a lucide-react icon.`;
 };
 
-/** Why an import isn't allowed, or undefined when it is. */
+/** Why a screen's import isn't allowed, or undefined when it is. */
 export const importError = (
-  { specifier, names }: ImportSite,
+  { specifier, names, typeOnly }: ImportSite,
   file: string,
   files: ReadonlySet<string>,
   kit: Kit
 ): string | undefined => {
+  if (typeOnly) {
+    return typeImportError(file, specifier, true);
+  }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
   }
@@ -473,10 +525,13 @@ const resolveCodeFile = (
 /** Why an import in `kind` code isn't allowed, or undefined when it is. */
 export const codeImportError = (
   kind: CodeKind,
-  specifier: string | undefined,
+  { specifier, typeOnly }: Pick<ImportSite, "specifier" | "typeOnly">,
   file: string,
   files: ReadonlySet<string>
 ): string | undefined => {
+  if (typeOnly) {
+    return typeImportError(file, specifier, false);
+  }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
   }
@@ -546,7 +601,7 @@ export const rewriteCodeImports = (
   files: ReadonlySet<string>
 ) =>
   rewriteWith((specifier) => {
-    const error = codeImportError(kind, specifier, file, files);
+    const error = codeImportError(kind, { specifier }, file, files);
     if (error !== undefined || specifier === undefined) {
       throw new Error(error);
     }
