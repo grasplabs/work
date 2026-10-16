@@ -20,6 +20,8 @@ import { isExpectedError } from "@grasp-os/shared/errors";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import {
   openWorkflowProtocol,
   workflowResourceErrors,
@@ -75,6 +77,12 @@ import { buildOpenWorkflow, withinBuildWait } from "./screens.ts";
 //   the SDK: closed by the generator (literals only, expressions by
 //   number) and the compiler (generated code may import the open-workflow
 //   SDK alone); see generate.ts.
+// - A load whose request is cancelled mid-read (workerd never settles it)
+//   holds every later load of that version in the isolate, or a load that
+//   failed or ran on past its time is served as verified: loads of one
+//   build share one only for as long as a load may take (`sharedRun`), and
+//   only a load that verified every byte keeps its build (`verified`); a
+//   failure keeps nothing (`loadWorkflowBuild`).
 
 /** Where the definition, exactly as published, is among the artifacts. */
 const definitionArtifact = "source/workflow.json";
@@ -634,9 +642,47 @@ const artifactText = async (
   );
 };
 
-/** Builds loaded and verified, by manifest hash: a version never changes. */
-const verified = new Map<string, Promise<LoadedBuild>>();
+/**
+ * Builds loaded and verified, by manifest hash: a version never changes.
+ * Only a load that verified the identity and every artifact puts one
+ * here, so a failed load leaves nothing, and two loads of one hash can
+ * only put the same build.
+ */
+const verified = new Map<string, LoadedBuild>();
 const verifiedMax = 32;
+
+/**
+ * The loads running now in this isolate, by manifest hash: loads of a
+ * build asked for while one runs share it. A load whose request was
+ * cancelled while it read never settles, so it is waited for only as long
+ * as a load may take (`sharedRun`, `buildReadMs`), never until the build
+ * is evicted.
+ */
+const verifying = new Map<string, SharedRun<LoadedBuild>>();
+
+/**
+ * The longest a load of a build takes: its manifest bounds how many
+ * artifacts it reads (one R2 read and one hash of each), one after the
+ * other, so a base for the first plus a share for each. A real build has
+ * a few dozen and loads in well under a second; past this, a load is
+ * taken for abandoned and the next to ask reads it anew.
+ */
+const buildReadBaseMs = 5000;
+
+/** {@link buildReadBaseMs}'s share for each artifact a build reads. */
+const buildArtifactReadMs = 100;
+
+/**
+ * How long a load of `build` may take before it is taken for abandoned,
+ * or less where tests set `WORKFLOW_BUILD_READ_MS`.
+ */
+const buildReadMs = (env: Env, build: SealedBuild): number => {
+  // One that isn't executable reads nothing: it is refused before.
+  const artifacts = build.executable ? build.artifacts.length : 0;
+  const bound = buildReadBaseMs + artifacts * buildArtifactReadMs;
+  const set = Number(env.WORKFLOW_BUILD_READ_MS);
+  return Number.isInteger(set) && set > 0 && set < bound ? set : bound;
+};
 
 const verifiedBuild = async (
   env: Env,
@@ -740,27 +786,29 @@ export const loadWorkflowBuild = async (
   if (hash !== row.manifestHash || (pinned !== undefined && pinned !== hash)) {
     throw corrupt(id, version, "manifest");
   }
-  let loading = verified.get(hash);
-  if (loading === undefined) {
-    let build: SealedBuild;
-    try {
-      build = buildOf(row.manifest);
-    } catch {
-      throw corrupt(id, version, "build");
-    }
-    loading = verifiedBuild(env, id, version, build);
-    verified.set(hash, loading);
-    if (verified.size > verifiedMax) {
-      const [oldest] = verified.keys();
-      if (oldest !== undefined) {
-        verified.delete(oldest);
+  const kept = verified.get(hash);
+  if (kept !== undefined) {
+    return kept;
+  }
+  let build: SealedBuild;
+  try {
+    build = buildOf(row.manifest);
+  } catch {
+    throw corrupt(id, version, "build");
+  }
+  return await sharedRun(verifying, hash, buildReadMs(env, build), async () => {
+    const loaded = await verifiedBuild(env, id, version, build);
+    // A load that ran on past being taken for abandoned keeps what is
+    // there already: the same build, as the hash is the same.
+    if (!verified.has(hash)) {
+      verified.set(hash, loaded);
+      if (verified.size > verifiedMax) {
+        const [oldest] = verified.keys();
+        if (oldest !== undefined) {
+          verified.delete(oldest);
+        }
       }
     }
-  }
-  try {
-    return await loading;
-  } catch (error) {
-    verified.delete(hash);
-    throw error;
-  }
+    return loaded;
+  });
 };
