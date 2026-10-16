@@ -72,14 +72,15 @@ export interface Framed {
 }
 
 /** The frame's document for a build, as the page frames it. */
-export const frameDocument = async ({
-  artifact,
-  frameToken,
-}: Framed): Promise<Response> => {
+export const frameDocument = async (
+  { artifact, frameToken }: Framed,
+  extra: Record<string, string> = {}
+): Promise<Response> => {
   const query = new URLSearchParams({
     load: "test",
     artifact,
     token: frameToken,
+    ...extra,
   }).toString();
   return await routed(`${screenFramePath}?${query}`);
 };
