@@ -295,9 +295,17 @@ describe("the package builder on the on-prem sandbox", () => {
     // The builders' share of four processes is two; one App holds one of
     // them and has one more waiting for it, at most.
     const held = call("builder=busy&app=app-a", "/inspect", wideUrl);
-    await sleep(500);
+    // Each admitted before the next is asked: a place, then a waiter.
+    await expect
+      .poll(() => wide.stats().subOwnerPlaces, { timeout: 5000, interval: 50 })
+      .toBe(1);
     const waiting = call("builder=busy&app=app-a", "/inspect", wideUrl);
-    await sleep(500);
+    await expect
+      .poll(() => wide.stats().waitingForOwners, {
+        timeout: 2000,
+        interval: 50,
+      })
+      .toBe(1);
     const past = await call("builder=busy&app=app-a", "/inspect", wideUrl);
     // The other place is another App's, while the first App's builds hold
     // theirs and wait.
