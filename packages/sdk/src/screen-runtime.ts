@@ -365,13 +365,15 @@ export const pageDrafts = async (
       waiting.delete(key);
       waiting.set(key, text);
       // Bounded however long the page can't answer: past twice an App's
-      // count of drafts, the oldest change waiting goes, a draft to keep
-      // before a drop.
+      // count of drafts, the oldest change waiting is sent now rather than
+      // let go of, so no drop of a draft the page keeps is lost. The page
+      // writes it as it would once it answers: the person's change is
+      // newer than anything it kept.
       if (waiting.size > draftsWaitingMost) {
-        const keep = [...waiting].find(([, value]) => value !== null);
-        const [oldest] = keep ?? [...waiting.keys()];
+        const [oldest] = waiting;
         if (oldest !== undefined) {
-          waiting.delete(oldest);
+          waiting.delete(oldest[0]);
+          send(...oldest);
         }
       }
       // A change after the asks were spent asks again.

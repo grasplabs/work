@@ -687,6 +687,8 @@ export class FormBinding {
   readonly #draft: DraftSlot | undefined;
   /** This editor, as the draft store knows who may write a key's draft. */
   readonly #owner = {};
+  /** The draft this editor last kept in the store (`#keepDraft`). */
+  #written: FormDraft | undefined;
   #mounted = true;
   /** The draft it was made from, if any: one newer at mount is taken up. */
   #restoredFrom: FormDraft | undefined;
@@ -866,7 +868,7 @@ export class FormBinding {
       slot.store.dropFor(slot.key, this.#owner);
       return;
     }
-    slot.store.putFor(slot.key, this.#owner, {
+    const draft: FormDraft = {
       fingerprint: slot.fingerprint,
       id: baseline.id,
       rev: baseline.rev,
@@ -875,7 +877,11 @@ export class FormBinding {
       values: pick(this.#form.state.values, target.fields),
       conflict: this.#status.conflict,
       at: Date.now(),
-    });
+    };
+    if (slot.store.holds(slot.key, this.#owner)) {
+      slot.store.putFor(slot.key, this.#owner, draft);
+      this.#written = draft;
+    }
   }
 
   /** Whether `field` is one the person edits. */
@@ -1204,12 +1210,6 @@ export class FormBinding {
 
   async #submitOnce(): Promise<unknown> {
     this.#started += 1;
-    // Whether the draft is this editor's own as the save starts (it may
-    // close while it is prepared): a newer editor of the record holding
-    // it keeps a draft this save never sent.
-    const ownDraft =
-      this.#draft !== undefined &&
-      this.#draft.store.holds(this.#draft.key, this.#owner);
     const submission = await this.#prepare();
     if ("issues" in submission) {
       throw clientError("contract.invalid_args", {
@@ -1224,10 +1224,11 @@ export class FormBinding {
     });
     // The draft of what is sent, dropped should the save commit after the
     // editor closed and nothing was written of it since (`#succeeded`).
+    // Only a draft this editor wrote itself: one a newer editor of the
+    // record wrote is theirs, which this save never sent.
+    const kept = this.#draft?.store.get(this.#draft.key);
     const sentDraft =
-      ownDraft && this.#draft !== undefined
-        ? this.#draft.store.get(this.#draft.key)
-        : undefined;
+      kept !== undefined && kept === this.#written ? kept : undefined;
     let result: unknown;
     try {
       result = await this.#send(submission);

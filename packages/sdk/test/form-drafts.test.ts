@@ -1058,7 +1058,7 @@ describe("the drafts a frame starts with", () => {
     }
   });
 
-  it("drops what the page kept of a record saved before its late answer, and holds a bounded number of changes", async () => {
+  it("drops what the page kept of a record saved before its late answer, and sends the oldest of too many changes rather than lose one", async () => {
     vi.useFakeTimers();
     try {
       const late = Promise.withResolvers<Record<string, string>>();
@@ -1076,18 +1076,32 @@ describe("the drafts a frame starts with", () => {
       const persistence = pageDrafts(bridge);
       await vi.advanceTimersByTimeAsync(draftLookupMs);
       const started = await persistence;
+      const waitingMost = 2 * screenLimits.drafts.perApp;
       started.write("saved", null);
-      for (let index = 0; index < 100; index += 1) {
-        started.write(`d${index}`, "typed");
+      for (let index = 0; index < 50; index += 1) {
+        started.write(`dropped${index}`, null);
       }
+      for (let index = 0; index < 50; index += 1) {
+        started.write(`typed${index}`, "typed");
+      }
+      // Past what the frame holds, the oldest changes went out already.
+      const early = written.length;
       late.resolve({ saved: "kept from before" });
       await vi.advanceTimersByTimeAsync(0);
+      const sent = new Map(written);
       expect({
-        dropped: written.some(
-          ([key, text]) => key === "saved" && text === null
-        ),
-        bounded: written.length <= 2 * screenLimits.drafts.perApp,
-      }).toStrictEqual({ dropped: true, bounded: true });
+        early,
+        saved: sent.get("saved"),
+        drops: [...sent].filter(([, text]) => text === null).length,
+        typed: [...sent].filter(([, text]) => text === "typed").length,
+        once: written.length,
+      }).toStrictEqual({
+        early: 101 - waitingMost,
+        saved: null,
+        drops: 51,
+        typed: 50,
+        once: 101,
+      });
     } finally {
       vi.useRealTimers();
     }
