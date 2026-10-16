@@ -500,7 +500,9 @@ const hostOf = async (
   /** The attempt's lease at each read of it, by count: held unless given. */
   lease?: (read: number) => AttemptLease | undefined,
   /** The activation's fuel, if not the host's own. */
-  activationFuel?: number
+  activationFuel?: number,
+  /** Gets the name of each error a step throws to the engine. */
+  thrown?: string[]
 ): Promise<ResourceRunHost> => {
   const manifest = await env.DB.prepare(
     "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
@@ -513,7 +515,15 @@ const hostOf = async (
   const step: RunStep = {
     do: async (name, _config, fn) => {
       count += 1;
-      return await fn({ attempt: 1, idempotencyKey: `key:${name}:${count}` });
+      try {
+        return await fn({
+          attempt: 1,
+          idempotencyKey: `key:${name}:${count}`,
+        });
+      } catch (error) {
+        thrown?.push(error instanceof Error ? error.name : "unknown");
+        throw error;
+      }
     },
     sleep: async () => {
       await Promise.resolve();
@@ -679,6 +689,35 @@ describe("a run's host, against a forged module", () => {
       honest: "ok",
       badOutput: "workflow.task_data_invalid",
       badInput: "workflow.task_data_invalid",
+    });
+  });
+
+  it("fails a step whose record breaks its task's schemas for good, never tried again", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, typedOutput)
+    );
+    const thrown: string[] = [];
+    const host = await hostOf(
+      by,
+      workflow.id,
+      undefined,
+      undefined,
+      undefined,
+      thrown
+    );
+    const code = await forged(
+      host,
+      "task:typed",
+      { who: "Ada" },
+      {
+        output: { status: 5 },
+      }
+    );
+    // The engine retries by the error's name: the same record fails again.
+    expect({ code, thrown }).toStrictEqual({
+      code: "workflow.task_data_invalid",
+      thrown: ["NonRetryableError"],
     });
   });
 

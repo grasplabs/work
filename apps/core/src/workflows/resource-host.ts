@@ -645,8 +645,9 @@ export class ResourceRunHost
               this.#activationFuel += Math.max(0, attempt.budget.fuel);
             }
           }
+          // A refusal is never retried: the same module refuses the same.
           if (this.#tampered !== undefined) {
-            throw this.#tampered;
+            throw toStepError(forIsolate(this.#tampered));
           }
           if (!result.ok) {
             throw toStepError(result.error);
@@ -675,7 +676,12 @@ export class ResourceRunHost
           // activation's fuel as an evaluation of it would.
           this.#activationFuel -=
             evaluationFuel + fuelPerByte * written.text.length;
-          this.#acceptRecord(attempt, value);
+          try {
+            this.#acceptRecord(attempt, value);
+          } catch (error) {
+            // A record off its task's schemas fails the same every time.
+            throw toStepError(forIsolate(error));
+          }
           return value;
         });
       });
