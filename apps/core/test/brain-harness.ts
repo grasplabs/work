@@ -274,10 +274,21 @@ const bookkeeping = new Set([
 ]);
 
 /**
+ * How the gate reads Knowledge's database: every row of every table, or,
+ * for a corpus too large to read twice a trial (the scale run's), each
+ * table's row count. Counts still see a document saved, a version added
+ * or a section purged; not a row rewritten in place, which only a bypass
+ * of Knowledge's API could do.
+ */
+export type KnowledgeStateCheck = "rows" | "counts";
+
+/**
  * Each table's digest, in core's and Knowledge's databases, but the
  * bookkeeping ones: what stored state holds.
  */
-const stateOf = async (): Promise<Map<string, string>> => {
+const stateOf = async (
+  knowledge: KnowledgeStateCheck
+): Promise<Map<string, string>> => {
   const digests = new Map<string, string>();
   for (const [name, db] of [
     ["core", env.DB],
@@ -286,7 +297,16 @@ const stateOf = async (): Promise<Map<string, string>> => {
     // oxlint-disable-next-line no-await-in-loop -- one database at a time
     for (const table of await tablesOf(db)) {
       const key = `${name}.${table}`;
-      if (!bookkeeping.has(key)) {
+      if (bookkeeping.has(key)) {
+        continue;
+      }
+      if (name === "knowledge" && knowledge === "counts") {
+        // oxlint-disable-next-line no-await-in-loop -- one table at a time
+        const counted = await db
+          .prepare(`SELECT count(*) AS count FROM "${table}"`)
+          .first<{ count: number }>();
+        digests.set(key, `${counted?.count ?? 0} rows`);
+      } else {
         // oxlint-disable-next-line no-await-in-loop -- one table at a time
         const { results } = await db.prepare(`SELECT * FROM "${table}"`).all();
         const rows = results.map(rowText).toSorted().join("\n");
@@ -316,7 +336,19 @@ export interface BrainCompany {
   documents: Map<string, { id: string; version: number }>;
   /** The time and charged cost of loading the corpus: its index build. */
   build: { ms: number; costMicros: number };
+  /**
+   * Collections beyond the frozen shared ones that each persona's agent is
+   * granted, by key in `collections`: the scale run's distractor teams
+   * (brain-scale.ts). The retrieval arms read them as the person, too.
+   */
+  granted?: readonly string[];
 }
+
+/** The collections every persona's agent is granted, by key. */
+const grantedKeys = (company: BrainCompany): string[] => [
+  ...sharedCollections,
+  ...(company.granted ?? []),
+];
 
 /**
  * The month and day the run's model calls count in, whatever the clock
@@ -534,19 +566,21 @@ const documentsOf = async (person: Person, collectionId: string) => {
 };
 
 /**
- * Every section of the shared collections `person` may read, in path
- * order, leaving out what doesn't fit in {@link fullContextChars}.
+ * Every section of the granted collections `person` may read, in path
+ * order, leaving out what doesn't fit in {@link fullContextChars}, and
+ * whether anything was left out.
  */
 const fullContextOf = async (
   company: BrainCompany,
   person: Person
-): Promise<Source[]> => {
+): Promise<{ sources: Source[]; truncated: boolean }> => {
   const shared = new Set(
-    sharedCollections.map((key) => held(company.collections, key))
+    grantedKeys(company).map((key) => held(company.collections, key))
   );
   const readable = await person.api.knowledge.listCollections();
   const sources: Source[] = [];
   let chars = 0;
+  let truncated = false;
   for (const collection of readable.filter(({ id }) => shared.has(id))) {
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
     for (const document of await documentsOf(person, collection.id)) {
@@ -556,21 +590,23 @@ const fullContextOf = async (
         if (chars + section.text.length <= fullContextChars) {
           chars += section.text.length;
           sources.push(section);
+        } else {
+          truncated = true;
         }
       }
     }
   }
-  return sources;
+  return { sources, truncated };
 };
 
-/** The best sections for `query` in the shared collections `person` may read. */
+/** The best sections for `query` in the granted collections `person` may read. */
 const fullTextOf = async (
   company: BrainCompany,
   person: Person,
   query: string
 ): Promise<Source[]> => {
   const shared = new Set(
-    sharedCollections.map((key) => held(company.collections, key))
+    grantedKeys(company).map((key) => held(company.collections, key))
   );
   const { hits } = await person.api.knowledge.search(query, { limit: 50 });
   const best = hits
@@ -591,7 +627,7 @@ const workspaceOf = async (company: BrainCompany, persona: BrainPersona) => {
   const id = workspaceIdSchema.parse(crypto.randomUUID());
   const stub = workspace(env, id);
   const agent = { type: "agent" as const, agentId: id };
-  for (const key of sharedCollections) {
+  for (const key of grantedKeys(company)) {
     // oxlint-disable-next-line no-await-in-loop -- one grant at a time
     const { id: permissionId } = await company.admin.api.permissions.request(
       readCollection(
@@ -678,17 +714,14 @@ interface TrialPlan {
   cold: boolean;
 }
 
-/** The sections a trial hands the model, or none for the agent arm. */
-const sourcesFor = async (
+/** The sections a trial other than the full-context arm's hands the model. */
+const sectionsFor = async (
   company: BrainCompany,
   { arm, task }: TrialPlan
 ): Promise<Source[] | undefined> => {
   const person = company.people[task.persona];
   if (arm === "agent") {
     return undefined;
-  }
-  if (arm === "fullContext") {
-    return await fullContextOf(company, person);
   }
   const found = await fullTextOf(company, person, task.query);
   if (arm !== "leakyContext") {
@@ -703,6 +736,21 @@ const sourcesFor = async (
   return leaked === undefined
     ? found
     : [...found, { source: leaked.path, text: leaked.text }];
+};
+
+/**
+ * The sections a trial hands the model, or none for the agent arm, and
+ * whether the full-context arm's budget left some out.
+ */
+const sourcesFor = async (
+  company: BrainCompany,
+  plan: TrialPlan
+): Promise<{ sources: Source[] | undefined; truncated?: boolean }> => {
+  const { arm, task } = plan;
+  if (arm === "fullContext") {
+    return await fullContextOf(company, company.people[task.persona]);
+  }
+  return { sources: await sectionsFor(company, plan) };
 };
 
 /** The controls that change stored state mid-trial. */
@@ -1006,7 +1054,8 @@ const runTrial = async (
   company: BrainCompany,
   place: Workspace,
   provider: Provider,
-  plan: TrialPlan
+  plan: TrialPlan,
+  knowledgeState: KnowledgeStateCheck
 ): Promise<TrialObservation> => {
   const { task, arm, repeat, cold } = plan;
   const person = company.people[task.persona];
@@ -1023,7 +1072,7 @@ const runTrial = async (
   // turns too; cost and latency are the question's own.
   // What the trial's chat drafted counts too: drafts live in its object.
   const stateNow = async () => {
-    const state = await stateOf();
+    const state = await stateOf(knowledgeState);
     for (const [table, digest] of await workspaceStateOf(place, chat.id)) {
       state.set(table, digest);
     }
@@ -1046,6 +1095,7 @@ const runTrial = async (
   };
   let answer = "";
   let failure: string | undefined;
+  let truncated: boolean | undefined;
   let started = performance.now();
   let observedBefore = provider.observingMs();
   try {
@@ -1081,13 +1131,14 @@ const runTrial = async (
       started = performance.now();
     }
     // Then retrieval, then the agent; a failed question is timed too.
-    const sources = await sourcesFor(company, plan);
+    const handed = await sourcesFor(company, plan);
+    ({ truncated } = handed);
     if (changes(arm) && arm !== "changesChatTitle") {
       await changeState(company, place, chat.id, arm);
     }
     setTurn({ phase: "question", task, searches: arm === "agent" });
     const reply = await place.stub.ask(chat.id, {
-      text: renderPrompt(task.question, sources),
+      text: renderPrompt(task.question, handed.sources),
       model,
     });
     ({ answer } = reply);
@@ -1129,6 +1180,7 @@ const runTrial = async (
     ...(failure === undefined ? {} : { error: failure }),
     latencyMs,
     costMicros: (await charged()) - spentBefore,
+    ...(truncated === undefined ? {} : { truncated }),
   };
 };
 
@@ -1235,6 +1287,8 @@ export interface BrainRunOptions {
   respond?: BrainProvider;
   /** The provider's name in the run's identity; required with `respond`. */
   providerName?: string;
+  /** How the gate reads Knowledge's database: every row by default. */
+  knowledgeState?: KnowledgeStateCheck;
 }
 
 const counts = (values: readonly string[]): Record<string, number> => {
@@ -1312,6 +1366,7 @@ export const runBrainBaseline = async (
     seed = 295,
     respond = stubReader,
     providerName,
+    knowledgeState = "rows",
   }: BrainRunOptions
 ): Promise<BrainReport> => {
   const tasks = tasksOf(split, { openSealed });
@@ -1379,7 +1434,13 @@ export const runBrainBaseline = async (
     for (const plan of plans) {
       observations.push(
         // oxlint-disable-next-line no-await-in-loop -- trials one at a time, so latency and state are each trial's own
-        await runTrial(company, held(places, plan.task.persona), provider, plan)
+        await runTrial(
+          company,
+          held(places, plan.task.persona),
+          provider,
+          plan,
+          knowledgeState
+        )
       );
     }
   }
@@ -1389,12 +1450,13 @@ export const runBrainBaseline = async (
     for (const arm of controls) {
       observations.push(
         // oxlint-disable-next-line no-await-in-loop -- trials one at a time
-        await runTrial(company, held(places, task.persona), provider, {
-          arm,
-          task,
-          repeat: 1,
-          cold: true,
-        })
+        await runTrial(
+          company,
+          held(places, task.persona),
+          provider,
+          { arm, task, repeat: 1, cold: true },
+          knowledgeState
+        )
       );
     }
   }
@@ -1460,7 +1522,10 @@ export const runBrainBaseline = async (
       policy: await digestOf({
         collections: brainCollections,
         teams: brainTeams,
-        grants: sharedCollections.map((key) => ({ key, actions: ["read"] })),
+        grants: grantedKeys(company).map((key) => ({
+          key,
+          actions: ["read"],
+        })),
         gateway: gatewayConfig,
         protocol: answerProtocol,
         budgets: { searchedSections, fullContextChars },

@@ -41,6 +41,11 @@ export interface TrialObservation {
   error?: string;
   latencyMs: number;
   costMicros: number;
+  /**
+   * For a trial handed every readable section: whether some were left out,
+   * not fitting the budget (GRA-678).
+   */
+  truncated?: boolean;
 }
 
 export interface TrialScore {
@@ -68,6 +73,8 @@ export interface TrialScore {
   failed: boolean;
   latencyMs: number;
   costMicros: number;
+  /** As observed: whether the sources handed over left some out. */
+  truncated?: boolean;
 }
 
 /** Text compared as people read it: case, spacing and Unicode forms aside. */
@@ -289,6 +296,9 @@ export const scoreTrial = (
     failed,
     latencyMs: observed.latencyMs,
     costMicros: observed.costMicros,
+    ...(observed.truncated === undefined
+      ? {}
+      : { truncated: observed.truncated }),
   };
   if (expect.kind === "abstain") {
     return {
