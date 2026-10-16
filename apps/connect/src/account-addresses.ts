@@ -22,9 +22,10 @@ import { readCapped } from "./oauth-client.ts";
 //   alias that isn't a send-as address isn't listed at all, so neither
 //   says what this mailbox receives. Workspace aliases need the Directory
 //   API (GRA-677).
-// A lookup that fails leaves both lists empty, logged: the connection is
-// made all the same, and mail to an alias is mail like any other, as
-// before. Each list is bounded, so no account can bloat every answer that
+// A lookup that fails is logged and changes nothing: the connection is
+// made all the same, a reconnected one keeps the lists it had, and a new
+// one has none (null: never read), so mail to an alias is mail like any
+// other, as before. Each list is bounded, so no account can bloat every answer that
 // carries it.
 
 /** Most addresses kept for one account, in each list. */
@@ -88,7 +89,9 @@ const lookups: Readonly<
     },
   },
   google: {
-    url: "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs",
+    // Only the fields read: a send-as address's signature and SMTP
+    // settings could take an answer past its cap.
+    url: "https://gmail.googleapis.com/gmail/v1/users/me/settings/sendAs?fields=sendAs(sendAsEmail,isPrimary,verificationStatus)",
     read: (body) => ({
       receives: [],
       sends: (googleSendAs.parse(body).sendAs ?? []).flatMap(
@@ -112,13 +115,14 @@ const addressesIn = (listed: readonly string[]): string[] => {
 
 /**
  * The addresses of the account `accessToken` is for, as its provider
- * says: those it receives mail at and those it sends as; none when the
- * lookup fails.
+ * says: those it receives mail at and those it sends as; undefined when
+ * the lookup fails, so a reconnect keeps what was read before and a new
+ * connection records that nothing was read.
  */
 export const accountAddressesOf = async (
   provider: OAuthProvider,
   accessToken: string
-): Promise<AccountAddresses> => {
+): Promise<AccountAddresses | undefined> => {
   const lookup = lookups[provider];
   try {
     const response = await fetch(lookup.url, {
@@ -143,6 +147,6 @@ export const accountAddressesOf = async (
       provider,
       ...errorFields(error),
     });
-    return { receives: [], sends: [] };
+    return undefined;
   }
 };

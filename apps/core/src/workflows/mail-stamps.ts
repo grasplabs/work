@@ -257,7 +257,8 @@ const sendersOf = async (
     owner.accountName,
     owner.accountEmail,
     // Those it receives at among them: Microsoft 365 lists each as both.
-    ...owner.accountSenders,
+    // None from a connect deployed behind this core, which lacks the field.
+    ...(owner.accountSenders ?? []),
   ].flatMap((sender) =>
     sender === null || sender.trim() === "" ? [] : [sender.trim().toLowerCase()]
   );

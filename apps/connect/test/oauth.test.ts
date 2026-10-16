@@ -23,6 +23,7 @@ import {
   startAs,
   stateOf,
 } from "./connect.ts";
+import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import type { Account } from "./oauth-provider.ts";
 import {
@@ -47,6 +48,8 @@ import { racingDb } from "./racing-db.ts";
 // once, in either order, and a grant left behind that nobody holds.
 
 const providers = fakeProviders();
+// Registered after the providers, so their requests go on to them.
+const internet = fakeInternet(() => new Response("Not found", { status: 404 }));
 const audit = auditEvents();
 
 /** The person's own connections, leaving out the shared ones of other tests. */
@@ -565,6 +568,47 @@ describe("whose account", () => {
     });
   });
 
+  it("reads an account's addresses within bounds: no redirect followed, no answer past its cap, at most 50 kept", async () => {
+    const ada = someone("admin");
+    const bounded = async (answer: () => Response) => {
+      providers.state.profile = async () => await Promise.resolve(answer());
+      const id = await connectAccount(providers, ada, mailboxAccount(), {
+        scope: "shared",
+      });
+      const [owner] = await exports.default.connectionOwners([id]);
+      return owner?.accountAddresses;
+    };
+    const many = Array.from(
+      { length: 60 },
+      (_, index) => `smtp:alias-${index}@acme.test`
+    );
+
+    const kept = await bounded(() => Response.json({ proxyAddresses: many }));
+    expect({
+      redirected: await bounded(
+        () =>
+          new Response(null, {
+            status: 302,
+            headers: { location: "https://collector.evil.test/me" },
+          })
+      ),
+      tooLarge: await bounded(() =>
+        Response.json({ mail: "a@acme.test", padding: "x".repeat(70_000) })
+      ),
+      kept: kept?.length,
+      // Nothing reached the host it was sent on to, nor anything else.
+      elsewhere: internet.sent.map(({ host, headers }) => [
+        host,
+        headers.authorization ?? null,
+      ]),
+    }).toStrictEqual({
+      redirected: [],
+      tooLarge: [],
+      kept: 50,
+      elsewhere: [],
+    });
+  });
+
   it("a personal connection must be to the person's own account", async () => {
     const anna = someone();
     const colleague = someone();
@@ -794,6 +838,39 @@ describe("reconnecting a connection whose access ran out", () => {
           action === "connection.connect" && detail.outcome === "ok"
       )
     ).toHaveLength(1);
+  });
+
+  it("keeps the addresses a reconnected account had when reading them fails", async () => {
+    const anna = someone();
+    const alias = anna.email.replace("@", "-sales@").toLowerCase();
+    const account = { ...ownAccount(anna), aliases: [alias] };
+    const connectionId = await connectedThenRanOut(anna, account);
+    providers.state.profile = async () =>
+      await Promise.resolve(new Response("Unavailable", { status: 503 }));
+    await connectAccount(providers, anna, account);
+    const fresh = await connectAccount(
+      providers,
+      someone("admin"),
+      mailboxAccount(),
+      {
+        scope: "shared",
+      }
+    );
+    const rows = await env.DB.prepare(
+      "SELECT id, account_addresses AS addresses FROM connections WHERE id IN (?, ?)"
+    )
+      .bind(connectionId, fresh)
+      .all<{ id: string; addresses: string | null }>();
+
+    expect(
+      Object.fromEntries(
+        rows.results.map(({ id, addresses }) => [id, addresses])
+      )
+    ).toStrictEqual({
+      [connectionId]: JSON.stringify([anna.email.toLowerCase(), alias]),
+      // A new connection whose lookup failed: never read, not none.
+      [fresh]: null,
+    });
   });
 
   it("is refused to anyone but the owner of a personal one, whatever they sign in to", async () => {

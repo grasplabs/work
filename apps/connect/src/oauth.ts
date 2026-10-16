@@ -304,7 +304,7 @@ const storeConnection = async (
   person: ConnectionPerson,
   account: ProviderAccount,
   tokens: TokenSet & { refreshToken: string },
-  addresses: AccountAddresses
+  addresses: AccountAddresses | undefined
 ): Promise<string> => {
   const connectionId = crypto.randomUUID();
   const now = new Date();
@@ -322,8 +322,8 @@ const storeConnection = async (
       accountId: account.id,
       accountName: account.name,
       accountEmail: account.email?.toLowerCase() ?? null,
-      accountAddresses: addresses.receives,
-      accountSenders: addresses.sends,
+      accountAddresses: addresses?.receives ?? null,
+      accountSenders: addresses?.sends ?? null,
       connectedBy: person.userId,
       createdAt: now,
       updatedAt: now,
@@ -361,7 +361,7 @@ const reconnect = async (
   held: ConnectionRow | undefined,
   account: ProviderAccount,
   tokens: TokenSet & { refreshToken: string },
-  addresses: AccountAddresses
+  addresses: AccountAddresses | undefined
 ): Promise<string | undefined> => {
   if (held === undefined) {
     return undefined;
@@ -402,8 +402,13 @@ const reconnect = async (
           tenant: flow.tenant,
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
-          accountAddresses: addresses.receives,
-          accountSenders: addresses.sends,
+          // A lookup that failed keeps what was read before.
+          ...(addresses === undefined
+            ? {}
+            : {
+                accountAddresses: addresses.receives,
+                accountSenders: addresses.sends,
+              }),
           updatedAt: now,
         })
         .where(stillWaiting),

@@ -208,7 +208,16 @@ export const fakeProviders = () => {
    */
   const profileOf = async (request: Request): Promise<Response> => {
     if (state.profile !== undefined) {
-      return await state.profile();
+      const answered = await state.profile();
+      const location = answered.headers.get("location");
+      // As fetch does, unless asked not to: it follows a redirect, its
+      // headers (the bearer token too) along.
+      return answered.status >= 300 &&
+        answered.status < 400 &&
+        location !== null &&
+        request.redirect !== "manual"
+        ? await globalThis.fetch(location, { headers: request.headers })
+        : answered;
     }
     const token = (request.headers.get("authorization") ?? "").replace(
       "Bearer ",
@@ -235,6 +244,8 @@ export const fakeProviders = () => {
           ],
         })
       : Response.json({
+          // Each with its signature too, unless the request asks for only
+          // the fields it reads, as Gmail answers.
           sendAs: [
             { sendAsEmail: account.email, isPrimary: true },
             ...aliases.map((alias) => ({
@@ -245,7 +256,11 @@ export const fakeProviders = () => {
               sendAsEmail: alias,
               verificationStatus: "pending",
             })),
-          ],
+          ].map((entry) =>
+            new URL(request.url).searchParams.has("fields")
+              ? entry
+              : { ...entry, signature: "<p>Kind regards</p>".repeat(4000) }
+          ),
         });
   };
 
