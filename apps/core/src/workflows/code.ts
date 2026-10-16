@@ -34,6 +34,7 @@ import {
   runInSession,
   sandboxVerdictOf,
 } from "../sandbox-session.ts";
+import type { SessionCall, SessionOptions } from "../sandbox-session.ts";
 import { sandbox } from "../sandbox.ts";
 import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
@@ -196,6 +197,34 @@ const codesVerdicts: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * What `call` answers in a sandbox session of App code apart from a run
+ * (a workflow's metadata, tests and dry runs; an App's test suites,
+ * app-tests.ts): what the code threw, or why the sandbox ended it, as the
+ * code's failure only for {@link codesVerdicts}. Any other verdict (its
+ * owner at its share, `busy`; its call over) is thrown as a
+ * {@link SandboxUnavailableError}, the platform's, to try again, its
+ * verdict on its `cause` (`noPlaceOf`).
+ */
+export const codeSession = async (
+  host: Fetcher,
+  call: SessionCall,
+  options: SessionOptions = {}
+): Promise<unknown> => {
+  try {
+    return await runInSession(host, call, options);
+  } catch (error) {
+    const verdict = sandboxVerdictOf(error);
+    if (verdict !== undefined && !codesVerdicts.has(verdict)) {
+      throw new SandboxUnavailableError(
+        error instanceof Error ? error.message : "The sandbox is busy.",
+        { cause: error, started: verdict !== "busy" }
+      );
+    }
+    throw error;
+  }
+};
+
+/**
  * Calls `method` of `entrypoint` with JSON `args`, in a workflow isolate of
  * `mainModule` and `modules`: on-prem in a sandbox session of its own, as
  * `owner`, its CPU time and memory bounded by the supervisor, which plain
@@ -231,33 +260,20 @@ export const isolateCall = async (
 ): Promise<unknown> => {
   const host = sessionHost(env);
   if (host !== undefined) {
-    try {
-      return await runInSession(
-        host,
-        {
-          mainModule,
-          modules: await modules(),
-          entrypoint,
-          method,
-          args: args.map((value) => ({ value })),
-          owner,
-          cpuMs: workflowSandbox.limits.cpuMs,
-          wallMs: codeCallMs,
-        },
-        signal === undefined ? {} : { signal }
-      );
-    } catch (error) {
-      // Its owner at its share of the sandbox, or anything else that isn't
-      // the code's doing: the platform's, to try again, never the code's.
-      const verdict = sandboxVerdictOf(error);
-      if (verdict !== undefined && !codesVerdicts.has(verdict)) {
-        throw new SandboxUnavailableError(
-          error instanceof Error ? error.message : "The sandbox is busy.",
-          { cause: error }
-        );
-      }
-      throw error;
-    }
+    return await codeSession(
+      host,
+      {
+        mainModule,
+        modules: await modules(),
+        entrypoint,
+        method,
+        args: args.map((value) => ({ value })),
+        owner,
+        cpuMs: workflowSandbox.limits.cpuMs,
+        wallMs: codeCallMs,
+      },
+      signal === undefined ? {} : { signal }
+    );
   }
   const stub: unknown = env.LOADER.get(key, async () => ({
     ...workflowSandbox,
