@@ -2402,6 +2402,37 @@ const awayAfterTheChange = (): D1Database => {
 };
 
 /**
+ * Core's database for a connection of its own on which `userId` is made
+ * an admin just before its first batch, as a promotion landing between a
+ * change's reads and its batch would.
+ */
+const promotedBeforeTheChange = (userId: string): D1Database => {
+  const state = { promoted: false };
+  return new Proxy(env.DB, {
+    get: (target, property): unknown => {
+      if (property === "batch") {
+        return async (statements: D1PreparedStatement[]) => {
+          if (!state.promoted) {
+            state.promoted = true;
+            await target
+              .prepare("update members set role = 'admin' where user_id = ?")
+              .bind(userId)
+              .run();
+          }
+          return await target.batch(statements);
+        };
+      }
+      const value: unknown = Reflect.get(target, property);
+      if (typeof value !== "function") {
+        return value;
+      }
+      const bound: unknown = value.bind(target);
+      return bound;
+    },
+  });
+};
+
+/**
  * The App hosts' namespace as a connection that can't reach them to tell
  * of a revocation sees it: every `accessRevoked` fails, anything else
  * goes through.
@@ -3188,6 +3219,29 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await runCron();
 
     expect(before).toBeFalsy();
+    await expect(whenLetGo(follower)).resolves.toStrictEqual({
+      last: "auth.unauthenticated",
+      released: true,
+    });
+  });
+
+  it("clears the screen of someone removed who was made an admin after the removal read their role, of an App only admins reach", async () => {
+    const opened = await openedApp();
+    const admin = await personApi("admin");
+    const removed = await personApi("admin");
+    const { lease } = await removed.api.screens.open(opened.app, "notes");
+    await removed.api.screens.present(opened.app, lease);
+    const follower = await followedList(opened, removed.api.screens, lease);
+    // A user as the removal reads them first; an admin again by its batch.
+    await env.DB.prepare("update members set role = 'user' where user_id = ?")
+      .bind(removed.userId)
+      .run();
+    const { core } = await openRpc(admin.session, {
+      coreEnv: { ...env, DB: promotedBeforeTheChange(removed.userId) },
+    });
+
+    await core.authenticate().members.remove(removed.userId);
+
     await expect(whenLetGo(follower)).resolves.toStrictEqual({
       last: "auth.unauthenticated",
       released: true,

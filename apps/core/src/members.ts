@@ -24,7 +24,7 @@ import { z } from "zod";
 
 import { revocationsOf, tellKept } from "./access-revocations.ts";
 import type { KeptRevocation } from "./access-revocations.ts";
-import { appsOpenNowTo } from "./app-access.ts";
+import { appsOwnedOrSharedNow } from "./app-access.ts";
 import {
   auditedBatch,
   outboxedEventWhere,
@@ -123,14 +123,26 @@ const membershipOf = async (
 /**
  * The Apps `userId` has a role in as a member in role `role`, with the
  * teams they are in when the statement runs, as a condition on `apps`
- * (`revocationsOf`): what removing them or lowering their role can take
- * away, for those Apps' hosts to tell their open screens
- * (access-revocations.ts). A role that isn't ours reaches nothing.
+ * (`revocationsOf`): what lowering their role can take away, for those
+ * Apps' hosts to tell their open screens (access-revocations.ts). Every
+ * App for an admin; a role that isn't ours reaches nothing.
  */
 const reachedAs = (userId: string, role: string): SQL | undefined => {
   const known = roleSchema.safeParse(role);
-  return known.success ? appsOpenNowTo(userId, known.data) : sql`0`;
+  if (!known.success) {
+    return sql`0`;
+  }
+  return isAdmin(known.data) ? undefined : appsOwnedOrSharedNow(userId);
 };
+
+/**
+ * The Apps `userId` has a role in as the member they are when the
+ * statement runs, in the role and teams they have then, as a condition on
+ * `apps`: what removing them takes away. Read in the removal's own
+ * statement, so a role changed since it was read before can't narrow it.
+ */
+const reachedNow = (userId: string): SQL =>
+  sql`(${activeMember(userId, ["admin"])} OR (${activeMember(userId)} AND ${appsOwnedOrSharedNow(userId)}))`;
 
 /** Whether going from role `from` to `to` can take a role in an App away. */
 const lowers = (from: string, to: Role): boolean =>
@@ -196,39 +208,33 @@ const listMembers = async (env: Env, by: Identity): Promise<Member[]> => {
  * still is one, checked in the same statement, so a removal racing any
  * other change of membership or role (see `setMemberRole`) never leaves
  * the organization without an admin: the admin making it is never the one
- * removed. Everything after it runs only once the marker is there,
- * including keeping a revocation for every App they reached in role
- * `role`, through the teams the batch is about to take away too.
+ * removed. Everything after it runs only once the marker is there. Before
+ * it, under the same condition, a revocation is kept for every App they
+ * reached, in the role and through the teams they had then.
  * Returns whether this call removed them, and the revocations it kept.
  */
 const recordRemoval = async (
   env: Env,
   by: Identity,
   userId: string,
-  membership: { id: string; role: string }
+  memberId: string
 ): Promise<{ removed: boolean; kept: KeptRevocation[] }> => {
   const db = drizzle(env.DB);
   const removed = sql`NOT ${notRemoved(userId)}`;
-  const event = createAuditEvent(
-    memberEntry(by, "member.removed", membership.id, userId),
-    "core"
-  );
-  const [inserted, , kept] = await auditedBatch(env, db, [
+  const removing = sql`${activeMember(userId)} AND ${isActiveAdmin(by.userId)}`;
+  const [kept, inserted] = await auditedBatch(env, db, [
+    // First, under the marker's own condition, while their membership and
+    // teams are still there to say what they reached.
+    revocationsOf(db, reachedNow(userId), [userId], removing),
     db
       .insert(memberRemovals)
       .select(
         sql`SELECT ${organizationId}, ${userId}, ${Date.now()}, NULL
-          WHERE ${activeMember(userId)} AND ${isActiveAdmin(by.userId)}`
+          WHERE ${removing}`
       )
       .onConflictDoNothing()
       .returning({ userId: memberRemovals.userId }),
-    outboxedEventWhere(db, event, sql`changes() > 0`),
-    revocationsOf(
-      db,
-      reachedAs(userId, membership.role),
-      [userId],
-      storedEvent(event.id)
-    ),
+    outboxedIfChanged(db, memberEntry(by, "member.removed", memberId, userId)),
     db.delete(teamMembers).where(and(eq(teamMembers.userId, userId), removed)),
     db
       .delete(members)
@@ -319,7 +325,12 @@ const removeMember = async (
   const target = targetOf(by, userId);
   const membership = await membershipOf(env, target);
   if (membership) {
-    const { removed, kept } = await recordRemoval(env, by, target, membership);
+    const { removed, kept } = await recordRemoval(
+      env,
+      by,
+      target,
+      membership.id
+    );
     // Someone else's removal of them may have landed first; otherwise the
     // admin stopped being one since their session was checked.
     if (!(removed || (await isRemoved(env, target)))) {
