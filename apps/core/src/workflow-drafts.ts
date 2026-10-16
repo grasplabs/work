@@ -11,7 +11,7 @@ import type {
   WorkflowDraft,
   WorkflowResourceVersion,
 } from "@grasp-os/shared/workflow-resources";
-import { and, desc, eq, lt, sql } from "drizzle-orm";
+import { and, desc, eq, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
@@ -114,20 +114,15 @@ type DraftRow = typeof workflowResourceDrafts.$inferSelect;
 /** The latest revision of workflow `id`'s draft, and its latest checkpoint. */
 const draftRows = async (
   env: Env,
-  id: string,
-  saved?: DraftRow
+  id: string
 ): Promise<{ latest?: DraftRow; checkpoint?: DraftRow }> => {
   const db = drizzle(env.DB);
-  // An edit's own answer is the row it wrote, never a later one: of what
-  // was there before it, only its checkpoint is read.
-  const latest =
-    saved ??
-    (await db
-      .select()
-      .from(workflowResourceDrafts)
-      .where(eq(workflowResourceDrafts.workflowResourceId, id))
-      .orderBy(desc(workflowResourceDrafts.revision))
-      .get());
+  const latest = await db
+    .select()
+    .from(workflowResourceDrafts)
+    .where(eq(workflowResourceDrafts.workflowResourceId, id))
+    .orderBy(desc(workflowResourceDrafts.revision))
+    .get();
   const checkpoint =
     latest?.checked === true
       ? latest
@@ -137,10 +132,7 @@ const draftRows = async (
           .where(
             and(
               eq(workflowResourceDrafts.workflowResourceId, id),
-              eq(workflowResourceDrafts.checked, true),
-              ...(latest === undefined
-                ? []
-                : [lt(workflowResourceDrafts.revision, latest.revision)])
+              eq(workflowResourceDrafts.checked, true)
             )
           )
           .orderBy(desc(workflowResourceDrafts.revision))
@@ -159,9 +151,11 @@ const draftOf = async (
   env: Env,
   by: Acting,
   workflow: Awaited<ReturnType<typeof requireWorkflowRole>>,
-  saved?: DraftRow
+  saved?: { latest: DraftRow; checkpoint?: DraftRow }
 ): Promise<WorkflowDraft> => {
-  const { latest, checkpoint } = await draftRows(env, workflow.id, saved);
+  // An edit's own answer is the row it wrote and the checkpoint its batch
+  // read, never what was saved after it.
+  const { latest, checkpoint } = saved ?? (await draftRows(env, workflow.id));
   const published =
     workflow.currentVersion === null
       ? undefined
@@ -231,8 +225,9 @@ export const editWorkflowDraft = async (
   const revision = expectedRevision + 1;
   const editedAt = new Date();
   const db = drizzle(env.DB);
+  let checkpoint: DraftRow | undefined;
   try {
-    await auditedBatch(env, db, [
+    const [, checkpoints] = await auditedBatch(env, db, [
       db.insert(workflowResourceDrafts).values({
         // Only while the workflow is live and the revision read is still
         // the latest: otherwise NULL, which fails the batch.
@@ -247,6 +242,20 @@ export const editWorkflowDraft = async (
         editedBy: by.userId,
         editedAt,
       }),
+      // Its checkpoint as of this edit, read with it: this revision if it
+      // passed, else the latest before it that did.
+      db
+        .select()
+        .from(workflowResourceDrafts)
+        .where(
+          and(
+            eq(workflowResourceDrafts.workflowResourceId, workflow.id),
+            eq(workflowResourceDrafts.checked, true),
+            lte(workflowResourceDrafts.revision, revision)
+          )
+        )
+        .orderBy(desc(workflowResourceDrafts.revision))
+        .limit(1),
       // Only the latest revision and the latest checkpoint stay.
       db.delete(workflowResourceDrafts).where(
         and(
@@ -265,6 +274,7 @@ export const editWorkflowDraft = async (
         detail: { revision, checked, problems: problems.length },
       }),
     ]);
+    [checkpoint] = checkpoints;
   } catch (error) {
     if (
       notNullFailed(error, "workflow_resource_drafts.workflow_resource_id") ||
@@ -275,13 +285,16 @@ export const editWorkflowDraft = async (
     throw error;
   }
   return await draftOf(env, by, workflow, {
-    workflowResourceId: workflow.id,
-    revision,
-    source,
-    checked,
-    problems: JSON.stringify(problems),
-    editedBy: by.userId,
-    editedAt,
+    latest: {
+      workflowResourceId: workflow.id,
+      revision,
+      source,
+      checked,
+      problems: JSON.stringify(problems),
+      editedBy: by.userId,
+      editedAt,
+    },
+    ...(checkpoint === undefined ? {} : { checkpoint }),
   });
 };
 

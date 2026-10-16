@@ -116,6 +116,9 @@ const WorkflowResourceView = ({
               <DefinitionEditor
                 currentVersion={currentVersion}
                 loaded={draft.data}
+                onVersionMoved={() => {
+                  void router.invalidate();
+                }}
                 onPublished={() => {
                   // The new current version, and its place among the
                   // versions, as core has them now.

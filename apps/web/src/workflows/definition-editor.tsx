@@ -78,11 +78,14 @@ export const DefinitionEditor = ({
   loaded,
   currentVersion,
   onPublished,
+  onVersionMoved,
 }: {
   workflow: string;
   loaded: WorkflowDraft;
   currentVersion: number | null;
   onPublished: (version: WorkflowResourceVersion) => void;
+  /** Someone published another version: the page reads the workflow again. */
+  onVersionMoved: () => void;
 }) => {
   const core = useCore();
   const { t } = useLingui();
@@ -154,6 +157,13 @@ export const DefinitionEditor = ({
       onPublished(version);
     } catch (error) {
       setOutcome({ kind: "failed", reason: failureText(error) });
+      // Built on a version no longer current: the page learns the current
+      // one, keeping the person's text, so publishing again builds on it.
+      if (
+        workflowResourceErrors.codeOf(error) === "workflow.version_conflict"
+      ) {
+        onVersionMoved();
+      }
     }
     setBusy(false);
   };

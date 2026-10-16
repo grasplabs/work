@@ -287,13 +287,17 @@ describe("a workflow's draft", () => {
     );
   });
 
-  it("answers an edit with the revision it wrote, though another lands right after it", async () => {
+  it("answers an edit with the revision it wrote and its checkpoint then, though another lands right after it", async () => {
     const ada = await person("builder");
     const workflow = await workflowOf(ada);
-    const mine = definitionOf(workflow.name, { status: "mine" });
+    const passing = definitionOf(workflow.name, { status: "first" });
     const theirs = definitionOf(workflow.name, { status: "theirs" });
-    // Core's database, where another builder's edit lands as soon as this
-    // one's batch has.
+    await editWorkflowDraft(env, ada, workflow.id, {
+      expectedRevision: 0,
+      source: passing,
+    });
+    // Core's database, where another builder's edit that passes lands as
+    // soon as this one's batch has, keeping only itself as its checkpoint.
     let raced = false;
     const racing = new Proxy(env.DB, {
       get: (target, property): unknown => {
@@ -301,12 +305,18 @@ describe("a workflow's draft", () => {
           return async (statements: D1PreparedStatement[]) => {
             raced = true;
             const results = await target.batch(statements);
-            await target
-              .prepare(
-                "INSERT INTO workflow_resource_drafts (workflow_resource_id, revision, source, checked, problems, edited_by, edited_at) VALUES (?, 2, ?, 1, '[]', ?, ?)"
-              )
-              .bind(workflow.id, theirs, ada.userId, Date.now())
-              .run();
+            await target.batch([
+              target
+                .prepare(
+                  "INSERT INTO workflow_resource_drafts (workflow_resource_id, revision, source, checked, problems, edited_by, edited_at) VALUES (?, 3, ?, 1, '[]', ?, ?)"
+                )
+                .bind(workflow.id, theirs, ada.userId, Date.now()),
+              target
+                .prepare(
+                  "DELETE FROM workflow_resource_drafts WHERE workflow_resource_id = ? AND revision < 3"
+                )
+                .bind(workflow.id),
+            ]);
             return results;
           };
         }
@@ -318,15 +328,15 @@ describe("a workflow's draft", () => {
       { ...env, DB: racing },
       ada,
       workflow.id,
-      { expectedRevision: 0, source: mine }
+      { expectedRevision: 1, source: "{ mine, not yet" }
     );
     const latest = await workflowDraft(env, ada, workflow.id);
     expect({
-      saved: [saved.revision, saved.source, saved.checkpoint?.revision],
+      saved: [saved.revision, saved.source, saved.checkpoint],
       latest: [latest.revision, latest.source],
     }).toStrictEqual({
-      saved: [1, mine, 1],
-      latest: [2, theirs],
+      saved: [2, "{ mine, not yet", { revision: 1, source: passing }],
+      latest: [3, theirs],
     });
   });
 

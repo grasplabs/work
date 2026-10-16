@@ -13,7 +13,8 @@ import { peopleIn } from "./people.ts";
 const definition = (
   name: string,
   status: string,
-  extra: Record<string, unknown> = {}
+  extra: Record<string, unknown> = {},
+  version = "1.0.0"
 ): string =>
   JSON.stringify(
     {
@@ -21,7 +22,7 @@ const definition = (
         dsl: "1.0.3",
         namespace: "workspace",
         name,
-        version: "1.0.0",
+        version,
         title: name,
         metadata: {
           grasp: {
@@ -124,4 +125,40 @@ test("a builder writes a workflow's definition, fixes what core finds, publishes
   await expect(page.getByLabel("workflow.json")).toHaveValue(
     definition(name, "theirs")
   );
+});
+
+test("a builder whose workflow someone else published meanwhile is told, and publishes on the new version", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("workflowEditor");
+  const page = await pageOf(builder);
+  const name = `racing-${crypto.randomUUID().slice(0, 8)}`;
+  await page.goto("/workflows");
+  await page.getByLabel("Name of a new workflow").fill(name);
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("heading", { name })).toBeVisible();
+  await save(page, definition(name, "first"));
+  await expect(
+    page.getByText("Revision 1 passes the profile and can be published.")
+  ).toBeVisible();
+
+  // Another tab publishes it first.
+  const other = await pageOf(builder);
+  await other.goto(page.url());
+  await other.getByRole("button", { name: "Publish revision 1" }).click();
+  await expect(other.getByText("Version 1", { exact: true })).toBeVisible();
+
+  const next = definition(name, "next", {}, "1.1.0");
+  await page.getByLabel("workflow.json").fill(next);
+  await page.getByRole("button", { name: "Check and save" }).click();
+  await page.getByRole("button", { name: "Publish revision 2" }).click();
+  await expect(
+    page.getByText("Someone published another version since you started", {
+      exact: false,
+    })
+  ).toBeVisible();
+  await expect(page.getByText("Version 1", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("workflow.json")).toHaveValue(next);
+  await page.getByRole("button", { name: "Publish revision 2" }).click();
+  await expect(page.getByText("Version 2", { exact: true })).toBeVisible();
 });
