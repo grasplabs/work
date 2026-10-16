@@ -16,11 +16,15 @@ import type {
   BoundWorkflow,
   WorkflowBindingExtras,
 } from "../src/host.ts";
+import type { AnyOperationReference } from "../src/index.ts";
 import { app, resource, v } from "../src/index.ts";
 import { workflowReferenceLimits } from "../src/references.ts";
 import { runFunction } from "../src/runner.ts";
 import type { OperationChannel } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
+import { valueLimits } from "../src/value-descriptor.ts";
+import { schemaOf } from "../src/value-schema.ts";
+import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable } from "../src/values.ts";
 import { notesWorkflows } from "./notes-workflows.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
@@ -291,6 +295,22 @@ describe("generated modules", () => {
   });
 });
 
+/** A descriptor `depth` levels deep: objects around a null. */
+const nested = (depth: number) => {
+  let schema: AnySchema = v.null();
+  for (let level = 1; level < depth; level += 1) {
+    schema = v.object({ inner: schema });
+  }
+  return schema.descriptor;
+};
+
+/** One last page of `items`, as a paginated query answers it. */
+const pageOf = (items: unknown[]) => ({
+  items,
+  nextCursor: null,
+  hasMore: false,
+});
+
 describe("workflow references", () => {
   const [summarize] = notesWorkflows;
   if (summarize === undefined) {
@@ -334,6 +354,7 @@ describe("workflow references", () => {
         "kind",
         "listens",
         "output",
+        "queries",
         "resourceId",
         "resourceVersion",
         "visibility",
@@ -421,6 +442,173 @@ describe("workflow references", () => {
     }).toThrow(
       expect.objectContaining({ code: "definition.invalid_descriptor" })
     );
+  });
+
+  test("expose runs, history, the decision inbox and a decision as public query references of their own contracts", async () => {
+    const queries = Object.entries(workflows).flatMap(([alias, reference]) =>
+      Object.entries<AnyOperationReference>(reference.queries).map(
+        ([name, query]) => ({
+          name,
+          query,
+          manifest: {
+            path: `workflows.${alias}.queries.${name}`,
+            kind: "query" as const,
+            visibility: "public" as const,
+            args: query.args,
+            returns: query.returns,
+            stream: null,
+            uses: [],
+            tables: {},
+          },
+        })
+      )
+    );
+    expect(
+      queries.map(({ manifest }) => manifest.path).toSorted()
+    ).toStrictEqual(
+      ["archiveNotes", "summarizeNote"].flatMap((alias) =>
+        ["decision", "decisions", "history", "runs"].map(
+          (name) => `workflows.${alias}.queries.${name}`
+        )
+      )
+    );
+    const fingerprints = await Promise.all(
+      queries.map(async ({ manifest }) => await contractFingerprint(manifest))
+    );
+    for (const [index, { query, manifest }] of queries.entries()) {
+      expect(query).toMatchObject({
+        ...identity,
+        contractId: manifest.path,
+        kind: "query",
+        visibility: "public",
+        mode: "single",
+        fingerprint: fingerprints[index],
+      });
+    }
+    // A workflow that asks nobody has no inbox, and no decision rows.
+    const files = await generatedWith([
+      { alias: "archiveNotes", events: {}, listens: {}, decisions: {} },
+    ]);
+    const text = files[".grasp/references.ts"] ?? "";
+    expect(text).toContain("workflows.archiveNotes.queries.history");
+    expect(text).not.toContain("workflows.archiveNotes.queries.decision");
+  });
+
+  test("hold as many decisions as a reference does, contexts nested one level short of the limit, and refuse deeper by name", async () => {
+    const many: WorkflowBindingExtras = {
+      ...summarize,
+      decisions: Object.fromEntries(
+        Array.from(
+          { length: workflowReferenceLimits.decisions },
+          (_, index) => [
+            `decision${index}`,
+            { value: v.null().descriptor, context: v.null().descriptor },
+          ]
+        )
+      ),
+    };
+    const deep = (depth: number): WorkflowBindingExtras => ({
+      ...summarize,
+      decisions: {
+        deep: { value: v.null().descriptor, context: nested(depth) },
+      },
+    });
+    const files = await generatedWith([many]);
+    expect(files[".grasp/references.ts"]).toContain(
+      `WorkflowDecisionDetail<"decision${workflowReferenceLimits.decisions - 1}"`
+    );
+    await expect(
+      generatedWith([deep(valueLimits.depth - 1)])
+    ).resolves.toBeDefined();
+    await expect(generatedWith([deep(valueLimits.depth)])).rejects.toThrow(
+      "summarizeNote's decision contexts don't fit its decision query"
+    );
+  });
+
+  test("answer only what each query declares: declared keys, no output, a known context", () => {
+    const { queries } = workflows.summarizeNote;
+    const historyRow = {
+      id: "h-1",
+      sequence: 4,
+      taskId: "do/2/awaitEdit",
+      at: 1000,
+      kind: "event",
+      eventId: "e-1",
+      key: "noteEdited",
+      state: "accepted",
+    };
+    const runRow = {
+      run: {
+        runId: "run-1",
+        workflowId: "wf-1",
+        workflowVersion: 2,
+        manifestHash: "m",
+      },
+      status: "completed",
+      startedAt: 1000,
+      finishedAt: 2000,
+      canWatch: true,
+    };
+    const detail = {
+      key: "chooseLength",
+      wait: {
+        kind: "decision",
+        id: "w-1",
+        taskId: "do/3/length",
+        key: "chooseLength",
+        title: "Length",
+        openedAt: 1000,
+        deadline: null,
+        canRespond: true,
+      },
+      prompt: "How long?",
+      context: { words: 120 },
+      canRespond: true,
+    };
+    const cases = {
+      history: [queries.history, pageOf([historyRow])],
+      "history: an undeclared event": [
+        queries.history,
+        pageOf([{ ...historyRow, key: "documentUploaded" }]),
+      ],
+      "history: a run's input": [
+        queries.history,
+        pageOf([{ ...historyRow, input: { noteId: "n" } }]),
+      ],
+      runs: [queries.runs, pageOf([runRow])],
+      "runs: a run's output": [
+        queries.runs,
+        pageOf([{ ...runRow, output: { summary: "s" } }]),
+      ],
+      decision: [queries.decision, detail],
+      "decision: closed": [queries.decision, null],
+      "decision: another decision's context": [
+        queries.decision,
+        { ...detail, context: { summary: "s" } },
+      ],
+      "decision: another decision's wait": [
+        queries.decision,
+        { ...detail, wait: { ...detail.wait, key: "approveSummary" } },
+      ],
+    } as const;
+    const accepted = Object.fromEntries(
+      Object.entries(cases).map(([what, [query, value]]) => [
+        what,
+        schemaOf(query.returns)["~standard"].validate(value).issues ===
+          undefined,
+      ])
+    );
+    expect(accepted).toStrictEqual({
+      history: true,
+      "history: an undeclared event": false,
+      "history: a run's input": false,
+      runs: true,
+      "runs: a run's output": false,
+      decision: true,
+      "decision: closed": true,
+      "decision: another decision's context": false,
+      "decision: another decision's wait": false,
+    });
   });
 
   test("pin the workflow's input and output, each event and decision its own contract, and the release all of it", async () => {
