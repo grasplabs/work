@@ -122,9 +122,18 @@ export class CoreLink {
   /** Core's refusal that ended the link, once one did. */
   #endedBy: Error | undefined;
   readonly #onEnded: (why: SessionEnded) => void;
+  readonly #open: () => ReturnType<typeof connectCore>;
 
-  constructor(onEnded: (why: SessionEnded) => void) {
+  /**
+   * `open` makes one connection to core: a WebSocket to the page's own
+   * core unless told otherwise.
+   */
+  constructor(
+    onEnded: (why: SessionEnded) => void,
+    open: () => ReturnType<typeof connectCore> = connectCore
+  ) {
     this.#onEnded = onEnded;
+    this.#open = open;
     // Core failing or out of reach is tried again on the first connection
     // too, a few times: only a connection that worked reconnects when it
     // breaks. A refusal, such as the session having ended, is core's answer.
@@ -198,7 +207,7 @@ export class CoreLink {
   async #connect(): Promise<Session> {
     // A failed attempt's connection, before opening the next.
     this.#drop();
-    const core = connectCore();
+    const core = this.#open();
     this.#core = core;
     const session = core.authenticate();
     // Core's own answer, never an App's: the session holds, or it ended,

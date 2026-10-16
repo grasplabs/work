@@ -137,6 +137,39 @@ export const screenLimits = {
   },
   /** The problems kept of what one person's screens of an App report. */
   callerReports: { burst: 20, perMinute: 20 },
+  /**
+   * A person's unsaved record-form drafts of one App, which the page keeps
+   * for the tab (session storage) so a refresh doesn't lose them (the
+   * page's form-drafts.ts). A draft is the editable values, their
+   * baseline and the rest of the save's arguments as JSON text:
+   *
+   * - `characters`: one draft's text, in UTF-16 code units, as JSON
+   *   escapes it again on the port (`JSON.stringify` of the text, which
+   *   the client measures before it sends one), so it always fits one
+   *   message (`rpc.maxMessageSize`) with its key and the call around it.
+   *   A larger draft stays in the frame's memory, however much of it is
+   *   escaped.
+   * - `perApp`: drafts kept per person and App; the oldest goes first.
+   * - `appCharacters`: one App's share of `total`, so no App alone can
+   *   crowd out another's drafts; within one message too, so a screen
+   *   is handed all of its App's drafts at once.
+   * - `total`: characters kept of every App's drafts in the tab together;
+   *   past it, the oldest draft in the tab goes, whichever App's.
+   * - `keyCharacters`: the frame's name for a draft.
+   * - `maxAgeMs`: a draft older than this is dropped, unread.
+   * - `burst`/`perMinute`: how often a frame may ask for its drafts; more
+   *   are answered with none. Its changes the page gathers instead.
+   */
+  drafts: {
+    characters: 192 * 1024,
+    perApp: 20,
+    appCharacters: 240 * 1024,
+    total: 2 * 1024 * 1024,
+    keyCharacters: 512,
+    maxAgeMs: 24 * 60 * 60 * 1000,
+    burst: 20,
+    perMinute: 240,
+  },
   /** The problems kept of what all of an App's screens report. */
   appReports: { burst: 200, perMinute: 200 },
   /** How many different problems an App's error log keeps. */

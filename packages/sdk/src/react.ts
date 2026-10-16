@@ -109,10 +109,12 @@ export type {
   WorkflowWait,
 } from "./references.ts";
 export type {
+  FieldChange,
   FormFailure,
   FormStatus,
   GraspForm,
   OperationFormOptions,
+  RecordChanges,
   RecordForm,
   RecordFormOptions,
   SchemaFormOptions,

@@ -1,6 +1,16 @@
 import { bindingOf } from "@grasp-os/sdk/form-binding";
-import type { FormStatus, GraspForm, TextFieldName } from "@grasp-os/sdk/react";
-import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import type {
+  FieldChange,
+  FormStatus,
+  GraspForm,
+  RecordForm,
+  TextFieldName,
+} from "@grasp-os/sdk/react";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Field,
@@ -388,6 +398,122 @@ const FormError = ({
   return null;
 };
 
+/** A field's value as text to read: text as it is, anything else as JSON. */
+const shown = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value === "" ? "(empty)" : value;
+  }
+  return JSON.stringify(value) ?? "(none)";
+};
+
+/** One field that changed, as the latest record and the draft have it. */
+const ChangedField = ({
+  change,
+  label,
+  latestLabel,
+  yoursLabel,
+}: {
+  change: FieldChange;
+  label: React.ReactNode;
+  latestLabel: string;
+  yoursLabel: string;
+}): React.JSX.Element => (
+  <div className="flex flex-col gap-1">
+    <dt className="font-medium">{label}</dt>
+    <dd>
+      {latestLabel}: {shown(change.latest)}
+    </dd>
+    <dd>
+      {yoursLabel}: {shown(change.draft)}
+    </dd>
+  </div>
+);
+
+/**
+ * What changed since a record form's draft started, once a newer record
+ * arrived or a save was refused as stale (GRA-254): each field the
+ * latest record or the person changed, both versions side by side, and
+ * a button that re-applies the person's changes on the latest record, as
+ * a draft to review and save. Discarding the draft (`form.reload()`) is
+ * the App's own control, since it loses edits and asks first.
+ */
+const FormChanges = <Values,>({
+  form,
+  labels,
+  title = "This changed since you started editing",
+  waiting = "Loading the latest version…",
+  latestLabel = "Latest version",
+  yoursLabel = "Yours",
+  reapplyLabel = "Re-apply my changes to the latest version",
+  className,
+}: {
+  form: RecordForm<Values, unknown>;
+  /** What each field is called, by its name; its name otherwise. */
+  labels?: Readonly<Record<string, React.ReactNode>>;
+  title?: string;
+  /** While the latest record is still on its way. */
+  waiting?: string;
+  latestLabel?: string;
+  yoursLabel?: string;
+  reapplyLabel?: string;
+  className?: string;
+}): React.JSX.Element | null => {
+  const status = useFormStatus(form);
+  if (!status.newer && !status.conflict) {
+    return null;
+  }
+  const locked = status.phase !== "idle";
+  return (
+    <form.Subscribe selector={(state) => state.values}>
+      {() => {
+        const changes = bindingOf(form).changes();
+        return (
+          <Alert className={className} live="polite">
+            <AlertTitle>{title}</AlertTitle>
+            <AlertDescription>
+              {/* The changes follow the person's typing: shown, never
+                  announced again with each keystroke (the heading is). */}
+              {changes.latestKnown ? (
+                <dl aria-live="off" className="flex flex-col gap-2">
+                  {changes.fields.map((change) => (
+                    <ChangedField
+                      change={change}
+                      key={change.field}
+                      label={
+                        labels !== undefined &&
+                        Object.hasOwn(labels, change.field)
+                          ? labels[change.field]
+                          : change.field
+                      }
+                      latestLabel={latestLabel}
+                      yoursLabel={yoursLabel}
+                    />
+                  ))}
+                </dl>
+              ) : (
+                <p>{waiting}</p>
+              )}
+              <p>
+                <Button
+                  disabled={!changes.latestKnown || locked}
+                  onClick={() => {
+                    form.reapply();
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {reapplyLabel}
+                </Button>
+              </p>
+            </AlertDescription>
+          </Alert>
+        );
+      }}
+    </form.Subscribe>
+  );
+};
+
 /**
  * `form`'s submit button: it submits on its own click (and so on Enter in
  * a field), shows when a submission is in flight, and takes no second
@@ -419,4 +545,4 @@ const SubmitButton = ({
   );
 };
 
-export { Form, FormError, SubmitButton, TextareaField, TextField };
+export { Form, FormChanges, FormError, SubmitButton, TextareaField, TextField };

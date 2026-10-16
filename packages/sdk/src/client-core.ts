@@ -25,6 +25,8 @@ import {
 import type { Settled } from "./client-error.ts";
 import { PortableTransport } from "./client-portable.ts";
 import type { PortableClientOptions } from "./client-portable.ts";
+import { DraftStore } from "./form-drafts.ts";
+import type { DraftPersistence } from "./form-drafts.ts";
 import type {
   ArgsOf,
   OperationReference,
@@ -200,6 +202,12 @@ export interface ClientTransport {
   ) => Promise<StreamLink>;
   /** Cancels the invocation `request` names, for everyone following it. */
   cancelStream?: (request: string) => Promise<unknown>;
+  /**
+   * Where unsaved record-form drafts are kept beyond the client's memory
+   * (form-drafts.ts): the page, for the frame. Without it they last as
+   * long as the client.
+   */
+  drafts?: DraftPersistence;
 }
 
 /**
@@ -831,6 +839,8 @@ export interface ClientInternals {
   ) => Promise<unknown>;
   /** How workflow runs reach the host (client-workflow.ts). */
   readonly workflowLink: WorkflowLink;
+  /** The person's unsaved record-form drafts, cleared at every fence. */
+  drafts: DraftStore;
 }
 
 /**
@@ -1361,6 +1371,8 @@ export class GraspClient {
    * person. Another operation under the same key never clears it.
    */
   readonly #uncertainKeys = new Map<string, number>();
+  /** Unsaved record-form drafts (form-drafts.ts). */
+  readonly #drafts: DraftStore;
   /** How many subscriptions the client made: each is numbered by it. */
   #attempts = 0;
   /** Told of every fence (`WorkflowLink.onFence`). */
@@ -1378,10 +1390,12 @@ export class GraspClient {
   constructor(connection: PortableClientOptions | ClientTransport) {
     if ("call" in connection && typeof connection.call === "function") {
       this.#transport = connection;
+      this.#drafts = new DraftStore(connection.drafts);
       this.#portable = undefined;
     } else if ("url" in connection) {
       this.#transport = undefined;
       this.#portable = new PortableTransport(connection);
+      this.#drafts = new DraftStore();
     } else {
       throw new TypeError("A client takes { url, getToken }.");
     }
@@ -1421,6 +1435,7 @@ export class GraspClient {
           };
         },
       },
+      drafts: client.#drafts,
     });
   }
 
@@ -2812,6 +2827,8 @@ export class GraspClient {
    */
   #switchPrincipal(): void {
     this.#generation += 1;
+    // The drafts were the person before's.
+    this.#drafts.clear();
     this.#fencedBy = clientError("auth.principal_changed");
     this.#submissions.clear();
     this.#cancelExtensions(this.#fencedBy);
@@ -2848,6 +2865,8 @@ export class GraspClient {
    */
   #fence(refusal: GraspError): void {
     this.#generation += 1;
+    // Drafts hold what was read under the access that ended (GRA-254).
+    this.#drafts.clear();
     this.#fencedBy = refusal;
     // Nothing of anyone's is held now: whoever's token comes next starts
     // afresh, without a switch to refuse calls over, and joins no save
