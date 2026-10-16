@@ -198,6 +198,24 @@ const codesVerdicts: ReadonlySet<string> = new Set([
   "refused",
 ]);
 
+/** What `work` comes to, or `signal`'s reason once it aborts first. */
+const givenUpOn = async <T>(
+  work: Promise<T>,
+  signal: AbortSignal
+): Promise<T> => {
+  signal.throwIfAborted();
+  const { promise: aborted, reject } = Promise.withResolvers<never>();
+  const abort = (): void => {
+    reject(signal.reason);
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  try {
+    return await Promise.race([work, aborted]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+};
+
 /**
  * What `call` answers in a sandbox session of App code apart from a run
  * (a workflow's metadata, tests and dry runs; an App's test suites,
@@ -260,6 +278,9 @@ export const isolateCall = async (
     signal?: AbortSignal;
   }
 ): Promise<unknown> => {
+  // Given up on before it starts (its modules built meanwhile): it never
+  // starts.
+  signal?.throwIfAborted();
   const host = sessionHost(env);
   if (host !== undefined) {
     return await codeSession(
@@ -290,8 +311,12 @@ export const isolateCall = async (
   if (typeof fn !== "function") {
     throw new TypeError(`The workflow's isolate has no ${method}.`);
   }
-  const answer: unknown = await Reflect.apply(fn, stub, args);
-  return answer;
+  const called: Promise<unknown> = Promise.resolve(
+    Reflect.apply(fn, stub, args)
+  );
+  // In core's own Loader nothing frees the isolate: given up on, the
+  // caller stops waiting for it, which the runtime bounds.
+  return signal === undefined ? await called : await givenUpOn(called, signal);
 };
 
 const runModule = "grasp-run.js";
@@ -605,9 +630,12 @@ const modulesOf = async (
   env: Env,
   app: AppId,
   version: number,
-  files: AppFiles
+  files: AppFiles,
+  /** Given up on: no compile starts, and it throws its reason. */
+  signal?: AbortSignal
 ): Promise<Record<string, string>> => {
-  const build = await buildWorkflows(env, files, app);
+  const build = await buildWorkflows(env, files, app, signal);
+  signal?.throwIfAborted();
   if (!build.ok) {
     throw workflowErrors.create("workflow.build_failed", {
       version,
@@ -1216,7 +1244,9 @@ export const testOutcomeOf = async (
   app: AppId,
   id: WorkflowId,
   modules: Record<string, string>,
-  calls: string
+  calls: string,
+  /** Gives up on the tests' isolate, and throws its reason. */
+  signal?: AbortSignal
 ): Promise<TestOutcome> => {
   let outcome: Settled<unknown>;
   try {
@@ -1233,9 +1263,14 @@ export const testOutcomeOf = async (
         entrypoint: "Tests",
         method: "run",
         args: [],
+        ...(signal === undefined ? {} : { signal }),
       })
     );
   } catch (error) {
+    // Given up on, not the code's failure.
+    if (signal?.aborted === true) {
+      throw signal.reason;
+    }
     // The isolate didn't start because a module threw as it loaded, such
     // as a workflow whose definition the SDK refuses, or it ran past its
     // bounds: the code's failure, reported as its tests'. Anything else is
@@ -1349,7 +1384,12 @@ export const workflowTestOutcome = async (
   /** Whose tests they are: the App, which the sandbox caps per owner. */
   app: AppId,
   version: number,
-  files: AppFiles
+  files: AppFiles,
+  /**
+   * Aborted once the tests are no one's (a build job's lease lost): the
+   * test running is given up, none starts after, and it throws its reason.
+   */
+  signal?: AbortSignal
 ): Promise<TestOutcome> => {
   const ids = workflowIdsIn(files);
   if (ids.length === 0) {
@@ -1357,14 +1397,15 @@ export const workflowTestOutcome = async (
   }
   // Refused before anything is built where no sandbox may run them.
   sessionHost(env);
-  const modules = await modulesOf(env, app, version, files);
+  signal?.throwIfAborted();
+  const modules = await modulesOf(env, app, version, files, signal);
   const failures: string[] = [];
   let keep = true;
   for (const id of ids) {
     if (Object.hasOwn(files, workflowPaths(id).tests)) {
       const calls = callsOf(files, id);
       // oxlint-disable-next-line no-await-in-loop -- one isolate at a time
-      const outcome = await testOutcomeOf(env, app, id, modules, calls);
+      const outcome = await testOutcomeOf(env, app, id, modules, calls, signal);
       failures.push(...outcome.failures);
       keep &&= outcome.keep;
     } else {
@@ -1383,9 +1424,16 @@ export const workflowTestFailures = async (
   /** Whose tests they are: the App, which the sandbox caps per owner. */
   app: AppId,
   version: number,
-  files: AppFiles
+  files: AppFiles,
+  signal?: AbortSignal
 ): Promise<string[]> => {
-  const { failures } = await workflowTestOutcome(env, app, version, files);
+  const { failures } = await workflowTestOutcome(
+    env,
+    app,
+    version,
+    files,
+    signal
+  );
   return failures;
 };
 
