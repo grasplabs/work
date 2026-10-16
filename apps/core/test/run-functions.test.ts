@@ -1509,6 +1509,10 @@ describe(
   "a workflow run's call on a version no admin approved",
   { timeout: 120_000 },
   () => {
+    afterEach(async () => {
+      await endLiveRuns();
+    });
+
     /**
      * A run asleep in its builder's App of `draftingMailFiles`, its first
      * version current and unapproved, with its model bound and a permission
