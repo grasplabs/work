@@ -23,6 +23,8 @@ import { and, desc, eq, like, lte, ne, or, sql } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
+import { accountAddressesOf } from "./account-addresses.ts";
+import type { AccountAddresses } from "./account-addresses.ts";
 import { recordEventIf, recordEvents } from "./audit.ts";
 import {
   abandonToolkitFlow,
@@ -301,7 +303,8 @@ const storeConnection = async (
   flow: FlowRow,
   person: ConnectionPerson,
   account: ProviderAccount,
-  tokens: TokenSet & { refreshToken: string }
+  tokens: TokenSet & { refreshToken: string },
+  addresses: AccountAddresses | undefined
 ): Promise<string> => {
   const connectionId = crypto.randomUUID();
   const now = new Date();
@@ -319,6 +322,8 @@ const storeConnection = async (
       accountId: account.id,
       accountName: account.name,
       accountEmail: account.email?.toLowerCase() ?? null,
+      accountAddresses: addresses?.receives ?? null,
+      accountSenders: addresses?.sends ?? null,
       connectedBy: person.userId,
       createdAt: now,
       updatedAt: now,
@@ -355,7 +360,8 @@ const reconnect = async (
   person: ConnectionPerson,
   held: ConnectionRow | undefined,
   account: ProviderAccount,
-  tokens: TokenSet & { refreshToken: string }
+  tokens: TokenSet & { refreshToken: string },
+  addresses: AccountAddresses | undefined
 ): Promise<string | undefined> => {
   if (held === undefined) {
     return undefined;
@@ -396,6 +402,13 @@ const reconnect = async (
           tenant: flow.tenant,
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
+          // A lookup that failed keeps what was read before.
+          ...(addresses === undefined
+            ? {}
+            : {
+                accountAddresses: addresses.receives,
+                accountSenders: addresses.sends,
+              }),
           updatedAt: now,
         })
         .where(stillWaiting),
@@ -466,13 +479,33 @@ const keepTokens = async (
     return await refusal("connection.provider_refused");
   }
   const kept = { ...tokens, refreshToken };
+  // The account's own addresses, read with the token just issued: core
+  // counts mail to and from them as the account's (account-addresses.ts).
+  const addresses = await accountAddressesOf(provider.id, tokens.accessToken);
   try {
     // Stored as new when there is nothing to reconnect, or no longer:
     // disconnected at the same moment, the account connects as new;
     // reconnected by another flow, it is a duplicate.
     return (
-      (await reconnect(env, setUp, flow, person, held, account, kept)) ??
-      (await storeConnection(env, setUp, flow, person, account, kept))
+      (await reconnect(
+        env,
+        setUp,
+        flow,
+        person,
+        held,
+        account,
+        kept,
+        addresses
+      )) ??
+      (await storeConnection(
+        env,
+        setUp,
+        flow,
+        person,
+        account,
+        kept,
+        addresses
+      ))
     );
   } catch (storeError) {
     // Connected at the same moment by another flow: the grant is theirs.

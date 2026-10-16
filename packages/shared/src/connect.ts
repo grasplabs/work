@@ -237,6 +237,8 @@ export interface ConnectionOwner {
   source: CatalogSource;
   /** A native provider (`microsoft`), or a Composio toolkit's slug. */
   provider: string;
+  /** The account's ID at the provider (Microsoft: its Entra object ID). */
+  accountId: string | null;
   /** The account at the provider, such as its email address. */
   accountName: string | null;
   /**
@@ -245,6 +247,19 @@ export interface ConnectionOwner {
    * its sign-in name (`accountName`). Null when the provider didn't say.
    */
   accountEmail: string | null;
+  /**
+   * The other addresses the account's mailbox receives mail at, its
+   * primary address and SMTP aliases, as its provider said when it was
+   * connected; none if that wasn't read.
+   */
+  accountAddresses: string[];
+  /**
+   * The addresses the account may send as besides those (Google's
+   * verified send-as addresses), as its provider said when it was
+   * connected: a run's senders, never its mailbox's addresses, since such
+   * an address may receive in another mailbox.
+   */
+  accountSenders: string[];
 }
 
 /**

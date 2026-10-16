@@ -56,6 +56,20 @@ export const connections = sqliteTable(
      * mail a workflow run sends through the connection.
      */
     accountEmail: text("account_email"),
+    /**
+     * The other addresses the account's mailbox receives mail at (its
+     * primary address and SMTP aliases), as its provider said when it was
+     * connected (account-addresses.ts); null when never read.
+     */
+    accountAddresses: text("account_addresses", { mode: "json" }).$type<
+      string[]
+    >(),
+    /**
+     * The addresses the account may send as, besides those it receives
+     * at (Google's verified send-as addresses), as its provider said when
+     * it was connected (account-addresses.ts); null when never read.
+     */
+    accountSenders: text("account_senders", { mode: "json" }).$type<string[]>(),
     connectedBy: text("connected_by"),
     /**
      * For a Composio connection: the MCP server and the auth config
