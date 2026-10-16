@@ -63,8 +63,20 @@ let kitCache:
       files: Record<string, string>;
       directories: Set<string>;
       parsed: Map<string, ts.SourceFile>;
+      /**
+       * How the kit's own files' imports resolve: kit files only, under
+       * `/node_modules`, where no App file is, so the same for every App
+       * and kept for the isolate. Only imports made by a kit file are
+       * resolved through it; an App file's go through a cache of its own
+       * check, never kept.
+       */
+      resolutions: ts.ModuleResolutionCache;
     }
   | undefined;
+
+/** A resolution cache, of paths as they are: the file system is in memory. */
+const resolutionCache = (): ts.ModuleResolutionCache =>
+  ts.createModuleResolutionCache("/", (path) => path, compilerOptions);
 
 const kitOf = (files: Record<string, string>) => {
   if (kitCache?.files !== files) {
@@ -72,10 +84,14 @@ const kitOf = (files: Record<string, string>) => {
       files,
       directories: directoriesOf(Object.keys(files)),
       parsed: new Map(),
+      resolutions: resolutionCache(),
     };
   }
   return kitCache;
 };
+
+/** Where the kit's packages are: no App file is under it. */
+const kitRoot = "/node_modules/";
 
 const severities: Partial<
   Record<ts.DiagnosticCategory, Diagnostic["severity"]>
@@ -199,6 +215,11 @@ export const typeCheck = (
     Object.entries(appFiles).map(([path, source]) => [`/${path}`, source])
   );
   const appDirectories = directoriesOf(app.keys());
+  // This check's own: App files' resolutions never outlive it.
+  const appResolutions = resolutionCache();
+  // The kit's cache holds only the kit's files' resolutions: should any
+  // App file sit under the kit's root, this check keeps none of its own.
+  const kitShared = ![...app.keys()].some((path) => path.startsWith(kitRoot));
   const readFile = (path: string): string | undefined =>
     app.get(path) ?? ownEntry(kit.files, path);
   const parse = (
@@ -248,18 +269,19 @@ export const typeCheck = (
             options
           ) =>
             literals.map(({ text }) => {
+              const fromKit =
+                containingFile.startsWith(kitRoot) && !app.has(containingFile);
               const { resolvedModule } = ts.resolveModuleName(
                 text,
                 containingFile,
                 options,
                 host,
-                undefined,
+                fromKit && kitShared ? kit.resolutions : appResolutions,
                 redirectedReference
               );
               return {
                 resolvedModule:
-                  !app.has(containingFile) ||
-                  resolvesWithin(text, resolvedModule, app, allowed)
+                  fromKit || resolvesWithin(text, resolvedModule, app, allowed)
                     ? resolvedModule
                     : undefined,
               };

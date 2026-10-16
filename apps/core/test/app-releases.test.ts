@@ -25,6 +25,7 @@ import {
   sdkReleaseManifests,
   sdkResourceBindings,
 } from "../src/db/core/schema.ts";
+import { platformRunner } from "../src/platform-sandbox.ts";
 import {
   buildAppCode,
   buildAppTests,
@@ -1151,6 +1152,27 @@ const targets = {
 } as const;
 
 describe("screens", { timeout: 120_000 }, () => {
+  it("type-check a screen's files against only the modules the kit gives it, however a file names one", async () => {
+    // A declaration's type naming a module by `import()` in a namespace:
+    // the compiler's check runs no import check (GRA-683), so only the
+    // type check's resolution holds it.
+    const files = {
+      ...notesFiles(),
+      "screens/notes.tsx":
+        "export default function Notes() {\n  return null;\n}\n",
+      "probe.d.ts":
+        'declare namespace Probe {\n  type Server = typeof import("@grasp-os/sdk/server");\n}\n',
+    };
+    const checked = z
+      .array(z.object({ file: z.string().optional(), rule: z.string() }))
+      .parse(await platformRunner(env).run("compiler", "check", [files]));
+    expect(
+      checked
+        .filter(({ file }) => file === "probe.d.ts")
+        .map(({ rule }) => rule)
+    ).toStrictEqual(["TS2307"]);
+  });
+
   it.each([
     [
       "imports inside it, in a declaration file",
