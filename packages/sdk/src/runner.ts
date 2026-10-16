@@ -143,8 +143,8 @@ const startOf =
     );
 
 /**
- * The one method of each kind of resource's client but knowledge's and
- * statistics', whose methods are the operations they declare.
+ * The one method of each kind of resource's client but knowledge's,
+ * statistics' and guests', whose methods are the operations they declare.
  */
 const clientMethods = {
   connector: "call",
@@ -167,7 +167,8 @@ const resourcesOf = (
         await channel.resource(resource.alias, method, args);
     const methods =
       resource["~resource"] === "knowledge" ||
-      resource["~resource"] === "statistics"
+      resource["~resource"] === "statistics" ||
+      resource["~resource"] === "guests"
         ? [...resource.operations]
         : [clientMethods[resource["~resource"]]];
     clients[resource.alias] = Object.freeze(
