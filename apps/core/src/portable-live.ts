@@ -223,13 +223,24 @@ export class PortableQueriesRpc
    */
   async #read(): Promise<Identity> {
     this.#recheckWhenDue();
+    const { token } = this.#held;
     if (Date.now() >= this.#held.expiresAt) {
       this.#expire();
       throw authErrors.create("auth.unauthenticated");
     }
-    const checked = await checkAppToken(this.#env, this.#held.token, this.#app);
+    const checked = await checkAppToken(this.#env, token, this.#app);
     if (checked.ok && checked.person.userId === this.#userId) {
       return checked.person;
+    }
+    // Renewed while this token was read: what it says no longer counts,
+    // and the one held now is read instead.
+    if (this.#held.token !== token) {
+      return await this.#read();
+    }
+    // It expired while it was read: as expired, not as access ended.
+    if (Date.now() >= this.#held.expiresAt) {
+      this.#expire();
+      throw authErrors.create("auth.unauthenticated");
     }
     if (!checked.ok && checked.reason === "keys_pending") {
       // Not a refusal of the person: the host connects again.
@@ -238,9 +249,12 @@ export class PortableQueriesRpc
     }
     // After the refusal is on its way to the host, if a read asked: the
     // close code tells a host whose connection was only checked on the
-    // timer, with nothing to push, that its access ended.
+    // timer, with nothing to push, that its access ended. Unless a
+    // renewal took the refused token's place meanwhile.
     setTimeout(() => {
-      this.#socket.close(accessEndedCloseCode, "Session ended");
+      if (this.#held.token === token) {
+        this.#socket.close(accessEndedCloseCode, "Session ended");
+      }
     }, 0);
     throw authErrors.create("auth.unauthenticated");
   }
