@@ -22,7 +22,9 @@ import { workflowReferenceLimits } from "../src/references.ts";
 import { runFunction } from "../src/runner.ts";
 import type { OperationChannel } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
+import { valueLimits } from "../src/value-descriptor.ts";
 import { schemaOf } from "../src/value-schema.ts";
+import type { AnySchema } from "../src/value-schema.ts";
 import { defineSchema, defineTable } from "../src/values.ts";
 import { notesWorkflows } from "./notes-workflows.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
@@ -293,6 +295,15 @@ describe("generated modules", () => {
   });
 });
 
+/** A descriptor `depth` levels deep: objects around a null. */
+const nested = (depth: number) => {
+  let schema: AnySchema = v.null();
+  for (let level = 1; level < depth; level += 1) {
+    schema = v.object({ inner: schema });
+  }
+  return schema.descriptor;
+};
+
 /** One last page of `items`, as a paginated query answers it. */
 const pageOf = (items: unknown[]) => ({
   items,
@@ -481,6 +492,37 @@ describe("workflow references", () => {
     const text = files[".grasp/references.ts"] ?? "";
     expect(text).toContain("workflows.archiveNotes.queries.history");
     expect(text).not.toContain("workflows.archiveNotes.queries.decision");
+  });
+
+  test("hold as many decisions as a reference does, contexts nested one level short of the limit, and refuse deeper by name", async () => {
+    const many: BoundWorkflow = {
+      ...summarize,
+      decisions: Object.fromEntries(
+        Array.from(
+          { length: workflowReferenceLimits.decisions },
+          (_, index) => [
+            `decision${index}`,
+            { value: v.null().descriptor, context: v.null().descriptor },
+          ]
+        )
+      ),
+    };
+    const deep = (depth: number): BoundWorkflow => ({
+      ...summarize,
+      decisions: {
+        deep: { value: v.null().descriptor, context: nested(depth) },
+      },
+    });
+    const files = await generatedWith([many]);
+    expect(files[".grasp/references.ts"]).toContain(
+      `WorkflowDecisionDetail<"decision${workflowReferenceLimits.decisions - 1}"`
+    );
+    await expect(
+      generatedWith([deep(valueLimits.depth - 1)])
+    ).resolves.toBeDefined();
+    await expect(generatedWith([deep(valueLimits.depth)])).rejects.toThrow(
+      "summarizeNote's decision contexts don't fit its decision query"
+    );
   });
 
   test("answer only what each query declares: declared keys, no output, a known context", () => {

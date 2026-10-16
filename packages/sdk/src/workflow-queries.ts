@@ -1,5 +1,6 @@
 import type { OperationManifest } from "./app.ts";
 import type { BoundWorkflow } from "./generate.ts";
+import { ValueDefinitionError } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { readDescriptor } from "./value-read.ts";
 import { descriptorOf, schemaOf } from "./value-schema.ts";
@@ -197,6 +198,15 @@ const decisionWait = (key: string): AnySchema =>
 const schemaFrom = (descriptor: ValueDescriptor): AnySchema =>
   schemaOf(readDescriptor(descriptor, 1, { nodes: 0 }));
 
+/** `items`, which has at least one. */
+const nonEmpty = <Item>(items: readonly Item[]): [Item, ...Item[]] => {
+  const [first, ...rest] = items;
+  if (first === undefined) {
+    throw new TypeError("At least one is needed.");
+  }
+  return [first, ...rest];
+};
+
 /** `members` as one union, or the one member alone. */
 const unionOf = (members: readonly AnySchema[]): AnySchema => {
   const [first, ...rest] = members;
@@ -256,22 +266,27 @@ const querySchemas = (
     schemas.decision = {
       args: v.object({ runId: idText, decisionId: idText }),
       // Null for an authorized decision that is closed or unavailable.
-      returns: unionOf([
-        ...keys.map((key) => {
-          const declared = workflow.decisions[key];
-          if (declared === undefined) {
-            throw new TypeError(`No decision ${key}`);
-          }
-          return v.object({
-            key: v.literal(key),
-            wait: decisionWait(key),
-            prompt: plainText,
-            context: schemaFrom(declared.context),
-            canRespond: v.boolean(),
-          });
-        }),
-        v.null(),
-      ]),
+      // Null for an authorized decision that is closed or unavailable:
+      // the union's own null, so 64 decisions still fit a union.
+      returns: v
+        .union(
+          ...nonEmpty(
+            keys.map((key) => {
+              const declared = workflow.decisions[key];
+              if (declared === undefined) {
+                throw new TypeError(`No decision ${key}`);
+              }
+              return v.object({
+                key: v.literal(key),
+                wait: decisionWait(key),
+                prompt: plainText,
+                context: schemaFrom(declared.context),
+                canRespond: v.boolean(),
+              });
+            })
+          )
+        )
+        .nullable(),
     };
   }
   return schemas;
@@ -286,8 +301,23 @@ const querySchemas = (
 export const workflowQueries = (
   workflow: BoundWorkflow
 ): Partial<Record<WorkflowQueryName, OperationManifest>> => {
+  let declared: ReturnType<typeof querySchemas>;
+  try {
+    declared = querySchemas(workflow);
+  } catch (error) {
+    // A decision's context sits two levels down in a detail, and every
+    // context shares one descriptor: contexts that fit a decision binding
+    // may still not fit together. Refused by name, never cut down.
+    if (error instanceof ValueDefinitionError) {
+      throw new TypeError(
+        `${workflow.alias}'s decision contexts don't fit its decision query: ${error.message}`,
+        { cause: error }
+      );
+    }
+    throw error;
+  }
   const queries: Partial<Record<WorkflowQueryName, OperationManifest>> = {};
-  for (const [name, schemas] of Object.entries(querySchemas(workflow))) {
+  for (const [name, schemas] of Object.entries(declared)) {
     // SAFETY: the keys of `querySchemas`' own answer are query names.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
     queries[name as WorkflowQueryName] = {
