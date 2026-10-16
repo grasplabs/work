@@ -86,9 +86,16 @@ const noteOn = (
 noteOn("get", (namespace, id) => namespace.idFromString(String(id)));
 noteOn("getByName", (namespace, name) => namespace.idFromName(String(name)));
 
+/**
+ * How long a reset waits for its wakes. An object that doesn't answer in
+ * time is still serving a request, so it is in memory and the reset
+ * reaches it without one: waiting longer could only hang the suite.
+ */
+export const wakeTimeoutMs = 5000;
+
 /** Brings back the instance of every object reached since the last reset, and of every database and bucket. */
 const wakeStorage = async (): Promise<void> => {
-  await Promise.all([
+  const wakes = Promise.allSettled([
     ...[...reached.values()].map(async ({ namespace, id }) => {
       await runInDurableObject(namespace.get(id), (_object, state) => state.id);
     }),
@@ -99,8 +106,16 @@ const wakeStorage = async (): Promise<void> => {
       await bucket.head("wake");
     }),
   ]);
-  // Those woken, and any reached meanwhile, are in memory: the reset
-  // reaches them.
+  const timeUp = Promise.withResolvers<"time up">();
+  const timer = setTimeout(() => {
+    timeUp.resolve("time up");
+  }, wakeTimeoutMs);
+  // A wake that fails, as one into an object whose constructor throws,
+  // doesn't stop the reset.
+  await Promise.race([wakes, timeUp.promise]);
+  clearTimeout(timer);
+  // Those woken, any still being woken, and any reached meanwhile, are in
+  // memory: the reset reaches them.
   reached.clear();
 };
 

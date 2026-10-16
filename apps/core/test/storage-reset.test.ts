@@ -7,7 +7,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { resetStorage } from "./reset-storage.ts";
+import { resetStorage, wakeTimeoutMs } from "./reset-storage.ts";
 
 type Ledger = DurableObjectStub;
 
@@ -78,6 +78,29 @@ describe("the reset between test files", () => {
     await scheduler.wait(busyMs * 2);
 
     // A new stub: the reset breaks those of the objects it reached.
+    await expect(noteOf(namedLedger(name))).resolves.toBeUndefined();
+  });
+
+  it("empties an object that never answers, without waiting for it", async () => {
+    const name = crypto.randomUUID();
+    await runInDurableObject(namedLedger(name), (_object, state) => {
+      state.storage.kv.put("note", "left behind");
+      // Then holds every later request, as a hung request can.
+      state.waitUntil(
+        (async () => {
+          await scheduler.wait(busyMs);
+          await state.blockConcurrencyWhile(
+            async () => await Promise.withResolvers<never>().promise
+          );
+        })()
+      );
+    });
+    await scheduler.wait(busyMs * 2);
+
+    const started = Date.now();
+    await resetStorage();
+
+    expect(Date.now() - started).toBeLessThan(wakeTimeoutMs * 2);
     await expect(noteOf(namedLedger(name))).resolves.toBeUndefined();
   });
 });
