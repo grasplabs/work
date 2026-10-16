@@ -1,12 +1,13 @@
 import { manifestText } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
-import { storeIdSchema } from "@grasp-os/shared/ids";
+import { storeIdSchema, workspaceIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, ChatId, StoreId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { roleErrors } from "@grasp-os/shared/roles";
+import { exports } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
@@ -278,7 +279,19 @@ export class SealedPreviews {
         observe === undefined
           ? invocation
           : { ...invocation, observeReads: observe };
-      const hosted = hostedRelease(this.#env, release);
+      const preview = {
+        workspaceId: workspaceIdSchema.parse(this.#ctx.id.name),
+        chatId,
+        revision: running.revision,
+      };
+      // Each isolate tailed for the chat's preview alone: what the draft's
+      // function writes with `console` goes to the agent's next check of
+      // this revision (server-logs.ts), as data.
+      const hosted = hostedRelease(this.#env, release, (fn) =>
+        exports.AppTail({
+          props: { app, version: null, preview, method: fn },
+        })
+      );
       const result = await (call.window === undefined
         ? callOperation(
             hosted,

@@ -412,7 +412,13 @@ export const releaseRunner =
     >,
     release: Pick<Release, "modules" | "sdk">,
     /** Whose release it is: the App, which the sandbox caps per owner. */
-    owner: string
+    owner: string,
+    /**
+     * The tail of the isolate that runs `path`, given: what the function
+     * writes with `console` goes there (server-logs.ts). None by default:
+     * a live release's calls keep no App-written text.
+     */
+    tailOf?: (path: string) => Fetcher
   ): Runner =>
   async (path, args, channel, signal, call) => {
     // The platform's modules last: no App module takes one's name.
@@ -436,6 +442,7 @@ export const releaseRunner =
               mainModule: runModule,
               modules,
               env: {},
+              ...(tailOf === undefined ? {} : { tails: [tailOf(path)] }),
             }))
               .getEntrypoint<RunEntrypoint>("Run")
               .run(path, args, isolateChannel),
@@ -495,10 +502,14 @@ export const releaseRunner =
     return data.answer === "json" ? parsed(data.text) : undefined;
   };
 
-/** `release` as the operation host runs it. */
-export const hostedRelease = (env: Env, release: Release): HostedApp => ({
+/** `release` as the operation host runs it, each isolate tailed by `tailOf`, if given. */
+export const hostedRelease = (
+  env: Env,
+  release: Release,
+  tailOf?: (path: string) => Fetcher
+): HostedApp => ({
   manifest: release.app,
-  run: releaseRunner(env, release, release.manifest.resourceId),
+  run: releaseRunner(env, release, release.manifest.resourceId, tailOf),
 });
 
 /** Every call of a store a release without tables doesn't have. */
