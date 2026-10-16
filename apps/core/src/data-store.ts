@@ -355,9 +355,16 @@ export class DataStore extends DurableObject<Env> {
     storeId: StoreId,
     principal: string,
     resource: string,
-    fileId: string
+    fileId: string,
+    claim: string
   ): void {
-    this.#live().files.abandonFinish(storeId, principal, resource, fileId);
+    this.#live().files.abandonFinish(
+      storeId,
+      principal,
+      resource,
+      fileId,
+      claim
+    );
   }
 
   /** `FileHost.publish`; its audit event, and orphan expiry, after. */
@@ -366,11 +373,19 @@ export class DataStore extends DurableObject<Env> {
     principal: string,
     resource: string,
     fileId: string,
-    verified: boolean
+    verified: boolean,
+    claim: string
   ): Promise<UploadState> {
     const host = this.#live();
     try {
-      return host.files.publish(storeId, principal, resource, fileId, verified);
+      return host.files.publish(
+        storeId,
+        principal,
+        resource,
+        fileId,
+        verified,
+        claim
+      );
     } finally {
       await this.#afterFiles();
     }

@@ -25,7 +25,11 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import type { DataStore } from "../src/data-store.ts";
-import { finishClaimMs, purgeGraceMs } from "../src/file-host.ts";
+import {
+  finishClaimMs,
+  purgeGraceMs,
+  sweepPage as sweepPageSize,
+} from "../src/file-host.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { StoreHost } from "../src/store-host.ts";
 import { allEvents } from "./audit-events.ts";
@@ -670,6 +674,12 @@ const gatedReads = (open: Promise<null>) => {
   });
   return { seen, reading };
 };
+
+/** The claim a finish's `publishable` took, or "" for none. */
+const claimOf = (found: unknown): string =>
+  typeof found === "object" && found !== null && "claim" in found
+    ? String(found.claim)
+    : "";
 
 /** R2 as core sees it, but that every deletion fails. */
 const failingDeletes = new Proxy(env.FILES, {
@@ -2102,7 +2112,14 @@ describe("an App's files", { timeout: 120_000 }, () => {
         }).file;
       const published = (principal: string, size?: number): void => {
         const file = start(principal, size);
-        host.files.publish(storeId, principal, "attachments", file, true);
+        host.files.publish(
+          storeId,
+          principal,
+          "attachments",
+          file,
+          true,
+          crypto.randomUUID()
+        );
       };
       // As if a record held every file published so far: what the test
       // arranges, since holding is a commit's to do.
@@ -2594,6 +2611,132 @@ describe("an App's files", { timeout: 120_000 }, () => {
       kept: kept.length,
       after: await storedObjects(release),
     }).toStrictEqual({ failed: true, dueSoon: true, kept: 1, after: [] });
+  });
+
+  it("tries again a failed removal behind a full page of writes removed already and kept for late puts", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    const admit = async (): Promise<string> => {
+      const admitted: { key: string | null } = { key: null };
+      await runInDurableObject(
+        env.DATA_STORES.getByName(storeId),
+        async (instance: DataStore) => {
+          admitted.key = await instance.admitChunk(
+            storeId,
+            builder.userId,
+            "attachments",
+            file,
+            0,
+            bytes.length
+          );
+        }
+      );
+      return admitted.key ?? "";
+    };
+    // More writes than a page, never recorded, removed by the alarm and
+    // kept, as removed writes are, until a write could no longer land.
+    for (let write = 0; write <= sweepPageSize; write += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one write at a time
+      await admit();
+    }
+    await sweepIn(release, purgeGraceMs + 1);
+    // A later write whose object lands, and whose removal fails.
+    const late = await admit();
+    await env.FILES.put(late, bytes);
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (_instance, state) => {
+        const host = new StoreHost(state, { ...env, FILES: failingDeletes });
+        try {
+          await host.files.sweep(storeId, Date.now() + purgeGraceMs + 2);
+        } catch {
+          // Its removal failed, as arranged.
+        }
+      }
+    );
+    const kept = await storedObjects(release);
+    await sweepIn(release, purgeGraceMs + 3);
+    expect({ kept, after: await storedObjects(release) }).toStrictEqual({
+      kept: [late],
+      after: [],
+    });
+  });
+
+  it("ends only its own finish claim, never one another finish took once its own expired", async () => {
+    const { app, release, screen, builder } = await openedApp();
+    const raw = rawChannel(screen, app);
+    const bytes = png(100);
+    const sha = await sha256(bytes);
+    const file = await begunFile(
+      await raw.begin({ ...declaration(), size: bytes.length, sha256: sha })
+    );
+    await expect(statusOf(raw.put(file, 0, bytes, sha))).resolves.toBe(200);
+    const storeId = storeIdSchema.parse(release.store?.storeId);
+    const seen: { stale?: unknown; afterOwn?: unknown } = {};
+    await runInDurableObject(
+      env.DATA_STORES.getByName(storeId),
+      async (_instance, state) => {
+        const host = new StoreHost(state, env);
+        const first = claimOf(
+          await host.files.publishable(
+            storeId,
+            builder.userId,
+            "attachments",
+            file
+          )
+        );
+        // The first check runs past its claim: the next finish claims it.
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          vi.setSystemTime(Date.now() + finishClaimMs + 1);
+          const second = claimOf(
+            await host.files.publishable(
+              storeId,
+              builder.userId,
+              "attachments",
+              file
+            )
+          );
+          const third = host.files.publishable(
+            storeId,
+            builder.userId,
+            "attachments",
+            file
+          );
+          const waiting = async () =>
+            await Promise.race([
+              third.then(() => "answered"),
+              scheduler.wait(100).then(() => "waiting"),
+            ]);
+          // The first check, late, ends its own claim: not the second's.
+          host.files.abandonFinish(
+            storeId,
+            builder.userId,
+            "attachments",
+            file,
+            first
+          );
+          seen.stale = await waiting();
+          host.files.abandonFinish(
+            storeId,
+            builder.userId,
+            "attachments",
+            file,
+            second
+          );
+          seen.afterOwn = await waiting();
+        } finally {
+          vi.useRealTimers();
+        }
+      }
+    );
+    expect(seen).toStrictEqual({ stale: "waiting", afterOwn: "answered" });
   });
 
   it("checks an upload's bytes once however many finishes arrive at once, answering each with the file", async () => {

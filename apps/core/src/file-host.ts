@@ -141,6 +141,7 @@ export const finishClaimMs = 2 * 60_000;
 
 /** One finish's claim on an upload: until when, and settled when it ends. */
 interface FinishClaim {
+  readonly id: string;
   readonly until: number;
   readonly ended: Promise<null>;
   readonly end: () => void;
@@ -165,7 +166,7 @@ const sameHolders = (
 ): boolean => holdersKey(one) === holdersKey(other);
 
 /** Files the alarm deletes or purges per transaction. */
-const sweepPage = 50;
+export const sweepPage = 50;
 
 /** Audit events handed to core per hand-over. */
 const eventsPage = 50;
@@ -228,6 +229,8 @@ export interface FileContent extends FileDescription {
 
 /** An upload all of whose chunks arrived: what its check reads. */
 export interface Publishable {
+  /** This finish's claim on the upload, which `publish` ends. */
+  readonly claim: string;
   readonly chunks: readonly RecordedChunk[];
   readonly size: number;
   readonly sha256: string;
@@ -818,7 +821,9 @@ export class FileHost {
             return claim;
           }
           const { promise: ended, resolve } = Promise.withResolvers<null>();
+          const id = crypto.randomUUID();
           this.#finishing.set(row.fileId, {
+            id,
             until: now + finishClaimMs,
             ended,
             end: () => {
@@ -826,6 +831,7 @@ export class FileHost {
             },
           });
           return {
+            claim: id,
             chunks: chunks.map(({ key, sha256 }) => ({ key, sha256 })),
             size: row.size,
             sha256: row.sha256,
@@ -850,19 +856,26 @@ export class FileHost {
     storeId: StoreId,
     principal: string,
     resource: unknown,
-    fileId: unknown
+    fileId: unknown,
+    claim: string
   ): void {
     const row = this.#storage.transactionSync(() =>
       this.#ownUpload(storeId, principal, fileId, resource)
     );
-    this.#endClaim(row.fileId);
+    this.#endClaim(row.fileId, claim);
   }
 
-  /** Ends the claim of a finish on `fileId`, letting any waiting one go on. */
-  #endClaim(fileId: string): void {
+  /**
+   * Ends finish claim `id` on `fileId`, letting any waiting one go on:
+   * only that one, never a claim another finish took once it expired.
+   */
+  #endClaim(fileId: string, id: string): void {
     const claim = this.#finishing.get(fileId);
+    if (claim?.id !== id) {
+      return;
+    }
     this.#finishing.delete(fileId);
-    claim?.end();
+    claim.end();
   }
 
   /**
@@ -877,14 +890,15 @@ export class FileHost {
     principal: string,
     resource: unknown,
     fileId: unknown,
-    verified: boolean
+    verified: boolean,
+    claim: string
   ): UploadState {
     // Whatever it answers, this finish's check is over.
     try {
       return this.#published(storeId, principal, resource, fileId, verified);
     } finally {
       if (typeof fileId === "string") {
-        this.#endClaim(fileId);
+        this.#endClaim(fileId, claim);
       }
     }
   }
@@ -1418,9 +1432,14 @@ export class FileHost {
         .select({ key: fileWrites.key, issuedAt: fileWrites.issuedAt })
         .from(fileWrites)
         .where(lte(fileWrites.issuedAt, now - purgeGraceMs))
-        // Writes not yet looked at first: those removed already, kept for
-        // a late put, never crowd them out of a page.
-        .orderBy(asc(fileWrites.condemned), asc(fileWrites.issuedAt))
+        // Writes whose removal is still owed (not looked at yet, or a
+        // removal that failed) first: those removed already, kept for a
+        // late put, never crowd them out of a page.
+        .orderBy(
+          sql`${fileWrites.removedAt} IS NOT NULL`,
+          asc(fileWrites.condemned),
+          asc(fileWrites.issuedAt)
+        )
         .limit(sweepPage)
         .all();
       const condemned: string[] = [];

@@ -576,10 +576,17 @@ const finish = async (
     verified = await verify(env, upload);
   } catch (error) {
     // The check couldn't say: the next finish checks again at once.
-    await stub.abandonFinish(storeId, principal, resource, file);
+    await stub.abandonFinish(storeId, principal, resource, file, upload.claim);
     throw error;
   }
-  return await stub.publish(storeId, principal, resource, file, verified);
+  return await stub.publish(
+    storeId,
+    principal,
+    resource,
+    file,
+    verified,
+    upload.claim
+  );
 };
 
 /**
