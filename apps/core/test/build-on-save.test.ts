@@ -430,7 +430,19 @@ export class App {}
     const builder = await signedInApi(idp, "builder");
     const app = await newApp(builder);
     const by = await builder.api.whoami();
-    await commitFiles(env, by, app, server(crypto.randomUUID()), "Save");
+    await commitFiles(
+      env,
+      by,
+      app,
+      {
+        "schema.ts": `import { defineSchema } from "@grasp-os/sdk";
+
+// ${crypto.randomUUID()}
+export default defineSchema({});
+`,
+      },
+      "Save"
+    );
     let built = 0;
     const counting: WorkerLoader = {
       get: (...args) => {

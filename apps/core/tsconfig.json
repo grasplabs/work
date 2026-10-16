@@ -18,6 +18,13 @@
     "worker-configuration.d.ts",
     "*.ts"
   ],
-  // The built-ins' screens: blueprints/tsconfig.json.
-  "exclude": ["blueprints/*/files/screens", "blueprints/*/files/components"]
+  // The built-ins' screens: blueprints/tsconfig.json. The tests' own
+  // built-in is an App of spec 8's layout, whose operations import the
+  // module its seal generates (`#grasp/server`): the compiler checks it as
+  // it seals, as any App's.
+  "exclude": [
+    "blueprints/*/files/screens",
+    "blueprints/*/files/components",
+    "test/fixtures/blueprints/*/files"
+  ]
 }

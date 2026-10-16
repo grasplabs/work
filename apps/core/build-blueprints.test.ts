@@ -58,7 +58,10 @@ const build = (dir: string): string => {
   return out;
 };
 
-const server = { "app/server.ts": "export class App {}\n" };
+const schema = {
+  "schema.ts":
+    'import { defineSchema } from "@grasp-os/sdk";\n\nexport default defineSchema({});\n',
+};
 
 /** A collection a built-in declares. */
 const tasks = { id: "tasks", name: "Tasks", description: "Things to do." };
@@ -109,7 +112,7 @@ describe("the built-in blueprints' build", () => {
   });
 
   it("embeds a built-in that passes every check", () => {
-    const out = build(fixture("fine", server));
+    const out = build(fixture("fine", schema));
     expect(embedded(out)).toStrictEqual([
       {
         id: "fine",
@@ -117,14 +120,14 @@ describe("the built-in blueprints' build", () => {
         description: "A test's built-in.",
         collections: [],
         permissions: [],
-        files: server,
+        files: schema,
       },
     ]);
   });
 
   it("embeds the collections and permissions a built-in declares", () => {
     const out = build(
-      fixture("asks", server, {
+      fixture("asks", schema, {
         collections: [tasks],
         permissions: [onTasks()],
       })
@@ -149,7 +152,7 @@ describe("the built-in blueprints' build", () => {
       ],
     ],
   ])("fails for a declared permission with %s", (_case, permissions) => {
-    const dir = fixture("asks", server, { collections: [tasks], permissions });
+    const dir = fixture("asks", schema, { collections: [tasks], permissions });
     expect(() => build(dir)).toThrow("blueprint.json");
     expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
   });
@@ -163,13 +166,13 @@ describe("the built-in blueprints' build", () => {
     ],
     ["a collection twice", [tasks, tasks], []],
   ])("fails for %s", (_case, collections, permissions) => {
-    const dir = fixture("asks", server, { collections, permissions });
+    const dir = fixture("asks", schema, { collections, permissions });
     expect(() => build(dir)).toThrow("blueprint.json");
     expect(existsSync(path.join(dir, "blueprints.js"))).toBeFalsy();
   });
 
   it("embeds a built-in whose record types the commit would take", () => {
-    const files = { ...server, ...records() };
+    const files = { ...schema, ...records() };
     const out = build(
       fixture("typed", files, {
         collections: [tasks],
@@ -201,7 +204,7 @@ describe("the built-in blueprints' build", () => {
   ])("fails, naming the built-in, for %s", (_case, text, issue) => {
     const dir = fixture(
       "typed",
-      { ...server, "app/records.json": text },
+      { ...schema, "app/records.json": text },
       { collections: [tasks], permissions: [onTasks()] }
     );
     expect(() => build(dir)).toThrow(
@@ -222,7 +225,7 @@ describe("the built-in blueprints' build", () => {
     (_case, collections, permissions) => {
       const dir = fixture(
         "typed",
-        { ...server, ...records() },
+        { ...schema, ...records() },
         {
           collections,
           permissions,
@@ -236,12 +239,12 @@ describe("the built-in blueprints' build", () => {
   );
 
   it.each([
-    ["a hidden file", "hidden", { ...server, ".env": "SECRET=1\n" }, "files/"],
+    ["a hidden file", "hidden", { ...schema, ".env": "SECRET=1\n" }, "files/"],
     ["a path an App can't have", "spaced", { "app/my file.ts": "" }, "files/"],
     [
       "a file over an App's limit",
       "large",
-      { "app/server.ts": "x".repeat(appLimits.fileLength + 1) },
+      { "schema.ts": "x".repeat(appLimits.fileLength + 1) },
       "files/",
     ],
     [

@@ -261,7 +261,6 @@ describe("the workflow map", { timeout: 60_000 }, () => {
       name: `Payables ${unique()}`,
     });
     await releaseFiles(admin, payables, {
-      "app/server.ts": "export class App {}\n",
       "workflows/pay.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
 
 export default workflow(

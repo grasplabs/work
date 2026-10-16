@@ -22,9 +22,10 @@ import {
 } from "../src/builtins.ts";
 import type { Release } from "../src/builtins.ts";
 import { buildScreens } from "../src/screens.ts";
-import { grantReviewed, ordinaryData, racingDb, serverBuilt } from "./apps.ts";
+import { grantReviewed, racingDb, serverBuilt } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { collectionWithNote, storedGrant } from "./knowledge.ts";
+import { calledAs } from "./sealed-apps.ts";
 import { auditedDuring, outcome, signedInApi, unique } from "./sign-in.ts";
 import { testBinding } from "./test-env.ts";
 
@@ -68,12 +69,15 @@ const releaseWith = (change: Partial<BuiltinBlueprint>): Release => ({
   ),
 });
 
+/** Where `hello` keeps its greeting, a function of its release. */
+const greetings = "operations/greetings.ts";
+
 /** A release whose `hello` greets differently. */
 const changedHello = (): Release =>
   releaseWith({
     files: {
       ...hello().files,
-      "app/server.ts": `${hello().files["app/server.ts"]}\n// Changed.\n`,
+      [greetings]: `${hello().files[greetings]}\n// Changed.\n`,
     },
   });
 
@@ -180,22 +184,23 @@ describe("the built-in blueprints", () => {
       name: "Our hello",
     });
     await builder.api.apps.versions.setCurrent(created.app.id, 1);
-    await ordinaryData(created.app.id);
-    await serverBuilt(created.app.id, 1);
     expect({
       blueprint: created.app.blueprint,
       owner: created.app.owner,
       permissions: created.permissions,
       files: await builder.api.apps.files.read(created.app.id, 1),
-      greeting: await builder.api.screens.call(created.app.id, "hello", [
-        "Ann",
-      ]),
+      greeting: await calledAs(
+        await builder.api.whoami(),
+        created.app.id,
+        { contractId: "greetings.hello", kind: "mutation" },
+        { name: "Ann" }
+      ),
     }).toStrictEqual({
       blueprint: "hello",
       owner: builder.userId,
       permissions: [],
       files: hello().files,
-      greeting: "Hello, Ann: greeting 1",
+      greeting: { ok: true, value: "Hello, Ann: greeting 1" },
     });
 
     // Users build no Apps: they neither find a built-in nor create from one.
@@ -558,7 +563,7 @@ describe("the built-in blueprints", () => {
           releaseWith({
             files: {
               ...hello().files,
-              "app/server.ts": `${hello().files["app/server.ts"]}\n// Changed.\n`,
+              [greetings]: `${hello().files[greetings]}\n// Changed.\n`,
             },
             permissions: [notesOf(collectionId)],
           })
@@ -571,7 +576,7 @@ describe("the built-in blueprints", () => {
     const { version } = await builder.api.apps.files.commit(
       created.app.id,
       {
-        "app/server.ts": `${hello().files["app/server.ts"]}\n// Mine.\n`,
+        [greetings]: `${hello().files[greetings]}\n// Mine.\n`,
       },
       "Mine"
     );
