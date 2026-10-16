@@ -161,6 +161,13 @@ export const TestRun = ({
               }[trace.status]
             }
           </output>
+          {trace.detailsRemoved ? (
+            <p className="text-muted-foreground">
+              <Trans>
+                The details of this run were removed when its retention ended.
+              </Trans>
+            </p>
+          ) : null}
           <WorkflowDiagramView
             diagram={trace.diagram}
             label={t`What the run of version ${traceVersion} did`}

@@ -6157,6 +6157,10 @@ msgstr "The data processing agreement isn't signed"
 msgid "The default, {each}"
 msgstr "The default, {each}"
 
+#: src/workflows/test-run.tsx
+msgid "The details of this run were removed when its retention ended."
+msgstr "The details of this run were removed when its retention ended."
+
 #: src/brain/brain.ts
 msgid "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."
 msgstr "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."

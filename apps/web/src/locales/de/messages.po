@@ -6157,6 +6157,10 @@ msgstr "Der Auftragsverarbeitungsvertrag ist nicht unterschrieben"
 msgid "The default, {each}"
 msgstr "Standard, {each}"
 
+#: src/workflows/test-run.tsx
+msgid "The details of this run were removed when its retention ended."
+msgstr "Die Details dieses Laufs wurden entfernt, als seine Aufbewahrungsfrist endete."
+
 #: src/brain/brain.ts
 msgid "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."
 msgstr "Das Verzeichnis und die Anmeldung über Microsoft oder Google. Ergänzt Teams und Rollen sowie die Anwendungen, bei denen sich Personen anmelden, mit ihren Berechtigungen."

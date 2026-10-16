@@ -182,6 +182,39 @@ describe("a run's trace", () => {
     });
   });
 
+  it("shows nothing a run reached once its retention, as the deployment has it now, is over", async () => {
+    const by = await person();
+    const workflow = await createWorkflowResource(
+      env,
+      by,
+      `traced-${unique()}`
+    );
+    await publishWorkflowVersion(env, by, workflow.id, {
+      definition: definitionOf(workflow.name, "1.0.0", routing),
+      basedOn: null,
+    });
+    const run = await ranFor(by, workflow.id, 1, "Ada");
+    // Two days on, with the deployment's retention cut to one day.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    let trace: WorkflowRunTrace;
+    try {
+      trace = await resourceRunTrace(
+        { ...env, RUN_RETENTION_DAYS: "1" },
+        by,
+        workflow.id,
+        run
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+    expect({
+      removed: trace.detailsRemoved,
+      reached: trace.tasks,
+      declared: trace.diagram.tasks.length,
+    }).toStrictEqual({ removed: true, reached: [], declared: 4 });
+  });
+
   it("is only for the workflow's builders, and only of its own runs", async () => {
     const by = await person();
     const user = await person("user");

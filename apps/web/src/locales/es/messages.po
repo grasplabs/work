@@ -6157,6 +6157,10 @@ msgstr "El contrato de encargo del tratamiento no está firmado"
 msgid "The default, {each}"
 msgstr "Predeterminado, {each}"
 
+#: src/workflows/test-run.tsx
+msgid "The details of this run were removed when its retention ended."
+msgstr "Los detalles de esta ejecución se eliminaron al terminar su periodo de conservación."
+
 #: src/brain/brain.ts
 msgid "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."
 msgstr "El directorio y el inicio de sesión con Microsoft o Google. Añade equipos y roles, y las aplicaciones en las que la gente inicia sesión con sus permisos."
