@@ -75,9 +75,9 @@ import { recheckedEvery, sessionRecheckMs } from "./session-check.ts";
 //   at `connect` and `renew` alike, must be for exactly it. A request
 //   naming another App's reference is refused by the read itself.
 // - A stolen token replayed: as on the function route, minutes, one App,
-//   what the person may do there. Every `connect` and `watchQuery` counts
-//   against their requests of the App (`admitted`), and each connection
-//   is recorded (`recordPortableUse`).
+//   what the person may do there. Every `connect`, `watchQuery` and
+//   `renew` counts against their requests of the App (`admitted`), and
+//   each connection is recorded (`recordPortableUse`).
 // - A flood of pushes: the same bounds as a tab's (query-subscriptions.ts:
 //   queries per connection, reads at once, what waits to be pushed), the
 //   person's live reads of the App shared with their tabs.
@@ -274,6 +274,9 @@ export class PortableQueriesRpc
   }
 
   async renew(token: string): Promise<{ expiresAt: number }> {
+    // A renewal is a request like any other: counted against the
+    // person's requests of the App before its token is read.
+    await admitted(this.#env, await this.#check(), this.#app);
     if (typeof token !== "string") {
       throw authErrors.create("auth.unauthenticated");
     }

@@ -50,14 +50,32 @@ interface Seen {
   body: string;
 }
 
-/** Core's `{ result }` for what `answer` gave: a value, or a response. */
+/**
+ * What core pushes for what `answer` gave: a value, the `{ result }` of
+ * a response, or the refusal a refused response's `{ code }` says.
+ */
 const resultOf = async (value: unknown): Promise<unknown> => {
   if (!(value instanceof Response)) {
     return { ok: true, value };
   }
   const body: unknown = await value.json();
-  return typeof body === "object" && body !== null && "result" in body
-    ? body.result
+  if (typeof body !== "object" || body === null) {
+    return undefined;
+  }
+  if ("result" in body) {
+    return body.result;
+  }
+  return "code" in body && typeof body.code === "string"
+    ? {
+        ok: false,
+        error: {
+          code: body.code,
+          message: body.code,
+          category: "authorization",
+          retryable: false,
+          requestId: "r",
+        },
+      }
     : undefined;
 };
 
@@ -118,6 +136,13 @@ class LiveQueries extends RpcTarget {
   }
 
   renew(token: string): { expiresAt: number } {
+    this.#seen.push({
+      url: this.#url,
+      authorization: `Bearer ${token}`,
+      credentials: undefined,
+      redirect: undefined,
+      body: "renew",
+    });
     this.#token = token;
     return { expiresAt: Date.now() + 60_000 };
   }
@@ -753,6 +778,78 @@ describe("a portable host's client", () => {
     expect(entry.snapshot).toStrictEqual({
       value: { title: "Bo's" },
       error: undefined,
+    });
+    stop();
+  });
+
+  it("swaps a live connection's token before it expires, asking no faster than every few seconds when the host has none newer", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    // Its `exp` 40 seconds on: the connection swaps it 30 seconds before.
+    const token = tokenOf("ann", expiry());
+    const seen = network(async () => await Promise.resolve({ title: "Ann's" }));
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    const renewals = (): number =>
+      seen.filter(({ body }) => body === "renew").length;
+    const before = renewals();
+    await vi.advanceTimersByTimeAsync(9500);
+    const first = renewals();
+    // The host hands back the same token every time: tried again every
+    // five seconds at most, not in a loop, until it expires.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect({
+      shown: entry.snapshot.value,
+      before,
+      first,
+      until: renewals(),
+    }).toStrictEqual({
+      shown: { title: "Ann's" },
+      before: 0,
+      first: 1,
+      until: 7,
+    });
+    stop();
+  });
+
+  it("asks the host for a new token once the live connection refuses the one it holds", async () => {
+    // Both kept for a while: only a refusal makes the client ask again.
+    const first = tokenOf("ann", expiry());
+    const next = tokenOf("ann", expiry() + 1);
+    let token = first;
+    const seen = network(async ({ authorization, url }) => {
+      if (url.includes("/app-live/") && authorization === `Bearer ${first}`) {
+        // The session the token came from ended: core pushes the refusal.
+        return await Promise.resolve(
+          Response.json(
+            { code: "auth.unauthenticated", message: "Sign in to continue." },
+            { status: 401 }
+          )
+        );
+      }
+      return await Promise.resolve({ title: "Ann's" });
+    });
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(token),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await until(() => entry.snapshot.error !== undefined);
+    token = next;
+    await client.query(api.notes.get, { id: idOf(2) });
+    expect({
+      refused: entry.snapshot.error?.code,
+      sentNext: seen.at(-1)?.authorization,
+    }).toStrictEqual({
+      refused: "auth.unauthenticated",
+      sentNext: `Bearer ${next}`,
     });
     stop();
   });

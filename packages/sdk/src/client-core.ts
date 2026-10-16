@@ -2799,6 +2799,12 @@ export class GraspClient {
     this.#principal = undefined;
     this.#submissions.clear();
     this.#cancelExtensions(refusal);
+    // Core refused the token, wherever it said so (a call's 401, or a
+    // live connection's refusal or last push): the next is asked of the
+    // host rather than the refused one sent again.
+    if (refusal.code === "auth.unauthenticated") {
+      this.#portable?.forget();
+    }
     this.#live?.closeAll();
     for (const entry of this.#queries.values()) {
       GraspClient.#unfollow(entry);

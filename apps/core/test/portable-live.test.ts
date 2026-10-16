@@ -12,6 +12,7 @@ import type {
   PortableQueriesApi,
 } from "@grasp-os/shared/portable";
 import type { Role } from "@grasp-os/shared/roles";
+import { screenLimits } from "@grasp-os/shared/screens";
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 import { newWebSocketRpcSession } from "capnweb";
 import { env } from "cloudflare:workers";
@@ -550,6 +551,32 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       someoneElse: "auth.principal_changed",
       closed: 4401,
     });
+  });
+
+  it("counts each renewal against the person's requests of the App", async () => {
+    // The bucket fills again with time, so the clock is stopped. A fresh
+    // person and App, so no other test's count.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+    try {
+      const notes = await notesApp();
+      const token = await tokenFor(notes.builder.session, notes.app);
+      const { live } = await openLive(notes.app);
+      const queries = live.connect(token);
+      const { burst } = screenLimits.requests;
+      const renewed: string[] = [];
+      for (let count = 0; count < burst; count += 1) {
+        // oxlint-disable-next-line no-await-in-loop -- one renewal after another, as a host sends them
+        renewed.push(await outcome(queries.renew(token)));
+      }
+      // Within the burst, however many requests getting the token and
+      // connecting took: never renewed without limit.
+      expect({
+        first: renewed[0],
+        last: renewed.at(-1),
+      }).toStrictEqual({ first: "ok", last: "screen.rate_limited" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses another App's query, sensitive data, and a connection's queries past its bound", async () => {

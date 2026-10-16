@@ -37,6 +37,12 @@ const idleMs = 30_000;
 /** How long before its token's `exp` a connection swaps in the next. */
 const renewBeforeMs = 30_000;
 
+/**
+ * How long a connection waits at least before trying to renew again: a
+ * host handing back a token no newer, or none, isn't asked in a loop.
+ */
+const renewAgainMs = 5000;
+
 /** How the client reaches a live connection's token, and lets go of one. */
 export interface LiveTokens {
   /** The person's token now, checked for a change of person first. */
@@ -155,19 +161,25 @@ export class PortableLive {
   }
 
   /**
-   * Swaps in the person's next token shortly before `token`'s `exp`: a
-   * token of someone else's closes the connection instead.
+   * Swaps in the person's next token shortly before `token`'s `exp`, and
+   * never sooner than `renewAgainMs` from now: a token of someone else's
+   * closes the connection instead.
    */
   #renewWhenDue(link: Link, token: PortableToken): void {
-    clearTimeout(link.renewal);
     if (token.expiresAt === undefined) {
+      clearTimeout(link.renewal);
       return;
     }
+    this.#renewIn(link, token.expiresAt - renewBeforeMs - Date.now());
+  }
+
+  #renewIn(link: Link, delayMs: number): void {
+    clearTimeout(link.renewal);
     link.renewal = setTimeout(
       () => {
         void this.#renew(link);
       },
-      Math.max(0, token.expiresAt - renewBeforeMs - Date.now())
+      Math.max(renewAgainMs, delayMs)
     );
   }
 
@@ -179,8 +191,10 @@ export class PortableLive {
     try {
       next = await this.#tokens.token();
     } catch {
-      // No token now: core closes the connection at the old one's `exp`,
-      // and the queries follow again once there is one.
+      // No token now: tried again shortly, and core closes the connection
+      // at the old one's `exp` meanwhile; the queries follow again once
+      // there is one.
+      this.#renewIn(link, renewAgainMs);
       return;
     }
     if (link.closed) {
@@ -195,7 +209,9 @@ export class PortableLive {
       this.#renewWhenDue(link, next);
     } catch {
       // Refused: the old token goes on until its `exp`, when core closes
-      // the connection and the queries follow again with a fresh one.
+      // the connection and the queries follow again with a fresh one;
+      // tried again shortly meanwhile.
+      this.#renewIn(link, renewAgainMs);
     }
   }
 
