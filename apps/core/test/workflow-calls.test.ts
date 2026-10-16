@@ -354,10 +354,18 @@ describe("time, randomness and deadlines of JSON workflows", () => {
         {
           until: {
             call: "grasp.sleepUntil",
-            with: { timestamp: "${ $workflow.startedAt + 2000 }" },
+            with: {
+              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 2000 }",
+            },
           },
         },
-        { finish: { set: { status: "${ $workflow.startedAt | tostring }" } } },
+        {
+          finish: {
+            set: {
+              status: "${ $workflow.startedAt.epoch.milliseconds | tostring }",
+            },
+          },
+        },
       ],
     });
     const run = await ended(by, workflow.id, await started(by, workflow.id));
@@ -1926,7 +1934,9 @@ describe("a run's host, against a forged module's calls", () => {
           later: {
             input: { from: '${ {who: .who, late: "yes"} }' },
             call: "grasp.sleepUntil",
-            with: { timestamp: "${ $workflow.startedAt + 60000 }" },
+            with: {
+              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 60000 }",
+            },
           },
         },
         { finish: { set: { status: "done" } } },
@@ -1959,7 +1969,9 @@ describe("a run's host, against a forged module's calls", () => {
         {
           later: {
             call: "grasp.sleepUntil",
-            with: { timestamp: "${ $workflow.startedAt + 60000 }" },
+            with: {
+              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 60000 }",
+            },
           },
         },
         { finish: { set: { status: "done" } } },
@@ -2029,7 +2041,9 @@ describe("a run's host, against a forged module's calls", () => {
         {
           later: {
             call: "grasp.sleepUntil",
-            with: { timestamp: "${ $workflow.startedAt + 60000 }" },
+            with: {
+              timestamp: "${ $workflow.startedAt.epoch.milliseconds + 60000 }",
+            },
           },
         },
         { finish: { set: { status: "done" } } },
