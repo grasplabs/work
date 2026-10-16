@@ -339,10 +339,15 @@ describe("a workflow's draft", () => {
     );
     const latest = await workflowDraft(env, ada, workflow.id);
     expect({
-      saved: [saved.revision, saved.source, saved.checkpoint],
+      saved: [
+        saved.revision,
+        saved.source,
+        saved.checkpoint?.revision,
+        saved.checkpoint?.source,
+      ],
       latest: [latest.revision, latest.source],
     }).toStrictEqual({
-      saved: [2, "{ mine, not yet", { revision: 1, source: passing }],
+      saved: [2, "{ mine, not yet", 1, passing],
       latest: [3, theirs],
     });
   });
