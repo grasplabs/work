@@ -96,38 +96,47 @@ const maxDiagnostics = 50;
 const maxMessage = 500;
 /** The most characters an inspection may answer. */
 const inspectionMaxLength = 1024 * 1024;
+/** How deep a manifest's JSON may nest (see `contractsOf`). */
+const manifestMaxDepth = 2 * valueDepth + 8;
 /** The most calculations one version's modules export. */
 const maxContracts = 256;
 
+/** What a JSON number, boolean or null starts with. */
+const scalarStart = /^[-0-9tfn]$/u;
+
 /**
- * How deep the JSON text `text` nests, its leaf included: counted in one
- * pass over its brackets outside strings, so nothing recurses however
- * deep it is. Text that isn't JSON counts as it reads; the parse refuses
- * it after.
+ * How deep the JSON text `text` nests, as the SDK counts a value's depth
+ * (`valueDepth`): the value itself is one level, and each array item or
+ * object member one level below its container, so `[]` is 1 and `[1]` is
+ * 2. Counted in one pass over the text, so nothing recurses however deep
+ * it is. Text that isn't JSON counts as it reads; the parse refuses it
+ * after.
  */
 export const jsonTextDepth = (text: string): number => {
   let depth = 0;
   let deepest = 0;
   let inString = false;
   for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
+    const char = text[index] ?? "";
     if (inString) {
       if (char === "\\") {
         index += 1;
       } else if (char === '"') {
         inString = false;
       }
-    } else if (char === '"') {
-      inString = true;
     } else if (char === "[" || char === "{") {
       depth += 1;
       deepest = Math.max(deepest, depth);
     } else if (char === "]" || char === "}") {
       depth -= 1;
+    } else if (char === '"' || scalarStart.test(char)) {
+      // A string (a member's name counts as its value would) or a
+      // number, boolean or null: one level below its container.
+      inString = char === '"';
+      deepest = Math.max(deepest, depth + 1);
     }
   }
-  // A leaf below the deepest container, or a bare one at the top.
-  return deepest + 1;
+  return deepest;
 };
 
 const invalid = (
@@ -214,8 +223,10 @@ const contractsOf = (
   text: string,
   sources: Readonly<Record<string, string>>
 ): Map<string, ComputeContract> => {
-  // A manifest's descriptors nest one level below its contracts' two.
-  if (jsonTextDepth(text) > valueDepth + 2) {
+  // Bounded so nothing that reads it recurses past what it can: a
+  // descriptor takes two JSON levels (its fields and itself) for each level
+  // of the value it describes, below the manifest's own two.
+  if (jsonTextDepth(text) > manifestMaxDepth) {
     throw invalid([{ message: "The modules' contracts nest too deep." }]);
   }
   let parsed: unknown;

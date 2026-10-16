@@ -24,8 +24,36 @@ export type ComputeModules = Readonly<Record<string, unknown>>;
  * workflow's modules could replace it.
  */
 const { stringify } = JSON;
-/** The `Object` functions the runner uses, taken as `stringify` is. */
+/**
+ * Every other intrinsic the runner calls, taken as `stringify` is: module
+ * code that replaces `Reflect.get`, `RegExp.prototype.exec`,
+ * `String.prototype.slice` or an `instanceof` hook changes nothing here,
+ * so a thenable answer is refused however it is dressed up.
+ */
 const { entries, getOwnPropertyDescriptor, hasOwn, keys } = Object;
+const { apply, get: reflectGet } = Reflect;
+const regexpExec: unknown = getOwnPropertyDescriptor(
+  RegExp.prototype,
+  "exec"
+)?.value;
+const stringSlice: unknown = getOwnPropertyDescriptor(
+  String.prototype,
+  "slice"
+)?.value;
+
+/** Whether `text` matches `pattern`, through the captured `exec`. */
+const matches = (pattern: RegExp, text: string): boolean =>
+  typeof regexpExec === "function" &&
+  apply(regexpExec, pattern, [text]) !== null;
+
+/** The first `length` code units of `text`, through the captured `slice`. */
+const cut = (text: string, length: number): string => {
+  const sliced: unknown =
+    typeof stringSlice === "function"
+      ? apply(stringSlice, text, [0, length])
+      : "";
+  return typeof sliced === "string" ? sliced : "";
+};
 
 /** The most of a handler's failure an answer keeps. */
 const failureMaxLength = 500;
@@ -67,7 +95,10 @@ export const computeManifestOf = (modules: ComputeModules): string => {
     }
     for (const name of keys(namespace)) {
       const value = exportOf(namespace, name);
-      if (!exportPattern.test(name) || computeHandler(value) === undefined) {
+      if (
+        !matches(exportPattern, name) ||
+        computeHandler(value) === undefined
+      ) {
         continue;
       }
       const contract = exportOf(value, "~compute");
@@ -96,7 +127,7 @@ export type ComputeAnswer =
 const isThenable = (value: unknown): boolean =>
   (typeof value === "object" || typeof value === "function") &&
   value !== null &&
-  typeof Reflect.get(value, "then") === "function";
+  typeof reflectGet(value, "then") === "function";
 
 /**
  * Runs the calculation `request` names on its input: the handler's answer
@@ -130,12 +161,19 @@ export const runCompute = (
       ? { ok: false, message: "The calculation answered no JSON value." }
       : { ok: true, output: text };
   } catch (error) {
+    // Its own `message`, as an error has it: read as data, never through
+    // a hook module code could have set.
+    const message: unknown =
+      (typeof error === "object" && error !== null) ||
+      typeof error === "function"
+        ? getOwnPropertyDescriptor(error, "message")?.value
+        : undefined;
     return {
       ok: false,
-      message: (error instanceof Error && typeof error.message === "string"
-        ? error.message
-        : "The calculation threw"
-      ).slice(0, failureMaxLength),
+      message: cut(
+        typeof message === "string" ? message : "The calculation threw",
+        failureMaxLength
+      ),
     };
   }
 };

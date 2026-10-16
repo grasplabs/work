@@ -17,9 +17,20 @@
 // whether every one of them took, and the runner refuses to run a
 // calculation in an isolate where one didn't.
 
+/**
+ * The intrinsics the wrappers below call, taken as this module loads,
+ * before any module of the workflow's: a wrapper module code calls later
+ * never looks one up again, so replacing `Reflect.apply`, `Error` or the
+ * like can't intercept what it passes on (the real `Date` or formatter).
+ */
+const { apply, construct } = Reflect;
+const RefusalError = Error;
+
 /** A function that refuses, for what a calculation can't use. */
 const unavailable = (what: string) => (): never => {
-  throw new Error(`A calculation is pure: ${what} isn't available to it.`);
+  throw new RefusalError(
+    `A calculation is pure: ${what} isn't available to it.`
+  );
 };
 
 /** Puts `value` in place of `key` of `target`, for good; whether it took. */
@@ -43,7 +54,13 @@ const seal = (target: object, key: string, value?: unknown): boolean => {
  * (`lockdown`), since a proxy hands descriptor reads to its target.
  */
 const clocklessDate = (): DateConstructor =>
+  // SAFETY: the handler has exactly a `ProxyHandler`'s `apply` and
+  // `construct` traps; `__proto__: null` only sets its prototype.
   new Proxy(Date, {
+    // No prototype: a trap the handler doesn't have is never looked up on
+    // `Object.prototype`, where module code could define one and be handed
+    // the real `Date`.
+    __proto__: null,
     apply: unavailable("the clock"),
     construct: (target, args: unknown[]) => {
       if (args.length === 0) {
@@ -51,9 +68,9 @@ const clocklessDate = (): DateConstructor =>
       }
       // SAFETY: constructing `Date` with arguments makes a `Date`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-      return Reflect.construct(target, args) as Date;
+      return construct(target, args) as Date;
     },
-  });
+  } as ProxyHandler<DateConstructor>);
 
 /** The globals a calculation has no use for, taken away entirely. */
 const removedGlobals = [
@@ -190,13 +207,13 @@ const lockdown = (): boolean => {
       get(this: unknown): unknown {
         const bound: unknown =
           typeof formatGetter === "function"
-            ? Reflect.apply(formatGetter, this, [])
+            ? apply(formatGetter, this, [])
             : undefined;
         return (...args: unknown[]): unknown => {
           if (args[0] === undefined || typeof bound !== "function") {
             return unavailable("the clock")();
           }
-          const formatted: unknown = Reflect.apply(bound, undefined, args);
+          const formatted: unknown = apply(bound, undefined, args);
           return formatted;
         };
       },
@@ -216,7 +233,7 @@ const lockdown = (): boolean => {
         if (args[0] === undefined || typeof formatToParts !== "function") {
           return unavailable("the clock")();
         }
-        const parts: unknown = Reflect.apply(formatToParts, this, args);
+        const parts: unknown = apply(formatToParts, this, args);
         return parts;
       }
     )

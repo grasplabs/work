@@ -1,5 +1,6 @@
 import { workflowSdkModules } from "@grasp-os/compiler";
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+import { valueDepth } from "@grasp-os/shared/value-depth";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import type {
   WorkflowResourceRun,
@@ -10,7 +11,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { Acting } from "../src/auth/identity.ts";
-import { runCompute } from "../src/workflow-modules.ts";
+import { jsonTextDepth, runCompute } from "../src/workflow-modules.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
@@ -182,6 +183,70 @@ const ran = async (by: Acting, id: string) => {
 const hashOf = (version: WorkflowResourceVersion | undefined): string =>
   version?.build.executable === true ? version.build.hash : "";
 
+/**
+ * Ways module code could intercept what the clock wrappers hand on, each
+ * an expression answering the current time, or throwing once it can't.
+ */
+const interceptions = [
+  // A trap the proxy's handler lacks, looked up on `Object.prototype`.
+  `(() => {
+    let real: unknown;
+    Reflect.set(Object.prototype, "has", (target: unknown) => {
+      real = target;
+      return false;
+    });
+    void ("x" in Date);
+    Reflect.deleteProperty(Object.prototype, "has");
+    if (typeof real !== "function") {
+      throw new Error("no clock");
+    }
+    return (Reflect.construct(real, []) as Date).getTime();
+  })()`,
+  // `Reflect.construct`, replaced before `new Date(0)`.
+  `(() => {
+    let real: unknown;
+    const original = Reflect.construct;
+    Reflect.set(Reflect, "construct", (target: Function, args: unknown[]) => {
+      real = target;
+      return original(target, args);
+    });
+    void new Date(0);
+    Reflect.set(Reflect, "construct", original);
+    if (typeof real !== "function") {
+      throw new Error("no clock");
+    }
+    return (original(real, []) as Date).getTime();
+  })()`,
+  // `Reflect.apply`, replaced before a date is formatted.
+  `(() => {
+    const found: unknown[] = [];
+    const original = Reflect.apply;
+    Reflect.set(Reflect, "apply", (fn: Function, self: unknown, args: unknown[]) => {
+      found.push(fn);
+      return original(fn, self, args);
+    });
+    const formatter = new Intl.DateTimeFormat();
+    void formatter.format(0);
+    Reflect.set(Reflect, "apply", original);
+    for (const fn of found) {
+      if (typeof fn === "function") {
+        const bound: unknown = original(fn, formatter, []);
+        if (typeof bound === "function") {
+          const text: unknown = original(bound, undefined, []);
+          if (typeof text === "string") {
+            return text.length;
+          }
+        }
+      }
+    }
+    throw new Error("no clock");
+  })()`,
+];
+
+/** `innermost` inside `levels` arrays, as JSON text. */
+const nested = (levels: number, innermost: string): string =>
+  `${"[".repeat(levels)}${innermost}${"]".repeat(levels)}`;
+
 const totalModules = {
   "code/total.ts": totalModule,
   "code/sum.ts": sumModule,
@@ -237,6 +302,7 @@ describe("a JSON workflow's compute modules", () => {
       "crypto.getRandomValues(new Uint8Array(4))[0]",
       "performance.now()",
       "new Intl.DateTimeFormat().format()",
+      ...interceptions,
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const refused = await publicationRefusal(by, {
@@ -268,6 +334,8 @@ describe("a JSON workflow's compute modules", () => {
       // Generated code would import what the compiler never let it name.
       'return Number(Function("return 1")());',
       'return Number(Reflect.construct(Object.getPrototypeOf(async () => 0).constructor, ["return 1"]));',
+      // What the clock wrappers hand on, intercepted.
+      ...interceptions.map((intercept) => `return ${intercept};`),
     ]) {
       // oxlint-disable-next-line no-await-in-loop -- one at a time
       const { workflow } = await published(by, {
@@ -313,6 +381,55 @@ describe("a JSON workflow's compute modules", () => {
       status: "completed",
       output: { status: "3" },
     });
+  });
+
+  it("refuses a thenable answer and reads exports with what module code can't replace", async () => {
+    const by = await builder();
+    // `Reflect.get` answering nothing would hide a promise's `then`.
+    const hidden = await published(by, {
+      "code/total.ts": `Reflect.set(Reflect, "get", () => undefined);\n${moduleAnswering("return Promise.resolve(6) as unknown as number;")}`,
+    });
+    await expect(ran(by, hidden.workflow.id)).resolves.toStrictEqual({
+      status: "failed",
+      code: "workflow.compute_failed",
+    });
+    // A `test` that matches nothing would hide every export.
+    const unmatched = await published(by, {
+      "code/total.ts": `RegExp.prototype.test = () => false;\n${moduleAnswering("return amounts.length;")}`,
+    });
+    await expect(ran(by, unmatched.workflow.id)).resolves.toStrictEqual({
+      status: "completed",
+      output: { status: "3" },
+    });
+  });
+
+  it("counts an answer's depth as the SDK counts a value's", () => {
+    // At the limit: an empty array 32 levels down, or a leaf 31 down, is
+    // a value; one level more is not.
+    const depths = Object.fromEntries(
+      [
+        "1",
+        "[]",
+        "[1]",
+        '{"a":[]}',
+        '{"a":"[[[{"}',
+        '["\\"["]',
+        nested(valueDepth, ""),
+        nested(valueDepth - 1, "0"),
+        nested(valueDepth, "0"),
+      ].map((text) => [text, jsonTextDepth(text)])
+    );
+    expect(Object.values(depths)).toStrictEqual([
+      1,
+      1,
+      2,
+      2,
+      2,
+      2,
+      valueDepth,
+      valueDepth,
+      valueDepth + 1,
+    ]);
   });
 
   it("checks a call's arguments against the sealed contract before running anything", async () => {
