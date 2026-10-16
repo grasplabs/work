@@ -532,8 +532,8 @@ interface SessionContext {
   readonly parent: () => string | undefined;
   /**
    * Set once the sandbox refused a function a test called for its own
-   * reasons, not its code's (`sandboxRefusals`): the suite's failures may
-   * be the sandbox's doing then.
+   * reasons, not its code's (`sandboxRefusals`): how the suite went may be
+   * the sandbox's doing then.
    */
   readonly sandbox: { refused: boolean };
 }
@@ -699,7 +699,13 @@ class FixtureSession extends TestTarget {
           ...(parentSession === undefined ? {} : { parentSession }),
         }
       );
-      if (!result.ok && sandboxRefusals.has(result.error.code)) {
+      // Only while the test runs: a call it didn't wait for, refused as
+      // the suite's session ends, tells nothing of how the tests went.
+      if (
+        !result.ok &&
+        sandboxRefusals.has(result.error.code) &&
+        !this.#closed
+      ) {
         this.#sandbox.refused = true;
       }
       return result;
@@ -1232,10 +1238,11 @@ const suiteFailures = async (
       `${path}, "${name}": ${failure}`.slice(0, maxFailureLength)
     )
   );
-  // A test that failed after the sandbox refused a function it called, for
-  // the sandbox's own reasons, may have failed for that: the sandbox's,
-  // to try again, never read as the code's failure.
-  if (failures.length > 0 && host.sandboxRefused) {
+  // Once the sandbox refused a function a test called, for its own
+  // reasons, how the tests went isn't known, failed or passed (a test may
+  // have caught the refusal): the sandbox's, to try again, never read as
+  // the code's failure or its pass.
+  if (host.sandboxRefused) {
     throw new SandboxUnavailableError(
       `${path}: the sandbox refused a function its tests called, for want of a place or as it was lost, so whether they pass isn't known: try again.`
     );

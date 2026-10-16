@@ -58,6 +58,11 @@ const passing = suiteOf(`
       await live.close();
 `);
 
+/** Passes on the refusal it gets while the App's calls have no place. */
+const catching = suiteOf(`
+      await t.rejectsCode(owner.query(api.notes.list, page), "operation.sandbox_busy");
+`);
+
 /** What a suite stopped past its CPU time fails with. */
 const stoppedOnCpu = /^tests\/notes\.test\.ts: it stopped: .*CPU time/u;
 
@@ -220,20 +225,26 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
     }
   });
 
-  it("take a failure after the sandbox refused a test's call for want of a place as the sandbox's", async () => {
-    const built = await appWith(passing);
-    // The App's own calls at their share: the function the test calls
-    // finds no place, and the test fails for it.
-    const giveUp = new AbortController();
-    const { ended: held } = await heldPlace(built.app, giveUp.signal);
-    try {
-      await expect(activation(built)).resolves.toBe("unavailable");
-    } finally {
-      giveUp.abort();
-      await held;
+  it.each([
+    ["a failure", passing],
+    ["a pass", catching],
+  ])(
+    "take %s after the sandbox refused a test's call for want of a place as the sandbox's",
+    async (_, suite) => {
+      const built = await appWith(suite);
+      // The App's own calls at their share: the function the test calls
+      // finds no place, and the test fails for it.
+      const giveUp = new AbortController();
+      const { ended: held } = await heldPlace(built.app, giveUp.signal);
+      try {
+        await expect(activation(built)).resolves.toBe("unavailable");
+      } finally {
+        giveUp.abort();
+        await held;
+      }
+      await expect(findApp(env, built.app)).resolves.toMatchObject({
+        currentVersion: null,
+      });
     }
-    await expect(findApp(env, built.app)).resolves.toMatchObject({
-      currentVersion: null,
-    });
-  });
+  );
 });
