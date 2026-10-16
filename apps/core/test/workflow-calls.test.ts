@@ -46,6 +46,8 @@ import { setWorkflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
   publishWorkflowVersion,
+  shareWorkflowResource,
+  unshareWorkflowResource,
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
@@ -657,6 +659,33 @@ describe("grasp.connector calls of JSON workflows", () => {
           outcome: "workflow.call_denied",
         },
       ],
+    });
+  });
+
+  it("refuses the next call of a running run once its person loses their role in the workflow", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const bob = await person("builder");
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      before: [hold],
+    });
+    await shareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+      role: "user",
+    });
+    // Bob's run sleeps before its call; he's unshared, still a member.
+    const runId = await started(bob, workflow.id, serving);
+    await unshareWorkflowResource(env, ada, workflow.id, {
+      type: "person",
+      id: bob.userId,
+    });
+    // An admin reads why it failed: its details are its person's and theirs.
+    const run = await ended(admin, workflow.id, runId);
+    const sent = await mail.did();
+    expect({ end: endOf(run), calls: sent.calls }).toStrictEqual({
+      end: { status: "failed", code: "workflow.call_denied" },
+      calls: 0,
     });
   });
 
