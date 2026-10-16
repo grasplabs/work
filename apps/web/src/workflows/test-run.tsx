@@ -6,6 +6,7 @@ import { Textarea } from "@grasp-os/ui/components/textarea";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
+import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
@@ -57,6 +58,7 @@ export const TestRun = ({
           return;
         }
         setTrace(read);
+        setFailure(undefined);
         if (!ended(read)) {
           timer = setTimeout(() => {
             void follow();
@@ -65,6 +67,13 @@ export const TestRun = ({
       } catch (error) {
         if (!stopped) {
           setFailure(failureText(error));
+          // Core or the connection out for a moment: the run goes on, and
+          // so does following it.
+          if (isTransient(error)) {
+            timer = setTimeout(() => {
+              void follow();
+            }, followMs);
+          }
         }
       }
     };

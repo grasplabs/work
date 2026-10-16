@@ -80,6 +80,26 @@ const DraftStatus = ({ draft }: { draft: WorkflowDraft }) => {
   );
 };
 
+/** The diagram of the draft's checkpoint, the latest text that passed. */
+const CheckpointDiagram = ({
+  checkpoint,
+}: {
+  checkpoint: NonNullable<WorkflowDraft["checkpoint"]>;
+}) => {
+  const { t } = useLingui();
+  const { revision: checkpointRevision } = checkpoint;
+  return (
+    <div className="flex flex-col gap-2">
+      <h2 className="font-medium">
+        {checkpointRevision === 0
+          ? t`Diagram of the current version`
+          : t`Diagram of revision ${checkpointRevision}`}
+      </h2>
+      <WorkflowDiagramView diagram={checkpoint.diagram} label={t`Diagram`} />
+    </div>
+  );
+};
+
 export const DefinitionEditor = ({
   workflow,
   loaded,
@@ -104,6 +124,7 @@ export const DefinitionEditor = ({
   const [replacing, setReplacing] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
   const edited = text !== draft.source;
+  const { checkpoint } = draft;
   const publishable =
     !edited &&
     draft.revision > 0 &&
@@ -277,18 +298,8 @@ export const DefinitionEditor = ({
       <ErrorText>
         {outcome?.kind === "failed" ? outcome.reason : undefined}
       </ErrorText>
-      {draft.checkpoint === null ? null : (
-        <div className="flex flex-col gap-2">
-          <h2 className="font-medium">
-            {draft.checkpoint.revision === 0
-              ? t`Diagram of the current version`
-              : t`Diagram of revision ${draft.checkpoint.revision}`}
-          </h2>
-          <WorkflowDiagramView
-            diagram={draft.checkpoint.diagram}
-            label={t`Diagram`}
-          />
-        </div>
+      {checkpoint === null ? null : (
+        <CheckpointDiagram checkpoint={checkpoint} />
       )}
       {draft.problems.length === 0 ? null : (
         <section aria-labelledby="definition-problems">
