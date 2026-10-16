@@ -868,12 +868,13 @@ ${working("c", 10)}
     const admission = await admitAttempt(env, lineage, returned);
     await admission.settle();
     const afterReturn = await outcome(admitAttempt(env, lineage, returned));
-    // Never returned: once its 50 ms have passed, the next admission
-    // settles it as used up.
-    const died = attemptOf("died", 50);
+    // Never returned: once its time has passed, the next admission
+    // settles it as used up. Long enough that asking again while it holds
+    // is still within it on a slow runner.
+    const died = attemptOf("died", 1500);
     await admitAttempt(env, lineage, died);
     const whileHolding = await outcome(admitAttempt(env, lineage, died));
-    await scheduler.wait(100);
+    await scheduler.wait(1600);
     const next = await outcome(admitAttempt(env, lineage, attemptOf("next")));
     const afterLapse = await outcome(admitAttempt(env, lineage, died));
 

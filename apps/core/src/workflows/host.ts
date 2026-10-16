@@ -1080,6 +1080,14 @@ export const isCpuLimitKill = (error: unknown): boolean =>
   error instanceof Error && cpuLimit.test(error.message);
 
 /**
+ * A CPU-limit kill as the Loader throws it (`isCpuLimitKill`): for a call
+ * into an isolate already so stopped, and for the on-prem sandbox's `cpu`
+ * verdict (code.ts), so both go the way the Loader's own kill does.
+ */
+export const cpuLimitKill = (cause?: unknown): Error =>
+  new Error("Worker exceeded CPU time limit.", { cause });
+
+/**
  * One of core's errors as the isolate, and the run's own record, may see
  * it: an expected error as it is, a timeout as one (the Loader's CPU limit
  * too), anything else as `internal.unexpected`, with the cause only in
@@ -1950,8 +1958,8 @@ export class RunHost extends RpcTarget {
    * every call `admission` admits as one of its lineage's host calls,
    * `stepDone` settling
    * once its step ends in this activation: what it settled with, or, once
-   * the Loader stopped the isolate past its CPU time while it ran, a
-   * timeout, which its step's retries retry in a fresh activation with a
+   * the Loader (on-prem, the sandbox: code.ts, `stepCodeFailure`) stopped
+   * the isolate past its CPU time while it ran, a timeout, which its step's retries retry in a fresh activation with a
    * fresh isolate (dispatcher.ts, `afterCpuKill`). An isolate so stopped
    * runs nothing more: an attempt that comes after it in this activation
    * (a retry due at once) times out as the one cut off did.
@@ -1963,7 +1971,7 @@ export class RunHost extends RpcTarget {
     stepDone: Promise<unknown>
   ): Promise<Settled<unknown>> {
     const call = this.#isolateStopped
-      ? Promise.reject(new Error("Worker exceeded CPU time limit."))
+      ? Promise.reject(cpuLimitKill())
       : fn(this.#attemptHost(attempt, admission));
     this.#hooks.attemptCall?.(call, stepDone);
     try {

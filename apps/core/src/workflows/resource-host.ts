@@ -37,6 +37,7 @@ import type {
 import { settling } from "./code.ts";
 import type { RunHostCalls, Settled } from "./code.ts";
 import {
+  cpuLimitKill,
   forIsolate,
   fromIsolate,
   isCpuLimitKill,
@@ -650,7 +651,7 @@ export class ResourceRunHost
                     check: (which, value) => this.#check(attempt, which, value),
                   })
                 )
-              : Promise.reject(new Error("Worker exceeded CPU time limit."));
+              : Promise.reject(cpuLimitKill());
             this.#hooks.attemptCall?.(call, stepDone.promise);
             let result: Settled<unknown>;
             try {
