@@ -98,6 +98,25 @@ describe("reading a body", () => {
     }).toStrictEqual({ outcome: "request.timeout", cancelled: true });
   });
 
+  it("refuses a body once its deadline passes, though its cancellation never settles or fails", async () => {
+    const hanging = new ReadableStream<Uint8Array>({
+      cancel: async () => {
+        await Promise.withResolvers<never>().promise;
+      },
+    });
+    const failing = new ReadableStream<Uint8Array>({
+      cancel: () => {
+        throw new Error("The source couldn't be cancelled.");
+      },
+    });
+    await expect(
+      Promise.all([
+        outcomeOf(readAtMost(hanging, 1024, deadlineMs)),
+        outcomeOf(readAtMost(failing, 1024, deadlineMs)),
+      ])
+    ).resolves.toStrictEqual(["request.timeout", "request.timeout"]);
+  });
+
   it("refuses a body sent a byte at a time once its deadline passes, however small", async () => {
     const { stream, seen } = dripping();
     const outcome = await outcomeOf(

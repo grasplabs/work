@@ -19,6 +19,17 @@ export const strictTransportSecurity = `max-age=${hstsMaxAgeSeconds}; includeSub
  */
 export const readDeadlineMs = 30_000;
 
+/** Cancels `reader`'s stream: should that fail, nobody waits to hear it. */
+const cancelQuietly = async (
+  reader: ReadableStreamDefaultReader<Uint8Array>
+): Promise<void> => {
+  try {
+    await reader.cancel();
+  } catch {
+    // The body is given up on either way.
+  }
+};
+
 /**
  * `stream`'s bytes, read up to `max` of them: undefined for a stream
  * longer than that, counted on what it holds, whatever it says its size is.
@@ -44,9 +55,10 @@ export const readAtMost = async (
       // oxlint-disable-next-line no-await-in-loop -- a stream reads in order
       const next = await Promise.race([reader.read(), expired]);
       if (next === "expired") {
+        // Cancelled without waiting for it: a source whose cancellation
+        // never settles, or fails, neither holds nor replaces the refusal.
         // The read still pending settles as done once cancelled.
-        // oxlint-disable-next-line no-await-in-loop -- once, then out
-        await reader.cancel();
+        void cancelQuietly(reader);
         throw requestErrors.create("request.timeout");
       }
       const { done, value } = next;
