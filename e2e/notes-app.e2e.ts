@@ -3,14 +3,7 @@ import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { notesAppFiles } from "./notes-app.ts";
-import {
-  apiOf,
-  endSession,
-  pageOf,
-  peopleIn,
-  release,
-  signInTo,
-} from "./people.ts";
+import { apiOf, endSession, peopleIn, release, signInTo } from "./people.ts";
 
 // The Notes App end to end on the platform's own runtime and React SDK: a
 // builder's App of spec 8's layout, sealed and current, its screen in its
@@ -73,11 +66,11 @@ const createNote = async (
 };
 
 test("a person creates, loads, edits and deletes notes, and a stale save keeps the draft", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("notesApp");
   const app = await notesApp(builder);
-  const page = await pageOf(browser, builder);
+  const page = await pageOf(builder);
   const screen = await openNotes(page, app);
   await expect(screen.getByText("No notes yet.")).toBeVisible();
 
@@ -131,7 +124,7 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
 
   // The same note open in a second tab, its draft started from the same
   // revision. The first tab saves; the second's save is stale.
-  const other = await pageOf(browser, builder);
+  const other = await pageOf(builder);
   const second = await openNotes(other, app);
   await second.getByRole("button", { name: "Edit Call Acme back" }).click();
   const draft = second.getByRole("form", { name: "Edit note" });
@@ -167,13 +160,13 @@ test("a person creates, loads, edits and deletes notes, and a stale save keeps t
 });
 
 test("a screen whose page connects again as someone else is stopped, and the page loads again as them, sending nothing of the first person's", async ({
-  browser,
+  pageOf,
 }) => {
   // Someone else may use the App and its data is ordinary, so a save sent
   // again under their cookie would run, and commit, as them.
   const { first, next } = peopleIn("notesAppSwitch");
   const app = await notesApp(first, next);
-  const page = await pageOf(browser, first);
+  const page = await pageOf(first);
 
   // The page's one connection (this route has no shell), dropped at will,
   // and refused while the browser's cookie changes hands.
@@ -236,11 +229,11 @@ test("a screen whose page connects again as someone else is stopped, and the pag
 });
 
 test("a screen whose function call core refuses as someone else's is stopped, and the page loads again as them", async ({
-  browser,
+  pageOf,
 }) => {
   const { first, next } = peopleIn("notesAppTwoTabs");
   const app = await notesApp(first, next);
-  const page = await pageOf(browser, first);
+  const page = await pageOf(first);
   // What core answered each save: its status.
   const answered: number[] = [];
   page.on("response", (response) => {
@@ -273,11 +266,11 @@ test("a screen whose function call core refuses as someone else's is stopped, an
 });
 
 test("a screen whose person signed out is stopped and the page loads again, so nothing of theirs stays on it", async ({
-  browser,
+  pageOf,
 }) => {
   const { first } = peopleIn("notesAppSignedOut");
   const app = await notesApp(first);
-  const page = await pageOf(browser, first);
+  const page = await pageOf(first);
   let drop: (() => Promise<void>) | undefined;
   await page.routeWebSocket("**/rpc", (socket) => {
     socket.connectToServer();
@@ -310,13 +303,13 @@ test("a screen whose person signed out is stopped and the page loads again, so n
 });
 
 test("a note saved in one session appears on another session's open screen without reloading", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("notesLive");
   const app = await notesApp(builder);
-  const watching = await openNotes(await pageOf(browser, builder), app);
+  const watching = await openNotes(await pageOf(builder), app);
   await expect(watching.getByText("No notes yet.")).toBeVisible();
-  const saving = await openNotes(await pageOf(browser, builder), app);
+  const saving = await openNotes(await pageOf(builder), app);
 
   // Saved in the second session: the first, which asks nothing, shows it.
   await createNote(saving, "Pushed to the other screen");
@@ -337,4 +330,189 @@ test("a note saved in one session appears on another session's open screen witho
   ).toBeVisible();
   await saving.getByRole("button", { name: "Delete Edited elsewhere" }).click();
   await expect(watching.getByText("No notes yet.")).toBeVisible();
+});
+
+test("a list loads five notes at a time and keeps the loaded notes current across sessions", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesPages");
+  const app = await notesApp(builder);
+  const watching = await openNotes(await pageOf(builder), app);
+  await expect(watching.getByText("No notes yet.")).toBeVisible();
+  const notes = watching.getByRole("list", { name: "Notes" });
+  for (let note = 1; note <= 6; note += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one note after the other
+    await createNote(watching, `Note ${note}`);
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await expect(
+      notes.getByText(`Note ${note}`, { exact: true })
+    ).toBeVisible();
+  }
+
+  // Five at first, newest first; the sixth once asked for.
+  await expect(notes.getByRole("listitem")).toHaveText([
+    /Note 6/u,
+    /Note 5/u,
+    /Note 4/u,
+    /Note 3/u,
+    /Note 2/u,
+  ]);
+  await watching.getByRole("button", { name: "Load more" }).click();
+  await expect(notes.getByRole("listitem")).toHaveCount(6);
+  await expect(watching.getByRole("button", { name: "Load more" })).toHaveCount(
+    0
+  );
+
+  // Another session saves a note and deletes one inside the loaded list:
+  // the open list follows, every note once, the rest closing up.
+  const saving = await openNotes(await pageOf(builder), app);
+  await createNote(saving, "Note 7");
+  await expect(notes.getByRole("listitem")).toHaveCount(7);
+  await saving.getByRole("button", { name: "Delete Note 4" }).click();
+  await expect(notes.getByRole("listitem")).toHaveText([
+    /Note 7/u,
+    /Note 6/u,
+    /Note 5/u,
+    /Note 3/u,
+    /Note 2/u,
+    /Note 1/u,
+  ]);
+});
+
+/** Waits until the page keeps a draft holding `text` for the tab (sessionStorage). */
+const draftKept = async (page: Page, text: string): Promise<void> => {
+  await page.waitForFunction(
+    (wanted) =>
+      Object.keys(sessionStorage).some(
+        (key) =>
+          key.startsWith("grasp.form-drafts:") &&
+          (sessionStorage.getItem(key) ?? "").includes(wanted)
+      ),
+    text
+  );
+};
+
+test("a draft survives a newer note, a stale save and a refresh, and is re-applied on the latest version", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesDrafts");
+  const app = await notesApp(builder);
+  const mine = await pageOf(builder);
+  const theirPage = await pageOf(builder);
+  const theirs = await openNotes(theirPage, app);
+  await createNote(theirs, "Plan", "First body");
+  const list = theirs.getByRole("list", { name: "Notes" });
+  await expect(list.getByText("Plan", { exact: true })).toBeVisible();
+
+  // I start editing the title; someone else saves a new body meanwhile.
+  let screen = await openNotes(mine, app);
+  await screen.getByRole("button", { name: "Edit Plan" }).click();
+  let editor = screen.getByRole("form", { name: "Edit note" });
+  await editor.getByLabel("Title").fill("My plan");
+
+  await theirs.getByRole("button", { name: "Edit Plan" }).click();
+  const other = theirs.getByRole("form", { name: "Edit note" });
+  await other.getByLabel("Body").fill("Their body");
+  await other.getByRole("button", { name: "Save changes" }).click();
+  await expect(other.getByLabel("Body")).toHaveValue("Their body");
+
+  // The newer note arrives: my draft stays as it was, and I see what
+  // changed beside what I changed.
+  let changes = editor.getByRole("status").filter({
+    hasText: "This changed since you started editing",
+  });
+  await expect(changes).toContainText("Latest version: Their body");
+  await expect(changes).toContainText("Yours: My plan");
+  // Each field changed shows both versions: what re-applying replaces.
+  await expect(changes).toContainText("Latest version: Plan");
+  await expect(changes).toContainText("Yours: First body");
+  await expect(editor.getByLabel("Title")).toHaveValue("My plan");
+  await expect(editor.getByLabel("Body")).toHaveValue("First body");
+
+  // Re-applied on the latest version, then saved: both changes are kept.
+  await changes
+    .getByRole("button", { name: "Re-apply my changes to the latest version" })
+    .click();
+  await expect(editor.getByLabel("Title")).toHaveValue("My plan");
+  await expect(editor.getByLabel("Body")).toHaveValue("Their body");
+  await editor.getByRole("button", { name: "Save changes" }).click();
+  await expect(list.getByText("My plan", { exact: true })).toBeVisible();
+  await expect(changes).toHaveCount(0);
+
+  // An unsaved draft, then a refresh of the page: the draft comes back
+  // when the note is opened again.
+  await editor.getByLabel("Title").fill("Unsaved title");
+  await draftKept(mine, "Unsaved title");
+  // Someone else saves again before the refresh, on my saved note.
+  await expect(other.getByLabel("Title")).toHaveValue("My plan");
+  await other.getByLabel("Body").fill("Their second body");
+  await other.getByRole("button", { name: "Save changes" }).click();
+  await expect(changes).toContainText("Latest version: Their second body");
+  await mine.reload();
+  screen = await openNotes(mine, app);
+  await screen.getByRole("button", { name: "Edit My plan" }).click();
+  editor = screen.getByRole("form", { name: "Edit note" });
+  changes = editor.getByRole("status").filter({
+    hasText: "This changed since you started editing",
+  });
+  await expect(editor.getByLabel("Title")).toHaveValue("Unsaved title");
+  await expect(editor.getByLabel("Body")).toHaveValue("Their body");
+
+  // The restored draft still carries the revision it started from, older
+  // than the note's, so my save is refused as stale and the draft stays,
+  // until I re-apply it on the latest version.
+  await expect(changes).toContainText("Latest version: Their second body");
+  await editor.getByRole("button", { name: "Save changes" }).click();
+  await expect(editor.getByRole("alert")).toContainText("changed since");
+  await expect(editor.getByLabel("Title")).toHaveValue("Unsaved title");
+  await changes
+    .getByRole("button", { name: "Re-apply my changes to the latest version" })
+    .click();
+  await editor.getByRole("button", { name: "Save changes" }).click();
+  await expect(list.getByText("Unsaved title", { exact: true })).toBeVisible();
+  // The note as saved, read afresh: my title on their second body.
+  const reread = await openNotes(theirPage, app);
+  await reread.getByRole("button", { name: "Edit Unsaved title" }).click();
+  const saved = reread.getByRole("form", { name: "Edit note" });
+  await expect(saved.getByLabel("Title")).toHaveValue("Unsaved title");
+  await expect(saved.getByLabel("Body")).toHaveValue("Their second body");
+
+  // An unsaved draft, then my session ends in another tab: the next load
+  // of this tab, as a browser restoring it would, finds no draft kept.
+  await editor.getByLabel("Body").fill("Left behind");
+  await draftKept(mine, "Left behind");
+  const elsewhere = await mine.context().newPage();
+  await elsewhere.goto("/");
+  const signedOut = await elsewhere.evaluate(async () => {
+    const response = await fetch("/api/auth/sign-out", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    return response.ok;
+  });
+  expect(signedOut).toBeTruthy();
+  await mine.reload();
+  await mine.waitForFunction(
+    () =>
+      !Object.keys(sessionStorage).some((key) =>
+        key.startsWith("grasp.form-drafts:")
+      )
+  );
+
+  // A tab the browser restored with my own drafts in it, signed out: the
+  // page drops them as soon as it learns nobody is signed in, with no
+  // screen open to do it.
+  const restoredKey = `grasp.form-drafts:${encodeURIComponent(builder.userId)}:${encodeURIComponent(app)}`;
+  await mine.evaluate((key) => {
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({ n1: { text: "Restored", at: Date.now() } })
+    );
+  }, restoredKey);
+  await mine.goto("/");
+  await mine.waitForFunction(
+    (key) => sessionStorage.getItem(key) === null,
+    restoredKey
+  );
 });

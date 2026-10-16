@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, ordinaryData, pageOf, peopleIn } from "./people.ts";
+import { apiOf, ordinaryData, peopleIn } from "./people.ts";
 import { origin } from "./stack.ts";
 
 // A chat builds an App in a studio: the chat alone until its agent writes
@@ -128,7 +128,7 @@ export default function Tally() {
 `;
 
 test("a chat builds an App in a studio, the chat on the left and a preview that changes none of the App's data on the right", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("chatPreview");
   const { core, api } = apiOf(builder);
@@ -146,7 +146,7 @@ test("a chat builds an App in a studio, the chat on the left and a preview that 
     const chat = await api.chats.create(`Build ${tag}`);
 
     // Nothing built yet: the chat alone, the chats' sidebar open beside it.
-    const page = await pageOf(browser, builder);
+    const page = await pageOf(builder);
     // While `failDrafts` holds, reading the chat's drafts goes to an API
     // this stack has switched off (improvement signals), which core
     // refuses: as a read that fails.

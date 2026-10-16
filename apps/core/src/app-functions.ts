@@ -17,7 +17,9 @@ import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { liveWindowMaxItems } from "@grasp-os/shared/store-limits";
 import { coreStepPrefix, stepIdempotencyKey } from "@grasp-os/shared/workflows";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { operationRoles } from "./app-access.ts";
@@ -25,6 +27,7 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { callTimeoutMs } from "./app.ts";
 import { appFor } from "./apps.ts";
+import { keepAuditEvent } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
@@ -34,6 +37,8 @@ import type {
   ProgressSink,
   ResourceBindings,
 } from "./operations.ts";
+import { requireApprovedVersion } from "./permissions.ts";
+import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
@@ -214,23 +219,55 @@ const fencedStore = (
  * is pinned to) for a step of `caller`'s run: as the person the run acts
  * for, in workflow mode, with the run as its work context, and with the
  * run as whoever the audit log names and whose budgets a model request
- * counts against besides its binding's (`BindingCaller.actor`). Nothing
- * of it comes from the run's isolate.
+ * counts against besides its binding's (`BindingCaller.actor`), for the
+ * call of `operation`, its public function's path. Nothing of it comes
+ * from the run's isolate.
  */
 export const runInvocationFor = async (
   env: Env,
   release: Release,
-  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller
+  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller,
+  operation: string
 ): Promise<Invocation> => {
   const { app, runId, version, authority } = run;
+  // A version nobody approved refused, recorded once for the call, as the
+  // v1 path's refused calls are (`workflow.call.refused`, workflows/
+  // host.ts): the App, the version and the function, never its input.
+  let refusalAudited = false;
+  const auditRefusal = async () => {
+    if (refusalAudited) {
+      return;
+    }
+    refusalAudited = true;
+    await keepAuditEvent(env, drizzle(env.DB), {
+      actor: runActorOf(run),
+      action: "workflow.call.refused",
+      target: { type: "workflow_run", id: runId },
+      requestId,
+      detail: {
+        app,
+        workflow: run.workflow,
+        version,
+        step: null,
+        call: operation,
+        errorCode: "permission.denied",
+        reason: "version.unapproved",
+      },
+    });
+  };
   // The one gate, as for a screen's call: before the call starts, each
-  // mutation commits and each resource request. The release, and the
-  // person, still a member with a role in the App; then, last, after
-  // every read, the step's attempt, so nothing runs for an attempt the
-  // engine let go of meanwhile. The commit and the request check the
-  // lease once more, synchronously, just before they start.
+  // mutation commits and each resource request. The release; the version
+  // an admin approved, while the App holds a permission that changes
+  // things (`requireApprovedVersion`), as a run's calls into the App
+  // always were: a run waiting on a version nobody approved does nothing
+  // more once an admin grants for a later one, not even to the App's own
+  // data. Then the person, still a member with a role in the App; then,
+  // last, after every read, the step's attempt, so nothing runs for an
+  // attempt the engine let go of meanwhile. The commit and the request
+  // check the lease once more, synchronously, just before they start.
   const authorize = async () => {
     await requireNotRevoked(env, app, version);
+    await requireApprovedVersion(env, app, version, auditRefusal);
     const role = await memberRole(env.DB, authority.onBehalfOf);
     if (role === undefined) {
       throw permissionErrors.create("permission.person_inactive");
@@ -300,17 +337,30 @@ const isOverBytes = (text: string, max: number): boolean =>
   (text.length * 3 > max && encoder.encode(text).byteLength > max);
 
 /** A call's request, as a screen or agent sends it (spec 32.6). */
-const functionRequestSchema = z.strictObject({
-  reference: z.strictObject({
-    resourceId: z.string().min(1).max(128),
-    resourceVersion: z.int().min(1),
-    contractId: z.string().min(1).max(256),
-    fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
-    kind: z.enum(["query", "mutation", "action"]),
-  }),
-  input: z.unknown(),
-  idempotencyKey: z.string().optional(),
-});
+const functionRequestSchema = z
+  .strictObject({
+    reference: z.strictObject({
+      resourceId: z.string().min(1).max(128),
+      resourceVersion: z.int().min(1),
+      contractId: z.string().min(1).max(256),
+      fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+      kind: z.enum(["query", "mutation", "action"]),
+    }),
+    input: z.unknown(),
+    idempotencyKey: z.string().optional(),
+    /**
+     * A paginated list's window (query-windows.ts): the query read from the
+     * start for at most `extent` records, for a screen only.
+     */
+    window: z
+      .strictObject({ extent: z.int().min(1).max(liveWindowMaxItems) })
+      .optional(),
+  })
+  // A window is a query's only, on every path a call is read on: a
+  // mutation or action with one, a stream's included, runs nothing.
+  .refine(
+    (call) => call.window === undefined || call.reference.kind === "query"
+  );
 
 /** A call's request, read. */
 export type FunctionRequest = z.infer<typeof functionRequestSchema>;
@@ -391,12 +441,20 @@ export const refusalOf = (
   const expected = isExpectedError(error)
     ? error
     : internalErrors.create("internal.unexpected", { requestId });
+  // Of its details, only how long to wait before asking again: what a
+  // caller needs to wait for its budget (a window's pages, say).
+  const details: unknown = Reflect.get(expected, "details");
+  const retryAfterMs: unknown =
+    typeof details === "object" && details !== null
+      ? Reflect.get(details, "retryAfterMs")
+      : undefined;
   return {
     code: expected.code,
     message: expected.message,
     category: categoryOf(expected.code),
     retryable: isRetryableCode(expected.code),
     requestId,
+    ...(typeof retryAfterMs === "number" ? { details: { retryAfterMs } } : {}),
   };
 };
 
@@ -408,6 +466,12 @@ interface FunctionCallOptions {
   readonly parentSession?: string;
   /** Only this kind of function may be called (a live query's). */
   readonly kind?: FunctionRequest["reference"]["kind"];
+  /**
+   * Given, the call may read a paginated list's window (a screen's): what
+   * charges the person for its pages past what the caller paid
+   * (`WindowRequest.charge`).
+   */
+  readonly chargeWindow?: (pages: number, whole: number) => Promise<void>;
   /** Told the store a query read and its read set (`Invocation.observeReads`). */
   readonly observeReads?: (
     storeId: StoreId,
@@ -423,7 +487,14 @@ const callFunction = async (
   request: unknown,
   options: FunctionCallOptions
 ): Promise<FunctionAnswer> => {
-  const { deadline, stillAllowed, parentSession, kind, observeReads } = options;
+  const {
+    deadline,
+    stillAllowed,
+    parentSession,
+    kind,
+    observeReads,
+    chargeWindow,
+  } = options;
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
     result: { ok: false, error: refusalOf(error, requestId) },
@@ -435,6 +506,13 @@ const callFunction = async (
   try {
     call = readFunctionRequest(request);
     if (kind !== undefined && call.reference.kind !== kind) {
+      throw operationErrors.create("contract.invalid_request");
+    }
+    // A window is a screen's, and a query's only.
+    if (
+      call.window !== undefined &&
+      (chargeWindow === undefined || call.reference.kind !== "query")
+    ) {
       throw operationErrors.create("contract.invalid_request");
     }
   } catch (error) {
@@ -465,25 +543,44 @@ const callFunction = async (
       sources,
     });
     const { store } = release;
-    const result = await callOperation(
-      hostedRelease(env, release),
+    const observe =
       observeReads === undefined || store === null
+        ? undefined
+        : (readSet: Record<string, number>) => {
+            observeReads(storeIdSchema.parse(store.storeId), readSet);
+          };
+    const observed =
+      observe === undefined
         ? invocation
-        : {
-            ...invocation,
-            observeReads: (readSet) => {
-              observeReads(storeIdSchema.parse(store.storeId), readSet);
+        : { ...invocation, observeReads: observe };
+    const hosted = hostedRelease(env, release);
+    const reference = { path, kind: call.reference.kind };
+    const result =
+      call.window === undefined
+        ? await callOperation(hosted, observed, reference, call.input, {
+            ...(call.idempotencyKey === undefined
+              ? {}
+              : { idempotencyKey: call.idempotencyKey }),
+            ...(parentSession === undefined ? {} : { parentSession }),
+          })
+        : await readWindow(
+            {
+              charge:
+                chargeWindow ??
+                (async () => {
+                  await Promise.reject(
+                    operationErrors.create("contract.invalid_request")
+                  );
+                }),
+              app: hosted,
+              invocation,
+              reference,
+              args: release.app.operations[path]?.args,
+              input: call.input,
+              extent: call.window.extent,
             },
-          },
-      { path, kind: call.reference.kind },
-      call.input,
-      {
-        ...(call.idempotencyKey === undefined
-          ? {}
-          : { idempotencyKey: call.idempotencyKey }),
-        ...(parentSession === undefined ? {} : { parentSession }),
-      }
-    );
+            observe
+          );
     return {
       result,
       provenance: sources.snapshot(),
@@ -519,6 +616,34 @@ export const callAppFunction = async (
     ...(parentSession === undefined ? {} : { parentSession }),
   });
 
+/**
+ * Calls a public function of App `app` for a screen of `by`'s, as
+ * `callAppFunction` calls it, or reads a query's paginated window for it
+ * (query-windows.ts). Never throws.
+ */
+export const callScreenFunction = async (
+  env: Env,
+  by: Pick<Identity, "userId" | "role" | "teams">,
+  app: unknown,
+  request: unknown,
+  deadline: number,
+  chargeWindow: (pages: number, whole: number) => Promise<void>
+): Promise<FunctionAnswer> =>
+  await callFunction(env, by, app, request, { deadline, chargeWindow });
+
+/**
+ * The extent of the window `request` asks for, or undefined when it asks
+ * for none or isn't a call (its call refuses it): what its pages are
+ * charged by (query-windows.ts, `windowPages`).
+ */
+export const windowExtentOf = (request: unknown): number | undefined => {
+  try {
+    return readFunctionRequest(request).window?.extent;
+  } catch {
+    return undefined;
+  }
+};
+
 /** What a live query's evaluation answered, and what it read. */
 export interface EvaluatedQuery {
   readonly answer: FunctionAnswer;
@@ -543,12 +668,14 @@ export const evaluateAppQuery = async (
   by: Pick<Identity, "userId" | "role" | "teams">,
   app: unknown,
   request: string,
-  deadline: number
+  deadline: number,
+  chargeWindow: (pages: number, whole: number) => Promise<void>
 ): Promise<EvaluatedQuery> => {
   let reads: EvaluatedQuery["reads"];
   const answer = await callFunction(env, by, app, request, {
     deadline,
     kind: "query",
+    chargeWindow,
     observeReads: (storeId, readSet) => {
       reads = { storeId, readSet };
     },
@@ -679,11 +806,16 @@ export const callRunFunction = async (
     }
     return await callOperation(
       hostedRelease(env, release),
-      await runInvocationFor(env, release, {
-        ...caller,
-        // No longer than the step's attempt, nor than any call of an App's.
-        deadline: Math.min(caller.deadline, Date.now() + callTimeoutMs(env)),
-      }),
+      await runInvocationFor(
+        env,
+        release,
+        {
+          ...caller,
+          // No longer than the step's attempt, nor than any call of an App's.
+          deadline: Math.min(caller.deadline, Date.now() + callTimeoutMs(env)),
+        },
+        operation.path
+      ),
       { path: operation.path, kind: operation.kind },
       input,
       { idempotencyKey }

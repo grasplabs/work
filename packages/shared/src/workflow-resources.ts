@@ -83,10 +83,20 @@ export const workflowResourceErrors = defineErrorFamily({
     "You have created as many workflows as one person may, deleted ones included.",
   "workflow.version_corrupt":
     "This version's stored record doesn't match what was published, so it isn't used. Report it to Grasp.",
+  "workflow.evaluator_changed":
+    "This version was published for an expression evaluator the platform no longer runs, so its runs can't evaluate as it was published. Publish it again as a new version.",
   "workflow.build_failed":
     "The code generated from this definition didn't build, so it wasn't published. Report it to Grasp.",
   "workflow.build_slow":
     "Building the code generated from this definition took longer than a publication waits, so nothing was published. Publish it again in a moment.",
+  "workflow.output_invalid":
+    "The workflow's result doesn't match its output schema, so the run failed.",
+  "workflow.run_unavailable": "This workflow has no such run.",
+  "workflow.run_limit":
+    "The person this start acts for already has as many runs of this workflow under way as one person may. Wait for one to end, or stop one.",
+  "workflow.run_ended": "This run has already ended.",
+  "workflow.start_unconfirmed":
+    "The run never started: the workflow engine didn't confirm its start in time, so nothing of it ran. Start the workflow again.",
   "workflow.protocol_unsupported":
     "This version was built for a protocol between the platform and workflow code that this platform doesn't run. Publish it again as a new version.",
   "workflow.start_invalid":
@@ -370,7 +380,52 @@ export interface WorkflowStart {
   paramsRevision: number;
   /** The SHA-256 of the frozen bindings. */
   bindingsHash: string;
+  /**
+   * The run executing it, under its own ID, pinned to the version's sealed
+   * build; null for a version that has no executable build
+   * (`WorkflowVersionBuild`), which is admitted and never runs.
+   */
+  runId: string | null;
   createdAt: string;
+}
+
+/**
+ * The most runs of one workflow that haven't ended a person may have
+ * started (or had started for them) at once: a start past it is refused
+ * (`workflow.run_limit`). An interim bound on what one person's starts
+ * make core spend, until lineage quotas hold these runs (GRA-567).
+ */
+export const maxLiveRunsPerPrincipal = 20;
+
+/** Where a run of a workflow is: the engine's say, as core follows it. */
+export type WorkflowRunStatus =
+  | "starting"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+/**
+ * A run of a workflow's exact version and build, admitted by its start's
+ * receipt (`WorkflowStart.id`, which it shares). What it returned or why it
+ * failed only for the person it acts for and the organization's admins:
+ * it can hold what the run read for them.
+ */
+export interface WorkflowResourceRun {
+  id: string;
+  workflowId: string;
+  version: number;
+  manifestHash: string;
+  /** The executable identity it runs (`WorkflowVersionBuild.hash`). */
+  buildHash: string;
+  principal: string;
+  status: WorkflowRunStatus;
+  createdAt: string;
+  endedAt: string | null;
+  /** What it returned, once completed, for those who see its details. */
+  output?: unknown;
+  /** Why it failed, for those who see its details. */
+  error?: { code: string | null; message: string };
 }
 
 /** A workflow resource, as its members see it. */
@@ -424,6 +479,11 @@ export interface WorkflowBinders {
    * any of them, so they see them all.
    */
   appBindings: { id: string; app: string }[];
+  /**
+   * Its runs that haven't ended. Its builders may terminate any of them
+   * (`terminateRun`), so they see how many.
+   */
+  liveRuns: number;
 }
 
 /**
@@ -528,6 +588,10 @@ export interface WorkflowResourcesApi {
    * for them (`workflowStartSchema`): its admitted receipt.
    */
   start: (id: string, input: unknown) => Promise<WorkflowStart>;
+  /** One of its runs, for anyone with a role (`WorkflowResourceRun`). */
+  run: (id: string, runId: string) => Promise<WorkflowResourceRun>;
+  /** Stops a run that hasn't ended; for the workflow's builders and admins. */
+  terminateRun: (id: string, runId: string) => Promise<WorkflowResourceRun>;
   /** Its parameters' configuration, for anyone with a role. */
   params: (id: string) => Promise<WorkflowParams>;
   /** Sets parameter values, revision-checked; for builders. */

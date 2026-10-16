@@ -1,4 +1,3 @@
-import { unknownOutcomeListLimit } from "@grasp-os/shared/connect";
 import type { UnknownOutcomeListing } from "@grasp-os/shared/connect";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
@@ -12,10 +11,12 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
+import { loadEveryPage } from "../dashboard/outcome-pages.ts";
 import { readPeople } from "../directory.ts";
 import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import {
   SettingsError,
   SettingsLoading,
@@ -97,14 +98,6 @@ const OutcomeRows = ({ outcomes }: { outcomes: Outcomes }) => {
           ))}
         </TableBody>
       </Table>
-      {listed.length >= unknownOutcomeListLimit ? (
-        <p className="text-muted-foreground border-t px-5 py-4" role="note">
-          <Trans>
-            Only the newest {unknownOutcomeListLimit} are shown. Older ones show
-            here as these are resolved.
-          </Trans>
-        </p>
-      ) : null}
     </div>
   );
 };
@@ -147,12 +140,31 @@ export const Route = createFileRoute("/_shell/settings/outcomes")({
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: UnknownOutcomes,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(core, async (session): Promise<Outcomes> => {
-      const [listed, people] = await Promise.all([
-        session.unknownOutcomes.listAll(),
-        readPeople(session),
-      ]);
-      return { listed, people };
-    }),
+  loader: async ({
+    abortController,
+    context: { core },
+  }): Promise<Loaded<Outcomes>> => {
+    // Each page of the listing within its own few seconds, and no more
+    // pages once the page is left.
+    const left = abortController.signal;
+    const [listed, people] = await Promise.all([
+      loadEveryPage(
+        core,
+        async (session, before) =>
+          await session.unknownOutcomes.listAll(before),
+        left
+      ),
+      loadFromCore(core, readPeople, left),
+    ]);
+    if (listed.state !== "ready") {
+      return listed;
+    }
+    if (people.state !== "ready") {
+      return people;
+    }
+    return {
+      state: "ready",
+      data: { listed: listed.data, people: people.data },
+    };
+  },
 });

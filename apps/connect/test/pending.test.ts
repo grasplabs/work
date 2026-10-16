@@ -116,7 +116,7 @@ const confirm = async (
       action: held.action,
       idempotencyKey: held.idempotencyKey,
       origin: chatOrigin,
-      confirms: held.id,
+      decision: { kind: "confirm", pendingActionId: held.id },
       ...call,
       ...signed,
     }),
@@ -547,7 +547,9 @@ describe("a side effect from chat", () => {
       // nothing.
       otherResource: await outcome(ended(sent, { resource: "other" })),
       otherAgent: await outcome(ended(sent, {}, inChat(anna, "agent-other"))),
-      confirming: await outcome(ended(sent, { confirms: id })),
+      confirming: await outcome(
+        ended(sent, { decision: { kind: "confirm", pendingActionId: id } })
+      ),
     }).toStrictEqual({
       sent: {
         connectionId,
@@ -657,7 +659,7 @@ describe("a side effect from chat", () => {
         })
       ),
       // ...or the agent's own call's capability, which confirms nothing.
-      outcome(confirm(anna, held, { signed: { confirms: undefined } })),
+      outcome(confirm(anna, held, { signed: { decision: undefined } })),
     ]);
     const stillWaiting = await waitingFor(anna);
     expect({
@@ -709,7 +711,10 @@ describe("a side effect from chat", () => {
     const held = await heldFor(anna);
     await expect(
       outcome(
-        callAs(inChat(anna), call, { origin: chatOrigin, confirms: held.id })
+        callAs(inChat(anna), call, {
+          origin: chatOrigin,
+          decision: { kind: "confirm", pendingActionId: held.id },
+        })
       )
     ).resolves.toBe("capability.invalid");
     expect({ ran: server.ran, waiting: await waitingFor(anna) }).toStrictEqual({
@@ -767,6 +772,73 @@ describe("a side effect from chat", () => {
       ran: [],
     });
     await confirm(anna, held, { authority: { ...crm, mode: "interactive" } });
+    expect(server.ran).toHaveLength(1);
+  });
+
+  it("runs only with a confirmation of exactly it, from where it was held: never with a resolution's capability", async () => {
+    const anna = someone();
+    const connectionId = await addConnection();
+    const crm = {
+      ...appFor(anna.userId, "app-crm"),
+      mode: "interactive" as const,
+    };
+    await hold(crm, mail(connectionId));
+    const held = await heldFor(anna);
+    const refusal = async (
+      signed: Signed,
+      authority: Authority = crm
+    ): Promise<string> =>
+      await outcome(confirm(anna, held, { authority, signed }));
+    const attempts = {
+      resolution: await refusal({
+        decision: { kind: "resolve", choice: "not_happened", claimedAt: 0 },
+      }),
+      anotherAction: await refusal({
+        decision: { kind: "confirm", pendingActionId: crypto.randomUUID() },
+      }),
+      otherVersion: await refusal({}, { ...crm, appVersion: 2 }),
+      otherPermission: await refusal({
+        origin: { ...chatOrigin, permissionId: "permission-other" },
+      }),
+      otherContext: await refusal({
+        origin: {
+          ...chatOrigin,
+          context: {
+            type: "chat",
+            workspaceId: "workspace-1",
+            chatId: "chat-2",
+          },
+        },
+      }),
+      withBinding: await refusal({
+        origin: {
+          ...chatOrigin,
+          binding: {
+            id: "binding-mail",
+            declarationHash: "a".repeat(64),
+            fingerprint: "b".repeat(64),
+          },
+        },
+      }),
+    };
+    const waiting = await waitingFor(anna);
+    expect({
+      attempts,
+      ran: server.ran,
+      waiting: waiting.map(({ id }) => id),
+    }).toStrictEqual({
+      attempts: {
+        resolution: "capability.invalid",
+        anotherAction: "capability.invalid",
+        otherVersion: "capability.invalid",
+        otherPermission: "capability.invalid",
+        otherContext: "capability.invalid",
+        withBinding: "capability.invalid",
+      },
+      ran: [],
+      waiting: [held.id],
+    });
+    await confirm(anna, held, { authority: crm });
     expect(server.ran).toHaveLength(1);
   });
 

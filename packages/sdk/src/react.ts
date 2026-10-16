@@ -24,6 +24,17 @@
  * following and controlling a workflow the App binds; generated workflow
  * references and the host's side of it are still to come (GRA-625,
  * GRA-626), so no App reaches it yet.
+ *
+ * A query that answers pages is shown as a live list with
+ * `usePaginatedQuery`:
+ *
+ * ```tsx
+ * const { items, hasMore, isLoading, loadMore } = usePaginatedQuery(
+ *   api.notes.list,
+ *   {},
+ *   { initialPageSize: 50 },
+ * );
+ * ```
  */
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import {
@@ -36,12 +47,14 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 
-import { clientInternals, loading } from "./client-core.ts";
+import { clientInternals, loading, skippedPage } from "./client-core.ts";
 import type {
   ActionReference,
   CallArguments,
   GraspClient,
   MutationReference,
+  PaginatedQueryView,
+  PagerSnapshot,
   QueryReference,
   QuerySnapshot,
   StreamReference,
@@ -49,6 +62,7 @@ import type {
 } from "./client-core.ts";
 import { clientError, GraspError } from "./client-error.ts";
 import { readWorkflowReference, workflowChannel } from "./client-workflow.ts";
+import type { PaginationResult } from "./database.ts";
 import { useGraspForm } from "./form.ts";
 import type {
   AnswersRecord,
@@ -75,6 +89,7 @@ import type { WorkflowView } from "./workflow-store.ts";
 export { GraspError } from "./client-error.ts";
 export type { ErrorCategory } from "./client-error.ts";
 export type {
+  PaginatedQueryView,
   QueryOptions,
   StreamOptions,
   SubmitOptions,
@@ -94,10 +109,12 @@ export type {
   WorkflowWait,
 } from "./references.ts";
 export type {
+  FieldChange,
   FormFailure,
   FormStatus,
   GraspForm,
   OperationFormOptions,
+  RecordChanges,
   RecordForm,
   RecordFormOptions,
   SchemaFormOptions,
@@ -168,6 +185,69 @@ export const useQuery = <Reference extends QueryReference>(
   // return, which `Reference` carries as its type.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   return snapshot.value as ReturnOf<Reference> | undefined;
+};
+
+/** The record a query of pages answers each of. */
+export type PageItemOf<Reference> =
+  ReturnOf<Reference> extends PaginationResult<infer Item> ? Item : never;
+
+/**
+ * What a paginated list of `Reference` takes besides its options: the
+ * query's arguments without `pagination`, which the list supplies; never
+ * for a query that doesn't take `pagination` and answer pages.
+ */
+export type PaginatedArgsOf<Reference> =
+  "pagination" extends keyof ArgsOf<Reference>
+    ? ReturnOf<Reference> extends PaginationResult<unknown>
+      ? Omit<ArgsOf<Reference>, "pagination"> & { readonly pagination?: never }
+      : never
+    : never;
+
+/** How a paginated list starts. */
+export interface PaginatedQueryOptions {
+  /**
+   * How many records it shows first, and loads more by unless a Load More
+   * says: a whole number from 1 to 100.
+   */
+  readonly initialPageSize: number;
+}
+
+/**
+ * A live paginated list of the query `reference` names (spec 10.6): one
+ * that takes the reserved `pagination` argument and answers pages, read
+ * with `args` (its other arguments, or `"skip"`). It shows `items`, the
+ * ordered records loaded so far, kept up to date as records are saved,
+ * moved or deleted, never with one twice or one missing between pages;
+ * `hasMore`; `isLoading`, while the first records or more load; and
+ * `loadMore`, stable, which loads `initialPageSize` more (or as many as
+ * it is given). Changing `args` or `initialPageSize` starts the list
+ * again; equal arguments in a new object don't. A failure is thrown to
+ * the screen's error boundary, as a query's is.
+ */
+export const usePaginatedQuery = <Reference extends QueryReference>(
+  reference: Reference,
+  args: PaginatedArgsOf<Reference> | "skip",
+  options: PaginatedQueryOptions
+): PaginatedQueryView<PageItemOf<Reference>> => {
+  const internals = clientInternals(useClient());
+  const pager =
+    args === "skip"
+      ? undefined
+      : internals.pager(reference, args, options.initialPageSize);
+  const snapshot: PagerSnapshot = useSyncExternalStore(
+    (onChange) =>
+      pager === undefined
+        ? noSubscription()
+        : internals.subscribePager(pager, onChange),
+    () => pager?.snapshot ?? skippedPage
+  );
+  if (snapshot.error !== undefined) {
+    throw snapshot.error;
+  }
+  // SAFETY: the host validated each page against the reference's declared
+  // return, whose records `PageItemOf` names.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return snapshot.view as PaginatedQueryView<PageItemOf<Reference>>;
 };
 
 /**

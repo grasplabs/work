@@ -21,12 +21,21 @@ export const brainStubModel = "brain-stub-reader/2026-10-15";
 
 /** What the harness is asking the agent for right now. */
 export type StubTurn =
-  | { phase: "prior" }
+  | {
+      phase: "prior";
+      /**
+       * Searches Knowledge for this first, as the agent arm does, then
+       * notes what was said: an earlier turn that reads.
+       */
+      reads?: string;
+    }
   | {
       phase: "question";
       task: BrainTask;
       /** The agent arm: no sources given, so it searches for them. */
       searches: boolean;
+      /** The trial's arm or control, for a provider that reports by arm. */
+      arm?: string;
     };
 
 /** Sections each search reads, in the agent arm as in the full-text arm. */
@@ -227,10 +236,12 @@ export const stubReader =
     const body = requests.at(-1)?.body;
     const input = modelStrings(body).join("\n");
     const turn = current();
-    if (turn.phase === "prior") {
-      return says("Noted.", input);
-    }
     const results = resultsSinceQuestion(body);
+    if (turn.phase === "prior") {
+      return turn.reads !== undefined && results.length === 0
+        ? codeStep(searchCode(turn.reads), input)
+        : says("Noted.", input);
+    }
     if (turn.searches && results.length === 0) {
       return codeStep(searchCode(turn.task.query), input);
     }

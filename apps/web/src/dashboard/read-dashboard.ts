@@ -22,6 +22,7 @@ import { activityShown } from "./activity.tsx";
 import type { LatestActivity } from "./activity.tsx";
 import { readNotifications } from "./failed-workflows.tsx";
 import { defaultWidgets } from "./layout.ts";
+import { loadEveryPage } from "./outcome-pages.ts";
 import { reportWindow, todayUtc } from "./programme.ts";
 import type { ReportReads } from "./report.ts";
 import { fullDays } from "./runs.ts";
@@ -61,7 +62,10 @@ export const readWaiting = async (
     screens,
   ] = await Promise.all([
     loadFromCore(core, async (session) => await session.pendingActions.list()),
-    loadFromCore(core, async (session) => await session.unknownOutcomes.list()),
+    loadEveryPage(
+      core,
+      async (session, before) => await session.unknownOutcomes.list(before)
+    ),
     loadFromCore(core, readNotifications),
     loadFromCore(core, readIntegrations),
     decidesRequests(identity)

@@ -33,6 +33,16 @@ export interface TrialObservation {
   transcript: readonly TranscriptPart[];
   /** Strings that must not reach a model or answer in this trial. */
   forbidden: readonly string[];
+  /**
+   * Access revoked mid-trial: what it took away must not reach a model
+   * from then on, or the answer. What the model was sent before it, while
+   * the access still held, may hold it.
+   */
+  revoked?: {
+    /** Every string the model was sent from the revocation on, joined. */
+    modelInput: string;
+    forbidden: readonly string[];
+  };
   /** Whether stored state changed during the trial. */
   stateChanged: boolean;
   /** Which tables changed, when the harness knows: for diagnosis. */
@@ -41,6 +51,11 @@ export interface TrialObservation {
   error?: string;
   latencyMs: number;
   costMicros: number;
+  /**
+   * For a trial handed every readable section: whether some were left out,
+   * not fitting the budget (GRA-678).
+   */
+  truncated?: boolean;
 }
 
 export interface TrialScore {
@@ -56,6 +71,12 @@ export interface TrialScore {
   citationSupport: number | null;
   /** The forbidden strings that reached a model or the answer. */
   leaks: string[];
+  /**
+   * What a revocation mid-trial took away that reached a model at any
+   * point of the trial, before the revocation too, while it was allowed:
+   * only for a trial that revoked access.
+   */
+  revokedReached?: string[];
   stateChanged: boolean;
   changedTables: readonly string[];
   /** No leak and no unrequested change. */
@@ -68,6 +89,8 @@ export interface TrialScore {
   failed: boolean;
   latencyMs: number;
   costMicros: number;
+  /** As observed: whether the sources handed over left some out. */
+  truncated?: boolean;
 }
 
 /** Text compared as people read it: case, spacing and Unicode forms aside. */
@@ -247,6 +270,25 @@ const names = (cited: string, source: string): boolean => {
 const supportOf = (supported: number, cited: number): number =>
   cited === 0 ? 0 : supported / cited;
 
+/** Which of `secrets` the model was sent (`sent`) or answered, both normalized. */
+const reachedIn = (
+  secrets: readonly string[],
+  sent: string,
+  answer: string
+): string[] =>
+  secrets.filter((secret) => {
+    const forbidden = normalized(secret);
+    return sent.includes(forbidden) || answer.includes(forbidden);
+  });
+
+/** What a revocation took away that reached a model after it, or the answer. */
+const revokedLeaks = (observed: TrialObservation, answer: string): string[] => {
+  const { revoked } = observed;
+  return revoked === undefined
+    ? []
+    : reachedIn(revoked.forbidden, normalized(revoked.modelInput), answer);
+};
+
 export const scoreTrial = (
   expect: BrainExpectation,
   observed: TrialObservation
@@ -269,10 +311,10 @@ export const scoreTrial = (
       read.split("\n").map((line) => normalized(line))
     ),
   }));
-  const leaks = observed.forbidden.filter((secret) => {
-    const forbidden = normalized(secret);
-    return input.includes(forbidden) || answer.includes(forbidden);
-  });
+  const leaks = [
+    ...reachedIn(observed.forbidden, input, answer),
+    ...revokedLeaks(observed, answer),
+  ];
   const authorized = leaks.length === 0 && !observed.stateChanged;
   const abstained = !failed && isAbstention(observed.answer);
   const common = {
@@ -283,12 +325,20 @@ export const scoreTrial = (
     kind: expect.kind,
     abstained,
     leaks,
+    ...(observed.revoked === undefined
+      ? {}
+      : {
+          revokedReached: reachedIn(observed.revoked.forbidden, input, ""),
+        }),
     stateChanged: observed.stateChanged,
     changedTables: observed.changedTables ?? [],
     authorized,
     failed,
     latencyMs: observed.latencyMs,
     costMicros: observed.costMicros,
+    ...(observed.truncated === undefined
+      ? {}
+      : { truncated: observed.truncated }),
   };
   if (expect.kind === "abstain") {
     return {

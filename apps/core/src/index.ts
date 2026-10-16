@@ -1,5 +1,6 @@
 import { errorFields, log } from "@grasp-os/shared/log";
 
+import { retryAccessRevocations } from "./access-revocations.ts";
 import { sweepTestFixtures } from "./app-tests.ts";
 import { auditLog } from "./audit-log.ts";
 import { drainAuditOutboxes } from "./audit-outbox.ts";
@@ -21,6 +22,10 @@ import { pumpConnectorEvents } from "./workflows/connector-events.ts";
 import { repairControls } from "./workflows/controls.ts";
 import { receiveEmail } from "./workflows/inbound-email.ts";
 import { deleteExpiredEmail } from "./workflows/kept-email.ts";
+import {
+  repairResourceStarts,
+  repairResourceTerminations,
+} from "./workflows/resource-runs.ts";
 import { sweepRunDetails } from "./workflows/retention.ts";
 import { repairStarts } from "./workflows/runs.ts";
 import { startDueSchedules } from "./workflows/triggers.ts";
@@ -71,13 +76,17 @@ export default {
   },
   // Every minute: audit events waiting in core's outboxes and connect's
   // (see src/audit-outbox.ts), personal connections of removed people still
-  // connected (see src/members.ts), Apps copied from a blueprint left
+  // connected (see src/members.ts), revocations an App's host couldn't be
+  // told of, told again (see src/access-revocations.ts), Apps copied from a blueprint left
   // pending (see src/app-blueprints.ts), uploads left behind
   // (see src/knowledge/uploads.ts), a new version of core, audited as
   // a platform update (see src/platform-updates.ts), and workflows'
   // schedules due by the minute it runs for (see src/workflows/triggers.ts),
   // starts core stopped in the middle of, sent to the engine again (see
-  // `repairStarts`, src/workflows/runs.ts) and pauses, resumes and
+  // `repairStarts`, src/workflows/runs.ts, and `repairResourceStarts`,
+  // src/workflows/resource-runs.ts), terminations of runs cancelled while
+  // starting the engine is still to confirm (`repairResourceTerminations`,
+  // the same file), and pauses, resumes and
   // cancels the engine is still to confirm (see `repairControls`,
   // src/workflows/controls.ts), wakes owed to runs waiting on a person,
   // sent again (see `repairWakes`, src/workflows/wakes.ts), and connector
@@ -129,6 +138,7 @@ export default {
             drainAuditOutboxes(env),
             drainSubmissionOutbox(env),
             retryDisconnects(env),
+            retryAccessRevocations(env),
             sweepUploads(env),
             // Deploys apply migrations first (CI's db:migrate, and the
             // console's deploy), so `platform_versions` exists. A version
@@ -138,6 +148,8 @@ export default {
             recordPlatformUpdate(env),
             startDueSchedules(env, new Date(controller.scheduledTime)),
             repairStarts(env),
+            repairResourceStarts(env, new Date(controller.scheduledTime)),
+            repairResourceTerminations(env, new Date(controller.scheduledTime)),
             repairControls(env),
             repairWakes(env, new Date(controller.scheduledTime)),
             pumpConnectorEvents(env),

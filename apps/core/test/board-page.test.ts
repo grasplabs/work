@@ -159,7 +159,6 @@ export default workflowTests(pay, [{ name: "counts", mocks: { count: 1 }, expect
 const payablesApp = async (admin: Person): Promise<AppId> => {
   const { id } = await admin.api.apps.create({ name: `Payables ${unique()}` });
   await releaseFiles(admin, id, {
-    "app/server.ts": "export class App {}\n",
     "workflows/pay.ts": workflowFile,
     "workflows/pay.workflow-tests.ts": workflowTestsFile,
   });

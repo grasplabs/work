@@ -140,7 +140,7 @@ import {
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
-import { Form, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
+import { Form, FormChanges, FormError, SubmitButton, TextareaField, TextField } from "@grasp-os/ui/form";
 import { useState } from "react";
 import { api } from "#grasp";
 
@@ -149,7 +149,8 @@ export type Note = NonNullable<ReturnOf<typeof api.notes.get>>;
 /**
  * One note, edited with explicit Save: the draft keeps the revision it
  * started from, and a save someone else's overtook keeps the draft until
- * the person chooses to load the latest version.
+ * the person chooses to load the latest version, or to re-apply their
+ * changes on it. The draft outlives the editor and a refresh of the page.
  */
 export function NoteEditor({ note }: { note: Note }) {
   const form = useForm(api.notes.update, {
@@ -163,6 +164,7 @@ export function NoteEditor({ note }: { note: Note }) {
       <TextField form={form} label="Title" name="title" />
       <TextareaField form={form} label="Body" name="body" />
       <FormError form={form} />
+      <FormChanges form={form} labels={{ title: "Title", body: "Body" }} />
       <div className="flex gap-2">
         <SubmitButton form={form}>Save changes</SubmitButton>
         <AlertDialog onOpenChange={setConfirming} open={confirming}>
@@ -196,7 +198,7 @@ export function NoteEditor({ note }: { note: Note }) {
 }
 `;
 
-const screen = `import { useMutation, useQuery } from "@grasp-os/sdk/react";
+const screen = `import { useMutation, usePaginatedQuery, useQuery } from "@grasp-os/sdk/react";
 import type { Id } from "@grasp-os/sdk";
 import { Button } from "@grasp-os/ui/components/button";
 import { useState } from "react";
@@ -219,11 +221,17 @@ function SelectedNote({ id }: { id: Id<"notes"> }) {
 }
 
 export default function Notes() {
-  const notes = useQuery(api.notes.list, { pagination: { pageSize: 50 } });
+  // A live list, five notes at a time: kept current as notes are saved,
+  // edited and deleted anywhere, never with a note twice or missing.
+  const { items, hasMore, isLoading, loadMore } = usePaginatedQuery(
+    api.notes.list,
+    {},
+    { initialPageSize: 5 },
+  );
   const remove = useMutation(api.notes.remove);
   const [selected, setSelected] = useState<Id<"notes"> | null>(null);
 
-  if (notes === undefined) {
+  if (isLoading && items.length === 0) {
     return <p role="status">Loading notes…</p>;
   }
   return (
@@ -231,11 +239,11 @@ export default function Notes() {
       <h1 className="text-2xl font-semibold">Notes</h1>
       <CreateNote />
       <ImportNote />
-      {notes.items.length === 0 ? (
+      {items.length === 0 ? (
         <p>No notes yet.</p>
       ) : (
         <ul aria-label="Notes" className="flex flex-col gap-3">
-          {notes.items.map((note) => (
+          {items.map((note) => (
             <li className="flex items-center gap-3" key={note._id}>
               <span>{note.title}</span>
               <Button onClick={() => setSelected(note._id)} variant="outline">
@@ -250,6 +258,11 @@ export default function Notes() {
             </li>
           ))}
         </ul>
+      )}
+      {hasMore && (
+        <Button disabled={isLoading} onClick={() => void loadMore()}>
+          {isLoading ? "Loading…" : "Load more"}
+        </Button>
       )}
       {selected === null ? null : <SelectedNote id={selected} />}
     </main>

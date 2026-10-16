@@ -4,13 +4,13 @@ import {
   capabilityErrors,
   verifyCapability,
 } from "@grasp-os/shared/capability";
-import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import {
   connectErrors,
   connectionPersonSchema,
   pendingKeySchema,
   refuseResolutionSchema,
   resolveOutcomeSchema,
+  unknownOutcomeCursorSchema,
   unknownOutcomeKeySchema,
   unknownOutcomeListLimit,
   unknownOutcomeRequestSchema,
@@ -27,13 +27,15 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { codeSubjectSchema } from "@grasp-os/shared/permissions";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, lt, or } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { recordEventIf, recordEvents } from "./audit.ts";
 import { connectionFor, recoverableNow } from "./call.ts";
 import { connections, idempotentCalls } from "./db/schema.ts";
+import { requireDecision } from "./decisions.ts";
 import { isUnknown, originOf, resolution, unknownNow } from "./idempotency.ts";
 import type { Row } from "./idempotency.ts";
 import { descriptionOf, nameOf, shownConnection } from "./pending.ts";
@@ -48,6 +50,42 @@ import type { ShownConnection } from "./pending.ts";
 // an effect undone.
 
 const listLimit = unknownOutcomeListLimit;
+
+/**
+ * The cursor of the call `row` records: its first send and its random
+ * list ID, so it says nothing of anyone else's calls (not how many were
+ * made in between, as a row number would) and stays where it is, whatever
+ * the database does with its rows.
+ */
+const cursorOf = (row: Pick<Row, "createdAt" | "listId">): string =>
+  `${row.createdAt.getTime()}.${row.listId}`;
+
+/**
+ * The calls listed after `before`, in the order lists go (newest first,
+ * then by list ID), or every one without it. Throws `connect.invalid` for a
+ * cursor no list gave.
+ */
+const after = (before: unknown): SQL | undefined => {
+  if (before === undefined) {
+    return undefined;
+  }
+  const parsed = unknownOutcomeCursorSchema.safeParse(before);
+  if (!parsed.success) {
+    throw connectErrors.create("connect.invalid");
+  }
+  const [time = "0", listId = ""] = parsed.data.split(".");
+  const at = new Date(Number(time));
+  return or(
+    lt(idempotentCalls.createdAt, at),
+    and(eq(idempotentCalls.createdAt, at), lt(idempotentCalls.listId, listId))
+  );
+};
+
+/** The order lists go in: newest first, then by list ID. */
+const listOrder = [
+  desc(idempotentCalls.createdAt),
+  desc(idempotentCalls.listId),
+];
 
 /** The key of the call `row` records, as a list and a resolution name it. */
 const keyOf = (row: Row): UnknownOutcomeKey =>
@@ -106,10 +144,10 @@ const summaryOf = ({
               ? {}
               : { binding: origin.binding }),
           },
+    cursor: cursorOf(row),
   };
 };
 
-/** The rows of `person`'s, under `key` when given. */
 /** The rows under `key`, whoever they acted for. */
 const underKey = (key: UnknownOutcomeKey) =>
   and(
@@ -123,6 +161,7 @@ const underKey = (key: UnknownOutcomeKey) =>
     eq(idempotentCalls.idempotencyKey, key.idempotencyKey)
   );
 
+/** The rows of `person`'s, under `key` when given. */
 const theirs = (person: ConnectionPerson, key?: UnknownOutcomeKey) =>
   and(
     eq(idempotentCalls.onBehalfOf, person.userId),
@@ -141,18 +180,20 @@ const anyUnder = async (env: Env, key: UnknownOutcomeKey): Promise<boolean> => {
 
 /**
  * The calls of unknown outcome that acted for `person`, newest first, at
- * most {@link listLimit}: none for Grasp staff, who act for nobody here.
- * One connect may still recover on its own is listed too: the person may
- * know better.
+ * most {@link listLimit} a page, the next page `before` the last one's
+ * cursor: none for Grasp staff, who act for nobody here. One connect may
+ * still recover on its own is listed too: the person may know better.
  */
 export const listUnknownOutcomes = async (
   env: Env,
-  request: unknown
+  request: unknown,
+  before?: unknown
 ): Promise<UnknownOutcome[]> => {
   const parsed = connectionPersonSchema.safeParse(request);
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
+  const page = after(before);
   if (parsed.data.staff) {
     return [];
   }
@@ -160,8 +201,8 @@ export const listUnknownOutcomes = async (
     .select({ row: idempotentCalls, connection: shownConnection })
     .from(idempotentCalls)
     .leftJoin(connections, eq(connections.id, idempotentCalls.connectionId))
-    .where(and(theirs(parsed.data), unknownNow(Date.now())))
-    .orderBy(desc(idempotentCalls.createdAt))
+    .where(and(theirs(parsed.data), unknownNow(Date.now()), page))
+    .orderBy(...listOrder)
     .limit(listLimit);
   return rows.map(summaryOf);
 };
@@ -179,6 +220,7 @@ const listingColumns = {
   claimedAt: idempotentCalls.claimedAt,
   resource: idempotentCalls.resource,
   createdAt: idempotentCalls.createdAt,
+  listId: idempotentCalls.listId,
 };
 
 type ListingRow = Pick<Row, keyof typeof listingColumns>;
@@ -200,11 +242,12 @@ const listingOf = async ({
     connection
   )?.title;
   return {
-    // Only tells rows apart, of what the admin is shown anyway, and never
-    // of its key: App code chooses keys and may put data in them, and a
-    // digest of a key a reader can guess would confirm the guess. Two calls
-    // alike in all of these, claimed in the same millisecond, share it until
-    // `distinctIds` tells them apart.
+    // Only tells rows apart, of what the admin is shown anyway and the
+    // row's random list ID, and never of its key: App code chooses keys and
+    // may put data in them, and a digest of a key a reader can guess would
+    // confirm the guess. The list ID makes it unique across every page,
+    // even for two calls alike in all the rest, claimed in the same
+    // millisecond.
     id: await sha256Hex(
       JSON.stringify([
         row.subjectType,
@@ -213,6 +256,7 @@ const listingOf = async ({
         row.connectionId,
         row.action,
         row.claimedAt.getTime(),
+        row.listId,
       ])
     ),
     onBehalfOf: row.onBehalfOf,
@@ -227,33 +271,20 @@ const listingOf = async ({
     ...(title === undefined ? {} : { title }),
     resource: row.resource,
     sentAt: row.createdAt.toISOString(),
+    cursor: cursorOf(row),
   };
 };
 
 /**
- * `listings` with every id told apart: a repeat of an id already given
- * gets its count after it, so a listing never names two rows alike.
- */
-const distinctIds = (
-  listings: UnknownOutcomeListing[]
-): UnknownOutcomeListing[] => {
-  const seen = new Map<string, number>();
-  return listings.map((listing) => {
-    const count = seen.get(listing.id) ?? 0;
-    seen.set(listing.id, count + 1);
-    return count === 0 ? listing : { ...listing, id: `${listing.id}-${count}` };
-  });
-};
-
-/**
- * Every person's calls of unknown outcome, newest first, at most
- * {@link listLimit}, as an admin sees them (`listingOf`): only for one of
- * the organization's own admins, as core read them now; refused to anyone
- * else, Grasp staff included, who act for nobody here.
+ * Every person's calls of unknown outcome, newest first, paged as
+ * `listUnknownOutcomes` is, as an admin sees them (`listingOf`): only for
+ * one of the organization's own admins, as core read them now; refused to
+ * anyone else, Grasp staff included, who act for nobody here.
  */
 export const listAllUnknownOutcomes = async (
   env: Env,
-  request: unknown
+  request: unknown,
+  before?: unknown
 ): Promise<UnknownOutcomeListing[]> => {
   const parsed = connectionPersonSchema.safeParse(request);
   if (!parsed.success) {
@@ -266,13 +297,16 @@ export const listAllUnknownOutcomes = async (
     .select({ row: listingColumns, connection: shownConnection })
     .from(idempotentCalls)
     .leftJoin(connections, eq(connections.id, idempotentCalls.connectionId))
-    .where(unknownNow(Date.now()))
-    .orderBy(desc(idempotentCalls.createdAt))
+    .where(and(unknownNow(Date.now()), after(before)))
+    .orderBy(...listOrder)
     .limit(listLimit);
-  return distinctIds(await Promise.all(rows.map(listingOf)));
+  return await Promise.all(rows.map(listingOf));
 };
 
-/** The person's call of unknown outcome `key` names, as stored, if any. */
+/**
+ * The person's call of unknown outcome `key` names, as stored, with its
+ * row's number, if any.
+ */
 const unknownRowOf = async (
   env: Env,
   person: ConnectionPerson,
@@ -388,32 +422,6 @@ export const refuseResolution = async (
 };
 
 /**
- * Whether `claims` are core's resolution of exactly the call `row`
- * records, by `choice`, for `person`, the person it acted for: the same
- * App or agent, the claim of its key it is now (one sent again since, and
- * lost again, is another call to decide on), and marked as a resolution,
- * never a call's or a held action's confirmation.
- */
-const resolvesThis = (
-  claims: CapabilityClaims,
-  row: Row,
-  person: ConnectionPerson,
-  choice: ResolutionChoice
-): boolean => {
-  const { subject, onBehalfOf } = claims.authority;
-  const subjectId = subject.type === "app" ? subject.appId : subject.agentId;
-  return (
-    claims.resolves?.choice === choice &&
-    claims.resolves.claimedAt === row.claimedAt.getTime() &&
-    claims.confirms === undefined &&
-    onBehalfOf === person.userId &&
-    onBehalfOf === row.onBehalfOf &&
-    subject.type === row.subjectType &&
-    subjectId === row.subjectId
-  );
-};
-
-/**
  * Resolves a call of unknown outcome by its person's word, with the
  * capability core signed for that resolution once it checked the call's
  * permission again: only for the person it acted for, on a connection
@@ -430,16 +438,29 @@ export const resolveOutcome = async (
   if (!parsed.success) {
     throw connectErrors.create("connect.invalid");
   }
-  const { capability, person, key, choice, claim } = parsed.data;
+  const { capability, person, key, choice } = parsed.data;
   const row = await unknownRowOf(env, person, key);
   if (row === undefined && !(await anyUnder(env, key))) {
     // No call was ever made under it: nothing to record a refusal of.
     throw connectErrors.create("connect.outcome_not_found");
   }
   try {
+    if (row === undefined) {
+      throw connectErrors.create("connect.outcome_not_found");
+    }
+    const claims = await verifyCapability(signingKeys, capability, {
+      connectionId: row.connectionId,
+      resource: row.resource ?? undefined,
+      action: row.action,
+      idempotencyKey: row.idempotencyKey,
+    });
     // Not the claim of its key the person was shown: sent again since,
     // and lost again, it is another call to decide on.
-    if (row === undefined || row.claimedAt.getTime() !== claim) {
+    const claimedAt = row.claimedAt.getTime();
+    if (
+      claims.decision?.kind === "resolve" &&
+      claims.decision.claimedAt !== claimedAt
+    ) {
       throw connectErrors.create("connect.outcome_not_found");
     }
     // What was sent is no longer kept (retention): "it didn't" would let
@@ -448,17 +469,16 @@ export const resolveOutcome = async (
     if (choice === "not_happened" && row.input === null) {
       throw connectErrors.create("connect.outcome_not_kept");
     }
-    const claims = await verifyCapability(signingKeys, capability, {
-      connectionId: row.connectionId,
-      resource: row.resource ?? undefined,
-      action: row.action,
-      idempotencyKey: row.idempotencyKey,
+    requireDecision(claims, {
+      decision: { kind: "resolve", choice, claimedAt },
+      person,
+      call: {
+        subjectType: row.subjectType,
+        subjectId: row.subjectId,
+        onBehalfOf: row.onBehalfOf,
+        origin: originOf(row),
+      },
     });
-    if (!resolvesThis(claims, row, person, choice)) {
-      throw capabilityErrors.create("capability.invalid", {
-        reason: "scope",
-      });
-    }
     await connectionFor(env, claims, row.connectionId);
   } catch (error) {
     await auditRefused(

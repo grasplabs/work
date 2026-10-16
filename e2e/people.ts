@@ -2,7 +2,7 @@ import { mapConcurrently } from "@grasp-os/shared/release";
 import type { Role } from "@grasp-os/shared/roles";
 import type { CoreApi } from "@grasp-os/shared/rpc";
 import { test } from "@playwright/test";
-import type { Browser, BrowserContext, Page } from "@playwright/test";
+import type { BrowserContext } from "@playwright/test";
 import { newWebSocketRpcSession } from "capnweb";
 
 /**
@@ -172,6 +172,8 @@ const cast = {
   notesAppSignedOut: { first: "builder" },
   notesLive: { builder: "builder" },
   writerApp: { builder: "builder" },
+  notesPages: { builder: "builder" },
+  notesDrafts: { builder: "builder" },
   resourceBindings: { builder: "builder", admin: "admin" },
   packageArtifacts: { builder: "builder" },
   productPageScripts: { builder: "builder" },
@@ -226,6 +228,7 @@ const cast = {
   languages: { member: "user" },
   iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
+  contexts: { member: "user" },
 } as const satisfies Record<string, Record<string, Role>>;
 
 type Scene = keyof typeof cast;
@@ -398,16 +401,6 @@ export const signInTo = async (
       sameSite: "Lax",
     },
   ]);
-};
-
-/** A page signed in as `person`, in a browser context of its own. */
-export const pageOf = async (
-  browser: Browser,
-  person: Person
-): Promise<Page> => {
-  const context = await browser.newContext();
-  await signInTo(context, person);
-  return await context.newPage();
 };
 
 /**

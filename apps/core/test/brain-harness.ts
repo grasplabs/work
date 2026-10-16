@@ -21,14 +21,23 @@
  * state changed, its latency and its charged cost; brain-scoring.ts turns
  * that into the report. The run's identity pins what the comparison
  * depends on, so two runs are compared only when they share it.
+ *
+ * Some tasks take access away mid-run, between their earlier turns and
+ * their question (GRA-677): the arms then read only what is still allowed,
+ * and what was revoked reaching a model breaks the gate. Durability cases
+ * break a run on purpose: an eviction mid-answer, and the same question
+ * asked again in the same chat after a restart.
  */
 import type { AuditEvent } from "@grasp-os/shared/audit";
+import { applyPartial } from "@grasp-os/shared/chat";
+import type { ChatPartial } from "@grasp-os/shared/chat";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { workspaceIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { pageMaxLimit } from "@grasp-os/shared/knowledge";
 import type { KnowledgeRead } from "@grasp-os/shared/knowledge";
+import type { PermissionSubjectInput } from "@grasp-os/shared/permissions";
 import { evictDurableObject, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { z } from "zod";
@@ -40,6 +49,7 @@ import {
   model,
   pointAtGateway,
   setObjectEnv,
+  transcript,
 } from "./agent-chat.ts";
 import { answeringGateway } from "./ai-gateway.ts";
 import type { GatewayReply, GatewayRequest } from "./ai-gateway.ts";
@@ -91,22 +101,31 @@ import {
 import type { BrainSplit, BrainTask } from "./fixtures/brain-tasks.ts";
 import type { Idp } from "./idp.ts";
 import { newTeam, readCollection } from "./knowledge.ts";
-import { signedInApi } from "./sign-in.ts";
+import { callAuth, openRpc, signedInApi } from "./sign-in.ts";
 
 /** Bumped with any change to how the harness runs or measures a trial. */
-export const brainHarnessVersion = "1";
+export const brainHarnessVersion = "2";
 
 export const brainArms = ["agent", "fullContext", "fullText"] as const;
 export type BrainArm = (typeof brainArms)[number];
 
 /**
- * Arms built to break the gate, to prove it holds: one hands the model a
- * section its person may not read; the others change stored state
- * mid-trial, in Knowledge, in core, in R2, in the chat's object and in an
- * earlier chat's history.
+ * Arms built to test the gate, to prove it holds. All but one break it:
+ * one hands the model a section its person may not read; on a task that
+ * revokes access, one hands it what its person could read before the
+ * revocation, as a cache that outlived it would, and one reads it in an
+ * earlier turn of the same chat, which the chat's history sends again
+ * after the revocation; the others change stored state mid-trial, in
+ * Knowledge, in core, in R2, in the chat's object and in an earlier
+ * chat's history. One must not break it: `readElsewhereFirst` reads what
+ * the task revokes in another chat, before the revocation, while it was
+ * allowed, so the gate's cut at the revocation is where it should be.
  */
 export const brainControls = [
   "leakyContext",
+  "staleAccess",
+  "historyAfterRevocation",
+  "readElsewhereFirst",
   "changesKnowledge",
   "changesCore",
   "changesFiles",
@@ -170,7 +189,20 @@ const mayRead = (persona: BrainPersona, collection: BrainCollectionKey) => {
   return members.includes(persona);
 };
 
-/** What must not reach a model, or the answer, in `task`. */
+/** Whether `task`'s revocation takes `collection` away from its question. */
+const revokes = (task: BrainTask, collection: BrainCollectionKey): boolean => {
+  const { revoke } = task;
+  if (revoke === undefined) {
+    return false;
+  }
+  if (revoke.type === "grant") {
+    return revoke.collection === collection;
+  }
+  const { access } = brainCollections[collection];
+  return access.type === "team" && access.team === revoke.team;
+};
+
+/** What must not reach a model, or the answer, anywhere in `task`. */
 export const forbiddenIn = (task: BrainTask): string[] => {
   const unreadable = Object.values(brainDocuments).flatMap((document) =>
     "canary" in document && !mayRead(task.persona, document.collection)
@@ -182,6 +214,19 @@ export const forbiddenIn = (task: BrainTask): string[] => {
     .flatMap((persona) => brainMemorySecrets[persona]);
   return [...unreadable, ...othersMemory, ...(task.mustNotReach ?? [])];
 };
+
+/**
+ * What `task`'s revocation takes away: readable in its earlier turns, it
+ * must not reach a model once revoked, or the answer.
+ */
+export const revokedIn = (task: BrainTask): string[] =>
+  Object.values(brainDocuments).flatMap((document) =>
+    "canary" in document &&
+    mayRead(task.persona, document.collection) &&
+    revokes(task, document.collection)
+      ? [document.canary, ...document.restricted]
+      : []
+  );
 
 /** The shared collections every persona's agent is granted, by key. */
 const sharedCollections = Object.entries(brainCollections)
@@ -198,6 +243,32 @@ const held = <K, V>(map: ReadonlyMap<K, V>, key: K): V => {
 };
 
 const asJson = (value: unknown): Json => z.json().parse(value);
+
+/** What a watch's listener answers with: nothing to wait for. */
+const heard: Promise<void> = Promise.resolve();
+
+const noop = () => {
+  // Settled either way: only that it settled matters.
+};
+
+/** How often, and for how long at most, {@link pollUntil} looks. */
+const pollMs = { every: 5, most: 30_000 } as const;
+
+/**
+ * Resolves once `check` holds, looking every few milliseconds: on the
+ * test's own timer, so the test goes on in its own I/O context, whoever
+ * made `check` hold.
+ */
+const pollUntil = async (check: () => boolean): Promise<void> => {
+  const deadline = Date.now() + pollMs.most;
+  while (!check()) {
+    if (Date.now() > deadline) {
+      throw new Error(`Still waiting after ${pollMs.most} ms`);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one look at a time
+    await scheduler.wait(pollMs.every);
+  }
+};
 
 const digestOf = async (value: unknown): Promise<string> =>
   await sha256Hex(canonicalJson(asJson(value)));
@@ -274,10 +345,21 @@ const bookkeeping = new Set([
 ]);
 
 /**
+ * How the gate reads Knowledge's database: every row of every table, or,
+ * for a corpus too large to read twice a trial (the scale run's), each
+ * table's row count. Counts still see a document saved, a version added
+ * or a section purged; not a row rewritten in place, which only a bypass
+ * of Knowledge's API could do.
+ */
+export type KnowledgeStateCheck = "rows" | "counts";
+
+/**
  * Each table's digest, in core's and Knowledge's databases, but the
  * bookkeeping ones: what stored state holds.
  */
-const stateOf = async (): Promise<Map<string, string>> => {
+const stateOf = async (
+  knowledge: KnowledgeStateCheck
+): Promise<Map<string, string>> => {
   const digests = new Map<string, string>();
   for (const [name, db] of [
     ["core", env.DB],
@@ -286,7 +368,16 @@ const stateOf = async (): Promise<Map<string, string>> => {
     // oxlint-disable-next-line no-await-in-loop -- one database at a time
     for (const table of await tablesOf(db)) {
       const key = `${name}.${table}`;
-      if (!bookkeeping.has(key)) {
+      if (bookkeeping.has(key)) {
+        continue;
+      }
+      if (name === "knowledge" && knowledge === "counts") {
+        // oxlint-disable-next-line no-await-in-loop -- one table at a time
+        const counted = await db
+          .prepare(`SELECT count(*) AS count FROM "${table}"`)
+          .first<{ count: number }>();
+        digests.set(key, `${counted?.count ?? 0} rows`);
+      } else {
         // oxlint-disable-next-line no-await-in-loop -- one table at a time
         const { results } = await db.prepare(`SELECT * FROM "${table}"`).all();
         const rows = results.map(rowText).toSorted().join("\n");
@@ -310,13 +401,27 @@ const changedBetween = (
 export interface BrainCompany {
   admin: Person;
   people: Record<BrainPersona, Person>;
+  /** Each team's ID, by its key in brain-corpus.ts. */
+  teams: Map<string, string>;
   /** Each collection's ID, by its key in brain-corpus.ts. */
   collections: Map<string, string>;
   /** Each document's ID and current version, by its key. */
   documents: Map<string, { id: string; version: number }>;
   /** The time and charged cost of loading the corpus: its index build. */
   build: { ms: number; costMicros: number };
+  /**
+   * Collections beyond the frozen shared ones that each persona's agent is
+   * granted, by key in `collections`: the scale run's distractor teams
+   * (brain-scale.ts). The retrieval arms read them as the person, too.
+   */
+  granted?: readonly string[];
 }
+
+/** The collections every persona's agent is granted, by key. */
+const grantedKeys = (company: BrainCompany): string[] => [
+  ...sharedCollections,
+  ...(company.granted ?? []),
+];
 
 /**
  * The month and day the run's model calls count in, whatever the clock
@@ -420,6 +525,7 @@ export const setUpBrainCompany = async (idp: Idp): Promise<BrainCompany> => {
   return {
     admin,
     people,
+    teams,
     collections,
     documents,
     build: { ms, costMicros: (await charged()) - spentBefore },
@@ -534,20 +640,18 @@ const documentsOf = async (person: Person, collectionId: string) => {
 };
 
 /**
- * Every section of the shared collections `person` may read, in path
- * order, leaving out what doesn't fit in {@link fullContextChars}.
+ * Every section of the collections `person` may read and `granted` holds,
+ * in path order, leaving out what doesn't fit in {@link fullContextChars}.
  */
 const fullContextOf = async (
-  company: BrainCompany,
-  person: Person
-): Promise<Source[]> => {
-  const shared = new Set(
-    sharedCollections.map((key) => held(company.collections, key))
-  );
+  person: Person,
+  granted: ReadonlySet<string>
+): Promise<{ sources: Source[]; truncated: boolean }> => {
   const readable = await person.api.knowledge.listCollections();
   const sources: Source[] = [];
   let chars = 0;
-  for (const collection of readable.filter(({ id }) => shared.has(id))) {
+  let truncated = false;
+  for (const collection of readable.filter(({ id }) => granted.has(id))) {
     // oxlint-disable-next-line no-await-in-loop -- one collection at a time
     for (const document of await documentsOf(person, collection.id)) {
       // oxlint-disable-next-line no-await-in-loop -- one document at a time
@@ -556,25 +660,27 @@ const fullContextOf = async (
         if (chars + section.text.length <= fullContextChars) {
           chars += section.text.length;
           sources.push(section);
+        } else {
+          truncated = true;
         }
       }
     }
   }
-  return sources;
+  return { sources, truncated };
 };
 
-/** The best sections for `query` in the shared collections `person` may read. */
+/**
+ * The best sections for `query` in the collections `person` may read and
+ * `granted` holds.
+ */
 const fullTextOf = async (
-  company: BrainCompany,
   person: Person,
+  granted: ReadonlySet<string>,
   query: string
 ): Promise<Source[]> => {
-  const shared = new Set(
-    sharedCollections.map((key) => held(company.collections, key))
-  );
   const { hits } = await person.api.knowledge.search(query, { limit: 50 });
   const best = hits
-    .filter(({ collectionId }) => shared.has(collectionId))
+    .filter(({ collectionId }) => granted.has(collectionId))
     .slice(0, searchedSections);
   return await Promise.all(
     best.map(async (hit) => {
@@ -586,30 +692,159 @@ const fullTextOf = async (
   );
 };
 
+/** Grants `agent` reading the collection `key`, as an admin would. */
+const grantCollection = async (
+  company: BrainCompany,
+  agent: PermissionSubjectInput,
+  key: string
+) => {
+  const { id } = await company.admin.api.permissions.request(
+    readCollection(
+      agent,
+      held(company.collections, key),
+      `BRAIN_${key.toUpperCase()}`
+    )
+  );
+  await grantReviewed(company.admin.api, id);
+};
+
 /** A persona's Workspace object, its agent granted the shared collections. */
 const workspaceOf = async (company: BrainCompany, persona: BrainPersona) => {
   const id = workspaceIdSchema.parse(crypto.randomUUID());
   const stub = workspace(env, id);
   const agent = { type: "agent" as const, agentId: id };
-  for (const key of sharedCollections) {
+  for (const key of grantedKeys(company)) {
     // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-    const { id: permissionId } = await company.admin.api.permissions.request(
-      readCollection(
-        agent,
-        held(company.collections, key),
-        `BRAIN_${key.toUpperCase()}`
-      )
-    );
-    // oxlint-disable-next-line no-await-in-loop -- one grant at a time
-    await grantReviewed(company.admin.api, permissionId);
+    await grantCollection(company, agent, key);
   }
   return { persona, stub, agent };
 };
 
 /**
- * The run's one model provider, behind every persona's object: trials run
- * one at a time, so it answers for the trial under way.
+ * The shared collections `place`'s agent holds an active grant on now, by
+ * ID, as the permissions API lists them: what the retrieval arms may hand
+ * the model, as the agent may read no more.
  */
+const grantedTo = async (
+  company: BrainCompany,
+  place: Workspace
+): Promise<Set<string>> => {
+  const shared = new Set(
+    grantedKeys(company).map((key) => held(company.collections, key))
+  );
+  const active = await company.admin.api.permissions.list(
+    place.agent,
+    "active"
+  );
+  return new Set(
+    active.flatMap(({ object }) =>
+      object.type === "collection" && shared.has(object.collectionId)
+        ? [object.collectionId]
+        : []
+    )
+  );
+};
+
+/** Calls Better Auth's organization endpoint `path` as the admin. */
+const teamCall = async (
+  company: BrainCompany,
+  path: string,
+  body: { teamId: string; userId: string }
+) => {
+  const response = await callAuth(path, company.admin.session, body);
+  if (!response.ok) {
+    throw new Error(`${path} failed with ${response.status}`);
+  }
+};
+
+/**
+ * Gives `persona` a new connection, which reads who they are now: an open
+ * one reads it again only every few seconds (`sessionRecheckMs`), so a
+ * team they just left or joined would reach the retrieval arms late, and
+ * the arms hand the model what the person may read now.
+ */
+const reconnect = async (company: BrainCompany, persona: BrainPersona) => {
+  const person = company.people[persona];
+  const { core, closed } = await openRpc(person.session);
+  company.people[persona] = {
+    ...person,
+    core,
+    closed,
+    api: core.authenticate(),
+  };
+  person.core[Symbol.dispose]();
+};
+
+/**
+ * Takes away what `task` revokes, as an admin would between its earlier
+ * turns and its question: its person leaves the team, or its agent's grant
+ * on the collection is revoked. What gives it back, for the trials after
+ * this one, goes to `keep` as soon as there is something to give back, so
+ * a step that fails after it still leaves the access restorable.
+ */
+const revokeAccess = async (
+  company: BrainCompany,
+  place: Workspace,
+  task: BrainTask,
+  keep: (restore: () => Promise<void>) => void
+): Promise<void> => {
+  const { revoke } = task;
+  if (revoke === undefined) {
+    return;
+  }
+  if (revoke.type === "team") {
+    const membership = {
+      teamId: held(company.teams, revoke.team),
+      userId: company.people[task.persona].userId,
+    };
+    await teamCall(company, "/organization/remove-team-member", membership);
+    keep(async () => {
+      await teamCall(company, "/organization/add-team-member", membership);
+      await reconnect(company, task.persona);
+    });
+    await reconnect(company, task.persona);
+    return;
+  }
+  const collectionId = held(company.collections, revoke.collection);
+  // Granted again only if a revoke went through: a grant left in place
+  // already holds the binding name.
+  keep(async () => {
+    const granted = await grantedTo(company, place);
+    if (!granted.has(collectionId)) {
+      await grantCollection(company, place.agent, revoke.collection);
+    }
+  });
+  const active = await company.admin.api.permissions.list(
+    place.agent,
+    "active"
+  );
+  for (const { id, object } of active) {
+    if (object.type === "collection" && object.collectionId === collectionId) {
+      // oxlint-disable-next-line no-await-in-loop -- one revoke at a time
+      await company.admin.api.permissions.revoke(id);
+    }
+  }
+};
+
+/**
+ * A chat in another Workspace object of `place`'s person, its agent
+ * granted what `place`'s is, pointed at the same provider.
+ */
+const elsewhereOf = async (
+  company: BrainCompany,
+  place: Workspace,
+  gateway: Provider["gateway"]
+) => {
+  const other = await workspaceOf(company, place.persona);
+  await pointAt(other.stub, gateway);
+  const chat = await other.stub.createChat(
+    "Baseline elsewhere",
+    company.people[place.persona].userId,
+    other.agent.agentId
+  );
+  return { stub: other.stub, chatId: chat.id };
+};
+
 /** A model provider: what it answers each gateway request with, in a turn. */
 export type BrainProvider = (
   turn: () => StubTurn
@@ -617,9 +852,54 @@ export type BrainProvider = (
   requests: readonly GatewayRequest[]
 ) => GatewayReply | Promise<GatewayReply>;
 
+/**
+ * An answer to stop mid-stream: after `at` characters, until `until`.
+ * `reached` turns true once its stream has delivered those characters and
+ * stopped: a flag, not a promise, as the gateway answers in the Workspace
+ * object's I/O context, and a test resumed from there would do its own
+ * I/O in it.
+ */
+interface Hold {
+  at: number;
+  until: Promise<unknown>;
+  reached: boolean;
+  /** What the stream delivered before it stopped. */
+  streamed: string;
+}
+
+/**
+ * The run's one model provider, behind every persona's object: trials run
+ * one at a time, so it answers for the trial under way.
+ */
 const providerOf = (respond: BrainProvider) => {
   let turn: StubTurn = { phase: "prior" };
-  const gateway = answeringGateway(respond(() => turn));
+  let hold: Hold | undefined;
+  const answer = respond(() => turn);
+  const gateway = answeringGateway(async (requests) => {
+    const reply = await answer(requests);
+    const pending = hold;
+    // Only an answer, not a step's call for code: the turn's last reply.
+    if (
+      pending === undefined ||
+      !("text" in reply) ||
+      reply.text === "" ||
+      (reply.toolCalls ?? []).length > 0
+    ) {
+      return reply;
+    }
+    hold = undefined;
+    return {
+      ...reply,
+      pause: {
+        at: pending.at,
+        until: pending.until,
+        reached: () => {
+          pending.reached = true;
+          pending.streamed = reply.text.slice(0, pending.at);
+        },
+      },
+    };
+  });
   // What the audit log recorded between one request and the next, by
   // request: the reads the step before each request made, in log order,
   // not by clock. A request comes only after its step's code has ended.
@@ -651,6 +931,25 @@ const providerOf = (respond: BrainProvider) => {
     setTurn: (next: StubTurn) => {
       turn = next;
     },
+    /**
+     * Stops the next answer after its first `at` characters until `until`
+     * settles: a turn caught mid-answer. Returns whether that answer has
+     * streamed its first characters and stopped yet, and what drops the
+     * hold if no answer took it.
+     */
+    holdAnswer: (at: number, until: Promise<unknown>) => {
+      const next: Hold = { at, until, reached: false, streamed: "" };
+      hold = next;
+      return {
+        paused: () => next.reached,
+        streamed: () => next.streamed,
+        drop: () => {
+          if (hold === next) {
+            hold = undefined;
+          }
+        },
+      };
+    },
   };
 };
 
@@ -676,23 +975,30 @@ interface TrialPlan {
   task: BrainTask;
   repeat: number;
   cold: boolean;
+  /** How the gate reads Knowledge's database. */
+  knowledge: KnowledgeStateCheck;
 }
 
-/** The sections a trial hands the model, or none for the agent arm. */
+/**
+ * The sections a trial hands the model, or none for the agent arm: what
+ * its person may read now and its agent is granted now.
+ */
 const sourcesFor = async (
   company: BrainCompany,
-  { arm, task }: TrialPlan
-): Promise<Source[] | undefined> => {
+  place: Workspace,
+  { arm, task }: Pick<TrialPlan, "arm" | "task">
+): Promise<{ sources: Source[] | undefined; truncated?: boolean }> => {
   const person = company.people[task.persona];
   if (arm === "agent") {
-    return undefined;
+    return { sources: undefined };
   }
+  const granted = await grantedTo(company, place);
   if (arm === "fullContext") {
-    return await fullContextOf(company, person);
+    return await fullContextOf(person, granted);
   }
-  const found = await fullTextOf(company, person, task.query);
+  const found = await fullTextOf(person, granted, task.query);
   if (arm !== "leakyContext") {
-    return found;
+    return { sources: found };
   }
   // A section of a document the person may not read, as a broken scope
   // would hand it over.
@@ -700,16 +1006,34 @@ const sourcesFor = async (
     (document) =>
       "canary" in document && !mayRead(task.persona, document.collection)
   );
-  return leaked === undefined
-    ? found
-    : [...found, { source: leaked.path, text: leaked.text }];
+  return {
+    sources:
+      leaked === undefined
+        ? found
+        : [...found, { source: leaked.path, text: leaked.text }],
+  };
 };
 
+/** The controls that run on a task that revokes access, and only there. */
+const revocationControls = [
+  "staleAccess",
+  "historyAfterRevocation",
+  "readElsewhereFirst",
+] as const;
+
+const isRevocationControl = (arm: string): boolean =>
+  revocationControls.some((control) => control === arm);
+
 /** The controls that change stored state mid-trial. */
-type ChangingControl = Exclude<BrainControl, "leakyContext">;
+type ChangingControl = Exclude<
+  BrainControl,
+  "leakyContext" | (typeof revocationControls)[number]
+>;
 
 const changingControls: ReadonlySet<string> = new Set(
-  brainControls.filter((control) => control !== "leakyContext")
+  brainControls.filter(
+    (control) => control !== "leakyContext" && !isRevocationControl(control)
+  )
 );
 
 const changes = (arm: BrainArm | BrainControl): arm is ChangingControl =>
@@ -1002,6 +1326,189 @@ export const transcriptWithReads = (
   });
 };
 
+/**
+ * What stored state holds, as a trial in `chatId` sees it: core's and
+ * Knowledge's tables, the Workspace object's tables but the chat's own
+ * rows, and R2's files. What the chat drafted counts too: drafts live in
+ * its object.
+ */
+const trialStateOf = async (
+  place: Workspace,
+  chatId: string,
+  knowledge: KnowledgeStateCheck
+): Promise<Map<string, string>> => {
+  const state = await stateOf(knowledge);
+  for (const [table, digest] of await workspaceStateOf(place, chatId)) {
+    state.set(table, digest);
+  }
+  state.set("files", await filesDigest());
+  return state;
+};
+
+/**
+ * Watches a chat's own rows, which only grow: after each turn every row
+ * there was before it must still be there, unchanged.
+ */
+const chatKeeper = async (place: Workspace, chatId: string) => {
+  let kept = await chatRowsOf(place, chatId);
+  let intact = true;
+  return {
+    keep: async () => {
+      const now = await chatRowsOf(place, chatId);
+      const rows = new Set(now);
+      intact &&= kept.every((row) => rows.has(row));
+      kept = now;
+    },
+    intact: () => intact,
+  };
+};
+
+/** Every string the model was sent in the requests from `firstRequest` on. */
+const modelInputFrom = (provider: Provider, firstRequest: number): string =>
+  provider.gateway.requests
+    .slice(firstRequest)
+    .flatMap(({ body }) => modelStrings(body))
+    .join("\n");
+
+/**
+ * What reached the model in the requests from `firstRequest` on: every
+ * string, and the transcript with each tool result's backing reads.
+ */
+const reachedFrom = async (
+  provider: Provider,
+  person: Person,
+  place: Workspace,
+  firstRequest: number
+): Promise<Pick<TrialObservation, "modelInput" | "transcript">> => {
+  const requests = provider.gateway.requests.slice(firstRequest);
+  return {
+    modelInput: modelInputFrom(provider, firstRequest),
+    // Every request in order: a long turn's last request may leave out
+    // earlier results, which the model still read.
+    transcript: transcriptWithReads(
+      requests,
+      await Promise.all(
+        provider.recorded
+          .slice(firstRequest)
+          .map(async (events) => await readTextsOf(person, place, events))
+      )
+    ),
+  };
+};
+
+/** A revocation made mid-run, and stored state on either side of it. */
+interface MidRun {
+  before: Map<string, string>;
+  after: Map<string, string>;
+  /** The stale control's sources, read before the revocation. */
+  stale?: Source[];
+}
+
+/**
+ * Revokes what the plan's task revokes, after its earlier turns: the stale
+ * control's sources are read first, while the access still holds, as a
+ * cache would keep them past the revocation.
+ */
+const revokeMidRun = async (
+  company: BrainCompany,
+  place: Workspace,
+  chatId: string,
+  { arm, task, knowledge }: TrialPlan,
+  keep: (restore: () => Promise<void>) => void
+): Promise<MidRun> => {
+  const before = await trialStateOf(place, chatId, knowledge);
+  const stale =
+    arm === "staleAccess"
+      ? await sourcesFor(company, place, { arm: "fullText", task })
+      : undefined;
+  await revokeAccess(company, place, task, keep);
+  return {
+    before,
+    after: await trialStateOf(place, chatId, knowledge),
+    ...(stale?.sources === undefined ? {} : { stale: stale.sources }),
+  };
+};
+
+/**
+ * The tables a trial changed: across it, or on either side of its
+ * revocation; and its chat's own rows, when one of them changed.
+ */
+const changedInTrial = ({
+  before,
+  after,
+  revoked,
+  chatIntact,
+}: {
+  before: ReadonlyMap<string, string>;
+  after: ReadonlyMap<string, string>;
+  revoked: MidRun | undefined;
+  chatIntact: boolean;
+}): string[] =>
+  [
+    ...new Set([
+      ...(revoked === undefined
+        ? changedBetween(before, after)
+        : [
+            ...changedBetween(before, revoked.before),
+            ...changedBetween(revoked.after, after),
+          ]),
+      ...(chatIntact ? [] : ["workspace.chat (this chat's rows)"]),
+    ]),
+  ].toSorted();
+
+/**
+ * A trial's turns before its question: what its person said earlier in
+ * the chat, and what the controls need there. The history control's
+ * earlier turns read what the task revokes, while it is still allowed;
+ * the elsewhere control reads it first in another chat.
+ */
+const earlierTurns = async (
+  company: BrainCompany,
+  place: Workspace,
+  { setTurn }: Provider,
+  {
+    chatId,
+    plan: { arm, task },
+    elsewhere,
+    keep,
+  }: {
+    chatId: string;
+    plan: TrialPlan;
+    elsewhere: { stub: Workspace["stub"]; chatId: string } | undefined;
+    keep: () => Promise<void>;
+  }
+): Promise<void> => {
+  if (elsewhere !== undefined) {
+    setTurn({ phase: "prior", reads: task.query });
+    await elsewhere.stub.ask(elsewhere.chatId, {
+      text: `Earlier, in another chat: ${task.question}`,
+      model,
+    });
+  }
+  setTurn(
+    arm === "historyAfterRevocation"
+      ? { phase: "prior", reads: task.query }
+      : { phase: "prior" }
+  );
+  // The controls that change this chat need an earlier turn: one rewrites
+  // it at the question, one changes the chat during it.
+  const earlier =
+    task.priorTurns ??
+    (arm === "changesChat" || arm === "changesChatTitle"
+      ? ["Control: an earlier turn to keep."]
+      : []);
+  for (const said of earlier) {
+    if (arm === "changesChatTitle") {
+      // oxlint-disable-next-line no-await-in-loop -- in order, as said
+      await changeState(company, place, chatId, arm);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- in order, as said
+    await place.stub.ask(chatId, { text: said, model });
+    // oxlint-disable-next-line no-await-in-loop -- in order, as said
+    await keep();
+  }
+};
+
 const runTrial = async (
   company: BrainCompany,
   place: Workspace,
@@ -1019,116 +1526,407 @@ const runTrial = async (
     person.userId,
     place.agent.agentId
   );
+  // Another of the person's Workspace objects, for the control that reads
+  // there first: set up before the trial, as it isn't the trial's change.
+  const elsewhere =
+    arm === "readElsewhereFirst"
+      ? await elsewhereOf(company, place, gateway)
+      : undefined;
   // The gate and what reached the model cover the whole trial, earlier
   // turns too; cost and latency are the question's own.
-  // What the trial's chat drafted counts too: drafts live in its object.
-  const stateNow = async () => {
-    const state = await stateOf();
-    for (const [table, digest] of await workspaceStateOf(place, chat.id)) {
-      state.set(table, digest);
-    }
-    state.set("files", await filesDigest());
-    return state;
-  };
-  const stateBefore = await stateNow();
+  const stateBefore = await trialStateOf(place, chat.id, plan.knowledge);
+  // A revocation is the harness's own change, made between the two: the
+  // state is compared on either side of it, never across it.
+  let revoked: MidRun | undefined;
+  let restore: (() => Promise<void>) | undefined;
   await provider.mark();
   const firstRequest = gateway.requests.length;
+  // Where what a revocation took away stops being allowed to reach the
+  // model: the whole trial, unless the revocation went through.
+  let revokedAt = firstRequest;
   let spentBefore = await charged();
-  // The chat's own rows only grow: after each turn every row there was
-  // before it must still be there, unchanged, from the chat's creation on.
-  let kept = await chatRowsOf(place, chat.id);
-  let chatIntact = true;
-  const keep = async () => {
-    const now = await chatRowsOf(place, chat.id);
-    const rows = new Set(now);
-    chatIntact &&= kept.every((row) => rows.has(row));
-    kept = now;
-  };
+  // The chat's own rows only grow, from the chat's creation on.
+  const chatRows = await chatKeeper(place, chat.id);
   let answer = "";
   let failure: string | undefined;
+  let truncated: boolean | undefined;
   let started = performance.now();
   let observedBefore = provider.observingMs();
   try {
-    setTurn({ phase: "prior" });
-    // The controls that change this chat need an earlier turn: one
-    // rewrites it at the question, one changes the chat during it.
-    const earlier =
-      task.priorTurns ??
-      (arm === "changesChat" || arm === "changesChatTitle"
-        ? ["Control: an earlier turn to keep."]
-        : []);
-    for (const said of earlier) {
-      if (arm === "changesChatTitle") {
-        // oxlint-disable-next-line no-await-in-loop -- in order, as said
+    try {
+      await earlierTurns(company, place, provider, {
+        chatId: chat.id,
+        plan,
+        elsewhere,
+        keep: chatRows.keep,
+      });
+      revoked =
+        task.revoke === undefined
+          ? undefined
+          : await revokeMidRun(company, place, chat.id, plan, (given) => {
+              restore = given;
+            });
+      revokedAt = gateway.requests.length;
+      spentBefore = await charged();
+      // A cold question starts in a just-evicted object, its caches and
+      // memory gone, after any earlier turns of its chat. Its timer starts
+      // before the object is constructed again, which pointing it at the
+      // provider does.
+      observedBefore = provider.observingMs();
+      if (cold) {
+        await evictDurableObject(place.stub);
+        started = performance.now();
+        await pointAt(place.stub, gateway);
+      } else {
+        started = performance.now();
+      }
+      // Then retrieval, then the agent; a failed question is timed too.
+      const handed =
+        arm === "staleAccess"
+          ? { sources: revoked?.stale }
+          : await sourcesFor(company, place, plan);
+      ({ truncated } = handed);
+      if (changes(arm) && arm !== "changesChatTitle") {
         await changeState(company, place, chat.id, arm);
       }
-      // oxlint-disable-next-line no-await-in-loop -- in order, as said
-      await place.stub.ask(chat.id, { text: said, model });
-      // oxlint-disable-next-line no-await-in-loop -- in order, as said
-      await keep();
+      setTurn({ phase: "question", task, searches: arm === "agent", arm });
+      const reply = await place.stub.ask(chat.id, {
+        text: renderPrompt(task.question, handed.sources),
+        model,
+      });
+      ({ answer } = reply);
+      if (reply.outcome !== "answered") {
+        failure = `${reply.outcome}: ${reply.error ?? ""}`;
+      }
+    } catch (error) {
+      failure = error instanceof Error ? error.message : String(error);
     }
-    spentBefore = await charged();
-    // A cold question starts in a just-evicted object, its caches and
-    // memory gone, after any earlier turns of its chat. Its timer starts
-    // before the object is constructed again, which pointing it at the
-    // provider does.
-    observedBefore = provider.observingMs();
-    if (cold) {
-      await evictDurableObject(place.stub);
-      started = performance.now();
-      await pointAt(place.stub, gateway);
-    } else {
-      started = performance.now();
-    }
-    // Then retrieval, then the agent; a failed question is timed too.
-    const sources = await sourcesFor(company, plan);
-    if (changes(arm) && arm !== "changesChatTitle") {
-      await changeState(company, place, chat.id, arm);
-    }
-    setTurn({ phase: "question", task, searches: arm === "agent" });
-    const reply = await place.stub.ask(chat.id, {
-      text: renderPrompt(task.question, sources),
-      model,
+    const latencyMs =
+      performance.now() - started - (provider.observingMs() - observedBefore);
+    await chatRows.keep();
+    const changedTables = changedInTrial({
+      before: stateBefore,
+      after: await trialStateOf(place, chat.id, plan.knowledge),
+      revoked,
+      chatIntact: chatRows.intact(),
     });
-    ({ answer } = reply);
-    if (reply.outcome !== "answered") {
-      failure = `${reply.outcome}: ${reply.error ?? ""}`;
-    }
-  } catch (error) {
-    failure = error instanceof Error ? error.message : String(error);
+    return {
+      taskId: task.id,
+      arm,
+      repeat,
+      cold,
+      answer,
+      // Read back as the person is now: a revocation reconnected them.
+      ...(await reachedFrom(
+        provider,
+        company.people[task.persona],
+        place,
+        firstRequest
+      )),
+      forbidden: forbiddenIn(task),
+      ...(task.revoke === undefined
+        ? {}
+        : {
+            revoked: {
+              modelInput: modelInputFrom(provider, revokedAt),
+              forbidden: revokedIn(task),
+            },
+          }),
+      stateChanged: changedTables.length > 0,
+      changedTables,
+      ...(failure === undefined ? {} : { error: failure }),
+      latencyMs,
+      costMicros: (await charged()) - spentBefore,
+      ...(truncated === undefined ? {} : { truncated }),
+    };
+  } finally {
+    // The trials after this one read with the access it took away.
+    await restore?.();
   }
-  const latencyMs =
-    performance.now() - started - (provider.observingMs() - observedBefore);
-  await keep();
-  const changedTables = [
-    ...changedBetween(stateBefore, await stateNow()),
-    ...(chatIntact ? [] : ["workspace.chat (this chat's rows)"]),
-  ];
-  const requests = gateway.requests.slice(firstRequest);
-  return {
-    taskId: task.id,
-    arm,
-    repeat,
-    cold,
-    answer,
-    modelInput: requests.flatMap(({ body }) => modelStrings(body)).join("\n"),
-    // Every request in order: a long turn's last request may leave out
-    // earlier results, which the model still read.
-    transcript: transcriptWithReads(
-      requests,
-      await Promise.all(
-        provider.recorded
-          .slice(firstRequest)
-          .map(async (events) => await readTextsOf(person, place, events))
-      )
-    ),
+};
 
-    forbidden: forbiddenIn(task),
-    stateChanged: changedTables.length > 0,
-    changedTables,
-    ...(failure === undefined ? {} : { error: failure }),
-    latencyMs,
-    costMicros: (await charged()) - spentBefore,
+/** A request the ledger admitted: its state, and what it was charged. */
+export interface LedgerRequest {
+  id: string;
+  state: string;
+  chargedMicros: number | null;
+}
+
+const ledgerRequestSchema = z.object({
+  id: z.string(),
+  state: z.string(),
+  chargedMicros: z.number().nullable(),
+});
+
+/** Every request the ledger holds, by ID. */
+const ledgerRequests = async (): Promise<Map<string, LedgerRequest>> =>
+  await runInDurableObject(modelLedger(env), (_instance, state) => {
+    const rows = state.storage.sql
+      .exec("SELECT id, state, charged_micros AS chargedMicros FROM requests")
+      .toArray();
+    return new Map(
+      rows.map((row) => {
+        const request = ledgerRequestSchema.parse(row);
+        return [request.id, request];
+      })
+    );
+  });
+
+export const durabilityKinds = ["crash", "replay"] as const;
+export type DurabilityKind = (typeof durabilityKinds)[number];
+
+/**
+ * Where a crash stops the answer: after its first characters, as a
+ * partial answer line ("ANSWER: 37", of "ANSWER: 37; 12").
+ */
+const crashAt = 10;
+
+/**
+ * A run broken on purpose (GRA-677): its question asked, then asked again,
+ * in the same chat and with the same input, after the object restarted.
+ * A crash restarts it mid-answer, its provider stream paused; a replay
+ * after the first answer is whole.
+ */
+export interface DurabilityCase {
+  kind: DurabilityKind;
+  arm: BrainArm;
+  taskId: string;
+  /** The first attempt: cut off by the eviction, or whole. */
+  first: TrialScore;
+  /** The same question in the same chat, after the restart. */
+  retry: TrialScore;
+  /** What each attempt answered: nothing for one cut off. */
+  answers: [first: string, retry: string];
+  /** The agent's last message in the chat after the restart, before the retry. */
+  afterRestart: string;
+  /**
+   * What the provider streamed of the crashed answer before the restart
+   * cut it off: nothing for a replay.
+   */
+  streamed: string;
+  /**
+   * What the chat showed its person of the crashed answer, as it was being
+   * written, when the restart came: nothing for a replay.
+   */
+  shown: string;
+  /** The whole chat after the restart, before the retry, as JSON. */
+  chatAfterRestart: string;
+  /** Every string the model was sent in the retry. */
+  retrySent: string;
+  /**
+   * The digest of stored state, the chat's own rows aside, after each
+   * attempt: a retry that changes nothing else leaves it as it was.
+   */
+  fingerprints: [first: string, retry: string];
+  /**
+   * The ledger's requests each attempt made, as they stand after it, and
+   * the first attempt's again after the retry.
+   */
+  ledger: {
+    first: LedgerRequest[];
+    retry: LedgerRequest[];
+    firstAfterRetry: LedgerRequest[];
+  };
+}
+
+/**
+ * Restarts `place`'s object where it is, whatever it is doing, as a deploy
+ * or a crash does: its memory and every request in flight end, its storage
+ * stays. The stub it was restarted through is broken, so `place` gets a
+ * new one.
+ */
+const restart = async (place: Workspace) => {
+  await runInDurableObject(place.stub, (_instance, state) => {
+    state.abort("Restarted by the Brain harness");
+  }).catch(noop);
+  place.stub = workspace(env, workspaceIdSchema.parse(place.agent.agentId));
+};
+
+/** What the chat's agent said last, as the chat keeps it. */
+const lastSaid = async (place: Workspace, chatId: string): Promise<string> => {
+  const messages = await transcript(place.stub, chatId);
+  const last = messages.findLast(({ role }) => role === "assistant");
+  return last?.role === "assistant"
+    ? last.content
+        .flatMap((part) => (part.type === "text" ? [part.text] : []))
+        .join("")
+    : "";
+};
+
+const runDurabilityCase = async (
+  company: BrainCompany,
+  place: Workspace,
+  provider: Provider,
+  {
+    kind,
+    arm,
+    task,
+    knowledge,
+  }: {
+    kind: DurabilityKind;
+    arm: BrainArm;
+    task: BrainTask;
+    knowledge: KnowledgeStateCheck;
+  }
+): Promise<DurabilityCase> => {
+  const person = company.people[task.persona];
+  const { gateway, setTurn } = provider;
+  await pointAt(place.stub, gateway);
+  const chat = await place.stub.createChat(
+    `Durability ${kind} ${task.id}`,
+    person.userId,
+    place.agent.agentId
+  );
+  // What the person said earlier in the chat, once, before either attempt.
+  setTurn({ phase: "prior" });
+  for (const said of task.priorTurns ?? []) {
+    // oxlint-disable-next-line no-await-in-loop -- in order, as said
+    await place.stub.ask(chat.id, { text: said, model });
+  }
+  // The same input both times: the prompt, its sources read once.
+  const { sources } = await sourcesFor(company, place, { arm, task });
+  const text = renderPrompt(task.question, sources);
+
+  const chatRows = await chatKeeper(place, chat.id);
+  const attempt = async (repeat: number, crash: boolean) => {
+    const stateBefore = await trialStateOf(place, chat.id, knowledge);
+    const requestsBefore = await ledgerRequests();
+    await provider.mark();
+    const firstRequest = gateway.requests.length;
+    const spentBefore = await charged();
+    const started = performance.now();
+    const observedBefore = provider.observingMs();
+    let answer = "";
+    let failure: string | undefined;
+    const cutOff = Promise.withResolvers<boolean>();
+    const crashHold = crash
+      ? provider.holdAnswer(crashAt, cutOff.promise)
+      : null;
+    // What the person sees of the answer as it is written: the chat's live
+    // partial, as the page follows it.
+    let shown: ChatPartial | null = null;
+    // Read through a function: the watch's callback sets it.
+    const shownText = (): string => shown?.text ?? "";
+    let shownBeforeRestart = "";
+    if (crash) {
+      await place.stub.watch(chat.id, person.userId, null, async (update) => {
+        shown = applyPartial(shown, update.partial);
+        // Answered at once: the listener only notes what it was shown.
+        await heard;
+      });
+    }
+    setTurn({ phase: "question", task, searches: arm === "agent", arm });
+    let settled = false;
+    // Never rejects: a turn the restart cut off is a failed attempt.
+    const asking = (async () => {
+      try {
+        const reply = await place.stub.ask(chat.id, { text, model });
+        ({ answer } = reply);
+        if (reply.outcome !== "answered") {
+          failure = `${reply.outcome}: ${reply.error ?? ""}`;
+        }
+      } catch (error) {
+        failure = error instanceof Error ? error.message : String(error);
+      } finally {
+        settled = true;
+      }
+    })();
+    if (crashHold !== null) {
+      try {
+        // Evicted while the answer is under way, its stream paused: what a
+        // deploy or a crash does to a turn in flight.
+        // Restarted only once the person sees what was streamed.
+        const showing = () =>
+          crashHold.paused() && shownText() === crashHold.streamed();
+        await pollUntil(() => showing() || settled);
+        if (!showing()) {
+          // Nothing to cut short: the setup failed, not the turn.
+          throw new Error(
+            `The crash's answer never reached its pause: ${failure ?? "answered whole"}`
+          );
+        }
+        shownBeforeRestart = shownText();
+        await restart(place);
+      } catch (error) {
+        // Ends whatever the ask still does: nothing outlives a failed case.
+        await restart(place);
+        await asking;
+        throw error;
+      } finally {
+        crashHold.drop();
+        cutOff.resolve(true);
+      }
+    }
+    await asking;
+    const latencyMs =
+      performance.now() - started - (provider.observingMs() - observedBefore);
+    // Woken again, as the next call to the object would.
+    await pointAt(place.stub, gateway);
+    await chatRows.keep();
+    const stateAfter = await trialStateOf(place, chat.id, knowledge);
+    const changedTables = [
+      ...changedBetween(stateBefore, stateAfter),
+      ...(chatRows.intact() ? [] : ["workspace.chat (this chat's rows)"]),
+    ];
+    const requestsAfter = await ledgerRequests();
+    const observation: TrialObservation = {
+      taskId: task.id,
+      arm,
+      repeat,
+      cold: repeat > 1,
+      answer,
+      ...(await reachedFrom(provider, person, place, firstRequest)),
+      forbidden: forbiddenIn(task),
+      stateChanged: changedTables.length > 0,
+      changedTables,
+      ...(failure === undefined ? {} : { error: failure }),
+      latencyMs,
+      costMicros: (await charged()) - spentBefore,
+    };
+    return {
+      observation,
+      streamed: crashHold?.streamed() ?? "",
+      shown: shownBeforeRestart,
+      sent: modelInputFrom(provider, firstRequest),
+      fingerprint: await digestOf(Object.fromEntries(stateAfter)),
+      requests: [...requestsAfter.values()].filter(
+        ({ id }) => !requestsBefore.has(id)
+      ),
+    };
+  };
+  const first = await attempt(1, kind === "crash");
+  if (kind === "replay") {
+    // A restart of an object at rest, as a deploy between two turns makes:
+    // its memory goes, its storage stays.
+    await evictDurableObject(place.stub);
+    await pointAt(place.stub, gateway);
+  }
+  const afterRestart = await lastSaid(place, chat.id);
+  const chatAfterRestart = JSON.stringify(
+    await transcript(place.stub, chat.id)
+  );
+  const retry = await attempt(2, false);
+  const ledgerAfter = await ledgerRequests();
+  const scoreOf = (observed: TrialObservation) =>
+    scoreTrial(task.expect, observed);
+  return {
+    kind,
+    arm,
+    taskId: task.id,
+    first: scoreOf(first.observation),
+    retry: scoreOf(retry.observation),
+    answers: [first.observation.answer, retry.observation.answer],
+    afterRestart,
+    streamed: first.streamed,
+    shown: first.shown,
+    chatAfterRestart,
+    retrySent: retry.sent,
+    fingerprints: [first.fingerprint, retry.fingerprint],
+    ledger: {
+      first: first.requests,
+      retry: retry.requests,
+      firstAfterRetry: first.requests.map(({ id }) => held(ledgerAfter, id)),
+    },
   };
 };
 
@@ -1197,6 +1995,7 @@ export interface RunIdentity {
     arms: readonly BrainArm[];
     controls: readonly BrainControl[];
     controlTasks: readonly string[];
+    durabilityTasks: readonly string[];
   };
 }
 
@@ -1219,6 +2018,10 @@ export interface BrainReport {
   comparisons: PairedComparison[];
   gate: { passed: boolean; violations: GateViolation[] };
   controlGate: { passed: boolean; violations: GateViolation[] };
+  /** The durability cases, each arm on each durability task. */
+  durability: DurabilityCase[];
+  /** The gate over both attempts of every durability case. */
+  durabilityGate: { passed: boolean; violations: GateViolation[] };
   scores: TrialScore[];
 }
 
@@ -1226,15 +2029,23 @@ export interface BrainRunOptions {
   split: BrainSplit;
   repeats: number;
   arms?: readonly BrainArm[];
-  /** Controls to run on `controlTasks`, once each, after the measured trials. */
+  /**
+   * Controls to run on `controlTasks`, once each, after the measured
+   * trials: each on the tasks it fits (`staleAccess` on those that revoke
+   * access, the others on those that don't).
+   */
   controls?: readonly BrainControl[];
   controlTasks?: readonly string[];
+  /** Tasks to run the durability cases on, in every arm, after the controls. */
+  durabilityTasks?: readonly string[];
   openSealed?: boolean;
   seed?: number;
   /** The model provider; the stub by default. */
   respond?: BrainProvider;
   /** The provider's name in the run's identity; required with `respond`. */
   providerName?: string;
+  /** How the gate reads Knowledge's database: every row by default. */
+  knowledgeState?: KnowledgeStateCheck;
 }
 
 const counts = (values: readonly string[]): Record<string, number> => {
@@ -1262,29 +2073,21 @@ const retrievalDigest = async (
   return await digestOf(found);
 };
 
+/** Whether `control` runs on `task`: the stale one only where access is revoked. */
+const fits = (control: BrainControl, task: BrainTask): boolean =>
+  isRevocationControl(control) === (task.revoke !== undefined);
+
 /**
- * Refuses a run that couldn't be compared: no repeat, or controls with no
- * task fit to run on. Controls run last, on the corpus as the last window
- * left it: only on tasks of the first window whose documents no window
- * changes.
+ * The IDs of `ids` that aren't a first-window task of `tasks` whose
+ * documents no window changes: what runs after the measured trials, on the
+ * corpus as the last window left it, needs one.
  */
-const checkRun = (
+const unfitAfterWindows = (
   tasks: readonly BrainTask[],
-  repeats: number,
-  controls: readonly BrainControl[],
-  controlTasks: readonly string[]
-) => {
-  if (!Number.isInteger(repeats) || repeats < 1) {
-    throw new RangeError("The baseline needs at least one repeat");
-  }
-  if (controls.length === 0) {
-    return;
-  }
-  if (controlTasks.length === 0) {
-    throw new RangeError("Controls need at least one task to run on");
-  }
+  ids: readonly string[]
+): string[] => {
   const changing = new Set(brainUpdates.map(({ document }) => document));
-  const unfit = controlTasks.filter((id) => {
+  return ids.filter((id) => {
     const task = tasks.find((each) => each.id === id);
     return (
       task === undefined ||
@@ -1292,11 +2095,90 @@ const checkRun = (
       task.documents.some((document) => changing.has(document))
     );
   });
+};
+
+/**
+ * Refuses a run that couldn't be compared: no repeat, controls with no
+ * task fit to run on, or durability cases on a task that revokes access
+ * (a restart would cross the revocation). Controls and durability cases
+ * run last, on the corpus as the last window left it: only on tasks of the
+ * first window whose documents no window changes.
+ */
+const checkRun = (
+  tasks: readonly BrainTask[],
+  repeats: number,
+  controls: readonly BrainControl[],
+  controlTasks: readonly string[],
+  durabilityTasks: readonly string[]
+) => {
+  if (!Number.isInteger(repeats) || repeats < 1) {
+    throw new RangeError("The baseline needs at least one repeat");
+  }
+  const unfitDurability = [
+    ...unfitAfterWindows(tasks, durabilityTasks),
+    ...durabilityTasks.filter((id) =>
+      tasks.some((task) => task.id === id && task.revoke !== undefined)
+    ),
+  ];
+  if (unfitDurability.length > 0) {
+    throw new RangeError(
+      `Durability cases can't run on ${unfitDurability.join(", ")}: not a first-window task of this split whose documents and access stay the same`
+    );
+  }
+  if (controls.length === 0) {
+    return;
+  }
+  const unfit = unfitAfterWindows(tasks, controlTasks);
   if (unfit.length > 0) {
     throw new RangeError(
       `Controls can't run on ${unfit.join(", ")}: not a first-window task of this split whose documents stay the same`
     );
   }
+  const idle = controls.filter(
+    (control) =>
+      !tasks.some(
+        (task) => controlTasks.includes(task.id) && fits(control, task)
+      )
+  );
+  if (idle.length > 0) {
+    throw new RangeError(
+      `Controls need a task they fit to run on: ${idle.join(", ")}`
+    );
+  }
+};
+
+/** Every durability case: each kind, in each arm, on each task. */
+const runDurability = async (
+  company: BrainCompany,
+  places: ReadonlyMap<BrainPersona, Workspace>,
+  provider: Provider,
+  {
+    tasks,
+    arms,
+    knowledge,
+  }: {
+    tasks: readonly BrainTask[];
+    arms: readonly BrainArm[];
+    knowledge: KnowledgeStateCheck;
+  }
+): Promise<DurabilityCase[]> => {
+  const cases: DurabilityCase[] = [];
+  for (const task of tasks) {
+    for (const arm of arms) {
+      for (const kind of durabilityKinds) {
+        cases.push(
+          // oxlint-disable-next-line no-await-in-loop -- cases one at a time
+          await runDurabilityCase(
+            company,
+            held(places, task.persona),
+            provider,
+            { kind, arm, task, knowledge }
+          )
+        );
+      }
+    }
+  }
+  return cases;
 };
 
 /** Runs the baseline on a company loaded at `t0`, window by window. */
@@ -1308,14 +2190,16 @@ export const runBrainBaseline = async (
     arms = brainArms,
     controls = [],
     controlTasks = [],
+    durabilityTasks = [],
     openSealed = false,
     seed = 295,
     respond = stubReader,
     providerName,
+    knowledgeState = "rows",
   }: BrainRunOptions
 ): Promise<BrainReport> => {
   const tasks = tasksOf(split, { openSealed });
-  checkRun(tasks, repeats, controls, controlTasks);
+  checkRun(tasks, repeats, controls, controlTasks, durabilityTasks);
   // Another provider names itself: the stub's name is the stub's only.
   if (respond !== stubReader && providerName === undefined) {
     throw new RangeError("A run with another model provider needs its name");
@@ -1372,7 +2256,13 @@ export const runBrainBaseline = async (
       // Odd repeats start each trial in a just-evicted object: cold.
       const cold = repeat % 2 === 1;
       const paired = inWindow.flatMap((task) =>
-        arms.map((arm) => ({ arm, task, repeat, cold }))
+        arms.map((arm) => ({
+          arm,
+          task,
+          repeat,
+          cold,
+          knowledge: knowledgeState,
+        }))
       );
       plans.push(...shuffled(paired, random));
     }
@@ -1386,7 +2276,7 @@ export const runBrainBaseline = async (
   // The controls change what they run in on purpose: they run after every
   // measured trial, cold, so nothing measured runs in what they changed.
   for (const task of tasks.filter(({ id }) => controlTasks.includes(id))) {
-    for (const arm of controls) {
+    for (const arm of controls.filter((control) => fits(control, task))) {
       observations.push(
         // oxlint-disable-next-line no-await-in-loop -- trials one at a time
         await runTrial(company, held(places, task.persona), provider, {
@@ -1394,10 +2284,22 @@ export const runBrainBaseline = async (
           task,
           repeat: 1,
           cold: true,
+          knowledge: knowledgeState,
         })
       );
     }
   }
+  // Broken on purpose, last: a crash leaves its request to the ledger's
+  // reconciliation, which nothing measured should run beside.
+  const durability = await runDurability(company, places, provider, {
+    tasks: tasks.filter(({ id }) => durabilityTasks.includes(id)),
+    arms,
+    knowledge: knowledgeState,
+  });
+  const durabilityScores = durability.flatMap(({ first, retry }) => [
+    first,
+    retry,
+  ]);
   const byId = new Map(brainTasks.map((task) => [task.id, task]));
   const scores = observations.flatMap((observed) => {
     const task = byId.get(observed.taskId);
@@ -1440,6 +2342,7 @@ export const runBrainBaseline = async (
   );
   const violations = gateViolations(armScores);
   const controlViolations = gateViolations(controlScores);
+  const durabilityViolations = gateViolations(durabilityScores);
   return {
     identity: {
       suite: {
@@ -1460,7 +2363,10 @@ export const runBrainBaseline = async (
       policy: await digestOf({
         collections: brainCollections,
         teams: brainTeams,
-        grants: sharedCollections.map((key) => ({ key, actions: ["read"] })),
+        grants: grantedKeys(company).map((key) => ({
+          key,
+          actions: ["read"],
+        })),
         gateway: gatewayConfig,
         protocol: answerProtocol,
         budgets: { searchedSections, fullContextChars },
@@ -1469,7 +2375,7 @@ export const runBrainBaseline = async (
       split,
       repeats,
       seed,
-      schedule: { arms, controls, controlTasks },
+      schedule: { arms, controls, controlTasks, durabilityTasks },
     },
     coverage: {
       families: counts(tasks.map(({ family }) => family)),
@@ -1504,6 +2410,11 @@ export const runBrainBaseline = async (
     controlGate: {
       passed: controlViolations.length === 0,
       violations: controlViolations,
+    },
+    durability,
+    durabilityGate: {
+      passed: durabilityViolations.length === 0,
+      violations: durabilityViolations,
     },
     scores,
   };

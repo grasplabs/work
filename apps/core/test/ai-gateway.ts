@@ -34,9 +34,10 @@ export type GatewayReply =
       /**
        * Streams the text's first `at` characters, then waits for `until`
        * before the rest (Anthropic and chat completions): an answer caught
-       * mid-stream.
+       * mid-stream. `reached` is called when the stream gets there, its
+       * first characters delivered.
        */
-      pause?: { at: number; until: Promise<unknown> };
+      pause?: { at: number; until: Promise<unknown>; reached?: () => void };
       /**
        * Streams the text's first `cut` characters, then closes the stream
        * with nothing after them, neither an end nor a count (Anthropic and
@@ -78,6 +79,7 @@ interface StreamEvent {
 /** Where a stream stops until the promise settles (`pause`). */
 interface StreamPause {
   until: Promise<unknown>;
+  reached?: () => void;
 }
 
 const sse = ({ event, data }: StreamEvent): Uint8Array =>
@@ -115,6 +117,9 @@ const eventStream = (
   const write = async (): Promise<void> => {
     try {
       for (const item of events) {
+        if ("until" in item) {
+          item.reached?.();
+        }
         // oxlint-disable-next-line no-await-in-loop -- in order, pausing where told
         await ("until" in item ? item.until : writer.write(sse(item)));
       }
@@ -162,11 +167,7 @@ const textDeltas = (
   });
   return pause === undefined
     ? [delta(text)]
-    : [
-        delta(text.slice(0, pause.at)),
-        { until: pause.until },
-        delta(text.slice(pause.at)),
-      ];
+    : [delta(text.slice(0, pause.at)), pause, delta(text.slice(pause.at))];
 };
 
 /** A content block of Anthropic's, as its stream opens it. */
@@ -333,7 +334,7 @@ const chatCompletionEvents = (
       ? [content(text)]
       : [
           content(text.slice(0, pause.at)),
-          { until: pause.until },
+          pause,
           content(text.slice(pause.at)),
         ]),
     ...(answer.toolCalls ?? []).map((call, index) =>

@@ -43,7 +43,16 @@ const unboundedTarget =
 export default defineConfig({
   lint: {
     extends: [core, react, tanstack, vitest, shadcn],
-    ignorePatterns: [...(core.ignorePatterns ?? []), ...generated],
+    ignorePatterns: [
+      ...(core.ignorePatterns ?? []),
+      ...generated,
+      // The tests' own built-in, an App of spec 8's layout: its operations
+      // import what its seal generates (`#grasp/server`), which nothing
+      // here maps, so its files are untyped, like any inline test App's
+      // (the seal strips types without checking them), and
+      // builtin-blueprints.test.ts covers what they do at runtime.
+      "apps/core/test/fixtures/blueprints/*/files/**",
+    ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),
       ...(antiSlop.jsPlugins ?? []),
@@ -164,6 +173,9 @@ export default defineConfig({
         files: [
           "apps/core/src/workflows/host.ts",
           "apps/core/src/workflows/attempt-host.ts",
+          // The same for a run of an independent workflow's sealed build.
+          "apps/core/src/workflows/resource-host.ts",
+          "apps/core/src/workflows/resource-attempt-host.ts",
         ],
         rules: {
           "no-restricted-imports": [
@@ -224,6 +236,7 @@ export default defineConfig({
       "apps/core/vite.on-prem.config.ts",
       "packages/*",
       "packages/workerflow/vite.process.config.ts",
+      "packages/workerflow/vite.conformance.config.ts",
       "packages/connectors/*",
       // Repo tooling's pure logic, and core's build step, in Node.
       {

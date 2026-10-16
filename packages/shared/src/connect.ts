@@ -808,8 +808,11 @@ export type HeldOutcomeRequest = z.input<typeof heldOutcomeRequestSchema>;
  * carried out now); they declined it, or it was dropped; it ran and
  * answered (`done`); it was sent and nobody can tell whether it took
  * effect (`unknown`: it may have been carried out, and is never sent
- * again under its key); or it didn't end well (`failed`: `reason` is the
- * error's code, and `output` what the tool said, for a tool's own error).
+ * again blindly under its key); its person said what became of such a
+ * call (`resolved`: `connect.resolved_done`, it took effect and is never
+ * sent again; `connect.resolved_not_done`, it didn't, and may be sent once
+ * more); or it didn't end well (`failed`: `reason` is the error's code,
+ * and `output` what the tool said, for a tool's own error).
  */
 export type HeldOutcome =
   | { state: "waiting" }
@@ -909,8 +912,6 @@ export const resolveOutcomeSchema = z.strictObject({
   person: connectionPersonSchema,
   key: unknownOutcomeKeySchema,
   choice: resolutionChoiceSchema,
-  /** The claim of the key the person was shown (`UnknownOutcome.claim`). */
-  claim: z.int().nonnegative(),
 });
 export type ResolveOutcome = z.input<typeof resolveOutcomeSchema>;
 
@@ -959,10 +960,23 @@ export interface UnknownOutcome {
   claim: number;
   /** Null for a call whose origin connect doesn't have: it can't be resolved. */
   origin: UnknownOutcomeOrigin | null;
+  /** Where the list goes on after it: the next page is `before` it. */
+  cursor: UnknownOutcomeCursor;
 }
 
 /** Most calls of unknown outcome one list answers: the newest. */
 export const unknownOutcomeListLimit = 200;
+
+/**
+ * Where a list of calls of unknown outcome goes on: when the call was
+ * first sent, in milliseconds, and its random list ID; never its key,
+ * which App code chooses, nor anything counting other calls. A list
+ * `before` one answers the calls listed after it, newest first.
+ */
+export const unknownOutcomeCursorSchema = z
+  .string()
+  .regex(/^\d{1,15}\.[0-9a-f-]{0,36}$/u);
+export type UnknownOutcomeCursor = z.infer<typeof unknownOutcomeCursorSchema>;
 
 /**
  * A call of unknown outcome as an organization's admin sees it, to follow
@@ -972,8 +986,9 @@ export const unknownOutcomeListLimit = 200;
  */
 export interface UnknownOutcomeListing {
   /**
-   * For telling rows apart, unique within one listing: a digest of what
-   * the listing shows anyway, never of the call's key.
+   * For telling rows apart, unique across every page: a digest of what
+   * the listing shows anyway and the call's random list ID, never of its
+   * key.
    */
   id: string;
   /** The person it acted for: theirs to resolve. */
@@ -988,6 +1003,8 @@ export interface UnknownOutcomeListing {
   resource: string | null;
   /** When it was first sent, ISO 8601. */
   sentAt: string;
+  /** As `UnknownOutcome.cursor`. */
+  cursor: UnknownOutcomeCursor;
 }
 
 /**
@@ -995,14 +1012,19 @@ export interface UnknownOutcomeListing {
  * their own. Grasp staff have none, and resolve none.
  */
 export interface UnknownOutcomesApi {
-  list: () => Promise<UnknownOutcome[]>;
   /**
-   * Every person's open calls of unknown outcome, newest first, for the
-   * organization's own admins only (never Grasp staff), to follow up
-   * with each call's person: read only, as `UnknownOutcomeListing` shows
-   * them. An admin resolves only their own, with `resolve`.
+   * The person's own, newest first, at most {@link unknownOutcomeListLimit}
+   * a page: a full page goes on `before` its last one's `cursor`.
    */
-  listAll: () => Promise<UnknownOutcomeListing[]>;
+  list: (before?: UnknownOutcomeCursor) => Promise<UnknownOutcome[]>;
+  /**
+   * Every person's open calls of unknown outcome, newest first, paged as
+   * `list` is, for the organization's own admins only (never Grasp staff),
+   * to follow up with each call's person: read only, as
+   * `UnknownOutcomeListing` shows them. An admin resolves only their own,
+   * with `resolve`.
+   */
+  listAll: (before?: UnknownOutcomeCursor) => Promise<UnknownOutcomeListing[]>;
   /**
    * Says what became of the call `key` names: `happened` keeps it from
    * ever being sent again; `not_happened` lets it be sent once more, with
@@ -1245,17 +1267,22 @@ export interface ConnectApi extends PackageRegistryApi {
   anyPending: (request: PendingKey) => Promise<boolean>;
   /**
    * The calls of unknown outcome that acted for `person`, newest first (at
-   * most 200), those connect may still recover on its own included: none
-   * for Grasp staff.
+   * most 200 a page, the next `before` the last one's cursor), those
+   * connect may still recover on its own included: none for Grasp staff.
    */
-  listUnknownOutcomes: (person: ConnectionPerson) => Promise<UnknownOutcome[]>;
+  listUnknownOutcomes: (
+    person: ConnectionPerson,
+    before?: UnknownOutcomeCursor
+  ) => Promise<UnknownOutcome[]>;
   /**
-   * Every person's calls of unknown outcome, newest first (at most 200), as
-   * an admin sees them: for `admin`, one of the organization's own admins
-   * as core read them now, never Grasp staff; refused to anyone else.
+   * Every person's calls of unknown outcome, newest first, paged as
+   * `listUnknownOutcomes` is, as an admin sees them: for `admin`, one of
+   * the organization's own admins as core read them now, never Grasp
+   * staff; refused to anyone else.
    */
   listAllUnknownOutcomes: (
-    admin: ConnectionPerson
+    admin: ConnectionPerson,
+    before?: UnknownOutcomeCursor
   ) => Promise<UnknownOutcomeListing[]>;
   /** One call of unknown outcome of the person's, or `null`. */
   unknownOutcome: (

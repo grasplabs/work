@@ -67,6 +67,16 @@ const clientErrors = {
       "The save went through, but answered something other than the record it saved, so the form can't show the record as it is now.",
     category: "contract",
   },
+  "contract.not_paginated": {
+    message:
+      "That query doesn't take a pagination argument and answer pages, so it can't be read as a paginated list.",
+    category: "contract",
+  },
+  "query.window_limit": {
+    message:
+      "This list can't load more: it holds as many records as one live list may. Narrow it with the query's arguments instead.",
+    category: "operational",
+  },
   "contract.invalid_request": {
     message:
       "That isn't a public reference of this kind: use one from the App's generated api.",

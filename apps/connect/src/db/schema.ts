@@ -92,9 +92,12 @@ export const connections = sqliteTable(
  * can't be reused for a different call. `state` is `running` while the call
  * is out, `done` once its result is stored, `failed` once the tool's error
  * is stored (a tool may have acted before it failed, so that is final too),
- * `unknown` when the call failed after it may have reached the server, and
+ * `unknown` when the call failed after it may have reached the server,
  * `declined` when a workflow run's held side effect was declined or
- * dropped (`output` says why): its step's retry fails, never asks again.
+ * dropped (`output` says why): its step's retry fails, never asks again;
+ * and, for a call of unknown outcome its person resolved, `resolved` when
+ * they said it happened (never sent again) and `freed` when they said it
+ * didn't (one more send of the same input takes the key, `running` again).
  * Rows are never deleted, so no key is ever used twice: past retention, or
  * when too large, an answer's output is dropped and a repeat is refused.
  */
@@ -157,10 +160,24 @@ export const idempotentCalls = sqliteTable(
     input: text(),
     /**
      * Where the call came from, as its capability said (mode, App version,
-     * permission and context), as JSON, kept as long as `input`: what core
-     * checks again before it signs a resolution of it.
+     * permission, context and the App's resource binding, if any), as
+     * JSON, kept as long as `input`: what core checks again before it signs
+     * a resolution of it, and connect compares the resolution with. Its
+     * `restricted` says a recovery of the call needs its person: its
+     * context had read restricted data, or a recovery was refused since for
+     * needing their confirmation (`requireConfirmation`).
      */
     origin: text(),
+    /**
+     * A random ID, set at the first claim: where a list of calls of unknown
+     * outcome goes on after this one, with `created_at` (its cursor). Never
+     * a row number, which would tell how many calls anyone made in between,
+     * and which the database may renumber. Empty only on a declined row,
+     * which no list shows. Not backfilled: nothing with this table is
+     * released (a hard cut), so no deployment holds rows from before it
+     * that a list would show.
+     */
+    listId: text("list_id").notNull().default(""),
   },
   (table) => [
     primaryKey({
@@ -176,6 +193,22 @@ export const idempotentCalls = sqliteTable(
     index("idempotent_calls_created_idx").on(table.createdAt),
     // How a held action ended, found by the key connect made for it.
     index("idempotent_calls_key_idx").on(table.idempotencyKey),
+    // A person's calls of unknown outcome, listed and waited on.
+    index("idempotent_calls_person_state_idx").on(
+      table.onBehalfOf,
+      table.state
+    ),
+    // A person's list, page by page, in the order it goes.
+    index("idempotent_calls_person_list_idx").on(
+      table.onBehalfOf,
+      table.createdAt,
+      table.listId
+    ),
+    // The inputs past retention, swept on every claim: only the rows that
+    // still keep one, never every old row.
+    index("idempotent_calls_kept_input_idx")
+      .on(table.createdAt)
+      .where(sql`${table.input} IS NOT NULL`),
   ]
 );
 
