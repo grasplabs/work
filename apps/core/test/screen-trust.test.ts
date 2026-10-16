@@ -1598,15 +1598,9 @@ describe("screen trust", { timeout: 60_000 }, () => {
   it("puts a version in front of the admins as soon as it is current, before anyone opens it", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
-    // A screen that imports the App's references (`#grasp`) is recorded
-    // only once it is opened or reviewed (screen-builds.ts), which
-    // GRA-660 closes; one that doesn't is recorded as it is made
-    // current.
-    const { id: app } = await builder.api.apps.create({ name: "Notes" });
-    await release(builder, app, {
-      ...appCode,
-      "screens/notes.tsx": plainScreenOf("Notes"),
-    });
+    // Its screen imports the App's references (`#grasp`), which name the
+    // release the version was sealed with as it was made current.
+    const app = await sampleApp(builder);
     // Recorded in the background as it was made current: soon after.
     const waitingNow = await vi.waitFor(async () => {
       const listed = await admin.api.screenTrust.waiting();
@@ -1615,10 +1609,14 @@ describe("screen trust", { timeout: 60_000 }, () => {
         throw new Error("Not recorded yet");
       }
       return found;
-    });
+    }, pushWait);
+    // Recorded is not approved: the build still opens to nobody.
+    const recorded = await outcome(builder.api.screens.open(app, "notes"));
     await approveCurrent(admin, app);
     const afterApproval = await waitsOn(admin, app);
-    await release(builder, app, { "screens/notes.tsx": plainScreenOf("Send") });
+    // What waited is what runs: approved, it opens.
+    const approved = await outcome(builder.api.screens.open(app, "notes"));
+    await release(builder, app, { "screens/notes.tsx": screenOf("Send") });
     const nextVersion = await vi.waitFor(async () => {
       const listed = await admin.api.screenTrust.waiting();
       const found = listed.find(
@@ -1628,15 +1626,19 @@ describe("screen trust", { timeout: 60_000 }, () => {
         throw new Error("Not recorded yet");
       }
       return found;
-    });
+    }, pushWait);
 
     expect({
       waitingNow: waitingNow.screens,
+      recorded,
       afterApproval,
+      approved,
       nextVersion: nextVersion.version,
     }).toStrictEqual({
       waitingNow: ["notes"],
+      recorded: "screen.unreviewed",
       afterApproval: false,
+      approved: "ok",
       nextVersion: 2,
     });
   });
