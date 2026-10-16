@@ -3079,6 +3079,33 @@ describe("live queries when access is revoked", { timeout: 180_000 }, () => {
     await expect(whenLetGo(follower)).resolves.toStrictEqual(refusedAndLetGo);
   });
 
+  it("drops a kept revocation once it is a day old, however many others the cron trigger tells first", async () => {
+    const opened = await openedApp();
+    const now = Date.now();
+    const keep = env.DB.prepare(
+      "insert into access_revocations (id, app_id, user_ids, attempts, created_at) values (?, ?, null, ?, ?)"
+    );
+    const expired = crypto.randomUUID();
+    // More than one run tells, none tried yet: each run reaches them
+    // before the old one, which was tried once.
+    const fresh = Array.from({ length: 101 }, () =>
+      keep.bind(crypto.randomUUID(), opened.app, 0, now)
+    );
+    await env.DB.batch([
+      ...fresh,
+      keep.bind(expired, opened.app, 1, now - 25 * 60 * 60 * 1000),
+    ]);
+
+    await runCron();
+
+    const left = await env.DB.prepare(
+      "select id from access_revocations where id = ?"
+    )
+      .bind(expired)
+      .first();
+    expect(left).toBeNull();
+  });
+
   it("clears the screen of someone removed who reached the App through a team, even when looking up their Apps fails", async () => {
     const opened = await openedApp();
     const admin = await personApi("admin");

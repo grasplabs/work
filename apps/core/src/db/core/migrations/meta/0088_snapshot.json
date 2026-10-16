@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "de68cc10-e0ba-4914-ae11-83aae8ef1fe6",
+  "id": "cae3bba5-814a-4b41-91c0-0680fe0b45d5",
   "prevId": "aad6bf56-c238-4804-b77f-6fddf84c7996",
   "tables": {
     "access_revocations": {
@@ -49,6 +49,13 @@
           "name": "access_revocations_due",
           "columns": [
             "attempts",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "access_revocations_age": {
+          "name": "access_revocations_age",
+          "columns": [
             "created_at"
           ],
           "isUnique": false

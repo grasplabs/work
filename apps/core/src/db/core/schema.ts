@@ -438,9 +438,11 @@ export const accessRevocations = sqliteTable(
     attempts: integer().notNull().default(0),
     createdAt: timestamp("created_at").notNull(),
   },
-  // The cron trigger tells the least tried first, oldest first among them.
+  // The cron trigger tells the least tried first, oldest first among them,
+  // once it dropped those a day old.
   (table) => [
     index("access_revocations_due").on(table.attempts, table.createdAt),
+    index("access_revocations_age").on(table.createdAt),
   ]
 );
 

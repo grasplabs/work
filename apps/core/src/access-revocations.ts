@@ -1,7 +1,7 @@
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -143,47 +143,59 @@ export const accessMayHaveDropped = async (
 const retriedAtOnce = 100;
 
 /**
- * How many runs of the cron trigger (one a minute) a kept revocation is
- * told again for: a day. One whose host is away longer is logged and
- * dropped; the screens then fall back on the check before each push.
+ * How long a kept revocation is told again for: a day, counted from when
+ * it was kept, however often it was tried. One whose host is away longer
+ * is logged and dropped; the screens then fall back on the check before
+ * each push.
  */
-const maxRetries = 24 * 60;
+const keptForMs = 24 * 60 * 60 * 1000;
 
-/** Tells one kept revocation again: dropped once taken, or past its retries. */
+/** Tells one kept revocation again: dropped once taken. */
 const retryOne = async (
   env: Env,
   row: typeof accessRevocations.$inferSelect
 ): Promise<void> => {
   const db = drizzle(env.DB);
-  const app = appIdSchema.parse(row.appId);
-  const drop = db
-    .delete(accessRevocations)
-    .where(eq(accessRevocations.id, row.id));
   try {
-    await appHost(env, app).accessRevoked(row.userIds);
-    await drop;
+    await appHost(env, appIdSchema.parse(row.appId)).accessRevoked(row.userIds);
   } catch (error) {
-    if (row.attempts + 1 < maxRetries) {
-      await db
-        .update(accessRevocations)
-        .set({ attempts: sql`${accessRevocations.attempts} + 1` })
-        .where(eq(accessRevocations.id, row.id));
-      return;
-    }
-    log.error("app.access_revocation_lost", {
-      appId: app,
+    log.warn("app.access_revocation_retry_failed", {
+      appId: row.appId,
       ...errorFields(error),
     });
-    await drop;
+    // Told again at a later run, behind those tried less often, until
+    // it is a day old (`dropExpired`).
+    await db
+      .update(accessRevocations)
+      .set({ attempts: sql`${accessRevocations.attempts} + 1` })
+      .where(eq(accessRevocations.id, row.id));
+    return;
+  }
+  await db.delete(accessRevocations).where(eq(accessRevocations.id, row.id));
+};
+
+/**
+ * Drops, logged, every kept revocation a day old, whether or not a run
+ * would reach it: one behind many others, or behind a steady stream of
+ * new ones, is never kept longer.
+ */
+const dropExpired = async (env: Env): Promise<void> => {
+  const lost = await drizzle(env.DB)
+    .delete(accessRevocations)
+    .where(lt(accessRevocations.createdAt, new Date(Date.now() - keptForMs)))
+    .returning({ appId: accessRevocations.appId });
+  for (const { appId } of lost) {
+    log.error("app.access_revocation_lost", { appId });
   }
 };
 
 /**
  * Tells the hosts again of the revocations they couldn't be told of
- * (`keepForLater`), least tried first. The cron trigger runs it every
- * minute.
+ * (`keepForLater`), least tried first, once those a day old are dropped.
+ * The cron trigger runs it every minute.
  */
 export const retryAccessRevocations = async (env: Env): Promise<void> => {
+  await dropExpired(env);
   const kept = await drizzle(env.DB)
     .select()
     .from(accessRevocations)
