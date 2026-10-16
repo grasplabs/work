@@ -250,12 +250,6 @@ const within = async <T>(
   }
 };
 
-/**
- * Where the session client keeps drafts: the page, which hands over the
- * App's drafts it kept for the person, or none if it can't within
- * `draftLookupMs`. An answer that comes later is never applied: a draft
- * restored into a form the person has started on could overwrite it.
- */
 /** What of the page's bridge keeps a frame's drafts. */
 export interface DraftPage {
   readonly drafts: () => Promise<unknown>;
@@ -269,6 +263,13 @@ const draftsWaitingMost = 2 * screenLimits.drafts.perApp;
 /** How many times in a row the page is asked again for its drafts. */
 const draftAsksMost = 5;
 
+/**
+ * Where the session client keeps drafts: the page, which hands over the
+ * App's drafts it kept for the person, or none if it can't within
+ * `draftLookupMs`. An answer that comes later is never applied, as a
+ * draft restored into a form the person has started on could overwrite
+ * it; the changes made meanwhile are written once it comes.
+ */
 export const pageDrafts = async (
   page: DraftPage
 ): Promise<DraftPersistence> => {
