@@ -1,3 +1,4 @@
+import { appFilesPath } from "@grasp-os/shared/app-file-limits";
 import { catalogLogoPath } from "@grasp-os/shared/connect";
 import { strictTransportSecurity } from "@grasp-os/shared/http";
 import { isPackageArtifactPath } from "@grasp-os/shared/packages";
@@ -104,7 +105,10 @@ export const isRefusedToProductPage = (request: Request): boolean =>
  *   or `blob:` module, no eval, no WebAssembly. A screen that renders HTML
  *   it was sent, or imports from a string, runs none of it.
  * - Styles inline and from `data:` URLs, images and fonts from `data:`:
- *   how a screen's CSS and assets come. Nothing to connect to (fetch,
+ *   how a screen's CSS and assets come. Images from `blob:` too: a
+ *   file's preview (spec 10.7.5), which the page hands the frame as a
+ *   `Blob` and the frame shows through a URL of its own opaque origin,
+ *   that no other document can load. Nothing to connect to (fetch,
  *   WebSocket, beacons, EventSource), no workers, no frames, no form
  *   targets and no `<base>`.
  * - Only the product page may frame it.
@@ -140,7 +144,7 @@ export const screenFramePolicy = (scripts: readonly string[]): string =>
     "default-src": "'none'",
     "script-src": scripts.length === 0 ? "'none'" : scripts.join(" "),
     "style-src": "data: 'unsafe-inline'",
-    "img-src": "data:",
+    "img-src": "data: blob:",
     "font-src": "data:",
     "connect-src": "'none'",
     "worker-src": "'none'",
@@ -216,6 +220,10 @@ export const catalogLogoPolicy = `${policy({
  * paths of code we didn't write vary on `Sec-Fetch-Site`, as core refuses
  * them to the product page (`isRefusedToProductPage`).
  */
+/** Whether `pathname` is where an App file's bytes are sent. */
+const isFileContentPath = (pathname: string): boolean =>
+  pathname.startsWith(`${appFilesPath}/`) && pathname.endsWith("/content");
+
 export const setSecurityHeaders = (
   headers: Headers,
   url: URL,
@@ -227,6 +235,12 @@ export const setSecurityHeaders = (
     headers.set("referrer-policy", "no-referrer");
   } else if (url.pathname.startsWith(`${catalogLogoPath}/`)) {
     headers.set("content-security-policy", catalogLogoPolicy);
+  } else if (isFileContentPath(url.pathname)) {
+    // An App file's bytes (app-file-route.ts): always an attachment, and
+    // should a browser open one anyway, a sandbox that runs nothing,
+    // loads nothing and isn't read by another site.
+    headers.set("content-security-policy", "default-src 'none'; sandbox");
+    headers.set("cross-origin-resource-policy", "same-origin");
   } else if (url.pathname !== screenFramePath) {
     headers.set("content-security-policy", contentSecurityPolicy(origin));
   } else if (!headers.has("content-security-policy")) {

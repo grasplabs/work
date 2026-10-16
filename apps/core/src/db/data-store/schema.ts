@@ -551,3 +551,160 @@ export const commitWriters = sqliteTable("sdk_commit_writers", {
   principal: text().notNull(),
   committedAt: integer("committed_at").notNull(),
 });
+
+/**
+ * The store's files (spec 9.6, 10.7.5; file-host.ts): one row per upload,
+ * its bytes in the deployment's private R2, in chunks under the store's
+ * own prefix. `uploading` until its bytes are checked (size, hash, type),
+ * then `published`; `deleted` once cancelled, expired, deleted by its
+ * uploader or cleaned up, its bytes removed after (`purgedAt`). A row is
+ * never removed while the store lives: it is the tombstone a stale
+ * cleanup or a reused key is checked against.
+ *
+ * `expiresAt` is the file's cleanup intent: when an upload's time runs
+ * out, or when a published file no record holds is deleted. A commit that
+ * takes the last reference to a file sets it, in the same transaction,
+ * and one that holds the file again clears it, so a cleanup acts only on
+ * what no record holds at the moment it acts.
+ */
+export const files = sqliteTable(
+  "sdk_files",
+  {
+    fileId: text("file_id").primaryKey(),
+    /** The alias of the files resource it was uploaded through. */
+    resource: text().notNull(),
+    /** Who uploaded it. */
+    ownerId: text("owner_id").notNull(),
+    name: text().notNull(),
+    /** The type it was declared as, and once published, checked to be. */
+    mimeType: text("mime_type").notNull(),
+    size: integer().notNull(),
+    sha256: text().notNull(),
+    state: text({ enum: ["uploading", "published", "deleted"] }).notNull(),
+    createdAt: integer("created_at").notNull(),
+    publishedAt: integer("published_at"),
+    deletedAt: integer("deleted_at"),
+    /** Why it was deleted. */
+    deletedHow: text("deleted_how", {
+      enum: ["cancelled", "rejected", "expired", "deleted", "orphaned"],
+    }),
+    /** The page's key for this upload: a start sent again finds it. */
+    beginKey: text("begin_key").notNull(),
+    expiresAt: integer("expires_at"),
+    /** When its bytes were removed from R2. */
+    purgedAt: integer("purged_at"),
+  },
+  (table) => [
+    index("sdk_files_expiring")
+      .on(table.expiresAt)
+      .where(sql`expires_at IS NOT NULL`),
+    index("sdk_files_unpurged")
+      .on(table.deletedAt)
+      .where(sql`state = 'deleted' AND purged_at IS NULL`),
+    index("sdk_files_owner_open")
+      .on(table.ownerId)
+      .where(sql`state = 'uploading'`),
+    // What the quotas count, live files only: a store's tombstones, kept
+    // for good, never add to what starting an upload reads.
+    index("sdk_files_live")
+      .on(table.ownerId, table.state, table.expiresAt, table.size)
+      .where(sql`state <> 'deleted'`),
+    uniqueIndex("sdk_files_begin_key").on(table.ownerId, table.beginKey),
+  ]
+);
+
+/**
+ * The keys a person deleted their files under: each key one file's, for
+ * every deletion that succeeded under it, a first one or one of a file
+ * already deleted, so a key never moves to another file.
+ */
+export const fileDeleteKeys = sqliteTable(
+  "sdk_file_delete_keys",
+  {
+    ownerId: text("owner_id").notNull(),
+    key: text().notNull(),
+    fileId: text("file_id")
+      .notNull()
+      .references(() => files.fileId),
+  },
+  (table) => [primaryKey({ columns: [table.ownerId, table.key] })]
+);
+
+/**
+ * The chunks of a file core holds, each checked against its hash, and the
+ * R2 object holding it: a key of its own for every write
+ * (`<file>/<index>.<uuid>`), so a chunk once recorded is never written
+ * over, and a write that lost to another removes only its own object.
+ */
+export const fileChunks = sqliteTable(
+  "sdk_file_chunks",
+  {
+    fileId: text("file_id")
+      .notNull()
+      .references(() => files.fileId),
+    index: integer().notNull(),
+    size: integer().notNull(),
+    sha256: text().notNull(),
+    key: text().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.fileId, table.index] }),
+    // What the alarm looks a write's key up by (`fileWrites`).
+    index("sdk_file_chunks_key").on(table.key),
+  ]
+);
+
+/**
+ * The R2 keys handed to chunk writes not yet settled (`admitChunk`), so an
+ * object whose writer never heard how its recording went (both answers
+ * lost) is still removed: once its write has had time to settle, the
+ * alarm deletes it unless a chunk is recorded under its key. A write
+ * settles by recording (`chunkStored`), which takes its key off; a key
+ * the alarm condemned is recorded no more.
+ */
+export const fileWrites = sqliteTable(
+  "sdk_file_writes",
+  {
+    key: text().primaryKey(),
+    fileId: text("file_id")
+      .notNull()
+      .references(() => files.fileId),
+    issuedAt: integer("issued_at").notNull(),
+    /** Set once the alarm is removing its object: it is recorded no more. */
+    condemned: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [index("sdk_file_writes_issued").on(table.issuedAt)]
+);
+
+/**
+ * Audit events of the store's files, written in the transaction that does
+ * what they record (a publication, a deletion, a cleanup) and handed to
+ * core's audit outbox after (file-host.ts, `flushEvents`), then removed:
+ * each lands once, however often the hand-over is retried.
+ */
+export const fileEvents = sqliteTable("sdk_file_events", {
+  id: text().primaryKey(),
+  /** The event, as JSON (`AuditEvent`). */
+  event: text().notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+/**
+ * The files the store's records hold: one row per record and file one of
+ * its `v.file()` fields holds, kept in the transaction that writes the
+ * record (store-host.ts), as `sdk_record_refs` is.
+ */
+export const fileRefs = sqliteTable(
+  "sdk_file_refs",
+  {
+    tableId: text("table_id").notNull(),
+    recordId: text("record_id").notNull(),
+    fileId: text("file_id")
+      .notNull()
+      .references(() => files.fileId),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tableId, table.recordId, table.fileId] }),
+    index("sdk_file_refs_file").on(table.fileId),
+  ]
+);

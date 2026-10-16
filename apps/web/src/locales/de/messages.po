@@ -907,6 +907,10 @@ msgstr "Eine Datenmigration hat die Datensätze dieser Domäne nach dieser Versi
 msgid "A decision was put to people, or answered"
 msgstr "Eine Entscheidung wurde Personen vorgelegt oder beantwortet"
 
+#: src/screens/screen-files.ts
+msgid "A file is downloaded only when you ask for it, with a click."
+msgstr "Eine Datei wird nur heruntergeladen, wenn Sie mit einem Klick darum bitten."
+
 #: src/activity/audit-words.ts
 msgid "A guest chat changed"
 msgstr "Ein Gast-Chat hat sich geändert"
@@ -942,6 +946,10 @@ msgstr "Eine neue Vorlage"
 #: src/screens/screen-frame.tsx
 msgid "A new version of this domain is available."
 msgstr "Eine neue Version dieser Domäne ist verfügbar."
+
+#: src/screens/screen-files.ts
+msgid "A preview keeps no files."
+msgstr "Eine Vorschau behält keine Dateien."
 
 #: src/engines/store-change-errors.ts
 msgid "A retry of this change already started, so it wasn't abandoned. The page shows where it stands now."
@@ -5815,6 +5823,10 @@ msgstr "Diese Datei ist zu groß für ein Transkript."
 msgid "That is too short to be a conversation."
 msgstr "Das ist zu kurz für ein Gespräch."
 
+#: src/screens/screen-files.ts
+msgid "That isn't a file call."
+msgstr "Das ist kein Dateiaufruf."
+
 #: src/onboarding/kickoff-errors.ts
 msgid "That isn't something the kickoff takes."
 msgstr "Das nimmt das Kickoff nicht an."
@@ -6160,6 +6172,10 @@ msgstr "Die Plattform ist für alle im Unternehmen offen: Sie wurde für das Onb
 msgid "The report as it stands today"
 msgstr "Der Bericht, wie er heute steht"
 
+#: src/screens/screen-files.ts
+msgid "The request failed."
+msgstr "Die Anfrage ist fehlgeschlagen."
+
 #: src/onboarding/staff-words.ts
 msgid "The risk assessment isn't done"
 msgstr "Die Risikobewertung ist nicht erledigt"
@@ -6198,6 +6214,10 @@ msgstr "Die genutzten Tools"
 #: src/routes/_shell.onboarding.kickoff.tsx
 msgid "The transcript"
 msgstr "Das Transkript"
+
+#: src/screens/screen-files.ts
+msgid "The upload was cancelled."
+msgstr "Der Upload wurde abgebrochen."
 
 #: src/brain/brain.ts
 msgid "The vision conversation, the interviews with stakeholders and employees by voice or chat, and chats with a Grasp agent. Adds how each team works, in their own words."
@@ -6462,6 +6482,10 @@ msgstr "Heute"
 #: src/routes/_shell.settings.models.tsx
 msgid "Today ({day}, UTC)"
 msgstr "Heute ({day}, UTC)"
+
+#: src/screens/screen-files.ts
+msgid "Too many files are moving at once. Try again shortly."
+msgstr "Zu viele Dateien werden gerade übertragen. Versuchen Sie es gleich noch einmal."
 
 #: src/activity/audit-words.ts
 msgid "Took back a guest's link"

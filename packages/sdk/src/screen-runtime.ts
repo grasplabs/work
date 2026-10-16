@@ -24,6 +24,7 @@ import { createRoot } from "react-dom/client";
 import { clientInternals, GraspClient } from "./client-core.ts";
 import type { ClientTransport } from "./client-core.ts";
 import { GraspError } from "./client-error.ts";
+import { portFileTransport } from "./file-port.ts";
 import type { DraftPersistence } from "./form-drafts.ts";
 import { GraspProvider } from "./react.ts";
 
@@ -566,13 +567,15 @@ const isScreenModule = (value: unknown): value is { default: ComponentType } =>
 
 /**
  * Runs the screen whose module is `screen` (a name in the frame's import
- * map), connected to the page through `port`, and tells the page once it
- * has rendered for the first time, as the `start` the page named.
+ * map), connected to the page through `port`, its files through
+ * `filePort` (file-port.ts), and tells the page once it has rendered for
+ * the first time, as the `start` the page named.
  */
 export const runScreen = async (
   port: MessagePort,
   screen: string,
-  start: ScreenStart
+  start: ScreenStart,
+  filePort: MessagePort
 ): Promise<void> => {
   const page = connectBridge(port);
   reportProblems();
@@ -592,6 +595,7 @@ export const runScreen = async (
     const client = new GraspClient({
       ...bridgeTransport(bridge),
       drafts: await pageDrafts(page),
+      files: portFileTransport(filePort),
     });
     createRoot(root, {
       onUncaughtError: (error) => {

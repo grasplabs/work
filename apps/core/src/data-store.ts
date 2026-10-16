@@ -1,5 +1,7 @@
+import type { UploadState } from "@grasp-os/shared/app-files";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { StoreId } from "@grasp-os/shared/ids";
+import { errorFields, log } from "@grasp-os/shared/log";
 import type { ReadScope } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-reads";
 import type {
@@ -15,6 +17,12 @@ import { DurableObject } from "cloudflare:workers";
 
 import migrations from "./db/data-store/migrations/migrations.js";
 import { migrateOnWake } from "./db/migrate.ts";
+import type {
+  ChunkRecord,
+  FileContent,
+  FileReader,
+  Publishable,
+} from "./file-host.ts";
 import type { StoreDeletionMark } from "./store-deletion.ts";
 import { StoreHost } from "./store-host.ts";
 import type {
@@ -223,6 +231,180 @@ export class DataStore extends DurableObject<Env> {
    */
   async claim(input: ClaimInput): Promise<string> {
     return JSON.stringify(await this.#live().claim(input));
+  }
+
+  /**
+   * After a file's change that may have recorded audit events: the alarm
+   * set for what is due, and the events handed to core now, as far as
+   * they go (the alarm hands over whatever this doesn't).
+   */
+  async #afterFiles(): Promise<void> {
+    const host = this.#live();
+    await host.schedule();
+    try {
+      await host.files.flushEvents();
+    } catch (error) {
+      log.warn("app_file.events_deferred", errorFields(error));
+    }
+  }
+
+  /** `FileHost.begin`; the upload's expiry gets the alarm. */
+  async beginUpload(
+    storeId: StoreId,
+    principal: string,
+    resource: string,
+    input: unknown
+  ): Promise<UploadState> {
+    const host = this.#live();
+    const state = host.files.begin(storeId, principal, resource, input);
+    await host.schedule();
+    return state;
+  }
+
+  /** `FileHost.status`. */
+  uploadStatus(
+    storeId: StoreId,
+    principal: string,
+    resource: string,
+    fileId: string
+  ): UploadState {
+    return this.#live().files.status(storeId, principal, resource, fileId);
+  }
+
+  /** `FileHost.admitChunk`; its write's cleanup gets the alarm. */
+  async admitChunk(
+    storeId: StoreId,
+    principal: string,
+    resource: string,
+    fileId: string,
+    index: number,
+    size: number,
+    sha256?: string
+  ): Promise<string | null> {
+    const host = this.#live();
+    const key = host.files.admitChunk(
+      storeId,
+      principal,
+      resource,
+      fileId,
+      index,
+      size,
+      sha256
+    );
+    await host.schedule();
+    return key;
+  }
+
+  /**
+   * `FileHost.chunkStored`: `ended` for a discarded fixture store too,
+   * so its writer removes what it wrote.
+   */
+  chunkStored(
+    storeId: StoreId,
+    principal: string,
+    fileId: string,
+    index: number,
+    size: number,
+    sha256: string,
+    key: string
+  ): ChunkRecord {
+    if (this.#discarded()) {
+      return "ended";
+    }
+    return this.#host.files.chunkStored(
+      storeId,
+      principal,
+      fileId,
+      index,
+      size,
+      sha256,
+      key
+    );
+  }
+
+  /** `FileHost.chunkKey`: none for a discarded fixture store. */
+  chunkKey(
+    storeId: StoreId,
+    principal: string,
+    fileId: string,
+    index: number
+  ): string | null {
+    if (this.#discarded()) {
+      return null;
+    }
+    return this.#host.files.chunkKey(storeId, principal, fileId, index);
+  }
+
+  /** `FileHost.publishable`. */
+  publishable(
+    storeId: StoreId,
+    principal: string,
+    resource: string,
+    fileId: string
+  ): Publishable | UploadState {
+    return this.#live().files.publishable(storeId, principal, resource, fileId);
+  }
+
+  /** `FileHost.publish`; its audit event, and orphan expiry, after. */
+  async publish(
+    storeId: StoreId,
+    principal: string,
+    resource: string,
+    fileId: string,
+    verified: boolean
+  ): Promise<UploadState> {
+    const host = this.#live();
+    try {
+      return host.files.publish(storeId, principal, resource, fileId, verified);
+    } finally {
+      await this.#afterFiles();
+    }
+  }
+
+  /** `FileHost.cancel`; the cancelled upload's purge gets the alarm. */
+  async cancelUpload(
+    storeId: StoreId,
+    principal: string,
+    resource: string,
+    fileId: string
+  ): Promise<UploadState> {
+    const host = this.#live();
+    const state = host.files.cancel(storeId, principal, resource, fileId);
+    await host.schedule();
+    return state;
+  }
+
+  /** `FileHost.content`. */
+  async fileContent(
+    storeId: StoreId,
+    reader: FileReader,
+    resource: string,
+    fileId: string
+  ): Promise<FileContent> {
+    return await this.#live().files.content(storeId, reader, resource, fileId);
+  }
+
+  /** `FileHost.usable`. */
+  async filesUsable(
+    storeId: StoreId,
+    reader: FileReader,
+    fileIds: string[],
+    resources: string[]
+  ): Promise<void> {
+    await this.#live().files.usable(storeId, reader, fileIds, resources);
+  }
+
+  /** `FileHost.delete`; its audit event, and the purge, after. */
+  async deleteFile(
+    storeId: StoreId,
+    principal: string,
+    resource: string,
+    fileId: string,
+    key?: string
+  ): Promise<void> {
+    const host = this.#live();
+    host.files.delete(storeId, principal, resource, fileId, key);
+    await this.#afterFiles();
   }
 
   /** `StoreHost.close`. */

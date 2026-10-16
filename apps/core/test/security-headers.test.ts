@@ -158,7 +158,7 @@ describe("security headers on the screen frame", () => {
       "default-src": ["'none'"],
       "script-src": ["'none'"],
       "style-src": ["data:", "'unsafe-inline'"],
-      "img-src": ["data:"],
+      "img-src": ["data:", "blob:"],
       "font-src": ["data:"],
       "connect-src": ["'none'"],
       "worker-src": ["'none'"],

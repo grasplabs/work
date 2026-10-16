@@ -13,6 +13,7 @@ import {
 import type { AppManifest, OperationManifest } from "@grasp-os/sdk/host";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
 import type { RunHandle } from "@grasp-os/sdk/server";
+import { fileErrors } from "@grasp-os/shared/app-files";
 import { appCallLimits } from "@grasp-os/shared/apps";
 import { deadline as timeLimit, whenAborted } from "@grasp-os/shared/deadline";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -82,6 +83,7 @@ import type { OpenChannel } from "./operation-channel.ts";
 import { sandboxVerdictOf } from "./sandbox-session.ts";
 import { SandboxUnavailableError } from "./sandboxed.ts";
 import { readConsistently, StoreReader } from "./store-reader.ts";
+import { valueFiles } from "./store-references.ts";
 
 // Core's operation host (spec 7.4, 7.5, 9.2, 9.5, 32.1): runs one of an
 // App's server functions for one caller, through the trusted host, and
@@ -1986,6 +1988,12 @@ interface Run {
   readonly onEffect?: () => void;
   /** Where its progress goes: only for the streaming action the caller named. */
   readonly progress?: ProgressSink;
+  /**
+   * Checks the files the caller passed the function they named
+   * (`admitFiles`): a mutation calls it once its receipt says it hasn't
+   * run yet, never for a nested call (whose arguments are App code's).
+   */
+  readonly filesAdmitted?: () => Promise<void>;
 }
 
 /** The most resource requests one call may make, at any depth. */
@@ -2593,6 +2601,17 @@ const runQuery = async (
   );
 };
 
+/** The aliases of the App's files resources that declare `use`. */
+const resourcesDeclaring = (
+  manifest: AppManifest,
+  use: "attach" | "read"
+): string[] =>
+  Object.values(manifest.browserResources).flatMap((resource) =>
+    resource["~resource"] === "files" && resource.operations.includes(use)
+      ? [resource.alias]
+      : []
+  );
+
 /**
  * Runs a mutation under its receipt (`key`): claimed first (a submission
  * that committed already answers its outcome), run, its return checked,
@@ -2629,6 +2648,9 @@ const runMutation = async (
   );
   if ("outcome" in claimed) {
     return claimed.outcome.result;
+  }
+  if (run.depth === 0) {
+    await run.filesAdmitted?.();
   }
   for (let attempt = 0; attempt <= queryMaxReruns; attempt += 1) {
     // oxlint-disable-next-line no-await-in-loop -- one run after the other
@@ -2766,6 +2788,7 @@ const runMutation = async (
             ...(invocation.writer === undefined
               ? {}
               : { writer: { ...invocation.writer } }),
+            attachable: resourcesDeclaring(run.app.manifest, "attach"),
           })
       );
       return committed.result;
@@ -2975,6 +2998,47 @@ const invocationDeadline = (asked: number): number => {
 };
 
 /**
+ * Checks the files a caller passes a public function (spec 32.5): each
+ * one the caller may use now, through its own resource, which must
+ * declare the use (`attach` for a mutation, `read` otherwise): published,
+ * and theirs while nothing holds it or held by a record they may read.
+ * `file.operation_denied` when no resource declares the use at all,
+ * `file.not_found` otherwise, the same however it isn't usable. Before
+ * the function runs, so a handler that returns early (an attachment that
+ * is there already) can't acknowledge a file its caller can't use. What
+ * a commit then writes is checked again in its transaction (file-host.ts).
+ */
+const admitFiles = async (
+  app: HostedApp,
+  compiled: Compiled,
+  invocation: Invocation,
+  operation: OperationManifest,
+  args: Json
+): Promise<void> => {
+  const held = valueFiles(operation.args, args);
+  if (held.size === 0) {
+    return;
+  }
+  const resources = resourcesDeclaring(
+    app.manifest,
+    operation.kind === "mutation" ? "attach" : "read"
+  );
+  if (resources.length === 0) {
+    throw fileErrors.create("file.operation_denied");
+  }
+  const roles = await admit(invocation);
+  await invocation.store.filesUsable(
+    {
+      principal: invocation.principal,
+      roles,
+      schemaHash: await compiled.hash,
+    },
+    [...held],
+    resources
+  );
+};
+
+/**
  * Calls the public function `reference` names of `app` for `invocation`,
  * with `args`: what it returned, or why it failed, as its caller may see
  * it (see the header). Never throws.
@@ -3017,6 +3081,17 @@ export const callOperation = async (
     if (cancelled?.aborted === true) {
       throw hostError(operationErrors.create("operation.cancelled"));
     }
+    const filesAdmitted = async (): Promise<void> => {
+      await trusted(async () => {
+        await admitFiles(app, compiled, invocation, operation, admitted);
+      });
+    };
+    // A mutation's files are checked once its receipt says it hasn't run
+    // yet (`runMutation`): a submission that committed answers its outcome
+    // whatever the caller may use now. Anything else, before it runs.
+    if (operation.kind !== "mutation") {
+      await filesAdmitted();
+    }
     const value = await execute(
       {
         app,
@@ -3030,6 +3105,7 @@ export const callOperation = async (
         ...(options.onEffect === undefined
           ? {}
           : { onEffect: options.onEffect }),
+        filesAdmitted,
       },
       operation,
       admitted,
