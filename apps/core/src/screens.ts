@@ -190,7 +190,7 @@ const compiled = async (
         {
           rule: "compile",
           severity: "error",
-          message: `The compiler was stopped before it finished: ${error.message} Simplify the App's types (a type that recurses without end holds the type checker).`,
+          message: `The compiler was stopped before it finished: ${error.message} Simplify the ${kind === "compute" ? "modules'" : "App's"} types (a type that recurses without end holds the type checker).`,
         },
       ],
     };
