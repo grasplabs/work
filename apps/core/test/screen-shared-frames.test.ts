@@ -291,6 +291,11 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
     const toOther = follower();
     await notesFrame.watchQuery(request, toNotes.callback);
     await otherFrame.watchQuery(request, toOther.callback);
+    // Both first reads in before anything changes, so what each is pushed
+    // is known exactly.
+    await vi.waitFor(() => {
+      expect([toNotes.titles, toOther.titles]).toStrictEqual([[[]], [[]]]);
+    }, pushWait);
     const client = callingClient({ app, lease: other.lease }, builder);
     await client.mutation(api.create, { title: "Before" });
     // Both frames are pushed the App's change while both are approved.

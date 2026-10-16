@@ -51,22 +51,29 @@ const idp = mockIdp();
 
 const secret = "Acme owes 4,200";
 
-/**
- * How long the App's slow actions wait between what they read and what
- * they answer: room for the test to take an approval back meanwhile.
- */
-const pauseMs = 4000;
-
 // The App, in spec 8's layout and sealed as each version becomes current:
 // its notes stand for a client's data. Its actions mark each step they
 // take in the store, so the test sees how far one got: what it read, and
-// whether it answered.
+// whether it answered. One that is held waits after its read until the
+// test lets it go (`<step>: release`, marked once the test has done what
+// it does meanwhile), never for a time that a slow runner could outlast.
 const operationsCode = `import { AppError, v } from "@grasp-os/sdk";
 import { action, mutation, query } from "#grasp/server";
 
 const secret = ${JSON.stringify(secret)};
 
 const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
+
+// Waits until \`released\` says so; a test that never lets go fails it.
+const until = async (released: () => Promise<boolean>) => {
+  for (let look = 0; look < 400; look += 1) {
+    if (await released()) {
+      return;
+    }
+    await pause(50);
+  }
+  throw new AppError("notes.never_released", "The test never let this step go.");
+};
 
 export const read = query({
   args: {},
@@ -90,42 +97,56 @@ export const mark = mutation({
   },
 });
 
-// Reads, says so, waits, says it answers, then answers what it read.
+// Whether the test let \`step\` go.
+export const released = query({
+  args: { step: v.string().min(1).max(90) },
+  returns: v.boolean(),
+  handler: async (ctx, args) =>
+    (await ctx.db.query("steps").take(100)).some(({ step }) => step === \`\${args.step}: release\`),
+});
+
+// Reads, says so, waits if held, says it answers, then answers what it read.
 export const slow = action({
-  args: { step: v.string().min(1).max(90), pauseMs: v.number().integer().min(0).max(5000) },
+  args: { step: v.string().min(1).max(90), held: v.boolean() },
   returns: v.array(v.string()),
-  uses: [mark],
+  uses: [mark, released],
   handler: async (ctx, args) => {
     const notes = [secret];
     await ctx.runMutation(mark, { step: \`\${args.step}: read\` });
-    await pause(args.pauseMs);
+    if (args.held) {
+      await until(async () => await ctx.runQuery(released, { step: args.step }));
+    }
     await ctx.runMutation(mark, { step: \`\${args.step}: answered\` });
     return notes;
   },
 });
 
-// Reads, says so, waits, then answers more than a screen takes in one
+// Reads, says so, waits if held, then answers more than a screen takes in one
 // call: the answer is refused as too large, by an error in place of it.
 export const big = action({
-  args: { step: v.string().min(1).max(90), pauseMs: v.number().integer().min(0).max(5000) },
+  args: { step: v.string().min(1).max(90), held: v.boolean() },
   returns: v.string(),
-  uses: [mark],
+  uses: [mark, released],
   handler: async (ctx, args) => {
     await ctx.runMutation(mark, { step: \`\${args.step}: read\` });
-    await pause(args.pauseMs);
+    if (args.held) {
+      await until(async () => await ctx.runQuery(released, { step: args.step }));
+    }
     return secret.padEnd(262_084, ".");
   },
 });
 
-// Reads, says so, waits, then fails with what it read.
+// Reads, says so, waits if held, then fails with what it read.
 export const failing = action({
-  args: { step: v.string().min(1).max(90), pauseMs: v.number().integer().min(0).max(5000) },
+  args: { step: v.string().min(1).max(90), held: v.boolean() },
   returns: v.null(),
-  uses: [mark],
+  uses: [mark, released],
   handler: async (ctx, args) => {
     const note = secret;
     await ctx.runMutation(mark, { step: \`\${args.step}: read\` });
-    await pause(args.pauseMs);
+    if (args.held) {
+      await until(async () => await ctx.runQuery(released, { step: args.step }));
+    }
     throw new AppError("notes.failed", note);
   },
 });
@@ -140,14 +161,14 @@ export default defineSchema({
 `,
   "operations/notes.ts": operationsCode,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { big, failing, live, mark, read, slow } from "./operations/notes.ts";
+import { big, failing, live, mark, read, released, slow } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { steps: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { read, live, mark, slow, failing, big } },
+  operations: { notes: { read, live, mark, released, slow, failing, big } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -371,6 +392,23 @@ const tookStep = async (
     kind: "query",
   });
   return result.ok && JSON.stringify(result.value).includes(step);
+};
+
+/** Lets the App's held action go on past `step`: the test did what it does meanwhile. */
+const letGo = async (
+  person: Person,
+  app: string,
+  step: string
+): Promise<void> => {
+  const marked = await calledAs(
+    await person.api.whoami(),
+    app,
+    { contractId: "notes.mark", kind: "mutation" },
+    { step: `${step}: release` }
+  );
+  if (!marked.ok) {
+    throw new Error(`The App didn't take the release of ${step}`);
+  }
 };
 
 /** The refusals among `events`, as what was refused where. */
@@ -818,6 +856,11 @@ describe("screen trust", { timeout: 60_000 }, () => {
       await requestFor(app, "notes.live", {}),
       live.callback
     );
+    // Its first read in before anything changes, so what it is pushed is
+    // known exactly.
+    await vi.waitFor(() => {
+      expect(live.values).toStrictEqual([[secret]]);
+    }, pushWait);
 
     let answered: string[] = [];
     let cachedBuild = "";
@@ -828,13 +871,15 @@ describe("screen trust", { timeout: 60_000 }, () => {
         called(builder, app, {
           lease: bundle.lease,
           contractId: "notes.slow",
-          input: { step: "slow", pauseMs },
+          input: { step: "slow", held: true },
         })
       );
       await vi.waitFor(() => {
         expect(live.values.at(-1)).toStrictEqual([secret, "slow: read"]);
       }, pushWait);
       await admin.api.screenTrust.revoke(app, bundle.artifact);
+      // Revoked: only now does the App go on past its read.
+      await letGo(builder, app, "slow");
       answered = [
         await slow,
         await outcome(called(builder, app, { lease: bundle.lease })),
@@ -1002,7 +1047,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
       called(builder, app, {
         lease: bundle.lease,
         contractId: "notes.failing",
-        input: { step: "approved", pauseMs: 0 },
+        input: { step: "approved", held: false },
       })
     );
     let revoked: Awaited<ReturnType<typeof failureOf>> | undefined;
@@ -1012,7 +1057,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
         called(builder, app, {
           lease: bundle.lease,
           contractId: "notes.failing",
-          input: { step: "revoked", pauseMs },
+          input: { step: "revoked", held: true },
         })
       );
       await vi.waitFor(async () => {
@@ -1021,6 +1066,8 @@ describe("screen trust", { timeout: 60_000 }, () => {
         ).resolves.toBeTruthy();
       }, pushWait);
       await admin.api.screenTrust.revoke(app, bundle.artifact);
+      // Revoked: only now does the App go on past its read.
+      await letGo(builder, app, "revoked");
       revoked = await failing;
     });
 
@@ -1044,7 +1091,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
       called(builder, app, {
         lease: bundle.lease,
         contractId: "notes.big",
-        input: { step: "big approved", pauseMs: 0 },
+        input: { step: "big approved", held: false },
       })
     );
     let revoked: Awaited<ReturnType<typeof failureOf>> | undefined;
@@ -1055,7 +1102,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
         called(builder, app, {
           lease: bundle.lease,
           contractId: "notes.big",
-          input: { step: "big revoked", pauseMs },
+          input: { step: "big revoked", held: true },
         })
       );
       await vi.waitFor(async () => {
@@ -1064,6 +1111,8 @@ describe("screen trust", { timeout: 60_000 }, () => {
         ).resolves.toBeTruthy();
       }, pushWait);
       await admin.api.screenTrust.revoke(app, bundle.artifact);
+      // Revoked: only now does the App go on past its read.
+      await letGo(builder, app, "big revoked");
       revoked = await answering;
     });
 
@@ -1085,7 +1134,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
       unapproved = await outcome(
         called(builder, app, {
           contractId: "notes.slow",
-          input: { step: "unapproved", pauseMs: 0 },
+          input: { step: "unapproved", held: false },
           key,
         })
       );
@@ -1097,7 +1146,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const approved = await called(builder, app, {
       lease: bundle.lease,
       contractId: "notes.slow",
-      input: { step: "approved", pauseMs: 0 },
+      input: { step: "approved", held: false },
       key: crypto.randomUUID(),
     });
 
@@ -1128,7 +1177,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
       const running = called(builder, app, {
         lease: bundle.lease,
         contractId: "notes.slow",
-        input: { step: "keyed", pauseMs },
+        input: { step: "keyed", held: true },
         key,
       });
       await vi.waitFor(async () => {
@@ -1137,6 +1186,8 @@ describe("screen trust", { timeout: 60_000 }, () => {
         ).resolves.toBeTruthy();
       }, pushWait);
       await admin.api.screenTrust.revoke(app, bundle.artifact);
+      // Revoked: only now does the App go on past its read.
+      await letGo(builder, app, "keyed");
       answered = await running;
     });
 
