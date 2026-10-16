@@ -1077,6 +1077,8 @@ export class FormBinding {
     ) {
       return;
     }
+    // Discarded: no draft of the record is kept, here or in the page.
+    this.#draft?.store.discardFor(this.#draft.key, this.#owner);
     this.#adopt(this.#latest);
   }
 
@@ -1216,10 +1218,13 @@ export class FormBinding {
     });
     // The draft of what is sent, dropped should the save commit after the
     // editor closed and nothing was written of it since (`#succeeded`).
+    // Only this editor's own: a newer editor of the record holding it
+    // keeps a draft this save never sent.
     const sentDraft =
-      this.#draft === undefined
-        ? undefined
-        : this.#draft.store.get(this.#draft.key);
+      this.#draft !== undefined &&
+      this.#draft.store.holds(this.#draft.key, this.#owner)
+        ? this.#draft.store.get(this.#draft.key)
+        : undefined;
     let result: unknown;
     try {
       result = await this.#send(submission);
@@ -1328,7 +1333,7 @@ export class FormBinding {
         // there is nothing to adopt, and no later revision of it, nor any
         // editor to restore a draft into.
         this.#set({ phase: "idle" });
-        this.#draft?.store.dropFor(this.#draft.key, this.#owner);
+        this.#draft?.store.discardFor(this.#draft.key, this.#owner);
         this.#dropSaved(sentDraft);
       } else if (
         committed === undefined ||
@@ -1343,6 +1348,8 @@ export class FormBinding {
         return refused;
       } else {
         this.#set({ phase: "idle" });
+        // Saved: no draft of the record is kept, here or in the page.
+        this.#draft?.store.discardFor(this.#draft.key, this.#owner);
         // A newer record supplied while the save was in flight wins: the
         // form is pristine now, and never goes back a revision.
         this.#adopt(

@@ -341,6 +341,11 @@ export class DraftStore {
     return true;
   }
 
+  /** Whether `owner` holds `key`'s claim: its draft is the one kept. */
+  holds(key: string, owner: object): boolean {
+    return this.#claims.get(key) === owner;
+  }
+
   /** `owner` lets go of `key`, if it holds it still. */
   release(key: string, owner: object): void {
     if (this.#claims.get(key) === owner) {
@@ -359,6 +364,20 @@ export class DraftStore {
   dropFor(key: string, owner: object): void {
     if (this.#claims.get(key) === owner) {
       this.drop(key);
+    }
+  }
+
+  /**
+   * Drops the draft `key` for `owner`, only while it holds the key's
+   * claim, and has it dropped where it is kept whether or not this frame
+   * holds it: the person saved or reloaded the record, so a draft of it
+   * the page kept and never handed over (its answer came too late) goes
+   * too. Only for those steps, never as values change: each writes.
+   */
+  discardFor(key: string, owner: object): void {
+    if (this.#claims.get(key) === owner) {
+      this.#drafts.delete(key);
+      this.#write(key);
     }
   }
 

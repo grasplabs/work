@@ -720,6 +720,31 @@ describe("a draft and the editor that owns it", () => {
     });
   });
 
+  it("is never dropped by an older editor's save that commits once both closed, the newer editor's edits kept", async () => {
+    const store = new DraftStore();
+    const answer = Promise.withResolvers<null>();
+    const save = saves();
+    const older = editor(note(3), store, async (input) => {
+      await answer.promise;
+      return await save.send(input);
+    });
+    older.type("title", "Older");
+    // A newer editor of the note opens beside it and is edited.
+    const newer = editor(note(3), store, saves().send);
+    newer.type("title", "Newer");
+    const saving = settle(older.binding.submit());
+    older.binding.setMounted(false);
+    newer.binding.setMounted(false);
+
+    answer.resolve(null);
+    await saving;
+
+    expect(store.get(slotOf(store).key)?.values).toStrictEqual({
+      title: "Newer",
+      body: "Body",
+    });
+  });
+
   it("is gone once a closed editor's save of it commits, and the note opens as saved", async () => {
     const store = new DraftStore();
     const answer = Promise.withResolvers<null>();
@@ -1067,6 +1092,41 @@ describe("the drafts a frame starts with", () => {
       vi.useRealTimers();
     }
   });
+
+  it.each(["saved", "reloaded"] as const)(
+    "drops what the page kept of a record %s unedited before its late answer",
+    async (step) => {
+      vi.useFakeTimers();
+      try {
+        const late = Promise.withResolvers<Record<string, string>>();
+        const written: [string, string | null][] = [];
+        const persistence = pageDrafts({
+          drafts: async () => await late.promise,
+          saveDraft: async (key: string, text: string | null) => {
+            written.push([key, text]);
+            await Promise.resolve();
+          },
+          clearDrafts: async () => {
+            await Promise.resolve();
+          },
+        });
+        await vi.advanceTimersByTimeAsync(draftLookupMs);
+        const store = new DraftStore(await persistence);
+        const { key } = slotOf(store);
+        const opened = editor(note(3), store, saves().send);
+        if (step === "saved") {
+          await opened.binding.submit();
+        } else {
+          opened.binding.reload();
+        }
+        late.resolve({ [key]: "kept from before" });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(written).toStrictEqual([[key, null]]);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it("starts, and asks again, past a page whose lookup throws at once", async () => {
     vi.useFakeTimers();
