@@ -736,23 +736,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if (!result.ok && (await this.#settledWindow(evaluation, result))) {
       return;
     }
-    // Writes landed while it read, each run of it (store-reader.ts): one
-    // writer's writes one after another do that as surely as concurrent
-    // ones. Its watch, if any, and what it pushed stay; it is read again
-    // once a longer window has passed (`#changed`), and let go of only
-    // once `maxTornReads` reads in a row were torn.
-    if (
-      !result.ok &&
-      result.error.code === "query.concurrent_change" &&
-      evaluation.torn + 1 < maxTornReads
-    ) {
-      evaluation.torn += 1;
-      evaluation.dirty = true;
+    if (QuerySubscriptions.#tornAgain(evaluation, result)) {
       return;
     }
-    // A read writes didn't tear (or tore once too often, and is let go
-    // of): the next torn read is the first in a row again.
-    evaluation.torn = 0;
     // A failure the host would answer differently later (the sandbox
     // busy or away, writes that kept tearing it) is not pushed as though
     // it were final, nor watched: what it read, if anything, isn't what an
@@ -788,6 +774,30 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // budget can refill enough for all of it.
     evaluation.budgetWaitMs = 0;
     this.#publish(evaluation, result, before.roles);
+  }
+
+  /**
+   * Whether `evaluation` is read again for a read writes tore. Writes
+   * landed while it read, each run of it (store-reader.ts): one writer's
+   * writes one after another do that as surely as concurrent ones. Its
+   * watch, if any, and what it pushed stay; it is read again once a
+   * longer window has passed (`#changed`), and let go of only once
+   * `maxTornReads` reads in a row were torn. A read writes didn't tear
+   * (or tore once too often, and is let go of) makes the next torn read
+   * the first in a row again.
+   */
+  static #tornAgain(evaluation: Evaluation, result: Result): boolean {
+    if (
+      !result.ok &&
+      result.error.code === "query.concurrent_change" &&
+      evaluation.torn + 1 < maxTornReads
+    ) {
+      evaluation.torn += 1;
+      evaluation.dirty = true;
+      return true;
+    }
+    evaluation.torn = 0;
+    return false;
   }
 
   /**
