@@ -260,10 +260,14 @@ export class PortableLive {
     try {
       await link.queries.renew(next.text);
       this.#renewWhenDue(link, next);
-    } catch {
+    } catch (error) {
       // Refused: the old token goes on until its `exp`, when core closes
       // the connection and the queries follow again with a fresh one;
-      // tried again shortly meanwhile.
+      // tried again shortly meanwhile. A token core refused isn't sent
+      // again: the next try asks the host for another.
+      if (coded(error, "auth.unauthenticated")) {
+        this.#tokens.forget();
+      }
       this.#renewIn(link, renewAgainMs);
     }
   }

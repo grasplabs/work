@@ -81,6 +81,9 @@ const resultOf = async (value: unknown): Promise<unknown> => {
     : undefined;
 };
 
+/** The tokens core refuses a renewal with (`auth.unauthenticated`). */
+const renewRefusals = new Set<string>();
+
 /** How core refuses the next connections' `connect`, one code each. */
 const connectRefusals: string[] = [];
 
@@ -141,6 +144,11 @@ class LiveQueries extends RpcTarget {
   }
 
   renew(token: string): { expiresAt: number } {
+    if (renewRefusals.has(token)) {
+      throw Object.assign(new Error("auth.unauthenticated"), {
+        code: "auth.unauthenticated",
+      });
+    }
     this.#seen.push({
       url: this.#url,
       authorization: `Bearer ${token}`,
@@ -263,6 +271,7 @@ const network = (answer: (seen: Seen) => Promise<unknown>) => {
   const seen: Seen[] = [];
   liveSockets.length = 0;
   connectRefusals.length = 0;
+  renewRefusals.clear();
   vi.stubGlobal("WebSocket", fakeWebSocket(answer, seen));
   vi.stubGlobal(
     "fetch",
@@ -1057,6 +1066,46 @@ describe("a portable host's client", () => {
       followed: await following,
       sockets: liveSockets.length,
     }).toStrictEqual({ followed: "refused", sockets: 0 });
+  });
+
+  it("asks the host for another token once core refuses a renewal's, keeping the connection", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const first = tokenOf("ann", expiry());
+    // The host's next token, kept by the client for a while, which core
+    // refuses (its session ended); then one that works.
+    const refused = tokenOf("ann", expiry() + 60);
+    const working = tokenOf("ann", expiry() + 120);
+    const tokens = [first, refused, working];
+    let asked = 0;
+    const seen = network(async () => await Promise.resolve({ title: "Ann's" }));
+    renewRefusals.add(refused);
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        const token = tokens[Math.min(asked, tokens.length - 1)] ?? null;
+        asked += 1;
+        return await Promise.resolve(token);
+      },
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    // The renewal ten seconds on is refused; the next, five on, asks the
+    // host again rather than sending the refused token.
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect({
+      shown: entry.snapshot.value,
+      renewed: seen
+        .filter(({ body }) => body === "renew")
+        .map(({ authorization }) => authorization),
+      sockets: liveSockets.length,
+    }).toStrictEqual({
+      shown: { title: "Ann's" },
+      renewed: [`Bearer ${working}`],
+      sockets: 1,
+    });
+    stop();
   });
 
   it("gives up on a host that never answers for a token, and never keeps its late answer", async () => {
