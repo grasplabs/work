@@ -84,7 +84,7 @@ import type { EngineStatus } from "./runs.ts";
 //
 // - A run with other authority than its start's. Its version, manifest,
 //   build and principal are its row's, written with its receipt and
-//   pinned by the database (migration 0088); its parameters and input are
+//   pinned by the database (migration 0089); its parameters and input are
 //   the receipt's, frozen as the start was admitted. A parameter edit,
 //   a new version or a changed grant after the start changes nothing it
 //   runs; the engine's pin names the same manifest, and every activation
