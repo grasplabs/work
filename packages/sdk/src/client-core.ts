@@ -18,6 +18,7 @@ import {
   nothingRanCodes,
   hidesOutcome,
   readAnswer,
+  retryAfterOf,
   refusedBeforeCallCodes,
   readRejection,
   settlesSubmission,
@@ -206,21 +207,6 @@ export interface ClientTransport {
    */
   drafts?: DraftPersistence;
 }
-
-/**
- * Calls the client refused before sending them, because what they were
- * bound to changed (`Bound`), by the error thrown: each settles as its
- * refusal, and never fences on its own, since the change that made it
- * stale fenced already.
- */
-const unsentCalls = new WeakMap<object, GraspError>();
-
-/** An error for a call refused unsent as `refusal` (`unsentCalls`). */
-const unsent = (refusal: GraspError): Error => {
-  const error = new Error(refusal.message);
-  unsentCalls.set(error, refusal);
-  return error;
-};
 
 /**
  * What a call through a portable host's transport is bound to: the fence
@@ -518,9 +504,7 @@ const waitAfter = (settled: Settled, attempt: number): number => {
   ) {
     return backoff;
   }
-  const { details } = settled.error;
-  const hinted = isPlainObject(details) ? details.retryAfterMs : undefined;
-  const said = typeof hinted === "number" ? hinted : rateLimitedWaitMs;
+  const said = retryAfterOf(settled.error.details) ?? rateLimitedWaitMs;
   // As long as the budget takes to give one back, and a little more, so
   // calls refused together don't all ask again at the same moment.
   return said + Math.random() * said;
@@ -1330,6 +1314,83 @@ const openedUnlessAborted = async (
 };
 
 /**
+ * How the client reaches the host, whichever way: one call of the App
+ * `app`, settled (`Settled`), never thrown. A call bound to what moved on
+ * (`Bound`: a fence since it began, someone else signed in) is refused
+ * before it is sent, as what it was bound to was refused; it never fences
+ * on its own, since the change that made it stale fenced already (its
+ * generation is no longer current, `#call`).
+ */
+interface Connection {
+  readonly call: (
+    request: string,
+    app: string,
+    bound: Bound
+  ) => Promise<Settled>;
+}
+
+/** Why a call bound to `bound` is refused unsent, if it is. */
+type StaleRefusal = (bound: Bound) => GraspError | undefined;
+
+/** The frame's connection: its transport's answers and rejections, read. */
+const frameConnection = (
+  transport: ClientTransport,
+  stale: StaleRefusal
+): Connection => ({
+  call: async (request, app, bound) => {
+    // Fenced since the call began (a retry of a lost answer among them):
+    // refused unsent, as the fence was.
+    const refused = stale(bound);
+    if (refused !== undefined) {
+      return { kind: "failed", error: refused };
+    }
+    try {
+      return readAnswer(await transport.call(request, app));
+    } catch (error) {
+      return readRejection(error);
+    }
+  },
+});
+
+/**
+ * A portable host's connection: the person's token is asked for first,
+ * through the client (`token`), which clears all it holds when it is
+ * someone else's than the last call's (`#switchPrincipal`), before
+ * anything is sent with it; a call bound to the person before is then
+ * refused unsent.
+ */
+const portableConnection = (
+  portable: PortableTransport,
+  {
+    stale,
+    token: tokenOf,
+  }: { stale: StaleRefusal; token: () => Promise<PortableToken> }
+): Connection => ({
+  call: async (request, app, bound) => {
+    const before = stale(bound);
+    if (before !== undefined) {
+      return { kind: "failed", error: before };
+    }
+    let token: PortableToken;
+    try {
+      token = await tokenOf();
+    } catch (error) {
+      return readRejection(error);
+    }
+    if (bound.principal !== undefined && bound.principal !== token.principal) {
+      return { kind: "failed", error: clientError("auth.principal_changed") };
+    }
+    // Asking for the token may itself have found someone else signed in.
+    const after = stale(bound);
+    if (after !== undefined) {
+      return { kind: "failed", error: after };
+    }
+    bound.principal = token.principal;
+    return await portable.send(request, app, token.text);
+  },
+});
+
+/**
  * The session client: queries, mutations and actions of the App, for the
  * person using it. One per App session, made and mounted by the
  * platform; App code gets it from `useClient()`.
@@ -1337,6 +1398,8 @@ const openedUnlessAborted = async (
 export class GraspClient {
   readonly #transport: ClientTransport | undefined;
   readonly #portable: PortableTransport | undefined;
+  /** How each call reaches the host, settled (`Connection`). */
+  readonly #connection: Connection;
   /** A portable host's live connections (client-live.ts). */
   readonly #live: PortableLive | undefined;
   /** Whose token a portable host's latest call was sent with. */
@@ -1381,11 +1444,18 @@ export class GraspClient {
       this.#drafts = new DraftStore(connection.drafts);
       this.#portable = undefined;
       this.#live = undefined;
+      this.#connection = frameConnection(connection, (bound) =>
+        this.#staleRefusal(bound)
+      );
     } else if ("url" in connection) {
       const portable = new PortableTransport(connection);
       this.#transport = undefined;
       this.#portable = portable;
       this.#drafts = new DraftStore();
+      this.#connection = portableConnection(portable, {
+        stale: (bound) => this.#staleRefusal(bound),
+        token: async () => await this.#portableToken(),
+      });
       this.#live = new PortableLive(portable.origin, {
         token: async () => await this.#portableToken(),
         forget: () => {
@@ -2668,21 +2738,11 @@ export class GraspClient {
    * the build fences every cache before its caller hears of it.
    */
   async #call(request: string, app: string, bound: Bound): Promise<Settled> {
-    let settled: Settled;
-    try {
-      settled = readAnswer(await this.#through(request, app, bound));
-    } catch (error) {
-      const refusal =
-        typeof error === "object" && error !== null
-          ? unsentCalls.get(error)
-          : undefined;
-      if (refusal !== undefined) {
-        return { kind: "failed", error: refusal };
-      }
-      settled = readRejection(error);
-    }
+    const settled = await this.#connection.call(request, app, bound);
     // A refusal of a request sent before the latest fence is of who or
     // what that fence already cleared: it doesn't fence whoever came after.
+    // So is a call the connection refused unsent (`Connection`), since
+    // what it was bound to moved on with a fence.
     const current =
       bound.generation === undefined || bound.generation === this.#generation;
     const fencing =
@@ -2691,30 +2751,6 @@ export class GraspClient {
       this.#fence(fencing);
     }
     return settled;
-  }
-
-  /**
-   * Sends `request` through the transport. A portable host's token is
-   * asked for first: when it is someone else's than the last call's, all
-   * the client holds is cleared before anything is sent with it
-   * (`#switchPrincipal`), and a call bound to before is refused unsent.
-   */
-  async #through(request: string, app: string, bound: Bound): Promise<unknown> {
-    // Fenced since the call began (a retry of a lost answer among them):
-    // refused unsent, as the fence was, whichever way the host is reached.
-    this.#refuseIfFenced(bound);
-    const portable = this.#portable;
-    if (portable === undefined) {
-      return await this.#transport?.call(request, app);
-    }
-    const token = await this.#portableToken();
-    if (bound.principal !== undefined && bound.principal !== token.principal) {
-      throw unsent(clientError("auth.principal_changed"));
-    }
-    // Asking for the token may itself have found someone else signed in.
-    this.#refuseIfFenced(bound);
-    bound.principal = token.principal;
-    return await portable.send(request, app, token.text);
   }
 
   /**
@@ -2735,14 +2771,15 @@ export class GraspClient {
     return token;
   }
 
-  /** Refuses, unsent, a call bound to a generation before the latest fence. */
-  #refuseIfFenced(bound: Bound): void {
-    if (
-      bound.generation !== undefined &&
+  /**
+   * The refusal of a call bound to a generation before the latest fence
+   * (what that fence was for), or `undefined` for a current one.
+   */
+  #staleRefusal(bound: Bound): GraspError | undefined {
+    return bound.generation !== undefined &&
       bound.generation !== this.#generation
-    ) {
-      throw unsent(this.#fencedBy ?? clientError("auth.principal_changed"));
-    }
+      ? (this.#fencedBy ?? clientError("auth.principal_changed"))
+      : undefined;
   }
 
   /**
