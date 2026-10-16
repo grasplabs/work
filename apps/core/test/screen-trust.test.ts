@@ -1,12 +1,22 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { errorPayloadSchema } from "@grasp-os/shared/errors";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Role } from "@grasp-os/shared/roles";
 import { builtArtifacts } from "@grasp-os/shared/screen-trust";
-import { screenLimits } from "@grasp-os/shared/screens";
+import {
+  appFunctionPath,
+  screenLeaseHeader,
+  screenLimits,
+  screenPersonHeader,
+} from "@grasp-os/shared/screens";
 import type { ScreenBundle } from "@grasp-os/shared/screens";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
+import { z } from "zod";
 
+import { loadRelease } from "../src/app-releases.ts";
+import { findApp } from "../src/apps.ts";
 import {
   approveScreens,
   classifyOutput,
@@ -14,10 +24,13 @@ import {
 } from "../src/screen-trust-rpc.ts";
 import { mockIdp } from "./idp.ts";
 import { appModulesOf, kitModulesOf, loadFrame } from "./screen-frames.ts";
+import { calledAs } from "./sealed-apps.ts";
+import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
   openRpc,
   outcome,
+  routed,
   signedIn,
   signedInApi,
   staffPerson,
@@ -28,71 +41,138 @@ import {
 // names another build's hash, borrows someone else's lease, or keeps
 // asking after its approval was taken back. And from the side of whoever
 // would approve without the right to, or approve something other than
-// what they were shown. The sample App runs for real, and what it holds
-// stands for a client's data.
+// what they were shown. The sample App runs for real, sealed as each
+// version becomes current, and what it holds stands for a client's data.
+// A screen calls its functions through core's function route under its
+// frame's lease (app-function-route.ts) and follows them live over its
+// connection (`watchQuery`), as the page relays both.
 
 const idp = mockIdp();
 
 const secret = "Acme owes 4,200";
 
-const serverCode = `import { DurableObject } from "cloudflare:workers";
+/**
+ * How long the App's slow actions wait between what they read and what
+ * they answer: room for the test to take an approval back meanwhile.
+ */
+const pauseMs = 4000;
 
-type Caller = { userId: string };
-type Watcher = ((notes: string[]) => Promise<void>) & Disposable & { dup(): Watcher };
+// The App, in spec 8's layout and sealed as each version becomes current:
+// its notes stand for a client's data. Its actions mark each step they
+// take in the store, so the test sees how far one got: what it read, and
+// whether it answered.
+const operationsCode = `import { AppError, v } from "@grasp-os/sdk";
+import { action, mutation, query } from "#grasp/server";
 
-export class App extends DurableObject {
-  #watchers = new Set<Watcher>();
-  #refusedPushes = 0;
+const secret = ${JSON.stringify(secret)};
 
-  notes(): string[] {
-    return [${JSON.stringify(secret)}];
-  }
+const pause = async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms));
 
-  watchNotes(_caller: Caller, onChange: Watcher): void {
-    this.#watchers.add(onChange.dup());
-  }
+export const read = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async () => [secret],
+});
 
-  // Reads, tells the screen it has, pushes to whoever watches, answers.
-  async slowNotes(_caller: Caller, afterRead: (step: string) => Promise<void>): Promise<string[]> {
-    const notes = this.notes();
-    await afterRead("read");
-    for (const watcher of this.#watchers) {
-      try {
-        await watcher(notes);
-      } catch {
-        this.#refusedPushes += 1;
-      }
-    }
+// The notes and every step taken so far: what a live query follows.
+export const live = query({
+  args: {},
+  returns: v.array(v.string()),
+  handler: async (ctx) => [secret, ...(await ctx.db.query("steps").take(100)).map(({ step }) => step)],
+});
+
+export const mark = mutation({
+  args: { step: v.string().min(1).max(100) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("steps", args);
+    return null;
+  },
+});
+
+// Reads, says so, waits, says it answers, then answers what it read.
+export const slow = action({
+  args: { step: v.string().min(1).max(90), pauseMs: v.number().integer().min(0).max(5000) },
+  returns: v.array(v.string()),
+  uses: [mark],
+  handler: async (ctx, args) => {
+    const notes = [secret];
+    await ctx.runMutation(mark, { step: \`\${args.step}: read\` });
+    await pause(args.pauseMs);
+    await ctx.runMutation(mark, { step: \`\${args.step}: answered\` });
     return notes;
-  }
+  },
+});
 
-  refusedPushes(): number {
-    return this.#refusedPushes;
-  }
-
-  // Reads, tells the screen it has, then fails with what it read.
-  async failingNotes(_caller: Caller, afterRead: () => Promise<void>): Promise<never> {
-    const [note] = this.notes();
-    await afterRead();
-    throw new Error(note);
-  }
-}
+// Reads, says so, waits, then fails with what it read.
+export const failing = action({
+  args: { step: v.string().min(1).max(90), pauseMs: v.number().integer().min(0).max(5000) },
+  returns: v.null(),
+  uses: [mark],
+  handler: async (ctx, args) => {
+    const note = secret;
+    await ctx.runMutation(mark, { step: \`\${args.step}: read\` });
+    await pause(args.pauseMs);
+    throw new AppError("notes.failed", note);
+  },
+});
 `;
+
+const appCode = {
+  "schema.ts": `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
+
+export default defineSchema({
+  steps: defineTable({ step: v.string().min(1).max(100) }),
+});
+`,
+  "operations/notes.ts": operationsCode,
+  "app.ts": `import { app } from "@grasp-os/sdk";
+import { failing, live, mark, read, slow } from "./operations/notes.ts";
+import schema from "./schema.ts";
+
+export default app({
+  name: "Notes",
+  schema,
+  access: { tables: { steps: { read: "appMembers", write: "appMembers" } } },
+  operations: { notes: { read, live, mark, slow, failing } },
+  internalOperations: {},
+  screens: [],
+  uses: [],
+});
+`,
+};
 
 const screenOf = (
   label: string
-): string => `import { callServer } from "@grasp-os/sdk/screen";
+): string => `import { useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/ui/components/button";
+import { api } from "#grasp";
 
 export default function Notes() {
-  return <Button onClick={() => void callServer("notes")}>${label}</Button>;
+  const notes = useQuery(api.notes.read, {});
+  return <Button>${label} {notes?.length ?? 0}</Button>;
 }
 `;
 
 const sampleFiles = {
-  "app/server.ts": serverCode,
+  ...appCode,
   "screens/notes.tsx": screenOf("Notes"),
 };
+
+/**
+ * A screen that imports none of the App's references (`#grasp`): what it
+ * builds to is its own code alone. One that imports them builds them in,
+ * and they name the release they belong to (screen-references.ts), so
+ * each version's build is its own, and its own to approve.
+ */
+const plainScreenOf = (
+  label: string
+): string => `import { Button } from "@grasp-os/ui/components/button";
+
+export default function Notes() {
+  return <Button>${label}</Button>;
+}
+`;
 
 const personApi = async (role: Role) => await signedInApi(idp, role);
 
@@ -151,6 +231,121 @@ const openFrame = async (
   return bundle;
 };
 
+/**
+ * A call of `contractId` of `app`'s current release, as the screen client
+ * writes it: the reference with the release's own fingerprint, so a
+ * refusal is for who calls and as which build, never for the request.
+ */
+const requestFor = async (
+  app: string,
+  contractId: string,
+  input: unknown
+): Promise<string> => {
+  const id = appIdSchema.parse(app);
+  const { currentVersion } = await findApp(env, id);
+  if (currentVersion === null) {
+    throw new Error("The App has no current version");
+  }
+  const released = await loadRelease(env, id, currentVersion);
+  const operation = released.app.operations[contractId];
+  const fingerprint = released.fingerprints[contractId];
+  if (operation === undefined || fingerprint === undefined) {
+    throw new Error(`The release has no ${contractId}`);
+  }
+  return JSON.stringify({
+    reference: {
+      resourceId: app,
+      resourceVersion: currentVersion,
+      contractId,
+      fingerprint,
+      kind: operation.kind,
+    },
+    input,
+  });
+};
+
+/**
+ * What `person`'s screen gets calling `contractId` of `app` as the build
+ * `lease` names (none: no lease of core's), through core's function
+ * route as the page relays it: the function's result, or the refusal's
+ * code thrown, as the page rejects it.
+ */
+const called = async (
+  person: Person,
+  app: string,
+  {
+    lease,
+    contractId = "notes.read",
+    input = {},
+  }: { lease?: string; contractId?: string; input?: unknown } = {}
+): Promise<unknown> => {
+  const response = await routed(`${appFunctionPath}/${app}`, {
+    method: "POST",
+    headers: {
+      origin: clientOrigin,
+      "content-type": "application/json",
+      cookie: person.session,
+      [screenPersonHeader]: person.userId,
+      ...(lease === undefined ? {} : { [screenLeaseHeader]: lease }),
+    },
+    body: await requestFor(app, contractId, input),
+  });
+  const answer: unknown = await response.json();
+  if (response.ok) {
+    return z.object({ result: z.unknown() }).parse(answer).result;
+  }
+  const { code, message } = errorPayloadSchema.parse(answer);
+  throw Object.assign(new Error(message), { code });
+};
+
+/** What the App holds, as its screen gets it. */
+const data = { ok: true, value: [secret] };
+
+const pushSchema = z.object({
+  result: z.union([
+    z.object({ ok: z.literal(true), value: z.unknown() }),
+    z.object({ ok: z.literal(false), error: z.object({ code: z.string() }) }),
+  ]),
+});
+
+/** What a live query of the App's pushed: its values, and its refusals. */
+const follower = () => {
+  const values: unknown[] = [];
+  const refused: string[] = [];
+  const callback = (push: unknown): void => {
+    const { result } = pushSchema.parse(push);
+    if (result.ok) {
+      values.push(result.value);
+    } else {
+      refused.push(result.error.code);
+    }
+  };
+  return { values, refused, callback };
+};
+
+/**
+ * A live query's refusal of a build taken back, recorded by whichever
+ * check meets it first: its read (`admission`) or the push of what it
+ * read (`push`).
+ */
+const liveRefusal = /^watchQuery\/(?:admission|push): revoked$/u;
+
+/** How long a push may take to arrive, and how often to look. */
+const pushWait = { timeout: 20_000, interval: 50 };
+
+/** Whether the App's steps include `step`, read past any screen's trust. */
+const tookStep = async (
+  person: Person,
+  app: string,
+  step: string
+): Promise<boolean> => {
+  const result = await calledAs(await person.api.whoami(), app, {
+    contractId: "notes.live",
+    kind: "query",
+  });
+  return result.ok && JSON.stringify(result.value).includes(step);
+};
+
 /** The refusals among `events`, as what was refused where. */
 const refusals = (events: Awaited<ReturnType<typeof auditedDuring>>) =>
   events
@@ -169,17 +364,25 @@ const noop = (): void => {
   // Nothing to update.
 };
 
-const nothing = async (): Promise<void> => {
-  // Nothing happens between the App's read and its failure.
-};
+const failedResult = z.object({
+  ok: z.literal(false),
+  error: z.object({ code: z.string() }),
+});
 
-/** What a call failed with, and whether anything in it carries the App's data. */
+/**
+ * What a call failed with, its function's error or a refusal, and whether
+ * anything in it carries the App's data.
+ */
 const failureOf = async (
   call: Promise<unknown>
 ): Promise<{ code: unknown; carriesData: boolean }> => {
   try {
-    await call;
-    return { code: "ok", carriesData: false };
+    const result = await call;
+    const failed = failedResult.safeParse(result);
+    return {
+      code: failed.success ? failed.data.error.code : "ok",
+      carriesData: JSON.stringify(result).includes(secret),
+    };
   } catch (error) {
     const seen = JSON.stringify({
       error,
@@ -219,7 +422,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const refused = await auditedDuring(async () => {
       before = await Promise.all([
         outcome(builder.api.screens.open(app, "notes")),
-        outcome(builder.api.screens.call(app, "notes", [])),
+        outcome(called(builder, app)),
       ]);
     });
     const all = await admin.api.screenTrust.waiting();
@@ -266,7 +469,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
             css: frame.screen.css,
           })
         )),
-      after: await builder.api.screens.call(app, "notes", []),
+      after: await called(builder, app, { lease: bundle.lease }),
       stillWaiting: await waitsOn(admin, app),
     }).toStrictEqual({
       before: ["screen.unreviewed", "screen.unreviewed"],
@@ -283,7 +486,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
         },
       ],
       approvedIsWhatRuns: true,
-      after: [secret],
+      after: data,
       stillWaiting: false,
     });
   });
@@ -323,8 +526,9 @@ describe("screen trust", { timeout: 60_000 }, () => {
       presented[name] = [
         // oxlint-disable-next-line no-await-in-loop -- see above
         await api.screens.present(unapproved, lease),
+        // The same lease on the screen's call of a function.
         // oxlint-disable-next-line no-await-in-loop -- see above
-        await outcome(api.screens.call(unapproved, "notes", [])),
+        await outcome(called(builder, unapproved, { lease })),
       ];
     }
     // Someone else's lease on the approved App names the approved build,
@@ -332,15 +536,19 @@ describe("screen trust", { timeout: 60_000 }, () => {
     // while their own does.
     const borrowed = [
       await other.api.screens.present(approved, real.lease),
-      await outcome(other.api.screens.call(approved, "notes", [])),
+      await outcome(called(other, approved, { lease: real.lease })),
     ];
     const own = await openFrame(other, approved);
-    const withOwn = await other.api.screens.call(approved, "notes", []);
+    const withOwn = [
+      await called(other, approved, { lease: own.lease }),
+      // Past the gate, to the run the workflow doesn't have.
+      await outcome(other.api.screens.runs(approved, "invoices")),
+    ];
     // A connection that presented its lease loses it to a forgery: it
     // can't keep the approved build while its frame runs something else.
     const afterForgery = [
       await other.api.screens.present(approved, `${own.artifact}.forged`),
-      await outcome(other.api.screens.call(approved, "notes", [])),
+      await outcome(other.api.screens.runs(approved, "invoices")),
     ];
 
     expect({ presented, borrowed, withOwn, afterForgery }).toStrictEqual({
@@ -351,7 +559,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
         ])
       ),
       borrowed: ["unreviewed", "screen.unreviewed"],
-      withOwn: [secret],
+      withOwn: [data, "ok"],
       afterForgery: ["unreviewed", "screen.unreviewed"],
     });
   });
@@ -359,30 +567,51 @@ describe("screen trust", { timeout: 60_000 }, () => {
   it("asks for a new approval when the screen's code changes, and for none when it doesn't", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
-    const app = await sampleApp(builder);
+    const plainApp = async (): Promise<string> => {
+      const { id } = await builder.api.apps.create({ name: "Notes" });
+      await release(builder, id, {
+        ...appCode,
+        "screens/notes.tsx": plainScreenOf("Notes"),
+      });
+      return id;
+    };
+    const app = await plainApp();
     await approveCurrent(admin, app);
     const first = await openFrame(builder, app);
 
-    // Server code alone: the screen builds to the same bytes.
+    // The App's functions alone: the screen builds to the same bytes.
     await release(builder, app, {
-      "app/server.ts": `${serverCode}\n// Changed.\n`,
+      "operations/notes.ts": `${operationsCode}\n// Changed.\n`,
     });
     const sameScreen = await builder.api.screens.open(app, "notes");
     // The screen itself: other bytes, which nobody approved.
-    await release(builder, app, { "screens/notes.tsx": screenOf("Send") });
+    await release(builder, app, { "screens/notes.tsx": plainScreenOf("Send") });
     const changed = await outcome(builder.api.screens.open(app, "notes"));
     const review = await admin.api.screenTrust.review(app);
     // The frame opened before still runs what was approved.
-    const oldFrame = await builder.api.screens.call(app, "notes", []);
+    const oldFrame = await called(builder, app, { lease: first.lease });
     // Back to the first screen: its approval is of those bytes, whichever
     // version holds them.
-    await release(builder, app, { "screens/notes.tsx": screenOf("Notes") });
+    await release(builder, app, {
+      "screens/notes.tsx": plainScreenOf("Notes"),
+    });
     const back = await builder.api.screens.open(app, "notes");
 
     // The same files in another App build to the same bytes, from the
     // same cached build: that App's screen is still nobody's to trust.
-    const copy = await sampleApp(builder);
+    const copy = await plainApp();
     const inCopy = await outcome(builder.api.screens.open(copy, "notes"));
+
+    // A screen that calls the App's functions builds its references in:
+    // a new version of its functions is a new build to approve.
+    const referencing = await sampleApp(builder);
+    await approveCurrent(admin, referencing);
+    await release(builder, referencing, {
+      "operations/notes.ts": `${operationsCode}\n// Changed.\n`,
+    });
+    const newReferences = await outcome(
+      builder.api.screens.open(referencing, "notes")
+    );
 
     expect({
       sameScreen: sameScreen.artifact === first.artifact,
@@ -395,13 +624,15 @@ describe("screen trust", { timeout: 60_000 }, () => {
       oldFrame,
       back: back.artifact === first.artifact,
       inCopy,
+      newReferences,
     }).toStrictEqual({
       sameScreen: true,
       changed: "screen.unreviewed",
       review: [{ screen: "notes", trust: "unreviewed", other: true }],
-      oldFrame: [secret],
+      oldFrame: data,
       back: true,
       inCopy: "screen.unreviewed",
+      newReferences: "screen.unreviewed",
     });
   });
 
@@ -553,69 +784,81 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const app = await sampleApp(builder);
     await approveCurrent(admin, app);
     const bundle = await openFrame(builder, app);
-    const pushed: unknown[] = [];
-    await builder.api.screens.call(app, "watchNotes", [
-      (notes: unknown) => {
-        pushed.push(notes);
-      },
-    ]);
+    const live = follower();
+    await builder.api.screens.watchQuery(
+      app,
+      bundle.lease,
+      await requestFor(app, "notes.live", {}),
+      live.callback
+    );
 
     let answered: string[] = [];
     let cachedBuild = "";
     const events = await auditedDuring(async () => {
+      // The App reads the data and says so, which the screen is pushed;
+      // the approval is taken back while it waits, before it answers.
+      const slow = outcome(
+        called(builder, app, {
+          lease: bundle.lease,
+          contractId: "notes.slow",
+          input: { step: "slow", pauseMs },
+        })
+      );
+      await vi.waitFor(() => {
+        expect(live.values.at(-1)).toStrictEqual([secret, "slow: read"]);
+      }, pushWait);
+      await admin.api.screenTrust.revoke(app, bundle.artifact);
       answered = [
-        // The App has read the data and says so; the approval is taken
-        // back before it pushes and answers.
-        await outcome(
-          builder.api.screens.call(app, "slowNotes", [
-            async () => {
-              await admin.api.screenTrust.revoke(app, bundle.artifact);
-            },
-          ])
-        ),
-        await outcome(builder.api.screens.call(app, "notes", [])),
+        await slow,
+        await outcome(called(builder, app, { lease: bundle.lease })),
         await outcome(builder.api.screens.watchRuns(app, "invoices", noop)),
       ];
       // The build is still in the cache; it opens nothing.
       cachedBuild = await outcome(builder.api.screens.open(app, "notes"));
+      // What the App changed as it answered reaches the screen as the
+      // refusal, never as its data.
+      await vi.waitFor(() => {
+        expect(live.refused).toStrictEqual(["screen.revoked"]);
+      }, pushWait);
     });
     const standing = await builder.api.screens.present(app, bundle.lease);
     // A screen revoked no longer waits on an admin: it was decided.
     const waiting = await waitsOn(admin, app);
-    // Approved again by a person, it runs again, and says what it saw.
+    // Approved again by a person, it runs again.
     await approveCurrent(admin, app);
-    const refusedPushes = await builder.api.screens.call(
-      app,
-      "refusedPushes",
-      []
-    );
+    const again = await called(builder, app, { lease: bundle.lease });
 
     expect({
       answered,
       cachedBuild,
-      pushed,
-      refusedPushes,
+      // It ran to its end: the answer was refused, not the run.
+      answeredStep: await tookStep(builder, app, "slow: answered"),
+      pushed: live.values,
+      again,
       standing,
       waiting,
-      events: events.map(({ action, detail }) =>
-        action === "app.artifact.refused"
-          ? `refused ${detail.operation}/${detail.stage}: ${detail.reason}`
-          : action
-      ),
+      revoked: events.filter(({ action }) => action === "app.artifact.revoked")
+        .length,
+      refused: refusals(events).toSorted(),
     }).toStrictEqual({
       answered: ["screen.revoked", "screen.revoked", "screen.revoked"],
       cachedBuild: "screen.revoked",
-      pushed: [],
-      refusedPushes: 1,
+      answeredStep: true,
+      // Nothing it read after the revocation.
+      pushed: [[secret], [secret, "slow: read"]],
+      again: data,
       standing: "revoked",
       waiting: false,
-      events: [
-        "app.artifact.revoked",
-        "refused call/push: revoked",
-        "refused call/delivery: revoked",
-        "refused call/admission: revoked",
-        "refused watchRuns/admission: revoked",
-        "refused open/admission: revoked",
+      revoked: 1,
+      refused: [
+        // The answer of the call it landed in, after the call ran.
+        "call/admission: revoked",
+        "call/delivery: revoked",
+        "open/admission: revoked",
+        // The live read after the change, or its push: whichever checked
+        // first.
+        expect.stringMatching(liveRefusal),
+        "watchRuns/admission: revoked",
       ],
     });
   });
@@ -624,11 +867,13 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const builder = await personApi("builder");
     const app = await sampleApp(builder);
     const { screens } = builder.api;
+    const live = await requestFor(app, "notes.live", {});
 
     const events = await auditedDuring(async () => {
       expect({
         gated: await Promise.all([
-          outcome(screens.call(app, "notes", [])),
+          outcome(called(builder, app)),
+          outcome(screens.watchQuery(app, "", live, noop)),
           outcome(screens.startRun(app, "invoices")),
           outcome(screens.runs(app, "invoices")),
           outcome(screens.run(app, "run-1")),
@@ -652,7 +897,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
           )
         ),
       }).toStrictEqual({
-        gated: Array.from({ length: 8 }, () => "screen.unreviewed"),
+        gated: Array.from({ length: 9 }, () => "screen.unreviewed"),
         version: 1,
         report: "ok",
       });
@@ -666,6 +911,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
       "run/admission: unreviewed",
       "runs/admission: unreviewed",
       "startRun/admission: unreviewed",
+      "watchQuery/admission: unreviewed",
       "watchRuns/admission: unreviewed",
     ]);
   });
@@ -676,13 +922,15 @@ describe("screen trust", { timeout: 60_000 }, () => {
     const app = await sampleApp(builder);
 
     let ordinary: unknown[] = [];
+    let lease = "";
     const events = await auditedDuring(async () => {
       await classifyAs(admin, app, "ordinary");
       // Said again: nothing changes, and nothing is recorded.
       await classifyAs(admin, app, "ordinary");
       const bundle = await openFrame(builder, app);
+      ({ lease } = bundle);
       ordinary = [
-        await builder.api.screens.call(app, "notes", []),
+        await called(builder, app, { lease: bundle.lease }),
         await builder.api.screens.present(app, bundle.lease),
         // Nothing waits on an admin for it.
         await waitsOn(admin, app),
@@ -692,12 +940,12 @@ describe("screen trust", { timeout: 60_000 }, () => {
 
     expect({
       ordinary,
-      sensitiveAgain: await outcome(builder.api.screens.call(app, "notes", [])),
+      sensitiveAgain: await outcome(called(builder, app, { lease })),
       classified: events
         .filter(({ action }) => action === "app.output.classified")
         .map(({ actor, target, detail }) => ({ actor, target, detail })),
     }).toStrictEqual({
-      ordinary: [[secret], "open", false],
+      ordinary: [data, "open", false],
       sensitiveAgain: "screen.unreviewed",
       classified: [
         {
@@ -724,23 +972,35 @@ describe("screen trust", { timeout: 60_000 }, () => {
     // While approved, the App's own message reaches the screen, and with
     // it what the App read.
     const approved = await failureOf(
-      builder.api.screens.call(app, "failingNotes", [nothing])
+      called(builder, app, {
+        lease: bundle.lease,
+        contractId: "notes.failing",
+        input: { step: "approved", pauseMs: 0 },
+      })
     );
     let revoked: Awaited<ReturnType<typeof failureOf>> | undefined;
     const events = await auditedDuring(async () => {
       // The App reads, the approval is taken back, then the App fails.
-      revoked = await failureOf(
-        builder.api.screens.call(app, "failingNotes", [
-          async () => {
-            await admin.api.screenTrust.revoke(app, bundle.artifact);
-          },
-        ])
+      const failing = failureOf(
+        called(builder, app, {
+          lease: bundle.lease,
+          contractId: "notes.failing",
+          input: { step: "revoked", pauseMs },
+        })
       );
+      await vi.waitFor(async () => {
+        await expect(
+          tookStep(builder, app, "revoked: read")
+        ).resolves.toBeTruthy();
+      }, pushWait);
+      await admin.api.screenTrust.revoke(app, bundle.artifact);
+      revoked = await failing;
     });
 
     expect({ approved, revoked, refused: refusals(events) }).toStrictEqual({
-      approved: { code: "app.failed", carriesData: true },
+      approved: { code: "notes.failed", carriesData: true },
       revoked: { code: "screen.revoked", carriesData: false },
+      // After the call ran: its error, not the call, was withheld.
       refused: ["call/delivery: revoked"],
     });
   });
@@ -760,7 +1020,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     await classifyAs(admin, copy, "ordinary");
     expect({
       present: await builder.api.screens.present(app, bundle.lease),
-      call: await outcome(builder.api.screens.call(app, "notes", [])),
+      call: await outcome(called(builder, app, { lease: bundle.lease })),
       open: await outcome(builder.api.screens.open(app, "notes")),
       undecided: await outcome(builder.api.screens.open(copy, "notes")),
     }).toStrictEqual({
@@ -787,7 +1047,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     };
     await classifyAs(admin, app, "ordinary");
     const { generation: before } = await admin.api.screenTrust.review(app);
-    const opened = await outcome(builder.api.screens.call(app, "notes", []));
+    const opened = await outcome(called(builder, app));
     const { id: permission } = await builder.api.permissions.request(request);
     const events = await auditedDuring(async () => {
       await admin.api.permissions.grant(permission, { version: 1 });
@@ -812,7 +1072,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
       output: after.output,
       // An approval reviewed before the grant no longer lands.
       generationMoved: after.generation > before,
-      refused: await outcome(builder.api.screens.call(app, "notes", [])),
+      refused: await outcome(called(builder, app)),
       waiting: await waitsOn(admin, app),
       quiet: quiet.map(({ action }) => action),
     }).toStrictEqual({
@@ -908,7 +1168,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
         .filter(({ artifact }) => artifact === first.artifact)
         .map(({ trust, decidedBy }) => ({ trust, decidedBy })),
       // The frame of the older build stops at its next call.
-      oldFrame: await outcome(builder.api.screens.call(app, "notes", [])),
+      oldFrame: await outcome(called(builder, app, { lease: first.lease })),
       source: Object.keys(firstSource),
       sourceOfNew: newSource["screens/notes.tsx"],
       byUser: await outcome(user.api.screenTrust.source(app, 1)),
@@ -1052,7 +1312,15 @@ describe("screen trust", { timeout: 60_000 }, () => {
   it("puts a version in front of the admins as soon as it is current, before anyone opens it", async () => {
     const admin = await personApi("admin");
     const builder = await personApi("builder");
-    const app = await sampleApp(builder);
+    // A screen that imports the App's references (`#grasp`) is recorded
+    // only once it is opened or reviewed (screen-builds.ts), which
+    // GRA-660 closes; one that doesn't is recorded as it is made
+    // current.
+    const { id: app } = await builder.api.apps.create({ name: "Notes" });
+    await release(builder, app, {
+      ...appCode,
+      "screens/notes.tsx": plainScreenOf("Notes"),
+    });
     // Recorded in the background as it was made current: soon after.
     const waitingNow = await vi.waitFor(async () => {
       const listed = await admin.api.screenTrust.waiting();
@@ -1064,7 +1332,7 @@ describe("screen trust", { timeout: 60_000 }, () => {
     });
     await approveCurrent(admin, app);
     const afterApproval = await waitsOn(admin, app);
-    await release(builder, app, { "screens/notes.tsx": screenOf("Send") });
+    await release(builder, app, { "screens/notes.tsx": plainScreenOf("Send") });
     const nextVersion = await vi.waitFor(async () => {
       const listed = await admin.api.screenTrust.waiting();
       const found = listed.find(
@@ -1098,12 +1366,12 @@ describe("screen trust", { timeout: 60_000 }, () => {
     ).run();
     let failed = "";
     try {
-      failed = await outcome(builder.api.screens.call(app, "notes", []));
+      failed = await outcome(called(builder, app));
     } finally {
       await env.DB.prepare("DROP TRIGGER refuse_refusals").run();
     }
     const events = await auditedDuring(async () => {
-      await outcome(builder.api.screens.call(app, "notes", []));
+      await outcome(called(builder, app));
     });
 
     expect({ failed, refused: refusals(events) }).toStrictEqual({
@@ -1158,8 +1426,8 @@ describe("screen trust", { timeout: 60_000 }, () => {
 
     const events = await auditedDuring(async () => {
       await Promise.all([
-        outcome(builder.api.screens.call(app, "notes", [])),
-        outcome(builder.api.screens.call(app, "notes", [])),
+        outcome(called(builder, app)),
+        outcome(called(builder, app)),
       ]);
     });
 
