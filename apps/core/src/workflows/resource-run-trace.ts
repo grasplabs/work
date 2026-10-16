@@ -3,15 +3,19 @@ import type {
   TraceState,
   WorkflowRunTrace,
 } from "@grasp-os/shared/workflow-diagrams";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import type { Acting } from "../auth/identity.ts";
+import { workflowStartReceipts } from "../db/core/schema.ts";
 import {
   requireWorkflowRole,
   workflowDefinition,
 } from "../workflow-resources.ts";
 import { runObjectOf } from "./engine.ts";
 import { resourceRunFor } from "./resource-runs.ts";
+import { detailsRemoved } from "./retention.ts";
 
 // A run of an independent workflow laid over its version's diagram
 // (platform specification 13.10): the tasks its journal reached, read from
@@ -112,6 +116,29 @@ export const resourceRunTrace = async (
     run.version
   );
   const diagram = workflowDiagram(z.json().parse(JSON.parse(definition)));
+  // Past its retention as the deployment has it now, or once swept, no
+  // more of it is shown than of its result (resource-runs.ts): the engine
+  // may still hold its journal for the retention it was admitted with.
+  const receipt = await drizzle(env.DB)
+    .select({ detailsRemovedAt: workflowStartReceipts.detailsRemovedAt })
+    .from(workflowStartReceipts)
+    .where(eq(workflowStartReceipts.id, run.id))
+    .get();
+  const removed = detailsRemoved(env, {
+    endedAt: run.endedAt === null ? null : new Date(run.endedAt),
+    detailsRemovedAt: receipt?.detailsRemovedAt ?? null,
+  });
+  if (removed) {
+    return {
+      runId: run.id,
+      version: run.version,
+      status: run.status,
+      diagram,
+      tasks: [],
+      complete: true,
+      detailsRemoved: true,
+    };
+  }
   const { steps, complete } = await tracedSteps(env, run.id);
   // A task's steps together: the most telling of their states, the most
   // attempts any made.
@@ -134,5 +161,6 @@ export const resourceRunTrace = async (
     diagram,
     tasks: [...tasks.values()],
     complete,
+    detailsRemoved: false,
   };
 };

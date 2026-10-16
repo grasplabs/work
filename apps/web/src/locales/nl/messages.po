@@ -6157,6 +6157,10 @@ msgstr "De verwerkersovereenkomst is niet getekend"
 msgid "The default, {each}"
 msgstr "Standaard, {each}"
 
+#: src/workflows/test-run.tsx
+msgid "The details of this run were removed when its retention ended."
+msgstr "De details van deze run zijn verwijderd toen de bewaartermijn afliep."
+
 #: src/brain/brain.ts
 msgid "The directory and sign-in through Microsoft or Google. Adds teams and roles, and the applications people sign in to with their permissions."
 msgstr "De directory en het inloggen via Microsoft of Google. Voegt teams en rollen toe, en de applicaties waarop mensen inloggen met hun rechten."
