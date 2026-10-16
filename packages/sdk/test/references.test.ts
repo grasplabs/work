@@ -495,7 +495,7 @@ describe("workflow references", () => {
   });
 
   test("hold as many decisions as a reference does, contexts nested one level short of the limit, and refuse deeper by name", async () => {
-    const many: BoundWorkflow = {
+    const many: WorkflowBindingExtras = {
       ...summarize,
       decisions: Object.fromEntries(
         Array.from(
@@ -507,7 +507,7 @@ describe("workflow references", () => {
         )
       ),
     };
-    const deep = (depth: number): BoundWorkflow => ({
+    const deep = (depth: number): WorkflowBindingExtras => ({
       ...summarize,
       decisions: {
         deep: { value: v.null().descriptor, context: nested(depth) },
