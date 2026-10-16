@@ -177,11 +177,13 @@ export const connectionOwners = async (
       accountName: connections.accountName,
       accountEmail: connections.accountEmail,
       accountAddresses: connections.accountAddresses,
+      accountSenders: connections.accountSenders,
     })
     .from(connections)
     .where(inArray(connections.id, ids));
-  return rows.map(({ accountAddresses, ...row }) => ({
+  return rows.map(({ accountAddresses, accountSenders, ...row }) => ({
     ...row,
     accountAddresses: accountAddresses ?? [],
+    accountSenders: accountSenders ?? [],
   }));
 };

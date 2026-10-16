@@ -24,6 +24,7 @@ import type { BatchItem } from "drizzle-orm/batch";
 import { drizzle } from "drizzle-orm/d1";
 
 import { accountAddressesOf } from "./account-addresses.ts";
+import type { AccountAddresses } from "./account-addresses.ts";
 import { recordEventIf, recordEvents } from "./audit.ts";
 import {
   abandonToolkitFlow,
@@ -303,7 +304,7 @@ const storeConnection = async (
   person: ConnectionPerson,
   account: ProviderAccount,
   tokens: TokenSet & { refreshToken: string },
-  addresses: readonly string[]
+  addresses: AccountAddresses
 ): Promise<string> => {
   const connectionId = crypto.randomUUID();
   const now = new Date();
@@ -321,7 +322,8 @@ const storeConnection = async (
       accountId: account.id,
       accountName: account.name,
       accountEmail: account.email?.toLowerCase() ?? null,
-      accountAddresses: [...addresses],
+      accountAddresses: addresses.receives,
+      accountSenders: addresses.sends,
       connectedBy: person.userId,
       createdAt: now,
       updatedAt: now,
@@ -359,7 +361,7 @@ const reconnect = async (
   held: ConnectionRow | undefined,
   account: ProviderAccount,
   tokens: TokenSet & { refreshToken: string },
-  addresses: readonly string[]
+  addresses: AccountAddresses
 ): Promise<string | undefined> => {
   if (held === undefined) {
     return undefined;
@@ -400,7 +402,8 @@ const reconnect = async (
           tenant: flow.tenant,
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
-          accountAddresses: [...addresses],
+          accountAddresses: addresses.receives,
+          accountSenders: addresses.sends,
           updatedAt: now,
         })
         .where(stillWaiting),

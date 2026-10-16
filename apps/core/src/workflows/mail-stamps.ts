@@ -100,10 +100,11 @@ import {
 //   deliver it to. Recipients and the watched mailbox are compared without
 //   a `+tag` (`mailboxOf`).
 // - An SMTP alias (GRA-654): the account's own other addresses (its
-//   primary address, `smtp:` proxy addresses, Google send-as addresses
-//   Google verified), as its provider said when it was connected
-//   (connect's account-addresses.ts), count as its mailbox and as its
-//   senders. Read with the connection's token, from the account's own
+//   primary address, `smtp:` proxy addresses), as its provider said when
+//   it was connected (connect's account-addresses.ts), count as its
+//   mailbox and as its senders. Addresses it may only send as (Google's
+//   verified send-as addresses) count as its senders, never its mailbox:
+//   one may receive in another mailbox. Read with the connection's token, from the account's own
 //   profile: no App sets them, and an unverified send-as address isn't
 //   one. A lookup that failed, or an alias added since, is no address of
 //   its own: mail to it is a root, as before. Another mailbox's aliases
@@ -226,9 +227,10 @@ const recordedTokens = async (
  * mailbox (the provider sends from it, or refuses the call), the
  * connection's account, that account's email address (for Microsoft 365
  * the primary address it sends from, which may differ from its sign-in
- * name: M-new-2), and the other addresses it receives mail at, its SMTP
- * aliases, as its provider said when it was connected (GRA-654); none for
- * a connection that isn't a native mail connector's.
+ * name: M-new-2), the other addresses it receives mail at (its SMTP
+ * aliases) and those it may send as (Google's verified send-as
+ * addresses), as its provider said when it was connected (GRA-654); none
+ * for a connection that isn't a native mail connector's.
  *
  * Known gap: Microsoft 365 also takes another user's ID or UPN as the
  * mailbox (a shared mailbox named so), and sends from that mailbox's
@@ -254,7 +256,8 @@ const sendersOf = async (
     typeof mailbox === "string" ? mailbox : null,
     owner.accountName,
     owner.accountEmail,
-    ...owner.accountAddresses,
+    // Those it receives at among them: Microsoft 365 lists each as both.
+    ...owner.accountSenders,
   ].flatMap((sender) =>
     sender === null || sender.trim() === "" ? [] : [sender.trim().toLowerCase()]
   );

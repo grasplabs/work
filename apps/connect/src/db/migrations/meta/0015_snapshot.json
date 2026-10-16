@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "312b1e77-96e7-4707-8988-990f40aaeef6",
+  "id": "85d601fe-4006-4c55-989a-233dae20fa32",
   "prevId": "7226f1b4-45da-4dcd-bee1-deccdbc3f00b",
   "tables": {
     "audit_outbox": {
@@ -406,6 +406,13 @@
         },
         "account_addresses": {
           "name": "account_addresses",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "account_senders": {
+          "name": "account_senders",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

@@ -497,6 +497,7 @@ describe("whose account", () => {
           accountName: anna.email,
           accountEmail: anna.email.toLowerCase(),
           accountAddresses: [anna.email.toLowerCase()],
+          accountSenders: [anna.email.toLowerCase()],
         },
         {
           id: shared,
@@ -509,6 +510,7 @@ describe("whose account", () => {
           // Its primary address and its alias, from its profile, never its
           // SIP address.
           accountAddresses: [mailbox.email, alias],
+          accountSenders: [mailbox.email, alias],
         },
       ].toSorted((a, b) => a.id.localeCompare(b.id))
     );
@@ -524,7 +526,7 @@ describe("whose account", () => {
     ).resolves.toStrictEqual([[], "connect.invalid"]);
   });
 
-  it("keeps only the addresses Google verified an account may send as, and connects without any when the lookup fails", async () => {
+  it("keeps the addresses Google verified an account may send as as its senders only, and connects without any when the lookup fails", async () => {
     const ada = someone("admin");
     const mailbox = mailboxAccount("google");
     const verified = mailbox.email.replace("mailbox-", "billing-");
@@ -548,11 +550,18 @@ describe("whose account", () => {
     const owners = await exports.default.connectionOwners([google, failed]);
     expect(
       Object.fromEntries(
-        owners.map(({ id, accountAddresses }) => [id, accountAddresses])
+        owners.map(({ id, accountAddresses, accountSenders }) => [
+          id,
+          { accountAddresses, accountSenders },
+        ])
       )
     ).toStrictEqual({
-      [google]: [mailbox.email, verified],
-      [failed]: [],
+      // A send-as address may receive in another mailbox: never this one's.
+      [google]: {
+        accountAddresses: [],
+        accountSenders: [mailbox.email, verified],
+      },
+      [failed]: { accountAddresses: [], accountSenders: [] },
     });
   });
 

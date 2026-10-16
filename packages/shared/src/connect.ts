@@ -248,11 +248,18 @@ export interface ConnectionOwner {
    */
   accountEmail: string | null;
   /**
-   * The other addresses the account receives mail at, its primary address
-   * and SMTP aliases, as its provider said when it was connected; none if
-   * that wasn't read.
+   * The other addresses the account's mailbox receives mail at, its
+   * primary address and SMTP aliases, as its provider said when it was
+   * connected; none if that wasn't read.
    */
   accountAddresses: string[];
+  /**
+   * The addresses the account may send as besides those (Google's
+   * verified send-as addresses), as its provider said when it was
+   * connected: a run's senders, never its mailbox's addresses, since such
+   * an address may receive in another mailbox.
+   */
+  accountSenders: string[];
 }
 
 /**
