@@ -257,6 +257,8 @@ describe("a JSON workflow's compute modules", () => {
       "return Math.random();",
       "return crypto.getRandomValues(new Uint8Array(1))[0] ?? 0;",
       "return (Date.prototype.constructor as DateConstructor).now();",
+      // A proxy hands descriptor reads to its target.
+      'return Number(Reflect.apply(Object.getOwnPropertyDescriptor(Date, "now")?.value, undefined, []));',
       'return typeof fetch === "function" ? 1 : Number("x");',
       'return typeof setTimeout === "function" ? 1 : Number("x");',
       // workerd keeps its platform globals on the global's prototype.

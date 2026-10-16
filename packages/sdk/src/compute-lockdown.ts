@@ -37,7 +37,11 @@ const seal = (target: object, key: string, value?: unknown): boolean => {
   return Reflect.get(target, key) === value;
 };
 
-/** `Date`, except that it never tells the time. */
+/**
+ * `Date`, except that it never tells the time: constructing it without a
+ * date refuses, and its `now` is the real `Date`'s, sealed as a refusal
+ * (`lockdown`), since a proxy hands descriptor reads to its target.
+ */
 const clocklessDate = (): DateConstructor =>
   new Proxy(Date, {
     apply: unavailable("the clock"),
@@ -48,13 +52,6 @@ const clocklessDate = (): DateConstructor =>
       // SAFETY: constructing `Date` with arguments makes a `Date`.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
       return Reflect.construct(target, args) as Date;
-    },
-    get: (target, key, receiver): unknown => {
-      if (key === "now") {
-        return unavailable("the clock");
-      }
-      const value: unknown = Reflect.get(target, key, receiver);
-      return value;
     },
   });
 
@@ -125,6 +122,10 @@ const refuses = (probe: () => unknown): boolean => {
   return false;
 };
 
+/** Whether `fn`, a function, refuses when called: as it must. */
+const calledRefuses = (fn: unknown): boolean =>
+  typeof fn === "function" && refuses(() => Reflect.apply(fn, undefined, []));
+
 /** Whether `generate`, called on source text, refuses: as it must. */
 const generatesNothing = (generate: unknown): boolean =>
   typeof generate === "function" &&
@@ -133,6 +134,7 @@ const generatesNothing = (generate: unknown): boolean =>
 /** Checks, after the fact, that what a calculation could misuse refuses. */
 const probesRefuse = (): boolean =>
   refuses(() => Date.now()) &&
+  calledRefuses(Reflect.getOwnPropertyDescriptor(Date, "now")?.value) &&
   refuses(() => new Date()) &&
   refuses(() => Math.random()) &&
   refuses(() => new Intl.DateTimeFormat().format()) &&
@@ -163,6 +165,9 @@ const lockdown = (): boolean => {
   }
   const clockless = clocklessDate();
   sealed.push(
+    // On the real `Date`, before the global is replaced: what the proxy
+    // forwards descriptor reads and gets to.
+    seal(Date, "now", unavailable("the clock")),
     seal(Math, "random", unavailable("randomness")),
     seal(globalThis, "Date", clockless),
     seal(Date.prototype, "constructor", clockless)
