@@ -1,6 +1,8 @@
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 import { appTokenMs, portableFunctionPath } from "@grasp-os/shared/portable";
 
+import { readAnswer, readRefusal } from "./client-error.ts";
+import type { Settled } from "./client-error.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 
 // How a portable host's client (spec 10.7.1: `new GraspClient({ url,
@@ -60,15 +62,8 @@ const tokenWaitMs = 30_000;
 const sendWaitMs = 60_000;
 
 /** A refusal before anything was sent, coded as core codes its own. */
-const refusal = (
-  code: string,
-  message: string,
-  details?: { retryAfterMs: number }
-): Error =>
-  Object.assign(new Error(message), {
-    code,
-    ...(details === undefined ? {} : { details }),
-  });
+const refusal = (code: string, message: string): Error =>
+  Object.assign(new Error(message), { code });
 
 const loopbackHosts: ReadonlySet<string> = new Set([
   "localhost",
@@ -294,10 +289,10 @@ export class PortableTransport {
   }
 
   /**
-   * Sends `request` to `app`'s function route with `token`: core's
-   * answer, or a coded refusal; a plain error for a lost response.
+   * Sends `request` to `app`'s function route with `token`: what core
+   * answered, or refused, settled; lost when no answer of core's came.
    */
-  async send(request: string, app: string, token: string): Promise<unknown> {
+  async send(request: string, app: string, token: string): Promise<Settled> {
     // An answer that never comes is a lost one: the caller's own retries
     // and uncertainty then apply, rather than waiting forever.
     const stop = new AbortController();
@@ -331,31 +326,28 @@ export class PortableTransport {
       } catch {
         answer = undefined;
       }
+    } catch {
+      // No answer: the network failed, or core took too long.
+      return { kind: "lost" };
     } finally {
       clearTimeout(timer);
     }
     if (response.ok && answer !== undefined) {
-      return answer;
+      return readAnswer(answer);
     }
     const code = isPlainObject(answer) ? answer.code : undefined;
     const message = isPlainObject(answer) ? answer.message : undefined;
     if (typeof code !== "string" || typeof message !== "string") {
       // The token refused, though not in core's words: refused all the
       // same, never a lost answer that a save would be sent again after.
-      if (response.status === unauthorized) {
-        throw refusal("auth.unauthenticated", "Sign in to continue.");
-      }
-      throw new TypeError("The answer wasn't core's.");
+      return response.status === unauthorized
+        ? readRefusal("auth.unauthenticated", "Sign in to continue.")
+        : { kind: "lost" };
     }
-    // Of a refusal's details, only how long to wait before asking again.
-    const details = isPlainObject(answer) ? answer.details : undefined;
-    const retryAfterMs = isPlainObject(details)
-      ? details.retryAfterMs
-      : undefined;
-    throw refusal(
+    return readRefusal(
       code,
       message,
-      typeof retryAfterMs === "number" ? { retryAfterMs } : undefined
+      isPlainObject(answer) ? answer.details : undefined
     );
   }
 }

@@ -428,6 +428,44 @@ export const readAnswer = (answer: unknown): Settled => {
 };
 
 /**
+ * How long a refusal's `details` say to wait before asking again, in
+ * milliseconds, if they say.
+ */
+export const retryAfterOf = (details: unknown): number | undefined => {
+  const said = isPlainObject(details) ? details.retryAfterMs : undefined;
+  return typeof said === "number" && Number.isFinite(said) ? said : undefined;
+};
+
+/**
+ * A refusal coded `code`, as the page or core said it before any call ran
+ * (a transport's rejection, or core's refusal on a portable host's route):
+ * of its details, only how long to wait before asking again is kept.
+ * `internal.unexpected` is the page's word for a request that may or may
+ * not have arrived: a lost response.
+ */
+export const readRefusal = (
+  code: string,
+  message: string,
+  details?: unknown
+): Settled => {
+  if (code === "internal.unexpected") {
+    return { kind: "lost" };
+  }
+  const retryAfterMs = retryAfterOf(details);
+  return {
+    kind: "failed",
+    error: new GraspError({
+      code,
+      message,
+      category: refusalCategory(code),
+      retryable: nothingRanCodes.has(code),
+      requestId: null,
+      ...(retryAfterMs === undefined ? {} : { details: { retryAfterMs } }),
+    }),
+  };
+};
+
+/**
  * A transport's rejection: a coded refusal of the page or core, or a lost
  * response, when it has no code or `internal.unexpected` (the page's word
  * for a request that may or may not have arrived).
@@ -437,28 +475,14 @@ export const readRejection = (error: unknown): Settled => {
     typeof error === "object" && error !== null && "code" in error
       ? error.code
       : undefined;
-  if (typeof code !== "string" || code === "internal.unexpected") {
+  if (typeof code !== "string") {
     return { kind: "lost" };
   }
-  // Of a refusal's details, only how long to wait before asking again.
-  const details =
+  return readRefusal(
+    code,
+    error instanceof Error ? error.message : "The call was refused.",
     typeof error === "object" && error !== null && "details" in error
       ? error.details
-      : undefined;
-  const retryAfterMs = isPlainObject(details)
-    ? details.retryAfterMs
-    : undefined;
-  return {
-    kind: "failed",
-    error: new GraspError({
-      code,
-      message: error instanceof Error ? error.message : "The call was refused.",
-      category: refusalCategory(code),
-      retryable: nothingRanCodes.has(code),
-      requestId: null,
-      ...(typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)
-        ? { details: { retryAfterMs } }
-        : {}),
-    }),
-  };
+      : undefined
+  );
 };
