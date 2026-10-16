@@ -113,6 +113,8 @@ export const operationErrors = defineErrorFamily({
     "The store's operation refused the request or failed: its details name the store's own code.",
   "resource.busy":
     "The store's operation couldn't run just now. Try again shortly.",
+  "resource.limit_reached":
+    "The App used this resource as much as it may in one call, one minute or one day, so this request wasn't made. Its details name which.",
   "contract.invalid_resource_result":
     "A resource answered something its contract doesn't allow.",
   "contract.invalid_args": "The arguments don't fit the operation.",
@@ -175,6 +177,7 @@ const categories: Readonly<Record<string, ErrorCategory>> = {
   "resource.idempotency_conflict": "contract",
   "resource.operation_failed": "domain",
   "resource.busy": "operational",
+  "resource.limit_reached": "operational",
   "data.write_denied": "authorization",
   "data.conflict": "domain",
   "data.referenced": "domain",

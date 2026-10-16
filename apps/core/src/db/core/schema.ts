@@ -949,7 +949,14 @@ export const appResourceBindings = sqliteTable(
       .references(() => apps.id),
     alias: text().notNull(),
     kind: text({
-      enum: ["model", "connector", "knowledge", "template", "store"],
+      enum: [
+        "model",
+        "connector",
+        "knowledge",
+        "template",
+        "store",
+        "statistics",
+      ],
     }).notNull(),
     target: text().notNull(),
     declarationHash: text("declaration_hash").notNull(),

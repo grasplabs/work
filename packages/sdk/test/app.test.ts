@@ -322,6 +322,51 @@ describe("resources", () => {
   });
 });
 
+/** Declares statistics with `config`, one the types may refuse. */
+const statistics = (config: unknown) => () =>
+  // SAFETY: a config the types refuse, checked at run time.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  resource.statistics("stats", config as { operations: ["read"] });
+
+describe("a statistics declaration", () => {
+  test("reads back as code declared it, and reads only the platform's measures it lists, with `read`", () => {
+    const own = resource.statistics("stats", { operations: ["record"] });
+    const platform = resource.statistics("platform", {
+      operations: ["read"],
+      platform: ["platform.workflow_runs"],
+    });
+    expect({
+      own: JSON.stringify(readResourceDeclaration(structuredClone(own))),
+      platform: JSON.stringify(
+        readResourceDeclaration(structuredClone(platform))
+      ),
+      frozen: Reflect.set(platform.platform, 1, "platform.improvement_signals"),
+      ownPlatform: own.platform,
+    }).toStrictEqual({
+      own: JSON.stringify(own),
+      platform: JSON.stringify(platform),
+      frozen: false,
+      ownPlatform: [],
+    });
+    expect(
+      [
+        statistics({
+          operations: ["record"],
+          platform: ["platform.workflow_runs"],
+        }),
+        statistics({ operations: ["read"], platform: ["platform.everything"] }),
+        statistics({ operations: ["read"], platform: [] }),
+        statistics({
+          operations: ["read"],
+          platform: ["platform.workflow_runs", "platform.workflow_runs"],
+        }),
+        statistics({ operations: ["write"] }),
+        statistics({ operations: ["read"], measures: [] }),
+      ].map((declaration) => refusal(declaration).length > 0)
+    ).toStrictEqual([true, true, true, true, true, true]);
+  });
+});
+
 describe("inspection", () => {
   test("hands out a manifest frozen all the way down, and handlers it can't change", () => {
     const registered = notes();

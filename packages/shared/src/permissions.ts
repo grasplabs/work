@@ -83,7 +83,7 @@ const collectionObjectSchema = z.strictObject({
  * action per permission (its stub does that one thing):
  *
  * - `statistics`: the measures the platform publishes of Apps' runs
- *   (`platformMeasures` in `@grasp-os/shared/statistics`), which an App
+ *   (`platformMeasures` in `@grasp-os/shared/platform-measures`), which an App
  *   reads only once an admin grants it this, and then only of Apps whose
  *   runs the person it acts for may see. An App's own statistics need no
  *   permission.

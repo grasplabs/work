@@ -42,6 +42,7 @@ import { readWindow } from "./query-windows.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
+  BindingCaller,
   InvocationProvenance,
   InvocationSources,
 } from "./resource-adapter.ts";
@@ -161,6 +162,11 @@ export interface RunCaller {
   readonly requireHolds: () => void;
   /** Hears each side effect connect held for the person (`BindingCaller.held`). */
   readonly held: (key: string) => void;
+  /**
+   * The step the call comes from, and its attempt, which the statistics
+   * points it records are kept by (`BindingCaller.step`).
+   */
+  readonly step?: NonNullable<BindingCaller["step"]>;
 }
 
 /**
@@ -226,7 +232,15 @@ const fencedStore = (
 export const runInvocationFor = async (
   env: Env,
   release: Release,
-  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller,
+  {
+    run,
+    requestId,
+    deadline,
+    stillCurrent,
+    requireHolds,
+    held,
+    step,
+  }: RunCaller,
   operation: string
 ): Promise<Invocation> => {
   const { app, runId, version, authority } = run;
@@ -290,6 +304,7 @@ export const runInvocationFor = async (
     shareSubject: run.shareSubject,
     requireHolds,
     admit: authorize,
+    ...(step === undefined ? {} : { step }),
   });
   return {
     principal: authority.onBehalfOf,

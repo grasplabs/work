@@ -217,6 +217,12 @@ interface StepAttempt {
   functionCalls: number;
   calledApp: boolean;
   /**
+   * Whether a function of its App it called kept a statistics point by it
+   * (`BindingCaller.step`): added up, as an App method's, if it completes
+   * the step.
+   */
+  recorded: boolean;
+  /**
    * The first of its calls refused as one its review doesn't show, or
    * made from another attempt's code that had one refused: the attempt
    * fails with it, whatever its code made of the refusal.
@@ -845,6 +851,14 @@ const attemptContextSchema = z.object({
     })
     .optional(),
 });
+
+/**
+ * Whether `attempt` may have kept statistics points to add up as it
+ * completes its step: it called its App's methods, or a function of its
+ * App's sealed release kept one by it.
+ */
+const keptStatistics = (attempt: StepAttempt): boolean =>
+  attempt.calledApp || attempt.recorded;
 
 /**
  * Whether an attempt has no retry after it: its number as the engine's
@@ -1761,6 +1775,7 @@ export class RunHost extends RpcTarget {
           heldKeys: [],
           functionCalls: 0,
           calledApp: false,
+          recorded: false,
           last: isLastAttempt(context, tries, parsed.retries?.limit),
         };
         // Admitted before its code runs, or failed with the refusal: a
@@ -1866,7 +1881,7 @@ export class RunHost extends RpcTarget {
           // The step completes with this attempt: the statistics points
           // its App calls recorded are added up, once (a step run again
           // after this adds nothing), and no other attempt's.
-          if (attempt.calledApp) {
+          if (keptStatistics(attempt)) {
             await commitStepStatistics(
               this.#env,
               this.#run.runId,
@@ -2704,6 +2719,13 @@ export class RunHost extends RpcTarget {
             ) {
               attempt.heldKeys.push(key);
             }
+          },
+          step: {
+            key: stepKey,
+            attempt: attempt.leaseId,
+            recording: () => {
+              attempt.recorded = true;
+            },
           },
         },
         reference,

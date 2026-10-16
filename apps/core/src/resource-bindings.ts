@@ -75,14 +75,16 @@ import type {
 } from "./resource-connector.ts";
 import { knowledgeAdapter } from "./resource-knowledge.ts";
 import { modelAdapter, modelAnswers, tokensOfBound } from "./resource-model.ts";
+import { platformGrantsOf, statisticsAdapter } from "./resource-statistics.ts";
 import { appStoreGrant, grantServes, storeAdapter } from "./resource-store.ts";
 import { templateAdapter, templateVersionsOf } from "./resource-templates.ts";
 import { auditStoreRefusal } from "./store-operations.ts";
 import type { StoreGrant } from "./store-operations.ts";
 
 // Approved resource bindings (spec 12, 16.1, 32.3): what lets an action of
-// an App of spec 8's layout reach a model, a connection, knowledge or a
-// template through `ctx.resources.<alias>`. Threat model, and how each is
+// an App of spec 8's layout reach a model, a connection, knowledge, a
+// template, another store or the platform's statistics through
+// `ctx.resources.<alias>`. Threat model, and how each is
 // closed:
 //
 // - A declaration self-grants: a declaration is App code's requirement and
@@ -132,6 +134,7 @@ const adapters: {
   connector: connectorAdapter,
   template: templateAdapter,
   store: storeAdapter,
+  statistics: statisticsAdapter,
 };
 
 /** The SHA-256 of `declaration`, canonical, as a release sealed it. */
@@ -290,6 +293,11 @@ const targetDetail = (target: BindingTarget): Record<string, Json> => {
     return joined.length <= identifierMaxLength
       ? { permissionIds: joined }
       : { permissionCount: ids.length };
+  }
+  if (target.kind === "statistics") {
+    return target.permissionId === undefined
+      ? {}
+      : { permissionId: target.permissionId };
   }
   return { templateId: target.templateId, templateVersion: target.version };
 };
@@ -713,6 +721,12 @@ interface ReviewGrants {
   readonly storeGrant: (
     permissionId: string
   ) => Promise<StoreGrant | undefined | typeof unchecked>;
+  /**
+   * The App's own active permissions to read the platform's statistics,
+   * newest first, at most `choicesMax`: read once, when a statistics
+   * resource that reads them asks.
+   */
+  readonly platform: () => Promise<{ ids: string[]; truncated: boolean }>;
 }
 
 /** The App's grants and their collections' names, read once for a review. */
@@ -740,7 +754,16 @@ const reviewGrants = async (
           .select({ id: collections.id, name: collections.name })
           .from(collections)
           .where(inList(collections.id, ids));
+  let platform: Promise<string[]> | undefined;
   return {
+    platform: async () => {
+      platform ??= platformGrantsOf(env, app, choicesMax + 1);
+      const granted = await platform;
+      return {
+        ids: granted.slice(0, choicesMax),
+        truncated: granted.length > choicesMax,
+      };
+    },
     connections,
     collections: { rows: readable, truncated: collectionGrants.truncated },
     stores,
@@ -812,6 +835,18 @@ const choicesFor = async (
         })),
       truncated:
         truncated || serving.some(([, serves]) => serves === undefined),
+    };
+  }
+  if (declaration["~resource"] === "statistics") {
+    const platform = declaration.platform.length > 0;
+    const granted = platform
+      ? await grants.platform()
+      : { ids: [], truncated: false };
+    return {
+      kind: "statistics",
+      platform,
+      permissions: granted.ids.map((permissionId) => ({ permissionId })),
+      truncated: granted.truncated,
     };
   }
   if (declaration["~resource"] === "store") {
@@ -997,9 +1032,15 @@ const targetLabels = async (
   };
 };
 
-/** Knowledge's declared operations, or a store's paths; none for other kinds. */
+/**
+ * Knowledge's or statistics' declared operations, or a store's paths; none
+ * for other kinds.
+ */
 const operationsOf = (declaration: AnyResource): string[] => {
-  if (declaration["~resource"] === "knowledge") {
+  if (
+    declaration["~resource"] === "knowledge" ||
+    declaration["~resource"] === "statistics"
+  ) {
     return [...declaration.operations];
   }
   return declaration["~resource"] === "store"
@@ -1018,6 +1059,7 @@ const declaredOf = (declaration: AnyResource) => {
     actions: kind === "connector" ? [...declaration.actions] : [],
     operations: operationsOf(declaration),
     collections: kind === "knowledge" ? [...declaration.collections] : [],
+    measures: kind === "statistics" ? [...declaration.platform] : [],
     maxOutputTokens: kind === "model" ? declaration.maxOutputTokens : null,
     structuredOutput: kind === "model" && declaration.structuredOutput !== null,
   };
@@ -1110,9 +1152,18 @@ export const reviewResourceBindings = async (
  * serves exactly the contract it served then; undefined otherwise, which
  * the operation host answers as `resource.unavailable`.
  */
-export const resourceBindingsFor =
-  (env: Env, caller: BindingCaller): ResourceBindings =>
-  async (declaration: AnyResource): Promise<BoundResource | undefined> => {
+export const resourceBindingsFor = (
+  env: Env,
+  given: BindingCaller
+): ResourceBindings => {
+  // One count of what the invocation used, across all its requests.
+  const caller: BindingCaller = {
+    ...given,
+    counts: given.counts ?? new Map<string, number>(),
+  };
+  return async (
+    declaration: AnyResource
+  ): Promise<BoundResource | undefined> => {
     const row = await activeRow(env, caller.app, declaration.alias);
     if (row === undefined) {
       return undefined;
@@ -1176,6 +1227,7 @@ export const resourceBindingsFor =
         ),
     };
   };
+};
 
 /** A held call its binding no longer serves. */
 const notServed = () => operationErrors.create("resource.unavailable");

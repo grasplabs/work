@@ -22,6 +22,11 @@ export const noChoice = (choices: BindingChoices): boolean => {
   if (choices.kind === "template") {
     return choices.versions.length === 0;
   }
+  // Statistics of the App's own measures only: nothing to choose, the
+  // approval is the grant.
+  if (choices.kind === "statistics" && !choices.platform) {
+    return false;
+  }
   return choices.permissions.length === 0;
 };
 
@@ -91,6 +96,16 @@ export const targetOf = (
       ? { kind: choices.kind, permissionId: picked }
       : undefined;
   }
+  if (choices.kind === "statistics") {
+    if (!choices.platform) {
+      return { kind: "statistics" };
+    }
+    return choices.permissions.some(
+      ({ permissionId }) => permissionId === picked
+    )
+      ? { kind: "statistics", permissionId: picked }
+      : undefined;
+  }
   if (choices.kind === "knowledge") {
     return allChosen(resource.collections, chosen)
       ? {
@@ -143,6 +158,7 @@ export const formKey = (
     resource.actions,
     resource.operations,
     resource.collections,
+    resource.measures,
     resource.binding?.id ?? null,
     choiceIds(resource.choices),
   ]);

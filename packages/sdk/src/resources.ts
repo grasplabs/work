@@ -4,6 +4,13 @@ import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
 } from "@grasp-os/shared/operation-limits";
+import { isPlatformMeasure } from "@grasp-os/shared/platform-measures";
+import type { PlatformMeasure } from "@grasp-os/shared/platform-measures";
+import type {
+  StatisticAnswer,
+  StatisticPoint,
+  StatisticQuery,
+} from "@grasp-os/shared/statistics";
 
 import type { ConnectorCatalog } from "./connector-catalog.gen.ts";
 import type { FilesOperation } from "./references.ts";
@@ -36,6 +43,11 @@ import type { Infer, ObjectInput, ValueShape } from "./values.ts";
 // the binding resolves only where the store serves exactly that. Its
 // tables and schema stay the store's own: the declaration copies none of
 // them, and the host runs each call as that App's own code.
+//
+// A statistics resource is the platform's statistics: recording and
+// reading measures of the App's own, and reading the measures the
+// platform publishes it lists (`platform`), each only once an admin binds
+// it, and a platform measure only under a permission they granted.
 
 /** The kinds of resource an action can use. */
 export type ResourceKind =
@@ -43,7 +55,8 @@ export type ResourceKind =
   | "connector"
   | "knowledge"
   | "template"
-  | "store";
+  | "store"
+  | "statistics";
 
 /** What a declaration's config may say about a model. */
 export interface ModelConfig<Output extends AnySchema | undefined> {
@@ -165,6 +178,23 @@ export interface StoreConfig<
   readonly operations: Operations;
 }
 
+/** What a statistics resource may do: record points, read measures. */
+export type StatisticsOperation = "record" | "read";
+
+/** What a declaration's config may say about statistics. */
+export interface StatisticsConfig<
+  Operations extends readonly StatisticsOperation[],
+> {
+  /** Recording points of the App's own measures, reading measures, or both. */
+  readonly operations: Operations;
+  /**
+   * The measures the platform publishes the App reads, each once: only
+   * with `read`, and only under a permission an admin binds. None for
+   * the App's own measures only.
+   */
+  readonly platform?: readonly PlatformMeasure[];
+}
+
 /** One store operation as a declaration holds it: data only. */
 export interface StoreOperationShape {
   readonly kind: StoreOperationKind;
@@ -229,6 +259,17 @@ export interface StoreResource<
   readonly "~operations"?: Operations;
 }
 
+/** A statistics requirement. */
+export interface StatisticsResource<
+  Alias extends string = string,
+  Operations extends readonly StatisticsOperation[] =
+    readonly StatisticsOperation[],
+> extends DeclarationBase<"statistics", Alias> {
+  readonly operations: Operations;
+  /** The platform's measures it reads: empty for the App's own only. */
+  readonly platform: readonly PlatformMeasure[];
+}
+
 /**
  * A files requirement (spec 10.7.5, 32.3): what the App's screens may do
  * with files, through the host. Browser-facing: no function lists it.
@@ -264,7 +305,8 @@ export type AnyResource =
   | ConnectorResource
   | KnowledgeResource
   | TemplateResource
-  | StoreResource;
+  | StoreResource
+  | StatisticsResource;
 
 /** One search result from knowledge: a title and an excerpt of it. */
 export interface KnowledgeHit {
@@ -368,6 +410,28 @@ export interface StoreClient<
   ) => Promise<Infer<Operations[Path]["returns"]>>;
 }
 
+/** What `ctx.resources.<alias>` is for statistics, by its operations. */
+export type StatisticsClient<
+  Operations extends readonly StatisticsOperation[],
+> = ("record" extends Operations[number]
+  ? {
+      /**
+       * Records one point of a measure of the App's own: a workflow
+       * run's step's points count once the step completes.
+       */
+      readonly record: (point: StatisticPoint) => Promise<null>;
+    }
+  : unknown) &
+  ("read" extends Operations[number]
+    ? {
+        /**
+         * Reads a measure of the App's own, or one of the platform's the
+         * declaration lists, added up as `query` asks.
+         */
+        readonly read: (query: StatisticQuery) => Promise<StatisticAnswer>;
+      }
+    : unknown);
+
 /**
  * A store call's arguments: each path of `Path` paired with its own
  * arguments, so a path that may be either of two needs arguments that fit
@@ -410,6 +474,12 @@ interface ResourceClients<Resource> {
   readonly store: Resource extends StoreResource<string, infer Operations>
     ? StoreClient<Operations>
     : never;
+  readonly statistics: Resource extends StatisticsResource<
+    string,
+    infer Operations
+  >
+    ? StatisticsClient<Operations>
+    : never;
 }
 
 /** Why a resource's declaration was refused. */
@@ -449,6 +519,46 @@ export const isResource = (value: unknown): value is AnyResource =>
 /** Whether `value` is a files or links declaration `resource` made. */
 export const isBrowserResource = (value: unknown): value is BrowserResource =>
   typeof value === "object" && value !== null && browserDeclarations.has(value);
+
+/** The operations a statistics resource may declare. */
+const statisticsOperations: readonly StatisticsOperation[] = ["record", "read"];
+
+/**
+ * The platform measures a statistics declaration reads: none, or each
+ * once, of those the platform publishes, and only with `read`.
+ */
+const checkedPlatform = (
+  platform: unknown,
+  operations: readonly StatisticsOperation[]
+): readonly PlatformMeasure[] => {
+  if (platform === undefined) {
+    return Object.freeze([]);
+  }
+  if (!Array.isArray(platform) || platform.length === 0) {
+    return refuse(
+      "A statistics resource's `platform` lists the platform's measures it reads, at least one."
+    );
+  }
+  if (!operations.includes("read")) {
+    return refuse(
+      "A statistics resource reads the platform's measures only with `read`."
+    );
+  }
+  const listed: readonly unknown[] = platform;
+  const measures: PlatformMeasure[] = [];
+  for (const measure of listed) {
+    if (typeof measure !== "string" || !isPlatformMeasure(measure)) {
+      return refuse(
+        "A statistics resource lists only measures the platform publishes, such as `platform.workflow_runs`."
+      );
+    }
+    if (measures.includes(measure)) {
+      refuse(`A statistics resource lists \`${measure}\` twice.`);
+    }
+    measures.push(measure);
+  }
+  return Object.freeze(measures);
+};
 
 /** The operations a files resource may declare. */
 const filesOperations: readonly FilesOperation[] = [
@@ -839,6 +949,40 @@ export const resource = Object.freeze({
     ) as StoreResource<Alias, Operations>;
   },
   /**
+   * The platform's statistics: recording and reading the App's own
+   * measures, and reading the platform's it lists in `platform`.
+   */
+  statistics: <
+    const Alias extends string,
+    const Operations extends readonly [
+      StatisticsOperation,
+      ...StatisticsOperation[],
+    ],
+  >(
+    alias: Alias,
+    config: StatisticsConfig<Operations>
+  ): StatisticsResource<Alias, Operations> => {
+    const checked = checkedConfig(config, ["operations", "platform"]);
+    const operations = checkedList(
+      checked.operations,
+      "operations",
+      statisticsOperations
+    ).filter(
+      (operation): operation is StatisticsOperation =>
+        operation === "record" || operation === "read"
+    );
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and lists holding exactly the names
+    // given, in order.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declared({
+      "~resource": "statistics",
+      alias: checkedAlias(alias),
+      operations,
+      platform: checkedPlatform(checked.platform, operations),
+    }) as StatisticsResource<Alias, Operations>;
+  },
+  /**
    * What the App's screens may do with files through the host: upload,
    * read, attach, delete. Listed in the App's `uses`, never a function's.
    */
@@ -941,6 +1085,18 @@ export const readResourceDeclaration = (
       return refuse("A store resource's config has only `operations`.");
     }
     return storeDeclaration(alias, operations, shapeFromData);
+  }
+  if (kind === "statistics") {
+    // A manifest holds no platform measures as an empty list; code leaves
+    // `platform` out for none.
+    const { platform, ...rest } = config;
+    // SAFETY: as above.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const statisticsConfig = {
+      ...rest,
+      ...(Array.isArray(platform) && platform.length === 0 ? {} : { platform }),
+    } as never;
+    return resource.statistics(alias, statisticsConfig);
   }
   if (kind === "files") {
     return resource.files(alias, loose);
