@@ -19,6 +19,12 @@ export interface AttemptCall {
    * workflow caught that and went on.
    */
   ended: boolean;
+  /**
+   * Whether its step had ended before its call settled: an attempt the
+   * engine timed out, left out in the isolate. Its call ending with the
+   * isolate says nothing of where the CPU time went.
+   */
+  outlivedStep: boolean;
 }
 
 /**
@@ -29,13 +35,21 @@ export interface AttemptCall {
 export const trackAttemptCalls =
   (calls: AttemptCall[]) =>
   (call: Promise<unknown>, stepDone: Promise<unknown>): void => {
-    const attempt: AttemptCall = { call, stepDone, ended: false };
+    const attempt: AttemptCall = {
+      call,
+      stepDone,
+      ended: false,
+      outlivedStep: false,
+    };
     const observed = async (): Promise<null> => {
       try {
         await call;
       } catch {
         // The host awaits it, and reports what it settles with.
       }
+      // A step ends only once its attempt's call settled (host.ts, `do`),
+      // unless the engine gave up on that attempt first.
+      attempt.outlivedStep = attempt.ended;
       return null;
     };
     const ending = async (): Promise<null> => {
@@ -88,15 +102,21 @@ export const afterCpuKill = async (
     attempts.push(call);
   }
   const outcomes = await Promise.allSettled(attempts);
-  const killed = calls.filter((_attempt, index) => {
+  // Only attempts the kill cut off in their step: one whose step ended
+  // before (it timed out, and the workflow went on) was in no step then.
+  const killed = calls.filter((attempt, index) => {
     const outcome = outcomes[index];
-    return outcome?.status === "rejected" && isCpuLimitKill(outcome.reason);
+    return (
+      !attempt.outlivedStep &&
+      outcome?.status === "rejected" &&
+      isCpuLimitKill(outcome.reason)
+    );
   });
   if (killed.length === 0) {
     throw spentOutsideSteps(thrown);
   }
-  // Only attempts whose steps are still under way: one whose step ended
-  // before (it timed out, and the workflow went on) is no step to retry.
+  // Only steps still under way are retried: one the kill ended in this
+  // activation (its last attempt) fails the run with its failure.
   const cutOff = killed.filter((attempt) => !attempt.ended);
   if (cutOff.length > 0) {
     const steps: Promise<unknown>[] = [];
