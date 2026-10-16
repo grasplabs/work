@@ -236,6 +236,21 @@ describe("the Google Workspace connector's scoping", () => {
   });
 });
 
+/** The stamp headers of the raw message a Gmail request carried. */
+const stampsOf = (body: unknown): string[] => {
+  const { raw } = z
+    .object({ raw: z.string() })
+    .or(
+      z
+        .object({ message: z.object({ raw: z.string() }) })
+        .transform(({ message }) => message)
+    )
+    .parse(body);
+  const mime = atob(raw.replaceAll("-", "+").replaceAll("_", "/"));
+  const [head = ""] = mime.split("\r\n\r\n");
+  return head.split("\r\n").filter((line) => line.startsWith("X-Grasp-Stamp:"));
+};
+
 describe("the Google Workspace connector's Gmail tools", () => {
   it("list a mailbox's messages with their metadata and the IDs they came from", async () => {
     const connection = await connected();
@@ -686,6 +701,37 @@ describe("the Google Workspace connector's Gmail tools", () => {
       subject: "Payment of invoice 2026-0041\r\nBcc: thief@evil.test",
       body: "Paid today, € 1.250.\r\n\r\nKind regards",
     });
+  });
+
+  it("send and draft a workflow run's mail with its stamp as a header, which no call without one carries", async () => {
+    const connection = await connected();
+    const stamp = "5a".repeat(16);
+    const mail = {
+      mailbox: invoices,
+      subject: "Payment of invoice 2026-0041",
+      body: "Paid today.",
+      to: ["billing@northwind.example.org"],
+    };
+    await call(connection, "mail.send", mail, {
+      resource: invoices,
+      idempotencyKey: "run-7:send-stamped",
+      stamp,
+    });
+    await call(connection, "mail.createDraft", mail, {
+      resource: invoices,
+      idempotencyKey: "run-7:draft-stamped",
+      stamp,
+    });
+    await call(connection, "mail.send", mail, {
+      resource: invoices,
+      idempotencyKey: "run-7:send-plain",
+    });
+
+    expect(requests().map(({ body }) => stampsOf(body))).toStrictEqual([
+      [`X-Grasp-Stamp: ${stamp}`],
+      [`X-Grasp-Stamp: ${stamp}`],
+      [],
+    ]);
   });
 
   it("send nothing to an address that would carry a header", async () => {

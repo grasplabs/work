@@ -26,6 +26,11 @@ export interface Account {
   audience?: string;
   /** Microsoft only: a B2B guest, signed in by this other identity provider. */
   guestFrom?: string;
+  /**
+   * Microsoft only: a sign-in name (UPN) that isn't the account's email
+   * address, which the ID token then names as its `email`.
+   */
+  signInName?: string;
 }
 
 /** One request connect sent to a provider. */
@@ -75,7 +80,8 @@ const idTokenFor = (account: Account): string => {
       aud: audience,
       tid: tenant,
       oid: account.subject,
-      preferred_username: account.email,
+      preferred_username: account.signInName ?? account.email,
+      ...(account.signInName === undefined ? {} : { email: account.email }),
       idp: account.guestFrom,
     });
   }

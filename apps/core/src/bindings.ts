@@ -297,16 +297,14 @@ export const runStubCall = async (
     call
   );
   try {
-    // A run's mail to the deployment's domain carries the run's token,
-    // recorded before the call leaves, so the runs it starts join its
-    // lineage. A record that fails fails the call, which sent nothing.
+    // A run's mail carries the run's tokens, recorded before the call
+    // leaves (on its recipients at the deployment's domain, and as its
+    // stamp), so the runs it starts join its lineage. A record that fails
+    // fails the call, which sent nothing.
     const sent =
       stamping === undefined
         ? request
-        : {
-            ...request,
-            input: await stampedMail(env, stamping, request),
-          };
+        : { ...request, ...(await stampedMail(env, stamping, request)) };
     await stillAllowed?.();
     return await env.CONNECT.call(sent);
   } catch (error) {

@@ -1407,11 +1407,17 @@ export const runMailStamps = sqliteTable(
 /**
  * What each mail call of a workflow run's step was sent with
  * (src/workflows/mail-stamps.ts): its recipients that carry a token, as
- * they were and as they went, none for a call that stamped nothing. Keyed
- * by the SHA-256 of the step's key, the connection, the action and the
- * call's input, so the same call made again under its key sends what it
- * sent the first time, whatever core learned since. Removed with its
- * run's details (src/workflows/retention.ts).
+ * they were and as they went, none for a call that stamped nothing; and,
+ * for a native mail connector's call, the call's stamp, which its message
+ * carries as a header, with every recipient the call named and who sent
+ * it (the mailbox it names, its connection's account and that account's
+ * email address). A copy of the message that reaches a watched mailbox
+ * starts its runs under the run only when the mailbox is one of
+ * `recipients` and its From one of `senders`. Keyed by the SHA-256 of the
+ * step's key, the connection, the action and the call's input, so the
+ * same call made again under its key sends what it sent the first time,
+ * whatever core learned since. Removed with its run's details
+ * (src/workflows/retention.ts).
  */
 export const runMailCalls = sqliteTable(
   "run_mail_calls",
@@ -1422,8 +1428,54 @@ export const runMailCalls = sqliteTable(
       .references(() => workflowRuns.id),
     replaced: text({ mode: "json" }).$type<Record<string, string>>().notNull(),
     createdAt: timestamp("created_at").notNull(),
+    stamp: text(),
+    recipients: text({ mode: "json" }).$type<string[]>(),
+    senders: text({ mode: "json" }).$type<string[]>(),
   },
-  (table) => [index("run_mail_calls_run_idx").on(table.runId)]
+  (table) => [
+    index("run_mail_calls_run_idx").on(table.runId),
+    uniqueIndex("run_mail_calls_stamp_idx").on(table.stamp),
+  ]
+);
+
+/**
+ * The messages that claimed each stamp at each source of connector events
+ * (src/workflows/mail-stamps.ts): a source is a connection and the
+ * mailbox it reads (`[connection, resource]`), and a message is what an
+ * event there that names the stamp is about (`eventKey`, the SHA-256 of
+ * its connection and ID). At most a few per stamp and source
+ * (`maxClaimsPerSource`): each starts runs under the stamp's run there,
+ * the same event delivered again included, and any message past them is
+ * a root. Removed with its run's details (src/workflows/retention.ts).
+ */
+export const runMailStampClaims = sqliteTable(
+  "run_mail_stamp_claims",
+  {
+    stamp: text().notNull(),
+    source: text().notNull(),
+    eventKey: text("event_key").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.stamp, table.source, table.eventKey] }),
+  ]
+);
+
+/**
+ * Each run a stamp's run lineage refused to start
+ * (src/workflows/connector-events.ts), by the trigger key it would have
+ * had, with the stamp that made it the lineage's: its refusal is audited
+ * once, however often its event is delivered again. Removed with the
+ * stamp's run's details (src/workflows/retention.ts).
+ */
+export const runMailStampRefusals = sqliteTable(
+  "run_mail_stamp_refusals",
+  {
+    triggerKey: text("trigger_key").primaryKey(),
+    stamp: text().notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [index("run_mail_stamp_refusals_stamp_idx").on(table.stamp)]
 );
 
 /**

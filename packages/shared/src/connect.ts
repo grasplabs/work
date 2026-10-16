@@ -33,6 +33,18 @@ export const connectCallSchema = z.strictObject({
    * a person using an App) needs none: connect makes one as it holds it.
    */
   idempotencyKey: identifierSchema.optional(),
+  /**
+   * The stamp core recorded for a workflow run's mail (core's
+   * workflows/mail-stamps.ts), never in the input App code writes: connect
+   * gives it to a native connector's side effect (`stampMetaKey`), whose
+   * mail carries it as a header, so the copy a watched mailbox receives
+   * names the run that sent it. Kept with a held action, so it goes out
+   * with it once its person confirms.
+   */
+  stamp: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/u)
+    .optional(),
 });
 export type ConnectCall = z.infer<typeof connectCallSchema>;
 
@@ -227,6 +239,12 @@ export interface ConnectionOwner {
   provider: string;
   /** The account at the provider, such as its email address. */
   accountName: string | null;
+  /**
+   * The account's own email address, as its provider's sign-in said: for
+   * Microsoft 365 the primary address it sends from, which may differ from
+   * its sign-in name (`accountName`). Null when the provider didn't say.
+   */
+  accountEmail: string | null;
 }
 
 /**
@@ -799,7 +817,7 @@ export interface HeldCall {
  * capability core made for exactly that call, as for carrying it out.
  */
 export const heldOutcomeRequestSchema = connectCallSchema
-  .omit({ input: true })
+  .omit({ input: true, stamp: true })
   .required({ idempotencyKey: true });
 export type HeldOutcomeRequest = z.input<typeof heldOutcomeRequestSchema>;
 
