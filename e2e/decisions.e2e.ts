@@ -149,15 +149,25 @@ const askedFor = async (builder: Person, decider: Person, page: Page) => {
       },
       "Approvals"
     );
-    const run = await api.workflows.start(app, "approval", {
-      from: `person:${decider.userId}`,
-    });
     await page.goto(`/domains/${app}/apps/asks/full`);
     const kept = page
       .frameLocator('iframe[title="asks app"]')
       .getByRole("status", { name: "Recipients" });
-    // The screen follows the query live: the ask's write reaches it.
+    // The screen follows the query from before any ask: nothing kept yet.
+    await expect(kept).toHaveText("[]", { timeout: 20_000 });
+    // Marked, so a reload of the frame or the page would show.
+    const frame = page.frame({ url: /\/screen-frame\?load=/u });
+    await frame?.evaluate(() => {
+      document.body.dataset.sameDocument = "yes";
+    });
+    const run = await api.workflows.start(app, "approval", {
+      from: `person:${decider.userId}`,
+    });
+    // The ask's write reaches the open screen live, without a reload.
     await expect(kept).toHaveText(/\/decisions\//u, { timeout: 30_000 });
+    expect(
+      await frame?.evaluate(() => document.body.dataset.sameDocument)
+    ).toBe("yes");
     const link = linkIn(JSON.parse((await kept.textContent()) ?? "[]"));
     expect(link).toMatch(/\/decisions\/[^?]+$/u);
     const { pathname, search } = new URL(link);
