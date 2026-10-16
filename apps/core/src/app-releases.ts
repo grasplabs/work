@@ -35,6 +35,8 @@ import { storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalText } from "@grasp-os/shared/json";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { sharedRun } from "@grasp-os/shared/shared-runs";
+import type { SharedRun } from "@grasp-os/shared/shared-runs";
 import { dataErrors, migrationErrors } from "@grasp-os/shared/stores";
 import type { AppliedContract } from "@grasp-os/shared/stores";
 import { and, eq, sql } from "drizzle-orm";
@@ -118,6 +120,12 @@ import { liveStoreSql } from "./store-deletion.ts";
 //   host chose for it (`app_default_stores`, app-activation.ts) and the
 //   App's builders bind by their builder rights. Which store to bind is its
 //   caller's choice, the host's, never App code's.
+// - A load whose request is cancelled mid-read (workerd never settles it)
+//   holds every later load of that release in the isolate, or a load that
+//   failed or ran on past its time is served as verified: loads of one
+//   release share one only for as long as a load may take (`sharedRun`),
+//   and only a load that verified every byte keeps its release
+//   (`verified`); a failure keeps nothing (`loadRelease`).
 
 /** Where an artifact's bytes are, by their SHA-256. */
 export const artifactKey = (sha256: string): string =>
@@ -214,8 +222,13 @@ const contractsSchema = z.strictObject({
 const sealedWorkflowsOf = (contracts: string): WorkflowBindingExtras[] =>
   readSealedWorkflows(contractsSchema.parse(JSON.parse(contracts)).workflows);
 
-/** Releases loaded and verified, by manifest hash: their content never changes. */
-const verified = new Map<string, Promise<Omit<Release, "manifestHash">>>();
+/**
+ * Releases loaded and verified, by manifest hash: their content never
+ * changes. Only a load that verified every byte against that hash puts
+ * one here, so a failed load leaves nothing, and two loads of one hash
+ * can only put the same release.
+ */
+const verified = new Map<string, Omit<Release, "manifestHash">>();
 
 /** How many verified releases one isolate keeps. */
 const verifiedMax = 32;
@@ -232,6 +245,38 @@ const storedArtifacts =
     const object = await env.FILES.get(artifactKey(sha256));
     return object === null ? undefined : await object.arrayBuffer();
   };
+
+/**
+ * The loads running now in this isolate, by manifest hash: loads of a
+ * release asked for while one runs share it. A load whose request was
+ * cancelled while it read never settles, so it is waited for only as long
+ * as a load may take (`sharedRun`, `releaseReadMs`), never until the
+ * release is evicted.
+ */
+const verifying = new Map<string, SharedRun<Omit<Release, "manifestHash">>>();
+
+/**
+ * The longest a load of a release takes: its manifest bounds how many
+ * artifacts it reads (one R2 read and one hash of each), one after the
+ * other, so a base for the first plus a share for each. A real release
+ * has a few dozen and loads in well under a second; past this, a load
+ * is taken for abandoned and the next to ask reads it anew.
+ */
+const releaseReadBaseMs = 5000;
+
+/** {@link releaseReadBaseMs}'s share for each artifact a release reads. */
+const releaseArtifactReadMs = 100;
+
+/**
+ * How long a load of `manifest` may take before it is taken for
+ * abandoned, or less where tests set `RELEASE_READ_MS`.
+ */
+const releaseReadMs = (env: Env, manifest: ReleaseManifest): number => {
+  const bound =
+    releaseReadBaseMs + manifest.artifacts.length * releaseArtifactReadMs;
+  const set = Number(env.RELEASE_READ_MS);
+  return Number.isInteger(set) && set > 0 && set < bound ? set : bound;
+};
 
 /** The bytes of the artifact `entry` names, checked against its hash and size. */
 const artifactText = async (
@@ -490,23 +535,29 @@ export const loadRelease = async (
   pinned?: string
 ): Promise<Release> => {
   const { manifest, hash } = await checkedManifest(env, app, version, pinned);
-  let loading = verified.get(hash);
-  if (loading === undefined) {
-    loading = verifiedRelease(storedArtifacts(env), manifest);
-    verified.set(hash, loading);
-    if (verified.size > verifiedMax) {
-      const [oldest] = verified.keys();
-      if (oldest !== undefined) {
-        verified.delete(oldest);
+  const kept =
+    verified.get(hash) ??
+    (await sharedRun(
+      verifying,
+      hash,
+      releaseReadMs(env, manifest),
+      async () => {
+        const loaded = await verifiedRelease(storedArtifacts(env), manifest);
+        // A load that ran on past being taken for abandoned keeps what is
+        // there already: the same release, as the hash is the same.
+        if (!verified.has(hash)) {
+          verified.set(hash, loaded);
+          if (verified.size > verifiedMax) {
+            const [oldest] = verified.keys();
+            if (oldest !== undefined) {
+              verified.delete(oldest);
+            }
+          }
+        }
+        return loaded;
       }
-    }
-  }
-  try {
-    return { ...(await loading), manifestHash: hash };
-  } catch (error) {
-    verified.delete(hash);
-    throw error;
-  }
+    ));
+  return { ...kept, manifestHash: hash };
 };
 
 /** A draft release as its keeper stores it (sealed-previews.ts). */

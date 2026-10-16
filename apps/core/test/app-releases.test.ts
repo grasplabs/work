@@ -588,6 +588,65 @@ describe("a sealed release that changed", { timeout: 120_000 }, () => {
     ]).toStrictEqual([true, true, true, true, true]);
   });
 
+  it("answers the next load of a release whose first load was cancelled mid-read", async () => {
+    const fixture = await appWith(tablelessFiles());
+    const sealed = await seal(fixture);
+    // R2 that never answers a read: as the first load's request was
+    // cancelled while it read, which workerd never settles.
+    const reading = Promise.withResolvers<boolean>();
+    const stuck = new Proxy(env.FILES, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (property === "get") {
+          return async (): Promise<never> => {
+            reading.resolve(true);
+            return await Promise.withResolvers<never>().promise;
+          };
+        }
+        return typeof value === "function"
+          ? (...args: unknown[]): unknown => Reflect.apply(value, target, args)
+          : value;
+      },
+    });
+    const bounded = { ...env, RELEASE_READ_MS: "50" };
+    // Never awaited: it never answers.
+    const cancelled = loadRelease({ ...bounded, FILES: stuck }, fixture.app, 1);
+    await reading.promise;
+
+    const next = await Promise.race([
+      loadRelease(bounded, fixture.app, 1),
+      scheduler.wait(5000).then(() => "still waiting" as const),
+    ]);
+
+    expect(next === "still waiting" ? next : next.manifestHash).toBe(
+      sealed.manifestHash
+    );
+    await expect(
+      Promise.race([cancelled, Promise.resolve("never answers")])
+    ).resolves.toBe("never answers");
+  });
+
+  it("verifies a release anew after a load of it failed, keeping no failure", async () => {
+    const fixture = await appWith(tablelessFiles());
+    const sealed = await seal(fixture);
+    const entry = artifactAt(sealed, ".grasp/contracts.json");
+    const key = artifactKey(entry.sha256);
+    const stored = await env.FILES.get(key);
+    const bytes = (await stored?.arrayBuffer()) ?? new ArrayBuffer(0);
+    await env.FILES.delete(key);
+    const failed = await failure(
+      async () => await loadRelease(env, fixture.app, 1)
+    );
+    await env.FILES.put(key, bytes);
+
+    const loaded = await loadRelease(env, fixture.app, 1);
+
+    expect([failed, loaded.manifestHash]).toStrictEqual([
+      "version.artifact_corrupt",
+      sealed.manifestHash,
+    ]);
+  });
+
   it("is refused when an artifact is gone", async () => {
     const fixture = await appWith(notesFiles());
     const release = await seal(fixture);

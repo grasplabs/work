@@ -266,6 +266,7 @@ const platformBindingNames: ReadonlySet<string> = new Set([
   "PLATFORM_CHANGE",
   // The deployment's quota policy (core's src/workflows/quotas.ts).
   "QUOTA_LIMITS",
+  "RELEASE_READ_MS",
   "ROUTER_SECRET",
   "ROUTER_SECRET_PREVIOUS",
   "RUN_RETENTION_DAYS",
