@@ -43,6 +43,7 @@ import {
   codeImportError,
   rewriteAppCodeImports,
   rewriteCodeImports,
+  computeCode,
   generatedWorkflowCode,
   rewriteImports,
   screenTypeImportError,
@@ -55,6 +56,7 @@ import {
   buildFiles,
   declarationFile,
   limitErrors,
+  computeModuleErrors,
   openWorkflowErrors,
   screenFile,
   serverEntry,
@@ -617,6 +619,38 @@ export const buildOpenWorkflow = (
 };
 
 /**
+ * A JSON workflow's compute modules, built: as modules by flat name; or
+ * why they failed, each diagnostic naming its file.
+ */
+export type ComputeModulesBuild =
+  | { ok: true; modules: Record<string, string> }
+  | { ok: false; diagnostics: Diagnostic[] };
+
+/**
+ * Builds a JSON workflow's compute modules (`code/<file>.ts`): compiled as
+ * App workflow code is, importing only each other and
+ * `@grasp-os/sdk/compute` (`computeCode`), and type-checked against that
+ * SDK's declarations, as generated workflow code is (spec 19.1). Their
+ * errors are their author's.
+ */
+export const buildComputeModules = (
+  files: Record<string, string>
+): ComputeModulesBuild => {
+  const wrong = computeModuleErrors(files);
+  if (wrong.length > 0) {
+    return { ok: false, diagnostics: wrong };
+  }
+  const built = compileCode(computeCode, files);
+  if (!built.ok) {
+    return built;
+  }
+  const diagnostics = typeCheck(files, kit.types).filter((diagnostic) =>
+    isError(diagnostic)
+  );
+  return diagnostics.length > 0 ? { ok: false, diagnostics } : built;
+};
+
+/**
  * An App's server code of spec 8's layout (app-code.ts) as modules by
  * flat name, the host's generated modules among them; or why it failed.
  */
@@ -814,6 +848,12 @@ export default class ScreenCompiler extends WorkerEntrypoint {
   // oxlint-disable-next-line class-methods-use-this
   buildOpenWorkflow(files: Record<string, string>): OpenWorkflowBuild {
     return buildOpenWorkflow(files);
+  }
+
+  /** Builds a JSON workflow's compute modules (`buildComputeModules`). */
+  // oxlint-disable-next-line class-methods-use-this
+  buildComputeModules(files: Record<string, string>): ComputeModulesBuild {
+    return buildComputeModules(files);
   }
 
   /** Only the type check and the lint, without building. */

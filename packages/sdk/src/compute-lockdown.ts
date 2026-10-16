@@ -1,0 +1,175 @@
+// Takes the clock, randomness, timers and the network away from the
+// isolate a workflow's compute module runs in (compute-runner.ts), for the
+// isolate's whole life: core's compute call loads this module before any
+// of the workflow's own, and every isolate runs one call only, so nothing
+// is ever put back.
+//
+// Defense in depth, not the boundary: the isolate has no env, no bindings
+// and no outbound network, so there is nothing to reach. What this adds is
+// that a calculation can't read the time or a random number, or wait on a
+// timer, so it answers the same for the same input and can hide nothing
+// behind a delay. Each global is replaced with a refusal and made
+// non-configurable and non-writable, so module code can't put the original
+// back; `lockedDown` says whether every one of them took, and the runner
+// refuses to run a calculation in an isolate where one didn't.
+
+/** A function that refuses, for what a calculation can't use. */
+const unavailable = (what: string) => (): never => {
+  throw new Error(`A calculation is pure: ${what} isn't available to it.`);
+};
+
+/** Puts `value` in place of `key` of `target`, for good; whether it took. */
+const seal = (target: object, key: string, value?: unknown): boolean => {
+  try {
+    Object.defineProperty(target, key, {
+      configurable: false,
+      writable: false,
+      enumerable: false,
+      value,
+    });
+  } catch {
+    return false;
+  }
+  return Reflect.get(target, key) === value;
+};
+
+/** `Date`, except that it never tells the time. */
+const clocklessDate = (): DateConstructor =>
+  new Proxy(Date, {
+    apply: unavailable("the clock"),
+    construct: (target, args: unknown[]) => {
+      if (args.length === 0) {
+        return unavailable("the clock")();
+      }
+      // SAFETY: constructing `Date` with arguments makes a `Date`.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      return Reflect.construct(target, args) as Date;
+    },
+    get: (target, key, receiver): unknown => {
+      if (key === "now") {
+        return unavailable("the clock");
+      }
+      const value: unknown = Reflect.get(target, key, receiver);
+      return value;
+    },
+  });
+
+/** The globals a calculation has no use for, taken away entirely. */
+const removedGlobals = [
+  "crypto",
+  "Crypto",
+  "SubtleCrypto",
+  "CryptoKey",
+  "performance",
+  "Performance",
+  "setTimeout",
+  "setInterval",
+  "clearTimeout",
+  "clearInterval",
+  "scheduler",
+  "fetch",
+  "caches",
+  "WebSocket",
+  "EventSource",
+  "Temporal",
+  "WeakRef",
+  "FinalizationRegistry",
+] as const;
+
+/** Whether `probe` throws, as everything taken away must. */
+const refuses = (probe: () => unknown): boolean => {
+  try {
+    probe();
+  } catch {
+    return true;
+  }
+  return false;
+};
+
+/** Checks, after the fact, that what a calculation could misuse refuses. */
+const probesRefuse = (): boolean =>
+  refuses(() => Date.now()) &&
+  refuses(() => new Date()) &&
+  refuses(() => Math.random()) &&
+  refuses(() => new Intl.DateTimeFormat().format()) &&
+  removedGlobals.every((key) => Reflect.get(globalThis, key) === undefined);
+
+const lockdown = (): boolean => {
+  const sealed: boolean[] = [];
+  // The prototypes the real functions live on, as they are now: reachable
+  // from instances a module may still hold.
+  const cryptoPrototype: unknown =
+    typeof crypto === "object" ? Object.getPrototypeOf(crypto) : undefined;
+  if (typeof cryptoPrototype === "object" && cryptoPrototype !== null) {
+    for (const key of ["getRandomValues", "randomUUID"]) {
+      sealed.push(seal(cryptoPrototype, key, unavailable("randomness")));
+    }
+  }
+  if (typeof SubtleCrypto === "function") {
+    sealed.push(
+      seal(SubtleCrypto.prototype, "generateKey", unavailable("randomness"))
+    );
+  }
+  const clockless = clocklessDate();
+  sealed.push(
+    seal(Math, "random", unavailable("randomness")),
+    seal(globalThis, "Date", clockless),
+    seal(Date.prototype, "constructor", clockless)
+  );
+  const dateFormat: object = Intl.DateTimeFormat.prototype;
+  const formatGetter: unknown = Reflect.getOwnPropertyDescriptor(
+    dateFormat,
+    "format"
+  )?.get;
+  const formatToParts: unknown = Reflect.getOwnPropertyDescriptor(
+    dateFormat,
+    "formatToParts"
+  )?.value;
+  try {
+    Object.defineProperty(dateFormat, "format", {
+      configurable: false,
+      enumerable: false,
+      // As the platform's getter: a function bound to its formatter, which
+      // refuses to format the current time (no date given).
+      get(this: unknown): unknown {
+        const bound: unknown =
+          typeof formatGetter === "function"
+            ? Reflect.apply(formatGetter, this, [])
+            : undefined;
+        return (...args: unknown[]): unknown => {
+          if (args[0] === undefined || typeof bound !== "function") {
+            return unavailable("the clock")();
+          }
+          const formatted: unknown = Reflect.apply(bound, undefined, args);
+          return formatted;
+        };
+      },
+    });
+    sealed.push(true);
+  } catch {
+    sealed.push(false);
+  }
+  sealed.push(
+    seal(
+      dateFormat,
+      "formatToParts",
+      function datelessFormatToParts(
+        this: unknown,
+        ...args: unknown[]
+      ): unknown {
+        if (args[0] === undefined || typeof formatToParts !== "function") {
+          return unavailable("the clock")();
+        }
+        const parts: unknown = Reflect.apply(formatToParts, this, args);
+        return parts;
+      }
+    )
+  );
+  for (const key of removedGlobals) {
+    sealed.push(seal(globalThis, key));
+  }
+  return sealed.every(Boolean) && probesRefuse();
+};
+
+/** Whether the isolate is locked down: the runner runs nothing otherwise. */
+export const lockedDown: boolean = lockdown();

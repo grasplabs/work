@@ -7,6 +7,7 @@ import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
 } from "./operation-limits.ts";
+import { workflowModulesError } from "./workflow-modules.ts";
 
 // Independent workflows (platform specification 3, 13.2 and 24): a
 // workflow is a resource of its own, with its own owner, members and
@@ -60,6 +61,19 @@ export const workflowShareSchema = workflowMemberSchema.extend({
 export const workflowPublishSchema = z.strictObject({
   definition: z.string(),
   basedOn: z.number().int().positive().nullable(),
+  /**
+   * The workflow's own modules, by path (`code/<file>.ts`): calculations
+   * its `grasp.compute` tasks call (workflow-modules.ts).
+   */
+  modules: z
+    .record(z.string(), z.string())
+    .superRefine((modules, context) => {
+      const error = workflowModulesError(modules);
+      if (error !== undefined) {
+        context.addIssue({ code: "custom", message: error });
+      }
+    })
+    .optional(),
 });
 
 export const workflowResourceErrors = defineErrorFamily({
@@ -138,6 +152,10 @@ export const workflowResourceErrors = defineErrorFamily({
     "The App release this call's approval pins is no longer the App's current version, so the call can't run. Approve the binding for the App's current release, then start the workflow again.",
   "workflow.model_call_limit":
     "The run made as many model calls as its workflow allows, so it failed.",
+  "workflow.modules_invalid":
+    "The workflow's code modules don't build: fix what the diagnostics name, then publish again.",
+  "workflow.compute_failed":
+    "A task's calculation threw, or the sandbox stopped it, so the run failed.",
 });
 
 /** The binding kinds the host catalog serves, beside other workflows. */
@@ -573,7 +591,7 @@ export interface WorkflowBinders {
  * A version built for another one doesn't run
  * (`workflow.protocol_unsupported`): its sealed SDK speaks something else.
  */
-export const openWorkflowProtocol = 3;
+export const openWorkflowProtocol = 4;
 
 /**
  * Something of a definition the code generator doesn't lower yet: its

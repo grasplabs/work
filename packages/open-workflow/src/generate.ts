@@ -103,7 +103,7 @@ export const maxTaskExpressions = 64;
 export const maxStepExpressions = 128;
 
 /** The generator's identity: part of every build it makes. */
-export const generatorVersion = "grasp-open-workflow-ts/3";
+export const generatorVersion = "grasp-open-workflow-ts/4";
 
 /** Where the generated module is among a version's files. */
 export const generatedPath = ".grasp/workflow.ts";
@@ -173,7 +173,16 @@ export type GeneratedCall =
       readonly model?: CallTemplate;
       readonly maxOutputTokens?: CallTemplate;
     }
-  | { readonly name: "grasp.sleepUntil"; readonly timestamp: CallTemplate };
+  | { readonly name: "grasp.sleepUntil"; readonly timestamp: CallTemplate }
+  | {
+      readonly name: "grasp.compute";
+      readonly binding: string;
+      /** The workflow's own module its binding names: `code/<file>.ts`. */
+      readonly module: string;
+      /** The module's export the binding names. */
+      readonly export: string;
+      readonly arguments: CallTemplate;
+    };
 
 /** The named calls this generator lowers. */
 export type LoweredCall = GeneratedCall["name"];
@@ -302,8 +311,9 @@ const supportedTaskKeys = new Set([
 /** Task kinds lowered here; the profile's others come later. */
 const loweredKinds = new Set<string>(["call", "do", "set", "switch", "wait"]);
 
-/** Named calls lowered here; compute and decisions come later. */
+/** Named calls lowered here; decisions come later. */
 const loweredCalls = new Set<string>([
+  "grasp.compute",
   "grasp.operation",
   "grasp.connector",
   "grasp.model",
@@ -1197,6 +1207,82 @@ const callPart = (
   return template;
 };
 
+/** `local:code/<file>.ts#<export>`: a binding of the workflow's own modules. */
+const localContract =
+  /^local:(?<module>code\/[^#]+\.ts)#(?<export>[A-Za-z_$][A-Za-z0-9_$]*)$/u;
+
+/**
+ * A `grasp.compute` task's call: the module and export its binding names,
+ * sealed as the literals validation resolved against the workflow's own
+ * module manifest. A compute binding of the host catalog is refused as
+ * `compute:catalog`: the catalog has no calculations to run.
+ */
+const computeCallOf = (
+  emitter: Emitter,
+  item: ListTask,
+  binding: string,
+  computeArguments: CallTemplate | undefined
+): GeneratedCall | undefined => {
+  const contract = emitter.checked.bindings.get(binding)?.contract ?? "";
+  const local = localContract.exec(contract)?.groups;
+  if (local?.module === undefined || local.export === undefined) {
+    emitter.refusals.add(
+      pointerJoin(pointerJoin(item.pointer, "with"), "binding"),
+      "compute:catalog",
+      item.id
+    );
+    return undefined;
+  }
+  return computeArguments === undefined
+    ? undefined
+    : {
+        name: "grasp.compute",
+        binding,
+        module: local.module,
+        export: local.export,
+        arguments: computeArguments,
+      };
+};
+
+/**
+ * A `grasp.model` task's call: its parts' templates (`part`), and the
+ * descriptor of its output schema, which the model's answer must match.
+ */
+const modelCallOf = (
+  emitter: Emitter,
+  item: ListTask,
+  binding: string,
+  part: (key: string) => CallTemplate | undefined
+): GeneratedCall | undefined => {
+  const args = isObject(item.task.with) ? item.task.with : {};
+  const instructions = part("instructions");
+  const input = part("input");
+  const model = Object.hasOwn(args, "model") ? part("model") : null;
+  const tokens = Object.hasOwn(args, "maxOutputTokens")
+    ? part("maxOutputTokens")
+    : null;
+  if (
+    instructions === undefined ||
+    input === undefined ||
+    model === undefined ||
+    tokens === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    name: "grasp.model",
+    binding,
+    instructions,
+    input,
+    outputSchema: descriptorAt(
+      emitter,
+      pointerJoin(pointerJoin(item.pointer, "with"), "outputSchema")
+    ),
+    ...(model === null ? {} : { model }),
+    ...(tokens === null ? {} : { maxOutputTokens: tokens }),
+  };
+};
+
 /**
  * Task `item`'s named call, as the build seals it: its binding and
  * operation as the literals validation checked, its arguments templates
@@ -1240,33 +1326,11 @@ const callOf = (
             arguments: connectorArguments,
           };
     }
+    case "grasp.compute": {
+      return computeCallOf(emitter, item, binding, part("arguments"));
+    }
     case "grasp.model": {
-      const instructions = part("instructions");
-      const input = part("input");
-      const model = Object.hasOwn(args, "model") ? part("model") : null;
-      const tokens = Object.hasOwn(args, "maxOutputTokens")
-        ? part("maxOutputTokens")
-        : null;
-      if (
-        instructions === undefined ||
-        input === undefined ||
-        model === undefined ||
-        tokens === undefined
-      ) {
-        return undefined;
-      }
-      return {
-        name: "grasp.model",
-        binding,
-        instructions,
-        input,
-        outputSchema: descriptorAt(
-          emitter,
-          pointerJoin(pointerJoin(item.pointer, "with"), "outputSchema")
-        ),
-        ...(model === null ? {} : { model }),
-        ...(tokens === null ? {} : { maxOutputTokens: tokens }),
-      };
+      return modelCallOf(emitter, item, binding, part);
     }
     default: {
       throw new Error(

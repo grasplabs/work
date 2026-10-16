@@ -9,6 +9,7 @@ import {
   kitModules,
   screenRuntime,
   limitErrors,
+  computeModuleErrors,
   openWorkflowErrors,
   serverFiles,
   workflowFiles,
@@ -16,6 +17,7 @@ import {
 import type {
   AppCodeBuild,
   Diagnostic,
+  ComputeModulesBuild,
   OpenWorkflowBuild,
   ScreenBuild,
   ServerBuild,
@@ -99,7 +101,11 @@ const limitsOf = (kind: string): ((files: AppFiles) => Diagnostic[]) => {
     return appCodeLimitErrors;
   }
   // A JSON workflow's generated module: one file, held to its own bound.
-  return kind === "open-workflow" ? openWorkflowErrors : limitErrors;
+  if (kind === "open-workflow") {
+    return openWorkflowErrors;
+  }
+  // A JSON workflow's compute modules: held to their own bounds.
+  return kind === "compute" ? computeModuleErrors : limitErrors;
 };
 
 /** A build refused before it started, or one that failed. */
@@ -122,6 +128,7 @@ const compilerMethods = {
   app: "buildAppCode",
   "app-tests": "buildAppTests",
   "open-workflow": "buildOpenWorkflow",
+  compute: "buildComputeModules",
 } as const;
 
 /** The kinds of build, by the compiler's method each runs. */
@@ -386,6 +393,26 @@ export const buildOpenWorkflow = async (
   await cachedBuild<OpenWorkflowBuild>(
     env,
     "open-workflow",
+    files,
+    (all) => all,
+    whose
+  );
+
+/**
+ * Builds a JSON workflow's compute modules (`code/<file>.ts`,
+ * workflow-modules.ts) into ES modules, in the compiler's isolate,
+ * type-checked against `@grasp-os/sdk/compute`. Cached in R2 like the
+ * others.
+ */
+export const buildComputeModules = async (
+  env: BuildEnv,
+  files: AppFiles,
+  /** Whose build it is: the independent workflow's ID. */
+  whose: string
+): Promise<ComputeModulesBuild> =>
+  await cachedBuild<ComputeModulesBuild>(
+    env,
+    "compute",
     files,
     (all) => all,
     whose
