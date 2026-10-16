@@ -331,3 +331,50 @@ test("a note saved in one session appears on another session's open screen witho
   await saving.getByRole("button", { name: "Delete Edited elsewhere" }).click();
   await expect(watching.getByText("No notes yet.")).toBeVisible();
 });
+
+test("a list loads five notes at a time and keeps the loaded notes current across sessions", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesPages");
+  const app = await notesApp(builder);
+  const watching = await openNotes(await pageOf(builder), app);
+  await expect(watching.getByText("No notes yet.")).toBeVisible();
+  const notes = watching.getByRole("list", { name: "Notes" });
+  for (let note = 1; note <= 6; note += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one note after the other
+    await createNote(watching, `Note ${note}`);
+    // oxlint-disable-next-line no-await-in-loop -- see above
+    await expect(
+      notes.getByText(`Note ${note}`, { exact: true })
+    ).toBeVisible();
+  }
+
+  // Five at first, newest first; the sixth once asked for.
+  await expect(notes.getByRole("listitem")).toHaveText([
+    /Note 6/u,
+    /Note 5/u,
+    /Note 4/u,
+    /Note 3/u,
+    /Note 2/u,
+  ]);
+  await watching.getByRole("button", { name: "Load more" }).click();
+  await expect(notes.getByRole("listitem")).toHaveCount(6);
+  await expect(watching.getByRole("button", { name: "Load more" })).toHaveCount(
+    0
+  );
+
+  // Another session saves a note and deletes one inside the loaded list:
+  // the open list follows, every note once, the rest closing up.
+  const saving = await openNotes(await pageOf(builder), app);
+  await createNote(saving, "Note 7");
+  await expect(notes.getByRole("listitem")).toHaveCount(7);
+  await saving.getByRole("button", { name: "Delete Note 4" }).click();
+  await expect(notes.getByRole("listitem")).toHaveText([
+    /Note 7/u,
+    /Note 6/u,
+    /Note 5/u,
+    /Note 3/u,
+    /Note 2/u,
+    /Note 1/u,
+  ]);
+});

@@ -6,7 +6,7 @@ import {
   runBrainBaseline,
   setUpBrainCompany,
 } from "./brain-harness.ts";
-import type { BrainReport } from "./brain-harness.ts";
+import type { BrainReport, LedgerRequest } from "./brain-harness.ts";
 import { brainLanguages } from "./fixtures/brain-corpus.ts";
 import {
   brainFamilies,
@@ -19,19 +19,59 @@ import { mockIdp } from "./idp.ts";
 
 // The Brain baseline (GRA-295, experiment E01) as CI runs it: the dev split
 // of the frozen suite, its three arms paired over two repeats, through the
-// real Workspace object, Knowledge, model gateway and ledger, with only the
-// model provider stubbed (brain-stub-model.ts). It proves the harness
-// measures what it reports and that its security gate holds and would
-// fail: a real model's run, which costs money, is a separate opt-in. The
-// statistics have unit tests of their own (brain-scoring.test.ts), and the
-// suite's split rules theirs (brain-suite.test.ts).
+// real Workspace object, Knowledge, permissions, model gateway and ledger,
+// with only the model provider stubbed (brain-stub-model.ts). It proves the
+// harness measures what it reports and that its security gate holds and
+// would fail, access revoked mid-run included, and how a run breaks and is
+// asked again (GRA-677): a real model's run, which costs money, is a
+// separate opt-in. The statistics have unit tests of their own
+// (brain-scoring.test.ts), and the suite's split rules theirs
+// (brain-suite.test.ts).
 
 const idp = mockIdp();
 
 const repeats = 2;
 
-/** The tasks the controls run on: one company and one team audience. */
-const controlTasks = ["dev-fleet-size", "dev-route-plan"];
+/** The tasks that take access away between their earlier turns and their question. */
+const revocationTasks = [
+  "dev-route-plan-left-team",
+  "dev-route-plan-grant-revoked",
+];
+
+/**
+ * The tasks the controls run on: one company and one team audience, and
+ * the revocations, which only the stale control runs on.
+ */
+const controlTasks = ["dev-fleet-size", "dev-route-plan", ...revocationTasks];
+
+/** The controls that run only on the revocation tasks. */
+const revocationControls: ReadonlySet<string> = new Set([
+  "historyAfterRevocation",
+  "readElsewhereFirst",
+  "staleAccess",
+]);
+
+/** The controls that change stored state mid-trial. */
+const changingControls: ReadonlySet<string> = new Set([
+  "changesChat",
+  "changesChatTitle",
+  "changesCore",
+  "changesFiles",
+  "changesHistory",
+  "changesKnowledge",
+  "changesObject",
+]);
+
+/** The task the durability cases break, in every arm. */
+const durabilityTasks = ["dev-fleet-size"];
+
+/** Whether every one of `requests` settled with a charge, and there are some. */
+const settledAndCharged = (requests: readonly LedgerRequest[]) =>
+  requests.length > 0 &&
+  requests.every(
+    ({ state, chargedMicros }) =>
+      state === "settled" && chargedMicros !== null && chargedMicros > 0
+  );
 
 let baseline: Promise<BrainReport> | undefined;
 
@@ -43,6 +83,7 @@ const run = async (): Promise<BrainReport> => {
       repeats,
       controls: brainControls,
       controlTasks,
+      durabilityTasks,
     }))();
   return await baseline;
 };
@@ -100,21 +141,226 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
         "changesHistory",
         "changesKnowledge",
         "changesObject",
+        "historyAfterRevocation",
         "leakyContext",
+        "staleAccess",
+        // Not `readElsewhereFirst`: it read only while it was allowed.
       ].flatMap((arm) =>
-        controlTasks.map((taskId) => ({
-          arm,
-          taskId,
-          leaked: arm === "leakyContext",
-          stateChanged: arm !== "leakyContext",
-        }))
+        controlTasks
+          .filter(
+            (taskId) =>
+              revocationControls.has(arm) === revocationTasks.includes(taskId)
+          )
+          .toSorted()
+          .map((taskId) => ({
+            arm,
+            taskId,
+            leaked: !changingControls.has(arm),
+            stateChanged: changingControls.has(arm),
+          }))
       ),
       controls: brainControls.map((arm) => ({
         arm,
-        evidenceRecall: 1,
-        completionRate: 0,
+        // The revocation tasks abstain: they expect no evidence.
+        evidenceRecall: revocationControls.has(arm) ? null : 1,
+        // The one that keeps to the gate abstains, as it should.
+        completionRate: arm === "readElsewhereFirst" ? 1 : 0,
       })),
     });
+  });
+
+  it("takes access revoked mid-run away from the question in every arm: leaving the team, or the agent's grant revoked", async () => {
+    const { scores } = await run();
+    expect(
+      scores
+        .filter(
+          ({ taskId, arm }) =>
+            revocationTasks.includes(taskId) &&
+            brainArms.some((each) => each === arm)
+        )
+        .map(
+          ({
+            arm,
+            taskId,
+            repeat,
+            leaks,
+            revokedReached,
+            stateChanged,
+            completed,
+          }) => ({
+            trial: `${arm} ${taskId} ${repeat}`,
+            leaks,
+            revokedReached,
+            stateChanged,
+            completed,
+          })
+        )
+        .toSorted((a, b) => a.trial.localeCompare(b.trial))
+    ).toStrictEqual(
+      brainArms
+        .flatMap((arm) =>
+          revocationTasks.flatMap((taskId) =>
+            Array.from({ length: repeats }, (_, index) => ({
+              trial: `${arm} ${taskId} ${index + 1}`,
+              leaks: [],
+              // Its earlier turns read nothing: nothing revoked ever reached it.
+              revokedReached: [],
+              stateChanged: false,
+              // It abstains: what it could have read earlier is gone.
+              completed: true,
+            }))
+          )
+        )
+        .toSorted((a, b) => a.trial.localeCompare(b.trial))
+    );
+  });
+
+  it("cuts what a revocation took away at the revocation: read before it, while allowed, is no leak; sent again after it, through the chat's history, is", async () => {
+    const { scores } = await run();
+    const planning = ["CANARY-PLN-7Q4K", "05:30 from Tilburg"];
+    expect(
+      scores
+        .filter(
+          ({ arm }) =>
+            arm === "historyAfterRevocation" || arm === "readElsewhereFirst"
+        )
+        .map(({ arm, taskId, leaks, revokedReached }) => ({
+          trial: `${arm} ${taskId}`,
+          read: planning.every((each) => (revokedReached ?? []).includes(each)),
+          leaks: planning.filter((each) => leaks.includes(each)),
+          // A leak is only ever something the trial read.
+          leaksRead: leaks.every((each) =>
+            (revokedReached ?? []).includes(each)
+          ),
+        }))
+        .toSorted((a, b) => a.trial.localeCompare(b.trial))
+    ).toStrictEqual(
+      ["historyAfterRevocation", "readElsewhereFirst"].flatMap((arm) =>
+        revocationTasks.toSorted().map((taskId) => ({
+          trial: `${arm} ${taskId}`,
+          read: true,
+          leaks: arm === "historyAfterRevocation" ? planning : [],
+          leaksRead: true,
+        }))
+      )
+    );
+  });
+
+  it("ends a turn evicted mid-answer as failed, never as answered from the part it streamed, and answers when asked again", async () => {
+    const { durability, durabilityGate } = await run();
+    const crashes = durability.filter(({ kind }) => kind === "crash");
+    expect({
+      gate: durabilityGate,
+      crashes: crashes.map(
+        ({
+          arm,
+          first,
+          retry,
+          answers,
+          afterRestart,
+          streamed,
+          shown,
+          chatAfterRestart,
+          retrySent,
+          ledger,
+        }) => ({
+          arm,
+          failed: first.failed,
+          completed: first.completed,
+          answer: answers[0],
+          // The answer was under way: its first characters were streamed,
+          // and the chat showed them to its person, before the restart.
+          streamed,
+          shown,
+          // The chat tells the person, and the next turn, that it was cut
+          // short; nothing it streamed is kept, in the chat or in what the
+          // retry sends the model.
+          told: afterRestart.startsWith("I was interrupted before I finished"),
+          kept: [
+            chatAfterRestart.includes(streamed),
+            retrySent.includes(streamed),
+          ],
+          retried: [retry.failed, retry.completed],
+          // The cut answer's request is held for reconciliation, which
+          // charges it once; nothing of the first attempt settled at zero,
+          // or was charged again by the retry.
+          ledger: {
+            held: ledger.first.some(({ state }) => state !== "settled"),
+            settledAtZero: ledger.first.some(
+              ({ state, chargedMicros }) =>
+                state === "settled" && (chargedMicros ?? 0) <= 0
+            ),
+            chargedOnce:
+              first.costMicros ===
+              ledger.first.reduce(
+                (total, { chargedMicros }) => total + (chargedMicros ?? 0),
+                0
+              ),
+            unchangedByRetry:
+              JSON.stringify(ledger.firstAfterRetry) ===
+              JSON.stringify(ledger.first),
+          },
+        })
+      ),
+    }).toStrictEqual({
+      gate: { passed: true, violations: [] },
+      crashes: brainArms.map((arm) => ({
+        arm,
+        failed: true,
+        completed: false,
+        answer: "",
+        streamed: "ANSWER: 37",
+        shown: "ANSWER: 37",
+        told: true,
+        kept: [false, false],
+        retried: [false, true],
+        ledger: {
+          held: true,
+          settledAtZero: false,
+          chargedOnce: true,
+          unchangedByRetry: true,
+        },
+      })),
+    });
+  });
+
+  it("replays a trial in the same chat after a restart to the same outcome and stored state, the ledger charging the retry as a request of its own", async () => {
+    const { durability } = await run();
+    expect(
+      durability.map(
+        ({ kind, arm, first, retry, answers, fingerprints, ledger }) => ({
+          case: `${kind} ${arm}`,
+          // A crash's first attempt failed; a replay's answered alike twice.
+          outcome:
+            kind === "replay"
+              ? [first.completed, retry.completed, answers[0] === answers[1]]
+              : [retry.completed],
+          fingerprint: fingerprints[0] === fingerprints[1],
+          ownRequests:
+            settledAndCharged(ledger.retry) &&
+            ledger.retry.every(
+              ({ id }) => !ledger.first.some((earlier) => earlier.id === id)
+            ),
+          // What the ledger charged during the retry is its own requests'.
+          charged:
+            retry.costMicros ===
+            ledger.retry.reduce(
+              (total, { chargedMicros }) => total + (chargedMicros ?? 0),
+              0
+            ),
+        })
+      )
+    ).toStrictEqual(
+      brainArms.flatMap((arm) =>
+        (["crash", "replay"] as const).map((kind) => ({
+          case: `${kind} ${arm}`,
+          outcome: kind === "replay" ? [true, true, true] : [true],
+          fingerprint: true,
+          ownRequests: true,
+          charged: true,
+        }))
+      )
+    );
   });
 
   it("answers from the corpus as it stands: corrected, withdrawn and removed content never comes back", async () => {
@@ -168,8 +414,13 @@ describe("the Brain baseline", { timeout: 300_000 }, () => {
         gateway: "grasp-os-test",
       },
       pinned: true,
-      run: ["dev", repeats, "1"],
-      schedule: { arms: brainArms, controls: brainControls, controlTasks },
+      run: ["dev", repeats, "2"],
+      schedule: {
+        arms: brainArms,
+        controls: brainControls,
+        controlTasks,
+        durabilityTasks,
+      },
     });
   });
 

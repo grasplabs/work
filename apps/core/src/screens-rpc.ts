@@ -15,6 +15,7 @@ import type { ScreenDelivery } from "@grasp-os/shared/screen-trust";
 import {
   jsonBytes,
   rateLimited,
+  rateLimitedRetryMs,
   screenErrors,
   screenLimits,
   screenNameSchema,
@@ -37,6 +38,7 @@ import type {
 } from "@grasp-os/shared/workflows";
 import { z } from "zod";
 
+import { windowExtentOf } from "./app-functions.ts";
 import { callApp, isPlainData, plainDataBounds } from "./app.ts";
 import type { AppAnswer } from "./app.ts";
 import { appFor, findVersion, getApp, versionFiles } from "./apps.ts";
@@ -44,6 +46,7 @@ import { appHost } from "./durable-objects.ts";
 import { callbackFor, isStub } from "./page-callbacks.ts";
 import type { StillOpen } from "./page-callbacks.ts";
 import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
+import { windowPages } from "./query-windows.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { RunSubscription } from "./run-subscription.ts";
 import { recordBuilds } from "./screen-builds.ts";
@@ -149,6 +152,42 @@ export const admitted = async (
 ): Promise<AppId> => {
   const { id } = await admittedApp(env, by, app);
   return id;
+};
+
+/**
+ * What charges `by` for a paginated list's pages of App `app`, past what
+ * its request paid (query-windows.ts): `pages` more of their requests,
+ * or `screen.rate_limited` with how long to wait: long enough for the
+ * budget to give back all of them and the request asking again, so a
+ * caller that waits as told isn't refused again for the same window.
+ */
+export const windowCharger =
+  (env: Env, by: Identity, app: AppId) =>
+  async (pages: number, whole = pages): Promise<void> => {
+    if (!(await appHost(env, app).admitRequest(by.userId, pages))) {
+      throw screenErrors.create("screen.rate_limited", {
+        retryAfterMs: rateLimitedRetryMs * (whole + 1),
+      });
+    }
+  };
+
+/**
+ * Counts a request for a paginated list's window (`request`, as its
+ * caller sent it) as the pages the window takes: the one request
+ * `admitted` counted, and one more for every page past the first. A
+ * request without a window counts nothing more.
+ */
+export const admitWindow = async (
+  env: Env,
+  by: Identity,
+  app: AppId,
+  request: unknown
+): Promise<void> => {
+  const extent = windowExtentOf(request);
+  const more = extent === undefined ? 0 : windowPages(extent) - 1;
+  if (more > 0) {
+    await windowCharger(env, by, app)(more);
+  }
 };
 
 /**
@@ -865,6 +904,8 @@ export class ScreenFrameRpc extends CoreRpcTarget implements ScreenFrameApi {
     ) {
       throw screenErrors.create("screen.invalid");
     }
+    // A window counts as the pages it reads (query-windows.ts).
+    await admitWindow(env, by, id, request);
     await requireDelivery(env, by, id, artifact, {
       operation: "watchQuery",
       stage: "admission",
@@ -1243,6 +1284,8 @@ export class ScreensRpc extends CoreRpcTarget implements ScreensApi {
       ) {
         throw screenErrors.create("screen.invalid");
       }
+      // A window counts as the pages its first read takes.
+      await admitWindow(this.#env, by, id, request);
       // The build of the frame that follows, by its own lease: never what
       // another frame of the App on this connection presented last.
       const artifact = await leasedArtifact(this.#env, by.userId, id, lease);

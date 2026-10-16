@@ -1,4 +1,5 @@
 import { GraspClient, GraspError } from "@grasp-os/sdk/client";
+import { clientInternals } from "@grasp-os/sdk/host";
 import { fromBase64Url, toBase64Url } from "@grasp-os/shared/encoding";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { appIdSchema } from "@grasp-os/shared/ids";
@@ -6,6 +7,7 @@ import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import { appTokenPath, portableFunctionPath } from "@grasp-os/shared/portable";
 import type { Role } from "@grasp-os/shared/roles";
 import { appFunctionPath } from "@grasp-os/shared/screens";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -14,10 +16,11 @@ import { loadRelease } from "../src/app-releases.ts";
 import { sweepTokenKeys } from "../src/auth/app-tokens.ts";
 import { authFor } from "../src/auth/auth.ts";
 import { signInConfig } from "../src/auth/config.ts";
+import { inJurisdiction } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { apiOf, notesFiles } from "./notes-client-app.ts";
+import { apiOf, notesFiles, referenceTo } from "./notes-client-app.ts";
 import { person } from "./sealed-apps.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import { callAuth, routed, signedInApi } from "./sign-in.ts";
@@ -53,15 +56,51 @@ const classifyAs = async (
  * A builder's Notes App, made current; its data `ordinary` (fine for
  * code nobody approved) unless `sensitive`.
  */
-const notesApp = async ({ sensitive = false } = {}) => {
+/**
+ * The Notes App, with a list that never answers more than ten notes a
+ * page, and a mutation that saves many notes at once.
+ */
+const pagedFiles: Record<string, string> = {
+  ...notesFiles,
+  "operations/notes.ts": `${notesFiles["operations/notes.ts"] ?? ""}
+export const listTen = query({
+  args: { pagination: paginationOptionsValidator },
+  returns: paginationResultValidator(doc("notes")),
+  handler: async (ctx, args) =>
+    await ctx.db
+      .query("notes")
+      .withIndex("by_updated")
+      .order("desc")
+      .paginate({ ...args.pagination, pageSize: Math.min(args.pagination.pageSize, 10) }),
+});
+
+export const seed = mutation({
+  args: { count: v.number().integer().min(1).max(100) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    for (let at = 0; at < args.count; at += 1) {
+      await ctx.db.insert("notes", { title: "Note " + String(at) });
+    }
+    return null;
+  },
+});
+`,
+  "app.ts": (notesFiles["app.ts"] ?? "")
+    .replace(
+      'import { big, create, echo, get, list, remove, stamp, update } from "./operations/notes.ts";',
+      'import { big, create, echo, get, list, listTen, remove, seed, stamp, update } from "./operations/notes.ts";'
+    )
+    .replace(
+      "operations: { notes: { list, get, create, update, remove, echo, stamp, big } }",
+      "operations: { notes: { list, listTen, get, create, update, remove, echo, stamp, big, seed } }"
+    ),
+};
+
+const notesApp = async ({ sensitive = false, files = notesFiles } = {}) => {
   const builder = await personApi("builder");
   const admin = await personApi("admin");
   const { id } = await builder.api.apps.create({ name: "Notes" });
-  const { version } = await builder.api.apps.files.commit(
-    id,
-    notesFiles,
-    "First"
-  );
+  const { version } = await builder.api.apps.files.commit(id, files, "First");
   await builder.api.apps.versions.setCurrent(id, version);
   if (!sensitive) {
     await classifyAs(admin, id, "ordinary");
@@ -286,6 +325,87 @@ const failureOf = async (promise: Promise<unknown>) => {
     return { code: error.code, category: error.category };
   }
   throw new Error("It resolved");
+};
+
+/**
+ * Has a write land in `notes`'s store right after every page it reads,
+ * moving the table on, as a busy table would. Answers what undoes it.
+ */
+const writeAfterEveryPage = async (notes: NotesApp): Promise<() => void> => {
+  const storeId = notes.release.store?.storeId;
+  if (storeId === undefined) {
+    throw new Error("The Notes App has a store");
+  }
+  let undo: (() => void) | undefined;
+  await runInDurableObject(
+    inJurisdiction(env, env.DATA_STORES).getByName(storeId),
+    (instance) => {
+      // SAFETY: a store's object's prototype holds its methods.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const methods = Object.getPrototypeOf(instance) as Record<
+        string,
+        unknown
+      >;
+      const original = methods.read;
+      if (typeof original !== "function") {
+        throw new TypeError("A store's object reads");
+      }
+      methods.read = async function read(
+        this: object,
+        ...args: unknown[]
+      ): Promise<unknown> {
+        const answer: unknown = await Reflect.apply(original, this, args);
+        // Through the object answering now, which may be a later one than
+        // the object this was set on.
+        const ctx: unknown = Reflect.get(this, "ctx");
+        if (
+          args[0] === storeId &&
+          JSON.stringify(args[2]).includes('"paginate"') &&
+          typeof ctx === "object" &&
+          ctx !== null
+        ) {
+          // SAFETY: a store's object's context, as workerd hands it over.
+          // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+          (ctx as DurableObjectState).storage.sql.exec(
+            "UPDATE sdk_tables SET generation = generation + 1"
+          );
+        }
+        return answer;
+      };
+      undo = () => {
+        methods.read = original;
+      };
+    }
+  );
+  return () => {
+    undo?.();
+  };
+};
+
+/**
+ * A paginated list of the App's notes on `client`, as `usePaginatedQuery`
+ * subscribes: its titles, its failure and its controls.
+ */
+const listOf = (
+  client: GraspClient,
+  { api }: NotesApp,
+  initialPageSize: number,
+  reference: unknown = api.list
+) => {
+  const internals = clientInternals(client);
+  const pager = internals.pager(reference, {}, initialPageSize);
+  const stop = internals.subscribePager(pager, () => {
+    // The test reads the list when it looks.
+  });
+  return {
+    pager,
+    stop,
+    titles: () =>
+      z
+        .array(z.object({ title: z.string() }))
+        .parse(pager.snapshot.view.items)
+        .map(({ title }) => title),
+  };
 };
 
 describe("a portable host's client", { timeout: 120_000 }, () => {
@@ -626,6 +746,466 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
       raced: { code: "auth.principal_changed", category: "authorization" },
       after: [],
     });
+  });
+
+  it("never shows a cached larger list older than the one it shows when it loads more", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    hostNetwork();
+    const client = portableClient(() => token);
+    // Another tab of the host: its saves are none this client confirmed.
+    const elsewhere = portableClient(() => token);
+    for (const title of ["One", "Two", "Three"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(notes.api.create, { title });
+    }
+    // A list of two, shown and left: its window stays cached.
+    const left = listOf(client, notes, 2);
+    await vi.waitFor(() => {
+      expect(left.titles()).toStrictEqual(["Three", "Two"]);
+    });
+    left.stop();
+    await elsewhere.mutation(notes.api.create, { title: "Four" });
+
+    // A list of one, read now, then one more: two from now, not the two
+    // cached from before "Four".
+    const list = listOf(client, notes, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Four"]);
+    });
+    await list.pager.loadMore();
+
+    expect(list.titles()).toStrictEqual(["Four", "Three"]);
+    list.stop();
+  });
+
+  it("starts a list again at its first page, without the last person's failure, once someone else signs in", async () => {
+    const notes = await notesApp();
+    const other = await personApi("user");
+    await notes.builder.api.apps.members.add(notes.app, {
+      type: "person",
+      id: other.userId,
+      role: "user",
+    });
+    const builders = await tokenFor(notes.builder.session, notes.app);
+    const others = await tokenFor(other.session, notes.app);
+    hostNetwork();
+    const theirs = portableClient(() => others);
+    for (const title of ["Theirs 1", "Theirs 2", "Theirs 3"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await theirs.mutation(notes.api.create, { title });
+    }
+    let current = builders;
+    const client = portableClient(() => current);
+    for (const title of ["Mine 1", "Mine 2", "Mine 3"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(notes.api.create, { title });
+    }
+    // The builder loads three, then asks for a batch of none: the list
+    // fails.
+    const list = listOf(client, notes, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Mine 3"]);
+    });
+    await list.pager.loadMore(2);
+    await list.pager.loadMore(0).catch(() => {
+      // Refused, and the list's failure now.
+    });
+    const before = {
+      titles: list.titles(),
+      error: list.pager.snapshot.error?.code,
+    };
+
+    // Someone else signs in on the host, without signing out between.
+    current = others;
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 280_000 });
+    await client.query(notes.api.list, { pagination: {} }).catch(() => {
+      // The call that finds the swap is refused unsent.
+    });
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Theirs 3"]);
+    });
+
+    expect({
+      before,
+      after: {
+        titles: list.titles(),
+        error: list.pager.snapshot.error?.code,
+        extent: list.pager.extent,
+      },
+    }).toStrictEqual({
+      before: {
+        titles: ["Mine 3", "Mine 2", "Mine 1"],
+        error: "contract.invalid_args",
+      },
+      after: { titles: ["Theirs 3"], error: undefined, extent: 1 },
+    });
+    list.stop();
+  });
+
+  it("keeps nothing of the last person in a list nobody shows, once someone else signs in", async () => {
+    const notes = await notesApp();
+    const other = await personApi("user");
+    await notes.builder.api.apps.members.add(notes.app, {
+      type: "person",
+      id: other.userId,
+      role: "user",
+    });
+    const builders = await tokenFor(notes.builder.session, notes.app);
+    const others = await tokenFor(other.session, notes.app);
+    hostNetwork();
+    let current = builders;
+    const client = portableClient(() => current);
+    await client.mutation(notes.api.create, { title: "Mine" });
+    const list = listOf(client, notes, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Mine"]);
+    });
+    // Closed, and kept a while to remount.
+    list.stop();
+
+    current = others;
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 280_000 });
+    await client.query(notes.api.list, { pagination: {} }).catch(() => {
+      // The call that finds the swap is refused unsent.
+    });
+
+    expect(list.titles()).toStrictEqual([]);
+  });
+
+  it("starts a list again at its first page once its person lost access, whoever is signed in when it is tried again", async () => {
+    const notes = await notesApp();
+    const other = await personApi("user");
+    await notes.builder.api.apps.members.add(notes.app, {
+      type: "person",
+      id: other.userId,
+      role: "user",
+    });
+    const builders = await tokenFor(notes.builder.session, notes.app);
+    const others = await tokenFor(other.session, notes.app);
+    hostNetwork();
+    let current = others;
+    const client = portableClient(() => current);
+    for (const title of ["Theirs 1", "Theirs 2", "Theirs 3"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(notes.api.create, { title });
+    }
+    const list = listOf(client, notes, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Theirs 3"]);
+    });
+    await list.pager.loadMore(2);
+    const loaded = list.pager.extent;
+
+    // Their access ends: the client is fenced at their next call.
+    await notes.builder.api.apps.members.remove(notes.app, {
+      type: "person",
+      id: other.userId,
+    });
+    await client.query(notes.api.list, { pagination: {} }).catch(() => {
+      // Refused: the person no longer has the App.
+    });
+    // The builder signs in on the host, and the list is tried again.
+    await portableClient(() => builders).mutation(notes.api.create, {
+      title: "Mine",
+    });
+    current = builders;
+    // The client keeps a token until shortly before its expiry.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 280_000 });
+    clientInternals(client).retryFailed();
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Mine"]);
+    });
+
+    expect({ loaded, extent: list.pager.extent }).toStrictEqual({
+      loaded: 3,
+      extent: 1,
+    });
+    list.stop();
+  });
+
+  it("loads a window of a handler's short pages for what full pages cost, within the person's budget", async () => {
+    const notes = await notesApp({ files: pagedFiles });
+    const token = await tokenFor(notes.builder.session, notes.app);
+    hostNetwork();
+    const client = portableClient(() => token);
+    const seed = referenceTo<{ count: number }, null, "mutation">(
+      notes.release,
+      "notes.seed"
+    );
+    await client.mutation(seed, { count: 100 });
+    await client.mutation(seed, { count: 60 });
+    const listTen = referenceTo<
+      { pagination: { cursor?: string | null; pageSize?: number } },
+      unknown,
+      "query"
+    >(notes.release, "notes.listTen");
+    const list = listOf(client, notes, 10, listTen);
+    await vi.waitFor(() => {
+      expect(list.titles()).toHaveLength(10);
+    });
+    // The person's requests spent, then three back: eleven pages of ten
+    // cost two full pages, which the Load More pays up front.
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"], now });
+    let limited = false;
+    for (let request = 0; request < 40 && !limited; request += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      const response = await listWith(notes, token);
+      limited = response.status === 429;
+    }
+    expect(limited).toBeTruthy();
+    vi.setSystemTime(now + 1500);
+    await list.pager.loadMore(100);
+    expect(list.titles()).toHaveLength(110);
+    list.stop();
+  });
+
+  it("reads a shown window again when it is tried again after a refresh whose answer was lost", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    hostNetwork();
+    const client = portableClient(() => token);
+    await client.mutation(notes.api.create, { title: "One" });
+    const list = listOf(client, notes, 5);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["One"]);
+    });
+    // The refresh after the next save never reaches core.
+    const network = globalThis.fetch;
+    let dropNextRead = true;
+    vi.stubGlobal(
+      "fetch",
+      async (
+        input: RequestInfo | URL,
+        init?: RequestInit
+      ): Promise<Response> => {
+        const body = typeof init?.body === "string" ? init.body : "";
+        if (dropNextRead && body.includes('"window"')) {
+          dropNextRead = false;
+          throw new TypeError("Failed to fetch");
+        }
+        return await network(input, init);
+      }
+    );
+    await client.mutation(notes.api.create, { title: "Two" });
+    await vi.waitFor(() => {
+      expect(dropNextRead).toBeFalsy();
+    });
+    // Still the window before, old; tried again, it is read afresh.
+    await scheduler.wait(200);
+    const kept = list.titles();
+    clientInternals(client).retryFailed();
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Two", "One"]);
+    });
+    expect(kept).toStrictEqual(["One"]);
+    list.stop();
+  });
+
+  it("fails a Load More, and throws a first load, when writes keep tearing the window, keeping the window shown", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    hostNetwork();
+    const client = portableClient(() => token);
+    for (const title of ["One", "Two", "Three"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(notes.api.create, { title });
+    }
+    const list = listOf(client, notes, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Three"]);
+    });
+
+    // From now on a write lands right after every page the store reads:
+    // no window is ever one state of the store.
+    const undo = await writeAfterEveryPage(notes);
+    try {
+      const loadMore = await failureOf(list.pager.loadMore());
+      const first = listOf(client, notes, 2);
+      await vi.waitFor(
+        () => {
+          expect(first.pager.snapshot.error?.code).toBe(
+            "query.concurrent_change"
+          );
+        },
+        { timeout: 20_000 }
+      );
+      expect({
+        loadMore: loadMore.code,
+        shown: list.titles(),
+        error: list.pager.snapshot.error,
+        loading: list.pager.snapshot.view.isLoading,
+      }).toStrictEqual({
+        loadMore: "query.concurrent_change",
+        shown: ["Three"],
+        error: undefined,
+        loading: false,
+      });
+      first.stop();
+    } finally {
+      undo();
+    }
+    list.stop();
+  });
+
+  it("fails a Load More whose larger window another list shows, when writes keep tearing it, both lists kept, and read again when tried again", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const network = hostNetwork();
+    const client = portableClient(() => token);
+    for (const title of ["One", "Two", "Three"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(notes.api.create, { title });
+    }
+    const two = listOf(client, notes, 2);
+    const one = listOf(client, notes, 1);
+    await vi.waitFor(() => {
+      expect({ two: two.titles(), one: one.titles() }).toStrictEqual({
+        two: ["Three", "Two"],
+        one: ["Three"],
+      });
+    });
+
+    const undo = await writeAfterEveryPage(notes);
+    try {
+      const loadMore = await failureOf(one.pager.loadMore(1));
+      expect({
+        loadMore: loadMore.code,
+        one: one.titles(),
+        two: two.titles(),
+        loading: one.pager.snapshot.view.isLoading,
+      }).toStrictEqual({
+        loadMore: "query.concurrent_change",
+        one: ["Three"],
+        two: ["Three", "Two"],
+        loading: false,
+      });
+    } finally {
+      undo();
+    }
+    // Writes landed while the shared window was read: trying again reads
+    // it, though the list that failed shows another.
+    const before = network.sent.length;
+    clientInternals(client).retryFailed();
+    await vi.waitFor(() => {
+      expect(network.sent.length - before).toBe(1);
+    });
+    expect({ one: one.titles(), two: two.titles() }).toStrictEqual({
+      one: ["Three"],
+      two: ["Three", "Two"],
+    });
+    one.stop();
+    two.stop();
+  });
+
+  it("refuses a Load More whose window the person's budget can't pay for, once, keeping the list", async () => {
+    const notes = await notesApp({ files: pagedFiles });
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const network = hostNetwork();
+    const client = portableClient(() => token);
+    const seed = referenceTo<{ count: number }, null, "mutation">(
+      notes.release,
+      "notes.seed"
+    );
+    await client.mutation(seed, { count: 100 });
+    await client.mutation(seed, { count: 60 });
+    const listTen = referenceTo<
+      { pagination: { cursor?: string | null; pageSize?: number } },
+      unknown,
+      "query"
+    >(notes.release, "notes.listTen");
+    const list = listOf(client, notes, 10, listTen);
+    await vi.waitFor(() => {
+      expect(list.titles()).toHaveLength(10);
+    });
+
+    // The person's requests spent, then one back: a window of eleven
+    // short pages costs what two full ones do, more than is left.
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"], now });
+    let limited = false;
+    for (let request = 0; request < 40 && !limited; request += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      const response = await listWith(notes, token);
+      limited = response.status === 429;
+    }
+    expect(limited).toBeTruthy();
+    vi.setSystemTime(now + 500);
+    const sentBefore = network.sent.length;
+    const loadMore = await failureOf(list.pager.loadMore(100));
+    expect({
+      loadMore: loadMore.code,
+      sent: network.sent.length - sentBefore,
+      shown: list.titles().length,
+      error: list.pager.snapshot.error,
+      loading: list.pager.snapshot.view.isLoading,
+    }).toStrictEqual({
+      loadMore: "screen.rate_limited",
+      sent: 1,
+      shown: 10,
+      error: undefined,
+      loading: false,
+    });
+    list.stop();
+  });
+
+  it("shows a list loading as soon as a Load More starts", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    hostNetwork();
+    const client = portableClient(() => token);
+    for (const title of ["One", "Two"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one after the other
+      await client.mutation(notes.api.create, { title });
+    }
+    const list = listOf(client, notes, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["Two"]);
+    });
+
+    const loading = list.pager.loadMore(1);
+    const whileLoading = list.pager.snapshot.view.isLoading;
+    await loading;
+
+    expect({
+      whileLoading,
+      after: list.pager.snapshot.view.isLoading,
+      titles: list.titles(),
+    }).toStrictEqual({
+      whileLoading: true,
+      after: false,
+      titles: ["Two", "One"],
+    });
+    list.stop();
+  });
+
+  it("reads a shown window again only at the next change after a read of it failed, not at once", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const network = hostNetwork();
+    const client = portableClient(() => token);
+    await client.mutation(notes.api.create, { title: "One" });
+    const list = listOf(client, notes, 1);
+    await vi.waitFor(() => {
+      expect(list.titles()).toStrictEqual(["One"]);
+    });
+
+    // Every window read from now on fails; a change this client confirms
+    // marks the shown window old, which reads it again.
+    const undo = await writeAfterEveryPage(notes);
+    try {
+      const before = network.sent.length;
+      await client.mutation(notes.api.create, { title: "Two" });
+      await scheduler.wait(2000);
+      expect({
+        sent: network.sent.length - before,
+        shown: list.titles(),
+      }).toStrictEqual({ sent: 2, shown: ["One"] });
+    } finally {
+      undo();
+    }
+    list.stop();
   });
 
   it("verifies only with keys that could still have signed a current token, and deletes the rest", async () => {
