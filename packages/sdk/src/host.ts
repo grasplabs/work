@@ -122,12 +122,19 @@ export {
   contractFingerprint,
   contractFingerprints,
   contractsFormatVersion,
+  eventFingerprint,
   generatedPaths,
   generateModules,
   serverModuleSource,
   symbolicModules,
+  workflowFingerprint,
 } from "./generate.ts";
-export type { CatalogAction, ReleaseIdentity } from "./generate.ts";
+export type {
+  BoundWorkflow,
+  BoundWorkflowEvent,
+  CatalogAction,
+  ReleaseIdentity,
+} from "./generate.ts";
 export type { ScreenManifest } from "./app.ts";
 
 // A descriptor as JSON Schema, for what reads only JSON Schema (a model

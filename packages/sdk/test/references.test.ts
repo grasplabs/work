@@ -2,17 +2,20 @@ import { describe, expect, test } from "vite-plus/test";
 
 import {
   contractFingerprint,
+  eventFingerprint,
   generateModules,
   inspectApp,
   readAppManifest,
   symbolicModules,
+  workflowFingerprint,
 } from "../src/host.ts";
-import type { AppManifest } from "../src/host.ts";
+import type { AppManifest, BoundWorkflow } from "../src/host.ts";
 import { app, resource, v } from "../src/index.ts";
 import { runFunction } from "../src/runner.ts";
 import type { OperationChannel } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
 import { defineSchema, defineTable } from "../src/values.ts";
+import { notesWorkflows } from "./notes-workflows.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
 // oxlint-disable-next-line import/default -- a ?raw import is the file's text
 import referencesText from "./notes/.grasp/references.ts?raw";
@@ -104,7 +107,8 @@ describe("generated modules", () => {
   test("are what the host generates for the fixture, byte for byte", async () => {
     const files = await generateModules(
       readAppManifest(textOf(notesManifest())),
-      identity
+      identity,
+      notesWorkflows
     );
     expect(files).toStrictEqual({
       ".grasp/server.ts": serverText,
@@ -269,11 +273,154 @@ describe("generated modules", () => {
     expect(files[".grasp/references.ts"]).not.toContain("preferences");
   });
 
-  test("have no workflow children: no .start, .get or .cancel", () => {
-    expect(workflows).toStrictEqual({});
-    expect(referencesText).toContain(
+  test("export no workflows for an App that binds none", async () => {
+    const files = await generateModules(notesManifest(), identity);
+    expect(files[".grasp/references.ts"]).toContain(
       "export const workflows: Readonly<Record<never, never>> = frozen({});"
     );
+  });
+});
+
+describe("workflow references", () => {
+  const [summarize, archive] = notesWorkflows;
+  if (summarize === undefined || archive === undefined) {
+    throw new Error("No bound workflows");
+  }
+
+  /** The fixture's references to bound workflows, generated with `bound`. */
+  const generatedWith = async (bound: readonly BoundWorkflow[]) =>
+    await generateModules(notesManifest(), identity, bound);
+
+  test("hold their contract and their events as data, and have no .start, .get or .cancel", () => {
+    for (const reference of Object.values(workflows)) {
+      expect(Object.keys(reference).toSorted()).toStrictEqual([
+        "alias",
+        "contractId",
+        "events",
+        "fingerprint",
+        "input",
+        "kind",
+        "output",
+        "resourceId",
+        "resourceVersion",
+        "visibility",
+      ]);
+      // Data all the way down: a clone refuses a function, and keeps all.
+      expect(structuredClone(reference)).toStrictEqual(reference);
+      expect(Object.isFrozen(reference.events)).toBeTruthy();
+    }
+    expect(workflows.summarizeNote).toMatchObject({
+      kind: "workflow",
+      visibility: "public",
+      ...identity,
+      alias: "summarizeNote",
+      contractId: "workflows.summarizeNote",
+      input: summarize.input,
+      output: summarize.output,
+    });
+  });
+
+  test("bind each event to its workflow binding, the contract it pins and its event type", async () => {
+    const reference = workflows.summarizeNote;
+    expect(reference.fingerprint).toBe(await workflowFingerprint(summarize));
+    const expected = await Promise.all(
+      Object.entries(summarize.events).map(async ([alias, declared]) => [
+        alias,
+        {
+          kind: "workflowEvent",
+          ...identity,
+          workflow: "workflows.summarizeNote",
+          workflowFingerprint: reference.fingerprint,
+          alias,
+          type: declared.type,
+          fingerprint: await eventFingerprint(declared),
+          data: declared.data,
+        },
+      ])
+    );
+    expect(reference.events).toStrictEqual(Object.fromEntries(expected));
+  });
+
+  test("pin every part of the workflow's contract, which any change to it changes", async () => {
+    const text = v.string().descriptor;
+    const changes: BoundWorkflow[] = [
+      { ...summarize, input: text },
+      { ...summarize, output: text },
+      {
+        ...summarize,
+        events: {
+          ...summarize.events,
+          noteEdited: { type: "notes.note.changed", data: text },
+        },
+      },
+      {
+        ...summarize,
+        events: {
+          ...summarize.events,
+          styleChosen: { type: "notes.summary.style_chosen", data: text },
+        },
+      },
+      {
+        ...summarize,
+        events: { ...summarize.events, extra: { type: "x", data: text } },
+      },
+      { ...summarize, listens: { "do/0/chooseStyle": ["styleChosen"] } },
+    ];
+    const fingerprints = await Promise.all(
+      [summarize, ...changes].map(workflowFingerprint)
+    );
+    expect(new Set(fingerprints).size).toBe(fingerprints.length);
+  });
+
+  test("are the same bytes whatever order the workflows and their events come in", async () => {
+    const reversed = notesWorkflows.toReversed().map((workflow) => ({
+      ...workflow,
+      events: Object.fromEntries(Object.entries(workflow.events).toReversed()),
+      listens: Object.fromEntries(
+        Object.entries(workflow.listens).toReversed()
+      ),
+    }));
+    await expect(generatedWith(reversed)).resolves.toStrictEqual(
+      await generatedWith(notesWorkflows)
+    );
+  });
+
+  test("are covered by the contracts the release's hash covers", async () => {
+    const files = await generatedWith([
+      { ...summarize, output: v.string().descriptor },
+    ]);
+    expect(files[".grasp/contracts.json"]).not.toBe(contractsText);
+    expect(JSON.parse(contractsText)).toMatchObject({
+      workflowFingerprints: {
+        archiveNotes: await workflowFingerprint(archive),
+        summarizeNote: await workflowFingerprint(summarize),
+      },
+    });
+  });
+
+  test.each<[string, readonly BoundWorkflow[]]>([
+    ["the same alias twice", [summarize, summarize]],
+    ["an alias that isn't plain", [{ ...summarize, alias: "summarize-note" }]],
+    [
+      "an event alias that isn't plain",
+      [
+        {
+          ...summarize,
+          events: { "note edited": { type: "x", data: v.null().descriptor } },
+          listens: {},
+        },
+      ],
+    ],
+    [
+      "a listen task for an event the workflow doesn't declare",
+      [{ ...summarize, listens: { "do/0/wait": ["documentUploaded"] } }],
+    ],
+    [
+      "a listen task for no event at all",
+      [{ ...summarize, listens: { "do/0/wait": [] } }],
+    ],
+  ])("refuse %s", async (_what, bound) => {
+    await expect(generatedWith(bound)).rejects.toThrow(TypeError);
   });
 });
 

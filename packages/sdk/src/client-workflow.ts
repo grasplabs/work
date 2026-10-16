@@ -16,7 +16,12 @@ import {
   readAnswer,
   readRejection,
 } from "./client-error.ts";
-import type { AppErrorPayload, RunHandle, WorkflowWait } from "./references.ts";
+import type {
+  AppErrorPayload,
+  RunHandle,
+  WorkflowEventReference,
+  WorkflowWait,
+} from "./references.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { ValueDescriptor } from "./value-descriptor.ts";
 import { validateValue } from "./value-interpreter.ts";
@@ -92,6 +97,11 @@ export interface ReadWorkflow {
   readonly fingerprint: string;
   readonly input: ValueDescriptor;
   readonly output: ValueDescriptor;
+  /**
+   * Its event references, by alias: the very objects it was generated
+   * with, which a wait's event resolves to.
+   */
+  readonly events: ReadonlyMap<string, WorkflowEventReference>;
   /** What a request names of it, exactly as the host reads it. */
   readonly wire: {
     readonly resourceId: string;
@@ -105,6 +115,80 @@ export interface ReadWorkflow {
 const fingerprintPattern = /^[0-9a-f]{64}$/u;
 
 const readWorkflows = new WeakMap<object, ReadWorkflow>();
+
+/** The most events one workflow reference declares. */
+const maxEvents = 64;
+
+const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+
+/** The release and contract of the workflow reference being read. */
+interface WorkflowIdentity {
+  readonly resourceId: string;
+  readonly resourceVersion: number;
+  readonly contractId: string;
+  readonly fingerprint: string;
+}
+
+/**
+ * Whether `event` is a reference to an event of `workflow` under `alias`:
+ * that very workflow's release, contract and fingerprint, its own alias,
+ * a type, a fingerprint, and a data descriptor that reads.
+ */
+const isEventOf = (
+  event: unknown,
+  alias: string,
+  workflow: WorkflowIdentity
+): event is WorkflowEventReference => {
+  if (
+    !aliasPattern.test(alias) ||
+    !isPlainObject(event) ||
+    event.kind !== "workflowEvent" ||
+    event.alias !== alias ||
+    event.resourceId !== workflow.resourceId ||
+    event.resourceVersion !== workflow.resourceVersion ||
+    event.workflow !== workflow.contractId ||
+    event.workflowFingerprint !== workflow.fingerprint ||
+    typeof event.type !== "string" ||
+    event.type.length === 0 ||
+    event.type.length > 256 ||
+    typeof event.fingerprint !== "string" ||
+    !fingerprintPattern.test(event.fingerprint)
+  ) {
+    return false;
+  }
+  try {
+    readDescriptor(event.data, 1, { nodes: 0 });
+  } catch {
+    return false;
+  }
+  return true;
+};
+
+/**
+ * The events of a workflow reference, `value`, by alias: each one of
+ * `workflow`'s own (`isEventOf`), the very objects given. Anything else
+ * throws.
+ */
+const readEvents = (
+  value: unknown,
+  workflow: WorkflowIdentity
+): ReadonlyMap<string, WorkflowEventReference> => {
+  if (!isPlainObject(value)) {
+    throw clientError("contract.invalid_request");
+  }
+  const entries = Object.entries(value);
+  if (entries.length > maxEvents) {
+    throw clientError("contract.invalid_request");
+  }
+  const events = new Map<string, WorkflowEventReference>();
+  for (const [alias, event] of entries) {
+    if (!isEventOf(event, alias, workflow)) {
+      throw clientError("contract.invalid_request");
+    }
+    events.set(alias, event);
+  }
+  return events;
+};
 
 /**
  * `value` as a public workflow reference, read as data, its descriptors
@@ -148,6 +232,7 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
     fingerprint: value.fingerprint,
     kind: "workflow",
   } as const;
+  const events = readEvents(value.events, wire);
   const read: ReadWorkflow = {
     key: canonicalJson([
       wire.resourceId,
@@ -160,6 +245,7 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
     fingerprint: wire.fingerprint,
     input,
     output,
+    events,
     wire,
   };
   readWorkflows.set(value, read);
@@ -428,6 +514,38 @@ const agrees = (snapshot: RunSnapshot): boolean => {
   );
 };
 
+/** A wait as the host names it: its event by alias and fingerprint. */
+type WireWait =
+  | Exclude<WorkflowWait, { readonly kind: "event" }>
+  | (Omit<Extract<WorkflowWait, { readonly kind: "event" }>, "event"> & {
+      readonly event: {
+        readonly kind: "workflowEvent";
+        readonly alias: string;
+        readonly fingerprint: string;
+      };
+    });
+
+/**
+ * `waits` with each event wait's event resolved to the reference `read`
+ * was generated with, by alias and fingerprint: a run listening for an
+ * event its reference doesn't declare, or for another contract of it,
+ * is an invalid snapshot, never a wait shown with a made-up event.
+ */
+const resolvedWaits = (
+  read: ReadWorkflow,
+  waits: readonly WireWait[]
+): readonly WorkflowWait[] =>
+  waits.map((wait): WorkflowWait => {
+    if (wait.kind !== "event") {
+      return wait;
+    }
+    const event = read.events.get(wait.event.alias);
+    if (event === undefined || event.fingerprint !== wait.event.fingerprint) {
+      throw invalidSnapshot();
+    }
+    return { ...wait, event };
+  });
+
 /**
  * A push of run `runId` of `read`, read: its snapshot, frozen, or a
  * structured error thrown (`contract.invalid_snapshot`, or
@@ -450,8 +568,8 @@ const readSnapshot = (
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   const snapshot = base as Omit<
     RunSnapshot,
-    "output" | "error" | "compensation"
-  > & { readonly fingerprint: string };
+    "output" | "error" | "compensation" | "waits"
+  > & { readonly fingerprint: string; readonly waits: readonly WireWait[] };
   if (snapshot.runId !== runId) {
     throw invalidSnapshot();
   }
@@ -466,7 +584,7 @@ const readSnapshot = (
     status: snapshot.status,
     startedAt: snapshot.startedAt,
     finishedAt: snapshot.finishedAt,
-    waits: snapshot.waits,
+    waits: resolvedWaits(read, snapshot.waits),
     control: snapshot.control,
   };
   let outputPart: { readonly output?: unknown } = {};

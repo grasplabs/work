@@ -19,8 +19,9 @@ import { descriptorOf } from "./value-schema.ts";
 //   resources its screens use, its `screens`, and `preferences` when it
 //   declares them. What a browser gets: data and types, extracted from
 //   descriptors, with no handler, schema or server code in it.
-// - `.grasp/contracts.json`: the App's manifest and each function's
-//   fingerprint, canonical: what the release's contract hash covers.
+// - `.grasp/contracts.json`: the App's manifest, each function's
+//   fingerprint and the workflows it binds with theirs, canonical: what
+//   the release's contract hash covers.
 //
 // Generation is deterministic: the same manifest and identity always
 // make the same bytes, so a release's artifacts can be compared and
@@ -72,6 +73,94 @@ export const contractFingerprints = async (
     fingerprints[path] = await contractFingerprint(operation);
   }
   return fingerprints;
+};
+
+/** One event a bound workflow declares, as the host resolved it. */
+export interface BoundWorkflowEvent {
+  /** The CloudEvents type its binding admits. */
+  readonly type: string;
+  /** The descriptor of its data. */
+  readonly data: ValueDescriptor;
+}
+
+/**
+ * A workflow the App binds (spec 3, 10.4.1, 10.4.6), as the host resolved
+ * its binding against the approved records: the App's alias for it, the
+ * pinned version's input and output, the events it declares by their
+ * binding's alias, and its listen tasks, by path, with the aliases of the
+ * events each listens for. Never from App code: what a reference pins is
+ * the host's word.
+ */
+export interface BoundWorkflow {
+  readonly alias: string;
+  readonly input: ValueDescriptor;
+  readonly output: ValueDescriptor;
+  readonly events: Readonly<Record<string, BoundWorkflowEvent>>;
+  readonly listens: Readonly<Record<string, readonly string[]>>;
+}
+
+/**
+ * The fingerprint of an event's exact contract: the SHA-256, in hex, of
+ * its type and data descriptor, canonically.
+ */
+export const eventFingerprint = async (
+  event: BoundWorkflowEvent
+): Promise<string> =>
+  await sha256Hex(canonicalText({ type: event.type, data: event.data }));
+
+/**
+ * The fingerprint of a bound workflow's exact public contract: the
+ * SHA-256, in hex, of its input, output, events and listen tasks,
+ * canonically. Any change to any of them changes it, so a reference pins
+ * all of them; the host refuses a run that pins another.
+ */
+export const workflowFingerprint = async (
+  workflow: BoundWorkflow
+): Promise<string> =>
+  await sha256Hex(
+    canonicalText({
+      input: workflow.input,
+      output: workflow.output,
+      events: workflow.events,
+      listens: workflow.listens,
+    })
+  );
+
+/** What the App calls a workflow and its events: plain identifiers. */
+const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+
+/**
+ * `workflows`, checked: unique aliases, and listen tasks that listen only
+ * for events the workflow declares. The host resolved them, so a failure
+ * is the host's own error, never the App's.
+ */
+const checkBoundWorkflows = (workflows: readonly BoundWorkflow[]): void => {
+  const aliases = new Set<string>();
+  for (const workflow of workflows) {
+    if (!aliasPattern.test(workflow.alias) || aliases.has(workflow.alias)) {
+      throw new TypeError(
+        `A bound workflow's alias is unique and plain: ${JSON.stringify(workflow.alias)}`
+      );
+    }
+    aliases.add(workflow.alias);
+    for (const alias of Object.keys(workflow.events)) {
+      if (!aliasPattern.test(alias)) {
+        throw new TypeError(
+          `An event's alias is plain: ${JSON.stringify(alias)}`
+        );
+      }
+    }
+    for (const [task, listened] of Object.entries(workflow.listens)) {
+      if (
+        listened.length === 0 ||
+        listened.some((alias) => !Object.hasOwn(workflow.events, alias))
+      ) {
+        throw new TypeError(
+          `Listen task ${JSON.stringify(task)} of ${workflow.alias} listens for events the workflow declares.`
+        );
+      }
+    }
+  }
 };
 
 const identifier = /^[A-Za-z_$][\w$]*$/u;
@@ -413,12 +502,138 @@ const serverReferencesText = (
   return `${banner}${typeImports(body, ["OperationReference", ...valueTypes])}\n${freezer}\n${body}`;
 };
 
+/** A workflow's contract ID: its registered path. */
+const workflowContractId = (alias: string): string => `workflows.${alias}`;
+
+/** The type of the reference to `event`, declared as `alias` by `workflow`. */
+const eventTypeOf = (
+  workflow: BoundWorkflow,
+  alias: string,
+  event: BoundWorkflowEvent
+): string =>
+  `WorkflowEventReference<${JSON.stringify(workflowContractId(workflow.alias))}, ${JSON.stringify(alias)}, ${JSON.stringify(event.type)}, ${valueTypeOf(event.data, "input")}>`;
+
+/** `names` in order: the same contract makes the same text. */
+const sortedKeys = (record: Readonly<Record<string, unknown>>): string[] =>
+  Object.keys(record).toSorted();
+
+/**
+ * The type of the waits a run of `workflow` can be held at: the engine's
+ * own, and one event wait per listen task, keyed by its path, holding the
+ * references of the events it listens for.
+ */
+const waitTypeOf = (workflow: BoundWorkflow, depth: number): string => {
+  const members = sortedKeys(workflow.listens).map((task) => {
+    const events = [...new Set(workflow.listens[task])]
+      .toSorted()
+      .map((alias) => {
+        const event = workflow.events[alias];
+        return event === undefined
+          ? "never"
+          : eventTypeOf(workflow, alias, event);
+      })
+      .join(" | ");
+    return `WorkflowEventWait<${JSON.stringify(task)}, ${events}>`;
+  });
+  return ["WorkflowEngineWait", ...members]
+    .map((member) => `| ${member}`)
+    .join(`\n${indent(depth)}`);
+};
+
+/** The type of the reference to `workflow`. */
+const workflowTypeOf = (workflow: BoundWorkflow): string => {
+  const events = sortedKeys(workflow.events).map((alias) => {
+    const event = workflow.events[alias];
+    const type =
+      event === undefined ? "never" : eventTypeOf(workflow, alias, event);
+    return `${indent(3)}readonly ${key(alias)}: ${type};`;
+  });
+  const eventsType =
+    events.length === 0
+      ? "Readonly<Record<never, never>>"
+      : `{\n${events.join("\n")}\n${indent(2)}}`;
+  const parts = [
+    JSON.stringify(workflow.alias),
+    valueTypeOf(workflow.input, "input"),
+    valueTypeOf(workflow.output, "output"),
+    waitTypeOf(workflow, 2),
+    eventsType,
+  ];
+  return `WorkflowReference<\n${parts.map((part) => `${indent(2)}${part},`).join("\n")}\n${indent(1)}>`;
+};
+
+/** The reference to `workflow`, as the data a generated module holds. */
+const workflowReferenceOf = async (
+  identity: ReleaseIdentity,
+  workflow: BoundWorkflow
+) => {
+  const contractId = workflowContractId(workflow.alias);
+  const fingerprint = await workflowFingerprint(workflow);
+  const events: Record<string, unknown> = {};
+  for (const alias of sortedKeys(workflow.events)) {
+    const event = workflow.events[alias];
+    if (event !== undefined) {
+      events[alias] = {
+        kind: "workflowEvent",
+        resourceId: identity.resourceId,
+        resourceVersion: identity.resourceVersion,
+        workflow: contractId,
+        workflowFingerprint: fingerprint,
+        alias,
+        type: event.type,
+        // One after the other: a digest is quick, and the order is the map's.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        fingerprint: await eventFingerprint(event),
+        data: event.data,
+      };
+    }
+  }
+  return {
+    kind: "workflow",
+    visibility: "public",
+    resourceId: identity.resourceId,
+    resourceVersion: identity.resourceVersion,
+    alias: workflow.alias,
+    contractId,
+    fingerprint,
+    input: workflow.input,
+    output: workflow.output,
+    events,
+  };
+};
+
+/**
+ * `workflows`: one reference per workflow the App binds, each with its
+ * events and nothing else; no `.start`, `.get` or `.cancel` (spec 10.4).
+ */
+const workflowsExport = async (
+  identity: ReleaseIdentity,
+  workflows: readonly BoundWorkflow[]
+): Promise<string> => {
+  const sorted = workflows.toSorted((a, b) => (a.alias < b.alias ? -1 : 1));
+  if (sorted.length === 0) {
+    return "export const workflows: Readonly<Record<never, never>> = frozen({});\n";
+  }
+  const types = sorted.map(
+    (workflow) =>
+      `  readonly ${key(workflow.alias)}: ${workflowTypeOf(workflow)};`
+  );
+  const values = await Promise.all(
+    sorted.map(
+      async (workflow) =>
+        `  ${key(workflow.alias)}: ${dataOf(await workflowReferenceOf(identity, workflow), 1)},`
+    )
+  );
+  return `export const workflows: {\n${types.join("\n")}\n} = frozen({\n${values.join("\n")}\n});\n`;
+};
+
 /** `#grasp`: the public api and everything else a browser may hold. */
-const referencesText = (
+const referencesText = async (
   manifest: AppManifest,
   identity: ReleaseIdentity,
-  fingerprints: Readonly<Record<string, string>>
-): string => {
+  fingerprints: Readonly<Record<string, string>>,
+  workflows: readonly BoundWorkflow[]
+): Promise<string> => {
   const parts: string[] = [
     referenceExport(
       "api",
@@ -426,9 +641,7 @@ const referencesText = (
       identity,
       fingerprints
     ),
-    // Workflow bindings come with the workflows an App may bind: until
-    // then there are none, and no `.start`, `.get` or `.cancel` children.
-    "export const workflows: Readonly<Record<never, never>> = frozen({});\n",
+    await workflowsExport(identity, workflows),
   ];
 
   const resources = Object.values(manifest.browserResources).toSorted((a, b) =>
@@ -494,6 +707,10 @@ const referencesText = (
     "OperationReference",
     "PreferencesReference",
     "ScreenReference",
+    "WorkflowEngineWait",
+    "WorkflowEventReference",
+    "WorkflowEventWait",
+    "WorkflowReference",
     ...valueTypes,
   ])}\n${freezer}\n${body}`;
 };
@@ -501,19 +718,31 @@ const referencesText = (
 /**
  * Every module the host generates for an App, by path (`generatedPaths`),
  * for the release `identity`, from its `manifest` as the host read it
- * (`readAppManifest`).
+ * (`readAppManifest`) and the `workflows` it binds, as the host resolved
+ * them (`BoundWorkflow`).
  */
 export const generateModules = async (
   manifest: AppManifest,
-  identity: ReleaseIdentity
+  identity: ReleaseIdentity,
+  workflows: readonly BoundWorkflow[] = []
 ): Promise<Record<string, string>> => {
+  checkBoundWorkflows(workflows);
   const fingerprints = await contractFingerprints(manifest);
+  const workflowFingerprints: Record<string, string> = {};
+  for (const workflow of workflows) {
+    // oxlint-disable-next-line no-await-in-loop -- one digest at a time, as above
+    workflowFingerprints[workflow.alias] = await workflowFingerprint(workflow);
+  }
   const contracts = canonicalText({
     formatVersion: contractsFormatVersion,
     resourceId: identity.resourceId,
     resourceVersion: identity.resourceVersion,
     manifest,
     fingerprints,
+    workflows: Object.fromEntries(
+      workflows.map((workflow) => [workflow.alias, workflow])
+    ),
+    workflowFingerprints,
   });
   return {
     [generatedPaths.server]: serverModuleSource,
@@ -522,10 +751,11 @@ export const generateModules = async (
       identity,
       fingerprints
     ),
-    [generatedPaths.references]: referencesText(
+    [generatedPaths.references]: await referencesText(
       manifest,
       identity,
-      fingerprints
+      fingerprints,
+      workflows
     ),
     [generatedPaths.contracts]: `${contracts}\n`,
   };

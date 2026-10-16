@@ -214,37 +214,56 @@ interface WaitFields<Key extends string> {
   readonly deadline: number | null;
 }
 
-/** The event a run listens for, as its wait names it (spec 10.4.6). */
-export interface WorkflowEventReference {
+/**
+ * A generated reference to one event a workflow the App binds declares
+ * (spec 10.4.6): `workflows.<workflow>.events.<alias>`. It names the
+ * workflow binding it belongs to (its App release, contract ID and
+ * pinned fingerprint), the event binding's alias and the exact event type
+ * it admits, with the descriptor of its data and that data's type in a
+ * phantom member. It grants nothing: the host checks every send against
+ * the run, the binding and the person, and validates the data again.
+ */
+export interface WorkflowEventReference<
+  Workflow extends string = string,
+  Alias extends string = string,
+  Type extends string = string,
+  Data = unknown,
+> {
   readonly kind: "workflowEvent";
+  readonly resourceId: string;
+  readonly resourceVersion: number;
+  /** The workflow binding's contract ID, e.g. `workflows.reviewInvoice`. */
+  readonly workflow: Workflow;
+  /** The fingerprint of the workflow contract it belongs to. */
+  readonly workflowFingerprint: string;
   /** The event binding's alias in the workflow. */
-  readonly alias: string;
-  /** The SHA-256 of its data contract, in hex. */
+  readonly alias: Alias;
+  /** The CloudEvents type it admits. */
+  readonly type: Type;
+  /** The SHA-256 of its type and data contract, in hex. */
   readonly fingerprint: string;
+  readonly data: ValueDescriptor;
+  /** Types only: never set. */
+  readonly [argsType]?: Data;
 }
 
+/** The data an event of `Reference` carries, as a sender passes it. */
+export type EventDataOf<Reference> =
+  Reference extends WorkflowEventReference<string, string, string, infer Data>
+    ? Data
+    : never;
+
 /**
- * A wait a run is held at now (spec 10.4.5, 10.7.2): a timer, an event,
- * a person's decision, a child run, or a hold of the platform's that no
- * one answers from an App. Each grants nothing of what it names.
+ * A wait the engine holds a run at on its own (spec 10.4.5, 10.7.2): a
+ * timer, a child run, or a hold of the platform's that no one answers
+ * from an App. Each grants nothing of what it names.
  */
-export type WorkflowWait<Key extends string = string> =
+export type WorkflowEngineWait<Key extends string = string> =
   | (WaitFields<Key> & {
       readonly kind: "timer";
       /** A sleep the workflow asked for, or a retry's backoff. */
       readonly purpose: "sleep" | "retry";
       readonly deadline: number;
-    })
-  | (WaitFields<Key> & {
-      readonly kind: "event";
-      readonly event: WorkflowEventReference;
-      /** Whether the person may send it now; false when unknown. */
-      readonly canSend: boolean;
-    })
-  | (WaitFields<Key> & {
-      readonly kind: "decision";
-      /** Whether the person may answer it now; false when unknown or stale. */
-      readonly canRespond: boolean;
     })
   | (WaitFields<Key> & {
       readonly kind: "child";
@@ -262,20 +281,57 @@ export type WorkflowWait<Key extends string = string> =
     });
 
 /**
- * A generated reference to one of the workflows an App binds (spec 10.4.1):
- * the App and release it belongs to, the binding's alias, the contract it
- * pins (its ID and fingerprint, over its input and output) and the
- * descriptors of its input and output. Its types, the input a run takes,
+ * A run listening for an event (spec 10.4.6, 10.7.2): `Key` is the listen
+ * task's path, `Event` the generated references of the events it listens
+ * for. Its `event` is the very reference the App was generated with.
+ */
+export type WorkflowEventWait<
+  Key extends string = string,
+  Event = WorkflowEventReference,
+> = WaitFields<Key> & {
+  readonly kind: "event";
+  readonly event: Event;
+  /** Whether the person may send it now; false when unknown. */
+  readonly canSend: boolean;
+};
+
+/** A run held for a person's decision (spec 10.4.5, 10.7.2). */
+export type WorkflowDecisionWait<Key extends string = string> =
+  WaitFields<Key> & {
+    readonly kind: "decision";
+    /** Whether the person may answer it now; false when unknown or stale. */
+    readonly canRespond: boolean;
+  };
+
+/**
+ * A wait a run is held at now (spec 10.4.5, 10.7.2): a timer, an event,
+ * a person's decision, a child run, or a hold of the platform's. A
+ * generated workflow reference narrows it to the waits that workflow
+ * declares (`WorkflowWaitOf`).
+ */
+export type WorkflowWait<Key extends string = string> =
+  | WorkflowEngineWait<Key>
+  | WorkflowEventWait<Key>
+  | WorkflowDecisionWait<Key>;
+
+/**
+ * A generated reference to one of the workflows an App binds (spec 10.4.1,
+ * 10.4.6): the App and release it belongs to, the binding's alias, the
+ * contract it pins (its ID and fingerprint, over its input, output and
+ * the events it declares), the descriptors of its input and output, and
+ * its event references under `events`. Its types, the input a run takes,
  * the output a completed run has and the waits it can be held at, live
  * in phantom members only. It holds no binding and grants nothing: the
  * host resolves it against the release and binding in force, and refuses
- * a run whose pinned contract isn't this one.
+ * a run whose pinned contract isn't this one. It has no `.start`, `.get`
+ * or `.cancel`: runs go through `useWorkflow`.
  */
 export interface WorkflowReference<
   Alias extends string = string,
   Input = unknown,
   Output = unknown,
   Wait = WorkflowWait,
+  Events = Readonly<Record<string, WorkflowEventReference>>,
 > {
   readonly kind: "workflow";
   readonly visibility: "public";
@@ -284,10 +340,12 @@ export interface WorkflowReference<
   readonly alias: Alias;
   /** Its registered path, e.g. `workflows.summarizeNote`. */
   readonly contractId: string;
-  /** The SHA-256 of its exact input and output contract, in hex. */
+  /** The SHA-256 of its exact public contract, in hex. */
   readonly fingerprint: string;
   readonly input: ValueDescriptor;
   readonly output: ValueDescriptor;
+  /** Its events, by their binding's alias in the workflow. */
+  readonly events: Events;
   /** Types only: never set. */
   readonly [argsType]?: Input;
   /** Types only: never set. */
@@ -304,6 +362,8 @@ export type AnyWorkflowReference = WorkflowReference<
   // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowOutputOf`
   any,
   // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowWaitOf`
+  any,
+  // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowEventsOf`
   any
 >;
 
@@ -321,6 +381,18 @@ export type WorkflowOutputOf<Reference> =
 export type WorkflowWaitOf<Reference> =
   Reference extends WorkflowReference<string, unknown, unknown, infer Wait>
     ? Wait
+    : never;
+
+/** The event references of `Reference`, by alias. */
+export type WorkflowEventsOf<Reference> =
+  Reference extends WorkflowReference<
+    string,
+    unknown,
+    unknown,
+    unknown,
+    infer Events
+  >
+    ? Events
     : never;
 
 /** A generated reference to the App's preferences, when it declares them. */
