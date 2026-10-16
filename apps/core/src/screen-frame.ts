@@ -8,6 +8,7 @@ import { artifactSchema } from "@grasp-os/shared/screen-trust";
 import {
   screenFrameMessage,
   screenFrameReady,
+  screenLanguageOf,
   screenModulePath,
 } from "@grasp-os/shared/screens";
 import { z } from "zod";
@@ -488,8 +489,11 @@ export const screenFrameResponse = async (
     await hashSource(importMap),
     ...new Set(Object.values(manifest.imports).map((hash) => addressOf(hash))),
   ];
+  // The page's language, one it speaks or English: never text of the
+  // page's own in the document.
+  const language = screenLanguageOf(url.searchParams.get("lang"));
   const html = `<!doctype html>
-<html lang="en">
+<html lang="${language}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />

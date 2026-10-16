@@ -5447,6 +5447,10 @@ msgstr "E-Signatur"
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "Die Anmeldung erfolgt bei {app}. Sie dauert etwa eine Minute."
 
+#: src/frame/person-menu.tsx
+msgid "Signing out didn't work"
+msgstr "Abmelden hat nicht funktioniert"
+
 #: src/brain/brain.ts
 msgid "Size changed to {people}"
 msgstr "Größe geändert auf {people}"
@@ -7256,6 +7260,10 @@ msgstr "Sie:"
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
 msgstr "Sie lesen Version {number}, gespeichert am {saved}. Die aktuelle Version ist {current}."
+
+#: src/frame/person-menu.tsx
+msgid "You're still signed in. Try again in a moment."
+msgstr "Sie sind noch angemeldet. Versuchen Sie es gleich noch einmal."
 
 #: src/routes/_shell.settings.tsx
 msgid "Your account"

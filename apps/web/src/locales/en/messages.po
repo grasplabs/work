@@ -5447,6 +5447,10 @@ msgstr "Signing"
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "Signing in happens at {app}. It takes about a minute."
 
+#: src/frame/person-menu.tsx
+msgid "Signing out didn't work"
+msgstr "Signing out didn't work"
+
 #: src/brain/brain.ts
 msgid "Size changed to {people}"
 msgstr "Size changed to {people}"
@@ -7256,6 +7260,10 @@ msgstr "You:"
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
 msgstr "You're reading version {number}, saved {saved}. The current version is {current}."
+
+#: src/frame/person-menu.tsx
+msgid "You're still signed in. Try again in a moment."
+msgstr "You're still signed in. Try again in a moment."
 
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
