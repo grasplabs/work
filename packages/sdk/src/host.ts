@@ -139,6 +139,7 @@ export type {
   ReleaseIdentity,
 } from "./generate.ts";
 export type { ScreenManifest } from "./app.ts";
+export { workflowReferenceLimits } from "./references.ts";
 
 // A descriptor as JSON Schema, for what reads only JSON Schema (a model
 // told its answer's shape); values are still checked by the descriptor.

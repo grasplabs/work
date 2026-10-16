@@ -13,7 +13,7 @@ const uploaded = v.object({ fileId: v.string() });
 const completed = v.object({ jobId: v.string() });
 
 describe("a bound workflow's events", () => {
-  it("are the browser-callable types with their data, and the listen tasks waiting on them", () => {
+  it("are the browser-callable types with their data, and the listen tasks waiting only on them", () => {
     const bound = boundEventsOf(
       [
         {
@@ -40,8 +40,21 @@ describe("a bound workflow's events", () => {
         },
       ],
       {
-        "await-upload": ["documentUploaded"],
-        "await-job": ["jobEvents"],
+        "await-upload": {
+          alias: "documentUploaded",
+          types: ["invoice.document.uploaded"],
+        },
+        // The same binding, another of its types: no screen sends it.
+        "await-scan": {
+          alias: "documentUploaded",
+          types: ["invoice.document.scanned"],
+        },
+        // An `any` mixing the two: not every type is a screen's.
+        "await-either": {
+          alias: "documentUploaded",
+          types: ["invoice.document.scanned", "invoice.document.uploaded"],
+        },
+        "await-job": { alias: "jobEvents", types: ["grasp.job.completed"] },
       }
     );
     expect(bound).toStrictEqual({
@@ -53,5 +66,23 @@ describe("a bound workflow's events", () => {
       },
       listens: { "await-upload": ["documentUploaded"] },
     });
+  });
+
+  it("refuse a contract with two types a screen sends as corrupt", () => {
+    const data = JSON.stringify(uploaded.descriptor);
+    expect(() =>
+      boundEventsOf(
+        [
+          {
+            alias: "documentUploaded",
+            events: {
+              "invoice.document.uploaded": { data, browser: true },
+              "invoice.document.replaced": { data, browser: true },
+            },
+          },
+        ],
+        {}
+      )
+    ).toThrow("admits more than one type a screen sends");
   });
 });

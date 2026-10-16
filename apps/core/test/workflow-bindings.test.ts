@@ -1,5 +1,9 @@
 /* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
-import { jsonSchemaOf, schemaFromDescriptor } from "@grasp-os/sdk/host";
+import {
+  jsonSchemaOf,
+  schemaFromDescriptor,
+  workflowReferenceLimits,
+} from "@grasp-os/sdk/host";
 import {
   releaseFormatVersion,
   releaseManifestSchema,
@@ -26,6 +30,7 @@ import {
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
 import { appFor } from "../src/apps.ts";
+import { boundEventsOf } from "../src/bound-workflow-events.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import { grantPermission, requestPermission } from "../src/permissions.ts";
 import { standingOf } from "../src/screen-trust.ts";
@@ -33,7 +38,10 @@ import {
   approveWorkflowBinding,
   revokeWorkflowBinding,
 } from "../src/workflow-bindings.ts";
-import { publishCatalogContract } from "../src/workflow-catalog.ts";
+import {
+  publishCatalogContract,
+  resolveCatalogKeys,
+} from "../src/workflow-catalog.ts";
 import { setWorkflowParams, workflowParams } from "../src/workflow-params.ts";
 import {
   createWorkflowResource,
@@ -191,6 +199,8 @@ interface Draft {
    */
   events?: string;
   listensFor?: string;
+  /** How many listen tasks it has, one after the other (1 by default). */
+  listenTasks?: number;
 }
 
 /**
@@ -207,6 +217,7 @@ const definitionOf = ({
   waits = false,
   events,
   listensFor = "grasp.job.completed",
+  listenTasks = 1,
 }: Draft): string =>
   JSON.stringify({
     document: {
@@ -289,18 +300,16 @@ const definitionOf = ({
       ...(waits ? [{ pause: { wait: "PT1H" } }] : []),
       ...(events === undefined
         ? []
-        : [
-            {
-              "await-job": {
-                listen: {
-                  to: { one: { with: { type: listensFor } } },
-                  read: "data",
-                },
-                timeout: { after: { hours: 24 } },
-                metadata: { grasp: { binding: "jobEvents" } },
+        : Array.from({ length: listenTasks }, (_, index) => ({
+            [index === 0 ? "await-job" : `await-job-${index}`]: {
+              listen: {
+                to: { one: { with: { type: listensFor } } },
+                read: "data",
               },
+              timeout: { after: { hours: 24 } },
+              metadata: { grasp: { binding: "jobEvents" } },
             },
-          ]),
+          }))),
       { finish: { set: { status: "done" } } },
     ],
   });
@@ -597,8 +606,90 @@ describe("event contracts", () => {
       unadmitted,
     }).toStrictEqual({
       bindings: [{ alias: "jobEvents", kind: "event", contractId: events }],
-      listens: { "await-job": ["jobEvents"] },
+      listens: {
+        "await-job": { alias: "jobEvents", types: ["grasp.job.completed"] },
+      },
       unadmitted: "workflow.definition_invalid",
+    });
+  });
+
+  it("make a listen task an App's event wait only when it waits on the type a screen sends", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const events = await eventContract(admin);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `listen-${unique()}`
+    );
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({ name: workflow.name, events }),
+      basedOn: null,
+    });
+    // The same binding, waiting on the contract's other type, which no
+    // screen sends.
+    await publishWorkflowVersion(env, ada, workflow.id, {
+      definition: definitionOf({
+        name: workflow.name,
+        version: "2.0.0",
+        events,
+        listensFor: "grasp.job.timeout",
+      }),
+      basedOn: 1,
+    });
+    const catalog = await resolveCatalogKeys(env, [events]);
+    const contractEvents = catalog.get(events)?.contract.events ?? {};
+    const boundAt = async (version: number) => {
+      const contract = await versionContract(env, workflow.id, version);
+      return boundEventsOf(
+        [{ alias: "jobEvents", events: contractEvents }],
+        contract?.listens ?? {}
+      );
+    };
+    const sent = await boundAt(1);
+    const timeout = await boundAt(2);
+    expect({
+      sent: sent.listens,
+      timeout: timeout.listens,
+      events: Object.keys(timeout.events),
+    }).toStrictEqual({
+      sent: { "await-job": ["jobEvents"] },
+      timeout: {},
+      events: ["jobEvents"],
+    });
+  });
+
+  it("refuse a version with more listen tasks waiting on a screen's events than a reference holds", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const events = await eventContract(admin);
+    const workflow = await createWorkflowResource(
+      env,
+      ada,
+      `listen-${unique()}`
+    );
+    const publish = async (listenTasks: number, listensFor?: string) =>
+      await outcome(
+        publishWorkflowVersion(env, ada, workflow.id, {
+          definition: definitionOf({
+            name: workflow.name,
+            events,
+            listenTasks,
+            ...(listensFor === undefined ? {} : { listensFor }),
+          }),
+          basedOn: null,
+        })
+      );
+    expect({
+      tooMany: await publish(workflowReferenceLimits.listens + 1),
+      // Waits no screen's event: no reference carries them.
+      internal: await publish(
+        workflowReferenceLimits.listens + 1,
+        "grasp.job.timeout"
+      ),
+    }).toStrictEqual({
+      tooMany: "workflow.definition_invalid",
+      internal: "ok",
     });
   });
 

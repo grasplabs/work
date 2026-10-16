@@ -38,6 +38,17 @@ const plain = (tasks: unknown[]) =>
 const emptyObject = JSON.stringify(v.object({}).descriptor);
 
 /** The fixture catalog, with `contract` as notes.get. */
+/**
+ * A catalog entry the host's types wouldn't allow: the reader takes
+ * entries as untrusted data, so it must refuse one, whatever its type.
+ */
+const malformed = (entry: Record<string, unknown>): CatalogContract => {
+  const copy: unknown = structuredClone(entry);
+  // SAFETY: deliberately not a CatalogContract; the reader checks every field.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  return copy as CatalogContract;
+};
+
 const withContract = (contract: CatalogContract): ValidateOptions => ({
   catalog: (key) => (key === "notes.get" ? contract : options.catalog(key)),
 });
@@ -268,6 +279,17 @@ describe("the host's catalog", () => {
     ["connector with no operations", { kind: "connector", operations: {} }],
     ["event", { kind: "event" }],
     ["event with no types", { kind: "event", events: {} }],
+    [
+      "event type without data",
+      malformed({ kind: "event", events: { "grasp.a": { browser: true } } }),
+    ],
+    [
+      "event type without browser",
+      malformed({
+        kind: "event",
+        events: { "grasp.a": { data: emptyObject } },
+      }),
+    ],
     [
       "event with two types a screen sends",
       {
