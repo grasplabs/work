@@ -303,6 +303,9 @@ const callConnector = async (
       return {
         authority: runAuthority(run),
         notAfter: effect.deadline,
+        // A sensitive parameter's value is in its input: connect keeps
+        // none of it, so no listing of a lost outcome shows it.
+        sensitive: call.sensitive.length > 0,
         // Last, after the permission check and the signing: the run's
         // authority again, then its attempt, nothing awaited after.
         stillAllowed: async () => {

@@ -234,7 +234,8 @@ export const rowKey = (row: Row) =>
  * exact input and where it came from, both as JSON (`input`, `origin`).
  */
 export interface Kept {
-  input: string;
+  /** Null for a call whose capability says its input is sensitive. */
+  input: string | null;
   origin: string;
 }
 
@@ -260,7 +261,7 @@ const storedOriginSchema = z.strictObject({
 
 /** What a call whose capability says `claims` keeps under its key. */
 export const keptOf = (claims: CapabilityClaims, input: Json): Kept => ({
-  input: JSON.stringify(input),
+  input: claims.sensitive ? null : JSON.stringify(input),
   origin: JSON.stringify({
     mode: claims.authority.mode,
     appVersion: claims.authority.appVersion ?? null,

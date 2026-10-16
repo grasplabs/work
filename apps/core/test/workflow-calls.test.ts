@@ -28,6 +28,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { appFor } from "../src/apps.ts";
+import { personOf } from "../src/connections.ts";
 import { requireResourceRole } from "../src/permission-resources.ts";
 import {
   grantPermission,
@@ -659,19 +660,38 @@ describe("grasp.connector calls of JSON workflows", () => {
     });
   });
 
-  it("never sends again under the same key, whatever its step's retries, once a send's outcome is lost", async () => {
+  it("never sends again under the same key, whatever its step's retries, once a send's outcome is lost, nor keeps its sensitive argument", async () => {
     const admin = await person("admin");
     const ada = await person("builder");
     // The server sends the mail, and its answer is lost on the way back.
     const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
       plan: ["lost"],
     });
+    const secret = `secret-${unique()}`;
+    await setWorkflowParams(env, ada, workflow.id, {
+      values: { token: secret },
+      expectedRevision: 0,
+    });
     const runId = await started(ada, workflow.id, serving);
     const run = await ended(ada, workflow.id, runId);
     const sent = await mail.did();
-    expect({ status: run.status, calls: sent.calls }).toStrictEqual({
+    // The call's person lists it as of unknown outcome, never its secret.
+    const listed = await env.CONNECT.listUnknownOutcomes(
+      await personOf(env, ada)
+    );
+    const ours = listed.filter(({ key }) => key.subject.type === "workflow");
+    expect({
+      status: run.status,
+      calls: sent.calls,
+      listed: ours.length,
+      input: ours.map(({ input }) => input),
+      secretShown: JSON.stringify(listed).includes(secret),
+    }).toStrictEqual({
       status: "failed",
       calls: 1,
+      listed: 1,
+      input: [null],
+      secretShown: false,
     });
   });
 
