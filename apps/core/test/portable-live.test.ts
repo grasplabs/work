@@ -2,6 +2,7 @@ import { GraspClient } from "@grasp-os/sdk/client";
 import type { GraspError } from "@grasp-os/sdk/client";
 import { clientInternals } from "@grasp-os/sdk/host";
 import { toBase64Url } from "@grasp-os/shared/encoding";
+import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
   accessEndedCloseCode,
   appTokenMs,
@@ -23,6 +24,8 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
+import { portableLiveAccounting } from "../src/portable-live.ts";
+import { eventsAfter, logHead } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles } from "./notes-client-app.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
@@ -142,6 +145,39 @@ const openLive = async <Api extends object = PortableLiveApi>(
   closeWhenTestEnds(socket);
   const live = newWebSocketRpcSession<Api>(socket);
   return { live, closed: closed.promise };
+};
+
+/**
+ * `app`'s live connection spoken by hand, as a page someone changed can:
+ * `send` sends one Cap'n Web message, `closed` settles with the close code.
+ */
+const rawLive = async (app: string) => {
+  const response = await routed(`${portableLivePath}/${app}`, {
+    headers: { Upgrade: "websocket", Origin: hostOrigin },
+  });
+  const socket = response.webSocket;
+  if (!socket) {
+    throw new Error(`Expected a WebSocket, got ${response.status}`);
+  }
+  const closed = Promise.withResolvers<number>();
+  socket.addEventListener("close", (event) => {
+    closed.resolve(event.code);
+  });
+  socket.accept();
+  closeWhenTestEnds(socket);
+  return {
+    send: (message: unknown): void => {
+      try {
+        socket.send(JSON.stringify(message));
+      } catch {
+        // Closed already.
+      }
+    },
+    close: (): void => {
+      socket.close(1000, "Leaving");
+    },
+    closed: closed.promise,
+  };
 };
 
 /** Every push a raw subscription got, and its first that holds data. */
@@ -425,6 +461,64 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
     await expect(outcome(live.connect(othersToken))).resolves.toBe(
       "auth.unauthenticated"
     );
+  });
+
+  it("holds a connection that isn't authenticated to a little, and still takes a request of the largest kind", async () => {
+    const notes = await notesApp();
+    // One message longer than any this route needs.
+    const long = await rawLive(notes.app);
+    long.send(["push", "a".repeat(portableLiveAccounting.maxMessageBytes)]);
+    // Messages each within it, holding more together than a few requests.
+    const hoarder = await rawLive(notes.app);
+    const part = "a".repeat(portableLiveAccounting.maxMessageBytes / 2);
+    for (let count = 0; count < 8; count += 1) {
+      hoarder.send(["push", part]);
+    }
+    // A request as long as a request may be, escaped to twice that in
+    // the message, is still taken (the read then refuses it, pushed).
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const { live, closed } = await openLive(notes.app);
+    const largest = await outcome(
+      live
+        .connect(token)
+        .watchQuery('"'.repeat(functionRequestMaxBytes), pushes().onSnapshot)
+    );
+    expect({
+      long: await closedWithin(long.closed, 5000),
+      hoarder: await closedWithin(hoarder.closed, 5000),
+      largest,
+      stillOpen: await closedWithin(closed, 100),
+    }).toStrictEqual({
+      long: 3000,
+      hoarder: 3000,
+      largest: "ok",
+      stillOpen: "open",
+    });
+  });
+
+  it("records and builds nothing for a connect that finishes after its connection closed", async () => {
+    const notes = await notesApp();
+    const member = await personApi("user");
+    await share(notes, member);
+    const leaving = await tokenFor(notes.builder.session, notes.app);
+    const staying = await tokenFor(member.session, notes.app);
+    const head = await logHead();
+    // The host sends `connect` and leaves before core has read its token.
+    const gone = await rawLive(notes.app);
+    gone.send(["push", ["pipeline", 0, ["connect"], [leaving]]]);
+    gone.close();
+    await closedWithin(gone.closed, 1000);
+    // A moment for core to finish reading the token it was sent.
+    await closedWithin(Promise.withResolvers<number>().promise, 1000);
+    // Another person's connection, connected as usual, is recorded.
+    const { live } = await openLive(notes.app);
+    await live.connect(staying).watchQuery(listOf(notes), pushes().onSnapshot);
+    const events = await eventsAfter(head);
+    expect(
+      events
+        .filter(({ action }) => action === "app.portable.called")
+        .map(({ actor }) => actor)
+    ).toMatchObject([{ type: "person", userId: member.userId }]);
   });
 
   it("closes a connection that doesn't connect in time", async () => {

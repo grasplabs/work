@@ -13,6 +13,8 @@ import type {
   PortableQueriesApi,
 } from "@grasp-os/shared/portable";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { rpcCopyNodeBounds } from "@grasp-os/shared/rpc-accounting";
+import type { RpcAccountingLimits } from "@grasp-os/shared/rpc-accounting";
 import { screenErrors } from "@grasp-os/shared/screens";
 import type { QuerySnapshotPush } from "@grasp-os/shared/screens";
 
@@ -26,7 +28,7 @@ import type { TokenCheck } from "./auth/app-tokens.ts";
 import { errorResponse } from "./errors.ts";
 import { isStub } from "./page-callbacks.ts";
 import { QuerySubscriptions, screenReads } from "./query-subscriptions.ts";
-import { CoreRpcTarget, coreRpcAccounting } from "./rpc-target.ts";
+import { CoreRpcTarget } from "./rpc-target.ts";
 import { serveRpc } from "./rpc.ts";
 import type { RunSubscription } from "./run-subscription.ts";
 import { deliveryOpen, requireDelivery } from "./screen-trust.ts";
@@ -54,9 +56,11 @@ import type { SessionCheck } from "./session-check.ts";
 // - A connection held open without authenticating: until `connect`
 //   answers, nothing but `connect` is reachable; it is answered once per
 //   connection; a connection that hasn't connected within
-//   `connectWithinMs`, or whose `connect` was refused, is closed. Each is
-//   bounded as a signed-in browser connection is (`serveRpc`), and every
-//   connection of the isolate together by its shared pool.
+//   `connectWithinMs`, or whose `connect` was refused, is closed, and a
+//   `connect` that finishes after its connection closed records and
+//   builds nothing. Each holds as little as a shell connection that isn't
+//   signed in (`portableLiveAccounting`), and every connection of the
+//   isolate together is bounded by its shared pool.
 // - The token expires mid-subscription: the connection keeps its `exp`,
 //   and the host swaps in a newer one before it (`renew`). One past its
 //   `exp` unrenewed closes the connection with `tokenExpiredCloseCode`,
@@ -84,6 +88,23 @@ import type { SessionCheck } from "./session-check.ts";
 // - A flood of pushes: the same bounds as a tab's (query-subscriptions.ts:
 //   queries per connection, reads at once, what waits to be pushed), the
 //   person's live reads of the App shared with their tabs.
+
+/**
+ * What a live connection may spend. Anyone can open one, and it reaches
+ * `connect` alone until it authenticates, so it holds as little as a
+ * shell connection that isn't signed in: no message here is big. A token
+ * is capped, and a request is `functionRequestMaxBytes` at most, of UTF-8
+ * JSON, which as a string in a message's JSON text at most doubles
+ * (escaped quotes and backslashes); a margin for the message around it.
+ * What its unanswered calls hold together stays within a few requests of
+ * the largest kind, so many connections hold little of the isolate's pool
+ * (`isolateRpcHeld`) between them.
+ */
+export const portableLiveAccounting: RpcAccountingLimits = {
+  ...rpcCopyNodeBounds,
+  maxMessageBytes: 2 * functionRequestMaxBytes + 4 * 1024,
+  maxSessionBytes: 1024 * 1024,
+};
 
 /** How long a connection may take to authenticate before it is closed. */
 const connectWithinMs = 10_000;
@@ -389,6 +410,13 @@ export class PortableLiveRpc extends CoreRpcTarget implements PortableLiveApi {
     });
   }
 
+  /** Throws once the connection is no longer open here. */
+  #stillOpen(): void {
+    if (!this.#socket.openHere()) {
+      throw new Error("The connection closed while it connected.");
+    }
+  }
+
   async connect(token: string): Promise<PortableQueriesRpc> {
     if (this.#asked) {
       throw authErrors.create("auth.unauthenticated");
@@ -404,7 +432,11 @@ export class PortableLiveRpc extends CoreRpcTarget implements PortableLiveApi {
       }
       const { person, sessionId, expiresAt } = checked;
       const app = await admitted(this.#env, person, this.#app);
+      // Closed while the token was read (by the host, or at the deadline):
+      // nothing is recorded for it, and nothing built on its socket.
+      this.#stillOpen();
       await recordPortableUse(this.#env, person, app, sessionId);
+      this.#stillOpen();
       clearTimeout(this.#deadline);
       return new PortableQueriesRpc(
         this.#env,
@@ -455,7 +487,7 @@ export const portableLiveResponse = (
   serveRpc(
     server,
     new PortableLiveRpc(env, app, server),
-    coreRpcAccounting,
+    portableLiveAccounting,
     requestId
   );
   return new Response(null, { status: 101, webSocket: client });
