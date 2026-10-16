@@ -19,7 +19,9 @@ import type { Person } from "./people.ts";
  */
 const schema = `import { defineSchema, defineTable, v } from "@grasp-os/sdk";
 
-export default defineSchema({ asks: defineTable({ recipients: v.string().max(16_000) }) });
+export default defineSchema({
+  asks: defineTable({ recipients: v.string().max(16_000) }).index("by_created", ["_createdAt"]),
+});
 `;
 
 const operations = `import { v } from "@grasp-os/sdk";
@@ -31,11 +33,12 @@ export const remember = mutation({
   handler: async (ctx, args) => await ctx.db.insert("asks", args),
 });
 
-/** The recipients the last ask kept, as JSON text: "[]" before any. */
+/** The recipients the newest ask kept, as JSON text: "[]" before any. */
 export const recipients = query({
   args: {},
   returns: v.string(),
-  handler: async (ctx) => (await ctx.db.query("asks").take(100)).at(-1)?.recipients ?? "[]",
+  handler: async (ctx) =>
+    (await ctx.db.query("asks").withIndex("by_created").order("desc").take(1)).at(0)?.recipients ?? "[]",
 });
 `;
 
