@@ -163,7 +163,10 @@ export default workflowTests(definition, [{ name: "runs", input, mocks: { read: 
  * `byName`, its permission names the mailbox by its sign-in name rather
  * than being on the whole connection. With `plusTag` the workflow mails
  * the mailbox's plus-address `local+<tag>@domain`, which its provider
- * delivers to the mailbox itself. An `aliased` account signs in with a UPN that isn't
+ * delivers to the mailbox itself; with `toAlias` it mails the mailbox's
+ * SMTP alias `also-<subject>@acme.test`, which Graph's profile of the
+ * account lists. `byId`, its permission names the mailbox by the user's
+ * object ID, and the workflow sends from it by that ID. An `aliased` account signs in with a UPN that isn't
  * the address it sends from; the workflow then names its mailbox by the
  * UPN, as Graph allows, and mails its address.
  */
@@ -174,12 +177,16 @@ const watchingApp = async (
     second = false,
     listening = false,
     byName = false,
+    byId = false,
+    toAlias = false,
     plusTag,
   }: {
     aliased?: boolean;
     second?: boolean;
     listening?: boolean;
     byName?: boolean;
+    byId?: boolean;
+    toAlias?: boolean;
     plusTag?: string;
   } = {}
 ) => {
@@ -187,11 +194,12 @@ const watchingApp = async (
   const watched = await connectShared(admin, subject);
   // The address it sends from, as Graph sends from a user's primary one.
   const address = `${subject}@acme.test`;
+  const alias = `also-${subject}@acme.test`;
+  const mailed =
+    plusTag === undefined ? address : address.replace("@", `+${plusTag}@`);
   const app = await appWith(admin, {
-    ...echo(
-      watched.signInName,
-      plusTag === undefined ? address : address.replace("@", `+${plusTag}@`)
-    ),
+    // A permission on the mailbox by ID lets calls name it by ID only.
+    ...echo(byId ? subject : watched.signInName, toAlias ? alias : mailed),
     ...(listening ? listen : {}),
   });
   await requestGranted(idp, admin, {
@@ -200,6 +208,7 @@ const watchingApp = async (
       type: "connection",
       connectionId: watched.id,
       ...(byName ? { resource: watched.signInName } : {}),
+      ...(byId ? { resource: subject } : {}),
     },
     actions: ["mail.list", "mail.send"],
     binding: "MAIL",
@@ -220,6 +229,7 @@ const watchingApp = async (
   return {
     app,
     address,
+    alias,
     signInName: watched.signInName,
     // Graph reaches a whole connection's mailbox by its user's object ID,
     // and a mailbox a permission names by that name.
@@ -587,6 +597,61 @@ describe(
         stamped: false,
         others: 0,
       });
+    });
+
+    it("join its lineage when it mails an SMTP alias of the watched mailbox", async () => {
+      const admin = await personApi("admin");
+      const watching = await watchingApp(admin, { toAlias: true });
+      const subject = `Ping ${crypto.randomUUID()}`;
+
+      await followHops(admin, watching, subject, 1);
+      await runsEnded(admin, watching.app, 2);
+      const sent = await sentMail(subject, 0);
+
+      expect({
+        to: sent.to,
+        places: await placesOf(watching.app),
+      }).toStrictEqual({
+        to: [watching.alias],
+        places: ["root", "child"],
+      });
+    });
+
+    it("join its lineage when its copy comes from an SMTP alias of the account it was sent from", async () => {
+      const admin = await personApi("admin");
+      const watching = await watchingApp(admin);
+      const subject = `Ping ${crypto.randomUUID()}`;
+      await arrive(
+        watching.user,
+        inboxMessage({ subject, from: "ann@customer.test" })
+      );
+      await runsEnded(admin, watching.app, 1);
+      const sent = await sentMail(subject, 0);
+      // As a provider sending as the alias writes its From.
+      await arrive(
+        watching.user,
+        inboxMessage({ subject, from: watching.alias, stamp: stampOf(sent) })
+      );
+      await runsEnded(admin, watching.app, 2);
+
+      await expect(placesOf(watching.app)).resolves.toStrictEqual([
+        "root",
+        "child",
+      ]);
+    });
+
+    it("join its lineage when its permission names the watched mailbox by its user's object ID", async () => {
+      const admin = await personApi("admin");
+      const watching = await watchingApp(admin, { byId: true });
+      const subject = `Ping ${crypto.randomUUID()}`;
+
+      await followHops(admin, watching, subject, 1);
+      await runsEnded(admin, watching.app, 2);
+
+      await expect(placesOf(watching.app)).resolves.toStrictEqual([
+        "root",
+        "child",
+      ]);
     });
 
     it("join its lineage when it mails a plus-address of the watched mailbox", async () => {

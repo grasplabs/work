@@ -472,10 +472,11 @@ describe("whose account", () => {
       "@acme.test",
       "@acme.onmicrosoft.test"
     );
+    const alias = mailbox.email.replace("mailbox-", "billing-");
     const shared = await connectAccount(
       providers,
       ada,
-      { ...mailbox, signInName },
+      { ...mailbox, signInName, aliases: [alias] },
       { scope: "shared" }
     );
     await exports.default.disconnect({ person: anna, connectionId: personal });
@@ -492,16 +493,22 @@ describe("whose account", () => {
           ownerUserId: anna.userId,
           source: "native",
           provider: "microsoft",
+          accountId: ownAccount(anna).subject,
           accountName: anna.email,
           accountEmail: anna.email.toLowerCase(),
+          accountAddresses: [anna.email.toLowerCase()],
         },
         {
           id: shared,
           ownerUserId: null,
           source: "native",
           provider: "microsoft",
+          accountId: mailbox.subject,
           accountName: signInName,
           accountEmail: mailbox.email,
+          // Its primary address and its alias, from its profile, never its
+          // SIP address.
+          accountAddresses: [mailbox.email, alias],
         },
       ].toSorted((a, b) => a.id.localeCompare(b.id))
     );
@@ -515,6 +522,38 @@ describe("whose account", () => {
         ),
       ])
     ).resolves.toStrictEqual([[], "connect.invalid"]);
+  });
+
+  it("keeps only the addresses Google verified an account may send as, and connects without any when the lookup fails", async () => {
+    const ada = someone("admin");
+    const mailbox = mailboxAccount("google");
+    const verified = mailbox.email.replace("mailbox-", "billing-");
+    const google = await connectAccount(
+      providers,
+      ada,
+      {
+        ...mailbox,
+        aliases: [verified],
+        // Anyone can add an address to send as; Google hasn't checked it.
+        unverified: ["ceo@other.test"],
+      },
+      { scope: "shared" }
+    );
+    providers.state.profile = async () =>
+      await Promise.resolve(new Response("Unavailable", { status: 503 }));
+    const failed = await connectAccount(providers, ada, mailboxAccount(), {
+      scope: "shared",
+    });
+
+    const owners = await exports.default.connectionOwners([google, failed]);
+    expect(
+      Object.fromEntries(
+        owners.map(({ id, accountAddresses }) => [id, accountAddresses])
+      )
+    ).toStrictEqual({
+      [google]: [mailbox.email, verified],
+      [failed]: [],
+    });
   });
 
   it("a personal connection must be to the person's own account", async () => {
@@ -712,12 +751,21 @@ describe("reconnecting a connection whose access ran out", () => {
     const anna = someone();
     const account = ownAccount(anna);
     const connectionId = await connectedThenRanOut(anna, account);
-    await expect(connectAccount(providers, anna, account)).resolves.toBe(
-      connectionId
-    );
-    await expect(ownConnections(anna)).resolves.toMatchObject([
-      { id: connectionId, status: "active", connectedBy: anna.userId },
-    ]);
+    // An alias added since: reconnecting reads the account's addresses anew.
+    const alias = anna.email.replace("@", "-sales@").toLowerCase();
+    await expect(
+      connectAccount(providers, anna, { ...account, aliases: [alias] })
+    ).resolves.toBe(connectionId);
+    const [owner] = await exports.default.connectionOwners([connectionId]);
+    expect({
+      listed: await ownConnections(anna),
+      addresses: owner?.accountAddresses,
+    }).toMatchObject({
+      listed: [
+        { id: connectionId, status: "active", connectedBy: anna.userId },
+      ],
+      addresses: [anna.email.toLowerCase(), alias],
+    });
     // The tokens it uses now are the ones the new flow got.
     const minted = providers.state.issued.findLast((token) =>
       token.startsWith("access")

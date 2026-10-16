@@ -98,9 +98,17 @@ import {
 // - A plus-address (L1): a run that mails `watched+1@corp.com` mails the
 //   watched mailbox, which Exchange Online and Google Workspace both
 //   deliver it to. Recipients and the watched mailbox are compared without
-//   a `+tag` (`mailboxOf`). A mailbox's other SMTP aliases
-//   (`proxyAddresses`) aren't known to core yet: mail to one is a root
-//   (GRA-654).
+//   a `+tag` (`mailboxOf`).
+// - An SMTP alias (GRA-654): the account's own other addresses (its
+//   primary address, `smtp:` proxy addresses, Google send-as addresses
+//   Google verified), as its provider said when it was connected
+//   (connect's account-addresses.ts), count as its mailbox and as its
+//   senders. Read with the connection's token, from the account's own
+//   profile: no App sets them, and an unverified send-as address isn't
+//   one. A lookup that failed, or an alias added since, is no address of
+//   its own: mail to it is a root, as before. Another mailbox's aliases
+//   (a shared mailbox's, a list's) need directory access, and aren't
+//   known.
 // - Mail to several watched mailboxes, or one mailbox two connections
 //   watch: each source claims for itself, so every copy is a child, and
 //   none escapes as a root.
@@ -120,10 +128,10 @@ import {
 // tell its sends from its reads), mail to a domain Email Routing hasn't
 // delivered for yet (a fresh deployment's first hop), mail a mailbox's
 // own rules forward, mail a distribution list delivers to a watched
-// mailbox (not a recipient the call names), mail to another SMTP alias
-// of a watched mailbox, a watched source naming its mailbox by a user ID
-// rather than an address, and events of other things a run made (files:
-// connector events).
+// mailbox (not a recipient the call names), mail to an alias of a mailbox
+// other than the connection's own account's, a watched source naming
+// another user's mailbox by its ID rather than an address, and events of
+// other things a run made (files: connector events).
 
 /** The run a stamp names: its ID, and the step key the call was made under. */
 export interface StampingRun {
@@ -216,16 +224,18 @@ const recordedTokens = async (
 /**
  * Who sends the mail of a call on `connectionId` naming `mailbox`: the
  * mailbox (the provider sends from it, or refuses the call), the
- * connection's account, and that account's email address (for Microsoft
- * 365 the primary address it sends from, which may differ from its
- * sign-in name: M-new-2); none for a connection that isn't a native mail
- * connector's.
+ * connection's account, that account's email address (for Microsoft 365
+ * the primary address it sends from, which may differ from its sign-in
+ * name: M-new-2), and the other addresses it receives mail at, its SMTP
+ * aliases, as its provider said when it was connected (GRA-654); none for
+ * a connection that isn't a native mail connector's.
  *
  * Known gap: Microsoft 365 also takes another user's ID or UPN as the
  * mailbox (a shared mailbox named so), and sends from that mailbox's
  * primary address, which is none of these. A run's mail from such a
  * mailbox matches no sender and starts roots, bounded by each workflow's
- * hourly limit only.
+ * hourly limit only: knowing another mailbox's addresses needs directory
+ * access the connector doesn't ask for.
  */
 const sendersOf = async (
   env: Env,
@@ -244,6 +254,7 @@ const sendersOf = async (
     typeof mailbox === "string" ? mailbox : null,
     owner.accountName,
     owner.accountEmail,
+    ...owner.accountAddresses,
   ].flatMap((sender) =>
     sender === null || sender.trim() === "" ? [] : [sender.trim().toLowerCase()]
   );
@@ -535,23 +546,32 @@ const mailEventFrom = z.object({
 
 /**
  * The addresses of the mailbox a connector event comes from: the one its
- * source names (`resource`), and, for a source on the whole connection or
- * one naming the account's own mailbox by its name or its address, both:
- * the account's name (for Microsoft 365 its UPN) and its email address.
+ * source names (`resource`); or, for a source on the whole connection or
+ * one naming the account's own mailbox (by its name, one of its addresses
+ * or its ID at the provider), all of the account's own: its name (for
+ * Microsoft 365 its UPN), its email address and the other addresses it
+ * receives mail at, its SMTP aliases (GRA-654).
  */
 const mailboxAddressesOf = async (
   env: Env,
   event: DeliveredConnectorEvent
 ): Promise<string[]> => {
   const [owner] = await connectionOwnersOf(env, [event.connection]);
-  const own = [owner?.accountName, owner?.accountEmail].flatMap((address) =>
+  const own = [
+    owner?.accountName,
+    owner?.accountEmail,
+    ...(owner?.accountAddresses ?? []),
+  ].flatMap((address) =>
     typeof address === "string" && address !== "" ? [address.toLowerCase()] : []
   );
   if (event.resource === undefined) {
     return own;
   }
   const resource = event.resource.toLowerCase();
-  return own.includes(resource) ? own : [resource];
+  const isOwnId =
+    typeof owner?.accountId === "string" &&
+    owner.accountId.toLowerCase() === resource;
+  return isOwnId || own.includes(resource) ? own : [resource];
 };
 
 /**

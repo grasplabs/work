@@ -104,6 +104,15 @@ export default {
     if (url.hostname === "graph.microsoft.com") {
       // Graph's mail, as Microsoft 365's native actions use it: sending
       // records the message; a mailbox's messages are none.
+      // The account's own profile, as connect reads its addresses: its
+      // primary address and an SMTP alias, \`also-<subject>@acme.test\`.
+      if (request.method === "GET" && url.pathname === "/v1.0/me") {
+        const subject = (request.headers.get("authorization") ?? "").replace("Bearer access.", "");
+        return Response.json({
+          mail: subject + "@acme.test",
+          proxyAddresses: ["SMTP:" + subject + "@acme.test", "smtp:also-" + subject + "@acme.test"],
+        });
+      }
       const [, version, users, mailbox, ...rest] = decodeURIComponent(url.pathname).split("/");
       const mailPath = version === "v1.0" && users === "users" && mailbox && rest.length === 1;
       if (request.method === "POST" && mailPath && rest[0] === "sendMail") {
