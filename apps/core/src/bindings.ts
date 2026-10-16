@@ -1,11 +1,10 @@
 import { signCapability } from "@grasp-os/shared/capability";
-import type { HeldBinding } from "@grasp-os/shared/capability";
-import { connectCallSchema, connectErrors } from "@grasp-os/shared/connect";
 import type {
-  ConnectCall,
-  ConnectResult,
-  ResolutionChoice,
-} from "@grasp-os/shared/connect";
+  CapabilityDecision,
+  HeldBinding,
+} from "@grasp-os/shared/capability";
+import { connectCallSchema, connectErrors } from "@grasp-os/shared/connect";
+import type { ConnectCall, ConnectResult } from "@grasp-os/shared/connect";
 import { isExpectedError, toOpaqueError } from "@grasp-os/shared/errors";
 import type { AppId, PermissionId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
@@ -68,9 +67,9 @@ export interface CallGrant {
  * saying whether `context` is in restricted mode (connect then holds its
  * side effects for the person), whether the call may only read, and the
  * permission and context to check again should connect hold it for them.
- * `confirms` is the held action a person confirmed (pending-actions.ts);
- * `resolves`, what a person said of a call of unknown outcome
- * (unknown-outcomes.ts).
+ * `decision` is what a person decided of a call waiting for them: a held
+ * action confirmed, or a call of unknown outcome resolved, only ever
+ * signed through `reauthorizedCapability` (decided-calls.ts).
  * Core makes capabilities here and nowhere else, and nothing outside core
  * reaches this function.
  */
@@ -86,8 +85,7 @@ export const signedCall = async (
     binding,
   }: CallGrant,
   { action, idempotencyKey }: Pick<ConnectCall, "action" | "idempotencyKey">,
-  confirms?: string,
-  resolves?: { choice: ResolutionChoice; claimedAt: number }
+  decision?: CapabilityDecision
 ) => {
   await authorize(env, authority, connection, action, permissionId, context);
   const restricted = await isRestricted(env, authority, context);
@@ -111,8 +109,7 @@ export const signedCall = async (
         ...(binding === undefined ? {} : { binding }),
       },
       context,
-      confirms,
-      resolves,
+      decision,
     }
   );
   return { capability, scope };

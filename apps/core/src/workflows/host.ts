@@ -2368,17 +2368,6 @@ export class RunHost extends RpcTarget {
   }
 
   /**
-   * Refuses what only code that gets past the SDK in the run's isolate
-   * asks for: a step its review doesn't show. The SDK never sends one for
-   * a workflow whose review reads its steps (one whose steps can't be read
-   * runs any step name, held to all its calls), so code that does has got
-   * past it, or past what the review read, and may catch the refusal and
-   * carry on. So it ends the run, whatever its code makes of it: the step
-   * fails, every later call of this activation fails at once
-   * (`#requireUntampered`), and the run fails with it (`tampered`).
-   * Audited once per activation, which the run's failure ends.
-   */
-  /**
    * Refuses a step whose name the version's review doesn't show: a `do`,
    * a sleep or a decision's wait alike. The name is the isolate's to say,
    * so no code runs, and no wait is journaled, under a name of its own
@@ -2395,6 +2384,17 @@ export class RunHost extends RpcTarget {
     }
   }
 
+  /**
+   * Refuses what only code that gets past the SDK in the run's isolate
+   * asks for: a step its review doesn't show. The SDK never sends one for
+   * a workflow whose review reads its steps (one whose steps can't be read
+   * runs any step name, held to all its calls), so code that does has got
+   * past it, or past what the review read, and may catch the refusal and
+   * carry on. So it ends the run, whatever its code makes of it: the step
+   * fails, every later call of this activation fails at once
+   * (`#requireUntampered`), and the run fails with it (`tampered`).
+   * Audited once per activation, which the run's failure ends.
+   */
   async #refuseTampering(
     error: Error,
     { step, call }: { step: string | null; call: string | null }
