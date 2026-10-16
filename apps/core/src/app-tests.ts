@@ -52,9 +52,11 @@ import type {
 } from "./query-subscriptions.ts";
 import { hostedRelease, noStore } from "./release-runner.ts";
 import { RunSubscription } from "./run-subscription.ts";
+import { capability, noPlaceOf } from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
+import { SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
 import { buildAppTests } from "./screens.ts";
-import { startFailure } from "./workflows/code.ts";
+import { codeSession, startFailure } from "./workflows/code.ts";
 
 // The trusted test runner for an App's tests (spec 28.2): every suite in
 // `tests/**.test.ts` runs whenever a version of the App is made current,
@@ -104,9 +106,26 @@ import { startFailure } from "./workflows/code.ts";
 // - Live queries outlive their test: a session releases every one its
 //   test didn't before it discards its store, and its principals' reads
 //   are refused from then on, which ends any read already under way.
-// - App tests run where nothing bounds them: off Cloudflare they need the
-//   sandbox host, which doesn't run them yet (GRA-529); there a version
-//   with App tests is refused (`version.tests_unavailable`), saying so.
+// - App tests run where nothing bounds them: off Cloudflare each suite runs
+//   in a sandbox session of its own (`sessionHost`, sandbox-session.ts),
+//   its CPU time, memory and wall clock bounded by the supervisor, owned
+//   by the App's tests (`appTestOwnerOf`), so the App holds at most that
+//   owner's share of the pool for them, and its open runs (an owner of
+//   their own) can't hold up its activation. Its code's failure is only what the sandbox
+//   blames the code for (`codeSession`); a place not free (`busy`) is
+//   asked for again for a while, then refused as the sandbox's, to try
+//   again, and never read as the suite's pass or failure. Without the
+//   sandbox host a version with App tests is refused
+//   (`version.tests_unavailable`), saying so.
+// - A suite in a session reaches core's host past what one session
+//   passes: workerd sends no stub to another process, and a session
+//   passes only the capabilities core names as arguments. So it gets one,
+//   the suite's host by numbers (`NumberedFixtureHost`): each test's
+//   session and live query is the number it was answered, kept in that
+//   suite's host alone; the isolate builds the objects `runAppSuite` takes
+//   from it (`sessionTestsMain`), which nothing in core relies on. The
+//   functions its tests call run as children of the suite's session
+//   (`parentSession`), in its process's reserve, ending with it.
 
 /** An App's files at one version, by path. */
 type AppFiles = Readonly<Record<string, string>>;
@@ -189,6 +208,44 @@ export class AppTests extends WorkerEntrypoint {
   async run(host) {
     try {
       return { ok: true, value: JSON.parse(JSON.stringify(await runAppSuite(suite, host, { testTimeoutMs: ${testMs} }))) };
+    } catch (error) {
+      return { ok: false, message: String(error?.message ?? error) };
+    }
+  }
+}
+`;
+
+/**
+ * The main module that runs suite `path` in a sandbox session, over core's
+ * host by numbers (`NumberedFixtureHost`): the objects `runAppSuite` takes
+ * are made here, in the isolate, each method a call of that host.
+ */
+const sessionTestsMain = (
+  path: string,
+  testMs: number
+): string => `import { WorkerEntrypoint } from "cloudflare:workers";
+import { runAppSuite } from ${JSON.stringify(kitModuleName("@grasp-os/sdk/testing"))};
+import suite from ${JSON.stringify(appModuleName(path))};
+const hostOf = (numbered) => ({
+  open: async (fixtures, name) => {
+    const session = await numbered.open(fixtures, name);
+    return {
+      principal: async (who) => await numbered.principal(session, who),
+      call: async (who, request) => await numbered.call(session, who, request),
+      subscribe: async (who, request, onSnapshot, onLost) => {
+        const answer = await numbered.subscribe(session, who, request, onSnapshot, onLost);
+        return "subscription" in answer
+          ? { subscription: { release: async () => await numbered.release(answer.subscription) } }
+          : answer;
+      },
+      close: async () => await numbered.close(session),
+    };
+  },
+});
+export class AppTests extends WorkerEntrypoint {
+  async run(numbered) {
+    try {
+      return { ok: true, value: JSON.parse(JSON.stringify(await runAppSuite(suite, hostOf(numbered), { testTimeoutMs: ${testMs} }))) };
     } catch (error) {
       return { ok: false, message: String(error?.message ?? error) };
     }
@@ -468,13 +525,38 @@ interface SessionContext {
   readonly release: Release;
   /** How long discarding a session's store may take (`TestLimits`). */
   readonly cleanupMs: number;
+  /**
+   * On-prem, the suite's sandbox session (its call ID), whose child each
+   * function a test calls runs in; undefined elsewhere.
+   */
+  readonly parent: () => string | undefined;
+  /**
+   * Set once the sandbox refused a function a test called for its own
+   * reasons, not its code's (`sandboxRefusals`): the suite's failures may
+   * be the sandbox's doing then.
+   */
+  readonly sandbox: { refused: boolean };
 }
+
+/**
+ * What a function's call is refused with when the sandbox, not its code,
+ * stopped it (operations.ts, `sandboxFailureOf`): its owner at its share,
+ * the sandbox down or lost, or the call it ran in over.
+ */
+const sandboxRefusals: ReadonlySet<string> = new Set([
+  "operation.sandbox_busy",
+  "operation.sandbox_unavailable",
+  "operation.sandbox_lost",
+  "operation.ended",
+]);
 
 /** One test's session: its principals' calls, on a fixture store of its own. */
 class FixtureSession extends TestTarget {
   readonly #env: Env;
   readonly #release: Release;
   readonly #cleanupMs: number;
+  readonly #parent: () => string | undefined;
+  readonly #sandbox: { refused: boolean };
   readonly #fixtures: string;
   readonly #fixture: Fixture;
   #store: Promise<OpenStore> | undefined;
@@ -489,6 +571,8 @@ class FixtureSession extends TestTarget {
     this.#env = context.env;
     this.#release = context.release;
     this.#cleanupMs = context.cleanupMs;
+    this.#parent = context.parent;
+    this.#sandbox = context.sandbox;
     this.#fixtures = fixtures;
     this.#fixture = fixture;
   }
@@ -601,15 +685,24 @@ class FixtureSession extends TestTarget {
               },
             }),
       };
-      return await callOperation(
+      // On-prem, in the suite's session's process: a child of it.
+      const parentSession = this.#parent();
+      const result = await callOperation(
         hostedRelease(this.#env, this.#release),
         invocation,
         { path, kind: call.reference.kind },
         call.input,
-        call.idempotencyKey === undefined
-          ? {}
-          : { idempotencyKey: call.idempotencyKey }
+        {
+          ...(call.idempotencyKey === undefined
+            ? {}
+            : { idempotencyKey: call.idempotencyKey }),
+          ...(parentSession === undefined ? {} : { parentSession }),
+        }
       );
+      if (!result.ok && sandboxRefusals.has(result.error.code)) {
+        this.#sandbox.refused = true;
+      }
+      return result;
     } catch (error) {
       return { ok: false, error: refusalOf(error, requestId) };
     }
@@ -782,6 +875,11 @@ class FixtureHost extends TestTarget {
     this.#files = files;
   }
 
+  /** Whether the sandbox refused a function a test called, not its code. */
+  get sandboxRefused(): boolean {
+    return this.#context.sandbox.refused;
+  }
+
   /**
    * A session for one test, on fixture `fixtures`: one of the App's own
    * files, whichever the suite names. Throws for one the App doesn't have
@@ -822,6 +920,9 @@ class FixtureHost extends TestTarget {
   }
 }
 
+/** No session to be a child of: a suite in core's own Loader. */
+const noParent = (): string | undefined => undefined;
+
 /**
  * Core's side of one suite's run of `release`'s tests, with the App's
  * `files`: the host the suite's isolate calls (`AppTestHost`), each
@@ -831,15 +932,221 @@ export const fixtureHostFor = (
   env: Env,
   release: Release,
   files: AppFiles,
-  cleanupMs = defaultLimits.cleanupMs
-): FixtureHost => new FixtureHost({ env, release, cleanupMs }, files);
+  cleanupMs = defaultLimits.cleanupMs,
+  parent: () => string | undefined = noParent
+): FixtureHost =>
+  new FixtureHost(
+    { env, release, cleanupMs, parent, sandbox: { refused: false } },
+    files
+  );
+
+/**
+ * One suite's host as a sandbox session passes it: a capability of plain
+ * calls, since no stub of core's crosses to the sandbox's process. Each
+ * test's session and live query is the number `open` and `subscribe`
+ * answered, kept here, for this suite alone: a number it wasn't answered
+ * is refused. Every call is `FixtureHost`'s or `FixtureSession`'s own,
+ * with their checks.
+ */
+class NumberedFixtureHost extends TestTarget {
+  readonly #host: FixtureHost;
+  readonly #sessions = new Map<number, FixtureSession>();
+  readonly #subscriptions = new Map<number, RunSubscription>();
+
+  constructor(host: FixtureHost) {
+    super();
+    this.#host = host;
+  }
+
+  /** Session `id`, which `open` answered; throws for any other. */
+  #session(id: unknown): FixtureSession {
+    const session = typeof id === "number" ? this.#sessions.get(id) : undefined;
+    if (session === undefined) {
+      throw new Error("No test of this suite was opened as that session.");
+    }
+    return session;
+  }
+
+  /** A session for one test (`FixtureHost.open`), by its number. */
+  async open(fixtures: unknown, name: unknown): Promise<number> {
+    const session = await this.#host.open(fixtures, name);
+    const id = this.#sessions.size;
+    this.#sessions.set(id, session);
+    return id;
+  }
+
+  async principal(id: unknown, name: unknown): Promise<string | undefined> {
+    return await this.#session(id).principal(name);
+  }
+
+  async call(id: unknown, name: unknown, request: unknown): Promise<string> {
+    return await this.#session(id).call(name, request);
+  }
+
+  /** A live query (`FixtureSession.subscribe`), its subscription by number. */
+  async subscribe(
+    id: unknown,
+    name: unknown,
+    request: unknown,
+    onSnapshot: unknown,
+    onLost: unknown
+  ): Promise<{ subscription: number } | { refusal: string }> {
+    const answer = await this.#session(id).subscribe(
+      name,
+      request,
+      onSnapshot,
+      onLost
+    );
+    if ("refusal" in answer) {
+      return answer;
+    }
+    const subscription = this.#subscriptions.size;
+    this.#subscriptions.set(subscription, answer.subscription);
+    return { subscription };
+  }
+
+  /** Releases live query `id`, which `subscribe` answered. */
+  async release(id: unknown): Promise<void> {
+    const subscription =
+      typeof id === "number" ? this.#subscriptions.get(id) : undefined;
+    if (subscription === undefined) {
+      throw new Error("No live query of this suite has that number.");
+    }
+    await subscription.release();
+  }
+
+  async close(id: unknown): Promise<void> {
+    await this.#session(id).close();
+  }
+}
+
+/** The calls of `NumberedFixtureHost` a suite's session passes. */
+const numberedMethods = [
+  "open",
+  "principal",
+  "call",
+  "subscribe",
+  "release",
+  "close",
+] as const;
+
+/**
+ * How long a suite waits, at most, for a place in the sandbox its App
+ * holds no more of (`busy`), asking again with a growing wait in between:
+ * past it, the activation is refused as the sandbox's, to try again.
+ */
+const placeWaitMs = 60_000;
+
+/** The longest one wait between asks for a place. */
+const placeRetryMs = 10_000;
+
+/**
+ * Whose an App's test suites are in the sandbox: an owner of their own,
+ * apart from the App's interactive calls and its runs (`runOwnerOf`). Not
+ * its runs', whose loads hold their places for as long as their steps
+ * take, so its open runs never hold up its activation. Not its
+ * interactive calls' either: the functions its tests call run as the App's
+ * own calls do, in sessions of the App's that are children of the suite's
+ * (`parentSession`), and the sandbox counts a child against its owner's
+ * share as any session: owned by the App too, a suite would take the very
+ * place its tests' calls wait for.
+ */
+export const appTestOwnerOf = (app: string): string => `tests:${app}`;
+
+/** Whether `error` says no place was free for the suite, before it ran. */
+const noPlaceFor = (error: unknown): boolean =>
+  noPlaceOf(error) ||
+  (error instanceof SandboxUnavailableError && noPlaceOf(error.cause));
+
+/**
+ * What suite `path` answers, run over `host` in a sandbox session of its
+ * own on `sandboxHost`, owned by the App, within `suiteMs` of wall clock
+ * and its CPU time; given up on, its process freed, once it's past them.
+ */
+const runInSuiteSession = async (
+  sandboxHost: Fetcher,
+  host: FixtureHost,
+  {
+    owner,
+    path,
+    modules,
+    testMs,
+    suiteMs,
+    opened,
+  }: {
+    owner: string;
+    path: string;
+    modules: Record<string, string>;
+    testMs: number;
+    suiteMs: number;
+    opened: (callId: string) => void;
+  }
+): Promise<unknown> => {
+  const giveUp = new AbortController();
+  try {
+    return await within(
+      codeSession(
+        sandboxHost,
+        {
+          mainModule,
+          modules: { ...modules, [mainModule]: sessionTestsMain(path, testMs) },
+          entrypoint: "AppTests",
+          method: "run",
+          args: [
+            {
+              capability: capability(
+                new NumberedFixtureHost(host),
+                numberedMethods
+              ),
+            },
+          ],
+          owner,
+          cpuMs: testSandbox.limits.cpuMs,
+          wallMs: suiteMs,
+        },
+        { signal: giveUp.signal, opened }
+      ),
+      suiteMs
+    );
+  } finally {
+    giveUp.abort();
+  }
+};
+
+/**
+ * Runs `attempt` with a host of its own each time, asking again while the
+ * sandbox has no place for it (`noPlaceFor`), for up to
+ * {@link placeWaitMs} or `leftMs`, whichever is less; past it, throws what
+ * the sandbox last said, its own unavailability.
+ */
+const askingForPlace = async <T>(
+  attempt: () => Promise<T>,
+  leftMs: number
+): Promise<T> => {
+  const until = Date.now() + Math.min(placeWaitMs, leftMs);
+  for (let wait = 1000; ; wait = Math.min(wait * 2, placeRetryMs)) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+      return await attempt();
+    } catch (error) {
+      if (!noPlaceFor(error) || Date.now() + wait > until) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+    await scheduler.wait(wait);
+  }
+};
 
 /**
  * Why suite `path` fails, one line per failing test: run in an isolate of
- * its own, which loads the suite and runs it over a host of its own.
+ * its own, which loads the suite and runs it over a host of its own:
+ * on-prem in a sandbox session on `sandboxHost`, elsewhere in a Loader
+ * isolate of core's own.
  */
 const suiteFailures = async (
   env: Env,
+  sandboxHost: Fetcher | undefined,
   release: Release,
   files: AppFiles,
   path: string,
@@ -853,22 +1160,44 @@ const suiteFailures = async (
   const failed = (failure: string): string[] => [
     `${path}: ${failure}`.slice(0, maxFailureLength),
   ];
-  const host = fixtureHostFor(env, release, files, cleanupMs);
-  const entry = env.LOADER.get(null, () => ({
-    ...testSandbox,
-    mainModule,
-    modules: { ...modules, [mainModule]: testsMain(path, testMs) },
-    env: {},
-  })).getEntrypoint<AppTestsEntrypoint>("AppTests");
+  let parent: string | undefined;
+  const host = fixtureHostFor(env, release, files, cleanupMs, () => parent);
   let answer: unknown;
   try {
-    answer = await within(entry.run(host), suiteMs);
+    if (sandboxHost === undefined) {
+      const entry = env.LOADER.get(null, () => ({
+        ...testSandbox,
+        mainModule,
+        modules: { ...modules, [mainModule]: testsMain(path, testMs) },
+        env: {},
+      })).getEntrypoint<AppTestsEntrypoint>("AppTests");
+      answer = await within(entry.run(host), suiteMs);
+    } else {
+      answer = await runInSuiteSession(sandboxHost, host, {
+        owner: appTestOwnerOf(release.manifest.resourceId),
+        path,
+        modules,
+        testMs,
+        suiteMs,
+        opened: (callId) => {
+          parent = callId;
+        },
+      });
+    }
   } catch (error) {
+    // The sandbox's own unavailability, a place not free among it: never
+    // the suite's failure, nor its pass.
+    if (error instanceof SandboxUnavailableError) {
+      throw error;
+    }
     const cause = startFailure(error);
+    if (cause !== undefined) {
+      return failed(`its code doesn't load: ${cause}`);
+    }
+    // Past its deadline, or (on-prem) its CPU time, memory or wall clock,
+    // its process gone, what it sent refused: the suite's failure.
     return failed(
-      cause === undefined
-        ? `it stopped: ${error instanceof Error ? error.message : String(error)}`
-        : `its code doesn't load: ${cause}`
+      `it stopped: ${error instanceof Error ? error.message : String(error)}`
     );
   } finally {
     // Cleanup has a deadline of its own: a store or D1 that stalls holds
@@ -898,11 +1227,20 @@ const suiteFailures = async (
       `its report doesn't hold one result for each of the ${host.opened.length} tests it ran`
     );
   }
-  return results.flatMap(({ name, failures }) =>
-    failures.map((failure) =>
+  const failures = results.flatMap(({ name, failures: of }) =>
+    of.map((failure) =>
       `${path}, "${name}": ${failure}`.slice(0, maxFailureLength)
     )
   );
+  // A test that failed after the sandbox refused a function it called, for
+  // the sandbox's own reasons, may have failed for that: the sandbox's,
+  // to try again, never read as the code's failure.
+  if (failures.length > 0 && host.sandboxRefused) {
+    throw new SandboxUnavailableError(
+      `${path}: the sandbox refused a function its tests called, for want of a place or as it was lost, so whether they pass isn't known: try again.`
+    );
+  }
+  return failures;
 };
 
 /**
@@ -929,13 +1267,16 @@ export const appTestFailures = async (
   if (suites.length === 0) {
     return [];
   }
-  // Only where the runtime bounds App code's CPU, or a deployment accepts
-  // that nothing does: on-prem the sandbox host doesn't run tests yet.
-  if (
-    env.RUNTIME_PROFILE !== "cloudflare" &&
-    env.SANDBOX_IN_PROCESS !== "unbounded"
-  ) {
-    throw versionErrors.create("version.tests_unavailable");
+  // Only where the runtime bounds App code's CPU, a sandbox host does, or
+  // a deployment accepts that nothing does.
+  let sandboxHost: Fetcher | undefined;
+  try {
+    sandboxHost = sessionHost(env);
+  } catch (error) {
+    if (error instanceof SandboxUnavailableError) {
+      throw versionErrors.create("version.tests_unavailable");
+    }
+    throw error;
   }
   const limits = limitsOf(env);
   const build = await buildAppTests(env, { ...files });
@@ -969,14 +1310,19 @@ export const appTestFailures = async (
         `${path}: didn't run: the version's tests ran past their ${limits.runMs / 1000} seconds`
       );
     } else {
-      failures.push(
-        // One suite at a time: each runs its own isolate and stores.
-        // oxlint-disable-next-line no-await-in-loop -- see above
-        ...(await suiteFailures(env, release, files, path, modules, {
+      const runSuite = async (): Promise<string[]> =>
+        await suiteFailures(env, sandboxHost, release, files, path, modules, {
           testMs: limits.testMs,
           suiteMs: Math.min(limits.suiteMs, left),
           cleanupMs: limits.cleanupMs,
-        }))
+        });
+      failures.push(
+        // One suite at a time: each runs its own isolate and stores; on
+        // the sandbox, asked for again while it has no place for it.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        ...(await (sandboxHost === undefined
+          ? runSuite()
+          : askingForPlace(runSuite, left)))
       );
     }
   }
