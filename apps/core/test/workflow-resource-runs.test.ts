@@ -691,6 +691,37 @@ describe("the bounds on runs of JSON workflows", () => {
     });
   });
 
+  it("audits a stop the engine took, though it couldn't say where the run is after", async () => {
+    const ada = await builder();
+    const workflow = await waitingWorkflow(ada);
+    const { runId } = await start(ada, workflow.id);
+    // The engine's, its row running: stopped by the engine.
+    await settledInEngine(runId);
+    await vi.waitFor(
+      async () => {
+        await expect(runColumn(runId, "status")).resolves.toBe("running");
+      },
+      { timeout: 10_000, interval: 50 }
+    );
+    // The engine takes the terminate, then can't answer the lookup.
+    const stopped = await whileEngineRefuses(
+      (method) => method === "status",
+      async () =>
+        await outcome(terminateResourceRun(env, ada, workflow.id, runId))
+    );
+    await settledInEngine(runId);
+    const audited = await runEvents(runId, "workflow.run.terminated");
+    expect({
+      stopped,
+      inEngine: await engineStatus(runId),
+      audited: audited.map(({ actor }) => actor),
+    }).toMatchObject({
+      stopped: "ok",
+      inEngine: "terminated",
+      audited: [{ type: "person", userId: ada.userId }],
+    });
+  });
+
   it("shows a person's run to them and the workflow's builders, never to its other users", async () => {
     const ada = await builder();
     const reader = await builder("user");

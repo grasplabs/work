@@ -978,7 +978,17 @@ export const terminateResourceRun = async (
     return await resourceRunFor(env, by, workflow.id, row.id);
   }
   await runEngine(env).terminate(row.id);
-  const live = await runEngine(env).status(row.id);
+  // The engine took the terminate: audited below whatever this lookup
+  // does, the row left to the end's notification if it can't be read.
+  let live: Awaited<ReturnType<ReturnType<typeof runEngine>["status"]>>;
+  try {
+    live = await runEngine(env).status(row.id);
+  } catch (error) {
+    log.error("workflow.resource_run_status_failed", {
+      runId: row.id,
+      ...errorFields(error),
+    });
+  }
   if (live?.status === "terminated") {
     // The end the engine confirms in answer to this, at once (no
     // sequence): an ended run never changes again, so no later
