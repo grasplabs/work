@@ -1746,10 +1746,20 @@ describe("live queries under load and loss", { timeout: 180_000 }, () => {
         return handle;
       },
     });
-    const list = reading(client, api.list, { pagination: {} });
-    await scheduler.wait(6000);
-    list.stop();
+    // The wait before each follow is fully jittered (client-core.ts), so
+    // how many fit in a window is chance: some draws stay near the 250 ms
+    // floor. Taking the middle of every draw makes the waits 0.5, 1, 2 and
+    // 4 s; a wall clock slowed by load only fits fewer.
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    try {
+      const list = reading(client, api.list, { pagination: {} });
+      await scheduler.wait(6000);
+      list.stop();
+    } finally {
+      random.mockRestore();
+    }
 
+    expect(follows).toBeGreaterThan(1);
     expect(follows).toBeLessThanOrEqual(5);
   });
 });
