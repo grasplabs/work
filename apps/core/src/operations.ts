@@ -2299,6 +2299,14 @@ const runMutation = async (
     if (refusedWrite !== undefined) {
       throw sealed(hostError(refusedWrite));
     }
+    // The gate, then the commit: a revocation, a membership ended or a
+    // grant made between the two (an admin granting for a later version,
+    // which leaves this one unapproved, `requireApprovedVersion`) doesn't
+    // stop this commit; the next protected step is refused. It can't be
+    // atomic with it: what the gate reads lives in core's D1 and the write
+    // in the store's own Durable Object, with no transaction across the
+    // two. The window is bounded to a call already admitted (accepted on
+    // GRA-500, as the store's on GRA-506, store-operations.ts).
     // oxlint-disable-next-line no-await-in-loop -- see above
     const current = await admit(invocation);
     // Its reads were scoped for roles the caller no longer has: run again
