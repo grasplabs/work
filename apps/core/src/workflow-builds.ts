@@ -683,6 +683,10 @@ export interface LoadedModules {
   readonly sources: Readonly<Record<string, string>>;
 }
 
+/** A sealed contract's key: `code/<file>.ts#<export>`. */
+const sealedContractKey =
+  /^(?<module>code\/[^#]+\.ts)#[A-Za-z_$][A-Za-z0-9_$]*$/u;
+
 /** The compute modules' contracts, as `compute.json` seals them. */
 const computeFileSchema = z.strictObject({
   paths: z.array(z.string().max(256)).max(64),
@@ -757,9 +761,11 @@ const loadedModules = (
     );
   const contractsOfPaths =
     file !== undefined &&
-    Object.keys(file.contracts).every((key) =>
-      file.paths.includes(key.slice(0, key.indexOf("#")))
-    );
+    Object.keys(file.contracts).every((key) => {
+      // `code/<file>.ts#<export>` exactly, of one of the sealed modules.
+      const module = sealedContractKey.exec(key)?.groups?.module;
+      return module !== undefined && file.paths.includes(module);
+    });
   if (file === undefined || !compiledAll || !contractsOfPaths) {
     return undefined;
   }
