@@ -1,19 +1,17 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { peopleIn, signInTo } from "./people.ts";
+import { peopleIn } from "./people.ts";
 
 // The product speaks the browser's language until the person picks one,
 // and keeps their pick in this browser. Every catalog having every message
 // is a unit test (apps/web/src/locales/locales.test.ts).
 
 test("follows the browser's language, then the one the person picks", async ({
-  browser,
+  pageOf,
 }) => {
   const { member } = peopleIn("languages");
-  const context = await browser.newContext({ locale: "de-DE" });
-  await signInTo(context, member);
-  const page = await context.newPage();
+  const page = await pageOf(member, { locale: "de-DE" });
 
   await page.goto("/knowledge");
   const nav = page.getByRole("navigation", { name: "Hauptmenü" });
@@ -45,15 +43,13 @@ test("follows the browser's language, then the one the person picks", async ({
   await page.reload();
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
-  await context.close();
 });
 
-test("signing in speaks the browser's language", async ({ browser }) => {
-  const context = await browser.newContext({ locale: "fr-FR" });
+test("signing in speaks the browser's language", async ({ newContext }) => {
+  const context = await newContext({ locale: "fr-FR" });
   const page = await context.newPage();
   await page.goto("/sign-in");
   await expect(
     page.getByText("Utilisez le compte de votre organisation pour continuer.")
   ).toBeVisible();
-  await context.close();
 });

@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 
 // The side panel of a chat shows the App being built: a version up for
 // review, with what core says it changes, and a builder making it
@@ -40,7 +40,7 @@ export default function Desk() {
 `;
 
 test("the side panel shows an App being built, and a builder makes its version current", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder } = peopleIn("chatBuilds");
   const { core, api } = apiOf(builder);
@@ -71,7 +71,7 @@ test("the side panel shows an App being built, and a builder makes its version c
     await api.apps.versions.propose(app.id, version);
     const chat = await api.chats.create(`Build ${tag}`);
 
-    const page = await pageOf(browser, builder);
+    const page = await pageOf(builder);
     // The server code's first read goes to an API this stack has switched
     // off (improvement signals), which core refuses: as a read that fails.
     let failServerCode = true;

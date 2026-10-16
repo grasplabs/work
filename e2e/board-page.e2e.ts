@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { apiOf, pageOf, peopleIn } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
 import { revokeOtherCopies } from "./playbook.ts";
 
 // The board page, the built-in App, end to end: an admin creates an App
@@ -34,7 +34,7 @@ const a4 = { width: 794, height: 1123 };
 const pageObject = /\/Type\s*\/Page(?![a-z])/gu;
 
 test("an admin takes a snapshot on the board page, writes its narrative and prints it on one page", async ({
-  browser,
+  pageOf,
 }) => {
   const { admin } = peopleIn("boardPage");
   const run = crypto.randomUUID().slice(0, 8);
@@ -95,7 +95,7 @@ test("an admin takes a snapshot on the board page, writes its narrative and prin
     core[Symbol.dispose]();
   }
 
-  const page = await pageOf(browser, admin);
+  const page = await pageOf(admin);
   await page.goto(`/domains/${app}/apps/board/full`);
   const screen = page.frameLocator('iframe[title="board app"]');
   // The first open builds the screen, which takes a while on a loaded machine.

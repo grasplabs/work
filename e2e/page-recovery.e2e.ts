@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { pageOf, peopleIn } from "./people.ts";
+import { peopleIn } from "./people.ts";
 
 // What a page does when the files it needs can't be fetched. After a new
 // release, the script files of a tab left open are gone: trying again
@@ -14,10 +14,10 @@ const sameDocument = async (page: Page): Promise<boolean> =>
   await page.evaluate(() => document.documentElement.dataset.marked === "yes");
 
 test("a page whose file is gone after a release loads Grasp anew on Try again", async ({
-  browser,
+  pageOf,
 }) => {
   const { member } = peopleIn("pageRecovery");
-  const page = await pageOf(browser, member);
+  const page = await pageOf(member);
   // What the app loads up front stays; a page's own file, fetched only
   // when the page is opened, is gone, as after a new release.
   const upFront = new Set<string>();
@@ -59,9 +59,9 @@ test("a page whose file is gone after a release loads Grasp anew on Try again", 
 });
 
 test("a start without its words says so in English, and tries again", async ({
-  browser,
+  newContext,
 }) => {
-  const context = await browser.newContext({ locale: "de-DE" });
+  const context = await newContext({ locale: "de-DE" });
   const page = await context.newPage();
   const words = "**/assets/messages-*.js";
   await page.route(words, async (route) => {
@@ -79,5 +79,4 @@ test("a start without its words says so in English, and tries again", async ({
       "Melden Sie sich mit dem Konto Ihrer Organisation an, um fortzufahren."
     )
   ).toBeVisible();
-  await context.close();
 });

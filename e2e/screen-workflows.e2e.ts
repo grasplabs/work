@@ -3,7 +3,7 @@ import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { invoiceAppFiles } from "./invoice-app.ts";
-import { apiOf, pageOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn, release } from "./people.ts";
 import type { Person } from "./people.ts";
 
 // Screens and workflows in one App, end to end, with the sample invoice
@@ -66,14 +66,11 @@ const invoicesOn = (screen: FrameLocator) =>
   screen.getByRole("list", { name: "Invoices" }).getByRole("listitem");
 
 test("a screen starts a run and follows it live, and an answer on another screen continues it for everyone", async ({
-  browser,
+  pageOf,
 }) => {
   const { builder, admin } = peopleIn("screenWorkflows");
   const app = await releaseApp(builder, admin);
-  const [first, second] = await Promise.all([
-    pageOf(browser, builder),
-    pageOf(browser, admin),
-  ]);
+  const [first, second] = await Promise.all([pageOf(builder), pageOf(admin)]);
   const [starter, reviewer] = await Promise.all([
     openIntake(first, app),
     openIntake(second, app),

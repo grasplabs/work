@@ -2,7 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { pageOf, peopleIn } from "./people.ts";
+import { peopleIn } from "./people.ts";
 
 // The icon of a control moves in its own parts when the control is pointed
 // at (apps/web/src/icon-moves.css): the sidebar trigger's panel slides
@@ -39,10 +39,10 @@ const transformAt = async (page: Page, share: number): Promise<string> =>
     }, share);
 
 test("a control's icon moves when pointed at, and never for less motion", async ({
-  browser,
+  pageOf,
 }) => {
   const { member } = peopleIn("iconMoves");
-  const page = await pageOf(browser, member);
+  const page = await pageOf(member);
   await page.goto("/");
   const trigger = page.getByRole("button", {
     name: "Show or hide the sidebar",
