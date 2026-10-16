@@ -924,6 +924,72 @@ describe("a portable host's client", () => {
     stop();
   });
 
+  it("follows again once a host that failed to say its token recovers", async () => {
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    let failing = true;
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        await Promise.resolve();
+        if (failing) {
+          failing = false;
+          throw new Error("The host's sign-in is down for a moment.");
+        }
+        return tokenOf("ann", expiry());
+      },
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.waitFor(
+      () => {
+        expect(entry.snapshot).toStrictEqual({
+          value: { title: "Ann's" },
+          error: undefined,
+        });
+      },
+      { timeout: 10_000, interval: 20 }
+    );
+    stop();
+  });
+
+  it("leaves nothing scheduled for a connection closed while it renewed", async () => {
+    vi.useFakeTimers({ now: Date.now() });
+    const renewal = Promise.withResolvers<string>();
+    let asked = 0;
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => {
+        asked += 1;
+        return asked === 1
+          ? await Promise.resolve(tokenOf("ann", expiry()))
+          : await renewal.promise;
+      },
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const stop = internals.subscribe(entry, () => {});
+    await vi.advanceTimersByTimeAsync(1000);
+    // The renewal asks the host ten seconds on; the query is let go of
+    // meanwhile, and core closes the connection.
+    await vi.advanceTimersByTimeAsync(9500);
+    expect(asked).toBe(2);
+    stop();
+    liveSockets[0]?.close(1001, "Going away");
+    await vi.advanceTimersByTimeAsync(100);
+    // The host then fails to say: nothing is tried again for a closed
+    // connection. Of what was on the clock, only the host's wait for its
+    // answer ends; the client's own keep of the released query stays.
+    const scheduled = vi.getTimerCount();
+    renewal.reject(new Error("The host's sign-in is down."));
+    await vi.advanceTimersByTimeAsync(100);
+    expect({
+      shown: entry.snapshot.value,
+      scheduled: vi.getTimerCount(),
+    }).toStrictEqual({ shown: { title: "Ann's" }, scheduled: scheduled - 1 });
+  });
+
   it("gives up on a host that never answers for a token, and never keeps its late answer", async () => {
     vi.useFakeTimers();
     const requests: PromiseWithResolvers<string>[] = [];

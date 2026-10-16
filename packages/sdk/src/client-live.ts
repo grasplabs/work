@@ -86,6 +86,30 @@ const releaseQuietly = async (held: Held): Promise<void> => {
   }
 };
 
+/** Whether `error` is the refusal coded `code`. */
+const coded = (error: unknown, code: string): boolean =>
+  typeof error === "object" &&
+  error !== null &&
+  Reflect.get(error, "code") === code;
+
+/**
+ * The person's token for a new follow: a host that failed to say (for
+ * now) is no refusal of the query, so it is followed again, as after a
+ * lost connection; no token at all is refused as it was.
+ */
+const tokenOrLost = async (tokens: LiveTokens): Promise<PortableToken> => {
+  try {
+    return await tokens.token();
+  } catch (error) {
+    if (coded(error, "auth.token_unavailable")) {
+      throw new Error("The host couldn't say its token yet.", {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+};
+
 /** A portable host's live connections, one per App (see the header). */
 export class PortableLive {
   readonly #origin: string;
@@ -179,7 +203,7 @@ export class PortableLive {
    * closes the connection instead.
    */
   #renewWhenDue(link: Link, token: PortableToken): void {
-    if (token.expiresAt === undefined) {
+    if (token.expiresAt === undefined || link.closed) {
       clearTimeout(link.renewal);
       return;
     }
@@ -188,6 +212,10 @@ export class PortableLive {
 
   #renewIn(link: Link, delayMs: number): void {
     clearTimeout(link.renewal);
+    // Closed while a renewal was under way: nothing more to renew.
+    if (link.closed) {
+      return;
+    }
     link.renewal = setTimeout(
       () => {
         void this.#renew(link);
@@ -239,7 +267,7 @@ export class PortableLive {
     onSnapshot: (push: unknown) => void,
     onLost: () => void
   ): Promise<{ release: () => void }> {
-    const token = await this.#tokens.token();
+    const token = await tokenOrLost(this.#tokens);
     const link = this.#linkFor(app, token);
     link.followed += 1;
     clearTimeout(link.idle);
@@ -291,11 +319,7 @@ export class PortableLive {
       // Core couldn't read the token yet: no refusal of the query, so it
       // is followed again, as after a lost connection, over a new one
       // (core closes this one, `connectAgainCloseCode`).
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        Reflect.get(error, "code") === "auth.token_unavailable"
-      ) {
+      if (coded(error, "auth.token_unavailable")) {
         this.#close(link);
         throw new Error("The token couldn't be read yet.", { cause: error });
       }
