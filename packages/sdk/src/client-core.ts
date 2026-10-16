@@ -617,6 +617,13 @@ const worthRetrying = (settled: Settled): boolean =>
   (settled.kind === "failed" && nothingRanCodes.has(settled.error.code));
 
 /**
+ * What core ends a followed query with once the person's roles in its App
+ * dropped: nothing read under the old roles is shown again
+ * (`#accessChanged`), and the query is followed again under the new.
+ */
+const accessChangedCode = "screen.access_changed";
+
+/**
  * Refusals after which following a query again would only be refused
  * again: the App moved to another version, or the page follows too many.
  * (A refusal of the person or the build fences the whole client.)
@@ -1819,6 +1826,9 @@ export class GraspClient {
         GraspClient.#stop(live);
         entry.live = undefined;
       }
+      if (error.code === accessChangedCode) {
+        this.#accessChanged(entry.reference.resourceId, error);
+      }
       show(entry, { value: undefined, error });
     }
   }
@@ -2092,6 +2102,52 @@ export class GraspClient {
       show(entry, { value: undefined, error: refusal });
     }
     this.#tellFence(refusal);
+  }
+
+  /**
+   * The person's roles in App `resourceId` dropped (`screen.access_changed`,
+   * pushed as a followed query's last result): what any query of the App
+   * keeps that nobody reads was read under the old roles: forgotten, so
+   * whoever reads it next reads it afresh, under the new. One read but
+   * not followed (a `query()` under way) keeps nothing a read sent before
+   * answers: that answer goes to its caller only. One whose following
+   * was lost and waits to follow again (or whose new following core has
+   * not answered or pushed to yet) shows no more what it kept, until its
+   * next push. A followed query is left to its own pushes: core ends each
+   * with this, and one that followed again since shows what it read
+   * under the new roles.
+   */
+  #accessChanged(resourceId: string, error: GraspError): void {
+    for (const entry of this.#queries.values()) {
+      if (entry.reference.resourceId !== resourceId) {
+        continue;
+      }
+      if (!wanted(entry)) {
+        clearTimeout(entry.evict);
+        entry.evict = undefined;
+        entry.reading?.stop.abort();
+        entry.reading = undefined;
+        this.#queries.delete(entry.key);
+        show(entry, loading);
+      } else if (entry.live === undefined) {
+        entry.shown = entry.sent;
+        entry.stale = true;
+        entry.changes += 1;
+        if (entry.listeners.size === 0) {
+          show(entry, loading);
+        }
+      } else if (GraspClient.#waitsToFollow(entry.live)) {
+        show(entry, { value: undefined, error });
+      }
+    }
+  }
+
+  /**
+   * Whether `live` shows nothing core pushed it: lost and waiting to
+   * follow again, or not yet pushed to, answered or not.
+   */
+  static #waitsToFollow(live: Live): boolean {
+    return live.retry !== undefined || live.revision === 0;
   }
 
   /**

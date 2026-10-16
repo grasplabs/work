@@ -1,4 +1,5 @@
 import { appErrors } from "@grasp-os/shared/apps";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId, StoreId } from "@grasp-os/shared/ids";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -54,6 +55,30 @@ import type { SessionCheck } from "./session-check.ts";
 //   screen drop what it holds, and the subscription ends: its readers are
 //   let go of before anything is awaited, so nothing that waited to be
 //   pushed goes out after the refusal.
+// - A snapshot stays on screen after access is lost, because nothing
+//   commits to what it read (spec 11.4): every write that can take a role
+//   in an App away tells the App's host once it committed
+//   (access-revocations.ts), and the host tells every connection of those
+//   people that follows the App (`#follow`), on every tab and isolate.
+//   The connection reads the session again now (`forget`), then passes
+//   each of the App's queries through the gate: a refusal ends it as
+//   above, clearing the screen; roles that changed read it again. No
+//   periodic recheck. How each way this can fail is closed:
+//   - An event that names someone else, arrives twice or late, or that
+//     anyone forged closes nothing: it only makes the connection look,
+//     and its own session and the database decide. Only core reaches an
+//     App's host, and the person a connection follows for is its
+//     session's, never the page's word.
+//   - An event missed while the host restarted: the host lets go of every
+//     callback with it, and a connection let go of looks at once and
+//     follows again, then looks once more, so an event sent in between
+//     is found by that look. A connection that can't follow at all stops
+//     its queries of the App, as when its store can't be watched.
+//   - A query followed just before the event lands, or right after it on
+//     a session read before it: nothing of the App is read on a
+//     connection until it follows the App's revocations, and then the
+//     session is read again, so a read either sees the change or is
+//     followed when the event arrives.
 // - A subscription outlives its session or the App's version: a session
 //   that ended refuses the read (`check`) and ends it; a reference to a
 //   version that is no longer current is refused (`version.*`) and ends
@@ -151,8 +176,13 @@ const rolesOf = async (
   try {
     const { appMember, appBuilder } = await operationRoles(env, by, app);
     return canonicalJson({ appMember, appBuilder });
-  } catch {
-    // No role in the App any more, or no answer: no roles to push under.
+  } catch (error) {
+    // No answer (the database away for a moment): thrown, so the gate
+    // refuses as one to try again, never as though the role were gone.
+    if (!isExpectedError(error)) {
+      throw error;
+    }
+    // No role in the App any more: no roles to push under.
     return undefined;
   }
 };
@@ -221,6 +251,20 @@ interface Evaluation {
   /** Reads in a row that writes tore (`maxTornReads`). */
   torn: number;
   closed: boolean;
+  /** The roles its latest result was read under (`rolesOf`). */
+  roles?: string;
+}
+
+/**
+ * This connection's place among those an App's host tells of revocations
+ * (`followAccess`): its ID there once the host answered, and the wait for
+ * that answer, which every read of the App waits for first.
+ */
+interface Following {
+  id: string | undefined;
+  ready: Promise<void>;
+  /** Let go of by the host before its answer was taken. */
+  early: boolean;
 }
 
 /** What the connection's access check says, before each push of data. */
@@ -262,6 +306,14 @@ export interface LiveReads<By extends Reader> {
   /** Whether a read a write caused may run now, within `by`'s budget. */
   admit: (by: By, app: AppId) => Promise<boolean>;
   /**
+   * Whether the connection follows each App's revocations (`#follow`):
+   * a page's do, for the person behind its session; a test's fixtures
+   * hold no role a write could take away.
+   */
+  readonly revocable: boolean;
+  /** Drops the latest reading of who reads, so `check` reads now. */
+  forget: () => void;
+  /**
    * Reads the query `request` names as `by`, as build `artifact`, by
    * `deadline`; a throw is a refusal that ends the subscription.
    */
@@ -289,6 +341,10 @@ export const screenReads = (
   access,
   roles: async (by, app) => await rolesOf(env, by, app),
   admit: async (by, app) => await appHost(env, app).admitLiveRead(by.userId),
+  revocable: true,
+  forget: () => {
+    check.forget?.();
+  },
   evaluate: async (by, app, artifact, request, deadline) => {
     const { answer, reads } = await delivering(
       env,
@@ -369,6 +425,23 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
   >();
 
+  /**
+   * The roles the gate last saw the person read each followed App's
+   * tables with (`#recheck`).
+   */
+  readonly #rolesSeen = new Map<AppId, string>();
+
+  /** The Apps whose revocations this connection follows (`#follow`). */
+  readonly #following = new Map<AppId, Following>();
+
+  /**
+   * How many times the person's access to each App may have dropped
+   * (`#revoked`): a read or push of the App that one landed during is
+   * read again rather than pushed. Per App, so events for one App never
+   * hold back another's.
+   */
+  readonly #revocations = new Map<AppId, number>();
+
   constructor(env: Env, reads: LiveReads<By>) {
     this.#env = env;
     this.#reads = reads;
@@ -411,6 +484,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     };
     evaluation.listeners.add(listener);
     this.#count += 1;
+    if (this.#reads.revocable && !this.#following.has(app)) {
+      this.#follow(by.userId, app);
+    }
     // A result kept for another subscription that hasn't taken it yet
     // goes to this one too; otherwise a read on its way answers it, or a
     // fresh one, admitted as the person's request, so not charged.
@@ -536,6 +612,12 @@ export class QuerySubscriptions<By extends Reader = Identity> {
 
   async #readAndPush(evaluation: Evaluation): Promise<void> {
     const { app, artifact, request } = evaluation;
+    // Nothing of the App is read before the connection follows its
+    // revocations (see the header).
+    await this.#followed(app);
+    if (evaluation.closed) {
+      return;
+    }
     let by: By;
     try {
       by = await this.#reads.check();
@@ -560,6 +642,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     // The roles it is read under, looked at first: the read sees records
     // by roles at least as new, and a result whose roles changed since is
     // read again rather than pushed (`#send`).
+    const revocations = this.#revocations.get(app);
     const before = await this.#gate(evaluation);
     if ("refusal" in before) {
       await this.#end(evaluation, before.refusal);
@@ -567,8 +650,11 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
     let evaluated: LiveRead;
     try {
+      // As the very reading the gate looked at, so the roles a result goes
+      // out under are those of the person it was read for: a newer reading
+      // (after a revocation, `#revoked`) is never paired with an older read.
       evaluated = await this.#reads.evaluate(
-        by,
+        before.by,
         app,
         artifact,
         request,
@@ -615,7 +701,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     if (reads === undefined) {
       // Nothing read that could be watched.
       await this.#unwatch(evaluation);
-    } else if (!(await this.#keepWatched(evaluation, by, reads))) {
+    } else if (!(await this.#keepWatched(evaluation, before.by, reads))) {
       await this.#lose(evaluation);
       return;
     }
@@ -626,7 +712,10 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       await this.#end(evaluation, after.refusal);
       return;
     }
-    if (after.roles !== before.roles) {
+    if (
+      after.roles !== before.roles ||
+      this.#revocations.get(app) !== revocations
+    ) {
       evaluation.dirty = true;
       return;
     }
@@ -646,7 +735,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
    */
   async #gate(
     evaluation: Evaluation
-  ): Promise<{ refusal: Result } | { roles: string }> {
+  ): Promise<{ refusal: Result } | { roles: string; by: By }> {
     const { app, artifact } = evaluation;
     let by: By;
     try {
@@ -666,16 +755,33 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       };
       this.#cleared.set(key, cached);
     }
-    let access: Awaited<ReturnType<AccessCheck<By>>>;
-    let roles: string | undefined;
-    try {
-      access = await cached.access;
-      roles = access === "open" ? await cached.roles : undefined;
-    } catch {
-      access = "role";
+    const [accessed, read] = await Promise.allSettled([
+      cached.access,
+      cached.roles,
+    ]);
+    // No answer of the roles or the access check (the database away for a
+    // moment): refused as a failure to try again, which clears what the
+    // screen shows and has it follow again, never as a lost role, which
+    // would sign the page out of the App for someone who still has it.
+    const unanswered = [read, accessed].find(
+      (settled): settled is PromiseRejectedResult =>
+        settled.status === "rejected" && !isExpectedError(settled.reason)
+    );
+    if (unanswered !== undefined) {
+      this.#cleared.delete(key);
+      return { refusal: refusalResult(unanswered.reason) };
     }
+    if (read.status === "rejected") {
+      this.#cleared.delete(key);
+      return {
+        refusal: refusalResult(appErrors.create("app.not_found")),
+      };
+    }
+    const access = accessed.status === "fulfilled" ? accessed.value : "role";
+    const roles = access === "open" ? read.value : undefined;
     if (access === "open" && roles !== undefined) {
-      return { roles };
+      this.#rolesSeen.set(app, roles);
+      return { roles, by };
     }
     this.#cleared.delete(key);
     // Someone without a role is refused as a read refuses them: nothing
@@ -865,6 +971,7 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     }
     const snapshot: Snapshot = { push, bytes, roles };
     evaluation.latest = snapshot;
+    evaluation.roles = roles;
     for (const listener of evaluation.listeners) {
       this.#offer(evaluation, listener, snapshot);
     }
@@ -923,12 +1030,17 @@ export class QuerySubscriptions<By extends Reader = Identity> {
     this.#unsent += snapshot.bytes;
     try {
       // Every push of data passes the gate first, however long it waited.
+      const revocations = this.#revocations.get(evaluation.app);
       const gate = await this.#gate(evaluation);
       if ("refusal" in gate) {
         void this.#end(evaluation, gate.refusal);
-      } else if (gate.roles !== snapshot.roles) {
-        // Read under roles the person no longer has: dropped, and read
-        // again as they are now.
+      } else if (
+        gate.roles !== snapshot.roles ||
+        this.#revocations.get(evaluation.app) !== revocations
+      ) {
+        // Read under roles the person no longer has, or passed by a gate
+        // that looked before a revocation landed (`#revoked`): dropped,
+        // and read again as they are now.
         if (evaluation.latest === snapshot) {
           evaluation.latest = undefined;
         }
@@ -1006,7 +1118,184 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       callbacks.push(this.#detach(listener));
     }
     evaluation.listeners.clear();
+    if (!this.#follows(evaluation.app)) {
+      this.#unfollow(evaluation.app);
+    }
     return callbacks;
+  }
+
+  /**
+   * Once the connection follows `app`'s revocations, or can't: waits for
+   * whichever following is current when the last one answered, so a
+   * following its host let go of early and replaced is waited out too.
+   */
+  async #followed(app: AppId): Promise<void> {
+    for (;;) {
+      const following = this.#following.get(app);
+      if (following === undefined) {
+        return;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- until the current one answered
+      await following.ready;
+      if (this.#following.get(app) === following) {
+        return;
+      }
+    }
+  }
+
+  /** Whether the connection still follows a query of `app`. */
+  #follows(app: AppId): boolean {
+    return [...this.#evaluations.values()].some(
+      (evaluation) => evaluation.app === app
+    );
+  }
+
+  /**
+   * Has `app`'s host tell this connection when `userId`'s role in it may
+   * have dropped (`followAccess`), until the connection follows no query
+   * of it (`#unfollow`). Once the host answered, looks once (`#revoked`):
+   * whatever changed before it followed is seen by that look. Let go of
+   * by the host (restarted), it looks at once and follows again; when it
+   * can't follow, the App's queries stop, as when a store can't be
+   * watched, and the screens follow again later.
+   */
+  #follow(userId: string, app: AppId): void {
+    const following: Following = {
+      id: undefined,
+      ready: Promise.resolve(),
+      early: false,
+    };
+    this.#following.set(app, following);
+    const current = (): boolean => this.#following.get(app) === following;
+    // Let go of by the host: an event may have been missed, so look now,
+    // and follow again while a query of the App is still followed here.
+    const letGo = (): void => {
+      this.#following.delete(app);
+      this.#revoked(app);
+      if (this.#follows(app)) {
+        this.#follow(userId, app);
+      }
+    };
+    const watcher = Object.assign(
+      (revoked: boolean): void => {
+        // Once it no longer follows, it says it is gone, so the host drops
+        // it even if core's word that it let go never arrived.
+        if (!current()) {
+          throw new Error("This App's revocations are no longer followed.");
+        }
+        if (revoked) {
+          this.#revoked(app);
+        }
+      },
+      {
+        [Symbol.dispose]: (): void => {
+          if (!current()) {
+            return;
+          }
+          if (following.id === undefined) {
+            // Before the host's answer was taken: once it is (`answered`).
+            following.early = true;
+            return;
+          }
+          letGo();
+        },
+      }
+    );
+    const answered = async (): Promise<void> => {
+      try {
+        following.id = await appHost(this.#env, app).followAccess(
+          userId,
+          watcher
+        );
+      } catch (error) {
+        log.warn("query.follow_access_failed", errorFields(error));
+        if (current()) {
+          this.#following.delete(app);
+          await Promise.all(
+            [...this.#evaluations.values()]
+              .filter((evaluation) => evaluation.app === app)
+              .map(async (evaluation) => {
+                await this.#lose(evaluation);
+              })
+          );
+        }
+        return;
+      }
+      if (current() && following.early) {
+        letGo();
+      } else if (current()) {
+        this.#revoked(app);
+      } else {
+        await this.#leave(app, following.id);
+      }
+    };
+    following.ready = answered();
+  }
+
+  /** Stops following `app`'s revocations: no query of it is followed. */
+  #unfollow(app: AppId): void {
+    const following = this.#following.get(app);
+    this.#following.delete(app);
+    // No read or push of the App is left to compare against it: a later
+    // follow starts afresh, so a connection keeps nothing per App it left.
+    this.#revocations.delete(app);
+    this.#rolesSeen.delete(app);
+    // Not answered yet: `#follow` leaves once it is.
+    if (following?.id !== undefined) {
+      void this.#leave(app, following.id);
+    }
+  }
+
+  async #leave(app: AppId, id: string): Promise<void> {
+    try {
+      await appHost(this.#env, app).unfollowAccess(id);
+    } catch (error) {
+      // The host drops it at its next telling.
+      log.warn("query.unfollow_access_failed", errorFields(error));
+    }
+  }
+
+  /**
+   * The person's role in `app` may have dropped: reads the session again
+   * now, and passes each of the App's queries through the gate, ending
+   * those it refuses (which clears their screens) and reading again those
+   * whose roles changed. Changes nothing for someone whose access holds.
+   */
+  #revoked(app: AppId): void {
+    this.#revocations.set(app, (this.#revocations.get(app) ?? 0) + 1);
+    // Before any look below moves it on.
+    const seen = this.#rolesSeen.get(app);
+    this.#reads.forget();
+    this.#cleared.clear();
+    for (const evaluation of this.#evaluations.values()) {
+      if (evaluation.app === app) {
+        void this.#recheck(evaluation, seen);
+      }
+    }
+  }
+
+  async #recheck(
+    evaluation: Evaluation,
+    seen: string | undefined
+  ): Promise<void> {
+    // The roles what it shows was read under, or for one that showed
+    // nothing yet, those the connection last saw: the client may keep
+    // results of the App read under them, which this tells it to drop.
+    const before = evaluation.roles ?? seen;
+    const gate = await this.#gate(evaluation);
+    if ("refusal" in gate) {
+      await this.#end(evaluation, gate.refusal);
+    } else if (before !== undefined && gate.roles !== before) {
+      // What its screens show was read under roles the person no longer
+      // has: ended with a result that carries nothing, pushed as the last
+      // however much waited (`#end`), so it clears the screen whatever a
+      // later read answers. It is no refusal of the person: the screen
+      // keeps following and follows again, from a read under their roles.
+      await this.#end(
+        evaluation,
+        refusalResult(screenErrors.create("screen.access_changed"))
+      );
+    }
   }
 
   /** Marks `listener` released, dropping what waited for it. */

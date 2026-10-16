@@ -5,11 +5,17 @@ import {
   oauthFlowLifetimeMs,
 } from "@grasp-os/shared/connect";
 import type { CodedError } from "@grasp-os/shared/errors";
-import { identifierSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, identifierSchema } from "@grasp-os/shared/ids";
+import type { AppId } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { memberErrors } from "@grasp-os/shared/members";
 import type { Invitation, Member, MembersApi } from "@grasp-os/shared/members";
-import { isAdmin, roleErrors, roleSchema } from "@grasp-os/shared/roles";
+import {
+  canBuild,
+  isAdmin,
+  roleErrors,
+  roleSchema,
+} from "@grasp-os/shared/roles";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { and, asc, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
@@ -17,6 +23,12 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import {
+  accessMayHaveDropped,
+  appsSharedWithAnyone,
+  withRetries,
+} from "./access-revocations.ts";
+import { appsFoundBy } from "./app-access.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
   activeAdminExists,
@@ -28,9 +40,11 @@ import {
   organizationId,
 } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
+import { teamsOf } from "./auth/identity.ts";
 import { revokeChatPermissions } from "./chat-connections.ts";
 import { personOf } from "./connections.ts";
 import {
+  apps,
   invitations,
   memberRemovals,
   members,
@@ -106,6 +120,94 @@ const membershipOf = async (
     .where(currentMembership(userId));
   return membership;
 };
+
+/**
+ * The Apps `userId` has a role in as a member in role `role`, with the
+ * teams they are in now (app-access.ts): what removing them or lowering
+ * their role can take away, for those Apps' hosts to tell their open
+ * screens (access-revocations.ts). Read before the change.
+ */
+const appsReachedBy = async (
+  env: Env,
+  userId: string,
+  role: string
+): Promise<AppId[]> => {
+  const known = roleSchema.safeParse(role);
+  if (!known.success) {
+    return [];
+  }
+  const rows = await drizzle(env.DB)
+    .select({ id: apps.id })
+    .from(apps)
+    .where(
+      appsFoundBy(env, {
+        userId,
+        role: known.data,
+        teams: await teamsOf(env.DB, userId),
+      })
+    );
+  return rows.map(({ id }) => appIdSchema.parse(id));
+};
+
+/**
+ * `appsReachedBy`, read before a change, or `undefined` when that read
+ * fails: the change goes ahead all the same, and `tellReached` makes up
+ * for it.
+ */
+const appsReachedBefore = async (
+  env: Env,
+  userId: string,
+  role: string
+): Promise<AppId[] | undefined> => {
+  try {
+    return await appsReachedBy(env, userId, role);
+  } catch (error) {
+    log.error("app.access_revocation_failed", errorFields(error));
+    return undefined;
+  }
+};
+
+/**
+ * Tells the Apps `reached` before the change, and those `userId` reaches
+ * in role `role` now (an App shared with them while it ran), that their
+ * role there may have dropped. Never throws: the change has committed,
+ * and what follows it must still run; a second look that fails tells
+ * the first look's Apps all the same. When the first look failed
+ * (`undefined`), every App shared with anyone is told too: a removal
+ * deletes the person's teams, so the look after it can't find the Apps
+ * they reached through them.
+ *
+ * Residual, accepted (GRA-564, follow-up GRA-635): a database away for longer than the
+ * looks' retries loses what they would have found, logged. Nothing leaks:
+ * every push still checks access first, so nothing new reaches the
+ * person; their screen is only cleared later.
+ */
+const tellReached = async (
+  env: Env,
+  reached: readonly AppId[] | undefined,
+  userId: string,
+  role: string
+): Promise<void> => {
+  const looks = await Promise.allSettled([
+    withRetries(async () => await appsReachedBy(env, userId, role)),
+    reached === undefined
+      ? withRetries(async () => await appsSharedWithAnyone(env))
+      : Promise.resolve([]),
+  ]);
+  const found: AppId[] = [...(reached ?? [])];
+  for (const look of looks) {
+    if (look.status === "fulfilled") {
+      found.push(...look.value);
+    } else {
+      log.error("app.access_revocation_failed", errorFields(look.reason));
+    }
+  }
+  await accessMayHaveDropped(env, found, [userId]);
+};
+
+/** Whether going from role `from` to `to` can take a role in an App away. */
+const lowers = (from: string, to: Role): boolean =>
+  (isAdmin(from) && !isAdmin(to)) || (canBuild(from) && !canBuild(to));
 
 /** That `userId` is an admin of the organization now, as a SQL condition. */
 const isActiveAdmin = (userId: string): SQL => activeMember(userId, ["admin"]);
@@ -284,6 +386,12 @@ const removeMember = async (
     if (!(removedNow || (await isRemoved(env, target)))) {
       throw refusal(by, roleErrors.create("role.forbidden"));
     }
+    if (removedNow) {
+      // Every App shared with anyone, not only those a look before found:
+      // the removal deletes their teams, one joined meanwhile included,
+      // so no look before or after it finds every App they reached.
+      await tellReached(env, undefined, target, membership.role);
+    }
   } else if (!(await isRemoved(env, target))) {
     throw refusal(by, memberErrors.create("member.not_found"));
   }
@@ -359,6 +467,9 @@ const setMemberRole = async (
   if (membership.role === newRole) {
     return;
   }
+  const reached = lowers(membership.role, newRole)
+    ? await appsReachedBefore(env, target.data, membership.role)
+    : [];
   const db = drizzle(env.DB);
   const keepsAnAdmin =
     newRole === "admin" ? sql`1` : activeAdminExists(target.data);
@@ -387,6 +498,9 @@ const setMemberRole = async (
     }),
   ]);
   if (changed) {
+    if (lowers(membership.role, newRole)) {
+      await tellReached(env, reached, target.data, membership.role);
+    }
     return;
   }
   const now = await membershipOf(env, target.data);

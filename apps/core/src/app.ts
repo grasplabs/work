@@ -24,6 +24,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import {
   querySubscriptionLimits,
+  screenErrors,
   screenLimits,
 } from "@grasp-os/shared/screens";
 import type {
@@ -523,6 +524,22 @@ export const invokeServer = async (
 export type RunWatcher = Rpc.Stub<(change: RunChange) => Promise<void>>;
 
 /**
+ * A connection's callback for the App's revocations (`followAccess`):
+ * called with `true` when its person's role in the App may have dropped,
+ * so it checks their access again now (query-subscriptions.ts), and with
+ * `false` only to see that it is still there. It throws once the
+ * connection no longer follows the App.
+ */
+export type AccessWatcher = Rpc.Stub<(revoked: boolean) => void>;
+
+/**
+ * Most connections of one person that follow the App's revocations at
+ * once: one per open tab of the App's screens, so this only bounds what a
+ * page that follows over and over keeps here.
+ */
+const accessFollowersPerPerson = 64;
+
+/**
  * What let a call into the App, as core checked it before the call, and
  * checks again before each stub call the App's code makes in it
  * (app-bindings.ts, `requireStillAdmitted`): the person's role in the App,
@@ -791,6 +808,12 @@ export class App extends DurableObject<Env> {
 
   /** Screens following the App's runs, by workflow and ID (`watchRuns`). */
   readonly #runWatchers = new Map<string, Map<string, RunWatcher>>();
+
+  /** Connections following the App's revocations, by ID (`followAccess`). */
+  readonly #accessFollowers = new Map<
+    string,
+    { readonly userId: string; readonly onRevoked: AccessWatcher }
+  >();
 
   /**
    * The calls running now, by token, with the version their code runs on
@@ -1466,6 +1489,83 @@ export class App extends DurableObject<Env> {
       this.#runWatchers.delete(workflow);
     }
     watcher?.[Symbol.dispose]();
+  }
+
+  /**
+   * Keeps `onRevoked`, the callback of a connection of `userId`'s that
+   * follows the App's live queries, and calls it each time their role in
+   * the App may have dropped (`accessRevoked`), until calling it fails.
+   * Kept in memory, as `watchRuns` keeps its callbacks: a restart of this
+   * object drops them, which tells each connection to check its access
+   * and follow again, so an event sent meanwhile is never missed. Past
+   * `accessFollowersPerPerson`, the person's connections that are gone
+   * are let go of first; refused if that frees no place. Returns the ID
+   * `unfollowAccess` drops it by.
+   */
+  async followAccess(
+    userId: string,
+    onRevoked: AccessWatcher
+  ): Promise<string> {
+    const held = onRevoked.dup();
+    const theirs = (): [string, AccessWatcher][] =>
+      [...this.#accessFollowers]
+        .filter(([, follower]) => follower.userId === userId)
+        .map(([id, follower]) => [id, follower.onRevoked]);
+    if (theirs().length >= accessFollowersPerPerson) {
+      await Promise.all(
+        theirs().map(async ([id, watcher]) => {
+          try {
+            await watcher(false);
+          } catch {
+            this.#dropFollower(id);
+          }
+        })
+      );
+    }
+    if (theirs().length >= accessFollowersPerPerson) {
+      held[Symbol.dispose]();
+      throw screenErrors.create("screen.too_many_queries");
+    }
+    const id = crypto.randomUUID();
+    this.#accessFollowers.set(id, { userId, onRevoked: held });
+    return id;
+  }
+
+  /** Drops the callback `followAccess` kept as `id`, if it still does. */
+  unfollowAccess(id: string): void {
+    this.#dropFollower(id);
+  }
+
+  /**
+   * Tells the connections of `userIds` (of everyone, when `null`) that
+   * follow the App's live queries that their role in it may have dropped
+   * (access-revocations.ts): each checks again now, and clears what its
+   * screens show if it has. Returns at once, with how many connections it
+   * told; a connection that is gone is dropped.
+   */
+  accessRevoked(userIds: readonly string[] | null): number {
+    let told = 0;
+    for (const [id, { userId, onRevoked }] of this.#accessFollowers) {
+      if (userIds === null || userIds.includes(userId)) {
+        told += 1;
+        void this.#tellRevoked(id, onRevoked);
+      }
+    }
+    return told;
+  }
+
+  async #tellRevoked(id: string, onRevoked: AccessWatcher): Promise<void> {
+    try {
+      await onRevoked(true);
+    } catch {
+      this.#dropFollower(id);
+    }
+  }
+
+  #dropFollower(id: string): void {
+    const follower = this.#accessFollowers.get(id);
+    this.#accessFollowers.delete(id);
+    follower?.onRevoked[Symbol.dispose]();
   }
 
   /**
