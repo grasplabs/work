@@ -1307,6 +1307,58 @@ const allowsStatistics = (
   );
 };
 
+/**
+ * Whether `method` with `args` is one of the operations a guests
+ * `declaration` declares, with what it takes: an invitation's object, a
+ * chat's ID, or nothing for a list.
+ */
+const allowsGuests = (
+  declaration: Extract<AnyResource, { "~resource": "guests" }>,
+  method: unknown,
+  args: readonly Json[]
+): boolean => {
+  const [first] = args;
+  if (!declaration.operations.some((operation) => operation === method)) {
+    return false;
+  }
+  if (method === "list") {
+    return args.length === 0;
+  }
+  return (
+    args.length === 1 &&
+    (method === "invite" ? isJsonObject(first) : typeof first === "string")
+  );
+};
+
+/** A guest chat, as a guests resource answers it. */
+const guestChatSchema = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  skill: z.string(),
+  status: z.enum(["open", "finished", "revoked", "expired"]),
+  invitedBy: z.string(),
+  turns: z.number(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  endedAt: z.string().nullable(),
+});
+
+/** What each guests operation answers. */
+const guestResults = {
+  invite: guestChatSchema.extend({ link: z.string() }),
+  list: z.array(guestChatSchema).max(100),
+  read: guestChatSchema.extend({
+    messages: z.array(
+      z.strictObject({
+        role: z.enum(["guest", "agent"]),
+        text: z.string(),
+        at: z.string(),
+      })
+    ),
+  }),
+  revoke: guestChatSchema,
+} as const;
+
 /** What a statistics read answers, checked as the contract allows it. */
 const statisticGroupSchema = z.strictObject({
   dimensions: z.record(z.string(), z.string().nullable()),
@@ -1388,6 +1440,8 @@ const allowedRequest = (
     );
   } else if (declaration["~resource"] === "statistics") {
     allowed = allowsStatistics(declaration, method, args);
+  } else if (declaration["~resource"] === "guests") {
+    allowed = allowsGuests(declaration, method, args);
   } else {
     allowed = method === "read" && args.length === 0;
   }
@@ -1440,6 +1494,13 @@ const checkedResourceResult = (
     valid = (
       method === "search" ? knowledgeHitsSchema : knowledgeDocumentSchema
     ).safeParse(result).success;
+  } else if (declaration["~resource"] === "guests") {
+    valid =
+      (method === "invite" ||
+        method === "list" ||
+        method === "read" ||
+        method === "revoke") &&
+      guestResults[method].safeParse(result).success;
   } else if (declaration["~resource"] === "statistics") {
     valid =
       method === "record"
@@ -1499,7 +1560,7 @@ const exhaustedDetailsSchema = z.object({
 
 /** Which bound of a resource's a request reached, and when to ask again. */
 const limitDetailsSchema = z.strictObject({
-  limit: z.enum(["call", "minute", "day"]),
+  limit: z.enum(["call", "minute", "day", "open"]),
   retryAfterSeconds: z.int().positive().max(60).optional(),
 });
 

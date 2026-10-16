@@ -10,16 +10,14 @@ import {
   statisticLimitsOf,
 } from "@grasp-os/shared/statistics";
 import type { StatisticUse } from "@grasp-os/shared/statistics";
-import { and, eq, isNull, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 
-import { permissions } from "./db/core/schema.ts";
 import { appHost } from "./durable-objects.ts";
 import type {
   BindingCaller,
   DeclarationOf,
   ResourceAdapter,
 } from "./resource-adapter.ts";
+import { platformGrantOf } from "./resource-platform.ts";
 import {
   auditPlatformRead,
   platformReadOf,
@@ -73,61 +71,6 @@ const countNames: Readonly<Record<StatisticUse, string>> = {
 /** Seconds until the next UTC minute, when the App's minute starts again. */
 const untilNextMinute = (): number =>
   60 - Math.floor((Date.now() % 60_000) / 1000);
-
-/**
- * Whether `permissionId` is App `app`'s own active permission to read the
- * platform's statistics, as it stands now.
- */
-const platformGrantOf = async (
-  env: Env,
-  app: AppId,
-  permissionId: PermissionId
-): Promise<boolean> => {
-  const row = await drizzle(env.DB)
-    .select({ id: permissions.id })
-    .from(permissions)
-    .where(
-      and(
-        eq(permissions.id, permissionId),
-        eq(permissions.subjectType, "app"),
-        eq(permissions.subjectId, app),
-        eq(permissions.objectType, "platform"),
-        eq(permissions.status, "active"),
-        isNull(permissions.chatId),
-        sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'statistics')`
-      )
-    )
-    .get();
-  return row !== undefined;
-};
-
-/**
- * The App's own active permissions to read the platform's statistics,
- * newest first, at most `limit`: what a binding of a declaration that
- * reads them may name.
- */
-export const platformGrantsOf = async (
-  env: Env,
-  app: AppId,
-  limit: number
-): Promise<string[]> => {
-  const rows = await drizzle(env.DB)
-    .select({ id: permissions.id })
-    .from(permissions)
-    .where(
-      and(
-        eq(permissions.subjectType, "app"),
-        eq(permissions.subjectId, app),
-        eq(permissions.objectType, "platform"),
-        eq(permissions.status, "active"),
-        isNull(permissions.chatId),
-        sql`EXISTS (SELECT 1 FROM json_each(${permissions.actions}) WHERE value = 'statistics')`
-      )
-    )
-    .orderBy(sql`${permissions.grantedAt} DESC`)
-    .limit(limit);
-  return rows.map(({ id }) => id);
-};
 
 /**
  * Counts one `use` of the invocation's against its bound, then against
@@ -290,7 +233,10 @@ const servable = async (
     return permissionId === undefined;
   }
   const parsed = permissionIdSchema.safeParse(permissionId);
-  return parsed.success && (await platformGrantOf(env, app, parsed.data));
+  return (
+    parsed.success &&
+    (await platformGrantOf(env, app, parsed.data, "statistics"))
+  );
 };
 
 /**

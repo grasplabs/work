@@ -199,6 +199,10 @@ const help = resource.knowledge("help", {
   collections: ["handbook"],
 });
 const letter = resource.template("letter", { contract: "grasp.letter@1" });
+// Guest chats it lists and reads, and never invites.
+const guestbook = resource.guests("guestbook", {
+  operations: ["list", "read"],
+});
 
 const sendMail = action({
   args: { to: v.string().email() },
@@ -226,6 +230,16 @@ const searchHelp = action({
   uses: [help],
   handler: async (ctx, args) =>
     await ctx.resources.help.search({ text: args.text, limit: 5 }),
+});
+
+const listGuests = action({
+  args: {},
+  returns: v.number(),
+  uses: [guestbook],
+  handler: async (ctx) => {
+    const chats = await ctx.resources.guestbook.list();
+    return chats.length;
+  },
 });
 
 const readLetter = action({
@@ -548,6 +562,7 @@ const notesApp = app({
       checkLater,
     },
     actions: {
+      listGuests,
       compose,
       createThenFail,
       rethrow,
@@ -583,7 +598,7 @@ const notesApp = app({
     "notes.blindCount": { tables: { notes: { insert: true } } },
   },
   screens: [],
-  uses: [mail, summarizer, help, letter],
+  uses: [mail, summarizer, help, letter, guestbook],
 });
 
 const { manifest } = inspectApp(notesApp);
@@ -1164,6 +1179,34 @@ describe("resources", () => {
           }
         )
       );
+    // A guests resource that lists and reads, asked to invite: refused
+    // before its binding hears of it, so no chat is made and nothing is
+    // audited.
+    let invited = false;
+    const guests = bindingsOf({
+      guestbook: bound("guests", null, async () => {
+        invited = true;
+        return await Promise.resolve([]);
+      }),
+    });
+    const invite = codeOf(
+      await call(
+        fixture,
+        "action",
+        "actions.listGuests",
+        {},
+        {
+          resources: guests,
+          run: misusing(
+            "actions.listGuests",
+            async (channel) =>
+              await channel.resource("guestbook", "invite", [
+                { name: "Anna", skill: "interview-a-stakeholder" },
+              ])
+          ),
+        }
+      )
+    );
     expect({
       undeclaredAction: await attempt(
         async (channel) =>
@@ -1174,10 +1217,14 @@ describe("resources", () => {
           await channel.resource("help", "search", [{ text: "a" }])
       ),
       reached,
+      invite,
+      invited,
     }).toStrictEqual({
       undeclaredAction: "resource.not_allowed",
       undeclaredAlias: "resource.not_allowed",
       reached: false,
+      invite: "resource.not_allowed",
+      invited: false,
     });
   });
 

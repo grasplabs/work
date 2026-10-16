@@ -1,3 +1,9 @@
+import type {
+  GuestChat,
+  GuestInvitation,
+  GuestInvite,
+  GuestTranscript,
+} from "@grasp-os/shared/guests";
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import {
   resourceAliasPattern,
@@ -48,6 +54,11 @@ import type { Infer, InferInput, ObjectInput, ValueShape } from "./values.ts";
 // reading measures of the App's own, and reading the measures the
 // platform publishes it lists (`platform`), each only once an admin binds
 // it, and a platform measure only under a permission they granted.
+//
+// A guests resource is guest chats: inviting someone who isn't a member to
+// a short chat with a model, through a link, for the person the call acts
+// for; listing, reading back and revoking the App's chats. Only under a
+// permission an admin granted the App, which its binding names.
 
 /** The kinds of resource an action can use. */
 export type ResourceKind =
@@ -56,7 +67,8 @@ export type ResourceKind =
   | "knowledge"
   | "template"
   | "store"
-  | "statistics";
+  | "statistics"
+  | "guests";
 
 /** What a declaration's config may say about a model. */
 export interface ModelConfig<Output extends AnySchema | undefined> {
@@ -195,6 +207,9 @@ export interface StatisticsConfig<
   readonly platform?: readonly PlatformMeasure[];
 }
 
+/** What a guests resource may do with the App's guest chats. */
+export type GuestsOperation = "invite" | "list" | "read" | "revoke";
+
 /** One store operation as a declaration holds it: data only. */
 export interface StoreOperationShape {
   readonly kind: StoreOperationKind;
@@ -270,6 +285,14 @@ export interface StatisticsResource<
   readonly platform: readonly PlatformMeasure[];
 }
 
+/** A guests requirement. */
+export interface GuestsResource<
+  Alias extends string = string,
+  Operations extends readonly GuestsOperation[] = readonly GuestsOperation[],
+> extends DeclarationBase<"guests", Alias> {
+  readonly operations: Operations;
+}
+
 /**
  * A files requirement (spec 10.7.5, 32.3): what the App's screens may do
  * with files, through the host. Browser-facing: no function lists it.
@@ -339,7 +362,8 @@ export type AnyResource =
   | KnowledgeResource
   | TemplateResource
   | StoreResource
-  | StatisticsResource;
+  | StatisticsResource
+  | GuestsResource;
 
 /** One search result from knowledge: a title and an excerpt of it. */
 export interface KnowledgeHit {
@@ -465,6 +489,37 @@ export type StatisticsClient<
       }
     : unknown);
 
+/** What `ctx.resources.<alias>` is for guests, by its operations. */
+export type GuestsClient<Operations extends readonly GuestsOperation[]> =
+  ("invite" extends Operations[number]
+    ? {
+        /**
+         * Invites a guest, for the person the call acts for: only a
+         * person's own call, never a workflow run's. The answer holds the
+         * link, shown once.
+         */
+        readonly invite: (invite: GuestInvite) => Promise<GuestInvitation>;
+      }
+    : unknown) &
+    ("list" extends Operations[number]
+      ? {
+          /** The App's guest chats: the open ones first, newest first. */
+          readonly list: () => Promise<GuestChat[]>;
+        }
+      : unknown) &
+    ("read" extends Operations[number]
+      ? {
+          /** A guest chat of the App, with what was written: untrusted text. */
+          readonly read: (id: string) => Promise<GuestTranscript>;
+        }
+      : unknown) &
+    ("revoke" extends Operations[number]
+      ? {
+          /** Stops a guest chat's link for good. */
+          readonly revoke: (id: string) => Promise<GuestChat>;
+        }
+      : unknown);
+
 /**
  * A store call's arguments: each path of `Path` paired with its own
  * arguments, so a path that may be either of two needs arguments that fit
@@ -512,6 +567,9 @@ interface ResourceClients<Resource> {
     infer Operations
   >
     ? StatisticsClient<Operations>
+    : never;
+  readonly guests: Resource extends GuestsResource<string, infer Operations>
+    ? GuestsClient<Operations>
     : never;
 }
 
@@ -561,6 +619,14 @@ export const isWorkflowResource = (value: unknown): value is WorkflowResource =>
 /** Whether `value` is a files or links declaration `resource` made. */
 export const isBrowserResource = (value: unknown): value is BrowserResource =>
   typeof value === "object" && value !== null && browserDeclarations.has(value);
+
+/** The operations a guests resource may declare. */
+const guestsOperations: readonly GuestsOperation[] = [
+  "invite",
+  "list",
+  "read",
+  "revoke",
+];
 
 /** The operations a statistics resource may declare. */
 const statisticsOperations: readonly StatisticsOperation[] = ["record", "read"];
@@ -1062,6 +1128,34 @@ export const resource = Object.freeze({
     }) as WorkflowResource<Alias, InferInput<Input>>;
   },
   /**
+   * Guest chats, under a permission an admin binds: inviting a guest for
+   * the person the call acts for, and listing, reading back and revoking
+   * the App's chats.
+   */
+  guests: <
+    const Alias extends string,
+    const Operations extends readonly [GuestsOperation, ...GuestsOperation[]],
+  >(
+    alias: Alias,
+    config: { readonly operations: Operations }
+  ): GuestsResource<Alias, Operations> => {
+    const checked = checkedConfig(config, ["operations"]);
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given, and the operations given, in order.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declared({
+      "~resource": "guests",
+      alias: checkedAlias(alias),
+      operations: checkedList(
+        checked.operations,
+        "operations",
+        guestsOperations
+      ).filter((operation): operation is GuestsOperation =>
+        guestsOperations.some((known) => known === operation)
+      ),
+    }) as GuestsResource<Alias, Operations>;
+  },
+  /**
    * What the App's screens may do with files through the host: upload,
    * read, attach, delete. Listed in the App's `uses`, never a function's.
    */
@@ -1176,6 +1270,9 @@ export const readResourceDeclaration = (
       ...(Array.isArray(platform) && platform.length === 0 ? {} : { platform }),
     } as never;
     return resource.statistics(alias, statisticsConfig);
+  }
+  if (kind === "guests") {
+    return resource.guests(alias, loose);
   }
   if (kind === "files") {
     return resource.files(alias, loose);

@@ -44,7 +44,10 @@ const modelNameSchema = z
  *   declaration that reads the platform's measures, one of the App's
  *   `{ type: "platform" }` permissions to read them (`statistics`),
  *   checked on every read; a declaration of its own measures only takes
- *   none.
+ *   none;
+ * - `guests`: one of the App's `{ type: "platform" }` permissions to invite
+ *   guests (`guests`), checked on every call, and by every guest's link of
+ *   a chat invited through it, which the binding's revocation stops too.
  */
 export const bindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("model"), model: modelNameSchema }),
@@ -76,6 +79,10 @@ export const bindingTargetSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("statistics"),
     permissionId: permissionIdSchema.optional(),
+  }),
+  z.strictObject({
+    kind: z.literal("guests"),
+    permissionId: permissionIdSchema,
   }),
 ]);
 export type BindingTarget = z.infer<typeof bindingTargetSchema>;
@@ -228,10 +235,11 @@ export interface StoreChoice {
 }
 
 /**
- * One of the App's permissions to read the platform's statistics, as a
- * statistics resource's choice.
+ * One of the App's `{ type: "platform" }` permissions, as a statistics or
+ * guests resource's choice: to read the platform's statistics, or to
+ * invite guests.
  */
-export interface StatisticsChoice {
+export interface PlatformChoice {
   permissionId: string;
 }
 
@@ -248,7 +256,8 @@ export interface StatisticsChoice {
  *   every declared operation, of exactly the declared shape, and allows it;
  * - `statistics`: for a declaration that reads the platform's measures
  *   (`platform`), the App's own active permissions to read them, one of
- *   which it needs; none, and nothing to choose, for its own measures.
+ *   which it needs; none, and nothing to choose, for its own measures;
+ * - `guests`: the App's own active permissions to invite guests.
  *
  * Approving checks the choice again: one that stopped serving since is
  * refused (`resource.target_invalid`). `truncated` says some were left
@@ -261,7 +270,8 @@ export type BindingChoices = { truncated: boolean } & (
   | { kind: "knowledge"; permissions: CollectionChoice[] }
   | { kind: "template"; versions: PublishedTemplate[] }
   | { kind: "store"; permissions: StoreChoice[] }
-  | { kind: "statistics"; platform: boolean; permissions: StatisticsChoice[] }
+  | { kind: "statistics"; platform: boolean; permissions: PlatformChoice[] }
+  | { kind: "guests"; permissions: PlatformChoice[] }
 );
 
 /**

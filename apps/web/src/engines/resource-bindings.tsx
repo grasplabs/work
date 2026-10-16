@@ -95,6 +95,7 @@ const kindLabels: Readonly<
   template: msg`Template`,
   store: msg`Store`,
   statistics: msg`Statistics`,
+  guests: msg`Guests`,
 };
 
 const stateLabels: Readonly<Record<BindingState, MessageDescriptor>> = {
@@ -195,6 +196,10 @@ const BoundTo = ({
     );
   }
   if (target.kind === "store") {
+    const { permissionId: permission } = target;
+    return <Trans>Permission {permission}</Trans>;
+  }
+  if (target.kind === "guests") {
     const { permissionId: permission } = target;
     return <Trans>Permission {permission}</Trans>;
   }
@@ -315,6 +320,11 @@ const NothingToChoose = ({
       <Trans>
         The domain has no permission to read the platform&apos;s statistics.
         Grant one first.
+      </Trans>
+    ),
+    guests: (
+      <Trans>
+        The domain has no permission to invite guests. Grant one first.
       </Trans>
     ),
   };
@@ -562,6 +572,19 @@ const BindForm = ({
       {choices.kind === "statistics" && choices.platform ? (
         <Choice
           label={t`Permission for the platform's statistics`}
+          onChange={setPicked}
+          value={picked}
+        >
+          {choices.permissions.map(({ permissionId: permission }) => (
+            <NativeSelectOption key={permission} value={permission}>
+              {t`Permission ${permission}`}
+            </NativeSelectOption>
+          ))}
+        </Choice>
+      ) : null}
+      {choices.kind === "guests" ? (
+        <Choice
+          label={t`Permission to invite guests`}
           onChange={setPicked}
           value={picked}
         >
