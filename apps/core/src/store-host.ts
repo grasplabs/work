@@ -89,6 +89,7 @@ import {
   abandonedTargets,
   backfills,
   commitWriters,
+  files,
   migrationWork,
   outbox,
   receipts,
@@ -100,6 +101,8 @@ import {
   store,
   tables,
 } from "./db/data-store/schema.ts";
+import { FileHost } from "./file-host.ts";
+import type { FileHolder, FileReader } from "./file-host.ts";
 import { liveRuns } from "./live-runs.ts";
 import {
   assertTimeout,
@@ -350,6 +353,12 @@ const purgeBudgetMs = 10_000;
  * Fixed names, never an author's.
  */
 const purgedTables = [
+  "sdk_file_refs",
+  "sdk_file_delete_keys",
+  "sdk_file_chunks",
+  "sdk_file_writes",
+  "sdk_file_events",
+  "sdk_files",
   "sdk_record_refs",
   "sdk_records",
   "sdk_schemas",
@@ -1043,10 +1052,40 @@ export class StoreHost {
   /** The defaulted fields of each contract read so far, by hash. */
   readonly #defaults = new Map<string, DefaultedFields>();
 
+  /** The store's files (file-host.ts). */
+  readonly files: FileHost;
+
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
     this.env = env;
     this.#db = drizzle(ctx.storage);
+    this.files = new FileHost(ctx.storage, env, this.#db, {
+      bind: (storeId) => {
+        this.#bind(storeId, false);
+      },
+      readable: async (reader, holders) =>
+        await this.#readableHolder(reader, holders),
+    });
+  }
+
+  /**
+   * Whether `reader` may read any of `holders`, records holding a file,
+   * now: under the schema their App reads with, as a commit decides a
+   * record may be referred to (`#referable`).
+   */
+  async #readableHolder(
+    reader: FileReader,
+    holders: readonly FileHolder[]
+  ): Promise<boolean> {
+    const pinned = await this.#pinned(this.#storeId(), reader.schemaHash);
+    const none: ReadonlyMap<string, Staged> = new Map();
+    return holders.some(({ tableId, recordId }) =>
+      this.#referable(pinned, none, reader.principal, reader.roles, {
+        table: this.#tableName(tableId),
+        tableId,
+        recordId,
+      })
+    );
   }
 
   /**
@@ -2621,6 +2660,7 @@ export class StoreHost {
       readSet,
       writes,
       intents,
+      attachable,
       result,
       writer,
     } = dataErrors.parse("data.invalid", commitSchema, input);
@@ -2684,6 +2724,26 @@ export class StoreHost {
       );
       this.#flush(staged, principal.userId, schemaHash, stagedAt);
       this.#indexReferences(pinned, staged, principal.userId, roles);
+      // The files they hold, by the same fields: the store's contract
+      // fixes each field's descriptor for good, as for references.
+      const contract = this.#contractNow() ?? pinned.manifest;
+      // Records already holding a file, as the writer reads them now: the
+      // commit's own records written, under the schema it is pinned to.
+      const none: ReadonlyMap<string, Staged> = new Map();
+      this.files.index(
+        staged,
+        principal.userId,
+        (table) => contract.tables[table]?.fields,
+        attachable,
+        (holders) =>
+          holders.some(({ tableId, recordId }) =>
+            this.#referable(pinned, none, principal.userId, roles, {
+              table: this.#tableName(tableId),
+              tableId,
+              recordId,
+            })
+          )
+      );
       const counted = this.#db
         .update(store)
         .set({ commits: sql`${store.commits} + 1` })
@@ -3910,7 +3970,16 @@ export class StoreHost {
     return { writes, failure: null };
   }
 
-  /** Writes a migration batch's checked records, dropping their work. */
+  /**
+   * Writes a migration batch's checked records, dropping their work.
+   *
+   * The files a record holds (`sdk_file_refs`, file-host.ts) aren't indexed
+   * again here, by decision (GRA-256): they are kept per record, so a
+   * transform moving a file between fields keeps it held, and one dropping
+   * a file leaves it held, so kept and readable through the record, until
+   * the record is next written by a commit or deleted. That errs towards
+   * keeping a file, never towards losing one a record still shows.
+   */
   #writeTransformed(
     target: string,
     tableId: string,
@@ -5327,6 +5396,12 @@ export class StoreHost {
       log.error("store.abandonment_audit_failed", errorFields(error));
     }
     try {
+      await this.files.sweep(this.#storeId());
+    } catch (error) {
+      failed = true;
+      log.error("store.files_sweep_failed", errorFields(error));
+    }
+    try {
       await this.#keepBackfillGoing();
     } catch (error) {
       // Not the alarm's failure: its next look is a lease's time away
@@ -5444,6 +5519,8 @@ export class StoreHost {
     const times = [
       entry?.at,
       receipt?.at,
+      // A file expiring, or a deleted file's bytes due for purging.
+      this.files.nextDue(),
       unaudited === undefined ? null : Date.now(),
       backfill === undefined ? null : backfillDueAt(backfill),
       typeof tombstone?.at === "number" ? tombstone.at + tombstoneMs : null,
@@ -5571,6 +5648,11 @@ export class StoreHost {
     // The cursor key goes with what it sealed: nothing is left to page.
     this.#db.update(store).set({ cursorKey: null }).run();
     this.#keys = undefined;
+    // Its files' bytes before their rows: a purge stopped between them
+    // finds the bytes gone and the rows still there, never the reverse.
+    if (this.#db.select({ id: files.fileId }).from(files).get() !== undefined) {
+      await this.files.purgeStore(storeIdSchema.parse(bound.storeId));
+    }
     const started = Date.now();
     for (const table of purgedTables) {
       for (;;) {

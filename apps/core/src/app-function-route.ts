@@ -22,7 +22,6 @@ import {
   screenErrors,
   screenLeaseHeader,
   screenLimits,
-  screenPersonHeader,
   streamCallActions,
 } from "@grasp-os/shared/screens";
 import type { StreamCallAction } from "@grasp-os/shared/screens";
@@ -46,7 +45,12 @@ import { appHost } from "./durable-objects.ts";
 import { errorResponse } from "./errors.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
-import { delivering, leasedArtifact, requireDelivery } from "./screen-trust.ts";
+import {
+  delivering,
+  leasedArtifact,
+  personRefusal,
+  requireDelivery,
+} from "./screen-trust.ts";
 import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
 
 // A running App's screen calling one of its App's functions (spec 32.6):
@@ -69,14 +73,9 @@ import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
 // - The page's frame was opened for one person and the browser's cookie
 //   is now someone else's (they signed in in another tab): the page names
 //   the person its frame is for (`screenPersonHeader`), and a call whose
-//   session is anyone else's is refused (`auth.principal_changed`) before
-//   it is counted or read, so what the frame sends again, such as a save
+//   session is anyone else's is refused before it is counted or read
+//   (`personRefusal`), so what the frame sends again, such as a save
 //   under an idempotency key whose answer was lost, never runs as them.
-//   A call that names nobody comes from a page older than the header (a
-//   tab left open across a deploy): refused alike, as out of date
-//   (`screen.reload_required`), not as someone else signing in.
-//   A lease is signed for one person too, but a screen of ordinary data
-//   runs without a valid one, so the lease alone doesn't hold this.
 // - Code nobody approved gets the App's data: the frame's lease, signed
 //   by core for exactly this person and App, says which build calls; the
 //   call runs only inside `delivering`, which checks that build's trust
@@ -596,20 +595,16 @@ const boundedCall = async (
  * the person signed in (`screenPersonHeader`, see the header), or none:
  * a streaming action's calls as much as a plain call.
  */
-const personRefusal = (
+const personRefused = (
   request: Request,
   person: Identity,
   app: string,
   requestId: string
 ): Response | undefined => {
-  const named = request.headers.get(screenPersonHeader);
-  if (named === person.userId) {
+  const refusal = personRefusal(request.headers, person.userId);
+  if (refusal === undefined) {
     return undefined;
   }
-  const refusal =
-    named === null
-      ? screenErrors.create("screen.reload_required")
-      : authErrors.create("auth.principal_changed");
   // Who was named and who is signed in stay out of the log: only why,
   // and for which App.
   log.info("app_function.person_refused", {
@@ -654,7 +649,7 @@ export const appFunctionResponse = async (
       requestId
     );
   }
-  const misnamed = personRefusal(request, person, app, requestId);
+  const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
   }
@@ -832,7 +827,7 @@ const admitCall = async (
       requestId
     );
   }
-  const misnamed = personRefusal(request, person, app, requestId);
+  const misnamed = personRefused(request, person, app, requestId);
   if (misnamed !== undefined) {
     return misnamed;
   }

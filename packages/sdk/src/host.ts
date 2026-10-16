@@ -142,3 +142,13 @@ export type { JsonSchema, JsonSchemaOptions } from "./json-schema.ts";
 // of it: a component's reading of a query, as `useQuery` subscribes.
 export { clientInternals, GraspClient } from "./client-core.ts";
 export type { ClientTransport, StreamLink } from "./client-core.ts";
+export type { FileTransport, TransferProgress } from "./client-files.ts";
+
+// The page's side of core's file channel (spec 10.7.5): what moves a
+// screen's files' bytes, which never travel in a JSON call.
+export { fileChannel } from "./file-channel.ts";
+export type {
+  CoreFetch,
+  FileChannel,
+  FileChannelOptions,
+} from "./file-channel.ts";

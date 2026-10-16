@@ -161,6 +161,24 @@ const clientErrors = {
     message: "Workflow runs can't be followed here.",
     category: "operational",
   },
+  "file.operation_undeclared": {
+    message:
+      "This App doesn't declare that use of these files: add it to the resource's operations.",
+    category: "contract",
+  },
+  "file.upload_active": {
+    message:
+      "An upload is already running here: wait for it, or cancel it first.",
+    category: "contract",
+  },
+  "file.channel_unavailable": {
+    message: "Files can't be moved here.",
+    category: "operational",
+  },
+  "file.cancelled": {
+    message: "The upload was cancelled.",
+    category: "operational",
+  },
 } as const satisfies Record<
   string,
   { message: string; category: ErrorCategory }
@@ -356,10 +374,28 @@ export const hidesOutcome = (code: string): boolean =>
   code === "operation.access_changed" ||
   code === "submission.expired";
 
+/** The category of each refusal of core's file channel that isn't operational. */
+const fileCategories: Readonly<Record<string, ErrorCategory>> = {
+  "file.not_found": "authorization",
+  "file.operation_denied": "authorization",
+  "file.invalid": "contract",
+  "file.too_large": "contract",
+  "file.type_unsupported": "contract",
+  "file.content_mismatch": "contract",
+  "file.referenced": "domain",
+  "submission.key_conflict": "contract",
+};
+
 /** The category of a refusal the page or core sent before any call ran. */
 const refusalCategory = (code: string): ErrorCategory => {
   if (fencingCodes.has(code) || code.startsWith("auth.")) {
     return "authorization";
+  }
+  const file = Object.hasOwn(fileCategories, code)
+    ? fileCategories[code]
+    : undefined;
+  if (file !== undefined) {
+    return file;
   }
   if (code.startsWith("request.") || code.startsWith("contract.")) {
     return "contract";

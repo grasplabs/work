@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { fileLimits } from "./app-file-limits.ts";
 import { defineErrorFamily } from "./errors.ts";
 import { identifierSchema, storeIdSchema } from "./ids.ts";
 import type { Json } from "./json.ts";
@@ -357,6 +358,15 @@ export const commitSchema = z
         resourceVersion: z.number().int().min(1),
       })
       .optional(),
+    /**
+     * The App's files resources that declare `attach`, as its sealed
+     * release says: a record may newly hold only a file uploaded through
+     * one of them (core's file-host.ts). None, and it may newly hold none.
+     */
+    attachable: z
+      .array(z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,63}$/u))
+      .max(fileLimits.resources)
+      .default([]),
   })
   .refine(
     ({ guards, readSet, writes, intents, result }) =>

@@ -7,6 +7,8 @@
   "sideEffects": false,
   "exports": {
     "./agent": "./src/agent.ts",
+    "./app-file-limits": "./src/app-file-limits.ts",
+    "./app-files": "./src/app-files.ts",
     "./app-limits": "./src/app-limits.ts",
     "./app-releases": "./src/app-releases.ts",
     "./apps": "./src/apps.ts",

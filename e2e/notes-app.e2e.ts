@@ -1,9 +1,22 @@
+import { readFile } from "node:fs/promises";
+
 import { expect } from "@playwright/test";
 import type { FrameLocator, Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { notesAppFiles } from "./notes-app.ts";
-import { apiOf, endSession, peopleIn, release, signInTo } from "./people.ts";
+import {
+  fileViewFiles,
+  notesAppFiles,
+  unaskedDownloadFiles,
+} from "./notes-app.ts";
+import {
+  apiOf,
+  endSession,
+  peopleIn,
+  release,
+  sensitiveData,
+  signInTo,
+} from "./people.ts";
 
 // The Notes App end to end on the platform's own runtime and React SDK: a
 // builder's App of spec 8's layout, sealed and current, its screen in its
@@ -16,16 +29,20 @@ import { apiOf, endSession, peopleIn, release, signInTo } from "./people.ts";
 // someone else signed in, is stopped before anything it holds is sent as
 // them; one whose person signed out is emptied too.
 
-/** A builder's new Notes App, released, and shared with `sharedWith`. */
+/**
+ * A builder's new Notes App of `files`, released, and shared with
+ * `sharedWith`.
+ */
 const notesApp = async (
   builder: Parameters<typeof apiOf>[0],
-  sharedWith?: { userId: string }
+  sharedWith?: { userId: string },
+  files: Record<string, string> = notesAppFiles()
 ): Promise<string> => {
   const name = `Notes ${crypto.randomUUID().slice(0, 8)}`;
   const { core, api } = apiOf(builder);
   try {
     const { id } = await api.apps.create({ name });
-    await release(api, id, notesAppFiles(), name);
+    await release(api, id, files, name);
     if (sharedWith !== undefined) {
       await api.apps.members.add(id, {
         type: "person",
@@ -527,4 +544,221 @@ test("a screen's frame speaks the page's language", async ({ pageOf }) => {
     timeout: 20_000,
   });
   await expect(screen.locator("html")).toHaveAttribute("lang", "de");
+});
+
+/** A 1×1 PNG, as a person's file picker hands it over. */
+const pixel = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64"
+);
+
+test("a person attaches a file to a note, previews and downloads it, and removes it", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesApp");
+  const app = await notesApp(builder);
+  const page = await pageOf(builder);
+  const screen = await openNotes(page, app);
+  await createNote(screen, "Trip");
+  await screen.getByRole("button", { name: "Edit Trip" }).click();
+  const attachments = screen.getByRole("region", { name: "Attachments" });
+  const picker = attachments.getByLabel("Attach a file");
+
+  // A type a browser would run is refused before any byte leaves the page.
+  await picker.setInputFiles({
+    name: "page.html",
+    mimeType: "text/html",
+    buffer: Buffer.from("<script>alert(1)</script>"),
+  });
+  await expect(
+    attachments.getByRole("status", { name: "Attaching" })
+  ).toContainText("Only PNG, JPEG, GIF and WebP images");
+  await expect(attachments.getByRole("status", { name: "Upload" })).toHaveText(
+    "failed"
+  );
+
+  // Uploaded, checked, attached at the note's revision, and previewed
+  // from a URL of the frame's own.
+  await picker.setInputFiles({
+    name: "photo.png",
+    mimeType: "image/png",
+    buffer: pixel,
+  });
+  await expect(
+    attachments.getByRole("status", { name: "Attaching" })
+  ).toHaveText("Attached photo.png.");
+  const files = attachments.getByRole("list", { name: "Attached files" });
+  await expect(files.getByText("photo.png", { exact: true })).toBeVisible();
+  await expect(files.getByText(`${pixel.length} bytes`)).toBeVisible();
+  await expect(
+    files.getByRole("img", { name: "Preview of photo.png" })
+  ).toHaveAttribute("src", /^blob:/u);
+
+  // Downloaded through the page, by the browser's own download.
+  const downloading = page.waitForEvent("download");
+  await files.getByRole("button", { name: "Download photo.png" }).click();
+  const download = await downloading;
+  expect(download.suggestedFilename()).toBe("photo.png");
+  // The bytes uploaded, whole, and a preview that decodes.
+  const saved = await download.path();
+  expect(await readFile(saved)).toStrictEqual(pixel);
+  await expect
+    .poll(
+      async () =>
+        await files
+          .getByRole("img", { name: "Preview of photo.png" })
+          .evaluate((image: HTMLImageElement) => image.naturalWidth)
+    )
+    .toBeGreaterThan(0);
+
+  // Removed from the note and deleted.
+  await files.getByRole("button", { name: "Remove photo.png" }).click();
+  await expect(files.getByRole("listitem")).toHaveCount(0);
+  await expect(
+    attachments.getByRole("status", { name: "Attaching" })
+  ).toHaveText("Removed photo.png.");
+});
+
+test("a screen can't download a file nobody clicked for", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesApp");
+  const app = await notesApp(builder, undefined, unaskedDownloadFiles());
+  const page = await pageOf(builder);
+  await page.goto(`/engines/${app}/apps/notes/full`);
+  const screen = page.frameLocator('iframe[title="notes app"]');
+  // Nothing touches the page while the screen waits to download: Playwright
+  // runs its checks with a user gesture, which would count as a click.
+  await page.waitForTimeout(12_000);
+  // A while after opening, with no click: refused by the page.
+  await expect(
+    screen.getByRole("status", { name: "Unasked download" })
+  ).toHaveText("file.gesture_required", { timeout: 20_000 });
+  // After a click it goes on to core, which knows no such file.
+  await screen.getByRole("button", { name: "Download" }).click();
+  await expect(
+    screen.getByRole("status", { name: "Asked download", exact: true })
+  ).toHaveText("file.not_found");
+});
+
+/** Opens the file view screen of `app`, its heading shown. */
+const openFiles = async (page: Page, app: string): Promise<FrameLocator> => {
+  await page.goto(`/engines/${app}/apps/notes/full`);
+  const screen = page.frameLocator('iframe[title="notes app"]');
+  await expect(screen.getByRole("heading", { name: "Files" })).toBeVisible({
+    timeout: 20_000,
+  });
+  return screen;
+};
+
+test("a file shown through another resource is loading until that read answers, never the last view", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesApp");
+  const app = await notesApp(builder, undefined, fileViewFiles());
+  const page = await pageOf(builder);
+  const screen = await openFiles(page, app);
+  await screen
+    .getByLabel("Upload a file")
+    .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
+  await expect(screen.getByText("Showing photo.png")).toBeVisible();
+  // The read through photos is held back a moment on its way to core.
+  const { promise: released, resolve: letThrough } =
+    Promise.withResolvers<null>();
+  await page.route("**/api/app-files/*/photos/**", async (route) => {
+    await released;
+    await route.continue();
+  });
+  await screen.getByRole("button", { name: "Through photos" }).click();
+  await expect(screen.getByText("Loading the file…")).toBeVisible();
+  await expect(screen.getByText("Showing photo.png")).toHaveCount(0);
+  letThrough(null);
+  // The read through photos answers, and the file is loading no more.
+  await expect(screen.getByText("Loading the file…")).toHaveCount(0);
+});
+
+test("a file shown is read once, however often its screen renders", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesApp");
+  const app = await notesApp(builder, undefined, fileViewFiles());
+  const page = await pageOf(builder);
+  const screen = await openFiles(page, app);
+  await screen
+    .getByLabel("Upload a file")
+    .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
+  await expect(screen.getByText("Showing photo.png, rendered 0")).toBeVisible();
+  let reads = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/attachments/files/")) {
+      reads += 1;
+    }
+  });
+  const again = screen.getByRole("button", { name: "Render again" });
+  await again.click();
+  await again.click();
+  await again.click();
+  await expect(screen.getByText("Showing photo.png, rendered 3")).toBeVisible();
+  await page.waitForTimeout(1000);
+  expect(reads).toBe(0);
+});
+
+test("a file hidden, then shown again, loads afresh instead of its last view", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesApp");
+  const app = await notesApp(builder, undefined, fileViewFiles());
+  const page = await pageOf(builder);
+  const screen = await openFiles(page, app);
+  await screen
+    .getByLabel("Upload a file")
+    .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
+  await expect(screen.getByText("Showing photo.png")).toBeVisible();
+  await screen.getByRole("button", { name: "Hide the file" }).click();
+  await expect(screen.getByText("The file is hidden")).toBeVisible();
+  // The next read is held back a moment on its way to core.
+  const { promise: released, resolve: letThrough } =
+    Promise.withResolvers<null>();
+  await page.route("**/api/app-files/*/attachments/files/**", async (route) => {
+    await released;
+    await route.continue();
+  });
+  await screen.getByRole("button", { name: "Show the file" }).click();
+  await expect(screen.getByText("Loading the file…")).toBeVisible();
+  await expect(screen.getByText("Showing photo.png")).toHaveCount(0);
+  letThrough(null);
+  await expect(screen.getByText("Showing photo.png")).toBeVisible();
+});
+
+test("a file whose reader lost access shows the refusal, and isn't read again and again", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("notesApp");
+  const app = await notesApp(builder, undefined, fileViewFiles());
+  const page = await pageOf(builder);
+  const screen = await openFiles(page, app);
+  const picker = screen.getByLabel("Upload a file");
+  await picker.setInputFiles({
+    name: "photo.png",
+    mimeType: "image/png",
+    buffer: pixel,
+  });
+  await expect(screen.getByText("Showing photo.png")).toBeVisible();
+  // The App's data is sensitive again: its build, approved by nobody,
+  // gets none, and the next thing the screen asks is refused.
+  await sensitiveData(app);
+  let reads = 0;
+  page.on("request", (request) => {
+    if (request.url().includes("/attachments/files/")) {
+      reads += 1;
+    }
+  });
+  await picker.setInputFiles({
+    name: "again.png",
+    mimeType: "image/png",
+    buffer: pixel,
+  });
+  await expect(screen.getByRole("alert")).toBeVisible();
+  await page.waitForTimeout(3000);
+  expect(reads).toBe(0);
 });

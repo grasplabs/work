@@ -10,7 +10,7 @@ import {
   draftsFor,
   saveDraft,
 } from "./form-drafts.ts";
-import { appScreen, callFunction } from "./screen-host.ts";
+import { appScreen, callFunction, fileRefusal } from "./screen-host.ts";
 
 // The page relaying a screen's function call to core: whatever comes back
 // that isn't core's JSON reaches the screen as a coded error, never as
@@ -661,5 +661,29 @@ describe("a running screen's drafts once core stops its build", () => {
     for (const cleanup of cleanups) {
       cleanup();
     }
+  });
+});
+
+/** Core's refusal `code`, with `status`. */
+const refusal = (code: string, status: number): Response =>
+  Response.json({ code, message: "Refused." }, { status });
+
+describe("core's answer to a screen's file request", () => {
+  it("stops the frame for someone else's session, and asks again for its build when refused for it", async () => {
+    await expect(
+      Promise.all([
+        fileRefusal(refusal("auth.principal_changed", 401)),
+        fileRefusal(refusal("screen.revoked", 403)),
+        fileRefusal(refusal("screen.unreviewed", 403)),
+        fileRefusal(refusal("file.not_found", 404)),
+        fileRefusal(Response.json({ code: "screen.revoked" })),
+      ])
+    ).resolves.toStrictEqual([
+      "principal-changed",
+      "build",
+      "build",
+      undefined,
+      undefined,
+    ]);
   });
 });

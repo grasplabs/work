@@ -1,3 +1,4 @@
+import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import {
   appErrorDetailsBytes,
   appErrors,
@@ -847,6 +848,15 @@ export class App extends DurableObject<Env> {
    */
   readonly #liveReads = new TokenBuckets(querySubscriptionLimits.liveReads);
 
+  /**
+   * Each person's chunk requests of the App's files: a budget of their
+   * own (an upload is many chunks), charged before a chunk costs anything.
+   */
+  readonly #chunks = new TokenBuckets(fileLimits.chunkRequests);
+
+  /** Chunks refused since the last line logged of them, and when that was. */
+  #refusedChunks = { chunks: 0, loggedAt: 0 };
+
   /** The reports kept of each person's screens, and of all of them. */
   readonly #callerReports = new TokenBuckets(screenLimits.callerReports);
   readonly #appReports = new TokenBuckets(screenLimits.appReports);
@@ -1349,6 +1359,28 @@ export class App extends DurableObject<Env> {
           refused: this.#refused.requests,
         });
         this.#refused = { requests: 0, loggedAt: now };
+      }
+    }
+    return admitted;
+  }
+
+  /**
+   * Whether `userId`'s screen may send one more chunk of a file now
+   * (`fileLimits.chunkRequests`): asked before the chunk is read or
+   * anything is looked up, so a refused, duplicate or malformed chunk
+   * counts too. Refusals reach the log at most once a minute.
+   */
+  admitChunk(userId: string): boolean {
+    const now = Date.now();
+    const admitted = this.#chunks.take(userId, now);
+    if (!admitted) {
+      this.#refusedChunks.chunks += 1;
+      if (now - this.#refusedChunks.loggedAt >= refusalLogMs) {
+        log.warn("app_file.chunks_limited", {
+          appId: this.#app,
+          refused: this.#refusedChunks.chunks,
+        });
+        this.#refusedChunks = { chunks: 0, loggedAt: now };
       }
     }
     return admitted;

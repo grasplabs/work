@@ -40,6 +40,7 @@ import {
   businessStores,
 } from "./db/core/schema.ts";
 import { inJurisdiction } from "./durable-objects.ts";
+import type { FileReader } from "./file-host.ts";
 import {
   memberEntry,
   requireNotStaff,
@@ -147,6 +148,15 @@ export interface OpenStore {
   ) => Promise<ReadResult>;
   /** The current generation of each of `tables` (`StoreHost.generations`). */
   generations: (tables: string[]) => Promise<Record<string, number>>;
+  /**
+   * Checks `reader` may use each of `fileIds`, files of the store
+   * (`FileHost.usable`).
+   */
+  filesUsable: (
+    reader: FileReader,
+    fileIds: string[],
+    resources: string[]
+  ) => Promise<void>;
 }
 
 /**
@@ -720,6 +730,9 @@ const storeClient = (
     read: async (scope, request, staged) =>
       readResultOf(await stub.read(storeId, scope, request, staged)),
     generations: async (names) => await stub.generations(storeId, names),
+    filesUsable: async (reader, fileIds, resources) => {
+      await stub.filesUsable(storeId, reader, fileIds, resources);
+    },
   };
 };
 
@@ -749,6 +762,23 @@ export const openStore = async (
     throw dataErrors.create("data.store_unavailable");
   }
   return storeClient(env, parsed.data);
+};
+
+/**
+ * The files of store `id`, which an App's release names, as core's file
+ * channel reaches them (app-file-route.ts): the store's object, which
+ * holds every call to that store. Opened only for a store the inventory
+ * lists and hasn't deleted (`openStore`).
+ */
+export const storeFiles = async (
+  env: Pick<Env, "DB" | "DATA_STORES" | "DURABLE_OBJECT_JURISDICTION">,
+  id: string
+) => {
+  const { id: storeId } = await openStore(env, id);
+  return {
+    storeId,
+    stub: inJurisdiction(env, env.DATA_STORES).getByName(storeId),
+  };
 };
 
 /**

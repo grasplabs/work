@@ -438,6 +438,27 @@ export const ordinaryData = async (app: string): Promise<void> => {
 };
 
 /**
+ * Classifies the App's data as sensitive again: its builds nobody
+ * approved get none of it from then on, the screens already running
+ * included.
+ */
+export const sensitiveData = async (app: string): Promise<void> => {
+  const cookie = process.env[adminVariable];
+  if (cookie === undefined) {
+    throw new Error(
+      `${adminVariable} is unset: the global setup in playwright.config.ts signs the admin in`
+    );
+  }
+  const { core, api } = apiOf({ cookie });
+  try {
+    const { generation } = await api.screenTrust.review(app);
+    await api.screenTrust.classify(app, "sensitive", generation);
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
+
+/**
  * Writes `files` to the App (null deletes one), commits them and makes
  * that version current, with the App's data classified as ordinary
  * (`ordinaryData`).
