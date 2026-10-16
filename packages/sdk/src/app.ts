@@ -1,3 +1,4 @@
+import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import { canonicalText } from "@grasp-os/shared/json";
 import {
   appMaxOperations,
@@ -393,6 +394,12 @@ const resourcesOf = (
     } else {
       browser.set(use.alias, use);
     }
+  }
+  const files = [...browser.values()].filter(
+    (use) => use["~resource"] === "files"
+  ).length;
+  if (files > fileLimits.resources) {
+    refuse(`An App declares at most ${fileLimits.resources} files resources.`);
   }
   return { actions, browser, workflows };
 };

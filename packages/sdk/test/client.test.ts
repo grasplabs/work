@@ -1,9 +1,13 @@
+import { createElement } from "react";
+import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { clientInternals, GraspClient } from "../src/client-core.ts";
 import type { ClientTransport } from "../src/client-core.ts";
 import { GraspError } from "../src/client-error.ts";
+import type { FileRef } from "../src/client-files.ts";
 import type { Id } from "../src/index.ts";
+import { GraspProvider, useFile } from "../src/react.ts";
 import { api } from "./notes/.grasp/references.ts";
 
 // The session client against the network and the page it reaches through:
@@ -967,5 +971,102 @@ describe("the session client and frames that arrive after the caller left", () =
       left: "stream.cancelled",
       heard: [],
     });
+  });
+});
+
+describe("the session client and the hooks", () => {
+  it("gives a client's hooks the same internals at every render, and another client its own", () => {
+    const transport: ClientTransport = {
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async () => await Promise.reject(new Error("No follows here")),
+    };
+    const client = new GraspClient(transport);
+    const other = new GraspClient(transport);
+    // A hook's effect depends on them: new ones each render would run it
+    // (and read its file) again on every render.
+    const firstRender = clientInternals(client);
+    const nextRender = clientInternals(client);
+    expect({
+      same: firstRender === nextRender,
+      shared: firstRender === clientInternals(other),
+    }).toStrictEqual({ same: true, shared: false });
+  });
+});
+
+describe("the session client's files", () => {
+  it("refuses a file reference core couldn't have minted in `useFile`, never reading it as skip", () => {
+    const client = new GraspClient({
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async () => await Promise.reject(new Error("No follows here")),
+    });
+    const resource = {
+      kind: "files",
+      alias: "attachments",
+      operations: ["read"],
+    } as const;
+    const shown = (file: unknown): string => {
+      const Probe = (): null => {
+        // SAFETY: deliberately not a FileRef, as unchecked data may be.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        useFile(resource, file as FileRef);
+        return null;
+      };
+      try {
+        renderToString(
+          createElement(GraspProvider, { client }, createElement(Probe))
+        );
+        return "rendered";
+      } catch (error) {
+        return error instanceof GraspError ? error.code : "failed";
+      }
+    };
+    expect([
+      shown({}),
+      shown({ id: crypto.randomUUID(), extra: true }),
+      shown("skip"),
+    ]).toStrictEqual([
+      "contract.invalid_args",
+      "contract.invalid_args",
+      "rendered",
+    ]);
+  });
+
+  it("fences the client once for refusals of file requests that started before that fence", async () => {
+    const pending: ((code: string) => void)[] = [];
+    const refusedLater = async (): Promise<never> => {
+      const { promise, reject } = Promise.withResolvers<never>();
+      pending.push((code) => {
+        reject(Object.assign(new Error(code), { code }));
+      });
+      return await promise;
+    };
+    const transport: ClientTransport = {
+      call: async () => await Promise.reject(new Error("No calls here")),
+      watch: async () => await Promise.reject(new Error("No follows here")),
+      files: {
+        upload: refusedLater,
+        read: refusedLater,
+        download: refusedLater,
+        delete: refusedLater,
+      },
+    };
+    const client = new GraspClient(transport);
+    const resource = {
+      kind: "files",
+      alias: "attachments",
+      operations: ["read"],
+    } as const;
+    const first = client.files.download(resource, { id: crypto.randomUUID() });
+    const second = client.files.download(resource, { id: crypto.randomUUID() });
+    const settled = Promise.allSettled([first, second]);
+    for (const refuse of pending) {
+      refuse("auth.unauthenticated");
+    }
+    await settled;
+    // A request after the fence, refused so too, fences it again.
+    const third = client.files.download(resource, { id: crypto.randomUUID() });
+    pending.at(-1)?.("auth.unauthenticated");
+    await Promise.allSettled([third]);
+    expect(clientInternals(client).fences()).toBe(2);
   });
 });

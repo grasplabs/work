@@ -14,6 +14,7 @@ import { onboardingSummaryPath } from "@grasp-os/shared/onboarding-summary";
 import { platformUpdatePath } from "@grasp-os/shared/platform-change";
 import { screenFramePath } from "@grasp-os/shared/screens";
 
+import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import {
   appFunctionRoute,
   portableCallApp,
@@ -182,8 +183,9 @@ const connectionRouteResponse = async (
 
 /**
  * A call of an App's functions, from a screen's page or a portable host,
- * a portable host's live connection, or its token request; `undefined`
- * for any other path.
+ * a portable host's live connection, or its token request, or a
+ * screen's file channel request (app-file-route.ts); `undefined` for any
+ * other path.
  */
 const appCallResponse = async (
   pathname: string,
@@ -206,9 +208,20 @@ const appCallResponse = async (
     return portableLiveResponse(request, env, liveApp, requestId);
   }
   const tokenApp = tokenRequestApp(pathname);
-  return tokenApp === undefined
+  if (tokenApp !== undefined) {
+    return await appTokenResponse(request, env, tokenApp, requestId);
+  }
+  const fileRoute = fileRouteOf(pathname, request.method);
+  if (fileRoute === "not_found") {
+    return errorResponse(
+      404,
+      requestErrors.create("request.not_found"),
+      requestId
+    );
+  }
+  return fileRoute === undefined
     ? undefined
-    : await appTokenResponse(request, env, tokenApp, requestId);
+    : await appFileResponse(request, env, fileRoute, requestId);
 };
 
 /** Routes a request that has passed the router-secret check. */

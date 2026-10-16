@@ -1,3 +1,4 @@
+import { fileLimits } from "@grasp-os/shared/app-file-limits";
 import { describe, expect, test } from "vite-plus/test";
 
 import {
@@ -738,6 +739,12 @@ const looseResource = resource as Record<
 >;
 
 /** A small App, with `changes` to its registration. */
+/** `count` files resources that may be attached. */
+const attachables = (count: number) =>
+  Array.from({ length: count }, (_, index) =>
+    resource.files(`files${index}`, { operations: ["read", "attach"] })
+  );
+
 const small = (changes: Record<string, unknown> = {}) =>
   looseApp({
     name: "Small",
@@ -1009,6 +1016,15 @@ describe("browser resources", () => {
     expect(refusal(() => small({ uses: [files, knowledge] }))).toContain(
       "Two of the App's resources have alias `help`"
     );
+  });
+
+  test("number at most what a mutation hands core as attachable", () => {
+    expect(() =>
+      small({ uses: attachables(fileLimits.resources) })
+    ).not.toThrow();
+    expect(
+      refusal(() => small({ uses: attachables(fileLimits.resources + 1) }))
+    ).toContain(`at most ${fileLimits.resources} files resources`);
   });
 
   test("are never listed by a function", () => {

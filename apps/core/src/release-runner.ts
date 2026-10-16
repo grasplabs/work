@@ -1,5 +1,6 @@
 import { appModuleName, kitModuleName } from "@grasp-os/compiler";
 import type { OperationChannel } from "@grasp-os/sdk/runner";
+import { fileErrors } from "@grasp-os/shared/app-files";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { whenAborted } from "@grasp-os/shared/deadline";
 import type { AppId } from "@grasp-os/shared/ids";
@@ -515,6 +516,9 @@ export const noStore = (): OpenStore => ({
   commit: unbound,
   read: unbound,
   generations: unbound,
+  filesUsable: async () => {
+    await Promise.reject(fileErrors.create("file.unavailable"));
+  },
 });
 
 /** Refuses with `version.revoked` once release `version` of `app` is revoked. */

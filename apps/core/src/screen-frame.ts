@@ -396,7 +396,7 @@ const start = (event) => {
     data?.type !== "${screenFrameMessage}" ||
     data.load !== load ||
     data.artifact !== screen.artifact ||
-    ports.length !== 1
+    ports.length !== 2
   ) {
     return;
   }
@@ -405,11 +405,12 @@ const start = (event) => {
   style.textContent = screen.css;
   document.head.append(style);
   import(screen.runtime).then((runtime) =>
-    runtime.runScreen(ports[0], screen.entry, {
-      load,
-      artifact: screen.artifact,
-      generation: data.generation,
-    })
+    runtime.runScreen(
+      ports[0],
+      screen.entry,
+      { load, artifact: screen.artifact, generation: data.generation },
+      ports[1]
+    )
   );
 };
 addEventListener("message", start);

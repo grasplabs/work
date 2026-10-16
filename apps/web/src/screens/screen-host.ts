@@ -1,3 +1,5 @@
+import { fileChannel } from "@grasp-os/sdk/host";
+import type { FileChannel } from "@grasp-os/sdk/host";
 import { appErrors } from "@grasp-os/shared/apps";
 import type { PreviewBundle } from "@grasp-os/shared/chat";
 import { decisionErrors } from "@grasp-os/shared/decisions";
@@ -35,6 +37,7 @@ import {
 import type { ExpectedStart } from "./frame-stages.ts";
 import { openBridge } from "./screen-bridge.ts";
 import type { FrameTarget } from "./screen-bridge.ts";
+import { frameGesture, openFilePort } from "./screen-files.ts";
 import { cancelStream, followStream } from "./screen-stream.ts";
 import { ownLink, tabLink } from "./tab-link.ts";
 import type { FrameLink, Joined } from "./tab-link.ts";
@@ -327,6 +330,37 @@ const checkDeliveryNow = async (
   } catch {
     // Asked again at the page's next check.
   }
+};
+
+/** The code of a refusal core answered, read from a copy of `response`. */
+const refusalCodeOf = async (response: Response): Promise<unknown> => {
+  try {
+    const payload = errorPayloadSchema.safeParse(await response.clone().json());
+    return payload.success ? payload.data.code : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * What core's answer to one of a frame's file requests means for the
+ * frame: someone else's session (`principal-changed`), a refusal for the
+ * build it runs (`build`, which the page then asks core about at once, as
+ * for a function call), or nothing.
+ */
+export const fileRefusal = async (
+  response: Response
+): Promise<"principal-changed" | "build" | undefined> => {
+  if (response.ok) {
+    return undefined;
+  }
+  const code = await refusalCodeOf(response);
+  if (response.status === 401 && code === "auth.principal_changed") {
+    return "principal-changed";
+  }
+  return code === "screen.unreviewed" || code === "screen.revoked"
+    ? "build"
+    : undefined;
 };
 
 /** Whether core refused a call for the build the frame runs. */
@@ -717,6 +751,12 @@ interface Connected {
   target: FrameTarget;
   /** Called once the screen runs, if given: `onState` says what the page shows. */
   running?: (onState: (state: ScreenState) => void) => void;
+  /**
+   * The screen's file channel (spec 10.7.5), if it has one: a running
+   * App's screen does, under its lease and for the person the tab's link
+   * is for; a draft's preview doesn't.
+   */
+  files?: FileChannel;
 }
 
 /** What a frame runs, and what its bridge reaches. */
@@ -873,12 +913,31 @@ const runFrame = <Bundle extends FrameCode>(
       artifact: bundle.artifact,
       generation,
     };
-    const { target, running } = source.connect(link, bundle, refused, cleanups);
+    const {
+      target,
+      running,
+      files: channel,
+    } = source.connect(link, bundle, refused, cleanups);
     const { port1, port2 } = new MessageChannel();
     cleanups.push(
       openBridge(port1, target, () => {
         fail({ status: "failed", reason: "disconnected" });
       })
+    );
+    // The frame's files go over a port of their own, as `Blob`s, never in
+    // the bridge's text (screen-files.ts).
+    const files = new MessageChannel();
+    // Asked for by the person in this frame: a click (activation) with the
+    // frame focused, never one elsewhere on the page.
+    const gesture = frameGesture(frame, {
+      events: window,
+      active: () => navigator.userActivation.isActive,
+      focused: () => document.activeElement,
+      now: () => performance.now(),
+    });
+    cleanups.push(
+      gesture.close,
+      openFilePort(files.port1, channel, gesture.asked)
     );
     const mounted = stage(
       "mounted",
@@ -889,7 +948,7 @@ const runFrame = <Bundle extends FrameCode>(
     frame.contentWindow?.postMessage(
       { type: screenFrameMessage, ...expected },
       "*",
-      [port2]
+      [port2, files.port2]
     );
     onOpened(bundle.name);
     // Running only once the screen has rendered, never because its frame
@@ -975,6 +1034,29 @@ export const appScreen = (
     });
     return {
       target: appTarget(bundle, closing, hold, confirm, drafts),
+      // Core's file channel, under the screen's lease, with the person's
+      // session: a plain request of the page's own origin, naming the
+      // person the frame is for. One core refuses as someone else's, or
+      // for the build, is handled as a function call's is.
+      files: fileChannel({
+        app,
+        lease: bundle.lease,
+        person: async () => await link.person(),
+        fetch: async (path, init) => {
+          const response = await fetch(path, {
+            ...init,
+            credentials: "same-origin",
+          });
+          const refusal = await fileRefusal(response);
+          if (refusal === "principal-changed") {
+            closing("principal-changed");
+          }
+          if (refusal === "build") {
+            void checkDeliveryNow(hold, closing);
+          }
+          return response;
+        },
+      }),
       running: (setState) => {
         const { version } = bundle;
         const check = async (): Promise<void> => {

@@ -24,6 +24,8 @@ import {
   settlesSubmission,
 } from "./client-error.ts";
 import type { Settled } from "./client-error.ts";
+import { ClientFiles } from "./client-files.ts";
+import type { FileTransport } from "./client-files.ts";
 import { PortableLive } from "./client-live.ts";
 import { PortableTransport } from "./client-portable.ts";
 import type {
@@ -206,6 +208,8 @@ export interface ClientTransport {
    * long as the client.
    */
   drafts?: DraftPersistence;
+  /** How files move (client-files.ts); a client without it moves none. */
+  files?: FileTransport;
 }
 
 /**
@@ -819,6 +823,12 @@ export interface ClientInternals {
   readonly workflowLink: WorkflowLink;
   /** The person's unsaved record-form drafts, cleared at every fence. */
   drafts: DraftStore;
+  /** How many times the client was fenced: what a file preview follows. */
+  fences: () => number;
+  /** What the latest fence was for, if there was one. */
+  fencedBy: () => GraspError | undefined;
+  /** Calls `onFence` at every fence, until the function it answers is called. */
+  onFence: (onFence: () => void) => () => void;
 }
 
 /**
@@ -1430,6 +1440,13 @@ export class GraspClient {
   readonly #fenceListeners = new Set<(refusal: GraspError) => void>();
 
   /**
+   * The App's files: downloading and deleting them through a files
+   * resource the App declares (spec 10.7.5). Uploads and previews are
+   * `useUpload`'s and `useFile`'s.
+   */
+  readonly files: ClientFiles;
+
+  /**
    * A portable host's client (`{ url, getToken }`, spec 10.7.1): its
    * bootstrap makes one per App session and mounts it with
    * `GraspProvider`; generated App code never makes one.
@@ -1470,6 +1487,18 @@ export class GraspClient {
     } else {
       throw new TypeError("A client takes { url, getToken }.");
     }
+    // A portable host moves no files yet: only a screen's page does.
+    // A refusal fences the client only if no fence came since its request
+    // started: a late one would undo what the screen recovered since.
+    this.files = new ClientFiles(
+      this.#transport?.files,
+      (error, startedUnder) => {
+        if (fences(error.code) && startedUnder === this.#generation) {
+          this.#fence(error);
+        }
+      },
+      () => this.#generation
+    );
   }
 
   static {
@@ -1507,6 +1536,14 @@ export class GraspClient {
         },
       },
       drafts: client.#drafts,
+      fences: () => client.#generation,
+      fencedBy: () => client.#fencedBy,
+      onFence: (onFence) => {
+        client.#fenceListeners.add(onFence);
+        return () => {
+          client.#fenceListeners.delete(onFence);
+        };
+      },
     });
   }
 
