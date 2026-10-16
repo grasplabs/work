@@ -386,7 +386,7 @@ describe("what a hook shows", () => {
       ...fields,
       kind: "event",
       id: "wait-2",
-      key: "upload",
+      key: "do/2/awaitEdit",
       deadline: null,
       event: {
         kind: "workflowEvent",
@@ -612,6 +612,14 @@ const malformed = Object.entries({
     status: "waiting",
     waits: [listening({ alias: "documentUploaded" })],
   }),
+  "a declared event under a task that doesn't listen for it": snapshotOf({
+    status: "waiting",
+    waits: [{ ...listening(), key: "do/0/chooseStyle" }],
+  }),
+  "a declared event under a task the workflow doesn't have": snapshotOf({
+    status: "waiting",
+    waits: [{ ...listening(), key: "do/9/elsewhere" }],
+  }),
   "another contract of a declared event": snapshotOf({
     status: "waiting",
     waits: [listening({ fingerprint: "e".repeat(64) })],
@@ -668,6 +676,15 @@ describe("what is never shown", () => {
     { ...workflows.summarizeNote, fingerprint: "not a hash" },
     { ...workflows.summarizeNote, output: { kind: "anything" } },
     { ...workflows.summarizeNote, events: undefined },
+    { ...workflows.summarizeNote, listens: undefined },
+    {
+      ...workflows.summarizeNote,
+      listens: { "do/0/chooseStyle": ["documentUploaded"] },
+    },
+    {
+      ...workflows.summarizeNote,
+      listens: { "do/0/chooseStyle": ["styleChosen", "styleChosen"] },
+    },
     {
       ...workflows.summarizeNote,
       events: { noteEdited: workflows.archiveNotes.events.confirmed },

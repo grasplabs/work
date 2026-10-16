@@ -346,6 +346,11 @@ export interface WorkflowReference<
   readonly output: ValueDescriptor;
   /** Its events, by their binding's alias in the workflow. */
   readonly events: Events;
+  /**
+   * Its listen tasks, by path, with the aliases of the events each listens
+   * for: what an event wait's key may name, and with which event.
+   */
+  readonly listens: Readonly<Record<string, readonly string[]>>;
   /** Types only: never set. */
   readonly [argsType]?: Input;
   /** Types only: never set. */

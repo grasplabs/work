@@ -42,7 +42,7 @@ export const generatedPaths = {
 } as const;
 
 /** The format of `contracts.json`. */
-export const contractsFormatVersion = 1;
+export const contractsFormatVersion = 2;
 
 /**
  * The fingerprint of `operation`'s exact contract: the SHA-256, in hex, of
@@ -607,6 +607,7 @@ const workflowReferenceOf = async (
     input: workflow.input,
     output: workflow.output,
     events,
+    listens: sortedListens(workflow.listens),
   };
 };
 

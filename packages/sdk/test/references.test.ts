@@ -300,6 +300,7 @@ describe("workflow references", () => {
         "fingerprint",
         "input",
         "kind",
+        "listens",
         "output",
         "resourceId",
         "resourceVersion",
@@ -317,6 +318,7 @@ describe("workflow references", () => {
       contractId: "workflows.summarizeNote",
       input: summarize.input,
       output: summarize.output,
+      listens: summarize.listens,
     });
   });
 

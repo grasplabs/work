@@ -69,6 +69,7 @@ expectTypeOf<Extract<keyof typeof summarize, string>>().toEqualTypeOf<
   | "input"
   | "output"
   | "events"
+  | "listens"
 >();
 // @ts-expect-error -- no generated start: runs go through useWorkflow
 void summarize.start;

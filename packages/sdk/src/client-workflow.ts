@@ -102,6 +102,8 @@ export interface ReadWorkflow {
    * with, which a wait's event resolves to.
    */
   readonly events: ReadonlyMap<string, WorkflowEventReference>;
+  /** Its listen tasks, by path: the aliases of the events each listens for. */
+  readonly listens: ReadonlyMap<string, ReadonlySet<string>>;
   /** What a request names of it, exactly as the host reads it. */
   readonly wire: {
     readonly resourceId: string;
@@ -162,6 +164,44 @@ const isEventOf = (
     return false;
   }
   return true;
+};
+
+/** The most listen tasks one workflow reference declares. */
+const maxListens = 256;
+
+/**
+ * The listen tasks of a workflow reference, `value`, by path: each a
+ * task's path with the events of `events` it listens for, each once.
+ * Anything else throws.
+ */
+const readListens = (
+  value: unknown,
+  events: ReadonlyMap<string, WorkflowEventReference>
+): ReadonlyMap<string, ReadonlySet<string>> => {
+  if (!isPlainObject(value)) {
+    throw clientError("contract.invalid_request");
+  }
+  const entries = Object.entries(value);
+  if (entries.length > maxListens) {
+    throw clientError("contract.invalid_request");
+  }
+  const listens = new Map<string, ReadonlySet<string>>();
+  for (const [task, aliases] of entries) {
+    if (
+      task.length === 0 ||
+      task.length > 1024 ||
+      !Array.isArray(aliases) ||
+      aliases.length === 0 ||
+      aliases.some(
+        (alias) => typeof alias !== "string" || !events.has(alias)
+      ) ||
+      new Set(aliases).size !== aliases.length
+    ) {
+      throw clientError("contract.invalid_request");
+    }
+    listens.set(task, new Set<string>(aliases));
+  }
+  return listens;
 };
 
 /**
@@ -233,6 +273,7 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
     kind: "workflow",
   } as const;
   const events = readEvents(value.events, wire);
+  const listens = readListens(value.listens, events);
   const read: ReadWorkflow = {
     key: canonicalJson([
       wire.resourceId,
@@ -246,6 +287,7 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
     input,
     output,
     events,
+    listens,
     wire,
   };
   readWorkflows.set(value, read);
@@ -528,8 +570,9 @@ type WireWait =
 /**
  * `waits` with each event wait's event resolved to the reference `read`
  * was generated with, by alias and fingerprint: a run listening for an
- * event its reference doesn't declare, or for another contract of it,
- * is an invalid snapshot, never a wait shown with a made-up event.
+ * event its reference doesn't declare, for another contract of it, or in
+ * a task that doesn't listen for it, is an invalid snapshot, never a wait
+ * shown with an event its key's type doesn't promise.
  */
 const resolvedWaits = (
   read: ReadWorkflow,
@@ -540,7 +583,11 @@ const resolvedWaits = (
       return wait;
     }
     const event = read.events.get(wait.event.alias);
-    if (event === undefined || event.fingerprint !== wait.event.fingerprint) {
+    if (
+      event === undefined ||
+      event.fingerprint !== wait.event.fingerprint ||
+      read.listens.get(wait.key)?.has(event.alias) !== true
+    ) {
       throw invalidSnapshot();
     }
     return { ...wait, event };

@@ -780,6 +780,11 @@ export const workflows: {
       "presence": "required"
     },
     "kind": "workflow",
+    "listens": {
+      "do/0/confirm": [
+        "confirmed"
+      ]
+    },
     "output": {
       "descriptorVersion": 1,
       "kind": "null",
@@ -884,6 +889,15 @@ export const workflows: {
       "presence": "required"
     },
     "kind": "workflow",
+    "listens": {
+      "do/0/chooseStyle": [
+        "styleChosen"
+      ],
+      "do/2/awaitEdit": [
+        "noteEdited",
+        "styleChosen"
+      ]
+    },
     "output": {
       "descriptorVersion": 1,
       "fields": {
