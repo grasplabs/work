@@ -823,6 +823,9 @@ export class QuerySubscriptions<By extends Reader = Identity> {
       // its first (a Load More's) is refused now, as a first read is,
       // rather than wait for a read writes may keep tearing.
       this.#refuseUnanswered(evaluation, result);
+      // Read again after a longer while each time, as any torn read is
+      // (`#changed`); a read writes didn't tear starts over.
+      evaluation.torn = Math.min(evaluation.torn + 1, maxTornReads);
       evaluation.dirty = !evaluation.closed;
     } else {
       await this.#end(evaluation, result);
