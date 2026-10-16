@@ -350,11 +350,15 @@ export const useUpload = <Reference extends FilesReference>(
   const [held, setHeld] = useState(() => ({
     client,
     alias: resource.alias,
-    transfer: new UploadTransfer(),
+    transfer: new UploadTransfer(clientInternals(client)),
   }));
   let current = held;
   if (held.client !== client || held.alias !== resource.alias) {
-    current = { client, alias: resource.alias, transfer: new UploadTransfer() };
+    current = {
+      client,
+      alias: resource.alias,
+      transfer: new UploadTransfer(clientInternals(client)),
+    };
     setHeld(current);
   }
   const { transfer } = current;
@@ -422,7 +426,11 @@ export const useFile = <Reference extends FilesReference>(
   // A reference core could have minted, checked as download and delete
   // check theirs: anything else is refused here, never read as "skip".
   const id = file === "skip" ? undefined : readFileRef(file).id;
-  const key = id === undefined ? undefined : `${resource.alias}/${id}`;
+  const shownFile = id === undefined ? undefined : `${resource.alias}/${id}`;
+  // How often the file was deleted through this client while shown: each
+  // deletion is a read of its own, which shows core's answer.
+  const [deletions, setDeletions] = useState(0);
+  const key = shownFile === undefined ? undefined : `${shownFile}#${deletions}`;
   // The fences as the hook's first render saw them: one between it and
   // the effect is caught by the effect, which never reads past it. After
   // a fence the screen shows the refusal until it is mounted again.
@@ -441,6 +449,11 @@ export const useFile = <Reference extends FilesReference>(
     if (id === undefined || key === undefined) {
       return noSubscription();
     }
+    const unwatch = internals.onFileDeleted((deleted) => {
+      if (deleted === shownFile) {
+        setDeletions((count) => count + 1);
+      }
+    });
     const stop = new AbortController();
     let previewUrl: string | null = null;
     const revoke = (): void => {
@@ -461,7 +474,10 @@ export const useFile = <Reference extends FilesReference>(
     const unfence = internals.onFence(fenced);
     if (internals.fences() !== fencesSeen) {
       fenced();
-      return unfence;
+      return () => {
+        unwatch();
+        unfence();
+      };
     }
     const read = async (): Promise<void> => {
       try {
@@ -493,6 +509,7 @@ export const useFile = <Reference extends FilesReference>(
     };
     void read();
     return () => {
+      unwatch();
       unfence();
       stop.abort();
       revoke();
@@ -500,7 +517,7 @@ export const useFile = <Reference extends FilesReference>(
       // later read of the same file (after a skip, say) starts loading.
       setShown(undefined);
     };
-  }, [client, internals, reading, id, key, fencesSeen]);
+  }, [client, internals, reading, id, key, shownFile, fencesSeen]);
   // Shown only for what is asked now: another resource, file or client is
   // loading until its own read settles.
   if (shown === undefined || shown.key !== key || shown.client !== client) {

@@ -608,6 +608,72 @@ export const fileChannel = ({
   };
 
   /**
+   * What an upload that failed for good after its start (`error`) answers:
+   * it is cancelled, so it holds none of the person's open uploads until
+   * it expires. Its file when core says publication came first (a finish
+   * whose answer was lost); otherwise `error`, also when the cancellation
+   * couldn't be sent.
+   */
+  const givenUp = async (
+    resource: string,
+    file: string,
+    error: unknown
+  ): Promise<string> => {
+    try {
+      return await cancelled(resource, file);
+    } catch {
+      throw error;
+    }
+  };
+
+  /**
+   * Sends what core doesn't hold of `blob` and finishes upload `file`,
+   * round after round while a finish finds a chunk missing; cancelled
+   * when `hooks.cancel` aborts.
+   */
+  const sendAndFinish = async (
+    resource: string,
+    file: string,
+    blob: Blob,
+    begun: UploadState,
+    hooks: UploadHooks
+  ): Promise<string> => {
+    let holding = new Set(begun.received);
+    for (let round = 1; ; round += 1) {
+      if (
+        hooks.cancel.aborted ||
+        // oxlint-disable-next-line no-await-in-loop -- a round after a finish found chunks missing
+        !(await sendMissing(resource, file, blob, holding, hooks))
+      ) {
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        return await cancelled(resource, file);
+      }
+      hooks.onProgress({
+        phase: "verifying",
+        bytesUploaded: blob.size,
+        bytesTotal: blob.size,
+      });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- once all chunks are in
+        return await finishing(resource, file, hooks.cancel);
+      } catch (error) {
+        if (codeOf(error) !== "file.incomplete" || round >= attempts) {
+          throw error;
+        }
+      }
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- resumed from what core holds
+        holding = await held(resource, file, hooks.cancel);
+      } catch (error) {
+        // Cancelled meanwhile: the next round sends the cancellation.
+        if (!hooks.cancel.aborted) {
+          throw error;
+        }
+      }
+    }
+  };
+
+  /**
    * Uploads `blob` as `name` through `resource`, resuming what breaks
    * under the same upload; answers its ID once core published it.
    */
@@ -654,38 +720,13 @@ export const fileChannel = ({
       return await cancelled(resource, found.file);
     }
     const { file } = begun;
-    let holding = new Set(begun.received);
-    for (let round = 1; ; round += 1) {
-      if (
-        hooks.cancel.aborted ||
-        // oxlint-disable-next-line no-await-in-loop -- a round after a finish found chunks missing
-        !(await sendMissing(resource, file, blob, holding, hooks))
-      ) {
-        // oxlint-disable-next-line no-await-in-loop -- once, then out
-        return await cancelled(resource, file);
+    try {
+      return await sendAndFinish(resource, file, blob, begun, hooks);
+    } catch (error) {
+      if (hooks.cancel.aborted) {
+        throw error;
       }
-      hooks.onProgress({
-        phase: "verifying",
-        bytesUploaded: blob.size,
-        bytesTotal: blob.size,
-      });
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- once all chunks are in
-        return await finishing(resource, file, hooks.cancel);
-      } catch (error) {
-        if (codeOf(error) !== "file.incomplete" || round >= attempts) {
-          throw error;
-        }
-      }
-      try {
-        // oxlint-disable-next-line no-await-in-loop -- resumed from what core holds
-        holding = await held(resource, file, hooks.cancel);
-      } catch (error) {
-        // Cancelled meanwhile: the next round sends the cancellation.
-        if (!hooks.cancel.aborted) {
-          throw error;
-        }
-      }
+      return await givenUp(resource, file, error);
     }
   };
 

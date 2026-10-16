@@ -829,6 +829,12 @@ export interface ClientInternals {
   fencedBy: () => GraspError | undefined;
   /** Calls `onFence` at every fence, until the function it answers is called. */
   onFence: (onFence: () => void) => () => void;
+  /**
+   * Calls `onDeleted` with `<alias>/<file>` of each file `files.delete`
+   * deleted, once core recorded it, until the function it answers is
+   * called: what a file's view reads again on.
+   */
+  onFileDeleted: (onDeleted: (key: string) => void) => () => void;
 }
 
 /**
@@ -1438,6 +1444,8 @@ export class GraspClient {
   #attempts = 0;
   /** Told of every fence (`WorkflowLink.onFence`). */
   readonly #fenceListeners = new Set<(refusal: GraspError) => void>();
+  /** Told of each file `files.delete` deleted (`onFileDeleted`). */
+  readonly #deletionListeners = new Set<(key: string) => void>();
 
   /**
    * The App's files: downloading and deleting them through a files
@@ -1497,7 +1505,12 @@ export class GraspClient {
           this.#fence(error);
         }
       },
-      () => this.#generation
+      () => this.#generation,
+      (key) => {
+        for (const listener of this.#deletionListeners) {
+          listener(key);
+        }
+      }
     );
   }
 
@@ -1542,6 +1555,12 @@ export class GraspClient {
         client.#fenceListeners.add(onFence);
         return () => {
           client.#fenceListeners.delete(onFence);
+        };
+      },
+      onFileDeleted: (onDeleted) => {
+        client.#deletionListeners.add(onDeleted);
+        return () => {
+          client.#deletionListeners.delete(onDeleted);
         };
       },
     });

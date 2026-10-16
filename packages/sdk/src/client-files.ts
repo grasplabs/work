@@ -241,20 +241,25 @@ export class ClientFiles {
   readonly #transport: FileTransport | undefined;
   readonly #refused: (error: GraspError, startedUnder: number) => void;
   readonly #generation: () => number;
+  readonly #deleted: (key: string) => void;
 
   /**
    * For the session client only: `refused` hears each failure with the
    * client's fence count as its request started (`generation`), so a
-   * refusal of one started before a fence never fences the client again.
+   * refusal of one started before a fence never fences the client again;
+   * `deleted` hears `<alias>/<file>` of each file deleted, once core
+   * recorded it, so the views of it read it again.
    */
   constructor(
     transport: FileTransport | undefined,
     refused: (error: GraspError, startedUnder: number) => void,
-    generation: () => number
+    generation: () => number,
+    deleted: (key: string) => void
   ) {
     this.#transport = transport;
     this.#refused = refused;
     this.#generation = generation;
+    this.#deleted = deleted;
   }
 
   /** `error`, after the client heard of it (a refusal fences it). */
@@ -304,6 +309,8 @@ export class ClientFiles {
     } catch (error) {
       throw this.#failure(error, startedUnder);
     }
+    // Shown nowhere as it was: each view of it reads it again.
+    this.#deleted(`${alias}/${id}`);
   }
 
   /** What `useFile` reads: the description and preview of `file`. */
