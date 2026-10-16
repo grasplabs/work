@@ -1204,6 +1204,12 @@ export class FormBinding {
 
   async #submitOnce(): Promise<unknown> {
     this.#started += 1;
+    // Whether the draft is this editor's own as the save starts (it may
+    // close while it is prepared): a newer editor of the record holding
+    // it keeps a draft this save never sent.
+    const ownDraft =
+      this.#draft !== undefined &&
+      this.#draft.store.holds(this.#draft.key, this.#owner);
     const submission = await this.#prepare();
     if ("issues" in submission) {
       throw clientError("contract.invalid_args", {
@@ -1218,11 +1224,8 @@ export class FormBinding {
     });
     // The draft of what is sent, dropped should the save commit after the
     // editor closed and nothing was written of it since (`#succeeded`).
-    // Only this editor's own: a newer editor of the record holding it
-    // keeps a draft this save never sent.
     const sentDraft =
-      this.#draft !== undefined &&
-      this.#draft.store.holds(this.#draft.key, this.#owner)
+      ownDraft && this.#draft !== undefined
         ? this.#draft.store.get(this.#draft.key)
         : undefined;
     let result: unknown;
