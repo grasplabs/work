@@ -212,6 +212,30 @@ describe("switch and transitions in JSON workflows", () => {
     });
   });
 
+  it("gives a wait's output.as the time its task started, though it has nothing before its wait", async () => {
+    const by = await builder();
+    const { workflow } = await published(by, (name) =>
+      definitionOf(name, [
+        {
+          pause: {
+            wait: "PT1S",
+            output: {
+              as: "${ {status: ($task.startedAt.epoch.milliseconds | tostring)} }",
+            },
+          },
+        },
+      ])
+    );
+    const run = await ranFor(by, workflow.id);
+    const started = Number(
+      z.object({ status: z.string() }).parse(run.output).status
+    );
+    // The leave step runs after the wait: its own start is a second later.
+    expect(Date.parse(run.endedAt ?? "") - started).toBeGreaterThanOrEqual(
+      1000
+    );
+  });
+
   it("replays a switch's recorded choice after a wait, never choosing again", async () => {
     const by = await builder();
     const { workflow } = await published(by, (name) =>

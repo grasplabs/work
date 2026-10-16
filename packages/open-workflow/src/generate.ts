@@ -618,8 +618,8 @@ const lowerSwitch = (
 
 /**
  * The statements of a task with a durable body (a `wait`'s sleep, a
- * `do`'s list): its enter step, if it has stages before the body, then
- * the body, then its leave step, if it has stages after.
+ * `do`'s list): its enter step, if it has stages before or after the
+ * body, then the body, then its leave step, if it has stages after.
  */
 const lowerDurable = (
   emitter: Emitter,
@@ -629,8 +629,11 @@ const lowerDurable = (
   body: (indent: string) => void
 ): TaskStep[] => {
   const steps: TaskStep[] = [];
-  const hasEnter = stages.enter.length > 0;
   const hasLeave = stages.leave.length > 0;
+  // A leave step's `$task.startedAt` is the time its enter step recorded,
+  // so a task with stages after its body always enters, with nothing to
+  // evaluate if it has nothing before it.
+  const hasEnter = stages.enter.length > 0 || hasLeave;
   if (!hasEnter && !hasLeave) {
     body(place.indent);
     return steps;
