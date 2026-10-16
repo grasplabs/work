@@ -1289,9 +1289,20 @@ export const setCurrentVersion = async (
     throw appErrors.create("app.conflict");
   }
   // What its screens build to with this release's kit, which may not be
-  // the one it was committed under (screen-builds.ts): in the background,
-  // never something making it current waits on. Bounded by the build
-  // wait; what doesn't get recorded now is when it is opened or reviewed.
-  waitUntil(recordVersionBuilds(env, appId, number, files));
+  // the one it was committed under, and with the references they import,
+  // read back from its release, checked above (screen-builds.ts): in the
+  // background, never something making it current waits on. Bounded by
+  // the build wait; what doesn't get recorded now is when it is opened or
+  // reviewed.
+  waitUntil(
+    recordVersionBuilds(env, appId, number, files, {
+      // Imported here, not at the top: the references reach releases,
+      // which reach back into this module for App lookups.
+      withReferences: async (built) => {
+        const { withScreenReferences } = await import("./screen-references.ts");
+        return await withScreenReferences(env, appId, number, built);
+      },
+    })
+  );
   return toApp(changed);
 };
