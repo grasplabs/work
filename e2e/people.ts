@@ -341,16 +341,26 @@ export const peopleIn = <S extends Scene>(
 };
 
 /**
- * Carries a page's `/rpc` connection through Node, which adds the
- * person's session cookie. Only for WebKit, which keeps a Secure cookie
- * from `http://localhost` where Chromium and Firefox send it: the stack
- * runs without TLS, so its pages would be signed out there. Everything
- * the page and core say to each other passes as it is.
+ * Carries a page's `/rpc` connection, and its screens' function calls
+ * (`/api/app-functions/`, plain requests, not the socket), through Node,
+ * which adds the person's session cookie. Only for WebKit, which keeps a
+ * Secure cookie from `http://localhost` where Chromium and Firefox send
+ * it: the stack runs without TLS, so its pages would be signed out there.
+ * Everything the page and core say to each other passes as it is.
  */
 const carrySession = async (
   context: BrowserContext,
   person: Person
 ): Promise<void> => {
+  await context.route("**/api/app-functions/**", async (route) => {
+    const response = await route.fetch({
+      headers: {
+        ...route.request().headers(),
+        cookie: `${sessionCookie}=${encodeURIComponent(person.cookie)}`,
+      },
+    });
+    await route.fulfill({ response });
+  });
   await context.routeWebSocket("**/rpc", (page) => {
     const core = rpcSocket(person);
     const waiting: string[] = [];
