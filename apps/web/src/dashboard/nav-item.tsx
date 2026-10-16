@@ -14,6 +14,7 @@ import { integrationsOf } from "../connections/integrations.ts";
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { useCore } from "../use-core.ts";
+import { everyPage } from "./outcome-pages.ts";
 import { decidesRequests, toReconnect } from "./to-do.tsx";
 import type { Viewer } from "./to-do.tsx";
 
@@ -45,11 +46,18 @@ const readCount = async (
         return held.length;
       })
     ),
+    // Each page within its own few seconds (`readWithin`).
     countOf(
-      readWithin(core, async (session) => {
-        const lost = await session.unknownOutcomes.list();
+      (async () => {
+        const lost = await everyPage(
+          async (before) =>
+            await readWithin(
+              core,
+              async (session) => await session.unknownOutcomes.list(before)
+            )
+        );
         return lost.length;
-      })
+      })()
     ),
     countOf(
       readWithin(core, async (session) => {
