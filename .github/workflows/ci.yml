@@ -105,7 +105,7 @@ jobs:
       # step's timeout: core's heaviest files could land together, and a
       # shard runs its project groups (core and the rest, then core's
       # screens, then on-prem) one after another. Five shards split by
-      # duration took 6 to 7 minutes each, leaving room for a runner twice
+      # duration took 4 to 7 minutes each, leaving room for a runner twice
       # as slow; four left the heaviest at about 9. Refresh the durations from the shards' test-progress
       # artifacts when the split drifts (scripts/test-durations.ts).
       # Vitest's default runs a worker per CPU but one, which left a third
