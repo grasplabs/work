@@ -759,33 +759,22 @@ const resultOf = async (
   ) {
     return {};
   }
-  // Past its retention, a failed run says only the code its row kept: the
-  // engine, which may be unreachable, or no longer hold it, isn't asked.
-  if (removed && row.failureCode !== null) {
-    return {
-      error: { code: row.failureCode, message: removedText(env) },
-    };
+  // Past its retention, a failed run says only the code its row kept, if
+  // any: the engine, which may be unreachable, or no longer hold it, isn't
+  // asked.
+  if (removed) {
+    return { error: { code: row.failureCode, message: removedText(env) } };
   }
   const engine = await engineResultOf(env, row.id);
-  let result: Pick<WorkflowResourceRun, "output" | "error">;
   if (row.status === "completed") {
-    result = engine.output === undefined ? {} : { output: engine.output };
-  } else if (
-    row.failureCode !== null &&
-    engine.error?.code !== row.failureCode
-  ) {
-    // Core's reason for a run it ended, or the engine's code once the
-    // engine no longer has the run: as the row keeps it.
-    result = { error: keptFailureOf(row.failureCode) };
-  } else {
-    result = engine.error === undefined ? {} : { error: engine.error };
+    return engine.output === undefined ? {} : { output: engine.output };
   }
-  if (!removed) {
-    return result;
+  // Core's reason for a run it ended, or the engine's code once the engine
+  // no longer has the run: as the row keeps it.
+  if (row.failureCode !== null && engine.error?.code !== row.failureCode) {
+    return { error: keptFailureOf(row.failureCode) };
   }
-  return result.error === undefined
-    ? {}
-    : { error: { ...result.error, message: removedText(env) } };
+  return engine.error === undefined ? {} : { error: engine.error };
 };
 
 /**
