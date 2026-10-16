@@ -23,6 +23,7 @@ import {
   issueDetails,
   settlesSubmission,
 } from "./client-error.ts";
+import { writeDraft } from "./form-drafts.ts";
 import type { DraftStore, FormDraft } from "./form-drafts.ts";
 import type { ArgsOf, ReturnOf } from "./references.ts";
 import { isPlainObject, unsafeKeys, valueLimits } from "./value-descriptor.ts";
@@ -665,6 +666,16 @@ type Checked =
  * What a form holds beside TanStack's state: its status, the record's
  * baseline and the submission in flight. One per mounted form.
  */
+/** Whether two drafts hold the same edits, whenever each was written. */
+const sameDraft = (one: FormDraft, other: FormDraft): boolean => {
+  try {
+    return writeDraft({ ...one, at: 0 }) === writeDraft({ ...other, at: 0 });
+  } catch {
+    // Can't be written as text: taken for a new one.
+    return false;
+  }
+};
+
 export class FormBinding {
   readonly #target: Target;
   readonly #listeners = new Set<() => void>();
@@ -878,10 +889,22 @@ export class FormBinding {
       conflict: this.#status.conflict,
       at: Date.now(),
     };
-    if (slot.store.holds(slot.key, this.#owner)) {
-      slot.store.putFor(slot.key, this.#owner, draft);
-      this.#written = draft;
+    if (!slot.store.holds(slot.key, this.#owner)) {
+      return;
     }
+    // The same draft as this editor kept last (a status changed, not the
+    // edits): kept as it is, so a save of it still knows it for the one
+    // it sent (`#dropSaved`).
+    const kept = slot.store.get(slot.key);
+    if (
+      kept !== undefined &&
+      kept === this.#written &&
+      sameDraft(kept, draft)
+    ) {
+      return;
+    }
+    slot.store.putFor(slot.key, this.#owner, draft);
+    this.#written = draft;
   }
 
   /** Whether `field` is one the person edits. */

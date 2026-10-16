@@ -768,6 +768,27 @@ describe("a draft and the editor that owns it", () => {
     });
   });
 
+  it("is gone once a closed editor's save of it commits, though a newer note arrived while it was saved", async () => {
+    const store = new DraftStore();
+    const answer = Promise.withResolvers<null>();
+    const save = saves();
+    const first = editor(note(3), store, async (input) => {
+      await answer.promise;
+      return await save.send(input);
+    });
+    first.type("title", "Saving");
+    const saving = settle(first.binding.submit());
+    // Someone else's save arrives while this one is on its way.
+    await vi.waitFor(() => {
+      expect(first.binding.status().phase).toBe("submitting");
+    });
+    first.binding.supply(note(4, { body: "Theirs" }));
+    first.binding.setMounted(false);
+    answer.resolve(null);
+    await saving;
+    expect(store.get(slotOf(store).key)).toBeUndefined();
+  });
+
   it("keeps a field cleared while editing, though it couldn't be saved yet", () => {
     const store = new DraftStore();
     editor(note(3), store, saves().send).type("title", "");
