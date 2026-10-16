@@ -9,6 +9,8 @@ import {
   workflowStartReceipts,
   runLineageChildren,
   runMailCalls,
+  runMailStampClaims,
+  runMailStampRefusals,
   runMailStamps,
   runLineageAttempts,
   runLineages,
@@ -216,6 +218,25 @@ const receiptsPruned = (
     // The tokens of the runs' mail (mail-stamps.ts): mail to one this
     // late is mail to an address no one receives at.
     db.delete(runMailStamps).where(inArray(runMailStamps.runId, runs)),
+    // Before their calls, which name their stamps.
+    db.delete(runMailStampClaims).where(
+      inArray(
+        runMailStampClaims.stamp,
+        db
+          .select({ stamp: sql<string>`${runMailCalls.stamp}` })
+          .from(runMailCalls)
+          .where(inArray(runMailCalls.runId, runs))
+      )
+    ),
+    db.delete(runMailStampRefusals).where(
+      inArray(
+        runMailStampRefusals.stamp,
+        db
+          .select({ stamp: sql<string>`${runMailCalls.stamp}` })
+          .from(runMailCalls)
+          .where(inArray(runMailCalls.runId, runs))
+      )
+    ),
     db.delete(runMailCalls).where(inArray(runMailCalls.runId, runs)),
     // The children their keys admitted (quotas.ts): what a delivery this
     // late starts is admitted afresh, if its lineage has room.

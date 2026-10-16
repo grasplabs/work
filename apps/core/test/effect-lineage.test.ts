@@ -155,9 +155,13 @@ export default workflowTests(definition, [{ name: "runs", input, mocks: { send: 
   "app/server.ts": relayServer,
 });
 
-/** A shared Microsoft 365 account `admin` connects: its ID and mailbox. */
-const connectShared = async (admin: Person) => {
-  const subject = `team-${crypto.randomUUID()}`;
+/**
+ * A shared Microsoft 365 account `admin` connects: its ID, its mailbox as
+ * its sign-in name, and the address it sends from. An `aliased` account's
+ * sign-in name (a UPN) isn't that address.
+ */
+const connectShared = async (admin: Person, aliased = false) => {
+  const subject = `${aliased ? "alias" : "team"}-${crypto.randomUUID()}`;
   const { url } = await admin.api.connections.start({
     provider: "microsoft",
     scope: "shared",
@@ -170,13 +174,14 @@ const connectShared = async (admin: Person) => {
   await routed(`/api/connections/callback?${query.toString()}`, {
     headers: { cookie: admin.session },
   });
-  const mailbox = `${subject}@acme.test`;
+  const sender = `${subject}@acme.test`;
+  const mailbox = aliased ? `${subject}@acme.onmicrosoft.test` : sender;
   const listed = await admin.api.connections.list();
   const connection = listed.find(({ accountName }) => accountName === mailbox);
   if (connection === undefined) {
     throw new Error("Expected the shared connection");
   }
-  return { id: connection.id, mailbox };
+  return { id: connection.id, mailbox, sender };
 };
 
 /**
@@ -191,11 +196,12 @@ const loopApp = async (
   {
     actions = ["mail.send"],
     listening = false,
+    aliased = false,
     files = (_local: string, _mailbox: string): Record<string, string> => ({}),
   } = {}
 ) => {
   const local = `loop-${crypto.randomUUID().slice(0, 8)}`;
-  const connection = await connectShared(admin);
+  const connection = await connectShared(admin, aliased);
   const app = await appWith(admin, {
     ...loop(local, connection.mailbox, send),
     ...(listening ? listen(local) : {}),
@@ -220,6 +226,7 @@ const loopApp = async (
     app,
     local,
     mailbox: connection.mailbox,
+    sender: connection.sender,
     address: `${local}@grasp.test`,
   };
 };
@@ -384,7 +391,7 @@ const tokenedAt = (local: string) =>
  */
 const followHops = async (
   admin: Person,
-  { app, address, mailbox }: Awaited<ReturnType<typeof loopApp>>,
+  { app, address, sender }: Awaited<ReturnType<typeof loopApp>>,
   subject: string,
   hops: number
 ): Promise<(string | undefined)[]> => {
@@ -401,7 +408,7 @@ const followHops = async (
     const to = await sentTo(subject, hop - 1);
     rejected.push(
       // oxlint-disable-next-line no-await-in-loop -- one hop after another
-      await deliver(to, message(to, { from: mailbox, subject }), mailbox)
+      await deliver(to, message(to, { from: sender, subject }), sender)
     );
   }
   return rejected;
@@ -588,6 +595,30 @@ describe("runs a run's own mail starts", { timeout: 120_000 }, () => {
         });
       }
     );
+  });
+
+  it("join its lineage from an account whose sign-in name isn't the address it sends from", async () => {
+    const admin = await personApi("admin");
+    // Its mailbox named by its UPN, as Graph allows; Graph sends from its
+    // primary address, the envelope sender its mail arrives from.
+    const looping = await loopApp(admin, "direct", { aliased: true });
+    const subject = `Ping ${crypto.randomUUID()}`;
+
+    const rejected = await followHops(admin, looping, subject, 1);
+    await runsEnded(admin, looping.app, 2);
+
+    expect({
+      senders: [looping.mailbox, looping.sender],
+      rejected,
+      places: await placesOf(looping.app),
+    }).toStrictEqual({
+      senders: [
+        looping.sender.replace("@acme.test", "@acme.onmicrosoft.test"),
+        looping.sender,
+      ],
+      rejected: [undefined, undefined],
+      places: ["root", "child"],
+    });
   });
 
   it("stop at its nesting limit", async () => {
@@ -929,6 +960,7 @@ export default workflowTests(definition, [{ name: "runs", mocks: { send: null },
         app,
         local,
         mailbox: connection.mailbox,
+        sender: connection.sender,
         address: `${local}@grasp.test`,
       },
       subject,

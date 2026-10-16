@@ -102,6 +102,7 @@ export const callOf = (row: Row): Omit<ConnectCall, "capability"> => {
     action: row.action,
     input,
     idempotencyKey: row.idempotencyKey,
+    ...(row.stamp === null ? {} : { stamp: row.stamp }),
   });
 };
 
@@ -495,10 +496,12 @@ export const hold = async (
     input,
     inputHash,
     idempotencyKey,
+    stamp,
   }: {
     input: Record<string, Json>;
     inputHash: string;
     idempotencyKey: string | null;
+    stamp: string | null;
   }
 ): Promise<PendingReference> => {
   const { authority, origin } = claims;
@@ -558,6 +561,7 @@ export const hold = async (
               : JSON.stringify(origin.binding),
             "binding"
           ),
+          stamp: value(stamp, "stamp"),
         })
         .from(connections)
         .where(

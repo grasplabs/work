@@ -49,6 +49,13 @@ export const connections = sqliteTable(
     tenant: text(),
     accountId: text("account_id"),
     accountName: text("account_name"),
+    /**
+     * The account's own email address, as the provider's ID token said
+     * (`email`): for Microsoft 365 the primary address it sends from,
+     * which may differ from its sign-in name. Core records it with the
+     * mail a workflow run sends through the connection.
+     */
+    accountEmail: text("account_email"),
     connectedBy: text("connected_by"),
     /**
      * For a Composio connection: the MCP server and the auth config
@@ -256,6 +263,12 @@ export const pendingActions = sqliteTable(
      * any other call.
      */
     binding: text(),
+    /**
+     * The stamp core recorded for a workflow run's mail (`ConnectCall`'s
+     * `stamp`), sent with the call once its person confirms it. Null for
+     * any other call.
+     */
+    stamp: text(),
   },
   (table) => [
     uniqueIndex("pending_actions_call_idx").on(

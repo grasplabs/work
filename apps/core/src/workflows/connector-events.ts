@@ -8,10 +8,14 @@ import type {
   OutboxedConnectorEvent,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { appIdSchema, workflowIdSchema } from "@grasp-os/shared/ids";
+import {
+  appIdSchema,
+  runIdSchema,
+  workflowIdSchema,
+} from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import {
-  connectorEventSchema,
+  deliveredConnectorEventSchema,
   matchesFilter,
   workflowErrors,
 } from "@grasp-os/shared/workflows";
@@ -19,11 +23,19 @@ import type { ConnectorEvent } from "@grasp-os/shared/workflows";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { apps, permissions, workflowTriggers } from "../db/core/schema.ts";
+import { auditedBatch, outboxedIfChanged } from "../audit-outbox.ts";
+import {
+  apps,
+  permissions,
+  runMailCalls,
+  runMailStampRefusals,
+  workflowTriggers,
+} from "../db/core/schema.ts";
 import {
   allowingPermissionSql,
   listeningPermissionSql,
 } from "../permissions.ts";
+import { lineageRefusals, stampedEventRun } from "./mail-stamps.ts";
 import { deliveryRoom, startRun } from "./runs.ts";
 
 // Events connections report, to workflows' event triggers
@@ -57,6 +69,13 @@ import { deliveryRoom, startRun } from "./runs.ts";
 // the event waits in connect's outbox and is delivered again later. A
 // start that fails fails the delivery, after every other has been tried,
 // so the event is delivered again and starts only what didn't start.
+//
+// A message a run sent to a mailbox it watches carries the run's stamp
+// (mail-stamps.ts): its runs start under that run, admitted against its
+// lineage, when core's own record says it is the run's own mail
+// (`stampedEventRun`). The run never gets the stamp. A run its lineage
+// refuses is audited (`workflow.event.refused`) and the event settled,
+// since delivering it again would be refused again.
 
 /**
  * The event triggers of Apps' current versions for `event`'s type, in
@@ -110,11 +129,14 @@ export const deliverConnectorEvent = async (
   env: Env,
   input: unknown
 ): Promise<{ runs: number }> => {
-  const event = workflowErrors.parse(
+  const delivered = workflowErrors.parse(
     "workflow.invalid",
-    connectorEventSchema,
+    deliveredConnectorEventSchema,
     input
   );
+  // The run gets the event without the stamp its message carried: what
+  // its sender wrote, which only core's own record vouches for.
+  const { stamp: _stamp, ...event } = delivered;
   const triggered = await receiversOf(env, event);
   // Each workflow once, however many of its triggers match: the event
   // starts one run of it (its key is by workflow), counted once, and two
@@ -157,6 +179,11 @@ export const deliverConnectorEvent = async (
     )
   );
   const withRoom = receivers.filter((_, index) => rooms[index] !== "capped");
+  // A run's own mail, to a mailbox it watches through a connection,
+  // starts its runs under the run (mail-stamps.ts), admitted against its
+  // lineage; anything else is a root. Asked only when a workflow listens.
+  const parent =
+    receivers.length === 0 ? undefined : await stampedEventRun(env, delivered);
   const started = await Promise.allSettled(
     withRoom.map(
       async (receiver) =>
@@ -171,11 +198,18 @@ export const deliverConnectorEvent = async (
             key: keyOf(receiver),
             version: receiver.version,
           },
+          ...(parent === undefined
+            ? {}
+            : { parent: runIdSchema.parse(parent) }),
         })
     )
   );
+  const refused = lineageRefusals(started, withRoom);
   const failures = started.flatMap((result): unknown[] =>
-    result.status === "rejected" ? [result.reason] : []
+    result.status === "rejected" &&
+    workflowErrors.codeOf(result.reason) !== "workflow.lineage_limit"
+      ? [result.reason]
+      : []
   );
   for (const failure of failures) {
     log.error("workflow.trigger_failed", {
@@ -198,7 +232,50 @@ export const deliverConnectorEvent = async (
     });
     throw new Error(`Event ${event.type} is over a workflow's hourly limit`);
   }
-  return { runs: receivers.length };
+  if (refused.length > 0) {
+    // Refused for good: the lineage's limits would refuse it again, so the
+    // event is settled, never delivered again without end. Audited only
+    // as the delivery settles, so one delivered again (another workflow
+    // at its limit, or failing) is audited once, not on every try.
+    // Once per run refused, by its key: an event delivered again after
+    // it settled (its acknowledgement lost) records nothing more.
+    const db = drizzle(env.DB);
+    await Promise.all(
+      refused.map(async ({ receiver, limit }) => {
+        await auditedBatch(env, db, [
+          // Only while the stamp's call is still recorded, as its claim
+          // is: retention removed meanwhile leaves no receipt behind that
+          // nothing would remove. A lineage refuses only a stamped event's
+          // runs, so the event has its stamp.
+          db
+            .insert(runMailStampRefusals)
+            .select(
+              db
+                .select({
+                  triggerKey: sql<string>`${keyOf(receiver)}`.as("trigger_key"),
+                  stamp: sql<string>`${runMailCalls.stamp}`.as("stamp"),
+                  createdAt: sql<Date>`${Date.now()}`.as("created_at"),
+                })
+                .from(runMailCalls)
+                .where(eq(runMailCalls.stamp, delivered.stamp ?? ""))
+            )
+            .onConflictDoNothing(),
+          outboxedIfChanged(db, {
+            actor: { type: "system" },
+            action: "workflow.event.refused",
+            target: { type: "app", id: receiver.appId },
+            detail: {
+              event: event.type,
+              workflow: receiver.workflowId,
+              reason: "lineage_limit",
+              limit,
+            },
+          }),
+        ]);
+      })
+    );
+  }
+  return { runs: receivers.length - refused.length };
 };
 
 /**
