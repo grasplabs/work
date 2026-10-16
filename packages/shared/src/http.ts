@@ -1,3 +1,5 @@
+import { requestErrors } from "./errors.ts";
+
 // Response headers every Grasp-made HTTP response carries, whether core or
 // the router in front of it makes it.
 
@@ -11,29 +13,56 @@ const hstsMaxAgeSeconds = 365 * 24 * 60 * 60;
 export const strictTransportSecurity = `max-age=${hstsMaxAgeSeconds}; includeSubDomains`;
 
 /**
+ * How long a body may take to arrive, all of it, unless the caller says
+ * otherwise: a client that sends it slowly, or stops, holds the request
+ * no longer than this.
+ */
+export const readDeadlineMs = 30_000;
+
+/**
  * `stream`'s bytes, read up to `max` of them: undefined for a stream
  * longer than that, counted on what it holds, whatever it says its size is.
+ * Refuses with `request.timeout`, the stream cancelled, once it has taken
+ * longer than `deadlineMs` in all: a body sent a byte at a time, within
+ * `max`, is held no longer than one that stalls.
  */
 export const readAtMost = async (
   stream: ReadableStream<Uint8Array>,
-  max: number
+  max: number,
+  deadlineMs = readDeadlineMs
 ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
   const reader = stream.getReader();
+  const { promise: expired, resolve: expire } =
+    Promise.withResolvers<"expired">();
+  const timer = setTimeout(() => {
+    expire("expired");
+  }, deadlineMs);
   const chunks: Uint8Array[] = [];
   let length = 0;
-  for (;;) {
-    // oxlint-disable-next-line no-await-in-loop -- a stream reads in order
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
+  try {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- a stream reads in order
+      const next = await Promise.race([reader.read(), expired]);
+      if (next === "expired") {
+        // The read still pending settles as done once cancelled.
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        await reader.cancel();
+        throw requestErrors.create("request.timeout");
+      }
+      const { done, value } = next;
+      if (done) {
+        break;
+      }
+      length += value.byteLength;
+      if (length > max) {
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        await reader.cancel();
+        return undefined;
+      }
+      chunks.push(value);
     }
-    length += value.byteLength;
-    if (length > max) {
-      // oxlint-disable-next-line no-await-in-loop -- once, then out
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
+  } finally {
+    clearTimeout(timer);
   }
   const bytes = new Uint8Array(length);
   let offset = 0;
