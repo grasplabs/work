@@ -257,9 +257,13 @@ export const editWorkflowDraft = async (
 
 /**
  * Publishes workflow `id`'s draft for `by` (`workflowDraftPublishSchema`):
- * only its latest revision, and only once it passed, else
- * `workflow.draft_unchecked`; then exactly as `publishWorkflowVersion`
- * publishes its text, on the current version it names.
+ * the revision they name, which must be the latest when they ask and have
+ * passed, else `workflow.draft_unchecked`; then exactly as
+ * `publishWorkflowVersion` publishes its text, on the current version it
+ * names, which checks it again. What is published is the text of that
+ * revision, the one the person saw: an edit someone saves meanwhile stays
+ * the draft's next revision, neither published nor lost, and publishing
+ * it is a publication of its own.
  */
 export const publishWorkflowDraft = async (
   env: Env,
