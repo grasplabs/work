@@ -522,9 +522,14 @@ const requireGuestsBinding = async (env: Env, row: ChatRow): Promise<void> => {
       )
     )
     .get();
-  const bound = bindingTargetSchema.safeParse(
-    binding === undefined ? undefined : JSON.parse(binding.target)
-  );
+  // A target that doesn't read serves nothing: the link fails closed.
+  let stored: unknown;
+  try {
+    stored = binding === undefined ? undefined : JSON.parse(binding.target);
+  } catch {
+    stored = undefined;
+  }
+  const bound = bindingTargetSchema.safeParse(stored);
   if (
     !bound.success ||
     bound.data.kind !== "guests" ||
