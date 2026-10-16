@@ -27,6 +27,10 @@ import { appVersions, permissions } from "../db/core/schema.ts";
 import { appHost } from "../durable-objects.ts";
 import { models } from "../models.ts";
 import { authorizeExport } from "../permissions.ts";
+import {
+  approvalServing,
+  callApprovedStoreOperation,
+} from "../workflow-bindings.ts";
 import { resolveCatalogKeys } from "../workflow-catalog.ts";
 import type { AttemptFence } from "./attempt-fence.ts";
 import { schemaOfDescriptor, takesExactly } from "./exact-values.ts";
@@ -74,7 +78,9 @@ import type { CallingRun, FrozenCatalogBinding } from "./resource-authority.ts";
 // - Restricted data reaching a run that would pass it on. A run never
 //   enters restricted mode (restricted.ts): an operation of an App in
 //   restricted mode is refused before it is called, and its answer
-//   withheld if the App entered it meanwhile (`permission.restricted`).
+//   withheld if the App entered it meanwhile (`permission.restricted`);
+//   so is a store operation of a store whose App is restricted
+//   (`resource.unavailable`, workflow-bindings.ts).
 // - Sensitive values in what a run records. A binding argument (a
 //   sensitive parameter's value, put in by the host) is sent to connect
 //   only, and a connector's answer that echoes one is refused
@@ -360,6 +366,58 @@ const releaseNotCurrent = () =>
   workflowResourceErrors.create("workflow.call_release_not_current");
 
 /**
+ * Calls the store operation the approval frozen with `binding` names
+ * (`callApprovedStoreOperation`, workflow-bindings.ts), with `args`, as
+ * the run's principal, under the effect's key: its answer, as the contract
+ * has it. The approval must be the one its start froze, still active for
+ * the run's version; the store, its operation and shape are read again for
+ * the call, the run's authority and attempt before each protected step,
+ * and nothing comes of a store whose App is restricted, before or after
+ * the call (`resource.unavailable`).
+ */
+const callStoreOperation = async (
+  env: Env,
+  run: CallingRun,
+  binding: FrozenCatalogBinding,
+  call: Extract<BuiltCall, { name: "grasp.operation" }>,
+  effect: Effect
+): Promise<Json> => {
+  const contract = await contractOf(env, binding);
+  const input = requireShape(contract.input, call.arguments, "arguments");
+  const approval = await approvalServing(
+    env,
+    run.workflowId,
+    run.version,
+    binding
+  );
+  if (approval?.id !== binding.approval) {
+    throw workflowResourceErrors.create("workflow.call_denied");
+  }
+  effect.requireHolds();
+  const answer = await callApprovedStoreOperation(
+    env,
+    { id: run.workflowId, version: run.version, approval },
+    input,
+    {
+      // As the run's own receipts name it: an independent run acts as no
+      // App, and its person is `principal`.
+      actor: { type: "system" },
+      principal: run.principal,
+      requestId: crypto.randomUUID(),
+      deadline: effect.deadline,
+      idempotencyKey: effect.key,
+      runId: run.runId,
+      stillAllowed: async () => {
+        await requireCallAuthority(env, run, binding);
+        effect.requireHolds();
+      },
+      requireHolds: effect.requireHolds,
+    }
+  );
+  return requireShape(contract.output, answer, "output");
+};
+
+/**
  * Calls the export `binding`'s operation target names, at the App version
  * it pins, with `args`, for the run's principal, under the effect's key:
  * its answer, as the contract has it. Refused
@@ -374,6 +432,9 @@ const callOperation = async (
   effect: Effect
 ): Promise<Json> => {
   const { target } = binding;
+  if (target.kind === "storeOperation") {
+    return await callStoreOperation(env, run, binding, call, effect);
+  }
   if (target.kind !== "operation") {
     throw workflowResourceErrors.create("workflow.call_denied");
   }
