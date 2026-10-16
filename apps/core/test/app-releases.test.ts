@@ -1152,6 +1152,41 @@ const targets = {
 
 describe("screens", { timeout: 120_000 }, () => {
   it.each([
+    [
+      "imports inside it, in a declaration file",
+      "leak.d.ts",
+      'declare module "x-probe" {\n  import type { runScreen } from "@grasp-os/sdk/screen-runtime";\n  import type { serverModule } from "@grasp-os/sdk/server";\n  global {\n    type Leak = [typeof runScreen, typeof serverModule];\n  }\n}\n',
+    ],
+    [
+      "imports inside it, in a component's declarations",
+      "components/leak.d.ts",
+      'declare module "x-probe" {\n  import type { runScreen } from "@grasp-os/sdk/screen-runtime";\n  global {\n    type Leak = [typeof runScreen];\n  }\n}\n',
+    ],
+    [
+      "one that shadows a kit module",
+      "shadow.d.ts",
+      'declare module "@grasp-os/sdk/react" {\n  export const useQuery: (reference: unknown) => unknown;\n}\n',
+    ],
+  ])("never declare a module by name: %s", async (_case, file, source) => {
+    const built = await buildScreens(env, {
+      ...notesFiles(),
+      "screens/notes.tsx":
+        "export type Reached = unknown;\nexport default function Notes() {\n  return null;\n}\n",
+      [file]: source,
+    });
+    expect({
+      ok: built.ok,
+      refused: saidSchema
+        .parse(built)
+        .diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.file === file &&
+            diagnostic.message.startsWith("declare module")
+        ).length,
+    }).toStrictEqual({ ok: false, refused: 1 });
+  });
+
+  it.each([
     ["a screen", "screens/notes.tsx", "../"],
     ["a declaration file", "notes.d.ts", "./"],
   ])(

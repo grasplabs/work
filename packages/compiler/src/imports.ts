@@ -26,6 +26,12 @@ export interface ImportSite {
    * must never reach (`typeImportError`).
    */
   typeOnly?: true;
+  /**
+   * Whether it is an ambient module (`declare module "…" { }`), which
+   * declares a module by name rather than importing one: what it holds
+   * names modules too, and it shadows any module of that name.
+   */
+  ambient?: true;
 }
 
 /** The parts of Babel's AST the import scan and rewrite read and write. */
@@ -140,6 +146,12 @@ const stringArgument = (call: Call): string | undefined => {
     : undefined;
 };
 
+/** A `declare module` or `namespace`: named by a string, or an identifier. */
+interface ModuleDeclaration {
+  id: { type: string; value?: unknown };
+  loc?: Call["loc"];
+}
+
 /** A type's `import("…")` (`typeof import()`, `import("…").Name`). */
 interface ImportType {
   argument: { type: string; value?: unknown };
@@ -179,13 +191,26 @@ export const collectImports = (imports: ImportSite[]) => () => {
         node: { body: Statement[] };
         traverse: (visitor: {
           TSImportType: (inner: { node: ImportType }) => void;
+          TSModuleDeclaration: (inner: { node: ModuleDeclaration }) => void;
         }) => void;
       }) => {
         // A type's `import("…")` sits in types the TypeScript transform
-        // removes as it goes: read them all now, before it runs.
+        // removes as it goes, and so does an ambient module: read them all
+        // now, before it runs.
         path.traverse({
           TSImportType: (inner) => {
             collectImportType(inner.node);
+          },
+          TSModuleDeclaration: ({ node: { id, loc } }) => {
+            if (id.type === "StringLiteral" && typeof id.value === "string") {
+              imports.push({
+                specifier: id.value,
+                line: loc?.start.line,
+                names: undefined,
+                typeOnly: true,
+                ambient: true,
+              });
+            }
           },
         });
         for (const statement of path.node.body) {
@@ -308,11 +333,14 @@ const resolveTypeFile = (
  * only the build's own files and the kit's modules by name.
  */
 export const screenTypeImportError = (
-  specifier: string | undefined,
+  { specifier, ambient }: Pick<ImportSite, "specifier" | "ambient">,
   file: string,
   files: ReadonlySet<string>,
   kit: Kit
 ): string | undefined => {
+  if (ambient) {
+    return `declare module "${specifier ?? ""}" is never in a screen's files: it would declare, or shadow, a module the kit doesn't give the App. Import what the kit has instead.`;
+  }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
   }
@@ -337,13 +365,13 @@ export const screenTypeImportError = (
 
 /** Why a screen's import isn't allowed, or undefined when it is. */
 export const importError = (
-  { specifier, names, typeOnly }: ImportSite,
+  { specifier, names, typeOnly, ambient }: ImportSite,
   file: string,
   files: ReadonlySet<string>,
   kit: Kit
 ): string | undefined => {
   if (typeOnly) {
-    return screenTypeImportError(specifier, file, files, kit);
+    return screenTypeImportError({ specifier, ambient }, file, files, kit);
   }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
@@ -590,10 +618,19 @@ const resolveCodeFile = (
 /** Why an import in `kind` code isn't allowed, or undefined when it is. */
 export const codeImportError = (
   kind: CodeKind,
-  { specifier, typeOnly }: Pick<ImportSite, "specifier" | "typeOnly">,
+  {
+    specifier,
+    typeOnly,
+    ambient,
+  }: Pick<ImportSite, "specifier" | "typeOnly" | "ambient">,
   file: string,
   files: ReadonlySet<string>
 ): string | undefined => {
+  // Its types are stripped, never checked (GRA-675 checks them): an
+  // ambient module there reaches nothing yet.
+  if (ambient) {
+    return undefined;
+  }
   if (typeOnly) {
     return typeImportError(file, specifier, false);
   }

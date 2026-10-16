@@ -106,6 +106,34 @@ const toDiagnostic = (diagnostic: ts.Diagnostic): Diagnostic | undefined => {
   return result;
 };
 
+/**
+ * Whether an App file's import of `name` may resolve where it did: to
+ * one of the App's files by a relative path or by the `#grasp` mapping,
+ * or by name to one of the modules `allowed` lists. Whatever the syntax
+ * that names it (an ambient module's import, a re-export, a pragma), an
+ * App file reaches nothing else of the kit: not its packages' own files
+ * by path, not a module the kit holds but doesn't give the App. The
+ * kit's own files resolve as TypeScript does.
+ */
+const resolvesWithin = (
+  name: string,
+  resolved: ts.ResolvedModuleFull | undefined,
+  app: ReadonlyMap<string, string>,
+  allowed: ReadonlySet<string>
+): boolean => {
+  if (resolved === undefined) {
+    return false;
+  }
+  if (app.has(resolved.resolvedFileName)) {
+    return (
+      name.startsWith("./") ||
+      name.startsWith("../") ||
+      name === screenReferences.specifier
+    );
+  }
+  return allowed.has(name);
+};
+
 /** Where `/// <reference path>` in `file` points: a path from the App's root. */
 const referencedPath = (file: string, reference: string): string => {
   const parts = reference.startsWith("/") ? [] : file.split("/").slice(0, -1);
@@ -163,7 +191,8 @@ const referenceErrors = (
  */
 export const typeCheck = (
   appFiles: Record<string, string>,
-  kitTypes: Record<string, string>
+  kitTypes: Record<string, string>,
+  allowed?: ReadonlySet<string>
 ): Diagnostic[] => {
   const kit = kitOf(kitTypes);
   const app = new Map(
@@ -209,6 +238,33 @@ export const typeCheck = (
       return kit.directories.has(directory) || appDirectories.has(directory);
     },
     getDirectories: () => [],
+    ...(allowed === undefined
+      ? {}
+      : {
+          resolveModuleNameLiterals: (
+            literals,
+            containingFile,
+            redirectedReference,
+            options
+          ) =>
+            literals.map(({ text }) => {
+              const { resolvedModule } = ts.resolveModuleName(
+                text,
+                containingFile,
+                options,
+                host,
+                undefined,
+                redirectedReference
+              );
+              return {
+                resolvedModule:
+                  !app.has(containingFile) ||
+                  resolvesWithin(text, resolvedModule, app, allowed)
+                    ? resolvedModule
+                    : undefined,
+              };
+            }),
+        }),
   };
   const program = ts.createProgram([...app.keys()], compilerOptions, host);
   const checked = program

@@ -203,7 +203,7 @@ const compileFile = (
   for (const site of imports) {
     // A type may also name the App's declarations (`typeFiles`).
     const message = site.typeOnly
-      ? screenTypeImportError(site.specifier, path, typeFiles, kit)
+      ? screenTypeImportError(site, path, typeFiles, kit)
       : importError(site, path, files, kit);
     if (message !== undefined) {
       errors.push(
@@ -252,8 +252,9 @@ const declarationImportErrors = (
     const message = messageIn(path, error);
     return [problem("compile", message, { file: path, ...locationOf(error) })];
   }
-  return imports.flatMap(({ specifier, line }) => {
-    const message = screenTypeImportError(specifier, path, typeFiles, kit);
+  return imports.flatMap((site) => {
+    const { line } = site;
+    const message = screenTypeImportError(site, path, typeFiles, kit);
     return message === undefined
       ? []
       : [
@@ -336,6 +337,17 @@ const buildCss = async (
 };
 
 /**
+ * What a screen's type check resolves an App file's imports to by name:
+ * the kit's modules, its icons, and the JSX runtime the compile names.
+ * Nothing else of the kit, however a file names it (type-check.ts).
+ */
+const screenModules: ReadonlySet<string> = new Set([
+  ...kit.imports,
+  "lucide-react",
+  "react/jsx-runtime",
+]);
+
+/**
  * Type-checks the App against the kit's types and lints it against the
  * kit's design system.
  */
@@ -349,7 +361,7 @@ export const checkScreens = (files: Record<string, string>): Diagnostic[] => {
   const own = Object.fromEntries(
     Object.entries(app).filter(([path]) => path !== screenReferences.path)
   );
-  return [...typeCheck(app, kit.types), ...lint(own, kit)];
+  return [...typeCheck(app, kit.types, screenModules), ...lint(own, kit)];
 };
 
 /**
@@ -464,8 +476,13 @@ const compileCodeFile = (
       ],
     };
   }
-  const errors = imports.flatMap(({ specifier, line, typeOnly }) => {
-    const message = codeImportError(kind, { specifier, typeOnly }, path, files);
+  const errors = imports.flatMap(({ specifier, line, typeOnly, ambient }) => {
+    const message = codeImportError(
+      kind,
+      { specifier, typeOnly, ambient },
+      path,
+      files
+    );
     return message === undefined
       ? []
       : [
@@ -634,8 +651,12 @@ const compileAppCodeFile = (
       ],
     };
   }
-  const errors = imports.flatMap(({ specifier, line, typeOnly }) => {
-    // A type is erased: held only to what no App code may name.
+  const errors = imports.flatMap(({ specifier, line, typeOnly, ambient }) => {
+    // A type is erased: held only to what no App code may name. An ambient
+    // module's types are stripped with the rest (GRA-675 checks them).
+    if (ambient) {
+      return [];
+    }
     const resolved = typeOnly
       ? typeImportErrorAsResult(path, specifier)
       : appCodeImport(path, specifier, files);
