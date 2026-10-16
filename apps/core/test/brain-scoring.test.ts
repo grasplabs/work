@@ -612,6 +612,7 @@ describe("summarising and comparing arms", () => {
 const request = (...calls: string[]) => ({
   url: "https://gateway.test/v1/messages",
   headers: new Headers(),
+  signal: new AbortController().signal,
   body: {
     messages: [
       { role: "user", content: "Who owns the lease?" },
