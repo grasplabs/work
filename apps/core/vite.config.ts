@@ -121,6 +121,7 @@ export const coreProject = (
   test: UserWorkspaceConfig["test"],
   {
     sandboxSocket,
+    bindings = {},
   }: {
     /**
      * For the on-prem project: the sandbox supervisor's socket, read when
@@ -128,6 +129,8 @@ export const coreProject = (
      * binds it, instead of running App code unbounded.
      */
     sandboxSocket?: () => string;
+    /** Bindings a project adds to the tests' env, such as a run's size. */
+    bindings?: Record<string, unknown>;
   } = {}
 ) =>
   defineProject({
@@ -235,6 +238,7 @@ export const coreProject = (
             CORE_MIGRATIONS: coreMigrations,
             KNOWLEDGE_MIGRATIONS: knowledgeMigrations,
             CONNECT_MIGRATIONS: connectMigrations,
+            ...bindings,
           },
           // Connect's database, as CONNECT_DB, so the setup can migrate it.
           d1Databases: { CONNECT_DB: "grasp-os-connect" },
@@ -301,6 +305,9 @@ export default coreProject({
     ...screenTests,
     // With the sandbox supervisor bound: vite.on-prem.config.ts.
     "test/on-prem/**",
+    // The Brain baseline's larger scale sizes, on request only:
+    // vite.brain-scale.config.ts.
+    "test/brain-scale-sizes.test.ts",
     "build-blueprints.test.ts",
     "host-json.bundle.test.ts",
   ],

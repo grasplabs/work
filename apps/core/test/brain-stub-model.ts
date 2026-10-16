@@ -27,6 +27,8 @@ export type StubTurn =
       task: BrainTask;
       /** The agent arm: no sources given, so it searches for them. */
       searches: boolean;
+      /** The trial's arm or control, for a provider that reports by arm. */
+      arm?: string;
     };
 
 /** Sections each search reads, in the agent arm as in the full-text arm. */
