@@ -1307,7 +1307,7 @@ const publish = async (
     throw workflowResourceErrors.create("workflow.version_conflict");
   }
   // Generated and built once, here: no start or resume compiles anything.
-  const compiled = await compileWorkflow(env, checked, definition);
+  const compiled = await compileWorkflow(env, checked, definition, workflow.id);
   try {
     return await writeVersion(env, by, {
       workflow,

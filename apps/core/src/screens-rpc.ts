@@ -241,7 +241,7 @@ const openScreen = async (
     version,
     await versionFiles(env, id, version)
   );
-  const built = await screenCode(env, files, screen, version);
+  const built = await screenCode(env, files, screen, version, id);
   const { artifact } = built;
   // What it builds to now, refused or not: a fact about the version, for
   // what waits on an admin (screen-builds.ts).

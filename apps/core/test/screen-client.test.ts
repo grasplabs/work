@@ -841,7 +841,8 @@ describe("a screen's build", { timeout: 120_000 }, () => {
         appIdSchema.parse(id),
         version,
         await versionFiles(env, appIdSchema.parse(id), version)
-      )
+      ),
+      "app-test"
     );
     return build.diagnostics
       .filter(({ severity }) => severity === "error")
@@ -861,7 +862,8 @@ describe("a screen's build", { timeout: 120_000 }, () => {
           appIdSchema.parse(opened.app),
           opened.release.manifest.resourceVersion
         )
-      )
+      ),
+      "app-test"
     );
     if (!build.ok) {
       throw new Error("The screen didn't build");

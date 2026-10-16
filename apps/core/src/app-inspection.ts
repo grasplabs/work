@@ -74,9 +74,11 @@ const buildDetails = (diagnostics: readonly Diagnostic[]) => ({
  */
 export const builtCode = async (
   env: Env,
-  files: Readonly<Record<string, string>>
+  files: Readonly<Record<string, string>>,
+  /** Whose code it is: the App's ID. */
+  app: string
 ): Promise<Record<string, string>> => {
-  const build = await buildAppCode(env, { ...files });
+  const build = await buildAppCode(env, { ...files }, app);
   if (!build.ok) {
     throw versionErrors.create(
       "version.build_failed",
@@ -155,7 +157,9 @@ export const readManifest = (text: string): AppManifest => {
  */
 export const filesManifest = async (
   env: Env,
-  files: Readonly<Record<string, string>>
+  files: Readonly<Record<string, string>>,
+  /** Whose code it is: the App's ID. */
+  app: string
 ): Promise<AppManifest> => {
   const sdk = await serverSdkModules(env.ASSETS);
   const code = {
@@ -172,7 +176,7 @@ export const filesManifest = async (
   if (cached) {
     return readManifest(await cached.text());
   }
-  const symbolic = await builtCode(env, code);
+  const symbolic = await builtCode(env, code, app);
   const text = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(text);
   await env.FILES.put(cacheKey, text);

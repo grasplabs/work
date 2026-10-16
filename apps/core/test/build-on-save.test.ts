@@ -94,13 +94,19 @@ describe("building on save", { timeout: 60_000 }, () => {
       workflows: { status: "ok", diagnostics: [] },
     });
     // Opening, calling and running it load what the save built.
-    await expect(buildScreens(unbuilt, files)).resolves.toMatchObject({
+    await expect(
+      buildScreens(unbuilt, files, "app-test")
+    ).resolves.toMatchObject({
       ok: true,
     });
-    await expect(buildServer(unbuilt, files)).resolves.toMatchObject({
+    await expect(
+      buildServer(unbuilt, files, "app-test")
+    ).resolves.toMatchObject({
       ok: true,
     });
-    await expect(buildWorkflows(unbuilt, files)).resolves.toMatchObject({
+    await expect(
+      buildWorkflows(unbuilt, files, "app-test")
+    ).resolves.toMatchObject({
       ok: true,
     });
   });
@@ -183,7 +189,7 @@ export class App {}
       },
     });
     const files = await versionFiles(env, appIdSchema.parse(app), 1);
-    await expect(buildScreens(env, files)).resolves.toMatchObject({
+    await expect(buildScreens(env, files, "app-test")).resolves.toMatchObject({
       ok: true,
     });
   });
@@ -227,7 +233,11 @@ export class App {}
     );
     // Still held: the build that didn't finish has cached nothing, so its
     // first use builds it anew.
-    const firstUse = await buildScreens({ ...env, LOADER: counting }, files);
+    const firstUse = await buildScreens(
+      { ...env, LOADER: counting },
+      files,
+      "app-test"
+    );
     held.resolve(true);
 
     expect({ builds, firstUse: firstUse.ok, rebuilt: built > 0 }).toStrictEqual(
@@ -357,7 +367,8 @@ export class App {}
         { ...env, FILES: holding, BUILD_WAIT_MS: "50" },
         files,
         "desk",
-        1
+        1,
+        "app-test"
       )
     );
     held.resolve(true);

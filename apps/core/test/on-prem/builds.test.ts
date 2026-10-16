@@ -1,10 +1,13 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { builderOwner } from "../../src/platform-sandbox.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
+import { buildOnSave } from "../../src/save-builds.ts";
 import { buildScreens, buildServer } from "../../src/screens.ts";
+import { server, workflowFiles } from "../workflow-apps.ts";
 
 // The screen compiler on-prem: it runs on the sandbox host this project
 // starts (src/platform-sandbox.ts), never in core's own process, whose
@@ -63,7 +66,7 @@ const answerTime = async (): Promise<number> => {
 
 describe("the screen compiler on-prem", () => {
   it("builds an App's screens on the sandbox host, not in core", async () => {
-    const built = await buildScreens(onPrem, screen(""));
+    const built = await buildScreens(onPrem, screen(""), "app-test");
 
     expect({
       ok: built.ok,
@@ -72,9 +75,13 @@ describe("the screen compiler on-prem", () => {
   });
 
   it("builds an App's server code on the sandbox host", async () => {
-    const built = await buildServer(onPrem, {
-      "app/server.ts": `import { DurableObject } from "cloudflare:workers";\n\nexport class App extends DurableObject {\n  book(): string {\n    return "booked";\n  }\n}\n`,
-    });
+    const built = await buildServer(
+      onPrem,
+      {
+        "app/server.ts": `import { DurableObject } from "cloudflare:workers";\n\nexport class App extends DurableObject {\n  book(): string {\n    return "booked";\n  }\n}\n`,
+      },
+      "app-test"
+    );
 
     expect(built.ok).toBeTruthy();
   });
@@ -82,7 +89,8 @@ describe("the screen compiler on-prem", () => {
   it("says what fails to type-check, as it does on Cloudflare", async () => {
     const built = await buildScreens(
       onPrem,
-      screen('export const count: number = "seven";')
+      screen('export const count: number = "seven";'),
+      "app-test"
     );
 
     expect(built.ok ? [] : built.diagnostics.map(({ rule }) => rule)).toContain(
@@ -94,7 +102,8 @@ describe("the screen compiler on-prem", () => {
     const started = Date.now();
     const building = buildScreens(
       { ...onPrem, SANDBOX_DEADLINE_MS: String(DEADLINE_MS) },
-      screen(recursiveTypes)
+      screen(recursiveTypes),
+      "app-test"
     );
     // Asked while the checker spins on the sandbox host.
     await scheduler.wait(DEADLINE_MS / 2);
@@ -128,10 +137,10 @@ describe("the screen compiler on-prem", () => {
     const files = screen(`${recursiveTypes}\n// viewed`);
     // Three views at once, then one more once they're done.
     const views = await Promise.all(
-      [1, 2, 3].map(async () => await buildScreens(counting, files))
+      [1, 2, 3].map(async () => await buildScreens(counting, files, "app-test"))
     );
     const started = Date.now();
-    const later = await buildScreens(counting, files);
+    const later = await buildScreens(counting, files, "app-test");
     const tookLater = Date.now() - started;
 
     expect(
@@ -163,8 +172,16 @@ describe("the screen compiler on-prem", () => {
         connect: env.ASSETS.connect.bind(env.ASSETS),
       },
     };
-    const first = await buildScreens(counting, screen("// first read"));
-    const second = await buildScreens(counting, screen("// second read"));
+    const first = await buildScreens(
+      counting,
+      screen("// first read"),
+      "app-test"
+    );
+    const second = await buildScreens(
+      counting,
+      screen("// second read"),
+      "app-test"
+    );
 
     expect({ first: first.ok, second: second.ok, read }).toStrictEqual({
       first: true,
@@ -173,13 +190,58 @@ describe("the screen compiler on-prem", () => {
     });
   });
 
-  it("refuses a build as no place in the sandbox, before it started, while the builders' share is held", async () => {
+  it("refuses a build as no place in the sandbox, before it started, while the builders' share is held past the build wait", async () => {
     // Two processes here, so the builders' share is one: a call of theirs
-    // that spins holds it to its deadline, past a build's wait for a place.
+    // that spins holds it to its deadline, past the build's asks for a
+    // place, which go on for the build wait (15 s).
     const host = env.SANDBOX_HOST;
     if (host === undefined) {
       throw new Error("The on-prem project binds SANDBOX_HOST.");
     }
+    const holding = runInSession(host, {
+      mainModule: "m.js",
+      modules: {
+        "m.js":
+          'import { WorkerEntrypoint } from "cloudflare:workers";\nexport class E extends WorkerEntrypoint { async go() { for (;;) {} } }',
+      },
+      entrypoint: "E",
+      method: "go",
+      args: [],
+      cpuMs: 30_000,
+      wallMs: 25_000,
+      owner: builderOwner,
+    });
+    await scheduler.wait(500);
+    const asked = Date.now();
+    let refused: unknown;
+    try {
+      await buildScreens(onPrem, screen("// waits for a place"), "app-test");
+    } catch (error) {
+      refused = error;
+    }
+    const askedFor = Date.now() - asked;
+    await expect(holding).rejects.toThrow("ran past its time");
+
+    expect({
+      unavailable: refused instanceof SandboxUnavailableError,
+      status: refused instanceof SandboxUnavailableError && refused.status,
+      started: refused instanceof SandboxUnavailableError && refused.started,
+      // Asked again for most of the build wait (15 s), no ask past it.
+      askedForTheWait: askedFor > 8000 && askedFor < 15_000,
+    }).toStrictEqual({
+      unavailable: true,
+      status: 429,
+      started: false,
+      askedForTheWait: true,
+    });
+  }, 60_000);
+
+  it("builds once a place held a moment, past one ask's wait, comes free: it asks again", async () => {
+    const host = env.SANDBOX_HOST;
+    if (host === undefined) {
+      throw new Error("The on-prem project binds SANDBOX_HOST.");
+    }
+    // The builders' one place, held past one ask's wait (3 s).
     const holding = runInSession(host, {
       mainModule: "m.js",
       modules: {
@@ -194,27 +256,86 @@ describe("the screen compiler on-prem", () => {
       owner: builderOwner,
     });
     await scheduler.wait(500);
-    let refused: unknown;
-    try {
-      await buildScreens(onPrem, screen("// waits for a place"));
-    } catch (error) {
-      refused = error;
-    }
-    await expect(holding).rejects.toThrow("ran past its time");
+    // Settled together: the holder ends while the build waits.
+    const [held, built] = await Promise.allSettled([
+      holding,
+      buildScreens(
+        onPrem,
+        screen(`// waits a moment ${crypto.randomUUID()}`),
+        "app-test"
+      ),
+    ]);
 
     expect({
-      unavailable: refused instanceof SandboxUnavailableError,
-      status: refused instanceof SandboxUnavailableError && refused.status,
-      started: refused instanceof SandboxUnavailableError && refused.started,
-    }).toStrictEqual({ unavailable: true, status: 429, started: false });
+      heldToItsDeadline:
+        held.status === "rejected" &&
+        String(held.reason).includes("ran past its time"),
+      built: built.status === "fulfilled" && built.value.ok,
+    }).toStrictEqual({ heldToItsDeadline: true, built: true });
   }, 60_000);
+
+  it("builds a fresh save's screens, server and workflows, its compiles waiting for the App's part of the builders' share", async () => {
+    // Fresh, so nothing is read from the cache: three compiles at once,
+    // where the App's part of the share is one place.
+    const fresh = crypto.randomUUID();
+    const saved = await buildOnSave(onPrem, {
+      app: appIdSchema.parse("app-on-prem-save"),
+      version: 1,
+      files: {
+        ...screen(`// ${fresh}`),
+        "app/server.ts": `${server}\n// ${fresh}\n`,
+        ...workflowFiles(
+          "single",
+          `  return await step.do("only", { description: "${fresh}" }, async () => "done");`
+        ),
+      },
+    });
+
+    expect({
+      screens: saved.screens.status,
+      server: saved.server.status,
+      workflows: saved.workflows.status,
+    }).toStrictEqual({ screens: "ok", server: "ok", workflows: "ok" });
+  }, 90_000);
+
+  it("asks again while refused, and builds another App's same files in its own part", async () => {
+    // A sandbox that refuses every session as busy, a moment after each
+    // ask, and says whose each ask was.
+    const asks: string[] = [];
+    const refusing: Fetcher = {
+      connect: () => {
+        throw new Error("The sandbox takes no sockets.");
+      },
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).pathname !== "/session") {
+          return Response.json({});
+        }
+        const whose = request.headers.get("x-grasp-sandbox-sub-owner") ?? "";
+        asks.push(whose);
+        await scheduler.wait(200);
+        return new Response("busy", { status: 429 });
+      },
+    };
+    const refused = { ...onPrem, SANDBOX_HOST: refusing };
+    const same = screen(`// the same ${crypto.randomUUID()}`);
+    await Promise.allSettled([
+      buildScreens(refused, same, "app-a"),
+      buildScreens(refused, same, "app-b"),
+    ]);
+
+    expect({
+      appAAskedAgain: asks.filter((whose) => whose === "app-a").length > 2,
+      appBAskedItself: asks.includes("app-b"),
+    }).toStrictEqual({ appAAskedAgain: true, appBAskedItself: true });
+  }, 90_000);
 
   it("builds the same screen again once the sandbox stopped it at its deadline, as that stop isn't cached", async () => {
     const files = screen(`${recursiveTypes}\n// again`);
     const stopped = { ...onPrem, SANDBOX_DEADLINE_MS: "1500" };
-    const first = await buildScreens(stopped, files);
+    const first = await buildScreens(stopped, files, "app-test");
     const started = Date.now();
-    const second = await buildScreens(stopped, files);
+    const second = await buildScreens(stopped, files, "app-test");
 
     expect({ first: first.ok, second: second.ok }).toStrictEqual({
       first: false,

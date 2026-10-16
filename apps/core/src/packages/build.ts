@@ -1062,12 +1062,13 @@ export const buildDependencies = async (
 ): Promise<PackageBuild> => {
   // As in resolveDependencies (resolve.ts): only where the builder is
   // bounded (builder.ts), refused before any tarball is fetched.
-  const builder = packageBuilder(env);
+  const builderOf = packageBuilder(env);
   const asked = dependencyErrors.parse(
     "dependency.invalid",
     packageBuildRequestSchema,
     input
   );
+  const builder = builderOf(asked.app);
   if (by.staff) {
     throw dependencyErrors.create("dependency.forbidden");
   }

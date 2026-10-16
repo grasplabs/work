@@ -144,7 +144,8 @@ export default {
               { ...env, SANDBOX_HOST: undefined },
               {
                 "screens/home.tsx": "export default () => null;",
-              }
+              },
+              "app-test"
             )
         )
       );

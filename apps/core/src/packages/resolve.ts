@@ -808,12 +808,13 @@ export const resolveDependencies = async (
   // Dynamic Worker whose CPU the runtime bounds, on-prem on the sandbox
   // host (builder.ts). Where neither bounds it, nothing resolves, refused
   // before any tarball is fetched.
-  const builder = packageBuilder(env);
+  const builderOf = packageBuilder(env);
   const intent = dependencyErrors.parse(
     "dependency.invalid",
     dependencyIntentSchema,
     input
   );
+  const builder = builderOf(intent.app);
   if (by.staff) {
     throw dependencyErrors.create("dependency.forbidden");
   }

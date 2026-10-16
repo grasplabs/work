@@ -272,7 +272,11 @@ describe("the built-in blueprints", () => {
         Object.keys(blueprint.files).some((path) => path.startsWith("screens/"))
       ) {
         // oxlint-disable-next-line no-await-in-loop -- as above
-        const screens = await buildScreens(env, { ...blueprint.files });
+        const screens = await buildScreens(
+          env,
+          { ...blueprint.files },
+          "app-test"
+        );
         if (!screens.ok || screens.diagnostics.length > 0) {
           throw new Error(
             `The screens of ${blueprint.id} don't pass: ${JSON.stringify(screens.diagnostics)}`

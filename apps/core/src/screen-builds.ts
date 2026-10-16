@@ -69,7 +69,7 @@ export const recordVersionBuilds = async (
     return name === undefined ? [] : [name];
   });
   try {
-    const codeOf = await versionScreens(env, files, version);
+    const codeOf = await versionScreens(env, files, version, app);
     const built = await Promise.all(
       screens.map(async (name) => await codeOf(name))
     );
