@@ -184,7 +184,8 @@ const compiled = async (
 };
 
 /**
- * The builds running now in this isolate, by their cache key: a build
+ * The builds running now in this isolate, by whose build and its cache
+ * key: a build
  * asked for while the same one runs waits for it rather than start the
  * compiler again, so views of one App's screen take one place in the
  * sandbox, not one each. A build whose request was cancelled never
@@ -233,7 +234,10 @@ const cachedBuild = async <Build>(
   }
   const built = await sharedRun(
     buildsRunning,
-    cacheKey,
+    // One sub-owner's: another App building the same files builds them in
+    // its own part of the builder's share, never on this one's (or with
+    // its refusal). The cache itself is by content alone.
+    `${whose}\n${cacheKey}`,
     runner.callMs("compiler"),
     async () => {
       const answer = await compiled(runner, kind, files);

@@ -67,6 +67,8 @@ describe("the package builder on the on-prem sandbox", () => {
   /** A pool of four, so the builder's share is two: one each for two Apps. */
   let wide: SandboxSupervisor;
   let wideUrl: string;
+  /** A second core isolate on that pool: core takes one App's builds in turns only within an isolate. */
+  let otherUrl: string;
 
   beforeAll(async () => {
     supervisor = await startSandboxSupervisor({
@@ -102,6 +104,7 @@ describe("the package builder on the on-prem sandbox", () => {
       log: () => {},
     });
     wideUrl = await standIn(wide.socket);
+    otherUrl = await standIn(wide.socket);
   }, 300_000);
 
   afterAll(async () => {
@@ -277,54 +280,46 @@ describe("the package builder on the on-prem sandbox", () => {
     ).toBe(1);
   }, 60_000);
 
-  it("holds builds to one owner's share of the pool: past it, the builder is busy, not the package's fault", async () => {
-    // Two processes, so one owner holds one: the second call waits for the
-    // first's place, gives up while it's held, and is busy.
-    const first = call("builder=busy");
+  it("holds builds to one owner's share of the pool: past it, a build waits for a place, then runs, never the package's fault", async () => {
+    // Two processes, so the builders hold one: the second build, another
+    // App's in another isolate of core, asks again until the first's place
+    // comes free, then runs to its own deadline.
+    const first = call("builder=busy&app=app-first");
     await sleep(500);
-    const second = await call("builder=busy");
+    const second = await call("builder=busy&app=app-second");
 
     expect({
-      status: second.status,
-      httpStatus: second.httpStatus,
-    }).toStrictEqual({ status: "unavailable", httpStatus: 429 });
+      second: second.status,
+      waitedForTheFirst: second.ms > DEADLINE_MS,
+    }).toStrictEqual({ second: "bound", waitedForTheFirst: true });
     await expect(first).resolves.toMatchObject({ status: "bound" });
   }, 60_000);
 
   it("holds one App's builds to part of the builders' share, so another App's build still runs", async () => {
-    // The builders' share of four processes is two; one App holds one of
-    // them and has one more waiting for it, at most.
+    // The builders' share of four processes is two. One App's build holds
+    // one; its build from another isolate of core waits for that one.
     const held = call("builder=busy&app=app-a", "/inspect", wideUrl);
-    // Each admitted before the next is asked: a place, then a waiter.
     await expect
       .poll(() => wide.stats().subOwnerPlaces, { timeout: 5000, interval: 50 })
       .toBe(1);
-    const waiting = call("builder=busy&app=app-a", "/inspect", wideUrl);
+    const waiting = call("builder=busy&app=app-a", "/inspect", otherUrl);
     await expect
       .poll(() => wide.stats().waitingForOwners, {
-        timeout: 2000,
+        timeout: 5000,
         interval: 50,
       })
       .toBe(1);
-    const past = await call("builder=busy&app=app-a", "/inspect", wideUrl);
     // The other place is another App's, while the first App's builds hold
     // theirs and wait.
     const other = await call("builder=busy&app=app-b", "/inspect", wideUrl);
     const [first, second] = await Promise.all([held, waiting]);
 
     expect({
-      past: { status: past.status, httpStatus: past.httpStatus },
-      pastAtOnce: past.ms < ANSWER_MS,
       other: other.status,
       held: first.status,
+      // It asked again until the App's place came free, then ran.
       waiting: second.status,
-    }).toStrictEqual({
-      past: { status: "unavailable", httpStatus: 429 },
-      pastAtOnce: true,
-      other: "bound",
-      held: "bound",
-      waiting: "unavailable",
-    });
+    }).toStrictEqual({ other: "bound", held: "bound", waiting: "bound" });
     // Every App's place given back once its process is gone.
     await expect
       .poll(() => wide.stats().subOwnerPlaces, { timeout: 5000, interval: 100 })

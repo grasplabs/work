@@ -1,10 +1,13 @@
+import { appIdSchema } from "@grasp-os/shared/ids";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import { builderOwner } from "../../src/platform-sandbox.ts";
 import { runInSession } from "../../src/sandbox-session.ts";
 import { SandboxUnavailableError } from "../../src/sandboxed.ts";
+import { buildOnSave } from "../../src/save-builds.ts";
 import { buildScreens, buildServer } from "../../src/screens.ts";
+import { server, workflowFiles } from "../workflow-apps.ts";
 
 // The screen compiler on-prem: it runs on the sandbox host this project
 // starts (src/platform-sandbox.ts), never in core's own process, whose
@@ -187,13 +190,57 @@ describe("the screen compiler on-prem", () => {
     });
   });
 
-  it("refuses a build as no place in the sandbox, before it started, while the builders' share is held", async () => {
+  it("refuses a build as no place in the sandbox, before it started, while the builders' share is held past the build wait", async () => {
     // Two processes here, so the builders' share is one: a call of theirs
-    // that spins holds it to its deadline, past a build's wait for a place.
+    // that spins holds it to its deadline, past the build's asks for a
+    // place, which go on for the build wait (15 s).
     const host = env.SANDBOX_HOST;
     if (host === undefined) {
       throw new Error("The on-prem project binds SANDBOX_HOST.");
     }
+    const holding = runInSession(host, {
+      mainModule: "m.js",
+      modules: {
+        "m.js":
+          'import { WorkerEntrypoint } from "cloudflare:workers";\nexport class E extends WorkerEntrypoint { async go() { for (;;) {} } }',
+      },
+      entrypoint: "E",
+      method: "go",
+      args: [],
+      cpuMs: 30_000,
+      wallMs: 25_000,
+      owner: builderOwner,
+    });
+    await scheduler.wait(500);
+    const asked = Date.now();
+    let refused: unknown;
+    try {
+      await buildScreens(onPrem, screen("// waits for a place"), "app-test");
+    } catch (error) {
+      refused = error;
+    }
+    const askedFor = Date.now() - asked;
+    await expect(holding).rejects.toThrow("ran past its time");
+
+    expect({
+      unavailable: refused instanceof SandboxUnavailableError,
+      status: refused instanceof SandboxUnavailableError && refused.status,
+      started: refused instanceof SandboxUnavailableError && refused.started,
+      askedForTheWait: askedFor > 12_000,
+    }).toStrictEqual({
+      unavailable: true,
+      status: 429,
+      started: false,
+      askedForTheWait: true,
+    });
+  }, 60_000);
+
+  it("builds once a place held a moment, past one ask's wait, comes free: it asks again", async () => {
+    const host = env.SANDBOX_HOST;
+    if (host === undefined) {
+      throw new Error("The on-prem project binds SANDBOX_HOST.");
+    }
+    // The builders' one place, held past one ask's wait (3 s).
     const holding = runInSession(host, {
       mainModule: "m.js",
       modules: {
@@ -208,20 +255,98 @@ describe("the screen compiler on-prem", () => {
       owner: builderOwner,
     });
     await scheduler.wait(500);
-    let refused: unknown;
-    try {
-      await buildScreens(onPrem, screen("// waits for a place"), "app-test");
-    } catch (error) {
-      refused = error;
-    }
-    await expect(holding).rejects.toThrow("ran past its time");
+    // Settled together: the holder ends while the build waits.
+    const [held, built] = await Promise.allSettled([
+      holding,
+      buildScreens(
+        onPrem,
+        screen(`// waits a moment ${crypto.randomUUID()}`),
+        "app-test"
+      ),
+    ]);
 
     expect({
-      unavailable: refused instanceof SandboxUnavailableError,
-      status: refused instanceof SandboxUnavailableError && refused.status,
-      started: refused instanceof SandboxUnavailableError && refused.started,
-    }).toStrictEqual({ unavailable: true, status: 429, started: false });
+      heldToItsDeadline:
+        held.status === "rejected" &&
+        String(held.reason).includes("ran past its time"),
+      built: built.status === "fulfilled" && built.value.ok,
+    }).toStrictEqual({ heldToItsDeadline: true, built: true });
   }, 60_000);
+
+  it("builds a fresh save's screens, server and workflows, its compiles taking turns for the App's part of the builders' share", async () => {
+    // Fresh, so nothing is read from the cache: three compiles at once,
+    // where the App's part of the share is one place.
+    const fresh = crypto.randomUUID();
+    const saved = await buildOnSave(onPrem, {
+      app: appIdSchema.parse("app-on-prem-save"),
+      version: 1,
+      files: {
+        ...screen(`// ${fresh}`),
+        "app/server.ts": `${server}\n// ${fresh}\n`,
+        ...workflowFiles(
+          "single",
+          `  return await step.do("only", { description: "${fresh}" }, async () => "done");`
+        ),
+      },
+    });
+
+    expect({
+      screens: saved.screens.status,
+      server: saved.server.status,
+      workflows: saved.workflows.status,
+    }).toStrictEqual({ screens: "ok", server: "ok", workflows: "ok" });
+  }, 90_000);
+
+  it("takes one App's builds in turns, asks again while refused, and builds another App's same files in its own part", async () => {
+    // A sandbox that refuses every session as busy, a moment after each
+    // ask, and says whose each ask was and how many of an App's were open
+    // at once.
+    const asks: string[] = [];
+    const open = new Map<string, number>();
+    const mostOpen = new Map<string, number>();
+    const refusing: Fetcher = {
+      connect: () => {
+        throw new Error("The sandbox takes no sockets.");
+      },
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).pathname !== "/session") {
+          return Response.json({});
+        }
+        const whose = request.headers.get("x-grasp-sandbox-sub-owner") ?? "";
+        asks.push(whose);
+        open.set(whose, (open.get(whose) ?? 0) + 1);
+        mostOpen.set(
+          whose,
+          Math.max(mostOpen.get(whose) ?? 0, open.get(whose) ?? 0)
+        );
+        await scheduler.wait(200);
+        open.set(whose, (open.get(whose) ?? 1) - 1);
+        return new Response("busy", { status: 429 });
+      },
+    };
+    const refused = { ...onPrem, SANDBOX_HOST: refusing };
+    const same = screen(`// the same ${crypto.randomUUID()}`);
+    await Promise.allSettled([
+      buildScreens(refused, same, "app-a"),
+      buildServer(
+        refused,
+        { "app/server.ts": `${server}\n// ${crypto.randomUUID()}\n` },
+        "app-a"
+      ),
+      buildScreens(refused, same, "app-b"),
+    ]);
+
+    expect({
+      appAOneAtATime: mostOpen.get("app-a"),
+      appAAskedAgain: asks.filter((whose) => whose === "app-a").length > 2,
+      appBAskedItself: asks.includes("app-b"),
+    }).toStrictEqual({
+      appAOneAtATime: 1,
+      appAAskedAgain: true,
+      appBAskedItself: true,
+    });
+  }, 90_000);
 
   it("builds the same screen again once the sandbox stopped it at its deadline, as that stop isn't cached", async () => {
     const files = screen(`${recursiveTypes}\n// again`);

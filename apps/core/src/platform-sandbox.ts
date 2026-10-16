@@ -10,6 +10,7 @@ import type { PlatformCode } from "@grasp-os/compiler";
 
 import {
   functionCapability,
+  noPlaceOf,
   runInSession,
   sandboxVerdictOf,
   sessionCallMs,
@@ -70,7 +71,12 @@ import { callStub, SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
 //   core's own record), sent as the session's sub-owner; the supervisor
 //   holds one sub-owner to part of its owner's share, places and waiting
 //   room both (`maxPerSubOwner`, half of it, at least one), leaving the
-//   rest to other Apps. Only core reaches the supervisor's socket, so no
+//   rest to other Apps. One App's own builds in an isolate run one at a
+//   time (`inTurn`), and a build with no place asks again within the
+//   build wait (`askingForPlace`), so a save's three compiles queue for
+//   the App's part rather than be refused. The part is per App, not per
+//   author: an App's builders share it (accepted, GRA-563). Only core
+//   reaches the supervisor's socket, so no
 //   App names another's sub-owner. Enforced there rather than in core,
 //   where builds run in many isolates and objects, and with no queue of
 //   its own: the supervisor holds the places already.
@@ -382,8 +388,77 @@ const sessionArgs = (args: readonly unknown[]): SessionArgument[] =>
   );
 
 /**
+ * How long a build asks again for a place in the builder's share while it
+ * has none (`noPlaceOf`): as long as a caller waits for a build at most
+ * (screens.ts, `buildWaitMs`), so a compile its own App's other builds
+ * hold up waits its turn rather than fail.
+ */
+const placeWaitMs = 15_000;
+
+/** The longest a build waits between asks for a place. */
+const placeRetryMs = 2000;
+
+/**
+ * The end of the turn of each sub-owner's build running or queued in this
+ * isolate: one App's builds here run one at a time (`inTurn`).
+ */
+const buildTurns = new Map<string, Promise<void>>();
+
+/**
+ * Runs `build` once `whose` builds before it in this isolate have ended:
+ * one save's compiles (screens, server and workflows at once) queue here
+ * rather than ask the supervisor for more of the App's part of the share
+ * than it gives one App, and be refused.
+ */
+const inTurn = async <T>(
+  whose: string,
+  build: () => Promise<T>
+): Promise<T> => {
+  const before = buildTurns.get(whose) ?? Promise.resolve();
+  const { promise: ended, resolve: end } = Promise.withResolvers<null>();
+  const turn = (async (): Promise<void> => {
+    await before;
+    await ended;
+  })();
+  buildTurns.set(whose, turn);
+  try {
+    await before;
+    return await build();
+  } finally {
+    end(null);
+    if (buildTurns.get(whose) === turn) {
+      buildTurns.delete(whose);
+    }
+  }
+};
+
+/**
+ * Runs `build`, asking again while the supervisor has no place for it
+ * (`noPlaceOf`: refused before anything ran, so nothing it was handed was
+ * read), backing off up to {@link placeRetryMs}, for up to
+ * {@link placeWaitMs}: the App's other builds, in other isolates, may hold
+ * its part of the share for a moment.
+ */
+const askingForPlace = async <T>(build: () => Promise<T>): Promise<T> => {
+  const until = Date.now() + placeWaitMs;
+  for (let wait = 250; ; wait = Math.min(wait * 2, placeRetryMs)) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one ask at a time
+      return await build();
+    } catch (error) {
+      if (!noPlaceOf(error) || Date.now() + wait > until) {
+        throw error;
+      }
+    }
+    // oxlint-disable-next-line no-await-in-loop -- backing off between asks
+    await scheduler.wait(wait);
+  }
+};
+
+/**
  * The runner on the sandbox host: a session for each call, as
- * `platform:builder`, each of `whose` builds within its share.
+ * `platform:builder`, each of `whose` builds within its share, one at a
+ * time in this isolate and asking again for a place while it has none.
  */
 const onHost = (
   env: PlatformEnv,
@@ -394,16 +469,28 @@ const onHost = (
     platformWallMs(env, programWallMs[program]);
   return {
     inCore: false,
-    run: async (program, method, args) =>
-      await runPlatformCode(host, await programCode[program](env.ASSETS), {
-        method,
-        args: sessionArgs(args),
-        wallMs: wallMs(program),
-        owner: builderOwner,
-        subOwner: whose,
-        memoryMib: builderMemoryMib,
-      }),
-    callMs: (program) => platformCodeReadMs + sessionCallMs(wallMs(program)),
+    run: async (program, method, args) => {
+      const code = await programCode[program](env.ASSETS);
+      const passed = sessionArgs(args);
+      return await inTurn(
+        whose,
+        async () =>
+          await askingForPlace(
+            async () =>
+              await runPlatformCode(host, code, {
+                method,
+                args: passed,
+                wallMs: wallMs(program),
+                owner: builderOwner,
+                subOwner: whose,
+                memoryMib: builderMemoryMib,
+              })
+          )
+      );
+    },
+    // Its place waited for too, beyond one call's own bounds.
+    callMs: (program) =>
+      platformCodeReadMs + placeWaitMs + sessionCallMs(wallMs(program)),
   };
 };
 
