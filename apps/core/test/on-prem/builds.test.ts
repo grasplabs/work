@@ -226,7 +226,8 @@ describe("the screen compiler on-prem", () => {
       unavailable: refused instanceof SandboxUnavailableError,
       status: refused instanceof SandboxUnavailableError && refused.status,
       started: refused instanceof SandboxUnavailableError && refused.started,
-      askedForTheWait: askedFor > 12_000,
+      // Asked again for most of the build wait (15 s), no ask past it.
+      askedForTheWait: askedFor > 8000 && askedFor < 15_000,
     }).toStrictEqual({
       unavailable: true,
       status: 429,

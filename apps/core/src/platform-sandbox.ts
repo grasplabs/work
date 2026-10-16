@@ -16,7 +16,12 @@ import {
   sessionCallMs,
 } from "./sandbox-session.ts";
 import type { SessionArgument } from "./sandbox-session.ts";
-import { callStub, SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
+import {
+  callStub,
+  SandboxUnavailableError,
+  sandboxWaitMs,
+  sessionHost,
+} from "./sandboxed.ts";
 
 // The release's platform code (the screen compiler, the package builder,
 // the file extractor), which reads hostile input (an App's source; npm
@@ -398,6 +403,12 @@ const placeWaitMs = 15_000;
 const placeRetryMs = 2000;
 
 /**
+ * The longest one ask may wait in the supervisor before it is refused: for
+ * its owner's place, then for a process.
+ */
+const placeAskMs = 2 * sandboxWaitMs;
+
+/**
  * Runs `build`, asking again while the supervisor has no place for it
  * (`noPlaceOf`: refused before anything ran, so nothing it was handed was
  * read), backing off up to {@link placeRetryMs}, for up to
@@ -413,7 +424,8 @@ const askingForPlace = async <T>(build: () => Promise<T>): Promise<T> => {
       // oxlint-disable-next-line no-await-in-loop -- one ask at a time
       return await build();
     } catch (error) {
-      if (!noPlaceOf(error) || Date.now() + wait > until) {
+      // No ask starts that could still be waiting past the wait.
+      if (!noPlaceOf(error) || Date.now() + wait + placeAskMs > until) {
         throw error;
       }
     }
