@@ -478,6 +478,55 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
     await expect(activating).resolves.toBe(1);
   });
 
+  it("start no ask for a suite's place that could still wait past the run's time", async () => {
+    const built = await appWith(suiteOf("t.equal(1, 1);"));
+    // Every ask for the suite's place refused at once (`busy`), each
+    // one's start noted: an ask may wait up to 6 s in the supervisor
+    // (2 × its 3 s), so none may start later than 6 s before the end.
+    const runMs = 20_000;
+    const askMs = 6000;
+    const asks: number[] = [];
+    const refusing: Fetcher = {
+      ...supervisor(),
+      fetch: async (input, init) => {
+        const headers: unknown = init?.headers;
+        const of: unknown =
+          typeof headers === "object" && headers !== null
+            ? Reflect.get(headers, sandboxOwnerHeader)
+            : undefined;
+        if (
+          of === appTestOwnerOf(built.app) &&
+          new URL(input instanceof Request ? input.url : input).pathname ===
+            "/session"
+        ) {
+          asks.push(Date.now());
+          return new Response(null, { status: 429 });
+        }
+        return await supervisor().fetch(input, init);
+      },
+    };
+    const outcome = await activation(
+      built,
+      envWith({
+        APP_TEST_LIMITS_MS: `20000/60000/${runMs}`,
+        SANDBOX_HOST: refusing,
+      })
+    );
+    const [first = 0] = asks;
+    const last = asks.at(-1) ?? 0;
+    expect({
+      outcome,
+      askedAgain: asks.length > 1,
+      lastStartedInTime: last - first <= runMs - askMs,
+      gaveUpInTime: Date.now() - first < runMs,
+    }).toStrictEqual({
+      outcome: "unavailable",
+      askedAgain: true,
+      lastStartedInTime: true,
+      gaveUpInTime: true,
+    });
+  });
+
   it("aren't held up by the App's own runs", async () => {
     const built = await appWith(passing);
     const giveUp = new AbortController();
