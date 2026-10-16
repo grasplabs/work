@@ -123,7 +123,13 @@ export const buildOnSave = async (
       async () =>
         await buildScreens(
           env,
-          await withDraftReferences(env, source.app, source.version, files),
+          await withDraftReferences(
+            env,
+            source.app,
+            source.version,
+            files,
+            signal
+          ),
           source.app,
           signal
         ),

@@ -318,9 +318,17 @@ export const buildAppCode = async (
   env: BuildEnv,
   appFiles: AppFiles,
   /** Whose build it is: the App's ID. */
-  whose: string
+  whose: string,
+  signal?: AbortSignal
 ): Promise<AppCodeBuild> =>
-  await cachedBuild<AppCodeBuild>(env, "app", appFiles, appCodeFiles, whose);
+  await cachedBuild<AppCodeBuild>(
+    env,
+    "app",
+    appFiles,
+    appCodeFiles,
+    whose,
+    signal
+  );
 
 /**
  * Builds an App's tests (`tests/**.ts`) into ES modules, in the

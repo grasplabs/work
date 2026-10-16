@@ -76,9 +76,12 @@ export const builtCode = async (
   env: Env,
   files: Readonly<Record<string, string>>,
   /** Whose code it is: the App's ID. */
-  app: string
+  app: string,
+  /** Given up on: no compile starts, and it throws its reason. */
+  signal?: AbortSignal
 ): Promise<Record<string, string>> => {
-  const build = await buildAppCode(env, { ...files }, app);
+  const build = await buildAppCode(env, { ...files }, app, signal);
+  signal?.throwIfAborted();
   if (!build.ok) {
     throw versionErrors.create(
       "version.build_failed",
@@ -159,7 +162,12 @@ export const filesManifest = async (
   env: Env,
   files: Readonly<Record<string, string>>,
   /** Whose code it is: the App's ID. */
-  app: string
+  app: string,
+  /**
+   * Given up on (a build job's lease lost): no compile nor inspection
+   * starts after, and it throws its reason.
+   */
+  signal?: AbortSignal
 ): Promise<AppManifest> => {
   const sdk = await serverSdkModules(env.ASSETS);
   const code = {
@@ -176,7 +184,9 @@ export const filesManifest = async (
   if (cached) {
     return readManifest(await cached.text());
   }
-  const symbolic = await builtCode(env, code, app);
+  signal?.throwIfAborted();
+  const symbolic = await builtCode(env, code, app, signal);
+  signal?.throwIfAborted();
   const text = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(text);
   await env.FILES.put(cacheKey, text);

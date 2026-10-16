@@ -2,6 +2,7 @@ import { appIdSchema } from "@grasp-os/shared/ids";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { withDraftReferences } from "../src/draft-references.ts";
 import { buildOnSave } from "../src/save-builds.ts";
 import { isolateCall, workflowTestOutcome } from "../src/workflows/code.ts";
 
@@ -210,6 +211,65 @@ describe("a build given up on", { timeout: 60_000 }, () => {
     }
     expect({ outcome, compiled: touched.includes("put") }).toStrictEqual({
       outcome: lostLease.message,
+      compiled: false,
+    });
+  });
+
+  it("starts no compile for a screen's references when it is given up on during their cache read", async () => {
+    const giveUp = new AbortController();
+    const touched: string[] = [];
+    const { FILES: files } = env;
+    env.FILES = new Proxy(files, {
+      get: (target, property) => {
+        const value: unknown = Reflect.get(target, property);
+        if (typeof property === "string" && typeof value === "function") {
+          return async (...args: unknown[]): Promise<unknown> => {
+            touched.push(property);
+            const answer: unknown = await Reflect.apply(value, target, args);
+            // Its lease lost while the references' manifest was read.
+            if (
+              property === "get" &&
+              typeof args[0] === "string" &&
+              args[0].startsWith("inspections/")
+            ) {
+              giveUp.abort(lostLease);
+            }
+            return answer;
+          };
+        }
+        return value;
+      },
+    });
+    const app = appIdSchema.parse(crypto.randomUUID());
+    let outcome: string;
+    try {
+      await withDraftReferences(
+        env,
+        app,
+        0,
+        {
+          // The App layout, its screen importing its references, its code
+          // new, so nothing of it is cached.
+          "app.ts": `export const built = ${JSON.stringify(crypto.randomUUID())};\n`,
+          "schema.ts": "export default {};\n",
+          "screens/desk.tsx":
+            'import { references } from "#grasp";\nexport default () => String(references);\n',
+        },
+        giveUp.signal
+      );
+      outcome = "ran to its end";
+    } catch (error) {
+      outcome = error instanceof Error ? error.message : String(error);
+    } finally {
+      env.FILES = files;
+    }
+    expect({
+      outcome,
+      read: touched.includes("get"),
+      compiled: touched.includes("put"),
+    }).toStrictEqual({
+      outcome: lostLease.message,
+      read: true,
       compiled: false,
     });
   });
