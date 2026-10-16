@@ -11,6 +11,20 @@ import { valueDepth } from "./value-depth.ts";
 export const screenFramePath = "/screen-frame";
 
 /**
+ * The languages a screen's frame may be told the page speaks (its `lang`
+ * query): the frontend's own. Its document says it, so the kit's helpers
+ * (@grasp-os/ui) speak it too; anything else is English.
+ */
+export const screenLanguages = ["en", "de", "nl", "es", "fr"] as const;
+
+/** One of `screenLanguages`. */
+export type ScreenLanguage = (typeof screenLanguages)[number];
+
+/** `value` as a language a frame speaks, or English. */
+export const screenLanguageOf = (value: unknown): ScreenLanguage =>
+  screenLanguages.find((language) => language === value) ?? "en";
+
+/**
  * Where a running App's screen calls one of its App's functions (core's
  * app-function-route.ts): `POST <path>/<app ID>`, the request as the body.
  */

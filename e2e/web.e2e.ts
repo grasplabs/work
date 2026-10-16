@@ -162,6 +162,28 @@ test("names each member's actions for them, and asks before making someone an ad
   await expect(role).toContainText("User");
 });
 
+test("a sign-out core doesn't carry out is said in a toast, and the person stays signed in", async ({
+  context,
+  page,
+}) => {
+  const { member } = peopleIn("signOutFailure");
+  await signInTo(context, member);
+  await page.goto("/knowledge");
+  // Core, or something in front of it, answers the sign-out with a failure.
+  await page.route("**/api/auth/sign-out", async (route) => {
+    await route.fulfill({ status: 503, body: "Unavailable" });
+  });
+  await page.getByRole("button", { name: /User$/u }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
+
+  await expect(page.getByText("Signing out didn't work")).toBeVisible();
+  await expect(
+    page.getByText("You're still signed in. Try again in a moment.")
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/knowledge$/u);
+  await expect(page.getByRole("button", { name: /User$/u })).toBeVisible();
+});
+
 test("an admin signs someone out everywhere, then removes them, and is told what that disconnected", async ({
   context,
   page,

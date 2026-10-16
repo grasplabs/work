@@ -5439,6 +5439,10 @@ msgstr "Digitaal ondertekenen"
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "Aanmelden gebeurt bij {app}. Het duurt ongeveer een minuut."
 
+#: src/frame/person-menu.tsx
+msgid "Signing out didn't work"
+msgstr "Uitloggen is niet gelukt"
+
 #: src/brain/brain.ts
 msgid "Size changed to {people}"
 msgstr "Omvang gewijzigd naar {people}"
@@ -7232,6 +7236,10 @@ msgstr "Jij:"
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
 msgstr "Je leest versie {number}, opgeslagen op {saved}. De huidige versie is {current}."
+
+#: src/frame/person-menu.tsx
+msgid "You're still signed in. Try again in a moment."
+msgstr "Je bent nog ingelogd. Probeer het zo opnieuw."
 
 #: src/routes/_shell.settings.tsx
 msgid "Your account"

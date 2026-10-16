@@ -5439,6 +5439,10 @@ msgstr "Firma electrónica"
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "El inicio de sesión se hace en {app}. Tarda alrededor de un minuto."
 
+#: src/frame/person-menu.tsx
+msgid "Signing out didn't work"
+msgstr "No se pudo cerrar la sesión"
+
 #: src/brain/brain.ts
 msgid "Size changed to {people}"
 msgstr "Tamaño actualizado: {people}"
@@ -7232,6 +7236,10 @@ msgstr "Tú:"
 #: src/knowledge/document.tsx
 msgid "You're reading version {number}, saved {saved}. The current version is {current}."
 msgstr "Estás leyendo la versión {number}, guardada el {saved}. La versión actual es la {current}."
+
+#: src/frame/person-menu.tsx
+msgid "You're still signed in. Try again in a moment."
+msgstr "Sigues con la sesión iniciada. Vuelve a intentarlo en un momento."
 
 #: src/routes/_shell.settings.tsx
 msgid "Your account"
