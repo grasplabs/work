@@ -8,6 +8,7 @@ import {
   kitModuleName,
   workflowSdkModules,
 } from "@grasp-os/compiler";
+import type { AppCodeBuild } from "@grasp-os/compiler";
 import { manifestText } from "@grasp-os/sdk/host";
 import {
   appTestTimeoutMs,
@@ -44,6 +45,7 @@ import type { OpenStore } from "./data-stores.ts";
 import { appTestFixtures } from "./db/core/schema.ts";
 import { callOperation } from "./operations.ts";
 import type { Invocation } from "./operations.ts";
+import { platformPlaceWaitMs } from "./platform-sandbox.ts";
 import { QuerySubscriptions } from "./query-subscriptions.ts";
 import type {
   LiveRead,
@@ -55,7 +57,11 @@ import { RunSubscription } from "./run-subscription.ts";
 import { capability, noPlaceOf } from "./sandbox-session.ts";
 import type { SessionCapability } from "./sandbox-session.ts";
 import { sandbox } from "./sandbox.ts";
-import { SandboxUnavailableError, sessionHost } from "./sandboxed.ts";
+import {
+  SandboxUnavailableError,
+  sandboxWaitMs,
+  sessionHost,
+} from "./sandboxed.ts";
 import { buildAppTests } from "./screens.ts";
 import { codeSession, startFailure } from "./workflows/code.ts";
 
@@ -1136,6 +1142,12 @@ const placeWaitMs = 60_000;
 const placeRetryMs = 10_000;
 
 /**
+ * The longest one ask for a suite's session may wait in the supervisor
+ * before it is refused: for its owner's place, then for a process.
+ */
+const suiteAskMs = 2 * sandboxWaitMs;
+
+/**
  * Whose an App's test suites are in the sandbox: an owner of their own,
  * apart from the App's interactive calls and its runs (`runOwnerOf`). Not
  * its runs', whose loads hold their places for as long as their steps
@@ -1234,14 +1246,18 @@ const runInSuiteSession = async (
 };
 
 /**
- * Runs `attempt` with a host of its own each time, asking again while the
- * sandbox has no place for it (`noPlaceFor`), for up to
- * {@link placeWaitMs} or `leftMs`, whichever is less; past it, throws what
- * the sandbox last said, its own unavailability.
+ * Runs `attempt`, asking again while the sandbox has no place for it
+ * (`noPlaceFor`: refused before any of it ran), backing off up to
+ * {@link placeRetryMs}, for up to {@link placeWaitMs} or `leftMs`,
+ * whichever is less; past it, throws what the sandbox last said, its own
+ * unavailability. No ask starts that could still be waiting past that
+ * (its backoff and `askMs`, the longest one ask waits, together), and
+ * nothing is queued in core: the supervisor's waiting room is the one
+ * queue, as for builds (platform-sandbox.ts).
  */
 const askingForPlace = async <T>(
   attempt: () => Promise<T>,
-  leftMs: number
+  { leftMs, askMs }: { leftMs: number; askMs: number }
 ): Promise<T> => {
   const until = Date.now() + Math.min(placeWaitMs, leftMs);
   for (let wait = 1000; ; wait = Math.min(wait * 2, placeRetryMs)) {
@@ -1249,7 +1265,7 @@ const askingForPlace = async <T>(
       // oxlint-disable-next-line no-await-in-loop -- one ask at a time
       return await attempt();
     } catch (error) {
-      if (!noPlaceFor(error) || Date.now() + wait > until) {
+      if (!noPlaceFor(error) || Date.now() + wait + askMs > until) {
         throw error;
       }
     }
@@ -1413,7 +1429,17 @@ export const appTestFailures = async (
     throw error;
   }
   const limits = limitsOf(env);
-  const build = await buildAppTests(env, { ...files }, app);
+  // On the sandbox, asked for again while the App's builds hold its part
+  // of the builder's share past what one build waits (platform-sandbox.ts):
+  // a refused build ran nothing, and is never read as failing tests.
+  const buildTests = async (): Promise<AppCodeBuild> =>
+    await buildAppTests(env, { ...files }, app);
+  const build = await (sandboxHost === undefined
+    ? buildTests()
+    : askingForPlace(buildTests, {
+        leftMs: limits.runMs,
+        askMs: platformPlaceWaitMs,
+      }));
   if (!build.ok) {
     return build.diagnostics
       .slice(0, maxFailures)
@@ -1433,7 +1459,8 @@ export const appTestFailures = async (
     ...release.sdk,
   };
   const failures: string[] = [];
-  // The suites' time: the build is the compiler's, bounded on its own.
+  // The suites' time: the build is the compiler's, bounded on its own, its
+  // waits for a place by {@link placeWaitMs}.
   const started = Date.now();
   for (const path of suites) {
     // Within the run's deadline, checked before each suite, which gets
@@ -1475,7 +1502,7 @@ export const appTestFailures = async (
         // oxlint-disable-next-line no-await-in-loop -- see above
         ...(await (sandboxHost === undefined
           ? runSuite()
-          : askingForPlace(runSuite, left)))
+          : askingForPlace(runSuite, { leftMs: left, askMs: suiteAskMs })))
       );
     }
   }
