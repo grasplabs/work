@@ -370,7 +370,7 @@ const callAction = async (
   try {
     const sent =
       stamping === undefined
-        ? valid
+        ? { input: valid }
         : await stampedMail(env, stamping, {
             connectionId: grant.connection.connectionId,
             action: action.raw.tool,
@@ -392,7 +392,7 @@ const callAction = async (
     // awaited before the call leaves: a run's attempt let go of meanwhile
     // sends nothing (`BindingCaller.requireHolds`).
     caller.requireHolds?.();
-    answered = await env.CONNECT.call({ capability, ...scope, input: sent });
+    answered = await env.CONNECT.call({ capability, ...scope, ...sent });
   } catch (error) {
     // A run's side effect, held for its person: connect answers a run
     // nothing it could carry on with. The run's step waits for their

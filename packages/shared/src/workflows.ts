@@ -346,6 +346,24 @@ export const connectorEventSchema = z.object({
 /** An event a connection reported. */
 export type ConnectorEvent = z.infer<typeof connectorEventSchema>;
 
+/**
+ * An event as connect hands it to core: with the stamp a message carries,
+ * if it carries one. What its sender wrote, so core believes it only as
+ * its own record of a run's mail says (its workflows/mail-stamps.ts), and
+ * never hands it to the run, which gets the event without it.
+ */
+export const deliveredConnectorEventSchema = connectorEventSchema.extend({
+  stamp: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/u)
+    .optional(),
+});
+
+/** An event as connect hands it to core, with its stamp if any. */
+export type DeliveredConnectorEvent = z.infer<
+  typeof deliveredConnectorEventSchema
+>;
+
 /** Most triggers one workflow declares. */
 const maxTriggerDeclarations = 20;
 

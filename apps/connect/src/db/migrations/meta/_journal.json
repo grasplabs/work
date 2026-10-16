@@ -99,6 +99,13 @@
       "when": 1792095235251,
       "tag": "0013_outcome_list_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792141342793,
+      "tag": "0014_mail_stamp_senders",
+      "breakpoints": true
     }
   ]
 }

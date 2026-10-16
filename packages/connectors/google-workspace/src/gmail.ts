@@ -3,6 +3,7 @@ import {
   invalidCode,
   ToolError,
 } from "@grasp-os/connector-kit/connector";
+import type { Effect } from "@grasp-os/connector-kit/connector";
 import {
   checkReadable,
   contentAs,
@@ -539,8 +540,13 @@ const draftFields = [
   { label: "Body format", input: "bodyType" },
 ] as const;
 
-/** The message as Gmail's `raw` takes it, from the mailbox itself. */
-const rawOf = (input: z.output<typeof draftInput>): string =>
+/**
+ * The message as Gmail's `raw` takes it, from the mailbox itself, with
+ * the call's stamp as a header if it has one: each copy Gmail delivers
+ * keeps it, so the copy a watched mailbox receives names the run that sent
+ * it (core's workflows/mail-stamps.ts).
+ */
+const rawOf = (input: z.output<typeof draftInput>, { stamp }: Effect): string =>
   rawMessage({
     from: input.mailbox,
     subject: input.subject,
@@ -550,6 +556,7 @@ const rawOf = (input: z.output<typeof draftInput>): string =>
     cc: input.cc ?? [],
     bcc: input.bcc ?? [],
     replyTo: input.replyTo ?? [],
+    stamp,
   });
 
 const sentMessage = z.object({
@@ -573,11 +580,11 @@ const sendMail = defineTool({
   resource: "mailbox",
   routes: [post("/messages/send")],
   describe: { title: "Send an email", fields: draftFields },
-  run: async (input) => {
+  run: async (input, effect) => {
     const sent = await googleJson(
       googleUrl(gmailHost, mailboxPath(input.mailbox, "/messages/send")),
       sentMessage,
-      jsonBody({ raw: rawOf(input) })
+      jsonBody({ raw: rawOf(input, effect) })
     );
     return {
       output: {
@@ -605,11 +612,11 @@ const createDraft = defineTool({
   resource: "mailbox",
   routes: [post("/drafts")],
   describe: { title: "Create a draft email", fields: draftFields },
-  run: async (input) => {
+  run: async (input, effect) => {
     const draft = await googleJson(
       googleUrl(gmailHost, mailboxPath(input.mailbox, "/drafts")),
       z.object({ id: z.string(), message: sentMessage }),
-      jsonBody({ message: { raw: rawOf(input) } })
+      jsonBody({ message: { raw: rawOf(input, effect) } })
     );
     return {
       output: {

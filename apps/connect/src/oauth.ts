@@ -318,6 +318,7 @@ const storeConnection = async (
       tenant: flow.tenant,
       accountId: account.id,
       accountName: account.name,
+      accountEmail: account.email?.toLowerCase() ?? null,
       connectedBy: person.userId,
       createdAt: now,
       updatedAt: now,
@@ -394,6 +395,7 @@ const reconnect = async (
           status: "active",
           tenant: flow.tenant,
           accountName: account.name,
+          accountEmail: account.email?.toLowerCase() ?? null,
           updatedAt: now,
         })
         .where(stillWaiting),

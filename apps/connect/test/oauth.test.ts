@@ -466,10 +466,18 @@ describe("whose account", () => {
     const anna = someone();
     const ada = someone("admin");
     const personal = await connectAccount(providers, anna, ownAccount(anna));
+    // Its sign-in name a UPN, not the address it sends from.
     const mailbox = mailboxAccount();
-    const shared = await connectAccount(providers, ada, mailbox, {
-      scope: "shared",
-    });
+    const signInName = mailbox.email.replace(
+      "@acme.test",
+      "@acme.onmicrosoft.test"
+    );
+    const shared = await connectAccount(
+      providers,
+      ada,
+      { ...mailbox, signInName },
+      { scope: "shared" }
+    );
     await exports.default.disconnect({ person: anna, connectionId: personal });
 
     const owners = await exports.default.connectionOwners([
@@ -485,13 +493,15 @@ describe("whose account", () => {
           source: "native",
           provider: "microsoft",
           accountName: anna.email,
+          accountEmail: anna.email.toLowerCase(),
         },
         {
           id: shared,
           ownerUserId: null,
           source: "native",
           provider: "microsoft",
-          accountName: mailbox.email,
+          accountName: signInName,
+          accountEmail: mailbox.email,
         },
       ].toSorted((a, b) => a.id.localeCompare(b.id))
     );

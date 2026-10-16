@@ -35,8 +35,8 @@ export const graphControlUrl = "https://graph-control.test/receive";
 
 /**
  * Where tests read the mail Microsoft Graph sent for them (`sendMail`), in
- * order: `{ mailbox, subject, to, replyTo }` each, and the drafts it made
- * (`draft: true`).
+ * order: `{ mailbox, subject, to, replyTo, headers }` each (`headers` its
+ * `internetMessageHeaders`), and the drafts it made (`draft: true`).
  */
 export const graphSentUrl = "https://graph-control.test/sent";
 
@@ -113,6 +113,7 @@ export default {
           subject: message.subject,
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
+          headers: message.internetMessageHeaders ?? [],
         });
         return losesAnswer(mailbox)
           ? new Response("Bad Gateway", { status: 502 })
@@ -132,6 +133,7 @@ export default {
           subject: message.subject,
           to: message.toRecipients.map((recipient) => recipient.emailAddress.address),
           replyTo: (message.replyTo ?? []).map((recipient) => recipient.emailAddress.address),
+          headers: message.internetMessageHeaders ?? [],
           draft: true,
         });
         return Response.json({ id: "draft-" + graphSent.length, conversationId: null, webLink: null });
@@ -182,12 +184,16 @@ export default {
     if (form.get("client_secret") !== ${JSON.stringify(connectClient.secret)} || digest !== challenge) {
       return Response.json({ error: "invalid_grant" }, { status: 400 });
     }
+    // An account whose sign-in name (its UPN) isn't the address it sends
+    // from, as a tenant's \`onmicrosoft\` UPNs are: \`alias-\` subjects.
+    const aliased = subject.startsWith("alias-");
     const claims = {
       iss: "https://login.microsoftonline.com/" + tenant + "/v2.0",
       aud: ${JSON.stringify(connectClient.id)},
       tid: tenant,
       oid: subject,
-      preferred_username: subject + "@acme.test",
+      preferred_username: subject + (aliased ? "@acme.onmicrosoft.test" : "@acme.test"),
+      ...(aliased ? { email: subject + "@acme.test" } : {}),
     };
     return Response.json({
       token_type: "Bearer",

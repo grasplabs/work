@@ -1,4 +1,5 @@
 import { addressesOf } from "@grasp-os/connector-google-workspace/mime";
+import { stampHeader } from "@grasp-os/connector-kit/manifest";
 import { z } from "zod";
 
 import {
@@ -9,6 +10,7 @@ import {
   providerJson,
   readFromProvider,
   readMaxItems,
+  stampOf,
 } from "./event-kinds.ts";
 import type {
   EventKind,
@@ -142,8 +144,10 @@ const mailEventOf = (mailbox: string, body: unknown): ReadEvent => {
       (each) => each.name.toLowerCase() === name.toLowerCase()
     )?.value;
   const [from] = addressesOf(header("From")?.slice(0, fromMaxLength));
+  const stamp = stampOf(message.payload?.headers);
   return {
     id: message.id,
+    ...(stamp === undefined ? {} : { stamp }),
     payload: {
       mailbox,
       id: message.id,
@@ -217,7 +221,7 @@ const mailEventsOf = async (
       .slice(at, at + messagesPerBatch)
       .map(
         (id, index) =>
-          `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <m${index}>\r\n\r\nGET /gmail/v1/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From\r\n\r\n`
+          `--${boundary}\r\nContent-Type: application/http\r\nContent-ID: <m${index}>\r\n\r\nGET /gmail/v1/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(id)}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=${stampHeader}\r\n\r\n`
       )
       .join("")}--${boundary}--`;
     // oxlint-disable-next-line no-await-in-loop -- a batch at a time, each counted

@@ -3,11 +3,18 @@ import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { workflowErrors } from "@grasp-os/shared/workflows";
-import { eq, inArray } from "drizzle-orm";
+import type { DeliveredConnectorEvent } from "@grasp-os/shared/workflows";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { connectionOwnersOf } from "../connections.ts";
-import { mailDomains, runMailCalls, runMailStamps } from "../db/core/schema.ts";
+import {
+  mailDomains,
+  runMailCalls,
+  runMailStampClaims,
+  runMailStamps,
+} from "../db/core/schema.ts";
 
 // The runs a run's own mail starts, as its descendants. A run that mails
 // an address of the deployment's mail domain, which an email trigger
@@ -62,12 +69,61 @@ import { mailDomains, runMailCalls, runMailStamps } from "../db/core/schema.ts";
 //   recipients past. Recipients past the most core stamps in one call
 //   (`maxStampedAddresses`) refuse the call.
 //
+//
+// A run's mail to a mailbox a connection watches (`m365.mail.received`,
+// `google.mail.received`, connector-events.ts) reaches it under an ID of
+// its own, through no address core reads. So each such call carries a
+// stamp of its own too (`run_mail_calls`' `stamp`, 128 random bits),
+// recorded before the call leaves with every recipient the call names and
+// its senders, and handed to connect beside the call (`ConnectCall`'s
+// `stamp`), never in the input App code writes. Connect gives it to the
+// native connector only, whose mail tool puts it on the message as a
+// header (`stampHeader`), and its mail events read it back. A message that
+// carries it starts its runs under the run (`stampedEventRun`) only when
+// it is that mail:
+//
+// - A forged stamp: one core didn't record is nothing.
+// - A recorded stamp, which every recipient of the run's mail can read,
+//   taken to another mailbox: it counts only at a mailbox the call named
+//   among its recipients, and only from one of the call's senders.
+// - A copy of it sent on by a recipient, its From forged, to a mailbox
+//   the run mailed too (L2): it may be read with the run's own copy, in
+//   the same read, and ahead of it. So up to `maxClaimsPerSource`
+//   messages claim the stamp at each source (`run_mail_stamp_claims`),
+//   each a child: a forged copy charges the run's lineage, never its
+//   owner's escape, and the run's own copy is a child however the read
+//   orders them. Past the bound a copy is a root, as anyone's mail is; a
+//   sender who gets that many forged copies ahead of the run's own within
+//   one read can still push it out, one hop, the residual case.
+// - A plus-address (L1): a run that mails `watched+1@corp.com` mails the
+//   watched mailbox, which Exchange Online and Google Workspace both
+//   deliver it to. Recipients and the watched mailbox are compared without
+//   a `+tag` (`mailboxOf`). A mailbox's other SMTP aliases
+//   (`proxyAddresses`) aren't known to core yet: mail to one is a root
+//   (GRA-654).
+// - Mail to several watched mailboxes, or one mailbox two connections
+//   watch: each source claims for itself, so every copy is a child, and
+//   none escapes as a root.
+// - Another owner's App: a run's own mail starts its runs under the run in
+//   every App that watches the mailbox, whoever owns it. A run whose
+//   lineage is spent mailing another person has that person's watching
+//   workflow refused, audited against their App. That is what bounds two
+//   Apps of different owners mailing each other; a root there would
+//   restart the loop with fresh limits.
+// - A run sending its mail without the stamp: App code never sees the
+//   header, the tools' input takes none, and a held send keeps its stamp
+//   until its person confirms it (connect's pending.ts).
+// - Another client's mail: a stamp is only this deployment's record.
+//
 // What it doesn't see, each a root still, bounded by each workflow's
 // hourly limit (runs.ts): mail through a Composio toolkit (core can't
 // tell its sends from its reads), mail to a domain Email Routing hasn't
 // delivered for yet (a fresh deployment's first hop), mail a mailbox's
-// own rules forward, and events of what a run made (connector events,
-// GRA-550).
+// own rules forward, mail a distribution list delivers to a watched
+// mailbox (not a recipient the call names), mail to another SMTP alias
+// of a watched mailbox, a watched source naming its mailbox by a user ID
+// rather than an address, and events of other things a run made (files:
+// connector events).
 
 /** The run a stamp names: its ID, and the step key the call was made under. */
 export interface StampingRun {
@@ -159,15 +215,17 @@ const recordedTokens = async (
 
 /**
  * Who sends the mail of a call on `connectionId` naming `mailbox`: the
- * mailbox (the provider sends from it, or refuses the call) and the
- * connection's account; none for a connection that isn't a native mail
+ * mailbox (the provider sends from it, or refuses the call), the
+ * connection's account, and that account's email address (for Microsoft
+ * 365 the primary address it sends from, which may differ from its
+ * sign-in name: M-new-2); none for a connection that isn't a native mail
  * connector's.
  *
- * Known gap (GRA-550): Microsoft 365 takes a user's ID or UPN as the
- * mailbox, and sends from their primary address, which may be neither. A
- * run's mail from such a mailbox then matches no sender and starts roots,
- * bounded by each workflow's hourly limit only, as before stamping. The
- * provider's real sending address is what to record instead.
+ * Known gap: Microsoft 365 also takes another user's ID or UPN as the
+ * mailbox (a shared mailbox named so), and sends from that mailbox's
+ * primary address, which is none of these. A run's mail from such a
+ * mailbox matches no sender and starts roots, bounded by each workflow's
+ * hourly limit only.
  */
 const sendersOf = async (
   env: Env,
@@ -185,8 +243,9 @@ const sendersOf = async (
   const senders = [
     typeof mailbox === "string" ? mailbox : null,
     owner.accountName,
+    owner.accountEmail,
   ].flatMap((sender) =>
-    sender === null || sender === "" ? [] : [sender.toLowerCase()]
+    sender === null || sender.trim() === "" ? [] : [sender.trim().toLowerCase()]
   );
   return [...new Set(senders)];
 };
@@ -264,7 +323,8 @@ const replacementsOf = async (
   stamping: StampingRun,
   { connectionId }: StampedCall,
   input: Readonly<Record<string, Json | undefined>>,
-  recipients: readonly string[]
+  recipients: readonly string[],
+  senders: readonly string[] | undefined
 ): Promise<Record<string, string>> => {
   const domains = await drizzle(env.DB)
     .select({ domain: mailDomains.domain })
@@ -285,7 +345,6 @@ const replacementsOf = async (
   ) {
     throw connectErrors.create("connect.invalid");
   }
-  const senders = await sendersOf(env, connectionId, input.mailbox);
   if (senders === undefined) {
     return {};
   }
@@ -318,23 +377,35 @@ const replacementsOf = async (
   );
 };
 
+/** A call as `run` sends it: its input, and the stamp it carries, if any. */
+export interface StampedMail {
+  input: Json;
+  /** The call's stamp, for connect (`ConnectCall`'s `stamp`). */
+  stamp?: string;
+}
+
+/** Random bytes in a call's stamp: 32 hex digits. */
+const stampBytes = 16;
+
 /**
- * `call`'s input as `run` sends it: for a native mail connector's send or
- * draft, each address of its `to`, `cc` and `bcc` at a domain Email
- * Routing delivered for carries the run's token (`local+<token>@domain`),
- * any token core recorded on it before replaced. Every other call, and
- * every other field, unchanged: `call.input` itself when nothing is.
- * Throws `connect.invalid`, sending nothing, past
+ * `call` as `run` sends it. For a native mail connector's send or draft:
+ * each address of its `to`, `cc` and `bcc` at a domain Email Routing
+ * delivered for carries the run's token (`local+<token>@domain`), any
+ * token core recorded on it before replaced; and the call carries a stamp
+ * of its own, recorded with every recipient it names and its senders,
+ * which its message carries as a header (`ConnectCall`'s `stamp`). Every
+ * other call, and every other field, unchanged: `call.input` itself when
+ * nothing is. Throws `connect.invalid`, sending nothing, past
  * {@link maxStampedAddresses}.
  */
 export const stampedMail = async (
   env: Env,
   stamping: StampingRun,
   call: StampedCall
-): Promise<Json> => {
+): Promise<StampedMail> => {
   const { input } = call;
   if (!mailActions.has(call.action) || !isJsonObject(input)) {
-    return input;
+    return { input };
   }
   const recipients = recipientFields.flatMap((field) => {
     const value = input[field];
@@ -342,13 +413,17 @@ export const stampedMail = async (
       ? value.flatMap((item) => (typeof item === "string" ? [item] : []))
       : [];
   });
-  if (recipients.every((item) => addressOf(item) === undefined)) {
-    return input;
+  const addresses = recipients.flatMap((item) => {
+    const address = addressOf(item);
+    return address === undefined ? [] : [`${address.local}@${address.domain}`];
+  });
+  if (addresses.length === 0) {
+    return { input };
   }
   // The call's decision, the first time it was made: the same call made
-  // again under its key sends the same input, whatever core learned since
-  // (a mail domain it delivers for now), or connect refuses it as another
-  // call under the key.
+  // again under its key sends the same input and stamp, whatever core
+  // learned since (a mail domain it delivers for now), or connect refuses
+  // it as another call under the key.
   const db = drizzle(env.DB);
   const origin = await sha256Hex(
     JSON.stringify([
@@ -360,49 +435,211 @@ export const stampedMail = async (
   );
   const decidedOf = async () =>
     await db
-      .select({ replaced: runMailCalls.replaced })
+      .select({ replaced: runMailCalls.replaced, stamp: runMailCalls.stamp })
       .from(runMailCalls)
       .where(eq(runMailCalls.origin, origin))
       .get();
   let decided = await decidedOf();
   if (decided === undefined) {
+    const senders = await sendersOf(env, call.connectionId, input.mailbox);
     const replaced = await replacementsOf(
       env,
       stamping,
       call,
       input,
-      recipients
+      recipients,
+      senders
     );
     await db
       .insert(runMailCalls)
-      .values({ origin, runId: stamping.run, replaced, createdAt: new Date() })
+      .values({
+        origin,
+        runId: stamping.run,
+        replaced,
+        createdAt: new Date(),
+        // A stamp only for a native mail connector's call, whose tool
+        // puts it on the message: core can't tell where else it goes.
+        ...(senders === undefined
+          ? {}
+          : {
+              stamp: toHex(crypto.getRandomValues(new Uint8Array(stampBytes))),
+              recipients: [...new Set(addresses)],
+              senders,
+            }),
+      })
       .onConflictDoNothing();
     decided = await decidedOf();
   }
   if (decided === undefined) {
     throw new Error(`No mail decision of run ${stamping.run}`);
   }
-  const { replaced } = decided;
+  const { replaced, stamp } = decided;
   return {
-    ...input,
-    ...Object.fromEntries(
-      recipientFields.flatMap((field) => {
-        const value = input[field];
-        return isJsonArray(value)
-          ? [
-              [
-                field,
-                value.map((item) =>
-                  typeof item === "string" && Object.hasOwn(replaced, item)
-                    ? (replaced[item] ?? item)
-                    : item
-                ),
-              ],
-            ]
-          : [];
-      })
-    ),
+    input: {
+      ...input,
+      ...Object.fromEntries(
+        recipientFields.flatMap((field) => {
+          const value = input[field];
+          return isJsonArray(value)
+            ? [
+                [
+                  field,
+                  value.map((item) =>
+                    typeof item === "string" && Object.hasOwn(replaced, item)
+                      ? (replaced[item] ?? item)
+                      : item
+                  ),
+                ],
+              ]
+            : [];
+        })
+      ),
+    },
+    ...(stamp === null ? {} : { stamp }),
   };
+};
+
+/**
+ * The most messages that may claim one stamp at one source
+ * (`run_mail_stamp_claims`), each then a child of the stamp's run. More
+ * than one, so a copy a recipient sends on with its From forged, read
+ * ahead of the run's own copy, can't push that copy out as a root; few,
+ * so forged copies charge the run's lineage little. Past it a copy is a
+ * root, as mail from anyone else is. Five covers a run's own copy read
+ * behind four forged ones; a sender who gets five ahead of it within one
+ * read is the residual case (GRA-550).
+ */
+const maxClaimsPerSource = 5;
+
+/**
+ * `address` as a mailbox receives it: lower case, without the `+tag` on
+ * its local part, which Exchange Online and Google Workspace both deliver
+ * to the mailbox itself. So a run that mails `watched+1@corp.com` mails
+ * `watched@corp.com`, and its copy there is still its own.
+ */
+const mailboxOf = (address: string): string => {
+  const lower = address.trim().toLowerCase();
+  const at = lower.lastIndexOf("@");
+  if (at === -1) {
+    return lower;
+  }
+  const local = lower.slice(0, at);
+  const plus = local.indexOf("+");
+  return `${plus <= 0 ? local : local.slice(0, plus)}${lower.slice(at)}`;
+};
+
+/** What a mail event's payload says of who sent it. */
+const mailEventFrom = z.object({
+  from: z.object({ address: z.string().max(256) }).nullish(),
+});
+
+/**
+ * The addresses of the mailbox a connector event comes from: the one its
+ * source names (`resource`), and, for a source on the whole connection or
+ * one naming the account's own mailbox by its name or its address, both:
+ * the account's name (for Microsoft 365 its UPN) and its email address.
+ */
+const mailboxAddressesOf = async (
+  env: Env,
+  event: DeliveredConnectorEvent
+): Promise<string[]> => {
+  const [owner] = await connectionOwnersOf(env, [event.connection]);
+  const own = [owner?.accountName, owner?.accountEmail].flatMap((address) =>
+    typeof address === "string" && address !== "" ? [address.toLowerCase()] : []
+  );
+  if (event.resource === undefined) {
+    return own;
+  }
+  const resource = event.resource.toLowerCase();
+  return own.includes(resource) ? own : [resource];
+};
+
+/**
+ * The run whose own mail a connector event is, if it is: a message that
+ * reached a watched mailbox carrying the stamp core recorded for the run's
+ * call (`stamp`, read from its header by connect), only when
+ * - the mailbox is one the call named among its recipients: a stamp taken
+ *   to any other mailbox is mail like any other;
+ * - its From is one of the call's senders;
+ * - it is one of the first {@link maxClaimsPerSource} messages at its
+ *   source (connection and mailbox) to name the stamp
+ *   (`run_mail_stamp_claims`): the same event delivered again is the same
+ *   message, and any past the bound is mail like any other.
+ * None otherwise: the event's runs are roots.
+ */
+export const stampedEventRun = async (
+  env: Env,
+  event: DeliveredConnectorEvent
+): Promise<string | undefined> => {
+  if (event.stamp === undefined) {
+    return undefined;
+  }
+  const db = drizzle(env.DB);
+  const call = await db
+    .select({
+      runId: runMailCalls.runId,
+      recipients: runMailCalls.recipients,
+      senders: runMailCalls.senders,
+    })
+    .from(runMailCalls)
+    .where(eq(runMailCalls.stamp, event.stamp))
+    .get();
+  const recipients = call?.recipients ?? null;
+  const senders = call?.senders ?? null;
+  if (call === undefined || recipients === null || senders === null) {
+    return undefined;
+  }
+  const from = mailEventFrom
+    .safeParse(event.payload)
+    .data?.from?.address.trim()
+    .toLowerCase();
+  if (from === undefined || !senders.includes(from)) {
+    return undefined;
+  }
+  // By mailbox, plus-tags gone on both sides: a run that mails a
+  // plus-address of a watched mailbox mails that mailbox (L1).
+  const mailed = new Set(recipients.map(mailboxOf));
+  const mailboxes = await mailboxAddressesOf(env, event);
+  if (!mailboxes.some((mailbox) => mailed.has(mailboxOf(mailbox)))) {
+    return undefined;
+  }
+  const source = JSON.stringify([event.connection, event.resource ?? ""]);
+  const eventKey = await sha256Hex(
+    JSON.stringify([event.connection, event.id])
+  );
+  // Only while the call is still recorded (one its run's retention
+  // removed meanwhile leaves no claim behind that nothing would remove),
+  // and only while the source has room: in the one statement, so of
+  // messages delivered at once no more than the bound claim.
+  const claimed = and(
+    eq(runMailStampClaims.stamp, event.stamp),
+    eq(runMailStampClaims.source, source)
+  );
+  await db
+    .insert(runMailStampClaims)
+    .select(
+      db
+        .select({
+          stamp: runMailCalls.stamp,
+          source: sql<string>`${source}`.as("source"),
+          eventKey: sql<string>`${eventKey}`.as("event_key"),
+          createdAt: sql<Date>`${Date.now()}`.as("created_at"),
+        })
+        .from(runMailCalls)
+        .where(
+          and(
+            eq(runMailCalls.stamp, event.stamp),
+            sql`(SELECT count(*) FROM ${runMailStampClaims} WHERE ${claimed}) < ${maxClaimsPerSource}`
+          )
+        )
+    )
+    .onConflictDoNothing();
+  const claim = await db
+    .select({ eventKey: runMailStampClaims.eventKey })
+    .from(runMailStampClaims)
+    .where(and(claimed, eq(runMailStampClaims.eventKey, eventKey)))
+    .get();
+  return claim === undefined ? undefined : call.runId;
 };
 
 /** Records that Email Routing delivered mail for `domain`. */
