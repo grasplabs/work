@@ -1087,7 +1087,7 @@ const targets = {
     wrap: (lines: string) =>
       `${lines}\nexport default function Notes() {\n  return null;\n}\n`,
     build: async (files: Record<string, string>) =>
-      await buildScreens(env, files),
+      await buildScreens(env, files, "app-test"),
   },
   "a component": {
     types: screenTypes,
@@ -1099,7 +1099,7 @@ const targets = {
     wrap: (lines: string) =>
       `${lines}\nexport function Note() {\n  return null;\n}\n`,
     build: async (files: Record<string, string>) =>
-      await buildScreens(env, files),
+      await buildScreens(env, files, "app-test"),
   },
   "a declaration file": {
     types: screenTypes,
@@ -1112,42 +1112,42 @@ const targets = {
     },
     wrap: (lines: string) => `${lines}\nexport type Declared = string;\n`,
     build: async (files: Record<string, string>) =>
-      await buildScreens(env, files),
+      await buildScreens(env, files, "app-test"),
   },
   "an operation": {
     types: codeTypes,
     file: "operations/extra.ts",
     wrap: (lines: string) => `${lines}\nexport const extra = 1;\n`,
     build: async (files: Record<string, string>) =>
-      await buildAppCode(env, files),
+      await buildAppCode(env, files, "app-test"),
   },
   "the shared values": {
     types: codeTypes,
     file: "values.ts",
     wrap: (lines: string) => `${lines}\nexport const shared = 1;\n`,
     build: async (files: Record<string, string>) =>
-      await buildAppCode(env, files),
+      await buildAppCode(env, files, "app-test"),
   },
   "a migration": {
     types: codeTypes,
     file: "migrations/0001-extra.ts",
     wrap: (lines: string) => `${lines}\nexport const migration = 1;\n`,
     build: async (files: Record<string, string>) =>
-      await buildAppCode(env, files),
+      await buildAppCode(env, files, "app-test"),
   },
   "a test": {
     types: codeTypes,
     file: "tests/extra.test.ts",
     wrap: (lines: string) => `${lines}\nexport const test = 1;\n`,
     build: async (files: Record<string, string>) =>
-      await buildAppTests(env, files),
+      await buildAppTests(env, files, "app-test"),
   },
   "a workflow": {
     types: codeTypes,
     file: "workflows/extra.ts",
     wrap: (lines: string) => `${lines}\nexport const workflow = 1;\n`,
     build: async (files: Record<string, string>) =>
-      await buildWorkflows(env, files),
+      await buildWorkflows(env, files, "app-test"),
   },
 } as const;
 
@@ -1165,7 +1165,9 @@ describe("screens", { timeout: 120_000 }, () => {
     };
     const checked = z
       .array(z.object({ file: z.string().optional(), rule: z.string() }))
-      .parse(await platformRunner(env).run("compiler", "check", [files]));
+      .parse(
+        await platformRunner(env, "app-test").run("compiler", "check", [files])
+      );
     expect(
       checked
         .filter(({ file }) => file === "probe.d.ts")
@@ -1190,12 +1192,16 @@ describe("screens", { timeout: 120_000 }, () => {
       'declare module "@grasp-os/sdk/react" {\n  export const useQuery: (reference: unknown) => unknown;\n}\n',
     ],
   ])("never declare a module by name: %s", async (_case, file, source) => {
-    const built = await buildScreens(env, {
-      ...notesFiles(),
-      "screens/notes.tsx":
-        "export type Reached = unknown;\nexport default function Notes() {\n  return null;\n}\n",
-      [file]: source,
-    });
+    const built = await buildScreens(
+      env,
+      {
+        ...notesFiles(),
+        "screens/notes.tsx":
+          "export type Reached = unknown;\nexport default function Notes() {\n  return null;\n}\n",
+        [file]: source,
+      },
+      "app-test"
+    );
     expect({
       ok: built.ok,
       refused: saidSchema
@@ -1224,12 +1230,16 @@ describe("screens", { timeout: 120_000 }, () => {
         "export type Reached = typeof C | typeof serverModule | Doc<never>;",
       ].join("\n");
       const screen = "export default function Notes() {\n  return null;\n}\n";
-      const built = await buildScreens(env, {
-        ...notesFiles(),
-        "screens/notes.tsx":
-          file === "screens/notes.tsx" ? `${lines}\n${screen}` : screen,
-        ...(file === "notes.d.ts" ? { [file]: lines } : {}),
-      });
+      const built = await buildScreens(
+        env,
+        {
+          ...notesFiles(),
+          "screens/notes.tsx":
+            file === "screens/notes.tsx" ? `${lines}\n${screen}` : screen,
+          ...(file === "notes.d.ts" ? { [file]: lines } : {}),
+        },
+        "app-test"
+      );
       const refused = saidSchema
         .parse(built)
         .diagnostics.filter(
@@ -1243,16 +1253,20 @@ describe("screens", { timeout: 120_000 }, () => {
         // refuses them.
         imports: refused.length,
       }).toStrictEqual({ ok: false, imports: 4 });
-      const directives = await buildScreens(env, {
-        ...notesFiles(),
-        "screens/notes.tsx":
-          file === "screens/notes.tsx"
-            ? `${lines.split("\n").slice(0, 2).join("\n")}\n${screen}`
-            : screen,
-        ...(file === "notes.d.ts"
-          ? { [file]: lines.split("\n").slice(0, 2).join("\n") }
-          : {}),
-      });
+      const directives = await buildScreens(
+        env,
+        {
+          ...notesFiles(),
+          "screens/notes.tsx":
+            file === "screens/notes.tsx"
+              ? `${lines.split("\n").slice(0, 2).join("\n")}\n${screen}`
+              : screen,
+          ...(file === "notes.d.ts"
+            ? { [file]: lines.split("\n").slice(0, 2).join("\n") }
+            : {}),
+        },
+        "app-test"
+      );
       expect({
         ok: directives.ok,
         directives: saidSchema
@@ -1278,20 +1292,24 @@ describe("screens", { timeout: 120_000 }, () => {
         'export type Schema = typeof import("../schema.ts");',
       ];
       const screen = "export default function Notes() {\n  return null;\n}\n";
-      const built = await buildScreens(env, {
-        ...notesFiles(),
-        "screens/notes.tsx":
-          file === "screens/notes.tsx"
-            ? `${typeLines.join("\n")}\nexport type Q = typeof query | typeof internal;\n${screen}`
-            : screen,
-        ...(file === "notes.d.ts"
-          ? {
-              [file]: typeLines
-                .map((line) => line.replace("../", "./"))
-                .join("\n"),
-            }
-          : {}),
-      });
+      const built = await buildScreens(
+        env,
+        {
+          ...notesFiles(),
+          "screens/notes.tsx":
+            file === "screens/notes.tsx"
+              ? `${typeLines.join("\n")}\nexport type Q = typeof query | typeof internal;\n${screen}`
+              : screen,
+          ...(file === "notes.d.ts"
+            ? {
+                [file]: typeLines
+                  .map((line) => line.replace("../", "./"))
+                  .join("\n"),
+              }
+            : {}),
+        },
+        "app-test"
+      );
       expect({
         ok: built.ok,
         refused: saidSchema
