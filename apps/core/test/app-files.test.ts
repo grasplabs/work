@@ -1319,6 +1319,60 @@ describe("an App's files", { timeout: 120_000 }, () => {
     ).resolves.toMatchObject({ size: bytes.length });
   });
 
+  it("sends a chunk again whose body core took too long to read, and finishes the upload", async () => {
+    const { app, release, screen } = await openedApp();
+    // The first chunk's body reaches core too slowly: it answers so.
+    const slow = { first: true };
+    const channel = fileChannel({
+      app,
+      lease: screen.lease,
+      person: screen.named,
+      fetch: async (path, init) => {
+        if (path.includes("/chunks/") && slow.first) {
+          slow.first = false;
+          return await Promise.resolve(
+            Response.json(
+              { code: "request.timeout", message: "Too slow." },
+              { status: 408 }
+            )
+          );
+        }
+        return await screen.fetch(path, init);
+      },
+    });
+    const bytes = png(100);
+    const id = await upload(channel, blobOf(bytes, "image/png"));
+    await expect(
+      screen.channel.describe("attachments", id)
+    ).resolves.toMatchObject({ size: bytes.length });
+    await expect(fileStates(release)).resolves.toStrictEqual(["published:"]);
+  });
+
+  it("answers a body that stops arriving as one that took too long, for the page to send again", async () => {
+    const { app, screen } = await openedApp();
+    // A start whose body never ends: core gives up reading it.
+    const body = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        controller.enqueue(new TextEncoder().encode("{"));
+      },
+    });
+    const response = await screen.fetch(
+      `${appFilesPath}/${app}/attachments/uploads`,
+      {
+        method: "POST",
+        headers: {
+          [screenLeaseHeader]: screen.lease,
+          "content-type": "application/json",
+        },
+        body,
+      }
+    );
+    expect({
+      status: response.status,
+      answer: await response.json(),
+    }).toMatchObject({ status: 408, answer: { code: "request.timeout" } });
+  });
+
   it("recovers an answer whose body broke partway under the same upload", async () => {
     const { app, release, screen } = await openedApp();
     // The connection drops after the headers of the first start's and the

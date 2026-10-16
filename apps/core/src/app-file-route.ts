@@ -258,6 +258,9 @@ const statuses: Readonly<Record<string, number>> = {
   "file.type_unsupported": 422,
   "file.content_mismatch": 422,
   "request.too_large": 413,
+  // A body that took too long to arrive (`readAtMost`): lost, for the
+  // page to send again.
+  "request.timeout": 408,
   "file.referenced": 409,
   "file.cancelled": 409,
   "file.incomplete": 409,
@@ -482,10 +485,12 @@ const receiveChunk = async (
   // Read no further than a chunk may be, whatever the request says of its
   // length; then held to the size its place says (`admitChunk`).
   const stream = bodyOf(request);
+  // Given as long as the page gives a chunk to be sent: a slow link whose
+  // page still waits is never cut off first.
   const bytes =
     stream === null
       ? undefined
-      : await readAtMost(stream, fileLimits.chunkBytes);
+      : await readAtMost(stream, fileLimits.chunkBytes, fileLimits.chunkSendMs);
   if (
     hash === undefined ||
     bytes === undefined ||

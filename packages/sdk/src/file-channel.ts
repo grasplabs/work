@@ -111,7 +111,9 @@ const isLost = (error: unknown): boolean => {
   return (
     code === undefined ||
     code === "internal.unexpected" ||
-    code === "screen.rate_limited"
+    code === "screen.rate_limited" ||
+    // Its body took core too long to read: sent again, or resumed.
+    code === "request.timeout"
   );
 };
 
