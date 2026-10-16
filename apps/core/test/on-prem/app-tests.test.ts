@@ -337,6 +337,29 @@ describe("an App's tests on-prem", { timeout: 180_000 }, () => {
     await expect(activating).resolves.toBe(1);
   });
 
+  it("run no suite that got its place after the run's time was up", async () => {
+    // Its build already made, by an App of the same files: the run's
+    // second starts as soon as it's asked.
+    const trivial = suiteOf("t.equal(1, 1);");
+    await expect(activation(await appWith(trivial))).resolves.toBe(1);
+    const built = await appWith(trivial);
+    const giveUp = new AbortController();
+    const { ended: held } = await heldPlace(
+      appTestOwnerOf(built.app),
+      giveUp.signal
+    );
+    // A run of 1 second, whose suite waits for a place (up to 3) that
+    // frees 2 seconds in: past the run's time, within one wait.
+    const activating = activation(
+      built,
+      envWith({ APP_TEST_LIMITS_MS: "20000/60000/1000" })
+    );
+    await scheduler.wait(2000);
+    giveUp.abort();
+    await expect(held).resolves.toBe("given up");
+    await expect(activating).resolves.toBe("unavailable");
+  });
+
   it("aren't held up by the App's own runs", async () => {
     const built = await appWith(passing);
     const giveUp = new AbortController();

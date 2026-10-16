@@ -1167,6 +1167,7 @@ const runInSuiteSession = async (
     modules,
     testMs,
     suiteMs,
+    runEndsAt,
     opened,
   }: {
     owner: string;
@@ -1174,6 +1175,8 @@ const runInSuiteSession = async (
     modules: Record<string, string>;
     testMs: number;
     suiteMs: number;
+    /** When the version's test run is over: the suite runs no later. */
+    runEndsAt: number;
     opened: (callId: string) => void;
   }
 ): Promise<unknown> => {
@@ -1201,11 +1204,24 @@ const runInSuiteSession = async (
           signal: giveUp.signal,
           opened: (callId) => {
             opened(callId);
+            // Within what is left of the run once it has its place: a wait
+            // for a place that took the rest is the sandbox's.
+            const left = runEndsAt - Date.now();
+            if (left <= 0) {
+              overrun.reject(
+                new SandboxUnavailableError(
+                  `${path}: the version's tests waited for a place in the sandbox past their time: try again.`
+                )
+              );
+              giveUp.abort();
+              return;
+            }
+            const ms = Math.min(suiteMs, left);
             timer = setTimeout(() => {
               overrun.reject(
-                new Error(`didn't finish within ${suiteMs / 1000} seconds`)
+                new Error(`didn't finish within ${ms / 1000} seconds`)
               );
-            }, suiteMs);
+            }, ms);
           },
         }
       ),
@@ -1259,7 +1275,11 @@ const suiteFailures = async (
     testMs,
     suiteMs,
     cleanupMs,
-  }: Pick<TestLimits, "testMs" | "suiteMs" | "cleanupMs">
+    runEndsAt = Number.POSITIVE_INFINITY,
+  }: Pick<TestLimits, "testMs" | "suiteMs" | "cleanupMs"> & {
+    /** When the version's whole test run is over (a time in milliseconds). */
+    runEndsAt?: number;
+  }
 ): Promise<string[]> => {
   let parent: string | undefined;
   const host = fixtureHostFor(env, release, files, {
@@ -1298,6 +1318,7 @@ const suiteFailures = async (
         modules,
         testMs,
         suiteMs,
+        runEndsAt,
         opened: (callId) => {
           parent = callId;
         },
@@ -1442,6 +1463,7 @@ export const appTestFailures = async (
           {
             testMs: limits.testMs,
             suiteMs: Math.min(limits.suiteMs, now),
+            runEndsAt: started + limits.runMs,
             cleanupMs: limits.cleanupMs,
           }
         );
