@@ -4,6 +4,7 @@ import { clientInternals } from "@grasp-os/sdk/host";
 import { toBase64Url } from "@grasp-os/shared/encoding";
 import {
   accessEndedCloseCode,
+  appTokenMs,
   appTokenPath,
   connectAgainCloseCode,
   portableLivePath,
@@ -569,6 +570,39 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
     }).toStrictEqual({ lapsed: pushed, renewed: [], stillOpen: "open" });
   });
 
+  it("refuses what is asked past its token's expiry, though its latest reading still holds and the expiry timer hasn't run", async () => {
+    const notes = await notesApp();
+    const token = await tokenFor(notes.builder.session, notes.app);
+    const { live, closed } = await openLive(notes.app);
+    const queries = live.connect(token);
+    await queries.watchQuery(listOf(notes), pushes().onSnapshot);
+    // The clock moved by hand, and no timer runs: a reading two seconds
+    // before the token's `exp` holds for a few seconds after it.
+    const start = Date.now();
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout"],
+      now: start,
+    });
+    try {
+      vi.setSystemTime(start + appTokenMs - 2000);
+      const near = await outcome(
+        queries.watchQuery(listOf(notes), pushes().onSnapshot)
+      );
+      vi.setSystemTime(start + appTokenMs + 1000);
+      const past = await outcome(
+        queries.watchQuery(listOf(notes), pushes().onSnapshot)
+      );
+      // Refused by closing the connection as expired, before any answer.
+      expect({ near, refused: past !== "ok" }).toStrictEqual({
+        near: "ok",
+        refused: true,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await expect(closedWithin(closed)).resolves.toBe(tokenExpiredCloseCode);
+  });
+
   it("refuses a renewal for anyone else, closing the connection, and one for another App, keeping it", async () => {
     const notes = await notesApp();
     const other = await notesApp();
@@ -597,7 +631,7 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
     });
   });
 
-  it("counts each renewal against the person's requests of the App", async () => {
+  it("counts each renewal against the person's requests of the App, and closes a connection refused for them to connect again", async () => {
     // The bucket fills again with time, so the clock is stopped. A fresh
     // person and App, so no other test's count.
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
@@ -614,10 +648,21 @@ describe("a portable host's live queries", { timeout: 120_000 }, () => {
       }
       // Within the burst, however many requests getting the token and
       // connecting took: never renewed without limit.
+      // A new connection then is refused for the budget, not the person:
+      // closed for the host to connect again, not as access ended.
+      const next = await openLive(notes.app);
+      const connected = await outcome(next.live.connect(token));
       expect({
         first: renewed[0],
         last: renewed.at(-1),
-      }).toStrictEqual({ first: "ok", last: "screen.rate_limited" });
+        connected,
+        closed: await closedWithin(next.closed),
+      }).toStrictEqual({
+        first: "ok",
+        last: "screen.rate_limited",
+        connected: "screen.rate_limited",
+        closed: connectAgainCloseCode,
+      });
     } finally {
       vi.useRealTimers();
     }

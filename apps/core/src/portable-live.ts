@@ -174,10 +174,21 @@ export class PortableQueriesRpc
     this.#userId = person.userId;
     this.#socket = socket;
     this.#held = held;
-    this.#check = recheckedEvery(
+    const verified = recheckedEvery(
       sessionRecheckMs,
       async () => await this.#read()
     );
+    // The token's `exp` is checked on every ask, outside the reading's
+    // window: a cached reading never outlives the token it was made with,
+    // whenever the expiry timer runs. What the window's check carries
+    // (dropping its latest reading) is carried over.
+    this.#check = Object.assign(async (): Promise<Identity> => {
+      if (Date.now() >= this.#held.expiresAt) {
+        this.#expire();
+        throw authErrors.create("auth.unauthenticated");
+      }
+      return await verified();
+    }, verified);
     const hasRole = stillHasRole(env, this.#check, app);
     this.#queries = new QuerySubscriptions(
       env,
@@ -387,15 +398,17 @@ export class PortableLiveRpc extends CoreRpcTarget implements PortableLiveApi {
         this.#server
       );
     } catch (error) {
-      // After the refusal is on its way to the host: a new connection
-      // with a new token is the way on, or the same once it is readable.
-      const unreadable =
+      // After the refusal is on its way to the host. Only a refused token
+      // ends the person's access; anything else (a token unreadable for
+      // now, the request budget spent, a moment's failure) is connected
+      // again, once its refusal says.
+      const refused =
         error instanceof Error &&
-        Reflect.get(error, "code") === "auth.token_unavailable";
+        Reflect.get(error, "code") === "auth.unauthenticated";
       setTimeout(() => {
         this.#socket.close(
-          unreadable ? connectAgainCloseCode : accessEndedCloseCode,
-          "Not authenticated"
+          refused ? accessEndedCloseCode : connectAgainCloseCode,
+          "Not connected"
         );
       }, 0);
       throw error;

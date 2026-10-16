@@ -288,6 +288,17 @@ export class PortableLive {
       state.held = await link.queries.watchQuery(request, callback);
     } catch (error) {
       uncount();
+      // Core couldn't read the token yet: no refusal of the query, so it
+      // is followed again, as after a lost connection, over a new one
+      // (core closes this one, `connectAgainCloseCode`).
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        Reflect.get(error, "code") === "auth.token_unavailable"
+      ) {
+        this.#close(link);
+        throw new Error("The token couldn't be read yet.", { cause: error });
+      }
       throw error;
     }
     if (state.lost) {

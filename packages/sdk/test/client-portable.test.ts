@@ -79,6 +79,9 @@ const resultOf = async (value: unknown): Promise<unknown> => {
     : undefined;
 };
 
+/** How core refuses the next connections' `connect`, one code each. */
+const connectRefusals: string[] = [];
+
 /** A subscription of the fake live connection's: released once. */
 class Subscription extends RpcTarget {
   readonly #release: () => void;
@@ -170,6 +173,10 @@ class LiveServer extends RpcTarget {
   }
 
   connect(token: string): LiveQueries {
+    const refused = connectRefusals.shift();
+    if (refused !== undefined) {
+      throw Object.assign(new Error(refused), { code: refused });
+    }
     return new LiveQueries(this.#url, this.#answer, this.#seen, token);
   }
 }
@@ -253,6 +260,7 @@ const fakeWebSocket = (
 const network = (answer: (seen: Seen) => Promise<unknown>) => {
   const seen: Seen[] = [];
   liveSockets.length = 0;
+  connectRefusals.length = 0;
   vi.stubGlobal("WebSocket", fakeWebSocket(answer, seen));
   vi.stubGlobal(
     "fetch",
@@ -887,6 +895,32 @@ describe("a portable host's client", () => {
     );
     expect(liveSockets).toHaveLength(2);
     expect(shown).toStrictEqual([{ title: "Ann's 1" }, { title: "Ann's 2" }]);
+    stop();
+  });
+
+  it("follows again when core can't read the token yet, clearing nothing", async () => {
+    network(async () => await Promise.resolve({ title: "Ann's" }));
+    connectRefusals.push("auth.token_unavailable");
+    const client = new GraspClient({
+      url: origin,
+      getToken: async () => await Promise.resolve(tokenOf("ann", expiry())),
+    });
+    const internals = clientInternals(client);
+    const entry = internals.entry(api.notes.get, { id: noteId });
+    const shown: unknown[] = [];
+    const stop = internals.subscribe(entry, () => {
+      shown.push(entry.snapshot.error?.code ?? entry.snapshot.value);
+    });
+    await vi.waitFor(
+      () => {
+        expect(entry.snapshot.value).toBeDefined();
+      },
+      { timeout: 10_000, interval: 20 }
+    );
+    expect({ shown, sockets: liveSockets.length }).toStrictEqual({
+      shown: [{ title: "Ann's" }],
+      sockets: 2,
+    });
     stop();
   });
 
