@@ -103,7 +103,7 @@ const accessCacheMs = 1000;
  * dropped; only writes that keep landing past that let go of the query,
  * which the screen then follows again.
  */
-const maxTornReads = 5;
+export const maxTornReads = 5;
 
 /**
  * How long core waits for a page to take a subscription's last result (a

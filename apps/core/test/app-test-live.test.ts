@@ -11,6 +11,8 @@ import type { Release } from "../src/app-releases.ts";
 import { fixtureHostFor } from "../src/app-tests.ts";
 import { commitFiles, createApp, findApp } from "../src/apps.ts";
 import type { Acting } from "../src/auth/identity.ts";
+import { queryMaxReruns } from "../src/call-limits.ts";
+import { maxTornReads } from "../src/query-subscriptions.ts";
 import { notesFiles } from "./notes-client-app.ts";
 import { person } from "./sealed-apps.ts";
 
@@ -465,9 +467,14 @@ describe("a test session's live queries", { timeout: 120_000 }, () => {
     await opened.close();
   });
 
-  it("let go of a subscription whose reads writes keep tearing, after a bounded number of reads", async () => {
-    // Every store answers as it does, but says each table moved on since
-    // any read of it: every read of the query is torn.
+  /**
+   * A session of a sealed Notes App's test run whose store answers as it
+   * does, but for its next `torn` looks at its tables' generations after
+   * a read (store-reader.ts): each says every table moved on since, so
+   * that run of a read is torn. `tear` asks for more such looks.
+   */
+  const tearingSession = async (torn: number) => {
+    let left = torn;
     const stores = new Proxy(env.DATA_STORES, {
       get: (namespace, key): unknown => {
         const value: unknown = Reflect.get(namespace, key);
@@ -477,8 +484,9 @@ describe("a test session's live queries", { timeout: 120_000 }, () => {
         return (name: string) =>
           new Proxy(namespace.getByName(name), {
             get: (stub, method): unknown => {
-              if (method === "generations") {
+              if (method === "generations" && left > 0) {
                 return async () => {
+                  left -= 1;
                   await Promise.resolve();
                   return {};
                 };
@@ -505,6 +513,69 @@ describe("a test session's live queries", { timeout: 120_000 }, () => {
       followed.onSnapshot,
       followed.onLost
     );
+    const tear = (more: number) => {
+      left += more;
+    };
+    return { release, opened, followed, tear };
+  };
+
+  /** Looks a read takes when every run of it is torn. */
+  const tornRead = 1 + queryMaxReruns;
+
+  it("read a subscription again, still followed, after reads writes tore, as many as it may", async () => {
+    const { opened, followed } = await tearingSession(
+      (maxTornReads - 1) * tornRead
+    );
+
+    await vi.waitFor(
+      () => {
+        expect(followed.pushes).toHaveLength(1);
+      },
+      { timeout: 10_000 }
+    );
+    expect(
+      pushOfNotes.parse(followed.pushes[0]).result.value.items
+    ).toStrictEqual([]);
+    expect({
+      lost: followed.lost(),
+      released: followed.released(),
+    }).toStrictEqual({ lost: 0, released: 0 });
+    await opened.close();
+  });
+
+  it("count only torn reads in a row: a read writes didn't tear starts the count again", async () => {
+    const { release, opened, followed, tear } = await tearingSession(
+      (maxTornReads - 1) * tornRead
+    );
+    await vi.waitFor(
+      () => {
+        expect(followed.pushes).toHaveLength(1);
+      },
+      { timeout: 10_000 }
+    );
+
+    tear((maxTornReads - 1) * tornRead);
+    await opened.call(
+      "note-owner",
+      requestFor(release, "notes.create", { title: "After" })
+    );
+
+    await vi.waitFor(
+      () => {
+        const last = pushOfNotes.safeParse(followed.pushes.at(-1));
+        expect(last.data?.result.value.items).toHaveLength(1);
+      },
+      { timeout: 10_000 }
+    );
+    expect({
+      lost: followed.lost(),
+      released: followed.released(),
+    }).toStrictEqual({ lost: 0, released: 0 });
+    await opened.close();
+  });
+
+  it("let go of a subscription once one read too many in a row was torn", async () => {
+    const { opened, followed } = await tearingSession(maxTornReads * tornRead);
 
     await vi.waitFor(
       () => {
