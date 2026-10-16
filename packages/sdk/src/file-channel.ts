@@ -721,6 +721,23 @@ export const fileChannel = ({
           ? { bounded: "progress" }
           : { cancel: signal, bounded: "progress" }
       ),
+    /**
+     * The bytes of file `file`, a previewable image, for the page to show
+     * in its frame: audited as a preview, never as a download.
+     */
+    preview: async (
+      resource: string,
+      file: string,
+      signal?: AbortSignal
+    ): Promise<Response> =>
+      await sendAgain(
+        `${base(resource)}/files/${encodeURIComponent(file)}/preview`,
+        {},
+        async (response) => await Promise.resolve(response),
+        signal === undefined
+          ? { bounded: "progress" }
+          : { cancel: signal, bounded: "progress" }
+      ),
     /** Deletes file `file`, under the caller's key if any. */
     delete: async (
       resource: string,

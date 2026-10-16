@@ -388,7 +388,7 @@ const pageFiles = (
   upload: channel.upload,
   read: async (resource, file, signal) => {
     const description = await channel.describe(resource, file, signal);
-    const content = await channel.content(resource, file, signal);
+    const content = await channel.preview(resource, file, signal);
     return { description, preview: await content.blob() };
   },
   download: async (resource, file, signal) => {
@@ -2783,6 +2783,53 @@ describe("an App's files", { timeout: 120_000 }, () => {
         })
       )
     ).resolves.toBe("file.not_found");
+  });
+
+  it("audits someone else's preview as a preview and their download as a download, and previews only an image", async () => {
+    const { builder, app, client, api, screen } = await openedApp();
+    const colleague = await colleagueOf(builder, app);
+    const image = await upload(screen.channel, blobOf(png(), "image/png"));
+    const text = await upload(
+      screen.channel,
+      blobOf(utf8("Plain words."), "text/plain")
+    );
+    const note = await client.mutation(api.create, { title: "Shared" });
+    await client.mutation(api.attachFile, {
+      id: note,
+      expectedRevision: 1,
+      file: { id: image },
+    });
+    await client.mutation(api.attachFile, {
+      id: note,
+      expectedRevision: 2,
+      file: { id: text },
+    });
+    const previewed = await colleague.screen.channel.preview(
+      "attachments",
+      image
+    );
+    await previewed.arrayBuffer();
+    const refused = await codeOf(
+      colleague.screen.channel.preview("attachments", text)
+    );
+    await colleague.client.files.download(resources.attachments, {
+      id: image,
+    });
+    const events = await fileEvents();
+    expect({
+      image: events
+        .filter(({ file }) => file === image)
+        .map(({ said }) => said)
+        .toSorted(),
+      refused,
+    }).toStrictEqual({
+      image: [
+        `file.downloaded:${colleague.userId}`,
+        `file.previewed:${colleague.userId}`,
+        `file.published:${builder.userId}`,
+      ].toSorted(),
+      refused: "file.invalid",
+    });
   });
 
   it("audits a person's downloads of a file once a day, though the first was logged before the next", async () => {

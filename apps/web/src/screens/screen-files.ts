@@ -68,7 +68,7 @@ const previewOf = async (
   if (!isPreviewable(description.mimeType, description.size)) {
     return { description, preview: null };
   }
-  const response = await channel.content(resource, file, signal);
+  const response = await channel.preview(resource, file, signal);
   const preview = await response.blob();
   // Within the bound in bytes, and in pixels as its header declares them:
   // a small file can decode to an image too large for the tab.

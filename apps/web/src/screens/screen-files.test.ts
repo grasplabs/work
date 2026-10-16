@@ -164,7 +164,7 @@ const imageChannel = (image: Uint8Array<ArrayBuffer>) =>
     lease: "lease",
     person: async () => await Promise.resolve("person"),
     fetch: async (path) => {
-      if (path.endsWith("/content")) {
+      if (path.endsWith("/preview")) {
         return await Promise.resolve(new Response(image));
       }
       return Response.json({

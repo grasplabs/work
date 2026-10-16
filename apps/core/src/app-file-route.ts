@@ -5,6 +5,7 @@ import {
   downloadNameOf,
   fileChunkHashHeader,
   fileLimits,
+  isPreviewable,
   TextCheck,
   typeOfBytes,
 } from "@grasp-os/shared/app-file-limits";
@@ -66,6 +67,7 @@ import { admitted } from "./screens-rpc.ts";
 // - `DELETE uploads/<file>`                cancels it
 // - `GET    files/<file>`                  what a file is
 // - `GET    files/<file>/content`          its bytes, as an attachment
+// - `GET    files/<file>/preview`          a previewable image's bytes
 // - `POST   files/<file>/delete`           deletes it
 //
 // The store's file host decides what each may do to which file
@@ -108,8 +110,9 @@ import { admitted } from "./screens-rpc.ts";
 //   (never one a browser runs), `nosniff` and a sandboxing policy
 //   (security-headers.ts), never cached, and saved under a name ending in
 //   that type's extension, with no invisible formatting (`downloadNameOf`).
-// - Nobody can tell who read someone else's file: a download by anyone
-//   but its uploader is audited, once a day per person and file.
+// - Nobody can tell who read someone else's file: a download, or a
+//   preview, by anyone but its uploader is audited, each as what it was,
+//   once a day per person and file.
 
 /** A file channel request, as its path names it. */
 type FileRequest =
@@ -117,7 +120,7 @@ type FileRequest =
   | { readonly kind: "status" | "cancel" | "finish"; readonly file: string }
   | { readonly kind: "chunk"; readonly file: string; readonly index: number }
   | {
-      readonly kind: "describe" | "content" | "delete";
+      readonly kind: "describe" | "content" | "preview" | "delete";
       readonly file: string;
     };
 
@@ -178,6 +181,9 @@ const fileRequestOf = (
     case "GET content": {
       return { kind: "content", file };
     }
+    case "GET preview": {
+      return { kind: "preview", file };
+    }
     case "POST delete": {
       return { kind: "delete", file };
     }
@@ -227,7 +233,11 @@ export const fileRouteOf = (
 
 /** The operation a request needs its resource to declare. */
 const operationOf = (request: FileRequest): FilesOperation => {
-  if (request.kind === "describe" || request.kind === "content") {
+  if (
+    request.kind === "describe" ||
+    request.kind === "content" ||
+    request.kind === "preview"
+  ) {
     return "read";
   }
   return request.kind === "delete" ? "delete" : "upload";
@@ -566,16 +576,17 @@ const finish = async (
 };
 
 /**
- * Records that `reader` downloaded `content`, if they aren't its uploader:
- * once a day per person and file (the event's ID is derived from them),
- * as access to someone else's document. Previews and descriptions aren't
- * audited.
+ * Records that `reader` downloaded or previewed `content` (`action`), if
+ * they aren't its uploader: once a day per person, file and action (the
+ * event's ID is derived from them), as access to someone else's document.
+ * Descriptions aren't audited.
  */
 const auditDownload = async (
   env: Env,
   storeId: string,
   reader: string,
-  content: FileContent
+  content: FileContent,
+  action: "file.downloaded" | "file.previewed"
 ): Promise<void> => {
   if (reader === content.ownerId) {
     return;
@@ -583,9 +594,7 @@ const auditDownload = async (
   const day = new Date().toISOString().slice(0, 10);
   const event = auditEventSchema.parse({
     id: uuidFromHash(
-      await sha256Hex(
-        `file.downloaded:${storeId}:${content.id}:${reader}:${day}`
-      )
+      await sha256Hex(`${action}:${storeId}:${content.id}:${reader}:${day}`)
     ),
     // The same event however often that day: one sent again after the
     // first was logged (its outbox row gone) is a duplicate the log drops,
@@ -593,7 +602,7 @@ const auditDownload = async (
     at: `${day}T00:00:00.000Z`,
     source: "core",
     actor: { type: "person", userId: reader },
-    action: "file.downloaded",
+    action,
     target: { type: "file", id: content.id },
     detail: { store: storeId, uploadedBy: content.ownerId, day },
   });
@@ -611,13 +620,25 @@ const auditDownload = async (
  */
 const contentResponse = async (
   { env, storeId, stub, resource, within, reader }: Channel,
-  file: string
+  file: string,
+  preview = false
 ): Promise<Response> => {
   const reading = await reader();
   const content = await within(
     async () => await stub.fileContent(storeId, reading, resource, file)
   );
-  await auditDownload(env, storeId, reading.principal, content);
+  // A preview is a previewable image the page shows in the frame, audited
+  // as one: anything else is read only as a download.
+  if (preview && !isPreviewable(content.mimeType, content.size)) {
+    throw fileErrors.create("file.invalid");
+  }
+  await auditDownload(
+    env,
+    storeId,
+    reading.principal,
+    content,
+    preview ? "file.previewed" : "file.downloaded"
+  );
   const endsAt = Date.now() + fileLimits.downloadMs;
   let next = 0;
   const body = new ReadableStream<Uint8Array>(
@@ -728,6 +749,9 @@ const answer = async (
     }
     case "content": {
       return await contentResponse(channel, asked.file);
+    }
+    case "preview": {
+      return await contentResponse(channel, asked.file, true);
     }
     case "delete": {
       const { idempotencyKey } = fileErrors.parse(
