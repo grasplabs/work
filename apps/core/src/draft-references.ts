@@ -80,5 +80,5 @@ export const withDraftReferences = async (
     app,
     version,
     files,
-    async () => await filesManifest(env, files)
+    async () => await filesManifest(env, files, app)
   );

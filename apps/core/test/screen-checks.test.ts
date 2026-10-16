@@ -130,7 +130,7 @@ const withLine = (from: string, to: string): Record<string, string> => {
 // Every build starts an isolate with the compiler in it.
 describe("screen checks", { timeout: 60_000 }, () => {
   it("passes a clean screen, with the App's server types", async () => {
-    const built = await buildScreens(env, app({}));
+    const built = await buildScreens(env, app({}), "app-test");
 
     expect(built).toMatchObject({ ok: true, diagnostics: [] });
   });
@@ -143,7 +143,8 @@ describe("screen checks", { timeout: 60_000 }, () => {
           `{ id: "T-2", title: "VPN drops at noon", status: "waiting", assignee: null },`,
           `{ id: "T-2", title: "VPN drops at noon", status: "stuck", assignee: null },`
         )
-      )
+      ),
+      "app-test"
     );
 
     expect(built).toStrictEqual({
@@ -172,7 +173,8 @@ describe("screen checks", { timeout: 60_000 }, () => {
   assignee: Person | null;
 }
 `,
-      })
+      }),
+      "app-test"
     );
 
     expect(built).toStrictEqual({
@@ -198,7 +200,8 @@ describe("screen checks", { timeout: 60_000 }, () => {
           `const [query, setQuery] = useState("");`,
           'const [query, setQuery = useState("");'
         )
-      )
+      ),
+      "app-test"
     );
 
     expect(built.ok).toBeFalsy();
@@ -220,7 +223,8 @@ describe("screen checks", { timeout: 60_000 }, () => {
           `<Button size="sm">`,
           `<Button size="sm" className="rounded-full px-8">`
         )
-      )
+      ),
+      "app-test"
     );
 
     expect(built.ok).toBeFalsy();
@@ -244,7 +248,8 @@ describe("screen checks", { timeout: 60_000 }, () => {
           `<main className="flex flex-col gap-4 p-6">`,
           `<main className="flex flex-col gap-4 bg-red-500 p-6">`
         )
-      )
+      ),
+      "app-test"
     );
 
     expect(built.ok).toBeFalsy();

@@ -691,7 +691,8 @@ describe("screens", { timeout: 60_000 }, () => {
       env,
       sampleFiles,
       "notes",
-      1
+      1,
+      "app-test"
     );
     const listedBefore = await env.FILES.list({ prefix: "screen-modules/" });
     await stageFrame(env, artifact, code, new Date(Date.now() + 16 * day));

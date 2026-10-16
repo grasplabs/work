@@ -5,7 +5,7 @@ import type { PackageLimits, PackageTarball } from "@grasp-os/shared/packages";
 import { PlatformBoundError, platformRunner } from "../platform-sandbox.ts";
 import type { PlatformEnv } from "../platform-sandbox.ts";
 import { inOrderReader } from "../sandbox-session.ts";
-import { SandboxUnavailableError } from "../sandboxed.ts";
+import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 
 // The package builder, wherever it runs (platform-sandbox.ts): on
 // Cloudflare in a Dynamic Worker of core's own, whose CPU the runtime
@@ -136,25 +136,12 @@ export const builderFailure = (error: unknown, refusal: string): unknown => {
   );
 };
 
-/**
- * The package builder for one resolve or build, wherever the runner runs
- * it (platform-sandbox.ts). Throws `SandboxUnavailableError` at once where
- * nothing bounds it: made before any tarball is fetched. Each call throws
- * {@link PlatformBoundError} when the builder was stopped at its bounds
- * (`own` when the packages reach it whatever the load),
- * `SandboxUnavailableError` when the sandbox had no place for it, and
- * what the builder threw otherwise.
- *
- * On the sandbox host the tarballs and the artifact go a chunk at a time,
- * the builder calling back into core for each. In core's Loader they go
- * as values in the call, as they always did: the builder's isolate has
- * `subRequests: 0`, and whether Cloudflare counts a Dynamic Worker's
- * calls to a function it was handed as subrequests isn't documented nor
- * checkable without a Cloudflare account to run on, so nothing there
- * depends on it.
- */
-export const packageBuilder = (env: PackageBuilderEnv): PackageBuilderRun => {
-  const { inCore, run } = platformRunner(env);
+/** The package builder building `whose` packages (an App's ID). */
+const builderFor = (
+  env: PackageBuilderEnv,
+  whose: string
+): PackageBuilderRun => {
+  const { inCore, run } = platformRunner(env, whose);
   return {
     inspect: async (limits, packages) => {
       if (inCore) {
@@ -181,4 +168,30 @@ export const packageBuilder = (env: PackageBuilderEnv): PackageBuilderRun => {
       return withWrittenFiles(answer, writer.files());
     },
   };
+};
+
+/**
+ * The package builder for one resolve or build, wherever the runner runs
+ * it (platform-sandbox.ts). Throws `SandboxUnavailableError` at once where
+ * nothing bounds it: made before any tarball is fetched. Each call throws
+ * {@link PlatformBoundError} when the builder was stopped at its bounds
+ * (`own` when the packages reach it whatever the load),
+ * `SandboxUnavailableError` when the sandbox had no place for it, and
+ * what the builder threw otherwise.
+ *
+ * On the sandbox host the tarballs and the artifact go a chunk at a time,
+ * the builder calling back into core for each. In core's Loader they go
+ * as values in the call, as they always did: the builder's isolate has
+ * `subRequests: 0`, and whether Cloudflare counts a Dynamic Worker's
+ * calls to a function it was handed as subrequests isn't documented nor
+ * checkable without a Cloudflare account to run on, so nothing there
+ * depends on it.
+ */
+export const packageBuilder = (
+  env: PackageBuilderEnv
+): ((whose: string) => PackageBuilderRun) => {
+  // Refused at once where nothing bounds the builder, before the caller
+  // reads its input or fetches a tarball.
+  sessionHost(env);
+  return (whose) => builderFor(env, whose);
 };

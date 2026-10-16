@@ -679,7 +679,7 @@ export const versionManifest = async (
     const release = await loadRelease(env, app, version);
     return release.app;
   }
-  return await filesManifest(env, files);
+  return await filesManifest(env, files, app);
 };
 
 /**
@@ -875,11 +875,15 @@ export const sealRelease = async (
 
   // The first inspection: symbolic references, resolved against the
   // registration they come with.
-  const symbolic = await builtCode(env, {
-    ...files,
-    ...symbolicModules(),
-    [generatedPaths.server]: serverModuleSource,
-  });
+  const symbolic = await builtCode(
+    env,
+    {
+      ...files,
+      ...symbolicModules(),
+      [generatedPaths.server]: serverModuleSource,
+    },
+    app
+  );
   const firstText = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(firstText);
 
@@ -888,7 +892,7 @@ export const sealRelease = async (
     resourceId: app,
     resourceVersion: version,
   });
-  const final = await builtCode(env, { ...files, ...generated });
+  const final = await builtCode(env, { ...files, ...generated }, app);
   const secondText = await inspected(env, final, sdk.modules);
   const reread = readManifest(secondText);
   if (canonicalText(reread) !== canonicalText(manifest)) {

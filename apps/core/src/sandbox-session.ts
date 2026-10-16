@@ -23,6 +23,7 @@ import {
   sandboxMemoryHeader,
   sandboxOwnerHeader,
   sandboxParentHeader,
+  sandboxSubOwnerHeader,
   sandboxWaitHeader,
 } from "./sandbox-headers.ts";
 import { sandboxWaitMs, SandboxUnavailableError } from "./sandboxed.ts";
@@ -109,6 +110,13 @@ export interface SessionCall {
    */
   readonly owner: string;
   /**
+   * Whose work it is within a shared owner (an App's builds, of
+   * `platform:builder`): the supervisor lets one sub-owner hold at most
+   * part of its owner's share. Core's own record of the call, never App
+   * code's word.
+   */
+  readonly subOwner?: string;
+  /**
    * The session (its call ID) this one is the child of: a call the parent
    * made and waits for (an App function a Code Mode run calls). The
    * supervisor gives it a process of the parent's own reserve, never one
@@ -121,6 +129,13 @@ export interface SessionCall {
    */
   readonly lingerMs?: number;
 }
+
+/**
+ * An owner or sub-owner as the supervisor takes one: what else it holds,
+ * it holds as `_`, whatever an ID's own form.
+ */
+const asOwner = (id: string): string =>
+  id.replaceAll(/[^A-Za-z0-9:_.-]/gu, "_").slice(0, 200);
 
 /**
  * A reader of `parts`' bytes, for the sandbox host to call as
@@ -524,9 +539,10 @@ const openSession = async (
           : { [sandboxParentHeader]: call.parent }),
         // As the supervisor takes an owner: what else it holds, it holds
         // as `_`, whatever an ID's own form.
-        [sandboxOwnerHeader]: call.owner
-          .replaceAll(/[^A-Za-z0-9:_.-]/gu, "_")
-          .slice(0, 200),
+        [sandboxOwnerHeader]: asOwner(call.owner),
+        ...(call.subOwner === undefined
+          ? {}
+          : { [sandboxSubOwnerHeader]: asOwner(call.subOwner) }),
       },
       signal:
         signal === undefined

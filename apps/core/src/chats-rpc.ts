@@ -436,7 +436,8 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         this.#env,
         Object.fromEntries(files),
         screen ?? screens[0],
-        null
+        null,
+        id
       );
       // A preview reads no real data, so no approval decides it; its
       // frame still runs exactly this build and nothing else.

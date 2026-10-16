@@ -19,7 +19,7 @@ const summary = ({ file, line, rule, message }: Diagnostic) =>
   `${file}:${line} ${rule}: ${message}`;
 
 const summaries = async (files: Record<string, string>) => {
-  const built = await buildScreens(env, files);
+  const built = await buildScreens(env, files, "app-test");
   expect(built.ok).toBeFalsy();
   return built.diagnostics.map((diagnostic) => summary(diagnostic));
 };
@@ -80,7 +80,8 @@ export default function Desk() {
       screen(
         `export const noise = "${")".repeat(150_000)}x";
 export const classes = ["mt-7","${"(".repeat(400)}"];`
-      )
+      ),
+      "app-test"
     );
 
     expect(built.ok && built.css).toContain(".mt-7");
@@ -101,7 +102,7 @@ export const classes = ["mt-7","${"(".repeat(400)}"];`
       Object.keys(many).map((path) => [`workflows/${path}`, "x".repeat(10_000)])
     );
     await expect(
-      buildScreens(env, { ...screen(""), ...unread })
+      buildScreens(env, { ...screen(""), ...unread }, "app-test")
     ).resolves.toMatchObject({ ok: true });
 
     const long = `// ${"x".repeat(200_001)}\n`;

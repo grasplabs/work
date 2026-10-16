@@ -1384,6 +1384,7 @@ const suiteFailures = async (
  */
 export const appTestFailures = async (
   env: Env,
+  app: AppId,
   release: Release,
   files: AppFiles
 ): Promise<string[]> => {
@@ -1412,7 +1413,7 @@ export const appTestFailures = async (
     throw error;
   }
   const limits = limitsOf(env);
-  const build = await buildAppTests(env, { ...files });
+  const build = await buildAppTests(env, { ...files }, app);
   if (!build.ok) {
     return build.diagnostics
       .slice(0, maxFailures)
@@ -1496,7 +1497,7 @@ export const requireAppTestsPass = async (
     return;
   }
   const release = await loadRelease(env, app, version);
-  const failures = await appTestFailures(env, release, files);
+  const failures = await appTestFailures(env, app, release, files);
   if (failures.length > 0) {
     throw versionErrors.create("version.tests_failed", { version, failures });
   }
