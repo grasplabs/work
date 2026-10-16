@@ -738,7 +738,7 @@ test("a file hidden, then shown again, loads afresh instead of its last view", a
   await expect(screen.getByText("Showing photo.png")).toBeVisible();
 });
 
-test("a file whose reader lost access shows the refusal, and isn't read again and again", async ({
+test("a file whose screen lost the App's data shows the refusal, and isn't read again", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("notesApp");
@@ -753,7 +753,10 @@ test("a file whose reader lost access shows the refusal, and isn't read again an
   });
   await expect(screen.getByText("Showing photo.png")).toBeVisible();
   // The App's data is sensitive again: its build, approved by nobody,
-  // gets none, and the next thing the screen asks is refused.
+  // gets none, and the next thing the screen asks is refused. The page
+  // then asks core about the build at once, and stops the screen: the
+  // refusal the person is left with is the page's, not the screen's own,
+  // which shows only until then.
   await sensitiveData(app);
   let reads = 0;
   page.on("request", (request) => {
@@ -766,7 +769,14 @@ test("a file whose reader lost access shows the refusal, and isn't read again an
     mimeType: "image/png",
     buffer: pixel,
   });
-  await expect(screen.getByRole("alert")).toBeVisible();
+  await expect(
+    page.getByText(
+      "Nobody has approved this app's code for the domain's data yet."
+    )
+  ).toBeVisible();
+  await expect(page.locator('iframe[title="notes app"]')).not.toHaveAttribute(
+    "src"
+  );
   await page.waitForTimeout(3000);
   expect(reads).toBe(0);
 });
