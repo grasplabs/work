@@ -5,9 +5,10 @@ import { descriptorOf } from "../src/value-schema.ts";
 // The workflows the Notes fixture binds, as the host resolves its
 // bindings against the approved records: what `.grasp/references.ts` is
 // generated with beside the App's manifest. `summarizeNote` takes a
-// note's ID and gives its summary, and listens for two events in two
-// tasks; `archiveNotes` takes nothing, gives nothing, and listens for a
-// confirmation.
+// note's ID and gives its summary, listens for two events in two tasks
+// and asks two decisions of different values; `archiveNotes` takes
+// nothing, gives nothing, listens for a confirmation and asks one
+// decision with no value.
 
 export const notesWorkflows: readonly BoundWorkflow[] = [
   {
@@ -37,6 +38,23 @@ export const notesWorkflows: readonly BoundWorkflow[] = [
       "do/0/chooseStyle": ["styleChosen"],
       "do/2/awaitEdit": ["noteEdited", "styleChosen"],
     },
+    decisions: {
+      approveSummary: {
+        value: descriptorOf(
+          v.object({
+            comment: v.string().max(500),
+            rating: v.number().integer().min(1).max(5).optional(),
+          })
+        ),
+        context: descriptorOf(
+          v.object({ noteId: v.id("notes"), summary: v.string() })
+        ),
+      },
+      chooseLength: {
+        value: descriptorOf(v.enum(["short", "long"])),
+        context: descriptorOf(v.object({ words: v.number().integer() })),
+      },
+    },
   },
   {
     alias: "archiveNotes",
@@ -49,5 +67,11 @@ export const notesWorkflows: readonly BoundWorkflow[] = [
       },
     },
     listens: { "do/0/confirm": ["confirmed"] },
+    decisions: {
+      confirmArchive: {
+        value: descriptorOf(v.null()),
+        context: descriptorOf(v.object({ count: v.number().integer() })),
+      },
+    },
   },
 ];

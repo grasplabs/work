@@ -122,6 +122,7 @@ export {
   contractFingerprint,
   contractFingerprints,
   contractsFormatVersion,
+  decisionFingerprint,
   eventFingerprint,
   generatedPaths,
   generateModules,
@@ -131,6 +132,7 @@ export {
 } from "./generate.ts";
 export type {
   BoundWorkflow,
+  BoundWorkflowDecision,
   BoundWorkflowEvent,
   CatalogAction,
   ReleaseIdentity,

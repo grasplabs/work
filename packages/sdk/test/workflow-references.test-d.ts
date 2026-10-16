@@ -1,19 +1,26 @@
 // Compile-time guarantees of the workflow references the host generates
 // (spec 10.4.1, 10.4.5, 10.4.6, 10.7.2, 10.7.9), checked against the
 // Notes fixture's generated `workflows`: a workflow's input, output,
-// waits and events are inferred from its reference alone, and after
-// narrowing a wait by its kind and key, its event and that event's data,
-// without a cast or a generic argument. An event of another workflow, data
-// of another event, a key no task has and a `.start`, `.get` or `.cancel`
-// all fail. Type-checked by `vp check`, never run: every
+// waits, events and decisions are inferred from its reference alone, and
+// after narrowing a wait by its kind and key, its event and that event's
+// data, or its decision's response value, without a cast or a generic
+// argument. An event or decision of another workflow, data or a value of
+// another one, a key no task or decision has and a `.start`, `.get` or
+// `.cancel` all fail. Type-checked by `vp check`, never run: every
 // `@ts-expect-error` must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
+import { v } from "../src/index.ts";
 import type {
   AnyWorkflowReference,
+  DecisionContextOf,
+  DecisionValueOf,
   EventDataOf,
   Id,
+  Infer,
+  InferInput,
   RunHandle,
+  WorkflowDecisionWait,
   WorkflowEventReference,
   WorkflowEventsOf,
   WorkflowInputOf,
@@ -70,6 +77,7 @@ expectTypeOf<Extract<keyof typeof summarize, string>>().toEqualTypeOf<
   | "output"
   | "events"
   | "listens"
+  | "decisions"
 >();
 // @ts-expect-error -- no generated start: runs go through useWorkflow
 void summarize.start;
@@ -170,3 +178,101 @@ if (archiveWait.kind === "event") {
 // The generic event reference stays usable where any event is shown.
 const anyEvent: WorkflowEventReference = edited;
 void anyEvent;
+
+/**
+ * How a screen answers a decision a run of its workflow is held at: the
+ * exact wait, and a value inferred from that wait alone.
+ */
+declare const respond: <Wait extends WorkflowDecisionWait>(
+  wait: Wait,
+  response: {
+    readonly approved: boolean;
+    readonly value: NoInfer<DecisionValueOf<Wait>>;
+  }
+) => Promise<void>;
+
+// Each decision binds its workflow binding and key, literally, and holds
+// its value schema as data.
+const approve = summarize.decisions.approveSummary;
+expectTypeOf(approve.workflow).toEqualTypeOf<"workflows.summarizeNote">();
+expectTypeOf(approve.key).toEqualTypeOf<"approveSummary">();
+expectTypeOf<DecisionValueOf<typeof approve>>().toEqualTypeOf<{
+  comment: string;
+  rating?: number;
+}>();
+expectTypeOf<DecisionContextOf<typeof approve>>().toEqualTypeOf<{
+  noteId: Id<"notes">;
+  summary: string;
+}>();
+expectTypeOf<
+  DecisionValueOf<typeof summarize.decisions.chooseLength>
+>().toEqualTypeOf<"short" | "long">();
+expectTypeOf<
+  DecisionValueOf<typeof archive.decisions.confirmArchive>
+>().toEqualTypeOf<null>();
+expectTypeOf<keyof typeof summarize.decisions>().toEqualTypeOf<
+  "approveSummary" | "chooseLength"
+>();
+// @ts-expect-error -- a decision the workflow doesn't declare
+void summarize.decisions.reviewInvoice;
+// @ts-expect-error -- read-only schema metadata: nothing answers through it
+void approve.respond;
+// @ts-expect-error -- a value schema is data: nothing to call
+void approve.valueSchema["~standard"];
+
+// A decision's form schema is built from its generated value schema.
+const responseSchema = v.object({
+  approved: v.boolean(),
+  value: approve.valueSchema,
+});
+expectTypeOf<InferInput<typeof responseSchema>>().toEqualTypeOf<{
+  approved: boolean;
+  value: { comment: string; rating?: number };
+}>();
+expectTypeOf<Infer<typeof responseSchema>>().toEqualTypeOf<{
+  approved: boolean;
+  value: { comment: string; rating?: number };
+}>();
+
+// Decision waits narrow by key to their own value, never another's.
+if (wait.kind === "decision") {
+  expectTypeOf(wait.key).toEqualTypeOf<"approveSummary" | "chooseLength">();
+  expectTypeOf(wait.canRespond).toEqualTypeOf<boolean>();
+  if (wait.key === "approveSummary") {
+    void respond(wait, { approved: true, value: { comment: "Checked." } });
+    void respond(wait, {
+      approved: false,
+      value: { comment: "Too long.", rating: 2 },
+    });
+    // @ts-expect-error -- chooseLength's value, not approveSummary's
+    void respond(wait, { approved: true, value: "short" });
+    // @ts-expect-error -- a field the value doesn't declare
+    void respond(wait, { approved: true, value: { comment: "", by: "ada" } });
+    // @ts-expect-error -- no value at all where one is declared
+    void respond(wait, { approved: true });
+    // @ts-expect-error -- untyped where the decision declares its value
+    void respond(wait, { approved: true, value: untyped });
+  }
+  if (wait.key === "chooseLength") {
+    void respond(wait, { approved: true, value: "long" });
+    // @ts-expect-error -- outside the enum
+    void respond(wait, { approved: true, value: "medium" });
+  }
+  // @ts-expect-error -- no decision has this key
+  void (wait.key === "reviewInvoice");
+}
+declare const eventWait: Extract<
+  WorkflowWaitOf<typeof summarize>,
+  { readonly kind: "event" }
+>;
+// @ts-expect-error -- an event wait is no decision to answer
+void respond(eventWait, { approved: true, value: null });
+
+declare const archiveDecision: Extract<
+  WorkflowWaitOf<typeof archive>,
+  { readonly kind: "decision" }
+>;
+expectTypeOf(archiveDecision.key).toEqualTypeOf<"confirmArchive">();
+void respond(archiveDecision, { approved: true, value: null });
+// @ts-expect-error -- archiveNotes's decision takes no comment
+void respond(archiveDecision, { approved: true, value: { comment: "" } });
