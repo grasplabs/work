@@ -942,7 +942,9 @@ const evaluatedWith = async (
     if (ran !== undefined) {
       ran.module = true;
     }
-    evaluated = settledCode(await attempt.evaluate(slot));
+    evaluated = settledCode(
+      await attempt.evaluate(slot, { input: { who: "Ada" }, output: null })
+    );
     return null;
   });
   // What it evaluated, or, refused before it could, why.
@@ -963,8 +965,11 @@ const attempted = async (
     { input: { input: { who: "Ada" }, context: {} } },
     async (attempt) => {
       ran.module = true;
-      const value = await attempt.evaluate(slot);
-      return value.ok ? { ok: true, value: value.value } : value;
+      const value = await attempt.evaluate(slot, {
+        input: { who: "Ada" },
+        output: null,
+      });
+      return value.ok ? { ok: true, value: { output: value.value } } : value;
     }
   );
   return ran.module;
@@ -1052,12 +1057,14 @@ describe("an activation's share of core's CPU", () => {
       { input: { input: { who: "Ada" }, context: {} } },
       async (attempt) => {
         leftRunning.push(
-          attempt.evaluate(0).then((settled) => {
-            settledFirst.push("evaluation");
-            return settledCode(settled);
-          })
+          attempt
+            .evaluate(0, { input: { who: "Ada" }, output: null })
+            .then((settled) => {
+              settledFirst.push("evaluation");
+              return settledCode(settled);
+            })
         );
-        return await Promise.resolve({ ok: true, value: null });
+        return await Promise.resolve({ ok: true, value: { output: null } });
       }
     );
     settledFirst.push("attempt");

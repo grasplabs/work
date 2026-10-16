@@ -1,4 +1,4 @@
-/* oxlint-disable no-template-curly-in-string -- workflow expressions are written as ${ … } strings */
+/* oxlint-disable no-template-curly-in-string, unicorn/no-thenable -- workflow expressions are written as ${ … } strings, and transitions as then */
 import { isRetryableCode } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -168,9 +168,9 @@ describe("JSON workflow builds", () => {
     // Real statements, one per task, in order: not the definition handed
     // to an interpreter.
     const places = [
-      'flow.task("greet"',
+      'flow.set("greet"',
       'flow.wait("pause", 3600000)',
-      'flow.task("finish"',
+      'flow.set("finish"',
     ].map((statement) => source.indexOf(statement));
     expect({
       definition: files["workflow.json"],
@@ -284,15 +284,17 @@ describe("JSON workflow builds", () => {
 
   it("publishes what the generator doesn't lower without a build, naming each construct", async () => {
     const by = await builder();
-    // A transition, as the profile writes it.
-    const check: unknown = JSON.parse(
-      '{"check":{"set":{"status":"checking"},"then":"finish"}}'
-    );
     const { workflow, version } = await published(by, (name) =>
       definitionOf(
         name,
         [
-          check,
+          {
+            check: {
+              set: { status: "checking" },
+              timeout: { after: { seconds: 5 } },
+              then: "finish",
+            },
+          },
           {
             stop: {
               raise: {
@@ -306,22 +308,15 @@ describe("JSON workflow builds", () => {
           },
           { finish: { set: { status: "done" } } },
         ],
-        {
-          more: {
-            output: {
-              schema: objectSchema({ status: { type: "string" } }),
-              as: "${ . }",
-            },
-          },
-        }
+        { more: { timeout: { after: { minutes: 5 } } } }
       )
     );
     expect(version.build.executable).toBeFalsy();
     expect(
       version.build.executable ? [] : version.build.unsupported
     ).toStrictEqual([
-      { pointer: "/output/as", taskId: null, feature: "output.as" },
-      { pointer: "/do/0/check/then", taskId: "check", feature: "then" },
+      { pointer: "/timeout", taskId: null, feature: "timeout" },
+      { pointer: "/do/0/check/timeout", taskId: "check", feature: "timeout" },
       { pointer: "/do/1/stop", taskId: "stop", feature: "raise" },
     ]);
     // Nothing generated, nothing sealed: the export is the definition alone.
@@ -363,7 +358,7 @@ describe("JSON workflow builds", () => {
     );
     expect(heads.every((head) => head !== null)).toBeTruthy();
     const { files } = await workflowSource(env, by, workflow.id, 1);
-    expect(files[generatedPath]).toContain('flow.task("finish"');
+    expect(files[generatedPath]).toContain('flow.set("finish"');
   });
 
   it("doesn't lower a task with more expressions than core evaluates in one", async () => {
