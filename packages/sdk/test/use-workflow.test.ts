@@ -15,6 +15,7 @@ import {
   readWorkflowReference,
   workflowChannel,
 } from "../src/client-workflow.ts";
+import { v } from "../src/index.ts";
 import type { Id } from "../src/index.ts";
 import { workflowReferenceLimits } from "../src/references.ts";
 import { isPlainObject } from "../src/value-descriptor.ts";
@@ -657,6 +658,21 @@ const malformed = Object.entries({
       }),
     ],
   }),
+  "a decision the workflow doesn't declare": snapshotOf({
+    status: "waiting",
+    waits: [
+      {
+        kind: "decision",
+        id: "wait-1",
+        taskId: "review",
+        key: "reviewInvoice",
+        title: "Review",
+        openedAt: 1000,
+        deadline: null,
+        canRespond: true,
+      },
+    ],
+  }),
   "a field the contract doesn't have": snapshotOf({ owner: "user-1" }),
   "another run's snapshot": snapshotOf({ runId: "run-9" }),
 });
@@ -729,6 +745,31 @@ describe("what is never shown", () => {
         noteEdited: {
           ...workflows.summarizeNote.events.noteEdited,
           data: { kind: "anything" },
+        },
+      },
+    },
+    { ...workflows.summarizeNote, decisions: undefined },
+    {
+      ...workflows.summarizeNote,
+      decisions: {
+        approveSummary: workflows.archiveNotes.decisions.confirmArchive,
+      },
+    },
+    {
+      ...workflows.summarizeNote,
+      decisions: {
+        approveSummary: {
+          ...workflows.summarizeNote.decisions.approveSummary,
+          valueSchema: v.object({ comment: v.string() }),
+        },
+      },
+    },
+    {
+      ...workflows.summarizeNote,
+      decisions: {
+        approveSummary: {
+          ...workflows.summarizeNote.decisions.approveSummary,
+          context: { kind: "anything" },
         },
       },
     },
