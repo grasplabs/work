@@ -27,6 +27,9 @@ const note = (instanceId: string, value: unknown): void => {
 export const notesOf = (instanceId: string): unknown[] =>
   observed.get(instanceId) ?? [];
 
+/** How long the pausable fixture sleeps between its steps. */
+export const pausableSleepMs = 1000;
+
 /** No retry: the step's failure is the step's at once. */
 const once = { retries: { limit: 0, delay: 0 } };
 
@@ -422,11 +425,12 @@ export const fixtures: Record<string, WorkflowDefinition> = {
     },
   },
   // One step, a sleep, a second step: paused in the sleep, it must not
-  // run the second until resumed.
+  // run the second until resumed. The sleep is long enough to pause in
+  // however slowly the test gets there after the first step's note.
   pausable: {
     run: async (event, step) => {
       await step.do("one", counted(event.instanceId, "one"));
-      await step.sleep("nap", 300);
+      await step.sleep("nap", pausableSleepMs);
       await step.do("two", counted(event.instanceId, "two"));
       return "done";
     },

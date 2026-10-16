@@ -213,6 +213,13 @@ export const discrepancies = {
     reference: "Cloudflare's types declare no rollingBack status",
     resolution: toOracle,
   },
+  "waiting-status": {
+    family: "status",
+    verdict: "unresolved",
+    workerflow: "a run suspended at an event wait reports waiting",
+    reference: "running, until the event or the timeout",
+    resolution: toOracle,
+  },
   "status-fields": {
     family: "status",
     verdict: "unresolved",

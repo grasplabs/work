@@ -22,6 +22,7 @@ import type {
   WorkflowStepContext,
 } from "../src/contracts.ts";
 import {
+  arrived,
   delivered,
   engineBinding,
   eventsOf,
@@ -34,6 +35,7 @@ import {
   start,
   statusName,
   threwWith,
+  until,
 } from "./conformance-engines.ts";
 import type { Instance, Pair } from "./conformance-engines.ts";
 import {
@@ -43,6 +45,7 @@ import {
   profileId,
 } from "./conformance-families.ts";
 import type { DiscrepancyName, Family } from "./conformance-families.ts";
+import { notesOf, pausableSleepMs } from "./conformance-fixtures.ts";
 
 const sameOnBoth = <T>(pair: Pair<T>): T => {
   expect(pair.engine).toStrictEqual(pair.reference);
@@ -78,6 +81,13 @@ const undoing = (label: string, output: string): unknown => ({
   stepName: `${label}-1`,
   step: { name: label, count: 1 },
 });
+
+/** Waits until both runs have got to their event wait. */
+const atTheirWait = async (pair: Pair<Instance>): Promise<void> => {
+  await onBoth(pair, async (instance) => {
+    await arrived(instance, "wait_started");
+  });
+};
 
 /** Sends `event` to both, after `ms`, as a caller would while they run. */
 const sendBoth = async (
@@ -461,13 +471,16 @@ const checks: Record<Family, () => void> = {
   "pause-resume": () => {
     test("a run paused in a sleep stays paused past its deadline, and resumed, finishes without repeating a step; pause and resume are idempotent", async () => {
       const instances = await start("pausable");
-      await scheduler.wait(100);
       await onBoth(instances, async (instance) => {
+        // Paused once its first step is done: in its sleep.
+        await until(`${instance.id}'s first step`, () =>
+          notesOf(instance.id).includes("one") ? true : undefined
+        );
         await instance.pause();
         await reached(instance, paused);
         await instance.pause();
       });
-      await scheduler.wait(400);
+      await scheduler.wait(pausableSleepMs + 200);
       expect(
         sameOnBoth(
           await onBoth(
@@ -506,7 +519,7 @@ const checks: Record<Family, () => void> = {
   "termination-deletion": () => {
     test("terminate ends a waiting run; an ended run can't be terminated; a deleted run is gone", async () => {
       const instances = await start("gated");
-      await scheduler.wait(100);
+      await atTheirWait(instances);
       const terminated = await onBoth(instances, async (instance) => {
         await instance.terminate();
         return outcomeOf(await reached(instance));
@@ -532,7 +545,7 @@ const checks: Record<Family, () => void> = {
   restart: () => {
     test("restart from a named wait keeps the steps before it; a step it never reached is refused", async () => {
       const instances = await start("gated");
-      await scheduler.wait(100);
+      await atTheirWait(instances);
       const unknown = await onBoth(
         instances,
         async (instance) =>
@@ -597,7 +610,7 @@ const checks: Record<Family, () => void> = {
 
     test("terminate with rollback rolls back, and ends terminated", async () => {
       const instances = await start("terminated-rollback");
-      await scheduler.wait(100);
+      await atTheirWait(instances);
       const outcomes = await onBoth(instances, async (instance) => {
         await instance.terminate({ rollback: true });
         return outcomeOf(await reached(instance));
@@ -903,6 +916,14 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
     expect(seen.engine.has("rollingBack")).toBeTruthy();
     expect(seen.reference.has("rollingBack")).toBeFalsy();
   },
+  "waiting-status": async () => {
+    const instances = await start("gated");
+    await atTheirWait(instances);
+    // Given the time to suspend, and more.
+    await scheduler.wait(200);
+    const statuses = await onBoth(instances, statusName);
+    expect(statuses).toStrictEqual({ engine: "waiting", reference: "running" });
+  },
   "status-fields": async () => {
     const instances = await start("compensated");
     const statuses = await onBoth(instances, async (instance) => {
@@ -916,13 +937,13 @@ const discrepancyChecks: Record<DiscrepancyName, () => Promise<void>> = {
   },
   "terminate-rollback-error": async () => {
     const instances = await start("terminated-rollback");
-    await scheduler.wait(100);
+    await atTheirWait(instances);
     await onBoth(instances, async (instance) => {
       await instance.terminate({ rollback: true });
       await reached(instance);
     });
-    const errorName = (notesOf: unknown[]): unknown =>
-      field(field(notesOf.at(0), "error"), "name");
+    const errorName = (noted: unknown[]): unknown =>
+      field(field(noted.at(0), "error"), "name");
     const undone = notes(instances);
     expect(errorName(undone.engine)).toBe("Terminated");
     expect(errorName(undone.reference)).toBe("Error");

@@ -113,6 +113,23 @@ export const reached = async (
   }
 };
 
+/** Polls `check` until it returns something, or fails at the deadline. */
+export const until = async <T>(
+  what: string,
+  check: () => T | undefined
+): Promise<T> => {
+  const started = Date.now();
+  while (Date.now() - started < deadlineMs) {
+    const value = check();
+    if (value !== undefined) {
+      return value;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- polling, one check at a time
+    await scheduler.wait(pollMs);
+  }
+  throw new Error(`timed out waiting for ${what}`);
+};
+
 /** A run's outcome as both engines' statuses share it. */
 export interface Outcome {
   readonly status: unknown;
@@ -214,6 +231,39 @@ export const delivered = async (
         return values;
       }
       values.push(result.value);
+    }
+  } finally {
+    clearTimeout(timer);
+    subscription[Symbol.dispose]();
+  }
+};
+
+/**
+ * Reads the run's events until one of `type` arrives: the run has got
+ * there, whether or not it has ended. Bounded and disposed as `delivered`.
+ */
+export const arrived = async (
+  instance: Instance,
+  type: string
+): Promise<void> => {
+  const subscription = await instance.subscribe();
+  const deadline = Promise.withResolvers<"expired">();
+  const timer = setTimeout(() => {
+    deadline.resolve("expired");
+  }, deadlineMs);
+  try {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- a subscription answers one event at a time
+      const result = await Promise.race([
+        subscription.next(),
+        deadline.promise,
+      ]);
+      if (result === "expired" || result.done === true) {
+        throw new Error(`${instance.id} never got to ${type}`);
+      }
+      if (field(result.value, "type") === type) {
+        return;
+      }
     }
   } finally {
     clearTimeout(timer);
