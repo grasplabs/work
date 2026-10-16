@@ -23,6 +23,7 @@ import type {
   WorkflowEvent,
   WorkflowRollbackContext,
   WorkflowStep,
+  WorkflowStepConfig,
   WorkflowStepContext,
 } from "../src/contracts.ts";
 import {
@@ -108,6 +109,18 @@ const sendBoth = async (
   );
 };
 
+/** The context `do` types for a config known only as WorkflowStepConfig. */
+const broadContext = async (step: WorkflowStep, config: WorkflowStepConfig) =>
+  await step.do("broad", config, (context) => context);
+
+/** The context `do` types for a config with a static delay. */
+const staticContext = async (step: WorkflowStep) =>
+  await step.do(
+    "static",
+    { retries: { limit: 1, delay: 10 } },
+    (context) => context
+  );
+
 const checks: Record<Family, () => void> = {
   "definition-event": () => {
     test("Workerflow's event type is Cloudflare's", () => {
@@ -164,6 +177,14 @@ const checks: Record<Family, () => void> = {
         WorkflowRollbackContext<unknown, WorkflowDelayFunction>
       >().toExtend<ReferenceRollbackContext<unknown, ReferenceDelayFunction>>();
       expectTypeOf<WorkflowStep>().toExtend<ReferenceStep>();
+      // A config only known as WorkflowStepConfig may hold a delay
+      // function: its context doesn't promise a delay.
+      expectTypeOf<
+        Awaited<ReturnType<typeof broadContext>>["config"]["retries"]
+      >().not.toHaveProperty("delay");
+      expectTypeOf<
+        Awaited<ReturnType<typeof staticContext>>["config"]["retries"]
+      >().toHaveProperty("delay");
     });
 
     test("occurrences of a name count from 1, attempts count from 1 across retries, and a given config comes back resolved", async () => {

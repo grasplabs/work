@@ -246,7 +246,8 @@ export interface WorkflowStep {
    *
    * As on Cloudflare, the config's overloads pick the context's type by
    * its retry delay: a function's context has no delay. The broad config
-   * stays last, or it would shadow them.
+   * stays last, or it would shadow them; its delay could be either kind,
+   * so its context may lack the delay, where Cloudflare's promises it.
    */
   do: (<T>(
     name: string,
@@ -270,8 +271,11 @@ export interface WorkflowStep {
     (<T>(
       name: string,
       config: WorkflowStepConfig,
-      callback: (context: WorkflowStepContext) => Promise<T> | T,
-      rollback?: WorkflowStepRollbackOptions<T>
+      callback: (context: AnyWorkflowStepContext) => Promise<T> | T,
+      rollback?: WorkflowStepRollbackOptions<
+        T,
+        WorkflowDuration | WorkflowDelayFunction
+      >
     ) => Promise<T>);
   /**
    * Resolves once `duration` has passed since this sleep was first
