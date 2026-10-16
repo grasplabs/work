@@ -1,4 +1,4 @@
-import { appIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { AppId } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import type { BindingTargetInput } from "@grasp-os/shared/resource-bindings";
@@ -16,7 +16,11 @@ import { loadRelease } from "../src/app-releases.ts";
 import { appFor } from "../src/apps.ts";
 import { refreshDailySignals } from "../src/daily-signals.ts";
 import { requestPermission } from "../src/permissions.ts";
-import { recordStatistic, sweepStatistics } from "../src/statistics.ts";
+import {
+  readStatistics,
+  recordStatistic,
+  sweepStatistics,
+} from "../src/statistics.ts";
 import { release, requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { fullScan, planOf, recordedQueries } from "./query-plans.ts";
@@ -83,6 +87,12 @@ export const platform = resource.statistics("platform", {
   platform: ["platform.workflow_runs", "platform.improvement_signals"],
 });
 
+// The runs only: no other platform measure.
+export const runs = resource.statistics("runs", {
+  operations: ["read"],
+  platform: ["platform.workflow_runs"],
+});
+
 const outcome = async (run: () => Promise<unknown>): Promise<string> => {
   try {
     return JSON.stringify({ ok: (await run()) ?? null });
@@ -129,6 +139,26 @@ export const readMany = action({
     }),
 });
 
+export const runsRead = action({
+  args: json,
+  returns: v.string(),
+  uses: [runs],
+  handler: async (ctx, args) => await outcome(async () => await ctx.resources.runs.read(JSON.parse(args.json))),
+});
+
+// \`count\` reads of its own measures at once.
+export const readBurst = action({
+  args: many,
+  returns: v.string(),
+  uses: [stats],
+  handler: async (ctx, args) =>
+    await outcome(async () => {
+      await Promise.all(
+        Array.from({ length: args.count }, async () => await ctx.resources.stats.read(JSON.parse(args.json)))
+      );
+    }),
+});
+
 export const platformRead = action({
   args: json,
   returns: v.string(),
@@ -150,17 +180,17 @@ export const platformReadMany = action({
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
 
-import { mark, marks, platform, platformRead, platformReadMany, read, readMany, record, stats } from "./operations/stats.ts";
+import { mark, marks, platform, platformRead, platformReadMany, read, readBurst, readMany, record, runs, runsRead, stats } from "./operations/stats.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Stats",
   schema,
   access: { tables: { marks: { read: "owner", write: "owner" } } },
-  operations: { stats: { record, read, readMany, platformRead, platformReadMany, mark, marks } },
+  operations: { stats: { record, read, readMany, readBurst, platformRead, platformReadMany, runsRead, mark, marks } },
   internalOperations: {},
   screens: [],
-  uses: [stats, platform],
+  uses: [stats, platform, runs],
 });
 `,
 });
@@ -218,7 +248,7 @@ const boundApp = async (owner: Person): Promise<AppId> => {
 
 /**
  * `app`'s permission to read the platform's statistics, asked for by
- * `builder` and granted, and its `platform` resource bound to it: the
+ * `builder` and granted, and its `platform` and `runs` resources bound to it: the
  * permission's ID.
  */
 const grantPlatform = async (builder: Person, app: AppId): Promise<string> => {
@@ -228,10 +258,11 @@ const grantPlatform = async (builder: Person, app: AppId): Promise<string> => {
     actions: ["statistics"],
     binding: "PLATFORM",
   });
-  await bind(await signedInApi(idp, "admin"), app, "platform", {
-    kind: "statistics",
-    permissionId,
-  });
+  const admin = await signedInApi(idp, "admin");
+  for (const alias of ["platform", "runs"]) {
+    // oxlint-disable-next-line no-await-in-loop -- one approval after another
+    await bind(admin, app, alias, { kind: "statistics", permissionId });
+  }
   return permissionId;
 };
 
@@ -438,6 +469,19 @@ describe("an App's own statistics", { timeout: 60_000 }, () => {
           kind: "statistics",
           operations: ["read"],
           measures: ["platform.workflow_runs", "platform.improvement_signals"],
+          state: "unbound",
+          choices: {
+            kind: "statistics",
+            platform: true,
+            permissions: [],
+            truncated: false,
+          },
+        },
+        {
+          alias: "runs",
+          kind: "statistics",
+          operations: ["read"],
+          measures: ["platform.workflow_runs"],
           state: "unbound",
           choices: {
             kind: "statistics",
@@ -693,6 +737,19 @@ describe("an App's own statistics", { timeout: 60_000 }, () => {
     });
   });
 
+  it("are read no more often than a call allows, however many of its reads run at once", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const app = await boundApp(admin);
+    holdClock();
+    const { perCall } = statisticLimitsOf("read", env.STATISTICS_READ_LIMITS);
+    await expect(
+      callAs(app, admin.userId, "stats.readBurst", {
+        json: JSON.stringify({ measure: "ticks", days: 1 }),
+        count: perCall + 1,
+      })
+    ).resolves.toStrictEqual(limited("call"));
+  });
+
   it("are swept past their retention, however many rows, in one run", async () => {
     const admin = await signedInApi(idp, "admin");
     const app = await countedApp(admin);
@@ -762,6 +819,50 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     vi.useRealTimers();
   });
 
+  it("are read at the platform only under a live permission, refused and audited otherwise", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const reader = await boundApp(builder);
+    const watched = await countedApp(admin);
+    const permissionId = await grantPlatform(builder, reader);
+    await admin.api.permissions.revoke(permissionId);
+    const query = {
+      measure: "platform.workflow_runs",
+      days: 7,
+      where: { app: watched },
+    };
+    // The platform's own check, past every binding's: the permission as it
+    // stands when it reads.
+    let refused = "";
+    const events = await auditedDuring(async () => {
+      refused = await failure(
+        async () =>
+          await readStatistics(
+            env,
+            {
+              subject: { type: "app", appId: reader },
+              onBehalfOf: admin.userId,
+              mode: "interactive",
+              appVersion: await currentVersion(reader),
+            },
+            query,
+            permissionIdSchema.parse(permissionId)
+          )
+      );
+    });
+    expect({
+      refused,
+      audited: events
+        .filter(({ action }) => action === "statistics.read")
+        .map(({ target, detail }) => ({ target, refused: detail.refused })),
+    }).toStrictEqual({
+      refused: "permission.denied",
+      audited: [
+        { target: { type: "app", id: watched }, refused: "permission.denied" },
+      ],
+    });
+  });
+
   it("count an App's runs and signals for whoever may see its runs, under a binding naming a live grant, audited, and nobody else", async () => {
     const admin = await signedInApi(idp, "admin");
     const builder = await signedInApi(idp, "builder");
@@ -818,6 +919,23 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
     const events = await auditedDuring(async () => {
       byWorkflow = await runs(admin.userId);
     });
+    // Through the resource that declares the runs only: the signals are
+    // refused before anything is read, and nothing is audited.
+    let narrowSignals: unknown;
+    const narrowEvents = await auditedDuring(async () => {
+      narrowSignals = await callAs(reader, admin.userId, "stats.runsRead", {
+        json: JSON.stringify({
+          measure: "platform.improvement_signals",
+          days: 7,
+          where: { app: watched },
+        }),
+      });
+    });
+    const narrowRuns = answerSchema.parse(
+      await callAs(reader, admin.userId, "stats.runsRead", {
+        json: JSON.stringify({ ...query, groupBy: [] }),
+      })
+    ).ok.groups;
     const answers = {
       byWorkflow: answerSchema.parse(byWorkflow).ok.groups,
       one: answerSchema.parse(
@@ -840,6 +958,11 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
       audited: events
         .filter(({ action }) => action === "statistics.read")
         .map(({ actor, target, detail }) => ({ actor, target, detail })),
+      narrowSignals,
+      narrowAudited: narrowEvents.filter(
+        ({ action }) => action === "statistics.read"
+      ).length,
+      narrowRuns,
     };
     // The permission the binding names, revoked: the next read is refused.
     await admin.api.permissions.revoke(permissionId);
@@ -879,6 +1002,9 @@ describe("the platform's statistics", { timeout: 60_000 }, () => {
           },
         },
       ],
+      narrowSignals: { error: "resource.not_allowed" },
+      narrowAudited: 0,
+      narrowRuns: [{ dimensions: {}, count: 3, sum: 3, min: 1, max: 1 }],
       othersGrant: "resource.target_invalid",
       revoked: { error: "resource.unavailable" },
     });
@@ -1461,6 +1587,81 @@ const countIn = (answer: Json | undefined): number => {
 describe("a run's statistics", { timeout: 90_000 }, () => {
   afterEach(async () => {
     await endLiveRuns();
+  });
+
+  it("read the platform's measures for a run as the run, for the person it acts for", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const builder = await signedInApi(idp, "builder");
+    const watched = await countedApp(admin);
+    await seedRun(watched, "pay");
+    const query = {
+      measure: "platform.workflow_runs",
+      days: 7,
+      where: { app: watched },
+    };
+    const reader = await statsApp(builder, {
+      ...statsFiles(),
+      "workflows/reads.ts": `import { workflow, z } from "@grasp-os/sdk/workflow";
+
+export default workflow("reads", { params: {}, input: z.unknown() }, async (step, { env }) =>
+  await step.do("read", { description: "Read", input: null, retries: { limit: 0 } }, async () =>
+    await env.APP.callFunction(${statsFunction("platformRead")}, ${statsInput(query)})
+  )
+);
+`,
+      "workflows/reads.workflow-tests.ts": `import { workflowTests } from "@grasp-os/sdk/testing";
+
+import definition from "./reads.ts";
+
+export default workflowTests(definition, [{ name: "runs", mocks: { read: null }, expect: {} }]);
+`,
+    });
+    await grantPlatform(builder, reader);
+    /** A run of `reads` started by `starter`: its ID, and what it read. */
+    const runBy = async (starter: Person) => {
+      const run = await starter.api.workflows.start(reader, "reads");
+      await finished(run.id);
+      const ended = await starter.api.workflows.status(run.id);
+      const parsed = z
+        .object({ ok: z.literal(true), value: z.string() })
+        .safeParse(ended.output);
+      const answer: unknown = parsed.success
+        ? JSON.parse(parsed.data.value)
+        : ended.output;
+      return { id: run.id, read: answer };
+    };
+    const started: { id: string; read: unknown }[] = [];
+    const events = await auditedDuring(async () => {
+      started.push(await runBy(admin));
+    });
+    const [byAdmin = { id: "", read: null }] = started;
+    // A builder of the reading App, with no role in the one it counts.
+    const byBuilder = await runBy(builder);
+    expect({
+      byAdmin: answerSchema.parse(byAdmin.read).ok.groups,
+      audited: events
+        .filter(({ action }) => action === "statistics.read")
+        .map(({ actor, detail }) => ({
+          actor,
+          onBehalfOf: detail.onBehalfOf,
+        })),
+      byBuilder: byBuilder.read,
+    }).toStrictEqual({
+      byAdmin: [{ dimensions: {}, count: 1, sum: 1, min: 1, max: 1 }],
+      // As the run, for the person it acts for: whoever started it.
+      audited: [
+        {
+          actor: {
+            type: "workflow",
+            appId: reader,
+            workflowId: "reads",
+            runId: byAdmin.id,
+          },
+          onBehalfOf: admin.userId,
+        },
+      ],
+      byBuilder: { error: "resource.item_not_found" },
+    });
   });
 
   it("count a step's points once it completes, once however often it ran, and never for an attempt that didn't", async () => {
