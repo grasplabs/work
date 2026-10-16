@@ -337,24 +337,30 @@ const isOverBytes = (text: string, max: number): boolean =>
   (text.length * 3 > max && encoder.encode(text).byteLength > max);
 
 /** A call's request, as a screen or agent sends it (spec 32.6). */
-const functionRequestSchema = z.strictObject({
-  reference: z.strictObject({
-    resourceId: z.string().min(1).max(128),
-    resourceVersion: z.int().min(1),
-    contractId: z.string().min(1).max(256),
-    fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
-    kind: z.enum(["query", "mutation", "action"]),
-  }),
-  input: z.unknown(),
-  idempotencyKey: z.string().optional(),
-  /**
-   * A paginated list's window (query-windows.ts): the query read from the
-   * start for at most `extent` records, for a screen only.
-   */
-  window: z
-    .strictObject({ extent: z.int().min(1).max(liveWindowMaxItems) })
-    .optional(),
-});
+const functionRequestSchema = z
+  .strictObject({
+    reference: z.strictObject({
+      resourceId: z.string().min(1).max(128),
+      resourceVersion: z.int().min(1),
+      contractId: z.string().min(1).max(256),
+      fingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+      kind: z.enum(["query", "mutation", "action"]),
+    }),
+    input: z.unknown(),
+    idempotencyKey: z.string().optional(),
+    /**
+     * A paginated list's window (query-windows.ts): the query read from the
+     * start for at most `extent` records, for a screen only.
+     */
+    window: z
+      .strictObject({ extent: z.int().min(1).max(liveWindowMaxItems) })
+      .optional(),
+  })
+  // A window is a query's only, on every path a call is read on: a
+  // mutation or action with one, a stream's included, runs nothing.
+  .refine(
+    (call) => call.window === undefined || call.reference.kind === "query"
+  );
 
 /** A call's request, read. */
 export type FunctionRequest = z.infer<typeof functionRequestSchema>;
