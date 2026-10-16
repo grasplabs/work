@@ -241,6 +241,10 @@ describe("a JSON workflow's compute modules", () => {
         "code/total.ts": `const taken = ${captured};\n${moduleAnswering("return amounts.length + Number(taken);")}`,
       });
       expect(refused.code).toBe("workflow.modules_invalid");
+      // Refused as its code loaded, past the build and the type check.
+      expect(JSON.stringify(refused.details)).toContain(
+        "The modules failed as they loaded."
+      );
     }
   });
 

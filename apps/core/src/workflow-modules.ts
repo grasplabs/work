@@ -280,7 +280,9 @@ export const compileModules = async (
     }
     throw invalid([
       {
-        message: `The modules failed as they loaded: ${error instanceof Error ? error.message : ""}`,
+        // Fixed: what the sandbox or the module's own code said is
+        // neither the platform's to pass on nor checked.
+        message: "The modules failed as they loaded.",
       },
     ]);
   }
