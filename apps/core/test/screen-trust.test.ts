@@ -104,6 +104,19 @@ export const slow = action({
   },
 });
 
+// Reads, says so, waits, then answers more than a screen takes in one
+// call: the answer is refused as too large, by an error in place of it.
+export const big = action({
+  args: { step: v.string().min(1).max(90), pauseMs: v.number().integer().min(0).max(5000) },
+  returns: v.string(),
+  uses: [mark],
+  handler: async (ctx, args) => {
+    await ctx.runMutation(mark, { step: \`\${args.step}: read\` });
+    await pause(args.pauseMs);
+    return secret.padEnd(262_084, ".");
+  },
+});
+
 // Reads, says so, waits, then fails with what it read.
 export const failing = action({
   args: { step: v.string().min(1).max(90), pauseMs: v.number().integer().min(0).max(5000) },
@@ -127,14 +140,14 @@ export default defineSchema({
 `,
   "operations/notes.ts": operationsCode,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { failing, live, mark, read, slow } from "./operations/notes.ts";
+import { big, failing, live, mark, read, slow } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { steps: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { read, live, mark, slow, failing } },
+  operations: { notes: { read, live, mark, slow, failing, big } },
   internalOperations: {},
   screens: [],
   uses: [],
@@ -239,7 +252,8 @@ const openFrame = async (
 const requestFor = async (
   app: string,
   contractId: string,
-  input: unknown
+  input: unknown,
+  idempotencyKey?: string
 ): Promise<string> => {
   const id = appIdSchema.parse(app);
   const { currentVersion } = await findApp(env, id);
@@ -261,6 +275,7 @@ const requestFor = async (
       kind: operation.kind,
     },
     input,
+    ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
   });
 };
 
@@ -277,7 +292,19 @@ const called = async (
     lease,
     contractId = "notes.read",
     input = {},
-  }: { lease?: string; contractId?: string; input?: unknown } = {}
+    key,
+  }: {
+    lease?: string;
+    contractId?: string;
+    input?: unknown;
+    /**
+     * The idempotency key a screen's session client sends every mutation
+     * and action with: an action under one runs in its own invocation
+     * (app-function-route.ts), checked before it runs and before its
+     * answer as an unkeyed call is.
+     */
+    key?: string;
+  } = {}
 ): Promise<unknown> => {
   const response = await routed(`${appFunctionPath}/${app}`, {
     method: "POST",
@@ -288,7 +315,7 @@ const called = async (
       [screenPersonHeader]: person.userId,
       ...(lease === undefined ? {} : { [screenLeaseHeader]: lease }),
     },
-    body: await requestFor(app, contractId, input),
+    body: await requestFor(app, contractId, input, key),
   });
   const answer: unknown = await response.json();
   if (response.ok) {
@@ -1002,6 +1029,171 @@ describe("screen trust", { timeout: 60_000 }, () => {
       revoked: { code: "screen.revoked", carriesData: false },
       // After the call ran: its error, not the call, was withheld.
       refused: ["call/delivery: revoked"],
+    });
+  });
+
+  it("hands a screen no refusal of its App's answer once its approval is taken back: the refusal is the revocation", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    await approveCurrent(admin, app);
+    const bundle = await openFrame(builder, app);
+
+    // While approved, an answer too large for a screen is refused as such.
+    const approved = await failureOf(
+      called(builder, app, {
+        lease: bundle.lease,
+        contractId: "notes.big",
+        input: { step: "big approved", pauseMs: 0 },
+      })
+    );
+    let revoked: Awaited<ReturnType<typeof failureOf>> | undefined;
+    const events = await auditedDuring(async () => {
+      // The App reads, the approval is taken back, then its answer is
+      // refused: the screen hears of the revocation, not of the answer.
+      const answering = failureOf(
+        called(builder, app, {
+          lease: bundle.lease,
+          contractId: "notes.big",
+          input: { step: "big revoked", pauseMs },
+        })
+      );
+      await vi.waitFor(async () => {
+        await expect(
+          tookStep(builder, app, "big revoked: read")
+        ).resolves.toBeTruthy();
+      }, pushWait);
+      await admin.api.screenTrust.revoke(app, bundle.artifact);
+      revoked = await answering;
+    });
+
+    expect({ approved, revoked, refused: refusals(events) }).toStrictEqual({
+      approved: { code: "screen.answer_too_large", carriesData: false },
+      revoked: { code: "screen.revoked", carriesData: false },
+      refused: ["call/delivery: revoked"],
+    });
+  });
+
+  it("runs no action a screen sends under a key for a build nobody approved", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    const key = crypto.randomUUID();
+
+    let unapproved = "";
+    const events = await auditedDuring(async () => {
+      unapproved = await outcome(
+        called(builder, app, {
+          contractId: "notes.slow",
+          input: { step: "unapproved", pauseMs: 0 },
+          key,
+        })
+      );
+    });
+    const ranUnapproved = await tookStep(builder, app, "unapproved: read");
+    // The same call of an approved build's, under a key of its own, runs.
+    await approveCurrent(admin, app);
+    const bundle = await openFrame(builder, app);
+    const approved = await called(builder, app, {
+      lease: bundle.lease,
+      contractId: "notes.slow",
+      input: { step: "approved", pauseMs: 0 },
+      key: crypto.randomUUID(),
+    });
+
+    expect({
+      unapproved,
+      ranUnapproved,
+      refused: refusals(events),
+      approved,
+    }).toStrictEqual({
+      unapproved: "screen.unreviewed",
+      // Refused before it ran: nothing of it was marked.
+      ranUnapproved: false,
+      refused: ["call/admission: unreviewed"],
+      approved: data,
+    });
+  });
+
+  it("withholds the answer of an action sent under a key once its approval is taken back as it runs", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const app = await sampleApp(builder);
+    await approveCurrent(admin, app);
+    const bundle = await openFrame(builder, app);
+    const key = crypto.randomUUID();
+
+    let answered: unknown;
+    const events = await auditedDuring(async () => {
+      const running = called(builder, app, {
+        lease: bundle.lease,
+        contractId: "notes.slow",
+        input: { step: "keyed", pauseMs },
+        key,
+      });
+      await vi.waitFor(async () => {
+        await expect(
+          tookStep(builder, app, "keyed: read")
+        ).resolves.toBeTruthy();
+      }, pushWait);
+      await admin.api.screenTrust.revoke(app, bundle.artifact);
+      answered = await running;
+    });
+
+    const withheld = z
+      .object({
+        ok: z.literal(false),
+        error: z.object({ code: z.string(), details: z.unknown() }),
+      })
+      .safeParse(answered);
+    expect({
+      answered: withheld.success
+        ? {
+            code: withheld.data.error.code,
+            details: withheld.data.error.details,
+          }
+        : answered,
+      carriesData: JSON.stringify(answered).includes(secret),
+      refused: refusals(events),
+    }).toStrictEqual({
+      // It ran, so whether it finished is withheld, with the key that
+      // recovers it, and why: never its answer.
+      answered: {
+        code: "submission.outcome_unknown",
+        details: { idempotencyKey: key, refusal: "screen.revoked" },
+      },
+      carriesData: false,
+      refused: ["call/delivery: revoked"],
+    });
+  });
+
+  it("decides a lease only for the App core signed it for, the same build approved in another", async () => {
+    const admin = await personApi("admin");
+    const builder = await personApi("builder");
+    const plainApp = async (): Promise<string> => {
+      const { id } = await builder.api.apps.create({ name: "Notes" });
+      await release(builder, id, {
+        ...appCode,
+        "screens/notes.tsx": plainScreenOf("Notes"),
+      });
+      await approveCurrent(admin, id);
+      return id;
+    };
+    const first = await plainApp();
+    const second = await plainApp();
+    const inFirst = await builder.api.screens.open(first, "notes");
+    const inSecond = await builder.api.screens.open(second, "notes");
+
+    expect({
+      sameBuild: inFirst.artifact === inSecond.artifact,
+      borrowed: await outcome(
+        called(builder, second, { lease: inFirst.lease })
+      ),
+      own: await called(builder, second, { lease: inSecond.lease }),
+    }).toStrictEqual({
+      sameBuild: true,
+      borrowed: "screen.unreviewed",
+      own: data,
     });
   });
 

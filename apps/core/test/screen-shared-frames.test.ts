@@ -224,9 +224,16 @@ describe("frames sharing a tab's connection", { timeout: 120_000 }, () => {
     // Made last, as the connection's last `present` would have been.
     const otherFrame = await screens.frame(app, other.lease);
     const unleased = await screens.frame(app, `${notes.artifact}.forged`);
+    const beforeFollower = follower();
     const before = await outcome(
-      notesFrame.watchQuery(request, follower().callback)
+      notesFrame.watchQuery(request, beforeFollower.callback)
     );
+
+    // Its first read done before the revocation: nothing of it is left
+    // to refuse while what follows is recorded, as nothing changes.
+    await vi.waitFor(() => {
+      expect(beforeFollower.titles).toStrictEqual([[]]);
+    }, pushWait);
 
     await admin.api.screenTrust.revoke(app, notes.artifact);
 
