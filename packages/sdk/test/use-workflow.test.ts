@@ -16,6 +16,7 @@ import {
   workflowChannel,
 } from "../src/client-workflow.ts";
 import type { Id } from "../src/index.ts";
+import { workflowReferenceLimits } from "../src/references.ts";
 import { isPlainObject } from "../src/value-descriptor.ts";
 import { WorkflowStore } from "../src/workflow-store.ts";
 import type { Selection } from "../src/workflow-store.ts";
@@ -241,10 +242,14 @@ const noteId = "01890000-0000-7000-8000-000000000001" as Id<"notes">;
  * mounted as React mounts it: how to read its view and render error, run
  * its commands, select another run (React's resubscription) and unmount.
  */
-const mount = (page: Host, selection: Selection) => {
+const mount = (
+  page: Host,
+  selection: Selection,
+  reference: unknown = workflows.summarizeNote
+) => {
   const store = new WorkflowStore(
     workflowChannel(page.client),
-    readWorkflowReference(workflows.summarizeNote)
+    readWorkflowReference(reference)
   );
   let shown = selection;
   let stop = store.subscribe(shown, unheard);
@@ -420,6 +425,26 @@ describe("what a hook shows", () => {
     expect(wait?.kind === "event" && wait.event).toBe(
       workflows.summarizeNote.events.noteEdited
     );
+  });
+
+  it("shows an event wait keyed by a listen task's path as long as a reference holds", async () => {
+    const path = "t".repeat(workflowReferenceLimits.taskPathLength);
+    const reference = {
+      ...workflows.summarizeNote,
+      listens: { ...workflows.summarizeNote.listens, [path]: ["noteEdited"] },
+    };
+    const page = host();
+    const hook = mount(page, "run-1", reference);
+    await flush();
+    page.one("run-1").push(
+      1,
+      snapshotOf({
+        status: "waiting",
+        waits: [{ ...listening(), taskId: path, key: path }],
+      })
+    );
+    expect(hook.error()).toBeUndefined();
+    expect(hook.view().waits).toMatchObject([{ key: path }]);
   });
 
   it("waits as long as a refused subscription says before following again", async () => {

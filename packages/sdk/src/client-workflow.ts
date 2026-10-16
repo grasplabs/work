@@ -329,7 +329,8 @@ const errorFieldsSchema = v.object({
 const waitFields = {
   id: idText,
   taskId: v.string().min(1).max(1024),
-  key: v.string().min(1).max(256),
+  // A decision's alias, a task's path or `$run`: as long as a task path.
+  key: v.string().min(1).max(workflowReferenceLimits.taskPathLength),
   title: v.string().max(200),
   openedAt: v.timestamp(),
   deadline: v.timestamp().nullable(),
