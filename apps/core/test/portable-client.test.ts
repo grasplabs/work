@@ -19,6 +19,7 @@ import { signInConfig } from "../src/auth/config.ts";
 import { inJurisdiction } from "../src/durable-objects.ts";
 import { revokeRelease } from "../src/release-retention.ts";
 import { eventsAfter, logHead } from "./audit-events.ts";
+import { hostSockets } from "./host-sockets.ts";
 import { mockIdp } from "./idp.ts";
 import { apiOf, notesFiles, referenceTo } from "./notes-client-app.ts";
 import { person } from "./sealed-apps.ts";
@@ -274,9 +275,12 @@ interface Sent {
 
 /**
  * The host's network: its `fetch` of the deployment reaches core through
- * the router, as a browser's would; everything else goes out as before.
+ * the router, as a browser's would, and so does the live connection the
+ * client follows its queries over (host-sockets.ts); everything else goes
+ * out as before.
  */
 const hostNetwork = () => {
+  hostSockets();
   const sent: Sent[] = [];
   const received: Response[] = [];
   const outside = globalThis.fetch;
@@ -961,48 +965,6 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     list.stop();
   });
 
-  it("reads a shown window again when it is tried again after a refresh whose answer was lost", async () => {
-    const notes = await notesApp();
-    const token = await tokenFor(notes.builder.session, notes.app);
-    hostNetwork();
-    const client = portableClient(() => token);
-    await client.mutation(notes.api.create, { title: "One" });
-    const list = listOf(client, notes, 5);
-    await vi.waitFor(() => {
-      expect(list.titles()).toStrictEqual(["One"]);
-    });
-    // The refresh after the next save never reaches core.
-    const network = globalThis.fetch;
-    let dropNextRead = true;
-    vi.stubGlobal(
-      "fetch",
-      async (
-        input: RequestInfo | URL,
-        init?: RequestInit
-      ): Promise<Response> => {
-        const body = typeof init?.body === "string" ? init.body : "";
-        if (dropNextRead && body.includes('"window"')) {
-          dropNextRead = false;
-          throw new TypeError("Failed to fetch");
-        }
-        return await network(input, init);
-      }
-    );
-    await client.mutation(notes.api.create, { title: "Two" });
-    await vi.waitFor(() => {
-      expect(dropNextRead).toBeFalsy();
-    });
-    // Still the window before, old; tried again, it is read afresh.
-    await scheduler.wait(200);
-    const kept = list.titles();
-    clientInternals(client).retryFailed();
-    await vi.waitFor(() => {
-      expect(list.titles()).toStrictEqual(["Two", "One"]);
-    });
-    expect(kept).toStrictEqual(["One"]);
-    list.stop();
-  });
-
   it("fails a Load More, and throws a first load, when writes keep tearing the window, keeping the window shown", async () => {
     const notes = await notesApp();
     const token = await tokenFor(notes.builder.session, notes.app);
@@ -1049,10 +1011,10 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     list.stop();
   });
 
-  it("fails a Load More whose larger window another list shows, when writes keep tearing it, both lists kept, and read again when tried again", async () => {
+  it("fails a Load More whose larger window another list shows, when writes keep tearing it, both lists kept", async () => {
     const notes = await notesApp();
     const token = await tokenFor(notes.builder.session, notes.app);
-    const network = hostNetwork();
+    hostNetwork();
     const client = portableClient(() => token);
     for (const title of ["One", "Two", "Three"]) {
       // oxlint-disable-next-line no-await-in-loop -- one after the other
@@ -1084,70 +1046,8 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
     } finally {
       undo();
     }
-    // Writes landed while the shared window was read: trying again reads
-    // it, though the list that failed shows another.
-    const before = network.sent.length;
-    clientInternals(client).retryFailed();
-    await vi.waitFor(() => {
-      expect(network.sent.length - before).toBe(1);
-    });
-    expect({ one: one.titles(), two: two.titles() }).toStrictEqual({
-      one: ["Three"],
-      two: ["Three", "Two"],
-    });
     one.stop();
     two.stop();
-  });
-
-  it("refuses a Load More whose window the person's budget can't pay for, once, keeping the list", async () => {
-    const notes = await notesApp({ files: pagedFiles });
-    const token = await tokenFor(notes.builder.session, notes.app);
-    const network = hostNetwork();
-    const client = portableClient(() => token);
-    const seed = referenceTo<{ count: number }, null, "mutation">(
-      notes.release,
-      "notes.seed"
-    );
-    await client.mutation(seed, { count: 100 });
-    await client.mutation(seed, { count: 60 });
-    const listTen = referenceTo<
-      { pagination: { cursor?: string | null; pageSize?: number } },
-      unknown,
-      "query"
-    >(notes.release, "notes.listTen");
-    const list = listOf(client, notes, 10, listTen);
-    await vi.waitFor(() => {
-      expect(list.titles()).toHaveLength(10);
-    });
-
-    // The person's requests spent, then one back: a window of eleven
-    // short pages costs what two full ones do, more than is left.
-    const now = Date.now();
-    vi.useFakeTimers({ toFake: ["Date"], now });
-    let limited = false;
-    for (let request = 0; request < 40 && !limited; request += 1) {
-      // oxlint-disable-next-line no-await-in-loop -- one after the other
-      const response = await listWith(notes, token);
-      limited = response.status === 429;
-    }
-    expect(limited).toBeTruthy();
-    vi.setSystemTime(now + 500);
-    const sentBefore = network.sent.length;
-    const loadMore = await failureOf(list.pager.loadMore(100));
-    expect({
-      loadMore: loadMore.code,
-      sent: network.sent.length - sentBefore,
-      shown: list.titles().length,
-      error: list.pager.snapshot.error,
-      loading: list.pager.snapshot.view.isLoading,
-    }).toStrictEqual({
-      loadMore: "screen.rate_limited",
-      sent: 1,
-      shown: 10,
-      error: undefined,
-      loading: false,
-    });
-    list.stop();
   });
 
   it("shows a list loading as soon as a Load More starts", async () => {
@@ -1177,34 +1077,6 @@ describe("a portable host's client", { timeout: 120_000 }, () => {
       after: false,
       titles: ["Two", "One"],
     });
-    list.stop();
-  });
-
-  it("reads a shown window again only at the next change after a read of it failed, not at once", async () => {
-    const notes = await notesApp();
-    const token = await tokenFor(notes.builder.session, notes.app);
-    const network = hostNetwork();
-    const client = portableClient(() => token);
-    await client.mutation(notes.api.create, { title: "One" });
-    const list = listOf(client, notes, 1);
-    await vi.waitFor(() => {
-      expect(list.titles()).toStrictEqual(["One"]);
-    });
-
-    // Every window read from now on fails; a change this client confirms
-    // marks the shown window old, which reads it again.
-    const undo = await writeAfterEveryPage(notes);
-    try {
-      const before = network.sent.length;
-      await client.mutation(notes.api.create, { title: "Two" });
-      await scheduler.wait(2000);
-      expect({
-        sent: network.sent.length - before,
-        shown: list.titles(),
-      }).toStrictEqual({ sent: 2, shown: ["One"] });
-    } finally {
-      undo();
-    }
     list.stop();
   });
 

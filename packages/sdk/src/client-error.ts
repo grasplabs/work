@@ -129,6 +129,10 @@ const clientErrors = {
     message: "The App's server couldn't be reached. Try again.",
     category: "operational",
   },
+  "auth.unauthenticated": {
+    message: "Sign in to continue.",
+    category: "authorization",
+  },
   "auth.principal_changed": {
     message:
       "Someone else signed in, so what was shown for the person before was cleared.",
