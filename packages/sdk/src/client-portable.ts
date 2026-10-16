@@ -15,7 +15,9 @@ import { isPlainObject } from "./value-descriptor.ts";
 //
 // - A token sent where it shouldn't go: only to the configured origin,
 //   over HTTPS (plain HTTP only on this machine), never along a redirect,
-//   and never with the browser's cookies for it.
+//   and never with the browser's cookies for it. The live connection
+//   (client-live.ts) goes to the same origin, over WSS (plain WS only on
+//   this machine), the token in its first message.
 // - Data of one person shown to another: the client reads whose a token
 //   is (its `sub`) before it is sent, and when that changes clears what
 //   it holds before anything of the new person's arrives (client-core.ts).
@@ -148,6 +150,8 @@ const keepUntil = (claims: TokenClaims, now: number): number =>
 export interface PortableToken {
   readonly text: string;
   readonly principal: string;
+  /** Its `exp`, in milliseconds, as it says (not trusted: core checks). */
+  readonly expiresAt: number | undefined;
 }
 
 /** A request to the host for a token, numbered in the order asked. */
@@ -175,6 +179,11 @@ export class PortableTransport {
     }
     this.#origin = originOf(options.url);
     this.#getToken = options.getToken;
+  }
+
+  /** The deployment's origin, as configured. */
+  get origin(): string {
+    return this.#origin;
   }
 
   /**
@@ -269,7 +278,11 @@ export class PortableTransport {
       if (typeof text !== "string" || claims === undefined) {
         throw refusal("auth.unauthenticated", "Sign in to continue.");
       }
-      const token = { text, principal: claims.sub };
+      const token = {
+        text,
+        principal: claims.sub,
+        expiresAt: claims.expiresAt,
+      };
       if (number >= this.#current) {
         this.#held = { token, until: keepUntil(claims, Date.now()) };
       }

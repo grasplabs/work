@@ -75,7 +75,8 @@ const keyRotationSeconds = 30 * 24 * 60 * 60;
 
 /**
  * Who App tokens are for: a portable host's calls of this deployment's
- * App functions, and nothing else that reads a token of core's.
+ * App functions and its live connection (portable-live.ts), and nothing
+ * else that reads a token of core's.
  */
 export const appTokenAudience = (origin: string): string =>
   `${origin}${portableFunctionPath}`;
