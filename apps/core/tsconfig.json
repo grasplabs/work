@@ -20,8 +20,10 @@
   ],
   // The built-ins' screens: blueprints/tsconfig.json. The tests' own
   // built-in is an App of spec 8's layout, whose operations import the
-  // module its seal generates (`#grasp/server`): the compiler checks it as
-  // it seals, as any App's.
+  // module its seal generates (`#grasp/server`), which nothing here maps:
+  // its files are untyped, like any inline test App's (the seal strips
+  // types without checking them), and builtin-blueprints.test.ts covers
+  // what they do at runtime.
   "exclude": [
     "blueprints/*/files/screens",
     "blueprints/*/files/components",

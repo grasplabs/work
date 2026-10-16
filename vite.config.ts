@@ -47,8 +47,10 @@ export default defineConfig({
       ...(core.ignorePatterns ?? []),
       ...generated,
       // The tests' own built-in, an App of spec 8's layout: its operations
-      // import what its seal generates (`#grasp/server`), so only the
-      // compiler can type them, as it does any App's when it seals.
+      // import what its seal generates (`#grasp/server`), which nothing
+      // here maps, so its files are untyped, like any inline test App's
+      // (the seal strips types without checking them), and
+      // builtin-blueprints.test.ts covers what they do at runtime.
       "apps/core/test/fixtures/blueprints/*/files/**",
     ],
     jsPlugins: [
