@@ -1,3 +1,4 @@
+import type { PaginationResult } from "./database.ts";
 import { isPlainObject } from "./value-descriptor.ts";
 import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 
@@ -422,6 +423,7 @@ export interface WorkflowReference<
   Wait = WorkflowWait,
   Events = Readonly<Record<string, WorkflowEventReference>>,
   Decisions = Readonly<Record<string, WorkflowDecisionReference>>,
+  Queries = Readonly<Record<string, AnyOperationReference>>,
 > {
   readonly kind: "workflow";
   readonly visibility: "public";
@@ -443,6 +445,12 @@ export interface WorkflowReference<
   readonly listens: Readonly<Record<string, readonly string[]>>;
   /** Its decisions, by their binding's alias in the workflow. */
   readonly decisions: Decisions;
+  /**
+   * Its ordinary queries (spec 10.7.2): `runs` and `history`, and, when it
+   * declares decisions, `decisions` and `decision`; for `useQuery` and
+   * `usePaginatedQuery`.
+   */
+  readonly queries: Queries;
   /** Types only: never set. */
   readonly [argsType]?: Input;
   /** Types only: never set. */
@@ -463,6 +471,8 @@ export type AnyWorkflowReference = WorkflowReference<
   // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowEventsOf`
   any,
   // oxlint-disable-next-line typescript/no-explicit-any -- only read, by `WorkflowDecisionsOf`
+  any,
+  // oxlint-disable-next-line typescript/no-explicit-any -- never read
   any
 >;
 
@@ -507,6 +517,39 @@ export type WorkflowEventsOf<Reference> =
   >
     ? Events
     : never;
+
+/**
+ * One pending decision in the person's inbox (spec 10.7.2): the run it
+ * holds and the exact wait, which `respond` takes as it is.
+ */
+export interface WorkflowDecisionInboxItem<
+  Key extends string = string,
+  Value = unknown,
+> {
+  readonly run: RunHandle;
+  readonly wait: WorkflowDecisionWait<Key, Value>;
+}
+
+/** A page of `Item`s, as every paginated query answers it. */
+export type WorkflowQueryPage<Item> = PaginationResult<Item>;
+
+/**
+ * One decision's detail (spec 10.7.2), discriminated by its `key`: the
+ * exact wait, the prompt, the context the person reviews and whether they
+ * may answer it now.
+ */
+export interface WorkflowDecisionDetail<
+  Key extends string = string,
+  Value = unknown,
+  Context = unknown,
+> {
+  readonly key: Key;
+  readonly wait: WorkflowDecisionWait<Key, Value>;
+  /** Plain text, bounded: never HTML. */
+  readonly prompt: string;
+  readonly context: Context;
+  readonly canRespond: boolean;
+}
 
 /** The decision references of `Reference`, by key. */
 export type WorkflowDecisionsOf<Reference> =

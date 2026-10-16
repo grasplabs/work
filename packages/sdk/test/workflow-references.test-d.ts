@@ -27,6 +27,7 @@ import type {
   WorkflowOutputOf,
   WorkflowWaitOf,
 } from "../src/index.ts";
+import { useMutation, usePaginatedQuery, useQuery } from "../src/react.ts";
 import { workflows } from "./notes/.grasp/references.ts";
 
 /**
@@ -45,6 +46,7 @@ declare const send: <
 declare const noteId: Id<"notes">;
 declare const taskId: Id<"tasks">;
 declare const untyped: unknown;
+declare const runId: string;
 
 const summarize = workflows.summarizeNote;
 const archive = workflows.archiveNotes;
@@ -78,6 +80,7 @@ expectTypeOf<Extract<keyof typeof summarize, string>>().toEqualTypeOf<
   | "events"
   | "listens"
   | "decisions"
+  | "queries"
 >();
 // @ts-expect-error -- no generated start: runs go through useWorkflow
 void summarize.start;
@@ -276,3 +279,108 @@ expectTypeOf(archiveDecision.key).toEqualTypeOf<"confirmArchive">();
 void respond(archiveDecision, { approved: true, value: null });
 // @ts-expect-error -- archiveNotes's decision takes no comment
 void respond(archiveDecision, { approved: true, value: { comment: "" } });
+
+// The ordinary queries (spec 10.7.2): typed public query references, read
+// through useQuery and usePaginatedQuery, never commands.
+export const useQueryChecks = (): void => {
+  const { queries } = summarize;
+  expectTypeOf<keyof typeof queries>().toEqualTypeOf<
+    "runs" | "history" | "decisions" | "decision"
+  >();
+  expectTypeOf(queries.runs.kind).toEqualTypeOf<"query">();
+  expectTypeOf(queries.runs.visibility).toEqualTypeOf<"public">();
+  // @ts-expect-error -- a query, never a command
+  void useMutation(queries.runs);
+  // @ts-expect-error -- no generated start beside the queries
+  void queries.start;
+
+  // Runs: a status filter, paged; rows without output or error.
+  const runs = usePaginatedQuery(queries.runs, {}, { initialPageSize: 25 });
+  void usePaginatedQuery(
+    queries.runs,
+    { status: "failed" },
+    { initialPageSize: 25 }
+  );
+  void usePaginatedQuery(
+    queries.runs,
+    // @ts-expect-error -- not a run status
+    { status: "lost" },
+    { initialPageSize: 25 }
+  );
+  for (const row of runs.items) {
+    expectTypeOf(row.run).toEqualTypeOf<{
+      manifestHash: string;
+      runId: string;
+      workflowId: string;
+      workflowVersion: number;
+    }>();
+    expectTypeOf(row.canWatch).toEqualTypeOf<boolean>();
+    if (row.status === "compensating") {
+      expectTypeOf(row.cause).toEqualTypeOf<"failure" | "cancellation">();
+    }
+    // @ts-expect-error -- a run's row never carries its output
+    void row.output;
+  }
+
+  // History: one run's rows, narrowed by kind to their declared keys.
+  const history = usePaginatedQuery(
+    queries.history,
+    { runId },
+    { initialPageSize: 50 }
+  );
+  // @ts-expect-error -- history is of one run
+  void usePaginatedQuery(queries.history, {}, { initialPageSize: 50 });
+  for (const row of history.items) {
+    expectTypeOf(row.sequence).toEqualTypeOf<number>();
+    if (row.kind === "event") {
+      expectTypeOf(row.key).toEqualTypeOf<"noteEdited" | "styleChosen">();
+    }
+    if (row.kind === "decision") {
+      expectTypeOf(row.key).toEqualTypeOf<"approveSummary" | "chooseLength">();
+    }
+    if (row.kind === "step" && row.state === "failed") {
+      expectTypeOf(row.error.code).toEqualTypeOf<string>();
+    }
+    if (row.kind === "step" && row.state !== "failed") {
+      // @ts-expect-error -- only a failed step has an error
+      void row.error;
+    }
+  }
+
+  // The inbox: each item's exact wait answers with its own value.
+  const inbox = usePaginatedQuery(
+    queries.decisions,
+    { runId },
+    { initialPageSize: 20 }
+  );
+  void usePaginatedQuery(queries.decisions, {}, { initialPageSize: 20 });
+  for (const item of inbox.items) {
+    if (item.wait.key === "chooseLength") {
+      void respond(item.wait, { approved: true, value: "short" });
+      // @ts-expect-error -- approveSummary's value, not chooseLength's
+      void respond(item.wait, { approved: true, value: { comment: "" } });
+    }
+  }
+
+  // One decision's detail: null, or narrowed by its key to its context
+  // and the exact wait to answer.
+  const detail = useQuery(queries.decision, { runId, decisionId: "d" });
+  // @ts-expect-error -- not a paginated query
+  void usePaginatedQuery(queries.decision, { runId }, { initialPageSize: 1 });
+  // @ts-expect-error -- the decision is named
+  void useQuery(queries.decision, { runId });
+  if (detail?.key === "approveSummary") {
+    expectTypeOf(detail.context).toEqualTypeOf<{
+      noteId: Id<"notes">;
+      summary: string;
+    }>();
+    expectTypeOf(detail.prompt).toEqualTypeOf<string>();
+    void respond(detail.wait, { approved: true, value: { comment: "Fine." } });
+    // @ts-expect-error -- chooseLength's value
+    void respond(detail.wait, { approved: true, value: "long" });
+  }
+  if (detail?.key === "chooseLength") {
+    expectTypeOf(detail.context).toEqualTypeOf<{ words: number }>();
+  }
+  expectTypeOf(detail).toExtend<null | undefined | { readonly key: string }>();
+};

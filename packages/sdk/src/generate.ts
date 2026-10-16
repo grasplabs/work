@@ -6,6 +6,8 @@ import type { AppManifest, OperationManifest } from "./app.ts";
 import { workflowReferenceLimits } from "./references.ts";
 import type { ValueDescriptor, ValueSchema } from "./value-descriptor.ts";
 import { descriptorOf } from "./value-schema.ts";
+import { workflowQueries } from "./workflow-queries.ts";
+import type { WorkflowQueryName } from "./workflow-queries.ts";
 
 // The modules the host generates for an App (spec 7.3, 8), from its
 // manifest as the host read it (app-manifest.ts), never from its code:
@@ -653,6 +655,54 @@ const waitTypeOf = (workflow: BoundWorkflow, depth: number): string => {
     .join(`\n${indent(depth)}`);
 };
 
+/**
+ * The types of `workflow`'s query references, by name: `runs` and
+ * `history` from their descriptors, as any function's; `decisions` and
+ * `decision` naming each decision's own wait type, so an item or detail
+ * narrowed by its key answers `respond` with that decision's value.
+ */
+const queryTypesOf = (workflow: BoundWorkflow): [string, string][] => {
+  const operations = workflowQueries(workflow);
+  const keys = sortedKeys(workflow.decisions);
+  const valueOf = (name: string): string => {
+    const decision = workflow.decisions[name];
+    return decision === undefined
+      ? "never"
+      : valueTypeOf(decision.value, "input");
+  };
+  const typed: Record<
+    WorkflowQueryName,
+    (operation: OperationManifest) => string
+  > = {
+    runs: referenceTypeOf,
+    history: referenceTypeOf,
+    decisions: (operation) => {
+      const items = keys
+        .map(
+          (name) =>
+            `WorkflowDecisionInboxItem<${JSON.stringify(name)}, ${valueOf(name)}>`
+        )
+        .join(" | ");
+      return `OperationReference<${valueTypeOf(operation.args, "input")}, WorkflowQueryPage<${items}>, "query">`;
+    },
+    decision: (operation) => {
+      const details = keys.map((name) => {
+        const context = workflow.decisions[name]?.context;
+        return `WorkflowDecisionDetail<${JSON.stringify(name)}, ${valueOf(name)}, ${context === undefined ? "never" : valueTypeOf(context, "output")}>`;
+      });
+      return `OperationReference<${valueTypeOf(operation.args, "input")}, ${[...details, "null"].join(" | ")}, "query">`;
+    },
+  };
+  return Object.entries(operations)
+    .toSorted(([a], [b]) => (a < b ? -1 : 1))
+    .flatMap(([name, operation]) => {
+      // SAFETY: the keys of `workflowQueries`' answer are query names.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+      const render = typed[name as WorkflowQueryName];
+      return operation === undefined ? [] : [[name, render(operation)]];
+    });
+};
+
 /** The type of the reference to `workflow`. */
 const workflowTypeOf = (workflow: BoundWorkflow): string => {
   const events = sortedKeys(workflow.events).map((alias) => {
@@ -669,6 +719,9 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
         : decisionTypeOf(workflow, name, decision);
     return `${indent(3)}readonly ${key(name)}: ${type};`;
   });
+  const queries = queryTypesOf(workflow).map(
+    ([name, type]) => `${indent(3)}readonly ${name}: ${type};`
+  );
   const recordType = (members: readonly string[]): string =>
     members.length === 0
       ? "Readonly<Record<never, never>>"
@@ -680,6 +733,7 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
     waitTypeOf(workflow, 2),
     recordType(events),
     recordType(decisions),
+    recordType(queries),
   ];
   return `WorkflowReference<\n${parts.map((part) => `${indent(2)}${part},`).join("\n")}\n${indent(1)}>`;
 };
@@ -728,6 +782,17 @@ const workflowReferenceOf = async (
       };
     }
   }
+  const queries: Record<string, unknown> = {};
+  for (const [name, operation] of Object.entries(workflowQueries(workflow))) {
+    if (operation !== undefined) {
+      queries[name] = referenceOf(
+        identity,
+        operation,
+        // oxlint-disable-next-line no-await-in-loop -- one digest at a time, as above
+        await contractFingerprint(operation)
+      );
+    }
+  }
   return {
     kind: "workflow",
     visibility: "public",
@@ -741,13 +806,14 @@ const workflowReferenceOf = async (
     events,
     listens: sortedListens(workflow.listens),
     decisions,
+    queries,
   };
 };
 
 /**
  * `workflows`: one reference per workflow the App binds, each with its
- * events and decisions and nothing else; no `.start`, `.get` or `.cancel`
- * (spec 10.4).
+ * events, decisions and ordinary queries and nothing else; no `.start`,
+ * `.get` or `.cancel` (spec 10.4).
  */
 const workflowsExport = async (
   identity: ReleaseIdentity,
@@ -850,11 +916,14 @@ const referencesText = async (
     "OperationReference",
     "PreferencesReference",
     "ScreenReference",
+    "WorkflowDecisionDetail",
+    "WorkflowDecisionInboxItem",
     "WorkflowDecisionReference",
     "WorkflowDecisionWait",
     "WorkflowEngineWait",
     "WorkflowEventReference",
     "WorkflowEventWait",
+    "WorkflowQueryPage",
     "WorkflowReference",
     ...valueTypes,
   ])}\n${freezer}\n${body}`;
