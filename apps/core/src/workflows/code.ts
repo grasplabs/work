@@ -40,7 +40,7 @@ import { SandboxUnavailableError, sessionHost } from "../sandboxed.ts";
 import { buildWorkflows } from "../screens.ts";
 import { attemptCallLabels } from "./attempt-host.ts";
 import type { AttemptHost } from "./attempt-host.ts";
-import { collectionMethods, fromIsolate } from "./host.ts";
+import { collectionMethods, cpuLimitKill, fromIsolate } from "./host.ts";
 
 // An App's workflows are its code, written by the agent: they run as its
 // server code does, in a Worker Loader isolate with no network and an
@@ -165,8 +165,10 @@ const declaredMetadataSchema = z.object({
  * retryable timeout, and the run waits for that retry in a fresh
  * activation, with a fresh isolate and limit, rather than fail for CPU an
  * earlier step spent (dispatcher.ts, `afterCpuKill`). On-prem the
- * sandbox supervisor bounds each run load by the same CPU time, and its
- * `cpu` verdict still fails the run (`runLoadFailure`). Its wall time is
+ * sandbox supervisor bounds each run load, a session of its own, by the
+ * same CPU time, and its `cpu` verdict is taken as the Loader's kill
+ * (`stepCodeFailure`, `runLoadFailure`): the attempt it cut off is
+ * retried in a fresh activation, with a fresh session. Its wall time is
  * the engine's to end, at each attempt's timeout (host.ts, `stepConfig`).
  */
 const workflowSandbox = {
@@ -788,9 +790,11 @@ export interface RunSession {
 
 /**
  * Fails a step whose function failed rather than answered, as its
- * session ended: for good when the sandbox stopped the code (its CPU time,
- * memory or time past, its process gone, what it sent refused), so the
- * step is never tried again in an isolate that is no more; as it failed,
+ * session ended: past its CPU time, as the Loader's CPU kill, which the
+ * host retries in a fresh session; for good when the sandbox stopped the
+ * code otherwise (its memory or time past, its process gone, what it sent
+ * refused), so the step is never tried again in an isolate that is no
+ * more; as it failed,
  * the platform's to try again, otherwise (a socket dropped, a refusal of
  * core's own, or no verdict yet).
  */
@@ -806,6 +810,12 @@ const stepCodeFailure = async (
     })(),
   ]);
   const verdict = sandboxVerdictOf(failure);
+  if (verdict === "cpu") {
+    // As the Loader's CPU kill: the host fails the attempt as a retryable
+    // timeout, retried in a fresh session (attempt-calls.ts,
+    // `afterCpuKill`), with no more CPU time than this one had.
+    return cpuLimitKill(failure);
+  }
   if (verdict !== undefined && codesVerdicts.has(verdict)) {
     return new NonRetryableError(
       `The sandbox stopped the step's code: ${failure instanceof Error ? failure.message : verdict}`
@@ -859,13 +869,20 @@ export const sessionRunHost = <Attempt extends object = AttemptHost>(
 });
 
 /**
- * What a run's load failing on-prem fails the run with: the sandbox
- * stopping its code (its CPU time, memory or time past, its process gone,
- * what it sent refused) as the App's, a workflow error saying so; anything
- * else as it is, the platform's. Never a step's retryable failure.
+ * What a run's load failing on-prem fails the run with: past its CPU
+ * time, the Loader's CPU kill, for `afterCpuKill`; the sandbox stopping
+ * its code otherwise (its memory or time past, its process gone, what it
+ * sent refused) as the App's, a workflow error saying so; anything else
+ * as it is, the platform's.
  */
 const runLoadFailure = (error: unknown): unknown => {
   const verdict = sandboxVerdictOf(error);
+  if (verdict === "cpu") {
+    // As the Loader's CPU kill, for `afterCpuKill`: it waits for each
+    // attempt the verdict cut off to be parked for its retry, and fails
+    // the run when none was (its code spent the time outside any step).
+    return cpuLimitKill(error);
+  }
   if (verdict === undefined || !codesVerdicts.has(verdict)) {
     return error;
   }

@@ -835,13 +835,16 @@ server.listen(socket, () => {
     expect(outcome.reached).toStrictEqual([]);
   });
 
-  it("fails a step for good when the sandbox stopped its code, and as the platform's when core's own answer was too big", async () => {
-    const [spins, bigAnswer] = [
+  it("fails a step as the Loader's CPU kill when the sandbox stopped its code past its CPU time, for good past its memory, and as the platform's when core's own answer was too big", async () => {
+    const [spins, fills, bigAnswer] = [
       await runHost("spins"),
+      await runHost("fills"),
       await runHost("bigAnswer"),
     ];
-    expect({ spins, bigAnswer }).toMatchObject({
-      spins: { verdict: "cpu", stepErrors: ["NonRetryableError"] },
+    expect({ spins, fills, bigAnswer }).toMatchObject({
+      // Retried in a fresh session, as on Cloudflare (attempt-calls.ts).
+      spins: { verdict: "cpu", stepErrors: ["CPU limit kill"] },
+      fills: { verdict: "memory", stepErrors: ["NonRetryableError"] },
       bigAnswer: {
         status: "unavailable",
         verdict: null,
