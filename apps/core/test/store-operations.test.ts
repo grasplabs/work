@@ -820,28 +820,36 @@ describe("an App calling another App's store", () => {
     const logged = await allEvents();
     const refusals = logged.filter(
       ({ action, detail }) =>
-        action === "store.operation.refused" &&
-        detail.consumer === desk.app &&
-        detail.consumerVersion === 2
+        (action === "store.operation.refused" &&
+          detail.consumer === desk.app &&
+          detail.consumerVersion === 2) ||
+        (action === "workflow.call.refused" && detail.app === desk.app)
     );
+    // The run's own gate refuses its call before any of the version's code
+    // runs (`runInvocationFor`): the store's never sees a request, and the
+    // refusal is recorded once, by the run's.
     expect({
       pinned: pinned.ok ? pinned.value : pinned.error.code,
       approved: await call(desk.owner, third, "desk.add", { name: "Grace" }),
       crmSees: await call(crm.owner, crm, "contacts.list"),
-      refused: refusals.map(({ target, detail }) => ({
+      refused: refusals.map(({ action, target, detail }) => ({
+        action,
         target: target?.id,
-        operation: detail.operation,
+        call: detail.call,
+        version: detail.version,
         reason: detail.reason,
       })),
     }).toStrictEqual({
-      pinned: "error:resource.unavailable",
+      pinned: "permission.denied",
       approved: null,
       crmSees: ["Grace"],
       refused: [
         {
-          target: crm.store,
-          operation: "contacts.add",
-          reason: "permission.denied",
+          action: "workflow.call.refused",
+          target: runId,
+          call: "desk.add",
+          version: 2,
+          reason: "version.unapproved",
         },
       ],
     });

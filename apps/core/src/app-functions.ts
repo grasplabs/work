@@ -18,6 +18,7 @@ import type { Authority } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { coreStepPrefix, stepIdempotencyKey } from "@grasp-os/shared/workflows";
+import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { operationRoles } from "./app-access.ts";
@@ -25,6 +26,7 @@ import { loadRelease } from "./app-releases.ts";
 import type { Release } from "./app-releases.ts";
 import { callTimeoutMs } from "./app.ts";
 import { appFor } from "./apps.ts";
+import { keepAuditEvent } from "./audit-outbox.ts";
 import { memberRole } from "./auth/identity.ts";
 import { openStore } from "./data-stores.ts";
 import type { OpenStore } from "./data-stores.ts";
@@ -34,6 +36,7 @@ import type {
   ProgressSink,
   ResourceBindings,
 } from "./operations.ts";
+import { requireApprovedVersion } from "./permissions.ts";
 import { hostedRelease, noStore, requireNotRevoked } from "./release-runner.ts";
 import { invocationSources } from "./resource-adapter.ts";
 import type {
@@ -214,23 +217,55 @@ const fencedStore = (
  * is pinned to) for a step of `caller`'s run: as the person the run acts
  * for, in workflow mode, with the run as its work context, and with the
  * run as whoever the audit log names and whose budgets a model request
- * counts against besides its binding's (`BindingCaller.actor`). Nothing
- * of it comes from the run's isolate.
+ * counts against besides its binding's (`BindingCaller.actor`), for the
+ * call of `operation`, its public function's path. Nothing of it comes
+ * from the run's isolate.
  */
 export const runInvocationFor = async (
   env: Env,
   release: Release,
-  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller
+  { run, requestId, deadline, stillCurrent, requireHolds, held }: RunCaller,
+  operation: string
 ): Promise<Invocation> => {
   const { app, runId, version, authority } = run;
+  // A version nobody approved refused, recorded once for the call, as the
+  // v1 path's refused calls are (`workflow.call.refused`, workflows/
+  // host.ts): the App, the version and the function, never its input.
+  let refusalAudited = false;
+  const auditRefusal = async () => {
+    if (refusalAudited) {
+      return;
+    }
+    refusalAudited = true;
+    await keepAuditEvent(env, drizzle(env.DB), {
+      actor: runActorOf(run),
+      action: "workflow.call.refused",
+      target: { type: "workflow_run", id: runId },
+      requestId,
+      detail: {
+        app,
+        workflow: run.workflow,
+        version,
+        step: null,
+        call: operation,
+        errorCode: "permission.denied",
+        reason: "version.unapproved",
+      },
+    });
+  };
   // The one gate, as for a screen's call: before the call starts, each
-  // mutation commits and each resource request. The release, and the
-  // person, still a member with a role in the App; then, last, after
-  // every read, the step's attempt, so nothing runs for an attempt the
-  // engine let go of meanwhile. The commit and the request check the
-  // lease once more, synchronously, just before they start.
+  // mutation commits and each resource request. The release; the version
+  // an admin approved, while the App holds a permission that changes
+  // things (`requireApprovedVersion`), as a run's calls into the App
+  // always were: a run waiting on a version nobody approved does nothing
+  // more once an admin grants for a later one, not even to the App's own
+  // data. Then the person, still a member with a role in the App; then,
+  // last, after every read, the step's attempt, so nothing runs for an
+  // attempt the engine let go of meanwhile. The commit and the request
+  // check the lease once more, synchronously, just before they start.
   const authorize = async () => {
     await requireNotRevoked(env, app, version);
+    await requireApprovedVersion(env, app, version, auditRefusal);
     const role = await memberRole(env.DB, authority.onBehalfOf);
     if (role === undefined) {
       throw permissionErrors.create("permission.person_inactive");
@@ -679,11 +714,16 @@ export const callRunFunction = async (
     }
     return await callOperation(
       hostedRelease(env, release),
-      await runInvocationFor(env, release, {
-        ...caller,
-        // No longer than the step's attempt, nor than any call of an App's.
-        deadline: Math.min(caller.deadline, Date.now() + callTimeoutMs(env)),
-      }),
+      await runInvocationFor(
+        env,
+        release,
+        {
+          ...caller,
+          // No longer than the step's attempt, nor than any call of an App's.
+          deadline: Math.min(caller.deadline, Date.now() + callTimeoutMs(env)),
+        },
+        operation.path
+      ),
       { path: operation.path, kind: operation.kind },
       input,
       { idempotencyKey }
