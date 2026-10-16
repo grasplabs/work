@@ -34,7 +34,7 @@ import {
   invocationName,
 } from "./action-invocation.ts";
 import {
-  callAppFunction,
+  callScreenFunction,
   readFunctionRequest,
   refusalOf,
 } from "./app-functions.ts";
@@ -47,7 +47,7 @@ import { errorResponse } from "./errors.ts";
 import { requireNotRevoked } from "./release-runner.ts";
 import { isOwnOrigin } from "./rpc.ts";
 import { delivering, leasedArtifact, requireDelivery } from "./screen-trust.ts";
-import { admitted } from "./screens-rpc.ts";
+import { admitted, admitWindow, windowCharger } from "./screens-rpc.ts";
 
 // A running App's screen calling one of its App's functions (spec 32.6):
 // `POST /api/app-functions/<app>`, the request as the body, the frame's
@@ -64,7 +64,8 @@ import { admitted } from "./screens-rpc.ts";
 //   another site can send without a preflight core never answers.
 // - Someone without a role in the App, or who lost it: the session is read
 //   on every request, the role checked by the call itself
-//   (`callAppFunction`), and the App named only by the path.
+//   (`callScreenFunction`), and the App named only by the path. A
+//   paginated list's window is read as the person too (query-windows.ts).
 // - The page's frame was opened for one person and the browser's cookie
 //   is now someone else's (they signed in in another tab): the page names
 //   the person its frame is for (`screenPersonHeader`), and a call whose
@@ -81,7 +82,10 @@ import { admitted } from "./screens-rpc.ts";
 //   call runs only inside `delivering`, which checks that build's trust
 //   before the call and again before its answer. No lease is unreviewed.
 // - A flood: each request counts against the person's requests of the
-//   App's screens (`admitted`), before its body is read.
+//   App's screens (`admitted`), before its body is read; a paginated
+//   list's window counts one more for every page past its first
+//   (`admitWindow`), and every page past what it paid for is charged as
+//   it is read (`windowCharger`).
 // - An answer larger than a frame takes: refused here
 //   (`screen.answer_too_large`), as a call of the App's server is.
 //
@@ -319,7 +323,11 @@ const keyedAction = (
     return undefined;
   }
   const key = idempotencyKeySchema.safeParse(call.idempotencyKey);
-  return call.reference.kind === "action" && key.success
+  // One with a window is a query's or nothing: the plain call refuses it
+  // before anything runs.
+  return call.reference.kind === "action" &&
+    key.success &&
+    call.window === undefined
     ? { call, key: key.data }
     : undefined;
 };
@@ -545,11 +553,13 @@ const boundedCall = async (
     if (portableSession !== undefined) {
       await recordPortableUse(env, person, id, portableSession);
     }
+    const text = new TextDecoder().decode(body);
+    // A window counts as the pages it reads (query-windows.ts).
+    await admitWindow(env, person, id, text);
     const artifact =
       lease === undefined
         ? undefined
         : await leasedArtifact(env, person.userId, id, lease);
-    const text = new TextDecoder().decode(body);
     const keyed = keyedAction(text);
     if (keyed !== undefined) {
       // Checks delivery itself, before the run and again before its answer.
@@ -565,12 +575,13 @@ const boundedCall = async (
       operation,
       async () =>
         withinFrame(
-          await callAppFunction(
+          await callScreenFunction(
             env,
             person,
             id,
             text,
-            Date.now() + screenCallMs
+            Date.now() + screenCallMs,
+            windowCharger(env, person, id)
           )
         )
     );

@@ -282,6 +282,8 @@ export interface CallOptions {
    * again would act on what that effect changed.
    */
   readonly onEffect?: () => void;
+  /** A budget it shares with other calls (`sharedBudget`), not its own. */
+  readonly budget?: SharedBudget;
 }
 
 /** A table of the App's schema, as staged writes are checked against it. */
@@ -1642,7 +1644,16 @@ interface CallBudget {
    * whole call.
    */
   reads: ReadBudget;
+  /**
+   * One budget for several calls, reads included, never renewed: a
+   * paginated list's window, every page and every rerun of it
+   * (`sharedBudget`, query-windows.ts).
+   */
+  readonly shared: boolean;
 }
+
+/** What several calls share, given as `CallOptions.budget`. */
+export type SharedBudget = CallBudget;
 
 /**
  * The read budget of a run of `run`'s function: a fresh one, shared by
@@ -1650,7 +1661,7 @@ interface CallBudget {
  * in's otherwise, so nested calls never multiply what one run reads.
  */
 const runReads = (run: Run): ReadBudget => {
-  if (run.depth === 0) {
+  if (run.depth === 0 && !run.budget.shared) {
     run.budget.reads = readBudget();
   }
   return run.budget.reads;
@@ -1661,6 +1672,16 @@ const callBudget = (): CallBudget => ({
   nested: 0,
   requests: 0,
   reads: readBudget(),
+  shared: false,
+});
+
+/**
+ * A budget several calls share (`CallOptions.budget`): what they read,
+ * nest and request together stays within what one call may.
+ */
+export const sharedBudget = (): SharedBudget => ({
+  ...callBudget(),
+  shared: true,
 });
 
 /** Spends one nested call, or one resource request, of `budget`. */
@@ -2575,7 +2596,7 @@ export const callOperation = async (
         compiled,
         invocation,
         depth: 0,
-        budget: callBudget(),
+        budget: options.budget ?? callBudget(),
         call: new CallTree(options.parentSession),
         ...(progress === undefined ? {} : { progress }),
         ...(cancelled === undefined ? {} : { cancelled }),

@@ -86,3 +86,13 @@ export const queryMaxScannedBytes = 16 * 1024 * 1024;
 
 /** The longest a pagination cursor may be, in characters (spec 9.2: 4 KiB). */
 export const cursorMaxLength = 4096;
+
+/**
+ * The most records one live paginated list (`usePaginatedQuery`, spec
+ * 10.6) holds at once: its loaded window, read again whole from the start
+ * at every change (spec 11.6), page by page within `queryMaxResults`. A
+ * Load More past it fails as `query.window_limit` rather than keep
+ * growing what core reads and pushes; the window's bytes are bounded on
+ * their own, as any push is (`screenLimits.answerBytes`).
+ */
+export const liveWindowMaxItems = 1000;
