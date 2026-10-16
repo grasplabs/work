@@ -4,8 +4,8 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import { shardSeconds, splitIntoShards } from "./test-shards.ts";
-import type { ShardFile } from "./test-shards.ts";
+import { shardSeconds, splitIntoShards, startsFirst } from "./test-shards.ts";
+import type { ShardFile, TimedFile } from "./test-shards.ts";
 
 const file = (
   key: string,
@@ -78,5 +78,23 @@ describe("splitting the test files between shards", () => {
     expect(
       shardSeconds([file("core", 100), file("screens", 100, { group: 1 })])
     ).toBe(200);
+  });
+
+  it("starts a project's untimed files first, then its longest", () => {
+    const files: TimedFile[] = [
+      { key: "short", seconds: 2 },
+      { key: "new b", seconds: undefined },
+      { key: "long", seconds: 90 },
+      { key: "new a", seconds: undefined },
+      { key: "middle", seconds: 30 },
+    ];
+
+    expect(files.toSorted(startsFirst).map(({ key }) => key)).toStrictEqual([
+      "new a",
+      "new b",
+      "long",
+      "middle",
+      "short",
+    ]);
   });
 });

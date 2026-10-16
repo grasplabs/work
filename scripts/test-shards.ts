@@ -86,3 +86,24 @@ export const splitIntoShards = (
   }
   return shards;
 };
+
+/** A file as the order within its project sees it: its time, if anyone took it. */
+export interface TimedFile {
+  readonly key: string;
+  readonly seconds: number | undefined;
+}
+
+/**
+ * Which of two files of a project starts first: one nobody timed yet, as
+ * Vitest's own order has it, then the longer. A new file may be long, and
+ * one that starts last holds its group up for all of its time.
+ */
+export const startsFirst = (a: TimedFile, b: TimedFile): number => {
+  if (a.seconds === undefined || b.seconds === undefined) {
+    return (
+      Number(a.seconds !== undefined) - Number(b.seconds !== undefined) ||
+      byKey(a.key, b.key)
+    );
+  }
+  return b.seconds - a.seconds || byKey(a.key, b.key);
+};

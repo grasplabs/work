@@ -77,7 +77,7 @@ jobs:
       # it.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -104,9 +104,9 @@ jobs:
       # minutes each (October 2026), and a slow runner ran one into this
       # step's timeout: core's heaviest files could land together, and a
       # shard runs its project groups (core and the rest, then core's
-      # screens, then on-prem) one after another. Four shards split by
-      # duration aim at about 7 minutes each, leaving room for a runner
-      # twice as slow. Refresh the durations from the shards' test-progress
+      # screens, then on-prem) one after another. Five shards split by
+      # duration took 6 to 7 minutes each, leaving room for a runner twice
+      # as slow; four left the heaviest at about 9. Refresh the durations from the shards' test-progress
       # artifacts when the split drifts (scripts/test-durations.ts).
       # Vitest's default runs a worker per CPU but one, which left a third
       # of the runner's CPU idle; a worker per CPU measured about 6% faster.

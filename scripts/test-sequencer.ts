@@ -1,7 +1,7 @@
 // Vitest's sequencer for this repo (vite.config.ts): shards split by how
 // long each file takes (scripts/test-shards.ts, with the times in
-// scripts/test-durations.json), and in each shard a project's longest
-// files first, so none starts last and holds its group up. Vitest's own split,
+// scripts/test-durations.json), and in each shard a project's untimed
+// and longest files first, so none starts last and holds its group up. Vitest's own split,
 // by a hash of each file's path, and its order, by file size on a runner
 // without a cache, knew neither.
 import { readFileSync } from "node:fs";
@@ -11,8 +11,8 @@ import { BaseSequencer } from "vite-plus/test/node";
 import type { TestSpecification } from "vite-plus/test/node";
 
 import { durationsFile, parseDurations } from "./test-durations.ts";
-import { byKey, splitIntoShards } from "./test-shards.ts";
-import type { ShardFile } from "./test-shards.ts";
+import { byKey, splitIntoShards, startsFirst } from "./test-shards.ts";
+import type { ShardFile, TimedFile } from "./test-shards.ts";
 
 /** Seconds per file, `<project> <file>`, as the progress logs name them. */
 const durations = parseDurations(readFileSync(durationsFile, "utf-8"));
@@ -28,6 +28,12 @@ const keyOf = (spec: TestSpecification): string =>
 
 const secondsOf = (spec: TestSpecification): number =>
   durations[keyOf(spec)] ?? unknownSeconds;
+
+/** `spec` as the order within its project sees it. */
+const timed = (spec: TestSpecification): TimedFile => ({
+  key: keyOf(spec),
+  seconds: durations[keyOf(spec)],
+});
 
 export default class DurationSequencer extends BaseSequencer {
   override async shard(
@@ -65,7 +71,7 @@ export default class DurationSequencer extends BaseSequencer {
             b.project.config.sequence.groupOrder ||
           // Projects one after another, as Vitest's own order has them.
           byKey(a.project.name, b.project.name) ||
-          secondsOf(b) - secondsOf(a)
+          startsFirst(timed(a), timed(b))
       )
     );
   }
