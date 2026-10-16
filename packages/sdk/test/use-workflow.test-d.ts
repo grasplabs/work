@@ -9,7 +9,12 @@
 // `vp check`, never run: every `@ts-expect-error` must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type { Id, RunHandle, WorkflowReference } from "../src/index.ts";
+import type {
+  DecisionValueOf,
+  Id,
+  RunHandle,
+  WorkflowReference,
+} from "../src/index.ts";
 import { useWorkflow } from "../src/react.ts";
 import type { AppErrorPayload, PendingControl } from "../src/react.ts";
 import { api, workflows } from "./notes/.grasp/references.ts";
@@ -151,8 +156,13 @@ export const useWaitChecks = (): void => {
       >();
       expectTypeOf(wait.canSend).toEqualTypeOf<boolean>();
     }
-    // @ts-expect-error -- summarizeNote declares no decision
-    void (wait.kind === "decision");
+    if (wait.kind === "decision" && wait.key === "approveSummary") {
+      // And to the decision, with its response's value type.
+      expectTypeOf<DecisionValueOf<typeof wait>>().toEqualTypeOf<{
+        comment: string;
+        rating?: number;
+      }>();
+    }
     if (wait.kind === "child") {
       expectTypeOf(wait.child).toEqualTypeOf<RunHandle>();
     }

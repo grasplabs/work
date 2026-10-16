@@ -2,6 +2,7 @@ import { describe, expect, test } from "vite-plus/test";
 
 import {
   contractFingerprint,
+  decisionFingerprint,
   eventFingerprint,
   generateModules,
   inspectApp,
@@ -297,6 +298,7 @@ describe("workflow references", () => {
       expect(Object.keys(reference).toSorted()).toStrictEqual([
         "alias",
         "contractId",
+        "decisions",
         "events",
         "fingerprint",
         "input",
@@ -344,7 +346,53 @@ describe("workflow references", () => {
     expect(reference.events).toStrictEqual(Object.fromEntries(expected));
   });
 
-  test("pin the workflow's input and output, each event its own contract, and the release all of it", async () => {
+  test("bind each decision to its workflow binding and key, with its value schema as a descriptor", async () => {
+    const reference = workflows.summarizeNote;
+    const expected = await Promise.all(
+      Object.entries(summarize.decisions).map(async ([key, declared]) => [
+        key,
+        {
+          kind: "workflowDecision",
+          ...identity,
+          workflow: "workflows.summarizeNote",
+          workflowFingerprint: reference.fingerprint,
+          key,
+          fingerprint: await decisionFingerprint(declared),
+          valueSchema: { kind: "descriptor", descriptor: declared.value },
+          context: declared.context,
+        },
+      ])
+    );
+    expect(reference.decisions).toStrictEqual(Object.fromEntries(expected));
+    // A form's schema is built from it, and checks what the decision does.
+    const response = v.object({
+      approved: v.boolean(),
+      value: reference.decisions.approveSummary.valueSchema,
+    });
+    expect(
+      response["~standard"].validate({
+        approved: true,
+        value: { comment: "Checked.", rating: 4 },
+      }).issues
+    ).toBeUndefined();
+    expect(
+      response["~standard"].validate({
+        approved: true,
+        value: { comment: "Checked.", rating: 9 },
+      }).issues
+    ).toBeDefined();
+    // A descriptor schema is read back as any stored descriptor is.
+    const forged: unknown = JSON.parse(
+      '{"kind":"descriptor","descriptor":{"kind":"anything"}}'
+    );
+    expect(() => {
+      Reflect.apply(v.object, undefined, [{ value: forged }]);
+    }).toThrow(
+      expect.objectContaining({ code: "definition.invalid_descriptor" })
+    );
+  });
+
+  test("pin the workflow's input and output, each event and decision its own contract, and the release all of it", async () => {
     const text = v.string().descriptor;
     const workflowChanges: BoundWorkflow[] = [
       { ...summarize, input: text },
@@ -368,6 +416,17 @@ describe("workflow references", () => {
     );
     expect(new Set(eventPrints).size).toBe(eventPrints.length);
 
+    const approve = summarize.decisions.approveSummary;
+    if (approve === undefined) {
+      throw new Error("No approveSummary");
+    }
+    const decisionPrints = await Promise.all(
+      [approve, { ...approve, value: text }, { ...approve, context: text }].map(
+        decisionFingerprint
+      )
+    );
+    expect(new Set(decisionPrints).size).toBe(decisionPrints.length);
+
     const contractChanges: BoundWorkflow[] = [
       ...workflowChanges,
       {
@@ -379,6 +438,24 @@ describe("workflow references", () => {
         events: { ...summarize.events, extra: { type: "x", data: text } },
       },
       { ...summarize, listens: { "do/0/chooseStyle": ["styleChosen"] } },
+      {
+        ...summarize,
+        decisions: {
+          ...summarize.decisions,
+          chooseLength: { value: text, context: text },
+        },
+      },
+      {
+        ...summarize,
+        decisions: {
+          ...summarize.decisions,
+          approveSummary: {
+            value: approve.value,
+            context: text,
+          },
+        },
+      },
+      { ...summarize, decisions: {} },
     ];
     const contracts = await Promise.all(
       [summarize, ...contractChanges].map(async (workflow) => {
@@ -449,6 +526,20 @@ describe("workflow references", () => {
       ],
     ],
     [
+      "a decision key that isn't plain",
+      [
+        {
+          ...summarize,
+          decisions: {
+            "approve summary": {
+              value: v.null().descriptor,
+              context: v.null().descriptor,
+            },
+          },
+        },
+      ],
+    ],
+    [
       "a listen task for an event the workflow doesn't declare",
       [{ ...summarize, listens: { "do/0/wait": ["documentUploaded"] } }],
     ],
@@ -507,6 +598,23 @@ describe("workflow references", () => {
               data: v.null().descriptor,
             },
           },
+        },
+      ],
+    ],
+    [
+      "more decisions than a reference holds",
+      [
+        {
+          ...summarize,
+          decisions: Object.fromEntries(
+            Array.from(
+              { length: workflowReferenceLimits.decisions + 1 },
+              (_, index) => [
+                `decision${index}`,
+                { value: v.null().descriptor, context: v.null().descriptor },
+              ]
+            )
+          ),
         },
       ],
     ],

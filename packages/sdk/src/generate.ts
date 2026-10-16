@@ -84,13 +84,21 @@ export interface BoundWorkflowEvent {
   readonly data: ValueDescriptor;
 }
 
+/** One decision a bound workflow declares, as the host resolved it. */
+export interface BoundWorkflowDecision {
+  /** The descriptor of the value a response carries. */
+  readonly value: ValueDescriptor;
+  /** The descriptor of the context a person reviews. */
+  readonly context: ValueDescriptor;
+}
+
 /**
- * A workflow the App binds (spec 3, 10.4.1, 10.4.6), as the host resolved
- * its binding against the approved records: the App's alias for it, the
- * pinned version's input and output, the events it declares by their
- * binding's alias, and its listen tasks, by path, with the aliases of the
- * events each listens for. Never from App code: what a reference pins is
- * the host's word.
+ * A workflow the App binds (spec 3, 10.4.1, 10.4.5, 10.4.6), as the host
+ * resolved its binding against the approved records: the App's alias for
+ * it, the pinned version's input and output, the events it declares by
+ * their binding's alias, its listen tasks, by path, with the aliases of
+ * the events each listens for, and its decisions by their binding's
+ * alias. Never from App code: what a reference pins is the host's word.
  */
 export interface BoundWorkflow {
   readonly alias: string;
@@ -98,7 +106,19 @@ export interface BoundWorkflow {
   readonly output: ValueDescriptor;
   readonly events: Readonly<Record<string, BoundWorkflowEvent>>;
   readonly listens: Readonly<Record<string, readonly string[]>>;
+  readonly decisions: Readonly<Record<string, BoundWorkflowDecision>>;
 }
+
+/**
+ * The fingerprint of a decision's exact contract: the SHA-256, in hex, of
+ * its value and context descriptors, canonically.
+ */
+export const decisionFingerprint = async (
+  decision: BoundWorkflowDecision
+): Promise<string> =>
+  await sha256Hex(
+    canonicalText({ value: decision.value, context: decision.context })
+  );
 
 /**
  * The fingerprint of an event's exact contract: the SHA-256, in hex, of
@@ -153,16 +173,20 @@ const checkBoundWorkflows = (workflows: readonly BoundWorkflow[]): void => {
     aliases.add(workflow.alias);
     if (
       Object.keys(workflow.events).length > workflowReferenceLimits.events ||
-      Object.keys(workflow.listens).length > workflowReferenceLimits.listens
+      Object.keys(workflow.listens).length > workflowReferenceLimits.listens ||
+      Object.keys(workflow.decisions).length > workflowReferenceLimits.decisions
     ) {
       throw new TypeError(
-        `${workflow.alias} declares more events or listen tasks than a reference holds.`
+        `${workflow.alias} declares more events, listen tasks or decisions than a reference holds.`
       );
     }
-    for (const alias of Object.keys(workflow.events)) {
+    for (const alias of [
+      ...Object.keys(workflow.events),
+      ...Object.keys(workflow.decisions),
+    ]) {
       if (!aliasPattern.test(alias)) {
         throw new TypeError(
-          `An event's alias is plain: ${JSON.stringify(alias)}`
+          `An event's or a decision's alias is plain: ${JSON.stringify(alias)}`
         );
       }
     }
@@ -542,14 +566,23 @@ const eventTypeOf = (
 ): string =>
   `WorkflowEventReference<${JSON.stringify(workflowContractId(workflow.alias))}, ${JSON.stringify(alias)}, ${JSON.stringify(event.type)}, ${valueTypeOf(event.data, "input")}>`;
 
+/** The type of the reference to `decision`, declared as `name` by `workflow`. */
+const decisionTypeOf = (
+  workflow: BoundWorkflow,
+  name: string,
+  decision: BoundWorkflowDecision
+): string =>
+  `WorkflowDecisionReference<${JSON.stringify(workflowContractId(workflow.alias))}, ${JSON.stringify(name)}, ${valueTypeOf(decision.value, "input")}, ${valueTypeOf(decision.value, "output")}, ${valueTypeOf(decision.context, "output")}>`;
+
 /** `names` in order: the same contract makes the same text. */
 const sortedKeys = (record: Readonly<Record<string, unknown>>): string[] =>
   Object.keys(record).toSorted();
 
 /**
  * The type of the waits a run of `workflow` can be held at: the engine's
- * own, and one event wait per listen task, keyed by its path, holding the
- * references of the events it listens for.
+ * own, one event wait per listen task, keyed by its path, holding the
+ * references of the events it listens for, and one decision wait per
+ * decision, keyed by its alias, with the type of its response's value.
  */
 const waitTypeOf = (workflow: BoundWorkflow, depth: number): string => {
   const members = sortedKeys(workflow.listens).map((task) => {
@@ -564,7 +597,13 @@ const waitTypeOf = (workflow: BoundWorkflow, depth: number): string => {
       .join(" | ");
     return `WorkflowEventWait<${JSON.stringify(task)}, ${events}>`;
   });
-  return ["WorkflowEngineWait", ...members]
+  const decisions = sortedKeys(workflow.decisions).map((name) => {
+    const decision = workflow.decisions[name];
+    const value =
+      decision === undefined ? "never" : valueTypeOf(decision.value, "input");
+    return `WorkflowDecisionWait<${JSON.stringify(name)}, ${value}>`;
+  });
+  return ["WorkflowEngineWait", ...members, ...decisions]
     .map((member) => `| ${member}`)
     .join(`\n${indent(depth)}`);
 };
@@ -577,16 +616,25 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
       event === undefined ? "never" : eventTypeOf(workflow, alias, event);
     return `${indent(3)}readonly ${key(alias)}: ${type};`;
   });
-  const eventsType =
-    events.length === 0
+  const decisions = sortedKeys(workflow.decisions).map((name) => {
+    const decision = workflow.decisions[name];
+    const type =
+      decision === undefined
+        ? "never"
+        : decisionTypeOf(workflow, name, decision);
+    return `${indent(3)}readonly ${key(name)}: ${type};`;
+  });
+  const recordType = (members: readonly string[]): string =>
+    members.length === 0
       ? "Readonly<Record<never, never>>"
-      : `{\n${events.join("\n")}\n${indent(2)}}`;
+      : `{\n${members.join("\n")}\n${indent(2)}}`;
   const parts = [
     JSON.stringify(workflow.alias),
     valueTypeOf(workflow.input, "input"),
     valueTypeOf(workflow.output, "output"),
     waitTypeOf(workflow, 2),
-    eventsType,
+    recordType(events),
+    recordType(decisions),
   ];
   return `WorkflowReference<\n${parts.map((part) => `${indent(2)}${part},`).join("\n")}\n${indent(1)}>`;
 };
@@ -617,6 +665,24 @@ const workflowReferenceOf = async (
       };
     }
   }
+  const decisions: Record<string, unknown> = {};
+  for (const name of sortedKeys(workflow.decisions)) {
+    const decision = workflow.decisions[name];
+    if (decision !== undefined) {
+      decisions[name] = {
+        kind: "workflowDecision",
+        resourceId: identity.resourceId,
+        resourceVersion: identity.resourceVersion,
+        workflow: contractId,
+        workflowFingerprint: fingerprint,
+        key: name,
+        // oxlint-disable-next-line no-await-in-loop -- one digest at a time, as above
+        fingerprint: await decisionFingerprint(decision),
+        valueSchema: { kind: "descriptor", descriptor: decision.value },
+        context: decision.context,
+      };
+    }
+  }
   return {
     kind: "workflow",
     visibility: "public",
@@ -629,12 +695,14 @@ const workflowReferenceOf = async (
     output: workflow.output,
     events,
     listens: sortedListens(workflow.listens),
+    decisions,
   };
 };
 
 /**
  * `workflows`: one reference per workflow the App binds, each with its
- * events and nothing else; no `.start`, `.get` or `.cancel` (spec 10.4).
+ * events and decisions and nothing else; no `.start`, `.get` or `.cancel`
+ * (spec 10.4).
  */
 const workflowsExport = async (
   identity: ReleaseIdentity,
@@ -737,6 +805,8 @@ const referencesText = async (
     "OperationReference",
     "PreferencesReference",
     "ScreenReference",
+    "WorkflowDecisionReference",
+    "WorkflowDecisionWait",
     "WorkflowEngineWait",
     "WorkflowEventReference",
     "WorkflowEventWait",

@@ -20,6 +20,7 @@ import { workflowReferenceLimits } from "./references.ts";
 import type {
   AppErrorPayload,
   RunHandle,
+  WorkflowDecisionReference,
   WorkflowEventReference,
   WorkflowWait,
 } from "./references.ts";
@@ -105,6 +106,8 @@ export interface ReadWorkflow {
   readonly events: ReadonlyMap<string, WorkflowEventReference>;
   /** Its listen tasks, by path: the aliases of the events each listens for. */
   readonly listens: ReadonlyMap<string, ReadonlySet<string>>;
+  /** Its decision references, by key. */
+  readonly decisions: ReadonlyMap<string, WorkflowDecisionReference>;
   /** What a request names of it, exactly as the host reads it. */
   readonly wire: {
     readonly resourceId: string;
@@ -164,6 +167,64 @@ const isEventOf = (
     return false;
   }
   return true;
+};
+
+/** Whether `value` is a descriptor that reads. */
+const readsAsDescriptor = (value: unknown): boolean => {
+  try {
+    readDescriptor(value, 1, { nodes: 0 });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Whether `decision` is a reference to a decision of `workflow` under
+ * `key`: that very workflow's release, contract and fingerprint, its own
+ * key, a fingerprint, and a value schema and context that read as
+ * descriptors, as data.
+ */
+const isDecisionOf = (
+  decision: unknown,
+  key: string,
+  workflow: WorkflowIdentity
+): decision is WorkflowDecisionReference =>
+  aliasPattern.test(key) &&
+  isPlainObject(decision) &&
+  decision.kind === "workflowDecision" &&
+  decision.key === key &&
+  decision.resourceId === workflow.resourceId &&
+  decision.resourceVersion === workflow.resourceVersion &&
+  decision.workflow === workflow.contractId &&
+  decision.workflowFingerprint === workflow.fingerprint &&
+  typeof decision.fingerprint === "string" &&
+  fingerprintPattern.test(decision.fingerprint) &&
+  isPlainObject(decision.valueSchema) &&
+  decision.valueSchema.kind === "descriptor" &&
+  readsAsDescriptor(decision.valueSchema.descriptor) &&
+  readsAsDescriptor(decision.context);
+
+/** The decisions of a workflow reference, `value`, by key; or throws. */
+const readDecisions = (
+  value: unknown,
+  workflow: WorkflowIdentity
+): ReadonlyMap<string, WorkflowDecisionReference> => {
+  if (!isPlainObject(value)) {
+    throw clientError("contract.invalid_request");
+  }
+  const entries = Object.entries(value);
+  if (entries.length > workflowReferenceLimits.decisions) {
+    throw clientError("contract.invalid_request");
+  }
+  const decisions = new Map<string, WorkflowDecisionReference>();
+  for (const [key, decision] of entries) {
+    if (!isDecisionOf(decision, key, workflow)) {
+      throw clientError("contract.invalid_request");
+    }
+    decisions.set(key, decision);
+  }
+  return decisions;
 };
 
 const maxListens = workflowReferenceLimits.listens;
@@ -273,6 +334,7 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
   } as const;
   const events = readEvents(value.events, wire);
   const listens = readListens(value.listens, events);
+  const decisions = readDecisions(value.decisions, wire);
   const read: ReadWorkflow = {
     key: canonicalJson([
       wire.resourceId,
@@ -287,6 +349,7 @@ export const readWorkflowReference = (value: unknown): ReadWorkflow => {
     output,
     events,
     listens,
+    decisions,
     wire,
   };
   readWorkflows.set(value, read);
@@ -571,14 +634,18 @@ type WireWait =
  * `waits` with each event wait's event resolved to the reference `read`
  * was generated with, by alias and fingerprint: a run listening for an
  * event its reference doesn't declare, for another contract of it, or in
- * a task that doesn't listen for it, is an invalid snapshot, never a wait
- * shown with an event its key's type doesn't promise.
+ * a task that doesn't listen for it, or held for a decision it doesn't
+ * declare, is an invalid snapshot, never a wait shown with an event or a
+ * response type its key's type doesn't promise.
  */
 const resolvedWaits = (
   read: ReadWorkflow,
   waits: readonly WireWait[]
 ): readonly WorkflowWait[] =>
   waits.map((wait): WorkflowWait => {
+    if (wait.kind === "decision" && !read.decisions.has(wait.key)) {
+      throw invalidSnapshot();
+    }
     if (wait.kind !== "event") {
       return wait;
     }
