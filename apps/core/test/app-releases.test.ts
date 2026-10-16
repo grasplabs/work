@@ -1031,6 +1031,8 @@ const importForms = {
     `export type { A${index} } from "${module}";`,
   "an import type": (module: string, index: number) =>
     `export type C${index} = typeof import("${module}");`,
+  "a type's require": (module: string, index: number) =>
+    `import type D${index} = require("${module}");\nexport type E${index} = typeof D${index};`,
 } as const;
 
 /** A file that names every bootstrap module as `form` writes one. */
@@ -1043,6 +1045,7 @@ const saidSchema = z.object({
     .array(
       z.object({
         file: z.string().optional(),
+        rule: z.string(),
         message: z.string(),
         severity: z.string(),
       })
@@ -1148,6 +1151,63 @@ const targets = {
 } as const;
 
 describe("screens", { timeout: 120_000 }, () => {
+  it.each([
+    ["a screen", "screens/notes.tsx", "../"],
+    ["a declaration file", "notes.d.ts", "./"],
+  ])(
+    "never name the kit's own files for their types in %s, by any path",
+    async (_case, file, up) => {
+      const lines = [
+        `/// <reference path="${up}node_modules/@grasp-os/sdk/src/client.ts" />`,
+        '/// <reference types="node" />',
+        `export type R = typeof import("${up}node_modules/@grasp-os/sdk/src/screen-runtime.ts");`,
+        'import type * as C from "/node_modules/@grasp-os/sdk/src/client-core.ts";',
+        `import type { serverModule } from "${up}node_modules/@grasp-os/sdk/src/server.ts";`,
+        `import type { Doc } from "${up}node_modules/@grasp-os/sdk/src/database.ts";`,
+        "export type Reached = typeof C | typeof serverModule | Doc<never>;",
+      ].join("\n");
+      const screen = "export default function Notes() {\n  return null;\n}\n";
+      const built = await buildScreens(env, {
+        ...notesFiles(),
+        "screens/notes.tsx":
+          file === "screens/notes.tsx" ? `${lines}\n${screen}` : screen,
+        ...(file === "notes.d.ts" ? { [file]: lines } : {}),
+      });
+      const refused = saidSchema
+        .parse(built)
+        .diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.file === file && diagnostic.rule === "imports"
+        );
+      expect({
+        ok: built.ok,
+        // The four imports, as the import check refuses them before any
+        // type check; then, alone, the two directives, as the type check
+        // refuses them.
+        imports: refused.length,
+      }).toStrictEqual({ ok: false, imports: 4 });
+      const directives = await buildScreens(env, {
+        ...notesFiles(),
+        "screens/notes.tsx":
+          file === "screens/notes.tsx"
+            ? `${lines.split("\n").slice(0, 2).join("\n")}\n${screen}`
+            : screen,
+        ...(file === "notes.d.ts"
+          ? { [file]: lines.split("\n").slice(0, 2).join("\n") }
+          : {}),
+      });
+      expect({
+        ok: directives.ok,
+        directives: saidSchema
+          .parse(directives)
+          .diagnostics.filter(
+            (diagnostic) =>
+              diagnostic.file === file && diagnostic.rule === "imports"
+          ).length,
+      }).toStrictEqual({ ok: false, directives: 2 });
+    }
+  );
+
   it.each([
     ["a screen", "screens/notes.tsx"],
     ["a declaration file", "notes.d.ts"],

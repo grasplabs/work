@@ -45,6 +45,7 @@ import {
   rewriteCodeImports,
   generatedWorkflowCode,
   rewriteImports,
+  screenTypeImportError,
   serverCode,
   workflowCode,
 } from "./imports.ts";
@@ -180,7 +181,8 @@ const messageIn = (path: string, error: unknown): string =>
 const compileFile = (
   path: string,
   source: string,
-  files: ReadonlySet<string>
+  files: ReadonlySet<string>,
+  typeFiles: ReadonlySet<string>
 ): { code: string; imported: ModuleImports } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
   let compiled: string;
@@ -199,7 +201,10 @@ const compileFile = (
   }
   const errors: Diagnostic[] = [];
   for (const site of imports) {
-    const message = importError(site, path, files, kit);
+    // A type may also name the App's declarations (`typeFiles`).
+    const message = site.typeOnly
+      ? screenTypeImportError(site.specifier, path, typeFiles, kit)
+      : importError(site, path, files, kit);
     if (message !== undefined) {
       errors.push(
         problem(
@@ -231,12 +236,14 @@ const compileFile = (
 };
 
 /**
- * What an App's declaration file (`*.d.ts`) names that a screen must
- * never reach: all it imports is types (`typeImportError`).
+ * Why an App's declaration file (`*.d.ts`) can't import what it does:
+ * all it imports is types, held to what a screen's types may name
+ * (`screenTypeImportError`) among `typeFiles`.
  */
 const declarationImportErrors = (
   path: string,
-  source: string
+  source: string,
+  typeFiles: ReadonlySet<string>
 ): Diagnostic[] => {
   const imports: ImportSite[] = [];
   try {
@@ -246,7 +253,7 @@ const declarationImportErrors = (
     return [problem("compile", message, { file: path, ...locationOf(error) })];
   }
   return imports.flatMap(({ specifier, line }) => {
-    const message = typeImportError(path, specifier, true);
+    const message = screenTypeImportError(specifier, path, typeFiles, kit);
     return message === undefined
       ? []
       : [
@@ -377,11 +384,13 @@ export const buildScreens = async (
     return { ok: false, diagnostics: clashes };
   }
   const known = new Set(paths);
+  // What a type may name: the build's files and its declarations.
+  const typeFiles = new Set(Object.keys(app));
   const modules: Record<string, string> = {};
   const imports = new Map<string, ModuleImports>();
   const errors: Diagnostic[] = [];
   for (const [path, source] of sources) {
-    const result = compileFile(path, source, known);
+    const result = compileFile(path, source, known, typeFiles);
     if ("code" in result) {
       modules[appModuleName(path)] = result.code;
       imports.set(appModuleName(path), result.imported);
@@ -394,7 +403,7 @@ export const buildScreens = async (
   // own types are.
   for (const [path, source] of Object.entries(app)) {
     if (declarationFile.test(path)) {
-      errors.push(...declarationImportErrors(path, source));
+      errors.push(...declarationImportErrors(path, source, typeFiles));
     }
   }
   // The checks would only say it again, less clearly.

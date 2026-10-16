@@ -50,6 +50,8 @@ interface Statement {
   type: string;
   loc?: { start: { line: number } } | null;
   source?: StringLiteral | null;
+  /** `import X = require("…")`'s module (`TSExternalModuleReference`). */
+  moduleReference?: { type: string; expression?: StringLiteral };
   specifiers?: Specifier[];
   importKind?: string | null;
   exportKind?: string | null;
@@ -187,6 +189,21 @@ export const collectImports = (imports: ImportSite[]) => () => {
           },
         });
         for (const statement of path.node.body) {
+          const { moduleReference } = statement;
+          if (
+            statement.type === "TSImportEqualsDeclaration" &&
+            moduleReference?.type === "TSExternalModuleReference"
+          ) {
+            // `import X = require("…")`: a value, or with `type` a type.
+            imports.push({
+              specifier: moduleReference.expression?.value,
+              line: statement.loc?.start.line,
+              names: undefined,
+              ...(statement.importKind === "type"
+                ? { typeOnly: true as const }
+                : {}),
+            });
+          }
           if (isModuleStatement(statement)) {
             imports.push(
               isTypeOnly(statement)
@@ -270,6 +287,54 @@ const iconError = (
     : `${unknown.map((name) => `"${name}"`).join(", ")} is not a lucide-react icon.`;
 };
 
+/**
+ * The App file a screen's type import names, if there is one: as a value
+ * import finds it, or a declaration file (`./types` for `types.d.ts`).
+ */
+const resolveTypeFile = (
+  file: string,
+  specifier: string,
+  files: ReadonlySet<string>
+): string | undefined =>
+  resolveRelative(file, specifier, files) ??
+  resolveRelative(file, `${specifier}.d.ts`, files);
+
+/**
+ * Why a type-only import in a screen, component or declaration file isn't
+ * allowed, or undefined when it is: held to what its values may import,
+ * but for the names they may take (a type of the SDK root's beyond
+ * `{ v }`, any lucide-react name). An allowlist, so no path reaches what
+ * the kit doesn't list: nothing under node_modules, nothing absolute,
+ * only the build's own files and the kit's modules by name.
+ */
+export const screenTypeImportError = (
+  specifier: string | undefined,
+  file: string,
+  files: ReadonlySet<string>,
+  kit: Kit
+): string | undefined => {
+  if (specifier === undefined) {
+    return "import() must name a module in quotes.";
+  }
+  const server = typeImportError(file, specifier, true);
+  if (server !== undefined) {
+    return server;
+  }
+  if (isRelative(specifier)) {
+    return resolveTypeFile(file, specifier, files) === undefined
+      ? `"${specifier}" is not a file of this App's screens.`
+      : undefined;
+  }
+  if (specifier === screenReferences.specifier) {
+    return files.has(screenReferences.path)
+      ? undefined
+      : `"${specifier}" holds the references the host generates from the App's server code (app.ts, schema.ts, operations/), which this App doesn't have yet.`;
+  }
+  return specifier === "lucide-react" || kit.imports.includes(specifier)
+    ? undefined
+    : `"${specifier}" is outside the kit. Screens can import the App's own files and ${packagesOf(kit)}.`;
+};
+
 /** Why a screen's import isn't allowed, or undefined when it is. */
 export const importError = (
   { specifier, names, typeOnly }: ImportSite,
@@ -278,7 +343,7 @@ export const importError = (
   kit: Kit
 ): string | undefined => {
   if (typeOnly) {
-    return typeImportError(file, specifier, true);
+    return screenTypeImportError(specifier, file, files, kit);
   }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";

@@ -106,6 +106,56 @@ const toDiagnostic = (diagnostic: ts.Diagnostic): Diagnostic | undefined => {
   return result;
 };
 
+/** Where `/// <reference path>` in `file` points: a path from the App's root. */
+const referencedPath = (file: string, reference: string): string => {
+  const parts = reference.startsWith("/") ? [] : file.split("/").slice(0, -1);
+  for (const part of reference.split("/")) {
+    if (part === "..") {
+      parts.pop();
+    } else if (part !== "." && part !== "") {
+      parts.push(part);
+    }
+  }
+  return `/${parts.join("/")}`;
+};
+
+/**
+ * What an App file's triple-slash directives reach beyond its own files:
+ * a `/// <reference path>` only to another App file, never into the kit's
+ * node_modules, and no `/// <reference types>` at all. The import checks
+ * hold every import an App file writes; these are how it would name a
+ * module without one.
+ */
+const referenceErrors = (
+  file: ts.SourceFile,
+  app: ReadonlyMap<string, string>
+): Diagnostic[] => {
+  const at = (position: number) => {
+    const { line, character } = file.getLineAndCharacterOfPosition(position);
+    return { line: line + 1, column: character + 1 };
+  };
+  return [
+    ...file.referencedFiles
+      .filter(
+        ({ fileName }) => !app.has(referencedPath(file.fileName, fileName))
+      )
+      .map(({ fileName, pos }) => ({
+        rule: "imports",
+        severity: "error" as const,
+        message: `"${fileName}" is not one of the App's files: a reference path names only those.`,
+        file: file.fileName.slice(1),
+        ...at(pos),
+      })),
+    ...file.typeReferenceDirectives.map(({ fileName, pos }) => ({
+      rule: "imports",
+      severity: "error" as const,
+      message: `"${fileName}": App files reference no type packages; import what the kit has instead.`,
+      file: file.fileName.slice(1),
+      ...at(pos),
+    })),
+  ];
+};
+
 /**
  * Type-checks App files (paths relative to the App, e.g.
  * `screens/desk.tsx`) against the kit and the App's own declaration files
@@ -164,7 +214,8 @@ export const typeCheck = (
   const checked = program
     .getSourceFiles()
     .filter((file) => app.has(file.fileName));
-  return [
+  const references = checked.flatMap((file) => referenceErrors(file, app));
+  const found = [
     ...program.getOptionsDiagnostics(),
     ...program.getGlobalDiagnostics(),
     ...checked.flatMap((file) => [
@@ -174,4 +225,5 @@ export const typeCheck = (
   ]
     .map((diagnostic) => toDiagnostic(diagnostic))
     .filter((diagnostic) => diagnostic !== undefined);
+  return [...found, ...references];
 };
