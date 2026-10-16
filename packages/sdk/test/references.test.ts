@@ -11,6 +11,7 @@ import {
 } from "../src/host.ts";
 import type { AppManifest, BoundWorkflow } from "../src/host.ts";
 import { app, resource, v } from "../src/index.ts";
+import { workflowReferenceLimits } from "../src/references.ts";
 import { runFunction } from "../src/runner.ts";
 import type { OperationChannel } from "../src/runner.ts";
 import { serverModule } from "../src/server.ts";
@@ -416,6 +417,24 @@ describe("workflow references", () => {
     });
   });
 
+  test("hold exactly as many events as the client reads (workflowReferenceLimits)", async () => {
+    const files = await generatedWith([
+      {
+        ...summarize,
+        events: Object.fromEntries(
+          Array.from({ length: workflowReferenceLimits.events }, (_, index) => [
+            `event${index}`,
+            { type: "x", data: v.null().descriptor },
+          ])
+        ),
+        listens: {},
+      },
+    ]);
+    expect(files[".grasp/references.ts"]).toContain(
+      `event${workflowReferenceLimits.events - 1}`
+    );
+  });
+
   test.each<[string, readonly BoundWorkflow[]]>([
     ["the same alias twice", [summarize, summarize]],
     ["an alias that isn't plain", [{ ...summarize, alias: "summarize-note" }]],
@@ -445,6 +464,37 @@ describe("workflow references", () => {
     [
       "a listen task for no event at all",
       [{ ...summarize, listens: { "do/0/wait": [] } }],
+    ],
+    [
+      "more events than a reference holds",
+      [
+        {
+          ...summarize,
+          events: Object.fromEntries(
+            Array.from(
+              { length: workflowReferenceLimits.events + 1 },
+              (_, index) => [
+                `event${index}`,
+                { type: "x", data: v.null().descriptor },
+              ]
+            )
+          ),
+          listens: {},
+        },
+      ],
+    ],
+    [
+      "a listen task's path longer than a reference holds",
+      [
+        {
+          ...summarize,
+          listens: {
+            ["t".repeat(workflowReferenceLimits.taskPathLength + 1)]: [
+              "noteEdited",
+            ],
+          },
+        },
+      ],
     ],
   ])("refuse %s", async (_what, bound) => {
     await expect(generatedWith(bound)).rejects.toThrow(TypeError);

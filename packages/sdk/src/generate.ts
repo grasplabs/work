@@ -3,6 +3,7 @@ import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
 import type { AppManifest, OperationManifest } from "./app.ts";
+import { workflowReferenceLimits } from "./references.ts";
 import type { ValueDescriptor, ValueSchema } from "./value-descriptor.ts";
 import { descriptorOf } from "./value-schema.ts";
 
@@ -150,6 +151,14 @@ const checkBoundWorkflows = (workflows: readonly BoundWorkflow[]): void => {
       );
     }
     aliases.add(workflow.alias);
+    if (
+      Object.keys(workflow.events).length > workflowReferenceLimits.events ||
+      Object.keys(workflow.listens).length > workflowReferenceLimits.listens
+    ) {
+      throw new TypeError(
+        `${workflow.alias} declares more events or listen tasks than a reference holds.`
+      );
+    }
     for (const alias of Object.keys(workflow.events)) {
       if (!aliasPattern.test(alias)) {
         throw new TypeError(
@@ -159,6 +168,8 @@ const checkBoundWorkflows = (workflows: readonly BoundWorkflow[]): void => {
     }
     for (const [task, listened] of Object.entries(workflow.listens)) {
       if (
+        task.length === 0 ||
+        task.length > workflowReferenceLimits.taskPathLength ||
         listened.length === 0 ||
         new Set(listened).size !== listened.length ||
         listened.some((alias) => !Object.hasOwn(workflow.events, alias))

@@ -16,6 +16,7 @@ import {
   readAnswer,
   readRejection,
 } from "./client-error.ts";
+import { workflowReferenceLimits } from "./references.ts";
 import type {
   AppErrorPayload,
   RunHandle,
@@ -118,8 +119,7 @@ const fingerprintPattern = /^[0-9a-f]{64}$/u;
 
 const readWorkflows = new WeakMap<object, ReadWorkflow>();
 
-/** The most events one workflow reference declares. */
-const maxEvents = 64;
+const maxEvents = workflowReferenceLimits.events;
 
 const aliasPattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
 
@@ -166,8 +166,7 @@ const isEventOf = (
   return true;
 };
 
-/** The most listen tasks one workflow reference declares. */
-const maxListens = 256;
+const maxListens = workflowReferenceLimits.listens;
 
 /**
  * The listen tasks of a workflow reference, `value`, by path: each a
@@ -189,7 +188,7 @@ const readListens = (
   for (const [task, aliases] of entries) {
     if (
       task.length === 0 ||
-      task.length > 1024 ||
+      task.length > workflowReferenceLimits.taskPathLength ||
       !Array.isArray(aliases) ||
       aliases.length === 0 ||
       aliases.some(
