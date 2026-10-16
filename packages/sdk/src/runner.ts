@@ -6,7 +6,7 @@ import { databaseReader, databaseWriter } from "./database.ts";
 import { migrationHandler } from "./migration.ts";
 import type { MigrationContext } from "./migration.ts";
 import { referenceData } from "./references.ts";
-import { isResource } from "./resources.ts";
+import { isResource, isWorkflowResource } from "./resources.ts";
 import type { AnyResource } from "./resources.ts";
 import type { AnyFunction, FunctionKind } from "./server.ts";
 import type { JsonValue } from "./value-descriptor.ts";
@@ -112,6 +112,37 @@ const usedPath = (
 };
 
 /**
+ * The alias of `workflow` among `fn`'s `uses`, or a refusal: only a
+ * workflow declaration it lists, by identity.
+ */
+const usedWorkflow = (fn: AnyFunction, workflow: unknown): string => {
+  const used = fn.uses.find((use) => use === workflow);
+  if (used === undefined || !isWorkflowResource(used)) {
+    throw Object.assign(
+      new Error("A function starts only the workflows it lists in `uses`."),
+      { code: "operation.not_found" }
+    );
+  }
+  return used.alias;
+};
+
+/**
+ * A start of a workflow `fn` uses, over `channel`: for an action, the
+ * start itself; for a mutation, its start staged with the commit. The
+ * host tells them apart by the function it runs, never by this call.
+ */
+const startOf =
+  (fn: AnyFunction, channel: OperationChannel) =>
+  async (workflow: unknown, input: unknown): Promise<unknown> =>
+    await channel.resource(
+      usedWorkflow(fn, workflow),
+      "start",
+      // No input travels as no argument, which JSON can carry: the host
+      // applies the workflow's declared default.
+      input === undefined ? [] : [input]
+    );
+
+/**
  * The one method of each kind of resource's client but knowledge's and
  * statistics', whose methods are the operations they declare.
  */
@@ -197,6 +228,11 @@ export const runFunction = async (
         async (request: WriteRequest) => await channel.write(request)
       ),
       runQuery: caller("query"),
+      afterCommit: Object.freeze({
+        start: async (workflow: unknown, input: unknown): Promise<void> => {
+          await startOf(fn, channel)(workflow, input);
+        },
+      }),
     };
   } else {
     ctx = {
@@ -213,6 +249,7 @@ export const runFunction = async (
               await channel.emit(progress);
             },
           }),
+      startWorkflow: startOf(fn, channel),
     };
   }
   // SAFETY: the context is the one of the function's kind, and the

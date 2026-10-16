@@ -24,7 +24,7 @@ import { readDescriptor } from "./value-read.ts";
 import { descriptorOf, schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 import { v } from "./values.ts";
-import type { Infer, ObjectInput, ValueShape } from "./values.ts";
+import type { Infer, InferInput, ObjectInput, ValueShape } from "./values.ts";
 
 // `resource`: how an App says which outside capabilities its actions need
 // (spec 12, 32.3): a model, a connector's actions, knowledge collections,
@@ -299,6 +299,39 @@ export interface LinksResource<
 /** A requirement the App's screens use, never its functions. */
 export type BrowserResource = FilesResource | LinksResource;
 
+/**
+ * A workflow requirement (spec 7.4, 9.5): an independent workflow the App
+ * starts, by an alias of its own. An action starts it
+ * (`ctx.startWorkflow`), and a mutation stages its start for after it
+ * commits (`ctx.afterCommit.start`), each only one it lists in its
+ * `uses`. Like every requirement it grants nothing: the host starts the
+ * version the App's builders bound under the alias, through the App's
+ * own `start` permission on that workflow, acting for the person the call
+ * acts for, and checks both again as each start is admitted. It never
+ * reaches the workflow engine.
+ */
+export interface WorkflowResource<
+  Alias extends string = string,
+  Input = unknown,
+> {
+  readonly "~resource": "workflow";
+  readonly alias: Alias;
+  /**
+   * The descriptor of the input the App starts it with: what the host
+   * checks a start's input against before it goes anywhere. The bound
+   * version's own contract is checked again as the start is admitted.
+   */
+  readonly input: ValueDescriptor;
+  /** The input as a caller passes it, for types only: never set. */
+  readonly "~input"?: Input;
+}
+
+/** What a workflow declaration's config says. */
+export interface WorkflowConfig<Input extends AnySchema> {
+  /** The input the App starts it with. */
+  readonly input: Input;
+}
+
 /** Any resource requirement. */
 export type AnyResource =
   | ModelResource<string, unknown>
@@ -516,6 +549,15 @@ const browserDeclarations = new WeakSet<object>();
 export const isResource = (value: unknown): value is AnyResource =>
   typeof value === "object" && value !== null && declarations.has(value);
 
+/** Every workflow declaration `resource` made. */
+const workflowDeclarations = new WeakSet<object>();
+
+/** Whether `value` is a workflow declaration `resource` made. */
+export const isWorkflowResource = (value: unknown): value is WorkflowResource =>
+  typeof value === "object" &&
+  value !== null &&
+  workflowDeclarations.has(value);
+
 /** Whether `value` is a files or links declaration `resource` made. */
 export const isBrowserResource = (value: unknown): value is BrowserResource =>
   typeof value === "object" && value !== null && browserDeclarations.has(value);
@@ -696,6 +738,13 @@ const declared = (declaration: AnyResource): AnyResource => {
 const declaredForBrowser = (declaration: BrowserResource): BrowserResource => {
   const frozen = deepFreeze(declaration);
   browserDeclarations.add(frozen);
+  return frozen;
+};
+
+/** A workflow declaration, frozen and registered as genuine. */
+const declaredWorkflow = (declaration: WorkflowResource): WorkflowResource => {
+  const frozen = deepFreeze(declaration);
+  workflowDeclarations.add(frozen);
   return frozen;
 };
 
@@ -983,6 +1032,36 @@ export const resource = Object.freeze({
     }) as StatisticsResource<Alias, Operations>;
   },
   /**
+   * An independent workflow the App starts, with input of `input`: listed
+   * in the App's `uses`, and in the `uses` of each action that starts it
+   * and each mutation that stages its start. Only ever what the App's
+   * builders bind under the alias, started through the App's own
+   * permission; never the engine.
+   */
+  workflow: <const Alias extends string, Input extends AnySchema>(
+    alias: Alias,
+    config: WorkflowConfig<Input>
+  ): WorkflowResource<Alias, InferInput<Input>> => {
+    const checked = checkedConfig(config, ["input"]);
+    const input = descriptorOf(checked.input);
+    // A start left without input takes the schema's default; an input that
+    // may be absent with none would be no JSON for the run to start with.
+    if (input.presence === "optional") {
+      refuse(
+        "A workflow's input is required or has a default, never only optional."
+      );
+    }
+    // SAFETY: built from what was checked of the arguments the type is
+    // inferred from: the alias given and the input schema's descriptor.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return declaredWorkflow({
+      "~resource": "workflow",
+      alias: checkedAlias(alias),
+      // The descriptor, as data: what the host checks a start against.
+      input: structuredClone(input),
+    }) as WorkflowResource<Alias, InferInput<Input>>;
+  },
+  /**
    * What the App's screens may do with files through the host: upload,
    * read, attach, delete. Listed in the App's `uses`, never a function's.
    */
@@ -1041,7 +1120,7 @@ export const resource = Object.freeze({
  */
 export const readResourceDeclaration = (
   data: unknown
-): AnyResource | BrowserResource => {
+): AnyResource | BrowserResource | WorkflowResource => {
   if (!isPlainObject(data)) {
     return refuse("A resource declaration is an object.");
   }
@@ -1100,6 +1179,16 @@ export const readResourceDeclaration = (
   }
   if (kind === "files") {
     return resource.files(alias, loose);
+  }
+  if (kind === "workflow") {
+    const { input, ...rest } = config;
+    // SAFETY: as above: `workflow` refuses any key but `input`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    const workflowConfig = {
+      ...rest,
+      input: schemaOf(readDescriptor(input, 1, { nodes: 0 })),
+    } as never;
+    return resource.workflow(alias, workflowConfig);
   }
   if (kind === "links") {
     return resource.links(alias, loose);

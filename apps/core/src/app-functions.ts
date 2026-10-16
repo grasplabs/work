@@ -47,6 +47,8 @@ import type {
   InvocationSources,
 } from "./resource-adapter.ts";
 import { resourceBindingsFor } from "./resource-bindings.ts";
+import { appWorkflowStarts } from "./workflow-start-intents.ts";
+import type { CallingAgent } from "./workflow-start-intents.ts";
 
 // Calling an App's server functions (spec 6, 8, 16, 32.6): who a call is
 // for, which release it runs and what it may reach, resolved by core and
@@ -66,6 +68,12 @@ interface FunctionCaller {
   readonly stillAllowed?: () => Promise<void>;
   /** What the invocation reads through its resources is noted here. */
   readonly sources?: InvocationSources;
+  /**
+   * The agent whose call this is (a chat's code, agent-apps.ts): named on
+   * the workflows the call starts, and whose permission on the App a start
+   * it stages needs again when it is dispatched.
+   */
+  readonly agent?: CallingAgent;
 }
 
 /**
@@ -82,6 +90,7 @@ export const invocationFor = async (
     deadline,
     stillAllowed,
     sources = invocationSources(),
+    agent,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -129,6 +138,10 @@ export const invocationFor = async (
     // operation host admits each request through `authorize` first, as it
     // admits each commit, so nothing else is checked here.
     resources: bindings,
+    // The workflows the App binds, started as the App for the person
+    // calling: each start admitted on the App's own grant and the
+    // person's role in the App, read again as it is admitted.
+    workflows: appWorkflowStarts(env, authority, agent ?? null),
   };
 };
 
@@ -492,6 +505,8 @@ interface FunctionCallOptions {
     storeId: StoreId,
     readSet: Record<string, number>
   ) => void;
+  /** The agent whose call this is (`FunctionCaller.agent`). */
+  readonly agent?: CallingAgent;
 }
 
 /** `callAppFunction`, with all of its options. */
@@ -509,6 +524,7 @@ const callFunction = async (
     kind,
     observeReads,
     chargeWindow,
+    agent,
   } = options;
   const requestId = crypto.randomUUID();
   const refused = (error: unknown): FunctionAnswer => ({
@@ -555,6 +571,7 @@ const callFunction = async (
       requestId,
       deadline,
       ...(stillAllowed === undefined ? {} : { stillAllowed }),
+      ...(agent === undefined ? {} : { agent }),
       sources,
     });
     const { store } = release;
@@ -623,12 +640,15 @@ export const callAppFunction = async (
   deadline = Date.now() + platformLimits.serverInvocationWallMs,
   stillAllowed?: () => Promise<void>,
   /** The sandbox session (its call ID) of the Code Mode run that calls. */
-  parentSession?: string
+  parentSession?: string,
+  /** The agent whose call this is (`FunctionCaller.agent`). */
+  agent?: CallingAgent
 ): Promise<FunctionAnswer> =>
   await callFunction(env, by, app, request, {
     deadline,
     ...(stillAllowed === undefined ? {} : { stillAllowed }),
     ...(parentSession === undefined ? {} : { parentSession }),
+    ...(agent === undefined ? {} : { agent }),
   });
 
 /**

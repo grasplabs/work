@@ -179,25 +179,27 @@ export const requestGranted = async (
 };
 
 /**
- * Core's database, with `first` run once, just before the first batch
- * after a statement that `writes` matches was prepared lands: another
- * writer getting there first.
+ * Core's database, with `first` run just before each of the first `times`
+ * batches after a statement that `writes` matches was prepared lands:
+ * another writer getting there first.
  */
 export const racingDb = (
   first: () => Promise<unknown>,
-  writes: RegExp
+  writes: RegExp,
+  times = 1
 ): D1Database => {
   const real = env.DB;
   let writing = false;
-  let raced = false;
+  let raced = 0;
   return {
     prepare: (query) => {
       writing ||= writes.test(query);
       return real.prepare(query);
     },
     batch: async <T>(statements: D1PreparedStatement[]) => {
-      if (writing && !raced) {
-        raced = true;
+      if (writing && raced < times) {
+        raced += 1;
+        writing = false;
         await first();
       }
       return await real.batch<T>(statements);

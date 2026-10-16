@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { connectorContractIdSchema } from "./connect.ts";
 import { defineErrorFamily } from "./errors.ts";
-import { identifierSchema } from "./ids.ts";
+import { chatIdSchema, identifierSchema, workspaceIdSchema } from "./ids.ts";
 import {
   storeOperationPathMaxLength,
   storeOperationPathPattern,
@@ -105,6 +105,8 @@ export const workflowResourceErrors = defineErrorFamily({
     "That isn't a valid start: name an exact published version, and input the workflow accepts.",
   "workflow.start_denied":
     "You, or what starts it for you, may not start this workflow, or that changed as it started. Check again, then retry.",
+  "workflow.start_restricted":
+    "This App has read restricted data, so it can't start workflows: a run it started would carry what it read. Ask an admin to start the workflow another way.",
   "workflow.start_conflict":
     "This idempotency key already started this workflow with another version or input.",
   "workflow.trigger_unavailable":
@@ -390,6 +392,46 @@ export interface WorkflowStart {
   runId: string | null;
   createdAt: string;
 }
+
+/**
+ * The start keys core derives itself begin with this: an App action's
+ * starts, and a committed mutation's. A key a caller chooses (a person's,
+ * an agent's, and a screen's when screens start workflows) may not, so no
+ * caller can take one of core's keys before core does.
+ */
+export const coreStartKeyPrefix = "grasp:";
+
+/**
+ * A start a committed mutation staged in its store's outbox
+ * (`ctx.afterCommit.start`), which its dispatch admits after the commit:
+ * who starts it, as core resolved them as the mutation ran (the App, the
+ * version of it whose code staged it, the person its call acted for),
+ * the alias the App binds the workflow under, its input as checked
+ * against the App's declaration, and the agent whose call staged it, if
+ * one did. Its key is its outbox entry's ID, which names the commit, so
+ * every dispatch of it is the same start and no later commit's start is.
+ * Never anything App code chose but the alias and the input.
+ */
+export const workflowStartIntentSchema = z.strictObject({
+  app: identifierSchema,
+  appVersion: z.int().min(1),
+  principal: identifierSchema,
+  alias: appWorkflowBindingSchema.shape.alias,
+  input: z.json(),
+  /**
+   * The agent whose call of the App staged it (a chat's code), whose
+   * permission on the App its dispatch requires again; null for a
+   * person's own call.
+   */
+  agent: z
+    .strictObject({
+      agentId: identifierSchema,
+      workspaceId: workspaceIdSchema,
+      chatId: chatIdSchema,
+    })
+    .nullable(),
+});
+export type WorkflowStartIntent = z.infer<typeof workflowStartIntentSchema>;
 
 /**
  * The most runs of one workflow that haven't ended a person may have
