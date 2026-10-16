@@ -1227,11 +1227,16 @@ describe("fair model admission", { timeout: 60_000 }, () => {
       const run = await builder.api.workflows.start(app, "reader");
       const summary = async () =>
         await builder.api.screens.summary(app, run.id);
-      await until(async () => {
-        const now = await summary();
-        return now.status === "queued";
-      });
-      const queued = await summary();
+      // A run still starting reads as queued too, with no share to wait
+      // for (summary.ts): the step's wait shows once its call joined the
+      // queue, in the revision that carries the share and the time.
+      let queued = await summary();
+      while (queued.queued === undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- until it shows
+        await scheduler.wait(10);
+        // oxlint-disable-next-line no-await-in-loop -- until it shows
+        queued = await summary();
+      }
       release.resolve(true);
       await finished(run.id);
       const done = await summary();
