@@ -149,6 +149,14 @@ describe("an app's provider record", () => {
         manifest({ signIn: apiKey, scopes: ["read"] })
       ).success
     ).toBeFalsy();
+    // Nor hold the separator it is joined with: it would be two at the app.
+    expect(
+      signInSchema.safeParse({
+        ...oauth2,
+        scopeSeparator: ",",
+        scopes: ["items:read,items:write"],
+      }).success
+    ).toBeFalsy();
     // A scope can't break out of the parameter it is joined into.
     expect(
       signInSchema.safeParse({ ...oauth2, scopes: ["read write"] }).success

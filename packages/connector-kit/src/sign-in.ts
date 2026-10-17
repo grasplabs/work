@@ -143,27 +143,34 @@ const appNameSchema = z.string().min(1).max(64);
  * tokens, with Grasp's own app at the provider (its credentials are the
  * deployment's, by the provider's name).
  */
-const oauth2SignInSchema = z.strictObject({
-  kind: z.literal("oauth2"),
-  name: appNameSchema,
-  authorizationEndpoint: plainEndpointSchema,
-  tokenEndpoint: plainEndpointSchema,
-  /** RFC 7009; without one, disconnecting deletes the tokens only. */
-  revocationEndpoint: plainEndpointSchema.optional(),
-  /** Exactly what connect asks for: the connector's scopes are among them. */
-  scopes: z.array(scopeSchema).min(1).max(64),
-  /** How the scopes are joined: RFC 6749 says a space; some apps a comma. */
-  scopeSeparator: z.enum([" ", ","]).default(" "),
-  /** Parameters the authorization request adds to connect's own. */
-  authorizationParams: z
-    .record(paramNameSchema, z.string().min(1).max(256))
-    .default({}),
-  /** How the client authenticates at the token endpoint (RFC 6749 §2.3.1). */
-  clientAuthentication: z
-    .enum(["client_secret_post", "client_secret_basic"])
-    .default("client_secret_post"),
-  account: accountLookupSchema,
-});
+const oauth2SignInSchema = z
+  .strictObject({
+    kind: z.literal("oauth2"),
+    name: appNameSchema,
+    authorizationEndpoint: plainEndpointSchema,
+    tokenEndpoint: plainEndpointSchema,
+    /** RFC 7009; without one, disconnecting deletes the tokens only. */
+    revocationEndpoint: plainEndpointSchema.optional(),
+    /** Exactly what connect asks for: the connector's scopes are among them. */
+    scopes: z.array(scopeSchema).min(1).max(64),
+    /** How the scopes are joined: RFC 6749 says a space; some apps a comma. */
+    scopeSeparator: z.enum([" ", ","]).default(" "),
+    /** Parameters the authorization request adds to connect's own. */
+    authorizationParams: z
+      .record(paramNameSchema, z.string().min(1).max(256))
+      .default({}),
+    /** How the client authenticates at the token endpoint (RFC 6749 §2.3.1). */
+    clientAuthentication: z
+      .enum(["client_secret_post", "client_secret_basic"])
+      .default("client_secret_post"),
+    account: accountLookupSchema,
+  })
+  .refine(
+    ({ scopes, scopeSeparator }) =>
+      scopes.every((scope) => !scope.includes(scopeSeparator)),
+    // Joined, it would be two scopes at the app, and not the ones checked.
+    "A scope can't hold the separator it is joined with"
+  );
 
 /**
  * Header names an API key can't go in: those the runtime or a proxy acts

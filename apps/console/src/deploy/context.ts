@@ -120,17 +120,29 @@ const optionalSharedSecrets: Readonly<Partial<Record<SharedSecret, string>>> = {
   APP_OAUTH_CLIENTS: "{}",
 };
 
-/** A shared secret's value, or its stand-in while the store has none. */
+/** Secrets Store's answer for a secret it doesn't have. */
+const notInStore = /not found/iu;
+
+/**
+ * A shared secret's value, or its stand-in while the store has none: not
+ * there at all, or empty. A read that failed any other way stops the
+ * deploy as a missing required secret does, so a store that answered
+ * badly once never deploys connect without the apps' clients it has.
+ */
 const sharedSecret = async (env: Env, name: SharedSecret): Promise<string> => {
-  try {
+  const standIn = optionalSharedSecrets[name];
+  if (standIn === undefined) {
     return await storeSecret(env, name);
-  } catch (error) {
-    const standIn = optionalSharedSecrets[name];
-    if (standIn !== undefined && error instanceof MissingStoreSecretError) {
-      return standIn;
-    }
-    throw error;
   }
+  let value = "";
+  try {
+    value = await env[name].get();
+  } catch (error) {
+    if (!(error instanceof Error && notInStore.test(error.message))) {
+      throw new MissingStoreSecretError(name);
+    }
+  }
+  return value === "" ? standIn : value;
 };
 
 /** Every secret a deploy gives the Workers, read from Secrets Store. */
