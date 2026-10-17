@@ -735,7 +735,9 @@ const workflowTypeOf = (workflow: BoundWorkflow): string => {
     recordType(decisions),
     recordType(queries),
   ];
-  return `WorkflowReference<\n${parts.map((part) => `${indent(2)}${part},`).join("\n")}\n${indent(1)}>`;
+  // No trailing comma: TypeScript 6, which checks App code, refuses one
+  // in a type-argument list.
+  return `WorkflowReference<\n${parts.map((part) => `${indent(2)}${part}`).join(",\n")}\n${indent(1)}>`;
 };
 
 /** The reference to `workflow`, as the data a generated module holds. */
@@ -833,7 +835,10 @@ const workflowsExport = async (
         `  ${key(workflow.alias)}: ${dataOf(await workflowReferenceOf(identity, workflow), 1)},`
     )
   );
-  return `export const workflows: {\n${types.join("\n")}\n} = frozen({\n${values.join("\n")}\n});\n`;
+  // `as const`: the data is inferred as the literal it is, never widened
+  // into an object union whose missing keys become `?: undefined` and no
+  // longer fit a descriptor.
+  return `export const workflows: {\n${types.join("\n")}\n} = frozen({\n${values.join("\n")}\n} as const);\n`;
 };
 
 /** `#grasp`: the public api and everything else a browser may hold. */
