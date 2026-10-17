@@ -49,7 +49,7 @@ import {
 } from "./src/kit.ts";
 import type { Kit, KitModules } from "./src/kit.ts";
 import { platformModules } from "./src/packages/platform.ts";
-import { compilerOptions } from "./src/type-check.ts";
+import { compilerOptions, serverLibs } from "./src/type-check.ts";
 
 const root = import.meta.dirname;
 const dist = path.join(root, "dist");
@@ -525,8 +525,14 @@ const declaration = /\.d\.[cm]?ts$/u;
  */
 const collectTypes = (specifiers: string[]): Record<string, string> => {
   const entry = path.join(root, "kit-types.ts");
-  // Third-party declarations can have errors that don't matter here.
-  const options = { ...compilerOptions, skipLibCheck: true };
+  // Third-party declarations can have errors that don't matter here. The
+  // worker lib too: what an App's server code is checked against
+  // (type-check.ts `serverTarget`), which no screen is.
+  const options = {
+    ...compilerOptions,
+    skipLibCheck: true,
+    lib: [...(compilerOptions.lib ?? []), ...serverLibs],
+  };
   const host = ts.createCompilerHost(options);
   const read = new Map<string, string>();
   const readFile = host.readFile.bind(host);
@@ -901,12 +907,17 @@ const buildScreenCompiler = async (
     moduleCandidates: candidatesByModule(sources),
     moduleImports,
     // Generated workflow code and compute modules are type-checked against
-    // their SDK entries too.
+    // their SDK entries too, and an App's server code against the SDK's
+    // server side.
     types: collectTypes([
       ...imports,
       "lucide-react",
       ...openWorkflowSdkImports,
       ...computeSdkImports,
+      // An App's server code is type-checked against what it and its
+      // generated modules import (app-code.ts).
+      ...serverSdkImports,
+      "@grasp-os/sdk/database",
     ]),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.

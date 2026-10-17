@@ -146,10 +146,12 @@ const stringArgument = (call: Call): string | undefined => {
     : undefined;
 };
 
-/** A `declare module` or `namespace`: named by a string, or an identifier. */
+/** A `declare module`, `declare global` or `namespace`: named by a string, or an identifier. */
 interface ModuleDeclaration {
-  id: { type: string; value?: unknown };
+  id: { type: string; value?: unknown; name?: string };
   loc?: Call["loc"];
+  /** Set on `declare global { … }`. */
+  global?: boolean;
 }
 
 /** A type's `import("…")` (`typeof import()`, `import("…").Name`). */
@@ -201,8 +203,23 @@ export const collectImports = (imports: ImportSite[]) => () => {
           TSImportType: (inner) => {
             collectImportType(inner.node);
           },
-          TSModuleDeclaration: ({ node: { id, loc } }) => {
-            if (id.type === "StringLiteral" && typeof id.value === "string") {
+          TSModuleDeclaration: ({ node: { id, loc, global } }) => {
+            // `declare global { … }`: what it declares, every file sees.
+            if (
+              global === true ||
+              (id.type === "Identifier" && id.name === "global")
+            ) {
+              imports.push({
+                specifier: undefined,
+                line: loc?.start.line,
+                names: undefined,
+                typeOnly: true,
+                ambient: true,
+              });
+            } else if (
+              id.type === "StringLiteral" &&
+              typeof id.value === "string"
+            ) {
               imports.push({
                 specifier: id.value,
                 line: loc?.start.line,
@@ -256,6 +273,87 @@ export const collectImports = (imports: ImportSite[]) => () => {
     },
   };
 };
+
+/** A comment as Babel keeps it: its text, without its delimiters. */
+interface Comment {
+  type: string;
+  value: string;
+  loc?: { start: { line: number } } | null;
+}
+
+/** A comment TypeScript reads as a directive to the type check. */
+export interface DirectiveSite {
+  /** What it says, e.g. `/// <reference lib="dom" />` or `@ts-ignore`. */
+  directive: string;
+  line: number | undefined;
+}
+
+/**
+ * A triple-slash directive TypeScript obeys: `/// <reference …/>`,
+ * `/// <amd-module …/>` or `/// <amd-dependency …/>`. Any other tag in a
+ * `///` comment (`/// <summary>`) is a comment to it.
+ */
+const tripleSlash = /^\/\s*<(?:reference|amd-module|amd-dependency)\b/iu;
+
+/**
+ * A comment that switches the type check off for the whole file: a
+ * `@ts-nocheck` pragma, which TypeScript reads in any case
+ * (`@ts-NoCheck`). Refused wherever a comment holds it, stricter than
+ * TypeScript, which reads it only where a pragma goes.
+ */
+const fileSuppression = /@ts-nocheck\b/iu;
+
+/**
+ * A comment line that switches the type check off for the next line: one
+ * that starts, after any `/` or `*` and space, with `@ts-ignore` or
+ * `@ts-expect-error`, where TypeScript reads them (in a line comment, or
+ * on any line of a block comment). A comment that only mentions one
+ * (`// Do not use @ts-ignore here.`) is prose to it, and to the build.
+ */
+// No word boundary after it, as TypeScript has none: it reads
+// `// @ts-ignoreX` as `@ts-ignore`.
+const lineSuppression = /^[\s/*]*@ts-(?:ignore|expect-error)/iu;
+
+/** The suppression `comment` holds where TypeScript would obey it, if any. */
+const suppressionIn = (comment: string): string | undefined =>
+  fileSuppression.exec(comment)?.[0] ??
+  comment
+    .split("\n")
+    .map((line) =>
+      lineSuppression
+        .exec(line)?.[0]
+        .trim()
+        .replace(/^[\s/*]*/u, "")
+    )
+    .find((found) => found !== undefined);
+
+/**
+ * A Babel plugin that lists into `directives` every comment of a file
+ * TypeScript would obey as a directive to its type check rather than
+ * read as a comment: a triple-slash directive (`/// <reference lib>`,
+ * `types`, `path`, which reach the whole program, not only the file), or
+ * a suppression (`@ts-nocheck`, `@ts-ignore`, `@ts-expect-error`).
+ */
+export const collectDirectives = (directives: DirectiveSite[]) => () => ({
+  visitor: {
+    Program: (
+      _path: unknown,
+      state: { file: { ast: { comments?: Comment[] | null } } }
+    ) => {
+      for (const { type, value, loc } of state.file.ast.comments ?? []) {
+        const line = loc?.start.line;
+        if (type === "CommentLine" && tripleSlash.test(value)) {
+          directives.push({ directive: `//${value}`.trim(), line });
+        } else {
+          const directive = suppressionIn(value);
+          if (directive !== undefined) {
+            directives.push({ directive, line });
+          }
+        }
+      }
+    },
+  },
+});
 
 /** How an import may name an App file: as written, or without its extension. */
 const importSuffixes = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"];
@@ -371,7 +469,9 @@ export const screenTypeImportError = (
   kit: Kit
 ): string | undefined => {
   if (ambient) {
-    return `declare module "${specifier ?? ""}" is never in a screen's files: it would declare, or shadow, a module the kit doesn't give the App. Import what the kit has instead.`;
+    return specifier === undefined
+      ? "declare global is never in a screen's files: it would declare globals the page doesn't give the App."
+      : `declare module "${specifier}" is never in a screen's files: it would declare, or shadow, a module the kit doesn't give the App. Import what the kit has instead.`;
   }
   if (specifier === undefined) {
     return "import() must name a module in quotes.";
