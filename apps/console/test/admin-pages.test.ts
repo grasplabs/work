@@ -88,6 +88,20 @@ const rowOf = (html: string, clientId: string): string => {
 const sidebarOf = (html: string): string =>
   html.slice(html.indexOf('data-slot="sidebar"'), html.indexOf("<main"));
 
+/** An organization's column of sections, named `name`; empty when the page has none. */
+const columnOf = (html: string, name: string): string => {
+  const at = html.indexOf(`<nav aria-label="${name}"`);
+  return at === -1 ? "" : html.slice(at, html.indexOf("</nav>", at));
+};
+
+/** The entry titled `title` in a column: from its link's start to its end. */
+const columnEntryOf = (column: string, title: string): string => {
+  const at = column.indexOf(`>${title}</span>`);
+  return at === -1
+    ? ""
+    : column.slice(column.lastIndexOf("<a", at), column.indexOf("</a>", at));
+};
+
 describe("the admin's frame", () => {
   useStoreSecrets({ deployer: token, tenant: tenantToken });
   // Only each test's own clients are listed: an earlier test's accounts
@@ -281,6 +295,184 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("lays out an organization as the prototype does: its column of sections in order, what waits where, and where the overview comes from", async () => {
+    const acme = await liveClient();
+    acme.account.admin = readySnapshot("Acme");
+
+    const { status, html } = await page(
+      `/admin/organizations/${acme.clientId}`
+    );
+    const column = columnOf(html, acme.name);
+    const titles = [
+      "Overview",
+      "Company",
+      "Details",
+      "Contract",
+      "Members",
+      "Onboarding",
+      "Steps",
+      "Organization",
+      "Interviews",
+      "Workflows",
+      "Platform",
+      "Setup",
+      "Integrations",
+      "AI use",
+      "Hours",
+      "Records",
+      "Brain",
+      "Data",
+      "Log",
+    ];
+    const positions = titles.map((title) => column.indexOf(`>${title}</span>`));
+
+    expect({
+      status,
+      inOrder:
+        positions.every((at) => at >= 0) &&
+        positions
+          .toSorted((a, b) => a - b)
+          .every((at, i) => at === positions[i]),
+      // The overview is where the page is, under the company's own name.
+      onOverview: columnEntryOf(column, "Overview").includes(
+        'aria-current="page"'
+      ),
+      title: html.includes(`${acme.name}</h1>`),
+      known: column.includes("85% known. Ready for Grasp’s go"),
+      // The go and the agreements wait under Steps, the contract under Contract.
+      waits: ["Steps", "Contract", "Members", "Interviews"].map((title) =>
+        columnEntryOf(column, title).includes("Something waits for Grasp")
+      ),
+      source: html.includes("From the company’s own Grasp."),
+      // Every need of Acme, with where it is settled.
+      needs: [
+        "85% of what Grasp needs is known: enough to open at 80%. The company comes in once Grasp gives its go.",
+        "The contract is still being written.",
+      ].map((text) => html.includes(text)),
+      opensContract: html.includes(
+        `href="/admin/organizations/${acme.clientId}/contract"`
+      ),
+    }).toStrictEqual({
+      status: 200,
+      inOrder: true,
+      onOverview: true,
+      title: true,
+      known: true,
+      waits: [true, true, false, false],
+      source: true,
+      needs: [true, true],
+      opensContract: true,
+    });
+  });
+
+  it("shows a section under its own path, titled, saying where what it shows comes from", async () => {
+    const acme = await liveClient();
+    acme.account.admin = readySnapshot("Acme");
+    const base = `/admin/organizations/${acme.clientId}`;
+
+    const contract = await page(`${base}/contract`);
+    const usage = await page(`${base}/ai-use`);
+    const setup = await page(`${base}/setup`);
+
+    expect({
+      statuses: [contract, usage, setup].map(({ status }) => status),
+      contract: {
+        title: contract.html.includes("Contract</h1>"),
+        about: contract.html.includes(
+          "What was signed, what it gives the company, and what is billed."
+        ),
+        // Core holds no contract yet: it comes from Rooms and Stripe.
+        source: contract.html.includes(
+          "The contract: from Rooms, once it is connected. Its invoices: from Stripe, once it is connected."
+        ),
+        current: columnEntryOf(
+          columnOf(contract.html, acme.name),
+          "Contract"
+        ).includes('aria-current="page"'),
+        overviewCurrent: columnEntryOf(
+          columnOf(contract.html, acme.name),
+          "Overview"
+        ).includes('aria-current="page"'),
+        toCome: contract.html.includes(
+          "This section isn’t in the console yet."
+        ),
+      },
+      usage: [
+        usage.html.includes("AI use</h1>"),
+        usage.html.includes("From the company’s own Grasp."),
+      ],
+      setup: [
+        setup.html.includes("Setup</h1>"),
+        setup.html.includes("From this console."),
+      ],
+    }).toStrictEqual({
+      statuses: [200, 200, 200],
+      contract: {
+        title: true,
+        about: true,
+        source: true,
+        current: true,
+        overviewCurrent: false,
+        toCome: true,
+      },
+      usage: [true, true],
+      setup: [true, true],
+    });
+  });
+
+  it("shows an organization whose core didn't answer by its name and why, with no sections", async () => {
+    const down = await liveClient();
+    down.account.unhealthy = 1000;
+    const waiting = await recordClient("provisioning");
+
+    const downPage = await page(`/admin/organizations/${down.clientId}`);
+    const downMembers = await page(
+      `/admin/organizations/${down.clientId}/members`
+    );
+    const waitingPage = await page(`/admin/organizations/${waiting.clientId}`);
+    /** What the page says of `name`: its title, why, and whether any section is there. */
+    const pageOf = (
+      { status, html }: { status: number; html: string },
+      name: string
+    ) => ({
+      status,
+      title: html.includes(`${name}</h1>`),
+      column: columnOf(html, name) !== "",
+      sections: [
+        "Members</h1>",
+        "Needs Grasp",
+        "% known",
+        "From the company",
+      ].some((text) => html.includes(text)),
+    });
+
+    expect({
+      down: pageOf(downPage, down.name),
+      downWhy: downPage.html.includes("Its Grasp can’t be read now:"),
+      downMembers: pageOf(downMembers, down.name),
+      waiting: pageOf(waitingPage, waiting.name),
+      waitingWhy: waitingPage.html.includes(
+        "Its Grasp isn’t deployed yet, so there is nothing of it to read."
+      ),
+    }).toStrictEqual({
+      down: { status: 200, title: true, column: false, sections: false },
+      downWhy: true,
+      downMembers: { status: 200, title: true, column: false, sections: false },
+      waiting: { status: 200, title: true, column: false, sections: false },
+      waitingWhy: true,
+    });
+  });
+
+  it("has no page for a section an organization doesn't have", async () => {
+    const acme = await liveClient();
+    acme.account.admin = emptyAdminSnapshot("Acme");
+
+    const missing = await page(`/admin/organizations/${acme.clientId}/nothing`);
+    const unknown = await page("/admin/organizations/client-unknown/members");
+
+    expect([missing.status, unknown.status]).toStrictEqual([404, 404]);
+  });
+
   it("gives a request Access doesn't vouch for nothing, asking no core", async () => {
     const acme = await liveClient();
     acme.account.admin = emptyAdminSnapshot("Acme");
@@ -291,6 +483,7 @@ describe("the admin's frame", () => {
         "/admin?phase=ready",
         "/admin/platform",
         `/admin/organizations/${acme.clientId}`,
+        `/admin/organizations/${acme.clientId}/contract`,
       ].map(async (path) => {
         const response = await exports.default.fetch(
           `https://console.grasp.test${path}`
@@ -303,7 +496,7 @@ describe("the admin's frame", () => {
       answers,
       readers: acme.account.adminReaders,
     }).toStrictEqual({
-      answers: [403, 403, 403, 403].map((status) => ({
+      answers: [403, 403, 403, 403, 403].map((status) => ({
         status,
         body: "Forbidden",
       })),
