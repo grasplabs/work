@@ -458,6 +458,19 @@ describe("a real organization as the admin reads it", () => {
     ).toBeNull();
   });
 
+  it("works out no reading of the first conversation once the Worker counts, so it is not counted twice", () => {
+    // The Worker counted from 2026-10-05, and Stephen read the
+    // conversation after that: whatever he read, the Worker counted.
+    const read = adminViewOf(
+      org,
+      { ...org.seed, conversation: "read", research: "done" },
+      "2026-10-06"
+    );
+    expect(read.usage.matrix.reading.opus.tokensIn).toBe(
+      view.usage.matrix.reading.opus.tokensIn
+    );
+  });
+
   it("counts AI use as the Worker counted it, at the admin’s prices, with what a model had kept at a tenth", () => {
     const counted = meteredOf(snapshot.usage);
     expect(

@@ -305,9 +305,28 @@ export const usageOf = (
     }
   };
 
-  // The first conversation, and the research that follows it.
-  if (state.conversation === "read") {
-    const on = (state.transcript === null ? org.vision?.on : undefined) ?? day;
+  // Counted as it happened: every call the Worker made for this organization, by what it was for and which model did it.
+  const metered = org.real?.metered ?? [];
+  for (const each of metered) {
+    took(each.day, each.purpose, each.model, each.use);
+  }
+  // From the first day the Worker counted, its count is what was used. What happened before that day, and at a sample, is worked out.
+  let countedFrom: string | null = null;
+  for (const each of metered) {
+    if (countedFrom === null || each.day < countedFrom) {
+      countedFrom = each.day;
+    }
+  }
+
+  // The first conversation, and the research that follows it, worked out
+  // only for a day before the Worker counted: from then on it counted them.
+  const readOn =
+    (state.transcript === null ? org.vision?.on : undefined) ?? day;
+  if (
+    state.conversation === "read" &&
+    (countedFrom === null || readOn < countedFrom)
+  ) {
+    const on = readOn;
     const words = view.transcript.split(/\s+/u).filter(Boolean).length;
     usedOn(on, "reading", "opus", {
       tokensIn: Math.round(words * READ.perWord) + READ.told,
@@ -321,18 +340,6 @@ export const usageOf = (
     }
   }
 
-  // Counted as it happened: every call the Worker made for this organization, by what it was for and which model did it.
-  const metered = org.real?.metered ?? [];
-  for (const each of metered) {
-    took(each.day, each.purpose, each.model, each.use);
-  }
-  // From the first day the Worker counted, its count is what was used. What happened before that day, and at a sample, is worked out.
-  let countedFrom: string | null = null;
-  for (const each of metered) {
-    if (countedFrom === null || each.day < countedFrom) {
-      countedFrom = each.day;
-    }
-  }
   for (const interview of view.interviews) {
     const on = dateOn(org, interview.day);
     const counted = countedFrom !== null && on >= countedFrom;
