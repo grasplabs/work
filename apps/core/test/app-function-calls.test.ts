@@ -107,6 +107,18 @@ export const add = mutation({
   },
 });
 
+/** Waits a while, then keeps a note: a cancel meanwhile must stop it. */
+export const later = action({
+  args: { text: v.string() },
+  returns: v.null(),
+  uses: [add],
+  handler: async (ctx, args) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await ctx.runMutation(add, { text: args.text });
+    return null;
+  },
+});
+
 export const mine = query({
   args: {},
   returns: ${mineReturns},
@@ -122,14 +134,14 @@ export const shout = action({
 export const hidden = internalQuery({ args: {}, returns: v.number(), handler: () => 1 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, followUp, hidden, kick, kickLater, mine, shout } from "./operations/crm.ts";
+import { add, followUp, hidden, kick, kickLater, later, mine, shout } from "./operations/crm.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "CRM",
   schema,
   access: { tables: { notes: { read: "owner", write: "owner" } } },
-  operations: { notes: { add, mine, shout, kick, kickLater } },
+  operations: { notes: { add, mine, shout, kick, kickLater, later } },
   internalOperations: { notes: { hidden } },
   screens: [],
   uses: [followUp],
@@ -166,6 +178,7 @@ export const crm = resource.app("crm", {
     "notes.shout": { kind: "action", args: { text: v.string() }, returns: v.string() },
     "notes.kick": { kind: "action", args: {}, returns: v.string() },
     "notes.kickLater": { kind: "mutation", args: {}, returns: v.null() },
+    "notes.later": { kind: "action", args: { text: v.string() }, returns: v.null() },
   },
 });
 
@@ -205,16 +218,23 @@ export const kickLater = action({
   uses: [crm],
   handler: async (ctx) => await attempt(() => ctx.resources.crm.call("notes.kickLater", {})),
 });
+
+export const later = action({
+  args: { text: v.string() },
+  returns: v.string(),
+  uses: [crm],
+  handler: async (ctx, args) => await attempt(() => ctx.resources.crm.call("notes.later", { text: args.text })),
+});
 ${extra}`,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { add, crm, kick, kickLater, mine, shout } from "./operations/desk.ts";
+import { add, crm, kick, kickLater, later, mine, shout } from "./operations/desk.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Desk",
   schema,
   access: { tables: {} },
-  operations: { desk: { add, mine, shout, kick, kickLater } },
+  operations: { desk: { add, mine, shout, kick, kickLater, later } },
   internalOperations: {},
   screens: [],
   uses: [crm],
@@ -568,16 +588,17 @@ const call = async (
 };
 
 /**
- * What `by` gets running the action `path` of `sealed`'s current release
- * as a screen sends it, under an idempotency key: through its action
- * invocation object (action-invocation.ts), not `callAppFunction`.
+ * The action `path` of `sealed`'s current release, started for `by` as a
+ * screen sends it, under an idempotency key: through its action
+ * invocation object (action-invocation.ts), not `callAppFunction`. Its
+ * object's name, and what it answers.
  */
-const screenAction = async (
+const startScreenAction = async (
   by: Person,
   sealed: Sealed,
   path: string,
   input: unknown
-): Promise<unknown> => {
+): Promise<{ name: string; result: Promise<unknown> }> => {
   const { release: current } = sealed;
   const key = crypto.randomUUID();
   const request = readFunctionRequest(
@@ -604,10 +625,22 @@ const screenAction = async (
     streaming: false,
     attach: false,
   });
-  const { result } = z
-    .object({ result: z.unknown() })
-    .parse(JSON.parse(await new Response(frames).text()));
-  return result;
+  const result = (async () => {
+    const text = await new Response(frames).text();
+    return z.object({ result: z.unknown() }).parse(JSON.parse(text)).result;
+  })();
+  return { name, result };
+};
+
+/** What `by` gets running the action `path` of `sealed` as a screen sends it. */
+const screenAction = async (
+  by: Person,
+  sealed: Sealed,
+  path: string,
+  input: unknown
+): Promise<unknown> => {
+  const { result } = await startScreenAction(by, sealed, path, input);
+  return await result;
 };
 
 /** The admin's binding of `caller`'s `alias` to App `appId`. */
@@ -761,6 +794,30 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
       screenAction(admin, desk, "desk.shout", { text: "hi" })
       // Desk's answer: the CRM's, as JSON.
     ).resolves.toStrictEqual({ ok: true, value: '"HI"' });
+  });
+
+  it("stop calling another App once the person cancels the screen's action", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles(), "Desk");
+    await bind(admin, desk, crm.app);
+    // The CRM's action waits before it keeps its note; the person cancels
+    // Desk's action meanwhile.
+    const { name, result } = await startScreenAction(
+      admin,
+      desk,
+      "desk.later",
+      { text: "after the cancel" }
+    );
+    await scheduler.wait(500);
+    const cancelled = await actionInvocation(env, name).cancel(admin.userId);
+    await result;
+    // Past when the CRM's action would have kept it.
+    await scheduler.wait(2500);
+    expect({
+      cancelled,
+      crmNotes: await call(admin, crm, "notes.mine"),
+    }).toStrictEqual({ cancelled: true, crmNotes: [] });
   });
 
   it("serves only another App's public functions, and stops once it changes a contract or the binding is revoked", async () => {

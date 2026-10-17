@@ -99,6 +99,8 @@ interface FunctionCaller {
   readonly requireHolds?: (() => void) | undefined;
   /** For a call from a workflow run's chain: the run (`BindingCaller.runOrigin`). */
   readonly runOrigin?: RunOrigin | undefined;
+  /** Aborted once the call is cancelled (`BindingCaller.cancelled`). */
+  readonly cancelled?: AbortSignal | undefined;
 }
 
 /**
@@ -137,6 +139,7 @@ export const invocationFor = async (
     appCalls,
     requireHolds,
     runOrigin,
+    cancelled,
   }: FunctionCaller
 ): Promise<Invocation> => {
   // SAFETY: a release's resource ID is the App it was sealed for.
@@ -171,6 +174,7 @@ export const invocationFor = async (
     ...(appCalls === undefined ? {} : { appCalls }),
     ...(requireHolds === undefined ? {} : { requireHolds }),
     ...(runOrigin === undefined ? {} : { runOrigin }),
+    ...(cancelled === undefined ? {} : { cancelled }),
   });
   const store =
     release.store === null
@@ -569,6 +573,8 @@ interface FunctionCallOptions {
   readonly requireHolds?: () => void;
   /** The run a call from its chain started from (`FunctionCaller.runOrigin`). */
   readonly runOrigin?: RunOrigin;
+  /** Aborted once the calling screen's call is cancelled (`FunctionCaller.cancelled`). */
+  readonly cancelled?: AbortSignal;
   /**
    * The calling invocation's sources, for a call from another App's
    * function (`AppFunctionCall`): the call reads into them. None, and it
@@ -627,6 +633,7 @@ const callFunction = async (
     appCalls,
     requireHolds,
     runOrigin,
+    cancelled,
     sources = invocationSources(),
   } = options;
   const requestId = crypto.randomUUID();
@@ -670,6 +677,7 @@ const callFunction = async (
       appCalls,
       requireHolds,
       runOrigin,
+      cancelled,
       // Another App's function, as this call of one runs: its role
       // checked, the chain carried on.
       callApp: async (person, called, appRequest, appOptions) =>
@@ -695,6 +703,7 @@ const callFunction = async (
               ? {}
               : { idempotencyKey: call.idempotencyKey }),
             ...(parentSession === undefined ? {} : { parentSession }),
+            ...(cancelled === undefined ? {} : { cancelled }),
           })
         : await readWindow(
             {
@@ -862,6 +871,7 @@ export const invokeAppAction = async (
       by,
       requestId,
       deadline,
+      cancelled,
       // Another App's function, as a screen's call of it runs.
       callApp: async (person, called, appRequest, appOptions) =>
         await callFunction(env, person, called, appRequest, appOptions),

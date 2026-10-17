@@ -239,6 +239,11 @@ export interface BindingCaller {
    * for its workflow, besides the called App's own binding caps.
    */
   readonly runOrigin?: RunOrigin;
+  /**
+   * Aborted once the person cancels the screen's call this invocation is
+   * part of (`CallOptions.cancelled`): the Apps it calls stop with it.
+   */
+  readonly cancelled?: AbortSignal;
 }
 
 /** The workflow run a chain of calls between Apps started from. */
@@ -268,6 +273,8 @@ export type AppFunctionCall = (
     readonly requireHolds?: () => void;
     /** For a run's chain: the run (`BindingCaller.runOrigin`). */
     readonly runOrigin?: RunOrigin;
+    /** The calling invocation's cancellation (`BindingCaller.cancelled`). */
+    readonly cancelled?: AbortSignal;
     /**
      * The calling invocation's sources (`BindingCaller.sources`), which
      * the called function reads into and its model and connector requests

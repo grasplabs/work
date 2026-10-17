@@ -320,6 +320,10 @@ const callFor = async (
       // sensitive connection's data included), and the caller's by what
       // it read in turn.
       sources: caller.sources,
+      // A screen's call cancelled stops the Apps it calls too.
+      ...(caller.cancelled === undefined
+        ? {}
+        : { cancelled: caller.cancelled }),
       ...runOriginField(caller),
       ...(caller.requireHolds === undefined
         ? {}
