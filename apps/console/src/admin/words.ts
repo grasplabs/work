@@ -12,6 +12,7 @@ import { LISTEN_DAYS } from "@grasp-os/shared/admin/onboarding";
 import { dateOn, mayInvite } from "@grasp-os/shared/admin/onboarding-admin";
 import type {
   ContractState,
+  KnowledgeSource,
   Need,
   OrgView,
   Settler,
@@ -312,4 +313,17 @@ export const needLine = (need: Need, view: OrgView): string => {
       return need satisfies never;
     }
   }
+};
+
+/** What each source of what Grasp knows about a company is (the prototype's `knowledge-words.ts`). */
+export const knowledgeSourceWords: Record<KnowledgeSource, string> = {
+  vision: "The first conversation and the research",
+  directory: "Who works where, from the sign-in",
+  sources: "Where the documents live, connected",
+  documents: "Documents dropped in",
+  pulse: "Pulse",
+  leadsKnown: "Team leads, from the HR platform",
+  leadsHeard: "Team leads interviewed",
+  everyoneHeard: "Everyone else interviewed",
+  review: "Workflows known",
 };
