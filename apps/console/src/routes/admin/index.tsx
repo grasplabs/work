@@ -332,7 +332,7 @@ const Portfolio = ({
 
 /** What needs Grasp today, at every answered organization: the most pressing at each first. */
 const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
-  const waiting = organizations.flatMap(({ admin, view }) =>
+  const each = organizations.map(({ admin, view }) =>
     view === null
       ? []
       : view.needs.map((need) => ({
@@ -341,6 +341,12 @@ const NeedsToday = ({ organizations }: { organizations: Organization[] }) => {
           text: needLine(need, view),
         }))
   );
+  // Every organization's most pressing first, then each one's next: in
+  // turn, so the first few can't fill the list before the rest are heard.
+  const deepest = Math.max(0, ...each.map((needs) => needs.length));
+  const waiting = Array.from({ length: deepest }, (_, rank) =>
+    each.flatMap((needs) => needs.slice(rank, rank + 1))
+  ).flat();
   if (waiting.length === 0) {
     return null;
   }

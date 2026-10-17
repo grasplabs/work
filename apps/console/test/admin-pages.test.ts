@@ -232,6 +232,29 @@ describe("the admin's frame", () => {
     });
   });
 
+  it("puts every organization's most pressing need in today's list before any one's next", async () => {
+    // Four needs each: twelve, past the eight the list shows.
+    const companies = await Promise.all(
+      ["Acme", "Birch", "Cobalt"].map(async (name) => {
+        const client = await liveClient();
+        client.account.admin = readySnapshot(name);
+        return client;
+      })
+    );
+
+    const { html } = await page("/admin");
+    const listed = (text: string) => {
+      const start = html.indexOf("Needs Grasp today");
+      return html
+        .slice(start, html.indexOf("</section>", start))
+        .includes(text);
+    };
+
+    expect(
+      companies.map(({ name }) => listed(`Open at ${name}:`))
+    ).toStrictEqual([true, true, true]);
+  });
+
   it("shows only the organizations in a phase when one is chosen", async () => {
     const acme = await liveClient();
     acme.account.admin = readySnapshot("Acme");
