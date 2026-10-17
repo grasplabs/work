@@ -388,8 +388,10 @@ export default appTest({ fixtures: "notes", tests: { "runs a handler": async () 
   it("fail closed on a report that leaves a test out", async () => {
     // The suite's own code rewrites what the isolate reports: one failing
     // test reported as none.
-    const forging = `const stringify = JSON.stringify;
-JSON.stringify = (value, ...rest) =>
+    // Rewrites the runner's report on its way out: past the types on
+    // purpose, as a forger's code would.
+    const forging = `const stringify = JSON.stringify as (value: unknown, ...rest: unknown[]) => string;
+(JSON as { stringify: unknown }).stringify = (value: Record<string, unknown> | null, ...rest: unknown[]) =>
   value !== null && typeof value === "object" && "results" in value
     ? stringify({ fixtures: value.fixtures, results: [] })
     : stringify(value, ...rest);`;

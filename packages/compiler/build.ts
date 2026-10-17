@@ -918,6 +918,8 @@ const buildScreenCompiler = async (
       // generated modules import (app-code.ts).
       ...serverSdkImports,
       "@grasp-os/sdk/database",
+      // And its tests, against the SDK's testing module (app-code.ts).
+      "@grasp-os/sdk/testing",
     ]),
     lintProject: collectLintProject(stylesheets),
     // The repo's lint config extends the same preset.

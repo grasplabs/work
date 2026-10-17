@@ -346,6 +346,12 @@ export const buildAppCode = async (
     signal
   );
 
+/** An App's server code with its tests: what `checkAppCode` reads. */
+const appCodeAndTestFiles = (files: AppFiles): AppFiles => ({
+  ...appTestFiles(files),
+  ...appCodeFiles(files),
+});
+
 /**
  * Builds an App's server code of spec 8's layout as `buildAppCode` does,
  * then type-checks it against the SDK's server side, with the host's
@@ -364,7 +370,7 @@ export const checkAppCode = async (
     env,
     "app-check",
     appFiles,
-    appCodeFiles,
+    appCodeAndTestFiles,
     whose,
     signal
   );
