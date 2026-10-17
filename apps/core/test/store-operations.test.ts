@@ -1762,20 +1762,32 @@ describe("a store operation starting a workflow", () => {
     const answered = await call(front.owner, front, "front.file", {
       who: "Ada",
     });
-    const outbox = await runInDurableObject(
+    const { outbox, commits } = await runInDurableObject(
       env.DATA_STORES.getByName(tracker.store),
-      (_instance, state) =>
-        state.storage.sql.exec("SELECT id FROM sdk_change_outbox").toArray()
-          .length
+      (_instance, state) => ({
+        outbox: state.storage.sql
+          .exec("SELECT id FROM sdk_change_outbox")
+          .toArray().length,
+        // Its mutation failed, so it saved nothing: not its record either.
+        commits: state.storage.sql
+          .exec<{ commits: number }>("SELECT commits FROM sdk_store")
+          .one().commits,
+      })
     );
     const receipts = await env.DB.prepare(
       "SELECT count(*) AS count FROM workflow_start_receipts WHERE invoker_type = 'app' AND invoker_id = ?"
     )
       .bind(tracker.app)
       .first<{ count: number }>();
-    expect({ answered, outbox, receipts: receipts?.count }).toStrictEqual({
+    expect({
+      answered,
+      outbox,
+      commits,
+      receipts: receipts?.count,
+    }).toStrictEqual({
       answered: "error:resource.unavailable",
       outbox: 0,
+      commits: 0,
       receipts: 0,
     });
   });

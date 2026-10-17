@@ -8,6 +8,7 @@ import type { OperationResult } from "@grasp-os/shared/operations";
 import type { Role } from "@grasp-os/shared/roles";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { executionErrors } from "@grasp-os/shared/workflows";
+import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -874,7 +875,19 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
     )
       .bind(app)
       .first<{ count: number }>();
-    expect({ ended, receipts: receipts?.count }).toMatchObject({
+    // Its mutation failed, so its store saved nothing: not its note either.
+    const { store } = await loadRelease(env, appIdSchema.parse(app), 1);
+    if (store === null) {
+      throw new Error("The release has no store");
+    }
+    const commits = await runInDurableObject(
+      env.DATA_STORES.getByName(store.storeId),
+      (_instance, state) =>
+        state.storage.sql
+          .exec<{ commits: number }>("SELECT commits FROM sdk_store")
+          .one().commits
+    );
+    expect({ ended, receipts: receipts?.count, commits }).toMatchObject({
       ended: {
         status: "completed",
         output: [
@@ -885,6 +898,7 @@ describe("an App's functions a workflow run calls", { timeout: 90_000 }, () => {
         ],
       },
       receipts: 0,
+      commits: 0,
     });
   });
 
