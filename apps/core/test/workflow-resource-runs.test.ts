@@ -1827,16 +1827,15 @@ describe(
         .bind(runId)
         .first<{ input: string | null }>();
       expect({
-        status: run.status,
-        before: kept.receipts,
+        // What the run was as the sweep reached it: ended, with receipts.
+        before: { status: run.status, receipts: kept.receipts },
         after: {
           input: receipt?.input,
           receipts: await receiptsOf(runId),
           lineage: await lineageOf(runId),
         },
       }).toStrictEqual({
-        status: "completed",
-        before: 2,
+        before: { status: "completed", receipts: 2 },
         after: { input: null, receipts: [], lineage: kept.lineage },
       });
     });
