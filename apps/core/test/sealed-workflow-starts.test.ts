@@ -622,6 +622,50 @@ describe("a workflow reference's queries", { timeout: 120_000 }, () => {
       oldCursor: runIds(await ask({ pagination: { cursor } })),
     };
 
+    // Revoked, or the person's role taken away, while the call runs:
+    // checked again just before anything is read.
+    const during = async (app: string, change: () => Promise<unknown>) => {
+      const answer = await callAppFunction(
+        env,
+        bob,
+        app,
+        JSON.stringify({
+          reference:
+            app === first.app
+              ? runs
+              : await queryReference(second.release, "followUp", "runs"),
+          input: { pagination: {} },
+        }),
+        Date.now() + 30_000,
+        async () => {
+          await change();
+        }
+      );
+      return codeOf(answer.result);
+    };
+    const lateRemoved = await during(
+      second.app,
+      async () =>
+        await env.DB.prepare(
+          "DELETE FROM app_members WHERE app_id = ? AND member_id = ?"
+        )
+          .bind(second.app, bob.userId)
+          .run()
+    );
+    const lateRevoked = await during(
+      first.app,
+      async () =>
+        await env.DB.prepare(
+          "UPDATE sdk_release_manifests SET revoked_at = ? WHERE app_id = ? AND version = 1"
+        )
+          .bind(Date.now(), first.app)
+          .run()
+    );
+    expect({ lateRemoved, lateRevoked }).toStrictEqual({
+      lateRemoved: "app.not_found",
+      lateRevoked: "version.revoked",
+    });
+
     // A release revoked while current answers nothing.
     await env.DB.prepare(
       "UPDATE sdk_release_manifests SET revoked_at = ? WHERE app_id = ? AND version = 1"

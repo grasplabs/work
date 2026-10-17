@@ -1,7 +1,7 @@
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { delegateActorOf, runActorOf } from "@grasp-os/shared/audit";
 import { internalErrors, isExpectedError } from "@grasp-os/shared/errors";
-import { storeIdSchema } from "@grasp-os/shared/ids";
+import { appIdSchema, storeIdSchema } from "@grasp-os/shared/ids";
 import type { AppId, RunId, StoreId, WorkflowId } from "@grasp-os/shared/ids";
 import { functionRequestMaxBytes } from "@grasp-os/shared/operation-limits";
 import {
@@ -642,6 +642,7 @@ const referenceIn = async (
 const answeredWorkflowQuery = async (
   env: Env,
   {
+    by,
     caller,
     query,
     call,
@@ -650,6 +651,7 @@ const answeredWorkflowQuery = async (
     stillAllowed,
     chargeWindow,
   }: {
+    by: Pick<Identity, "userId" | "role">;
     caller: { app: string; userId: string };
     query: ResolvedWorkflowQuery;
     call: FunctionRequest;
@@ -660,9 +662,18 @@ const answeredWorkflowQuery = async (
   }
 ): Promise<FunctionAnswer> => {
   try {
-    // The caller's own check of whether it may still call (an agent's
-    // permission, say), as every call's invocation asks it.
+    // The gate every call's invocation passes before it reads, as late as
+    // it can be: the caller's own check (an agent's permission, say), the
+    // release not revoked, and the person's role in the App, read again
+    // now, so a revocation or a role lost since the call began reads
+    // nothing.
     await stillAllowed?.();
+    await requireNotRevoked(
+      env,
+      appIdSchema.parse(caller.app),
+      release.manifest.resourceVersion
+    );
+    await operationRoles(env, by, appIdSchema.parse(caller.app));
     const result =
       call.window === undefined
         ? await callWorkflowQuery(env, caller, query, call.input)
@@ -744,6 +755,7 @@ const callFunction = async (
   }
   if (workflowQuery !== undefined) {
     return await answeredWorkflowQuery(env, {
+      by,
       caller: { app: appId, userId: by.userId },
       query: workflowQuery,
       call,
