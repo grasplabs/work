@@ -4,11 +4,15 @@ import {
   schemaFromDescriptor,
   workflowQueries,
 } from "@grasp-os/sdk/host";
-import type { WorkflowQueryName } from "@grasp-os/sdk/host";
+import type { WorkflowPin, WorkflowQueryName } from "@grasp-os/sdk/host";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { operationErrors } from "@grasp-os/shared/operations";
+import {
+  categoryOf,
+  isRetryableCode,
+  operationErrors,
+} from "@grasp-os/shared/operations";
 import type { OperationResult } from "@grasp-os/shared/operations";
 import {
   liveWindowMaxItems,
@@ -16,6 +20,7 @@ import {
 } from "@grasp-os/shared/store-limits";
 import { dataErrors } from "@grasp-os/shared/stores";
 import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
+import type { RunHistoryEntry } from "@grasp-os/shared/workflows";
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -26,6 +31,9 @@ import {
   workflowStartReceipts,
 } from "./db/core/schema.ts";
 import { windowPages } from "./query-windows.ts";
+import { loadWorkflowBuild } from "./workflow-builds.ts";
+import { historyEntries } from "./workflows/history.ts";
+import { detailsRemoved } from "./workflows/retention.ts";
 
 // A workflow reference's ordinary queries, as an App's screens read them
 // (spec 10.7.2): `workflows.<alias>.queries.runs`, `.history`,
@@ -45,15 +53,28 @@ import { windowPages } from "./query-windows.ts";
 //   never from the request. A removed binding answers nothing.
 // - Existence leaked through counts or cursors: pages are keyset pages
 //   over the caller's own runs, and a cursor is a place in that list.
-// - A run's or decision's ID as an oracle: `history` and `decision`
-//   refuse alike, whatever the ID; there are no decisions of independent
-//   runs yet, nor a projection of their journal for an App.
+// - A run's ID as an oracle: `history` reads a run only when its start
+//   receipt says this App started it for the caller, it acts for them,
+//   and it is of exactly the workflow version the release's seal resolved
+//   the alias to (`pinned`, contracts.json); any other run, a rebound
+//   alias's included, is refused as one that doesn't exist
+//   (`workflow.run_unavailable`), before anything of it is read. A
+//   release that pinned nothing reads no run's history.
+// - What a history tells: metadata only, from the engine's journal
+//   (workflows/history.ts), which holds no input, output or payload. A
+//   failure's message, the workflow's own text, never leaves: a platform
+//   code as it is, any other as `workflow.step_failed`. A task is named
+//   only by an ID the version's sealed build declares.
+// - A decision's ID as an oracle: `decision` refuses alike, whatever the
+//   ID; there are no decisions of independent runs yet.
 // - Arguments or answers outside the contract: arguments are checked by
 //   the generated descriptor, answers too before they leave, projected
 //   field by field: a run row carries no input, output or error.
 // - Cost: one person's runs of a workflow are read through
 //   `workflow_resource_runs_principal_idx` (workflow ID, principal,
-//   created at, ID), never a scan of everyone's runs of it.
+//   created at, ID), never a scan of everyone's runs of it; a history
+//   page reads its run by ID and at most `historyEntries`' bounded reads
+//   of its journal.
 
 const queryPath =
   /^workflows\.(?<alias>[A-Za-z][A-Za-z0-9_]{0,63})\.queries\.(?<name>runs|history|decisions|decision)$/u;
@@ -84,6 +105,8 @@ export interface ResolvedWorkflowQuery {
   readonly name: WorkflowQueryName;
   readonly args: unknown;
   readonly returns: unknown;
+  /** The workflow version the release's seal resolved the alias to. */
+  readonly pinned: WorkflowPin | undefined;
 }
 
 /**
@@ -130,6 +153,7 @@ export const workflowQueryOf = async (
     name: toName(name),
     args: operation.args,
     returns: operation.returns,
+    pinned: bound?.pinned,
   };
 };
 
@@ -285,8 +309,8 @@ const runsPage = async (
       // Admitted is when it was started; a queued run hasn't begun.
       startedAt: status === "queued" ? null : row.createdAt.getTime(),
       finishedAt: row.endedAt === null ? null : row.endedAt.getTime(),
-      // Nothing of a run can be followed through an App yet: its history
-      // refuses (GRA-695) and nothing keeps it fresh (GRA-696).
+      // Nothing keeps a run fresh through an App yet (GRA-696), and its
+      // history is read only for the version the release pins.
       canWatch: false,
     };
   });
@@ -297,6 +321,203 @@ const runsPage = async (
     ...(lastRow === undefined
       ? {}
       : { last: `${lastRow.createdAt.getTime()}:${lastRow.id}` }),
+  };
+};
+
+/** An engine event ID: where a history page goes on from. */
+const sequencePattern = /^\d{1,15}$/u;
+
+/** Where a history page starts: after the event `cursor` names, or the start. */
+const sequenceOf = (cursor: unknown): number => {
+  if (cursor === null || cursor === undefined) {
+    return 0;
+  }
+  if (typeof cursor !== "string" || !sequencePattern.test(cursor)) {
+    throw dataErrors.create("data.invalid_cursor");
+  }
+  return Number(cursor);
+};
+
+/**
+ * Run `runId`, when the caller may read its history through `app`: one
+ * this App started for them (its receipt), acting for them, of exactly
+ * `pinned`. Anything else, an unknown ID included, is refused alike.
+ */
+const historyRunOf = async (
+  env: Env,
+  caller: WorkflowQueryCaller,
+  pinned: WorkflowPin | undefined,
+  runId: string
+) => {
+  const refused = workflowResourceErrors.create("workflow.run_unavailable");
+  if (pinned === undefined) {
+    throw refused;
+  }
+  const row = await drizzle(env.DB)
+    .select({
+      id: workflowResourceRuns.id,
+      manifestHash: workflowResourceRuns.manifestHash,
+      endedAt: workflowResourceRuns.endedAt,
+      // The retention sweep marks a run's receipt (resource-runs.ts).
+      detailsRemovedAt: workflowStartReceipts.detailsRemovedAt,
+    })
+    .from(workflowResourceRuns)
+    .innerJoin(
+      workflowStartReceipts,
+      eq(workflowStartReceipts.id, workflowResourceRuns.id)
+    )
+    .where(
+      and(
+        eq(workflowResourceRuns.id, runId),
+        eq(workflowResourceRuns.workflowResourceId, pinned.workflowId),
+        eq(workflowResourceRuns.version, pinned.version),
+        eq(workflowResourceRuns.principalId, caller.userId),
+        eq(workflowStartReceipts.invokerType, "app"),
+        eq(workflowStartReceipts.invokerId, caller.app),
+        eq(workflowStartReceipts.principalId, caller.userId)
+      )
+    )
+    .get();
+  if (row === undefined) {
+    throw refused;
+  }
+  return row;
+};
+
+/** A step of the generated code's own: its kind, then its task's ID. */
+const taskStep = /^(?:task|enter|leave):(?<id>[a-z0-9][a-z0-9-]{0,63})$/u;
+
+/** A history entry's error, as a screen reads one: never the workflow's text. */
+const errorRow = (error: { code: string; message: string }): Json => ({
+  code: error.code,
+  message: error.message,
+  category: categoryOf(error.code),
+  retryable: isRetryableCode(error.code),
+  requestId: null,
+});
+
+/**
+ * Entry `entry` as a history row of the SDK's (workflow-queries.ts); none
+ * for what a row doesn't tell: an unreadable event, a compensation's
+ * attempt about to be tried again.
+ */
+const historyRowOf = (entry: RunHistoryEntry): Json | undefined => {
+  const common = {
+    id: entry.id,
+    sequence: entry.sequence,
+    taskId: entry.taskId,
+    at: entry.at,
+  };
+  switch (entry.kind) {
+    case "lifecycle": {
+      return entry.status === "compensating"
+        ? {
+            ...common,
+            kind: "lifecycle",
+            status: "compensating",
+            cause: entry.cause,
+            activity: entry.activity,
+          }
+        : { ...common, kind: "lifecycle", status: entry.status };
+    }
+    case "step": {
+      return entry.state === "failed"
+        ? {
+            ...common,
+            kind: "step",
+            state: "failed",
+            attempt: entry.attempt,
+            error: errorRow(entry.error),
+          }
+        : {
+            ...common,
+            kind: "step",
+            state: entry.state,
+            attempt: entry.attempt,
+          };
+    }
+    case "wait": {
+      return {
+        ...common,
+        kind: "wait",
+        waitId: entry.waitId,
+        // An unknown outcome blocks the step as a held one does.
+        waitKind:
+          entry.waitKind === "outcome_unknown" ? "blocked" : entry.waitKind,
+        state: entry.state,
+        deadline: entry.deadline,
+      };
+    }
+    case "compensation": {
+      if (entry.state === "failed") {
+        return {
+          ...common,
+          kind: "compensation",
+          state: "failed",
+          attempt: entry.attempt,
+          error: errorRow(entry.error),
+        };
+      }
+      return entry.state === "retrying"
+        ? undefined
+        : {
+            ...common,
+            kind: "compensation",
+            state: entry.state,
+            attempt: entry.attempt,
+          };
+    }
+    case "unreadable": {
+      return undefined;
+    }
+    default: {
+      return entry satisfies never;
+    }
+  }
+};
+
+/**
+ * Up to `size` rows of run `runId`'s history after the event `after`, for
+ * `caller` through the release's pin, oldest first.
+ */
+const historyPage = async (
+  env: Env,
+  caller: WorkflowQueryCaller,
+  query: ResolvedWorkflowQuery,
+  runId: string,
+  { size, cursor }: { size: number; cursor: unknown }
+): Promise<{ items: Json[]; nextCursor: string | null; hasMore: boolean }> => {
+  const run = await historyRunOf(env, caller, query.pinned, runId);
+  // Read only once the run is the caller's: a cursor tells nothing of a
+  // run they can't read.
+  const after = sequenceOf(cursor);
+  if (detailsRemoved(env, run) || query.pinned === undefined) {
+    return { items: [], nextCursor: null, hasMore: false };
+  }
+  const { tasks } = await loadWorkflowBuild(
+    env,
+    query.pinned.workflowId,
+    query.pinned.version,
+    run.manifestHash
+  );
+  const declared = new Set(tasks.map(({ id }) => id));
+  const page = await historyEntries(
+    env,
+    run.id,
+    { after, pageSize: size },
+    {
+      // Nobody reads a failure's own message through an App.
+      sees: false,
+      taskOf: (engineStep) => {
+        const id = taskStep.exec(engineStep)?.groups?.id;
+        return id !== undefined && declared.has(id) ? id : null;
+      },
+    }
+  );
+  return {
+    items: page.items.flatMap((entry) => historyRowOf(entry) ?? []),
+    nextCursor: page.nextCursor,
+    hasMore: page.hasMore,
   };
 };
 
@@ -328,6 +549,14 @@ const checked = (
     throw operationErrors.create(code);
   }
   return normalized;
+};
+
+/** The run checked arguments name. */
+const runIdOf = (args: Readonly<Record<string, Json | undefined>>): string => {
+  if (typeof args.runId !== "string") {
+    throw operationErrors.create("contract.invalid_args");
+  }
+  return args.runId;
 };
 
 /** What a query answers, before its descriptor checks it. */
@@ -365,9 +594,14 @@ const answerOf = async (
       throw workflowResourceErrors.create("workflow.decision_unavailable");
     }
     case "history": {
-      // A run's journal isn't projected for an App yet: refused for every
-      // run, the caller's own and anyone else's alike.
-      throw workflowResourceErrors.create("workflow.history_unavailable");
+      const pagination = isObject(args.pagination) ? args.pagination : {};
+      return await historyPage(env, caller, query, runIdOf(args), {
+        size:
+          typeof pagination.pageSize === "number"
+            ? Math.min(pagination.pageSize, maxPageSize)
+            : defaultPageSize,
+        cursor: pagination.cursor,
+      });
     }
     default: {
       return query.name satisfies never;
@@ -402,8 +636,9 @@ export const callWorkflowQuery = async (
  * `caller`, as a live list reads one (query-windows.ts): its records and
  * whether more follow, from one read, charged as a window's pages are:
  * the caller paid `windowPages(extent)`, and `charge` is asked for any
- * page's worth of records past that. Only `runs` pages through records;
- * `decisions` answers its empty inbox, and anything else isn't paginated.
+ * page's worth of records past that. `runs` and `history` page through
+ * records; `decisions` answers its empty inbox, and `decision` isn't
+ * paginated.
  */
 export const readWorkflowWindow = async (
   env: Env,
@@ -415,7 +650,7 @@ export const readWorkflowWindow = async (
     readonly charge: (pages: number, whole: number) => Promise<void>;
   }
 ): Promise<OperationResult> => {
-  if (query.name !== "runs" && query.name !== "decisions") {
+  if (query.name === "decision") {
     throw operationErrors.create("contract.not_paginated");
   }
   if (!isObject(input) || Object.hasOwn(input, "pagination")) {
@@ -434,10 +669,17 @@ export const readWorkflowWindow = async (
   if (query.name === "decisions") {
     return { ok: true, value: { items: [], hasMore: false } };
   }
-  const page = await runsPage(env, caller, workflowId, {
-    ...(typeof args.status === "string" ? { status: args.status } : {}),
-    size: Math.min(Math.max(window.extent, 1), liveWindowMaxItems),
-  });
+  const size = Math.min(Math.max(window.extent, 1), liveWindowMaxItems);
+  const page =
+    query.name === "history"
+      ? await historyPage(env, caller, query, runIdOf(args), {
+          size,
+          cursor: null,
+        })
+      : await runsPage(env, caller, workflowId, {
+          ...(typeof args.status === "string" ? { status: args.status } : {}),
+          size,
+        });
   const owed =
     Math.ceil(page.items.length / queryMaxResults) - windowPages(window.extent);
   if (owed > 0) {
