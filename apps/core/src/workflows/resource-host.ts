@@ -123,7 +123,9 @@ import type { BuiltCall } from "./resource-calls.ts";
 //   of the lineage's host calls. What a run spends in core on expressions,
 //   across every activation, retry, restart and replay, is so held to its
 //   lineage's active time and host calls, which only grow: an
-//   activation's fuel is only a tighter bound of its own.
+//   activation's fuel is only a tighter bound of its own. Each grasp call
+//   is one too, taken before it is built or sent (`#made`): a lineage
+//   with none left reaches nothing more outside core.
 // - A refusal for load forged as a result. A lineage that is busy, or a
 //   share that is full, ends the attempt as core's busy marker, which the
 //   run waits on durably, as an App run does (host.ts, `busyMarker`); what
@@ -1854,9 +1856,11 @@ export class ResourceRunHost
 
   /**
    * `#call`'s work, for `attempt` of call task `task`: the time, a random
-   * number, or the effect resource-calls.ts makes. A model call takes its
-   * place among the run's model calls synchronously, before anything is
-   * awaited, so steps run at once can't each find room for one more.
+   * number, or the effect resource-calls.ts makes, each first one of its
+   * lineage's host calls. A model call then takes its place among the
+   * run's model calls synchronously, with nothing awaited between the
+   * check and the count, so steps run at once can't each find room for one
+   * more, and a call its lineage refused takes none.
    */
   async #made(
     attempt: StepAttempt,
@@ -1864,6 +1868,11 @@ export class ResourceRunHost
     frame: unknown
   ): Promise<Json> {
     const passed = this.#callFrame(frame);
+    this.#requireCurrent(attempt);
+    // One of its lineage's host calls, before anything of it is built or
+    // sent, and before a model call takes its place: a lineage with none
+    // left makes no more calls, in this attempt or any later one.
+    await attempt.admission.hostCall();
     this.#requireCurrent(attempt);
     const { call } = task;
     if (call.name === "grasp.now") {

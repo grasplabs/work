@@ -64,6 +64,7 @@ import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { mailControlUrl } from "./mail-server.ts";
+import { withQuotas } from "./quota-policies.ts";
 import { admittedFreely } from "./runs.ts";
 import {
   outcome as resultOf,
@@ -593,6 +594,54 @@ describe("grasp.connector calls of JSON workflows", () => {
       ],
       inOutput: false,
       inAudit: false,
+    });
+  });
+
+  it("refuses a call once its run's lineage has made all the host calls it may, sending nothing for it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Two calls of the clock first, one host call each, then the mail's
+    // own: all the lineage may make. Its first argument's evaluation, which
+    // would fail if it ran, is refused before it runs: the call took its
+    // host call before anything of it was built, and nothing is sent.
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      before: [
+        { first: { call: "grasp.now" } },
+        { second: { call: "grasp.now" } },
+      ],
+      to: "${ $workflow.input.who | tonumber | tostring }",
+    });
+    const { runId, run } = await withQuotas(
+      { lineageHostCalls: 3 },
+      async () => {
+        const id = await started(ada, workflow.id, serving);
+        return { runId: id, run: await ended(ada, workflow.id, id) };
+      }
+    );
+    const sent = await mail.did();
+    const lineage = await env.DB.prepare(
+      "SELECT host_calls AS hostCalls FROM run_lineages WHERE root_run_id = ?"
+    )
+      .bind(runId)
+      .first<{ hostCalls: number }>();
+    const attempts = await env.DB.prepare(
+      "SELECT host_calls AS hostCalls FROM run_lineage_attempts WHERE run_id = ? ORDER BY admitted_at"
+    )
+      .bind(runId)
+      .all<{ hostCalls: number }>();
+    expect({
+      end: endOf(run),
+      calls: sent.calls,
+      receipts: await receiptsOf(runId),
+      hostCalls: lineage?.hostCalls,
+      byAttempt: attempts.results.map(({ hostCalls }) => hostCalls),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.lineage_limit" },
+      calls: 0,
+      receipts: [],
+      hostCalls: 3,
+      // Each attempt made its call; the mail's went no further.
+      byAttempt: [1, 1, 1],
     });
   });
 
