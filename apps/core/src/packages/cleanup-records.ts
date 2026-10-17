@@ -42,7 +42,7 @@ export const clearBuildCleanup = async (
     .where(
       and(
         eq(packageCleanups.key, hash),
-        sql`EXISTS (SELECT 1 FROM ${dependencyLocks} l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE l.app_id = ${app} AND l.graph_hash = ${graphHash} AND json_extract(pin.value, '$.hash') = ${hash})`
+        sql`EXISTS (SELECT 1 FROM ${dependencyLocks} l, json_each(l.lock, '$.artifacts') c, json_each(c.value) pin WHERE l.subject_type = 'app' AND l.subject_id = ${app} AND l.graph_hash = ${graphHash} AND json_extract(pin.value, '$.hash') = ${hash})`
       )
     );
 };

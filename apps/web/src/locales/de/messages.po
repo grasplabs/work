@@ -1323,6 +1323,7 @@ msgctxt "log filter: what"
 msgid "Anything"
 msgstr "Alles"
 
+#: src/dashboard/dependency-requests.tsx
 #: src/engines/screen-approval.tsx
 msgid "App"
 msgstr "App"
@@ -7116,6 +7117,10 @@ msgstr "Mit {person}"
 msgid "With the board"
 msgstr "Mit dem Vorstand"
 
+#: src/activity/audit-words.ts
+msgid "Withdrew a request for packages"
+msgstr "Eine Paketanfrage zurückgezogen"
+
 #: src/routes/_shell.onboarding.agreements.tsx
 msgid "Without all three, nobody is invited: the admin's links wait, and go out once all are in place."
 msgstr "Ohne alle drei wird niemand eingeladen: Die Links des Admins warten und gehen raus, sobald alle stehen."
@@ -7149,6 +7154,7 @@ msgstr "Ermittelt, wie Wissen genutzt wird"
 msgid "Worked out what could be improved"
 msgstr "Ermittelt, was sich verbessern ließe"
 
+#: src/dashboard/dependency-requests.tsx
 #: src/dashboard/runs-widget.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx

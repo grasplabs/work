@@ -8,6 +8,7 @@ import {
   integritySchema,
   npmRegistryOrigin,
   packageNameSchema,
+  workflowDependencyTarget,
 } from "./dependencies.ts";
 import type {
   DependencyGraph,
@@ -16,7 +17,7 @@ import type {
 } from "./dependencies.ts";
 import { sha256Hex } from "./encoding.ts";
 import { defineErrorFamily } from "./errors.ts";
-import { appIdSchema } from "./ids.ts";
+import { appIdSchema, workflowResourceIdSchema } from "./ids.ts";
 import { canonicalJson } from "./json.ts";
 
 // npm packages as the registry has them, as connect fetches them for core.
@@ -263,33 +264,57 @@ export const entryPackage = (entry: string): string => {
 };
 
 /** What the source asks for: package.json's dependencies, and where they run. */
-export const dependencyIntentSchema = z.strictObject({
-  app: appIdSchema,
-  sourceRevision: z.string().regex(/^[\w.:-]{1,128}$/u, "a source revision"),
-  purpose: z.string().trim().min(1).max(500),
-  targets: z
-    .array(dependencyTargetSchema)
-    .min(1)
-    .refine((targets) => new Set(targets).size === targets.length, {
-      message: "Each target once",
-    }),
-  /** package.json's `dependencies`: names and ranges. */
-  dependencies: z
-    .record(packageNameSchema, z.string().min(1).max(registryLimits.textLength))
-    .refine((dependencies) => Object.keys(dependencies).length > 0, {
-      message: "At least one dependency",
-    })
-    .refine(
-      (dependencies) =>
-        Object.keys(dependencies).length <= dependencyMaxPackages,
-      { message: `At most ${dependencyMaxPackages} dependencies` }
-    ),
-  /**
-   * What the App imports of them; each direct dependency's own name
-   * unless given.
-   */
-  entries: z.array(packageEntrySchema).min(1).max(256).optional(),
-});
+export const dependencyIntentSchema = z
+  .strictObject({
+    /** Whose package.json it is: an App's, or a workflow's (exactly one). */
+    app: appIdSchema.optional(),
+    workflow: workflowResourceIdSchema.optional(),
+    sourceRevision: z.string().regex(/^[\w.:-]{1,128}$/u, "a source revision"),
+    purpose: z.string().trim().min(1).max(500),
+    targets: z
+      .array(dependencyTargetSchema)
+      .min(1)
+      .refine((targets) => new Set(targets).size === targets.length, {
+        message: "Each target once",
+      }),
+    /** package.json's `dependencies`: names and ranges. */
+    dependencies: z
+      .record(
+        packageNameSchema,
+        z.string().min(1).max(registryLimits.textLength)
+      )
+      .refine((dependencies) => Object.keys(dependencies).length > 0, {
+        message: "At least one dependency",
+      })
+      .refine(
+        (dependencies) =>
+          Object.keys(dependencies).length <= dependencyMaxPackages,
+        { message: `At most ${dependencyMaxPackages} dependencies` }
+      ),
+    /**
+     * What the App imports of them; each direct dependency's own name
+     * unless given.
+     */
+    entries: z.array(packageEntrySchema).min(1).max(256).optional(),
+  })
+  .refine(
+    ({ app, workflow }) => (app === undefined) !== (workflow === undefined),
+    {
+      message: "Either an App or a workflow, not both",
+      path: ["app"],
+    }
+  )
+  // A workflow's packages run in its compute modules only: refused before
+  // anything is fetched for any other target.
+  .refine(
+    ({ workflow, targets }) =>
+      workflow === undefined ||
+      targets.every((target) => target === workflowDependencyTarget),
+    {
+      message: `A workflow's packages are for ${workflowDependencyTarget} only`,
+      path: ["targets"],
+    }
+  );
 export type DependencyIntent = z.input<typeof dependencyIntentSchema>;
 
 const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/u);

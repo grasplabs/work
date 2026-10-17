@@ -1869,9 +1869,13 @@ export const dependencyRequests = sqliteTable(
   "dependency_requests",
   {
     id: text().primaryKey(),
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     sourceRevision: text("source_revision").notNull(),
     graphHash: text("graph_hash").notNull(),
     targets: text().notNull(),
@@ -1912,20 +1916,22 @@ export const dependencyRequests = sqliteTable(
     endedReason: text("ended_reason"),
   },
   (table) => [
-    // One request waits per App: a second pending row is refused.
+    // One request waits per subject: a second pending row is refused.
     uniqueIndex("dependency_requests_pending_idx")
-      .on(table.appId)
+      .on(table.subjectType, table.subjectId)
       .where(sql`status = 'pending'`),
-    // The approval an App got last (its status, and what a new request
+    // The approval a subject got last (its status, and what a new request
     // is compared with).
-    index("dependency_requests_app_idx").on(
-      table.appId,
+    index("dependency_requests_subject_idx").on(
+      table.subjectType,
+      table.subjectId,
       table.status,
       table.decidedAt
     ),
-    // Whether a graph is approved for an App: a proposal, and admission.
+    // Whether a graph is approved for a subject: a proposal, and admission.
     index("dependency_requests_graph_idx").on(
-      table.appId,
+      table.subjectType,
+      table.subjectId,
       table.graphHash,
       table.status
     ),
@@ -2006,9 +2012,13 @@ export const dependencyApprovers = sqliteTable(
 export const dependencyLocks = sqliteTable(
   "dependency_locks",
   {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     graphHash: text("graph_hash").notNull(),
     lock: text().notNull(),
     createdAt: timestamp("created_at").notNull(),
@@ -2020,7 +2030,11 @@ export const dependencyLocks = sqliteTable(
      */
     servedUntil: timestamp("served_until"),
   },
-  (table) => [primaryKey({ columns: [table.appId, table.graphHash] })]
+  (table) => [
+    primaryKey({
+      columns: [table.subjectType, table.subjectId, table.graphHash],
+    }),
+  ]
 );
 
 /**
@@ -2057,16 +2071,27 @@ export const packageCleanups = sqliteTable(
 export const dependencyBuildLeases = sqliteTable(
   "dependency_build_leases",
   {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     graphHash: text("graph_hash").notNull(),
     target: text().notNull(),
     holder: text().notNull(),
     expiresAt: timestamp("expires_at").notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.appId, table.graphHash, table.target] }),
+    primaryKey({
+      columns: [
+        table.subjectType,
+        table.subjectId,
+        table.graphHash,
+        table.target,
+      ],
+    }),
     // The cron's sweep of leases that lapsed.
     index("dependency_build_leases_expires_at_idx").on(table.expiresAt),
   ]
@@ -2083,9 +2108,13 @@ export const dependencyBuildLeases = sqliteTable(
 export const dependencyAdmissionRefusals = sqliteTable(
   "dependency_admission_refusals",
   {
-    appId: text("app_id")
-      .notNull()
-      .references(() => apps.id),
+    /**
+     * Whose it is: an App (`app`, its ID) or an independent workflow
+     * resource (`workflow`, its ID). No foreign key names both tables,
+     * so a trigger refuses a subject neither has (migration 0097).
+     */
+    subjectType: text("subject_type", { enum: ["app", "workflow"] }).notNull(),
+    subjectId: text("subject_id").notNull(),
     graphHash: text("graph_hash").notNull(),
     targets: text().notNull(),
     policyGeneration: integer("policy_generation").notNull(),
@@ -2095,7 +2124,8 @@ export const dependencyAdmissionRefusals = sqliteTable(
   (table) => [
     primaryKey({
       columns: [
-        table.appId,
+        table.subjectType,
+        table.subjectId,
         table.graphHash,
         table.targets,
         table.policyGeneration,

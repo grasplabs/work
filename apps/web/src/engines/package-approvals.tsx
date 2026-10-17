@@ -1,3 +1,4 @@
+import { refOfSubject } from "@grasp-os/shared/dependencies";
 import type {
   DependencyApprovals,
   DependencyImpact,
@@ -94,7 +95,7 @@ const EndDialog = ({
   const busy = calling || settling;
   const [reason, setReason] = useState("");
   const reasonId = useId();
-  const engine = request.app.name;
+  const engine = request.subject.name;
   // What it ends, as core counted it: retiring, the approvals in force
   // still approved; revoking, retired ones too. Named in the decision by
   // their digest, so core ends exactly these or nothing.
@@ -234,7 +235,7 @@ const ApprovalRow = ({
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
-  const engine = request.app.name;
+  const engine = request.subject.name;
   const targets = formatList(
     request.targets.map((target) => i18n._(targetNames[target]))
   );
@@ -393,7 +394,8 @@ export const PackageApprovals = ({
   const [asked, setAsked] = useState<Asked>();
   const refresh = async (): Promise<void> => {
     const now = await run(
-      async (session) => await session.dependencies.approvals(loaded.app.id)
+      async (session) =>
+        await session.dependencies.approvals(refOfSubject(loaded.subject))
     );
     if (now !== undefined) {
       setListed(now);
