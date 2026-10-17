@@ -97,8 +97,8 @@ export interface GridRow {
   } | null;
 }
 
-/** How long a client's health check may take, from when it's sent. */
-const healthTimeoutMs = 5000;
+/** How long a client's health check, or another request to its core, may take. */
+export const healthTimeoutMs = 5000;
 
 /**
  * How reading live columns may go: how many clients at once and how long
@@ -195,7 +195,7 @@ const recordedClients = async (db: ConsoleDatabase) => {
 };
 
 /** What the router knows of client `clientId`'s core: its route, and the secret it sends. */
-const routeOf = async (
+export const routeOf = async (
   hosts: RouterHosts,
   routerKey: string | null,
   clientId: string,
@@ -377,7 +377,9 @@ const liveOf = async (
 };
 
 /** What `read` answers, or null when a secret it reads isn't in Secrets Store. */
-const ifStored = async <T>(read: () => Promise<T>): Promise<T | null> => {
+export const ifStored = async <T>(
+  read: () => Promise<T>
+): Promise<T | null> => {
   try {
     return await read();
   } catch (error) {
