@@ -34,6 +34,62 @@ export const compilerOptions: ts.CompilerOptions = {
   paths: { [screenReferences.specifier]: [`./${screenReferences.path}`] },
 };
 
+/**
+ * What a type check holds App files to: its options (the lib among them),
+ * the bare names that map to App files, and the modules an App file may
+ * resolve by name (`undefined`: any, for code the host generated alone).
+ */
+export interface TypeTarget {
+  readonly options: ts.CompilerOptions;
+  readonly mapped: ReadonlySet<string>;
+  readonly allowed?: ReadonlySet<string>;
+}
+
+/** Code the host generated, checked against its SDK as it imports it. */
+export const generatedTarget: TypeTarget = {
+  options: compilerOptions,
+  mapped: new Set([screenReferences.specifier]),
+};
+
+/** A screen's files: the DOM's lib, the kit's modules (`allowed`). */
+export const screenTarget = (allowed: ReadonlySet<string>): TypeTarget => ({
+  options: compilerOptions,
+  mapped: new Set([screenReferences.specifier]),
+  allowed,
+});
+
+/**
+ * The libs an App's server code is checked with besides the language's:
+ * a worker's globals (`setTimeout`, `crypto`, `TextEncoder`, `URL`,
+ * `console`, …), as its isolate has them, and no DOM: no `window`,
+ * `document` or `localStorage`. The worker lib also types `fetch`, which
+ * the isolate has but can't use: it runs without network, and a call
+ * fails there.
+ */
+export const serverLibs = ["lib.webworker.d.ts"];
+
+/**
+ * An App's server code of spec 8's layout (app-code.ts): no DOM, which
+ * its isolate doesn't have, no JSX; the generated modules by their
+ * aliases; and by name only the SDK's modules it and its generated
+ * modules import.
+ */
+export const serverTarget = (
+  generated: Readonly<Record<string, string>>,
+  allowed: ReadonlySet<string>
+): TypeTarget => ({
+  options: {
+    ...compilerOptions,
+    lib: ["lib.es2024.d.ts", ...serverLibs, "lib.esnext.disposable.d.ts"],
+    jsx: undefined,
+    paths: Object.fromEntries(
+      Object.entries(generated).map(([alias, path]) => [alias, [`./${path}`]])
+    ),
+  },
+  mapped: new Set(Object.keys(generated)),
+  allowed,
+});
+
 /** Where TypeScript's own declarations (`lib.dom.d.ts`, …) are. */
 export const libLocation = "/node_modules/typescript/lib";
 
@@ -64,19 +120,21 @@ let kitCache:
       directories: Set<string>;
       parsed: Map<string, ts.SourceFile>;
       /**
-       * How the kit's own files' imports resolve: kit files only, under
-       * `/node_modules`, where no App file is, so the same for every App
-       * and kept for the isolate. Only imports made by a kit file are
-       * resolved through it; an App file's go through a cache of its own
-       * check, never kept.
+       * How the kit's own files' imports resolve, for each target's
+       * options: kit files only, under `/node_modules`, where no App file
+       * is, so the same for every App and kept for the isolate. Only
+       * imports made by a kit file are resolved through it; an App file's
+       * go through a cache of its own check, never kept.
        */
-      resolutions: ts.ModuleResolutionCache;
+      resolutions: Map<ts.CompilerOptions, ts.ModuleResolutionCache>;
     }
   | undefined;
 
 /** A resolution cache, of paths as they are: the file system is in memory. */
-const resolutionCache = (): ts.ModuleResolutionCache =>
-  ts.createModuleResolutionCache("/", (path) => path, compilerOptions);
+const resolutionCache = (
+  options: ts.CompilerOptions
+): ts.ModuleResolutionCache =>
+  ts.createModuleResolutionCache("/", (path) => path, options);
 
 const kitOf = (files: Record<string, string>) => {
   if (kitCache?.files !== files) {
@@ -84,7 +142,7 @@ const kitOf = (files: Record<string, string>) => {
       files,
       directories: directoriesOf(Object.keys(files)),
       parsed: new Map(),
-      resolutions: resolutionCache(),
+      resolutions: new Map(),
     };
   }
   return kitCache;
@@ -135,19 +193,15 @@ const resolvesWithin = (
   name: string,
   resolved: ts.ResolvedModuleFull | undefined,
   app: ReadonlyMap<string, string>,
-  allowed: ReadonlySet<string>
+  { mapped, allowed }: TypeTarget
 ): boolean => {
   if (resolved === undefined) {
     return false;
   }
   if (app.has(resolved.resolvedFileName)) {
-    return (
-      name.startsWith("./") ||
-      name.startsWith("../") ||
-      name === screenReferences.specifier
-    );
+    return name.startsWith("./") || name.startsWith("../") || mapped.has(name);
   }
-  return allowed.has(name);
+  return allowed?.has(name) ?? true;
 };
 
 /** Where `/// <reference path>` in `file` points: a path from the App's root. */
@@ -208,15 +262,21 @@ const referenceErrors = (
 export const typeCheck = (
   appFiles: Record<string, string>,
   kitTypes: Record<string, string>,
-  allowed?: ReadonlySet<string>
+  target: TypeTarget = generatedTarget
 ): Diagnostic[] => {
+  const { options: targetOptions, allowed } = target;
   const kit = kitOf(kitTypes);
+  let kitResolutions = kit.resolutions.get(targetOptions);
+  if (kitResolutions === undefined) {
+    kitResolutions = resolutionCache(targetOptions);
+    kit.resolutions.set(targetOptions, kitResolutions);
+  }
   const app = new Map(
     Object.entries(appFiles).map(([path, source]) => [`/${path}`, source])
   );
   const appDirectories = directoriesOf(app.keys());
   // This check's own: App files' resolutions never outlive it.
-  const appResolutions = resolutionCache();
+  const appResolutions = resolutionCache(targetOptions);
   // The kit's cache holds only the kit's files' resolutions: should any
   // App file sit under the kit's root, this check keeps none of its own.
   const kitShared = ![...app.keys()].some((path) => path.startsWith(kitRoot));
@@ -276,19 +336,19 @@ export const typeCheck = (
                 containingFile,
                 options,
                 host,
-                fromKit && kitShared ? kit.resolutions : appResolutions,
+                fromKit && kitShared ? kitResolutions : appResolutions,
                 redirectedReference
               );
               return {
                 resolvedModule:
-                  fromKit || resolvesWithin(text, resolvedModule, app, allowed)
+                  fromKit || resolvesWithin(text, resolvedModule, app, target)
                     ? resolvedModule
                     : undefined,
               };
             }),
         }),
   };
-  const program = ts.createProgram([...app.keys()], compilerOptions, host);
+  const program = ts.createProgram([...app.keys()], targetOptions, host);
   const checked = program
     .getSourceFiles()
     .filter((file) => app.has(file.fileName));

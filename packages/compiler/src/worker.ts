@@ -25,10 +25,12 @@ import {
   appCodeFiles,
   appCodeImport,
   appCodeKind,
+  generatedModules,
   appTestFiles,
   isAppLayout,
   isAppTestSuite,
   maxAppTestSuites,
+  serverSdkImports,
   strayTestFileMessage,
   strayTestFiles,
   typeImportError,
@@ -72,7 +74,7 @@ import {
   screenRuntime,
 } from "./kit.ts";
 import { lint } from "./lint.ts";
-import { typeCheck } from "./type-check.ts";
+import { screenTarget, serverTarget, typeCheck } from "./type-check.ts";
 
 /**
  * What a page loads to run one screen, by flat name: of the App's modules,
@@ -343,11 +345,20 @@ const buildCss = async (
  * the kit's modules, its icons, and the JSX runtime the compile names.
  * Nothing else of the kit, however a file names it (type-check.ts).
  */
-const screenModules: ReadonlySet<string> = new Set([
-  ...kit.imports,
-  "lucide-react",
-  "react/jsx-runtime",
-]);
+const screensTarget = screenTarget(
+  new Set([...kit.imports, "lucide-react", "react/jsx-runtime"])
+);
+
+/**
+ * How an App's server code is type-checked (type-check.ts): the
+ * generated modules by their aliases, and by name the SDK's modules it
+ * and they import: its root, the server constructors, the database's
+ * types the constructors name, and nothing else.
+ */
+const appCodeTarget = serverTarget(
+  generatedModules,
+  new Set([...serverSdkImports, "@grasp-os/sdk/database"])
+);
 
 /**
  * Type-checks the App against the kit's types and lints it against the
@@ -363,7 +374,7 @@ export const checkScreens = (files: Record<string, string>): Diagnostic[] => {
   const own = Object.fromEntries(
     Object.entries(app).filter(([path]) => path !== screenReferences.path)
   );
-  return [...typeCheck(app, kit.types, screenModules), ...lint(own, kit)];
+  return [...typeCheck(app, kit.types, screensTarget), ...lint(own, kit)];
 };
 
 /**
@@ -686,10 +697,17 @@ const compileAppCodeFile = (
     };
   }
   const errors = imports.flatMap(({ specifier, line, typeOnly, ambient }) => {
-    // A type is erased: held only to what no App code may name. An ambient
-    // module's types are stripped with the rest (GRA-675 checks them).
+    // An ambient module would declare, or shadow, a module by name in the
+    // type check (`checkAppCode`): server code declares none. A type is
+    // erased: held only to what no App code may name.
     if (ambient) {
-      return [];
+      return [
+        problem(
+          "imports",
+          `declare module "${specifier ?? ""}" is never in an App's server code: it would declare, or shadow, a module the SDK doesn't give it.`,
+          line === undefined ? { file: path } : { file: path, line }
+        ),
+      ];
     }
     const resolved = typeOnly
       ? typeImportErrorAsResult(path, specifier)
@@ -757,6 +775,37 @@ export const buildAppCode = (files: Record<string, string>): AppCodeBuild => {
   return errors.length > 0
     ? { ok: false, diagnostics: errors }
     : { ok: true, modules };
+};
+
+/**
+ * An App's server code of spec 8's layout built (`buildAppCode`), then
+ * type-checked against the SDK's server side, with the host's generated
+ * modules (`.grasp/`) among its files: what it would build to, or why it
+ * fails, its type errors included. No DOM: its isolate has none. A seal
+ * holds its release to this before anything is sealed (app-releases.ts);
+ * a build alone, as the seal's first, symbolic inspection makes it,
+ * doesn't, since its generated modules are stand-ins without types.
+ */
+export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
+  const built = buildAppCode(files);
+  if (!built.ok) {
+    return built;
+  }
+  // Not yet its migrations' own errors: the SDK types a migration's row
+  // as any record, not as the table's previous shape, so a migration
+  // that spreads its row fails to check (GRA-690). Their
+  // imports are held by the build all the same, and they run where they
+  // reach nothing whatever their types say.
+  const diagnostics = typeCheck(
+    appCodeFiles(files),
+    kit.types,
+    appCodeTarget
+  ).filter(
+    ({ file }) => file === undefined || appCodeKind(file) !== "migration"
+  );
+  return diagnostics.some((diagnostic) => isError(diagnostic))
+    ? { ok: false, diagnostics }
+    : built;
 };
 
 /**
@@ -830,6 +879,12 @@ export default class ScreenCompiler extends WorkerEntrypoint {
   // oxlint-disable-next-line class-methods-use-this
   buildAppCode(files: Record<string, string>): AppCodeBuild {
     return buildAppCode(files);
+  }
+
+  /** Builds and type-checks an App's server code (`checkAppCode`). */
+  // oxlint-disable-next-line class-methods-use-this
+  checkAppCode(files: Record<string, string>): AppCodeBuild {
+    return checkAppCode(files);
   }
 
   /** Builds an App's tests (`buildAppTests`). */

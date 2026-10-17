@@ -66,6 +66,11 @@ import { action } from "#grasp/server";
 
 export const guests = resource.guests("guests", { operations: ${operations} });
 
+// What the declaration may leave out, called past its types on purpose:
+// the call is what refuses it.
+const loose = (client: object) =>
+  client as unknown as Record<string, (...input: unknown[]) => Promise<unknown>>;
+
 const outcome = async (run: () => Promise<unknown>): Promise<string> => {
   try {
     return JSON.stringify({ ok: (await run()) ?? null });
@@ -82,28 +87,28 @@ export const invite = action({
   args: { json: v.string() },
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.guests.invite(JSON.parse(args.json))),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.guests).invite(JSON.parse(args.json))),
 });
 
 export const list = action({
   args: {},
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx) => await outcome(async () => await ctx.resources.guests.list()),
+  handler: async (ctx) => await outcome(async () => await loose(ctx.resources.guests).list()),
 });
 
 export const read = action({
   args: { id: v.string() },
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.guests.read(args.id)),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.guests).read(args.id)),
 });
 
 export const revoke = action({
   args: { id: v.string() },
   returns: v.string(),
   uses: [guests],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.guests.revoke(args.id)),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.guests).revoke(args.id)),
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";

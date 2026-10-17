@@ -193,7 +193,7 @@ export const hidden = resource.store("hidden", {
 });
 
 /** What a call answered, as JSON, or why it failed: its code and the store's. */
-const attempt = async (work) => {
+const attempt = async (work: () => Promise<unknown>): Promise<string> => {
   try {
     return JSON.stringify(await work());
   } catch (error) {
@@ -1378,10 +1378,24 @@ describe("a workflow calling a store's public operation", () => {
     });
     const noteMutation = "export const note = mutation({";
     const noteArgs = `${noteMutation}\n  args: { text: v.string() },`;
-    // The same shapes, now a query.
+    // The same shapes, now a query: one that reads, as a query may.
+    const noteBlock = `${noteArgs}
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.insert("notes", { text: args.text });
+    return null;
+  },
+});`;
     const asQuery = await nextVersion(
       crm,
-      withNote(noteMutation, "export const note = query({"),
+      withNote(
+        noteBlock,
+        `export const note = query({
+  args: { text: v.string() },
+  returns: v.null(),
+  handler: async () => null,
+});`
+      ),
       2
     );
     const otherKind = await run();

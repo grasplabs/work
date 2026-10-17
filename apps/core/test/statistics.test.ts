@@ -82,6 +82,11 @@ export const marks = query({
 
 export const stats = resource.statistics("stats", { operations: ${operations} });
 
+// What the declaration may leave out, called past its types on purpose:
+// the call is what refuses it.
+const loose = (client: object) =>
+  client as unknown as Record<string, (...input: unknown[]) => Promise<unknown>>;
+
 export const platform = resource.statistics("platform", {
   operations: ["read"],
   platform: ["platform.workflow_runs", "platform.improvement_signals"],
@@ -115,7 +120,7 @@ export const record = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       for (const point of JSON.parse(args.json)) {
-        await ctx.resources.stats.record(point);
+        await loose(ctx.resources.stats).record(point);
       }
     }),
 });
@@ -124,7 +129,7 @@ export const read = action({
   args: json,
   returns: v.string(),
   uses: [stats],
-  handler: async (ctx, args) => await outcome(async () => await ctx.resources.stats.read(JSON.parse(args.json))),
+  handler: async (ctx, args) => await outcome(async () => await loose(ctx.resources.stats).read(JSON.parse(args.json))),
 });
 
 export const readMany = action({
@@ -134,7 +139,7 @@ export const readMany = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       for (let read = 0; read < args.count; read += 1) {
-        await ctx.resources.stats.read(JSON.parse(args.json));
+        await loose(ctx.resources.stats).read(JSON.parse(args.json));
       }
     }),
 });
@@ -154,7 +159,7 @@ export const readBurst = action({
   handler: async (ctx, args) =>
     await outcome(async () => {
       await Promise.all(
-        Array.from({ length: args.count }, async () => await ctx.resources.stats.read(JSON.parse(args.json)))
+        Array.from({ length: args.count }, async () => await loose(ctx.resources.stats).read(JSON.parse(args.json)))
       );
     }),
 });
