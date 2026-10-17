@@ -12,7 +12,7 @@ import type { PurgePlan, PurgeResult } from "@grasp-os/shared/knowledge";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, count, eq, gt, inArray, lte, or, sql } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, lte, or } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -35,6 +35,11 @@ import type { CollectionRow } from "./collections.ts";
 import { checkedText, personWriter, writeVersion } from "./documents.ts";
 import type { DocumentRow } from "./documents.ts";
 import { personalCollectionId } from "./memory-files.ts";
+import {
+  eraseFromSearchIndex,
+  rebuildSearchIndex,
+  secureDeleteReady,
+} from "./search-erasure.ts";
 import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 
 // Purging personal data from Knowledge, for good, when someone leaves or
@@ -64,11 +69,14 @@ import { cleanUpOriginals, forgetUploads } from "./uploads.ts";
 // and deleted from R2 right after, or by the cron trigger when that fails
 // or an upload may still be storing its original.
 //
-// Then the search index is rebuilt from what it holds now: FTS5 keeps a
-// deleted row's terms in its index pages, where they can't be found by a
-// search but are still in the database, until a merge drops them, and
-// `optimize` doesn't merge an index that is one segment already, which can
-// still hold them. The rebuild runs after the data is committed, and on every purge, also one with nothing left to change, so
+// Then nothing of it is left in the search index (search-erasure.ts): a
+// content purge's deletes are secure ones, which take a row's terms out of
+// the index's pages, and the pages' directory is checked for a term left
+// behind; the index is rebuilt from what it holds now when one is, or
+// when that can't be told (a term that isn't plain ASCII, a platform that
+// refuses secure deletes), and always after a personal purge, whose
+// terms the purge doesn't know. The cleanup runs after the data is
+// committed, and on every purge, also one with nothing left to change, so
 // when it fails (`knowledge.purge_index_pending`) running the purge again
 // finishes it.
 //
@@ -208,22 +216,18 @@ const tokenFor = async (
 };
 
 /**
- * Drops deleted rows' terms from the search index's pages for good, by
- * rebuilding it from its content: after a delete, FTS5 only marks them
- * deleted. Refuses with `knowledge.purge_index_pending` when it fails: the
- * data is deleted already, and running the purge again rebuilds again.
+ * Runs `cleanup` of the search index, refusing with
+ * `knowledge.purge_index_pending` when it fails: the data is deleted
+ * already, and running the purge again cleans up again.
  */
-const rebuildSearchIndex = async (db: DrizzleD1Database): Promise<void> => {
+const cleanSearchIndex = async (
+  cleanup: () => Promise<void>
+): Promise<void> => {
   try {
-    await db.batch([
-      db.run(sql`INSERT INTO search_words (search_words) VALUES ('rebuild')`),
-      db.run(
-        sql`INSERT INTO search_trigrams (search_trigrams) VALUES ('rebuild')`
-      ),
-    ]);
+    await cleanup();
   } catch (error) {
     // The data is already deleted by now; running the purge again, which
-    // always rebuilds, finishes the cleanup.
+    // always cleans up, finishes it.
     log.error("knowledge.purge.rebuild_failed", errorFields(error));
     throw knowledgeErrors.create("knowledge.purge_index_pending");
   }
@@ -323,7 +327,10 @@ const purgePersonal = async (
     ),
   ]);
   await cleanUpOriginals(env);
-  await rebuildSearchIndex(db);
+  // Whole documents go, whose tokens the purge doesn't know: rebuilt.
+  await cleanSearchIndex(async () => {
+    await rebuildSearchIndex(db);
+  });
   return { purgeId, ...counts };
 };
 
@@ -931,6 +938,9 @@ const purgeContent = async (
   const named = await documentsNamed(db, input);
   const matcher = matcherOf(input.terms, { countJoined: false });
   await contentCounts(env, db, named, matcher);
+  // Before anything is deleted: so the purge's deletes are secure ones,
+  // which leave nothing in the index's pages (search-erasure.ts).
+  const secure = await secureDeleteReady(db);
   const purgeId = crypto.randomUUID();
   // Recorded before anything changes, so no purge goes unrecorded however
   // far it gets.
@@ -953,7 +963,9 @@ const purgeContent = async (
     done.push(await purgeDocument(env, db, person, one, matcher));
   }
   await cleanUpOriginals(env);
-  await rebuildSearchIndex(db);
+  await cleanSearchIndex(async () => {
+    await eraseFromSearchIndex(db, input.terms, secure);
+  });
   return { purgeId, ...sum(done) };
 };
 
