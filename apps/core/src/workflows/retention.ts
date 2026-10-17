@@ -360,10 +360,17 @@ export const sweepWorkflowStartDetails = async (
   const db = drizzle(env.DB);
   const receipts = workflowStartReceipts;
   const params = workflowResourceParams;
-  // The starts due, as each statement reads them before the last marks
-  // them: by when they were admitted and their IDs, the same ones.
-  const due = db
-    .select({ id: receipts.id })
+  // The starts due, read once, so what connect is asked to drop and what
+  // is marked are the same starts, whatever another sweep marks between
+  // the two: by when they were admitted and their IDs, with whether each
+  // admitted a run.
+  const dueRows = await db
+    .select({
+      id: receipts.id,
+      workflowId: receipts.workflowResourceId,
+      ran: sql<number>`EXISTS (SELECT 1 FROM workflow_resource_runs AS run
+        WHERE run.id = ${receipts.id})`,
+    })
     .from(receipts)
     .where(
       and(
@@ -380,6 +387,10 @@ export const sweepWorkflowStartDetails = async (
     )
     .orderBy(asc(receipts.createdAt), asc(receipts.id))
     .limit(startDetailsPerSweep);
+  // As one bound value, within D1's bound parameters however many.
+  const due = sql`(SELECT value FROM json_each(${JSON.stringify(
+    dueRows.map(({ id }) => id)
+  )}))`;
   // What connect still holds of their runs goes first, as an App run's
   // does (`removedElsewhere`): a run that ended while a side effect of it
   // was held leaves the action, with its exact input, until its person
@@ -389,16 +400,9 @@ export const sweepWorkflowStartDetails = async (
   // export of it runs), keyed by its steps as its own are: connect drops
   // them all by the run (`dropForEndedRuns`). A sweep that fails here
   // marks nothing, and the next does it again.
-  const heldOf = await db
-    .select({ runId: receipts.id, workflowId: receipts.workflowResourceId })
-    .from(receipts)
-    .where(
-      and(
-        inArray(receipts.id, due),
-        sql`EXISTS (SELECT 1 FROM workflow_resource_runs AS run
-          WHERE run.id = ${receipts.id})`
-      )
-    );
+  const heldOf = dueRows.flatMap(({ id, workflowId, ran }) =>
+    ran === 1 ? [{ runId: id, workflowId }] : []
+  );
   for (const runs of chunks(heldOf, sweptPerBatch)) {
     // oxlint-disable-next-line no-await-in-loop -- one bounded batch after another
     await env.CONNECT.dropForEndedRuns({ runs });
@@ -409,7 +413,8 @@ export const sweepWorkflowStartDetails = async (
     db
       .update(receipts)
       .set({ input: null, params: null, detailsRemovedAt: now })
-      .where(inArray(receipts.id, due)),
+      // Another sweep may have marked some meanwhile: marked once.
+      .where(and(inArray(receipts.id, due), isNull(receipts.detailsRemovedAt))),
     db
       .update(params)
       .set({ values: null, valuesRemovedAt: now })

@@ -81,7 +81,10 @@ import {
   resourceRunFor,
   terminateResourceRun,
 } from "../src/workflows/resource-runs.ts";
-import { sweepRunDetails } from "../src/workflows/retention.ts";
+import {
+  startDetailsPerSweep,
+  sweepRunDetails,
+} from "../src/workflows/retention.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { release, serverBuilt } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -2244,6 +2247,74 @@ describe("runs started by a restricted App", () => {
       // Ada's own run's send; the cancelled ones sent nothing.
       calls: [1, 0],
     });
+  });
+
+  it("leave nothing held of runs a sweep marks, when two sweeps overlap", async () => {
+    const ada = await person("builder");
+    const { workflow } = await published(ada, {
+      tasks: [{ finish: { set: { status: "done" } } }],
+    });
+    // More ended runs due than one sweep takes, long ago.
+    const longAgo = Date.now() - 400 * 86_400_000;
+    const prefix = `overlap-${unique()}`;
+    await env.DB.batch([
+      env.DB.prepare(
+        `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+        INSERT INTO workflow_start_receipts (id, invoker_type, invoker_id, idempotency_key, workflow_resource_id, workflow_resource_version, manifest_hash, principal_id, authority_generation, input, input_hash, params, params_revision, bindings, bindings_hash, created_at, restricted)
+        SELECT ? || '-' || i, 'person', ?, ? || '-' || i, ?, 1, 'manifest', ?, 0, '{}', 'hash', '{}', 0, '[]', '', ?, 1 FROM n`
+      ).bind(
+        startDetailsPerSweep + 1,
+        prefix,
+        ada.userId,
+        prefix,
+        workflow.id,
+        ada.userId,
+        longAgo
+      ),
+      env.DB.prepare(
+        `INSERT INTO workflow_resource_runs (id, workflow_resource_id, version, manifest_hash, build_hash, principal_id, status, created_at, ended_at, restricted)
+        SELECT id, workflow_resource_id, 1, 'manifest', 'build', principal_id, 'completed', created_at, created_at, 1
+        FROM workflow_start_receipts WHERE id LIKE ? || '-%'`
+      ).bind(prefix),
+    ]);
+    const asked = new Set<string>();
+    const later = new Date(Date.now() + 31 * 86_400_000);
+    const recording = (onFirstDrop?: () => Promise<void>): Env => {
+      let onDrop = onFirstDrop;
+      return {
+        ...env,
+        CONNECT: new Proxy(env.CONNECT, {
+          get: (target, name): unknown =>
+            name === "dropForEndedRuns"
+              ? async (request: EndedRuns) => {
+                  for (const { runId } of request.runs) {
+                    asked.add(runId);
+                  }
+                  await target.dropForEndedRuns(request);
+                  const then = onDrop;
+                  onDrop = undefined;
+                  await then?.();
+                }
+              : Reflect.get(target, name),
+        }),
+      };
+    };
+    // A second sweep runs whole as the first asks connect to drop.
+    await sweepRunDetails(
+      recording(async () => {
+        await sweepRunDetails(recording(), later);
+      }),
+      later
+    );
+    const { results } = await env.DB.prepare(
+      "SELECT id FROM workflow_start_receipts WHERE id LIKE ? || '-%' AND details_removed_at IS NOT NULL"
+    )
+      .bind(prefix)
+      .all<{ id: string }>();
+    expect({
+      marked: results.length > 0,
+      markedUnasked: results.filter(({ id }) => !asked.has(id)).length,
+    }).toStrictEqual({ marked: true, markedUnasked: 0 });
   });
 
   it("collect a held send's outcome once confirmed, though their lineage has no host calls left", async () => {
