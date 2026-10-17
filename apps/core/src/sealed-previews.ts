@@ -11,6 +11,7 @@ import { jsonOf, operationErrors } from "@grasp-os/shared/operations";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
 import { roleErrors } from "@grasp-os/shared/roles";
+import { jsonBytes } from "@grasp-os/shared/screens";
 import {
   idempotencyKeySchema,
   submissionErrors,
@@ -111,14 +112,23 @@ import type { Draft } from "./workspace.ts";
 //   invocation it holds, and each protected step of the run checks the
 //   preview is still the one running, so nothing more commits; an attach
 //   once it's gone is `submission.expired`.
-// - It escapes its budgets: a preview holds at most `streamMaxRunning`
-//   running at once (a start past them records nothing), each ends by
-//   `serverInvocationWallMs`, one nobody follows is cancelled after
-//   `streamIdleCancelMs`, and what is kept is the latest snapshot and at
-//   most `streamsKept` receipts, never the input or a progress log.
+// - It escapes its budgets: this object (all of one person's chats)
+//   runs at most `streamMaxRunning` at once (a start past them records
+//   nothing), each ends by `serverInvocationWallMs`, and one nobody
+//   follows is cancelled after `streamIdleCancelMs`. While it runs only
+//   its latest snapshot is kept; once settled, no snapshot, and its
+//   receipt only when its result is small (`receiptBytes`), at most
+//   `receiptsKept` of them in this object, oldest forgotten first: an
+//   attach of one forgotten is `submission.expired`. Never the input or a
+//   progress log.
 // - Another key's input, another action, or another person: the key is
 //   the person's own and the action's (`streamName`), and other input
 //   under it is `submission.key_conflict`.
+// - A key's protection outlasting this object: invocations and receipts
+//   live in its memory alone, as the preview's store holds only fixture
+//   data. A restart forgets them (an attach is then `submission.expired`,
+//   a start under the same key runs anew), which a preview, changing
+//   nothing real, can afford.
 
 /** What one chat's preview of one App runs: its revision, release and store. */
 interface Running {
@@ -140,8 +150,18 @@ interface PreviewStream {
   readonly live: Live;
 }
 
-/** The most streaming actions' invocations one preview keeps, settled ones first to go. */
-const streamsKept = 64;
+/** Forgets `held`, which `of` holds as `named`, if it still holds that one. */
+const forget = (of: Running, named: string, held: Live): void => {
+  if (of.streams.get(named)?.live === held) {
+    of.streams.delete(named);
+  }
+};
+
+/** The most settled invocations' receipts one object keeps, of all its previews. */
+const receiptsKept = 8;
+
+/** The largest result whose receipt is kept, as JSON: a larger one isn't. */
+const receiptBytes = 16 * 1024;
 
 /**
  * The key of `personId`'s invocation of the action `call` names under
@@ -233,6 +253,8 @@ export class SealedPreviews {
   readonly #discarding = new Set<string>();
   /** What each preview runs, by `nameOf`. In memory: a restart loads it again. */
   readonly #running = new Map<string, Running>();
+  /** The receipts kept of settled invocations, oldest first (`#kept`). */
+  readonly #receipts: { running: Running; name: string; live: Live }[] = [];
 
   constructor(
     ctx: DurableObjectState,
@@ -462,9 +484,13 @@ export class SealedPreviews {
     const inputHash = await sha256Hex(
       canonicalJson(jsonOf(call.input) ?? null)
     );
-    const running = this.#runningFor(chatId, app, draft);
     const name = streamName(personId, call, key);
-    const known = running.streams.get(name);
+    // An attach reads only what runs: a preview not running holds nothing,
+    // and none is sealed just to say so.
+    const running = attach
+      ? this.#runningAt(chatId, app, draft)
+      : this.#runningFor(chatId, app, draft);
+    const known = running?.streams.get(name);
     if (known !== undefined) {
       return known.inputHash === inputHash
         ? readerOf(known.live)
@@ -472,14 +498,14 @@ export class SealedPreviews {
             refusedResult(submissionErrors.create("submission.key_conflict"))
           );
     }
-    if (attach) {
+    if (running === undefined || attach) {
       return resultOf(
         refusedResult(submissionErrors.create("submission.expired"))
       );
     }
-    const under = [...running.streams.values()].filter(
-      ({ live }) => live.result === undefined
-    ).length;
+    const under = [...this.#running.values()]
+      .flatMap(({ streams }) => [...streams.values()])
+      .filter(({ live }) => live.result === undefined).length;
     if (under >= streamMaxRunning) {
       return resultOf(
         refusedResult(
@@ -501,7 +527,6 @@ export class SealedPreviews {
       changed: Promise.withResolvers(),
     };
     running.streams.set(name, { inputHash, live });
-    SealedPreviews.#trimStreams(running);
     const run = async (): Promise<void> => {
       const result = await this.#runStream(
         chatId,
@@ -514,7 +539,10 @@ export class SealedPreviews {
       clearTimeout(live.idle);
       live.idle = undefined;
       live.result = withReason(result, live.unfollowed);
+      // Settled, it keeps no snapshot: its readers get its result next.
+      live.progress = null;
       wake(live);
+      this.#kept(running, name, live);
     };
     this.#ctx.waitUntil(run());
     return readerOf(live);
@@ -535,8 +563,9 @@ export class SealedPreviews {
   ): Promise<boolean> {
     await Promise.resolve();
     const { call, key } = streamRequestOf(request);
-    const running = this.#runningFor(chatId, app, draft);
-    const known = running.streams.get(streamName(personId, call, key));
+    const known = this.#runningAt(chatId, app, draft)?.streams.get(
+      streamName(personId, call, key)
+    );
     if (known === undefined || known.live.result !== undefined) {
       return false;
     }
@@ -589,16 +618,29 @@ export class SealedPreviews {
     }
   }
 
-  /** Forgets `running`'s oldest settled invocations past `streamsKept`. */
-  static #trimStreams(running: Running): void {
-    for (const [name, { live }] of running.streams) {
-      if (running.streams.size <= streamsKept) {
-        return;
-      }
-      if (live.result !== undefined) {
-        running.streams.delete(name);
+  /**
+   * Keeps the receipt of `live`, settled, which `running` holds as
+   * `name`: only when its result is small, then at most `receiptsKept` in
+   * this object, the oldest forgotten first.
+   */
+  #kept(running: Running, name: string, live: Live): void {
+    if (jsonBytes(live.result, receiptBytes) > receiptBytes) {
+      forget(running, name, live);
+      return;
+    }
+    this.#receipts.push({ running, name, live });
+    while (this.#receipts.length > receiptsKept) {
+      const oldest = this.#receipts.shift();
+      if (oldest !== undefined) {
+        forget(oldest.running, oldest.name, oldest.live);
       }
     }
+  }
+
+  /** The preview of `draft` running now, if one runs its revision. */
+  #runningAt(chatId: ChatId, app: AppId, draft: Draft): Running | undefined {
+    const known = this.#running.get(nameOf(chatId, app));
+    return known?.revision === draft.revision ? known : undefined;
   }
 
   /**
@@ -828,6 +870,12 @@ export class SealedPreviews {
     // step checks the preview is still the one running.
     for (const { live } of running?.streams.values() ?? []) {
       live.stop.abort();
+    }
+    // Its receipts go with it.
+    for (let at = this.#receipts.length - 1; at >= 0; at -= 1) {
+      if (this.#receipts[at]?.running === running) {
+        this.#receipts.splice(at, 1);
+      }
     }
     this.#ctx.storage.transactionSync(() => {
       this.#forgetRelease(chatId, app);

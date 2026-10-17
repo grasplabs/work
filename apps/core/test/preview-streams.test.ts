@@ -4,6 +4,7 @@ import {
   streamIdleCancelMs,
   streamMaxRunning,
 } from "@grasp-os/shared/operation-limits";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -89,6 +90,17 @@ export const slow = action({
   },
 });
 
+/** A result larger than a receipt keeps. */
+export const big = action({
+  args: {},
+  returns: v.string(),
+  stream: v.object({ step: v.number() }),
+  handler: async (ctx) => {
+    await ctx.emit({ step: 1 });
+    return "x".repeat(20000);
+  },
+});
+
 /** Asks the App's model: an outside system. */
 export const consult = action({
   args: {},
@@ -102,14 +114,14 @@ export const consult = action({
 });
 `,
   "app.ts": `import { app } from "@grasp-os/sdk";
-import { consult, create, draft, slow, titles, writer } from "./operations/notes.ts";
+import { big, consult, create, draft, slow, titles, writer } from "./operations/notes.ts";
 import schema from "./schema.ts";
 
 export default app({
   name: "Notes",
   schema,
   access: { tables: { notes: { read: "appMembers", write: "appMembers" } } },
-  operations: { notes: { create, titles, draft, slow, consult } },
+  operations: { notes: { create, titles, draft, slow, consult, big } },
   internalOperations: {},
   screens: [],
   uses: [writer],
@@ -630,6 +642,133 @@ describe(
           "operation.outcome_unknown",
         ].includes(unfollowed ?? ""),
       }).toStrictEqual({ pastEnd: "operation.stream_limit", unfollowed: true });
+    });
+
+    it("keeps a few small receipts of all its previews, and none of a large result", async () => {
+      const { builder, app, chatId, revision } = await setUp();
+      const seat = { chatId, app, revision };
+      const keys = Array.from({ length: 9 }, () => crypto.randomUUID());
+      const requests = await Promise.all(
+        keys.map(
+          async (key, index) =>
+            await streamRequest(
+              builder,
+              seat,
+              "notes.draft",
+              { topic: `t${String(index)}` },
+              key
+            )
+        )
+      );
+      for (const request of requests) {
+        // oxlint-disable-next-line no-await-in-loop -- one run after the other
+        const followed = await follow(builder, seat, "stream", request);
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await followed.ended;
+        // Let go of, as a page lets go of a stream that ended.
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await followed.subscription.release();
+      }
+      const bigRequest = await streamRequest(
+        builder,
+        seat,
+        "notes.big",
+        {},
+        crypto.randomUUID()
+      );
+      const large = await follow(builder, seat, "stream", bigRequest);
+      const largeEnd = await large.ended;
+      await large.subscription.release();
+      const reread = async (request: string): Promise<string> => {
+        const followed = await follow(builder, seat, "attach", request);
+        const end = await followed.ended;
+        await followed.subscription.release();
+        return end;
+      };
+      expect({
+        largeEnd,
+        large: await reread(bigRequest),
+        oldest: await reread(requests[0] ?? ""),
+        newest: await reread(requests.at(-1) ?? ""),
+      }).toStrictEqual({
+        largeEnd: "ok",
+        // Answered once, never kept.
+        large: "submission.expired",
+        // Past the receipts the object keeps.
+        oldest: "submission.expired",
+        newest: "ok",
+      });
+    });
+
+    it("reads again only what runs: an attach or a cancel of a preview not running seals nothing", async () => {
+      const { builder, app, chatId, revision } = await setUp();
+      const seat = { chatId, app, revision };
+      const request = JSON.stringify({
+        reference: {
+          resourceId: app,
+          resourceVersion: 2,
+          contractId: "notes.draft",
+          fingerprint: "0".repeat(64),
+          kind: "action",
+        },
+        input: { topic: "none" },
+        idempotencyKey: crypto.randomUUID(),
+      });
+      const attached = await follow(builder, seat, "attach", request);
+      const cancelled = await builder.api.chats.previewCancelStream(
+        chatId,
+        app,
+        revision,
+        request
+      );
+      const sealed = await runInDurableObject(
+        chatsOf(builder),
+        (_instance, state) =>
+          state.storage.sql
+            .exec(
+              "SELECT revision FROM preview_releases WHERE chat_id = ?",
+              chatId
+            )
+            .toArray().length
+      );
+      expect({
+        attached: await attached.ended,
+        cancelled,
+        sealed,
+      }).toStrictEqual({
+        attached: "submission.expired",
+        cancelled: { requested: false },
+        sealed: 0,
+      });
+    });
+
+    it("holds the connection's watches to their limit, however many start at once", async () => {
+      const { builder, app, chatId, revision } = await setUp();
+      const seat = { chatId, app, revision };
+      const request = await streamRequest(
+        builder,
+        seat,
+        "notes.draft",
+        { topic: "crowd" },
+        crypto.randomUUID()
+      );
+      const started = await Promise.allSettled(
+        Array.from(
+          { length: 14 },
+          async () => await follow(builder, seat, "attach", request)
+        )
+      );
+      const refused = started.flatMap((settled): unknown[] => {
+        const reason: unknown =
+          settled.status === "rejected" ? settled.reason : undefined;
+        return typeof reason === "object" && reason !== null && "code" in reason
+          ? [reason.code]
+          : [];
+      });
+      expect({
+        held: started.filter(({ status }) => status === "fulfilled").length,
+        refused: refused.includes("agent.too_many_watches"),
+      }).toStrictEqual({ held: 10, refused: true });
     });
   }
 );

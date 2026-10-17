@@ -2557,6 +2557,24 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * The revision of the chat's draft of App `appId`: 0 when there is none
+   * (or no such chat). Its revision alone, for a check that runs often
+   * (preview-stream-relay.ts), never its files.
+   */
+  draftRevision(chatId: unknown, appId: string): number {
+    const chat = chatIdSchema.safeParse(chatId);
+    if (!chat.success) {
+      return 0;
+    }
+    const row = this.#db
+      .select({ revision: chatDrafts.revision })
+      .from(chatDrafts)
+      .where(and(eq(chatDrafts.chatId, chat.data), eq(chatDrafts.appId, appId)))
+      .get();
+    return row?.revision ?? 0;
+  }
+
+  /**
    * The title of `personId`'s own chat `chatId`; `null` when it is gone,
    * or not theirs. For a review of what the chat's agent proposed, read by
    * the person it acted for alone: a title may quote their question.
