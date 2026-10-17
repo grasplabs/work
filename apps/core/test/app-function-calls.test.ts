@@ -13,7 +13,12 @@ import { env } from "cloudflare:workers";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { callAppFunction, callRunFunction } from "../src/app-functions.ts";
+import { actionInvocation, invocationName } from "../src/action-invocation.ts";
+import {
+  callAppFunction,
+  callRunFunction,
+  readFunctionRequest,
+} from "../src/app-functions.ts";
 import type { RunCaller } from "../src/app-functions.ts";
 import { addMember } from "../src/app-members.ts";
 import type { Release } from "../src/app-releases.ts";
@@ -562,6 +567,49 @@ const call = async (
   }
 };
 
+/**
+ * What `by` gets running the action `path` of `sealed`'s current release
+ * as a screen sends it, under an idempotency key: through its action
+ * invocation object (action-invocation.ts), not `callAppFunction`.
+ */
+const screenAction = async (
+  by: Person,
+  sealed: Sealed,
+  path: string,
+  input: unknown
+): Promise<unknown> => {
+  const { release: current } = sealed;
+  const key = crypto.randomUUID();
+  const request = readFunctionRequest(
+    JSON.stringify({
+      reference: {
+        resourceId: current.manifest.resourceId,
+        resourceVersion: current.manifest.resourceVersion,
+        contractId: path,
+        fingerprint: current.fingerprints[path] ?? "",
+        kind: "action",
+      },
+      input,
+      idempotencyKey: key,
+    })
+  );
+  const app = appIdSchema.parse(sealed.app);
+  const name = await invocationName(by.userId, app, request, key, false);
+  const frames = await actionInvocation(env, name).open({
+    by,
+    access: "the person's",
+    app,
+    name,
+    call: request,
+    streaming: false,
+    attach: false,
+  });
+  const { result } = z
+    .object({ result: z.unknown() })
+    .parse(JSON.parse(await new Response(frames).text()));
+  return result;
+};
+
 /** The admin's binding of `caller`'s `alias` to App `appId`. */
 const bind = async (
   admin: Person,
@@ -702,6 +750,17 @@ describe("an App calling another App's functions", { timeout: 60_000 }, () => {
         },
       ],
     });
+  });
+
+  it("reach them from a screen's keyed action, as the browser sends it", async () => {
+    const admin = await person("admin");
+    const crm = await sealedApp(crmFiles(), "CRM");
+    const desk = await sealedApp(deskFiles(), "Desk");
+    await bind(admin, desk, crm.app);
+    await expect(
+      screenAction(admin, desk, "desk.shout", { text: "hi" })
+      // Desk's answer: the CRM's, as JSON.
+    ).resolves.toStrictEqual({ ok: true, value: '"HI"' });
   });
 
   it("serves only another App's public functions, and stops once it changes a contract or the binding is revoked", async () => {

@@ -862,6 +862,9 @@ export const invokeAppAction = async (
       by,
       requestId,
       deadline,
+      // Another App's function, as a screen's call of it runs.
+      callApp: async (person, called, appRequest, appOptions) =>
+        await callFunction(env, person, called, appRequest, appOptions),
     });
     reached = true;
     const result = await callOperation(
