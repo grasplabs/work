@@ -28,6 +28,7 @@ import type { DataStore } from "../src/data-store.ts";
 import {
   finishClaimMs,
   purgeGraceMs,
+  removalRetryMs,
   sweepPage as sweepPageSize,
 } from "../src/file-host.ts";
 import { revokeRelease } from "../src/release-retention.ts";
@@ -2588,7 +2589,15 @@ describe("an App's files", { timeout: 120_000 }, () => {
     );
     // Its put lands, and its writer never records it.
     await env.FILES.put(admitted.key ?? "", bytes);
-    const due: { failed?: unknown; next: number | null } = { next: null };
+    const due: {
+      failed?: unknown;
+      next: number | null;
+      alarm: number | null;
+      now: number;
+    } = { next: null, alarm: null, now: 0 };
+    // The write's lifetime, and leeway for the test's own time.
+    const writeLifetime = 60 * 60_000;
+    const retrySlackMs = 5000;
     await runInDurableObject(
       env.DATA_STORES.getByName(storeId),
       async (_instance, state) => {
@@ -2599,18 +2608,32 @@ describe("an App's files", { timeout: 120_000 }, () => {
           due.failed = error;
         }
         due.next = host.files.nextDue();
+        // The store's activity sets the alarm again (a commit, a chunk):
+        // the failed removal stays a retry's wait away all the same.
+        await state.storage.deleteAlarm();
+        await host.schedule();
+        due.alarm = await state.storage.getAlarm();
+        due.now = Date.now();
       }
     );
     const kept = await storedObjects(release);
     await sweepIn(release, purgeGraceMs + 2);
     expect({
       failed: due.failed instanceof Error,
-      // Due again at once, which the alarm puts off by its retry wait:
-      // never only once the write could no longer land.
-      dueSoon: (due.next ?? Number.POSITIVE_INFINITY) <= Date.now(),
+      // Due again a retry's wait after it was tried: never only once the
+      // write could no longer land.
+      dueSoon: (due.next ?? Number.POSITIVE_INFINITY) < due.now + writeLifetime,
+      // Nor at every alarm the store's activity brings forward.
+      alarmWaits: (due.alarm ?? 0) - due.now >= removalRetryMs - retrySlackMs,
       kept: kept.length,
       after: await storedObjects(release),
-    }).toStrictEqual({ failed: true, dueSoon: true, kept: 1, after: [] });
+    }).toStrictEqual({
+      failed: true,
+      dueSoon: true,
+      alarmWaits: true,
+      kept: 1,
+      after: [],
+    });
   });
 
   it("tries again a failed removal behind a full page of writes removed already and kept for late puts", async () => {

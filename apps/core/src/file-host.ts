@@ -149,6 +149,12 @@ interface FinishClaim {
   readonly end: () => void;
 }
 
+/**
+ * How long after a failed removal of a write's object it is tried again:
+ * the alarm's own wait after its work failed (store-host.ts).
+ */
+export const removalRetryMs = 30_000;
+
 /** How often a file's readability is checked when its holders keep changing. */
 const readableAttempts = 3;
 
@@ -1307,20 +1313,20 @@ export class FileHost {
         and(eq(fileWrites.condemned, true), isNotNull(fileWrites.removedAt))
       )
       .all();
-    // Condemned but its removal failed: due again at once, which the alarm
-    // puts off by its retry wait (store-host.ts, `schedule`).
-    const unremoved = this.#db
-      .select({ key: fileWrites.key })
+    // Condemned but its removal failed: due again a retry's wait after it
+    // was last tried, however often the store's activity sets the alarm.
+    const [unremoved] = this.#db
+      .select({ at: min(fileWrites.removeTriedAt) })
       .from(fileWrites)
       .where(and(eq(fileWrites.condemned, true), isNull(fileWrites.removedAt)))
-      .get();
+      .all();
     const times = [
       event === undefined ? null : Date.now(),
       expiring?.at,
       typeof unpurged?.at === "number" ? unpurged.at + purgeGraceMs : null,
       typeof unsettled?.at === "number" ? unsettled.at + purgeGraceMs : null,
       typeof condemned?.at === "number" ? condemned.at + writeLifetimeMs : null,
-      unremoved === undefined ? null : Date.now(),
+      typeof unremoved?.at === "number" ? unremoved.at + removalRetryMs : null,
     ].filter((time): time is number => typeof time === "number");
     return times.length === 0 ? null : Math.min(...times);
   }
@@ -1472,7 +1478,7 @@ export class FileHost {
           // again at the alarm's next try (`nextDue`).
           this.#db
             .update(fileWrites)
-            .set({ condemned: true, removedAt: null })
+            .set({ condemned: true, removedAt: null, removeTriedAt: now })
             .where(eq(fileWrites.key, key))
             .run();
           condemned.push(key);

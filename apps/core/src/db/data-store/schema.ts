@@ -678,6 +678,12 @@ export const fileWrites = sqliteTable(
      * at the write's lifetime.
      */
     removedAt: integer("removed_at"),
+    /**
+     * When the alarm last tried to remove its object: a removal that
+     * failed is tried again a retry's wait after (`removalRetryMs`), not
+     * at every alarm the store's activity brings forward.
+     */
+    removeTriedAt: integer("remove_tried_at"),
   },
   (table) => [index("sdk_file_writes_issued").on(table.issuedAt)]
 );
