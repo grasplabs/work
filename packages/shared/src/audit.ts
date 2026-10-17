@@ -67,7 +67,16 @@ export const auditActorSchema = z.discriminatedUnion("type", [
      */
     rootRunId: runIdSchema.optional(),
   }),
-  z.object({ type: z.literal("staff"), userId: identifierSchema }),
+  z.object({
+    type: z.literal("staff"),
+    userId: identifierSchema,
+    /**
+     * Read through the staff console rather than signed in here: `userId`
+     * is then the email Cloudflare Access verified, as the console signs
+     * it (core's admin-snapshot.ts), for they have no user here.
+     */
+    via: z.literal("console").optional(),
+  }),
   /**
    * Someone who isn't a member, in a guest chat an App invited them to
    * (`@grasp-os/shared/guests`), for the member it was made for.
