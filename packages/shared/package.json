@@ -14,6 +14,7 @@
     "./admin/admin-log": "./src/admin/admin-log.ts",
     "./admin/admin-missing": "./src/admin/admin-missing.ts",
     "./admin/admin-organization": "./src/admin/admin-organization.ts",
+    "./admin/admin-snapshot-adapter": "./src/admin/admin-snapshot-adapter.ts",
     "./admin/admin-state": "./src/admin/admin-state.ts",
     "./admin/admin-todo": "./src/admin/admin-todo.ts",
     "./admin/admin-usage": "./src/admin/admin-usage.ts",

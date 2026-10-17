@@ -22,8 +22,11 @@ import { DEFAULT_THRESHOLD, LISTEN_DAYS, WEIGHTS } from "./onboarding.ts";
 import type { DirectoryTeam } from "./onboarding.ts";
 import { present } from "./present.ts";
 
-/** What a person may do in a client's workspace. */
-export type MemberRole = "owner" | "admin" | "viewer";
+/**
+ * What a person may do in a client's workspace: the prototype's roles, and Grasp OS's own
+ * (`roleSchema` in ../roles.ts), whose builders and users the prototype had no word for.
+ */
+export type MemberRole = "owner" | "admin" | "builder" | "user" | "viewer";
 
 /**
  * Grasp's own side of an onboarding: every organization from its first conversation until Grasp
@@ -549,6 +552,12 @@ export interface RealHappened {
       spend: number;
     };
   }[];
+  /**
+   * How much Grasp knows, in percent, as the organization counts it itself: Grasp OS's core counts
+   * it for its gate, from parts of its own, and that is the number the company sees. None where
+   * the admin counts it from its own sources.
+   */
+  known?: number;
 }
 
 const clamp = (value: number, min = 0, max = 1) =>
@@ -1901,7 +1910,10 @@ export interface OrgKnowledge {
     known: number;
     points: number;
   }[];
-  /** The points of every source together: a point counts only once it is wholly in. */
+  /**
+   * The points of every source together: a point counts only once it is wholly in. Where the
+   * organization counts it itself (`RealHappened.known`), its number, and no sources.
+   */
   percent: number;
   threshold: number;
   /** Enough is known: it waits only for Grasp's go. */
@@ -2300,9 +2312,12 @@ export const viewOf = (org: Org, state: OrgState): OrgView => {
     known: has[source],
     points: Math.floor(WEIGHTS[source] * has[source] + 1e-9),
   }));
-  const percent = sources.reduce((sum, each) => sum + each.points, 0);
+  // Where the organization counts it itself, its own number stands: the company sees that one.
+  const percent =
+    org.real?.known ?? sources.reduce((sum, each) => sum + each.points, 0);
   const knowledge: OrgKnowledge = {
-    sources,
+    // Core's number comes without its parts: the admin's own would not add up to it, so none.
+    sources: org.real?.known === undefined ? sources : [],
     percent,
     threshold: state.threshold,
     ready: percent >= state.threshold,

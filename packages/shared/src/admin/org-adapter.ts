@@ -25,6 +25,7 @@ import { LISTEN_DAYS } from "./onboarding.ts";
 import { daysBetween, METER_PURPOSES } from "./org-record.ts";
 import type {
   DrawnWork,
+  HeldInterview,
   MeterDay,
   StaffSnapshot,
   WorkRecord,
@@ -185,6 +186,17 @@ const clientStepOf = (snapshot: StaffSnapshot): ClientStep => {
   return leadsNamed || snapshot.client.reached >= 7 ? "leads" : "directory";
 };
 
+/**
+ * Every fact written down in an interview, as a sample interview counts them, and how many of those
+ * the person took out again. Where only the numbers came, they stand for the facts: their words
+ * stay where they were said.
+ */
+const factsOf = (interview: HeldInterview): { facts: number; out: number } =>
+  interview.counted ?? {
+    facts: interview.progress.facts.length,
+    out: interview.progress.facts.filter((fact) => fact.out === true).length,
+  };
+
 /** The day something happened, as the number of days since the interviews started. */
 const dayAt = (start: string, time: string | null | undefined) =>
   present(time) ? Math.max(0, daysBetween(start, time)) : null;
@@ -316,7 +328,6 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     const approved = interview.completed !== null;
     const work = works.find((each) => each.id === person.work) ?? null;
     const telling = work ? (told.get(`${person.id}/${work.id}`) ?? null) : null;
-    const { facts } = interview.progress;
     let stoppedAt: Phase | null = null;
     if (!approved) {
       stoppedAt = PHASES.includes(interview.progress.phase)
@@ -351,10 +362,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
         typed: interview.progress.mode === "type",
         telling,
         filled: telling ? filledBy(telling) : [],
-        // Every fact written down, as a sample interview counts them;
-        // `out` says how many of those the person took out again.
-        facts: facts.length,
-        out: facts.filter((fact) => fact.out === true).length,
+        ...factsOf(interview),
         mistakes: 0,
         kinds: [],
         followUps: work
@@ -383,11 +391,14 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     sent,
     heard,
     talking,
+    // Only what was said here: an interview that came as numbers has no transcript to show.
     transcripts: new Map(
-      snapshot.interviews.map((interview) => [
-        interview.person,
-        { lines: interview.progress.lines, facts: interview.progress.facts },
-      ])
+      snapshot.interviews
+        .filter((interview) => interview.counted === undefined)
+        .map((interview) => [
+          interview.person,
+          { lines: interview.progress.lines, facts: interview.progress.facts },
+        ])
     ),
     links: new Map(snapshot.links.map((link) => [link.person, link.code])),
     clientCode: snapshot.clientCode,
@@ -407,6 +418,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
     ),
     // A snapshot from before the Worker counted has none.
     metered: meteredOf(snapshot.usage ?? []),
+    ...(snapshot.known === undefined ? {} : { known: snapshot.known }),
   };
 
   const skipped: ("sources" | "documents" | "pulse")[] = [
@@ -487,7 +499,7 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
       notice: 3,
     },
     papers: {},
-    members: [],
+    members: snapshot.members ?? [],
     integrations: [],
     hourly: 0,
     seed,
