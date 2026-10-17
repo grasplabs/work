@@ -53,10 +53,12 @@ import {
   workflowVersions,
 } from "../src/workflow-resources.ts";
 import { startWorkflow } from "../src/workflow-starts.ts";
-import type { Settled } from "../src/workflows/code.ts";
+import type { Settled, StepError } from "../src/workflows/code.ts";
+import { cpuLimitKill } from "../src/workflows/host.ts";
 import type { RunStep } from "../src/workflows/host.ts";
 import type { FrozenCatalogBinding } from "../src/workflows/resource-authority.ts";
 import { ResourceRunHost } from "../src/workflows/resource-host.ts";
+import type { TriedOnceMarks } from "../src/workflows/resource-host.ts";
 import { resourceRunFor } from "../src/workflows/resource-runs.ts";
 import { fakeGateway } from "./ai-gateway.ts";
 import { release, serverBuilt } from "./apps.ts";
@@ -1807,6 +1809,272 @@ const called = async (
     : { ok: false as const, error: now.error };
 };
 
+/** Marks of tried-once attempts as a run's object keeps them, in memory. */
+const keptMarks = (): TriedOnceMarks => {
+  const unstarted = new Set<string>();
+  const failures = new Map<string, StepError>();
+  return {
+    markUnstarted: (key, attempt) => {
+      unstarted.add(`${attempt}:${key}`);
+    },
+    unstarted: (key, attempt) => unstarted.has(`${attempt}:${key}`),
+    keepFailure: (key, attempt, error) => {
+      failures.set(`${attempt}:${key}`, error);
+    },
+    failureOf: (key, attempt) => failures.get(`${attempt}:${key}`),
+  };
+};
+
+/**
+ * A host of one activation of run `runKey` of version 1 of workflow `id`
+ * for `by`, on `marks`, as the engine gives its steps: each step under a
+ * key of the run's and the step's, at the attempt `attempts` says (the
+ * first unless given).
+ */
+const activationOf = async (
+  by: Identity,
+  id: string,
+  {
+    runId,
+    runKey,
+    marks,
+    attempts = {},
+    bindings,
+    failed,
+  }: {
+    /** The run's row: a real start's, which its calls are checked against. */
+    runId: string;
+    runKey: string;
+    marks: TriedOnceMarks;
+    attempts?: Record<string, number>;
+    /** The bindings its start froze. */
+    bindings: ReadonlyMap<string, FrozenCatalogBinding>;
+    /** What each attempt failed with, as the engine heard it: its name and code. */
+    failed: unknown[];
+  }
+): Promise<ResourceRunHost> => {
+  const manifest = await env.DB.prepare(
+    "SELECT manifest_hash AS hash FROM workflow_resource_versions WHERE workflow_resource_id = ? AND version = 1"
+  )
+    .bind(id)
+    .first<{ hash: string }>();
+  const build = await loadWorkflowBuild(env, id, 1, manifest?.hash ?? "");
+  const step: RunStep = {
+    do: async (name, _config, fn) => {
+      try {
+        return await fn({
+          attempt: attempts[name] ?? 1,
+          idempotencyKey: `key:${runKey}:${name}`,
+        });
+      } catch (error) {
+        const code: unknown =
+          error instanceof Error ? Reflect.get(error, "code") : undefined;
+        failed.push({
+          name: error instanceof Error ? error.name : "unknown",
+          code: code ?? null,
+        });
+        throw error;
+      }
+    },
+    sleep: async () => {
+      await Promise.resolve();
+    },
+    sleepUntil: async () => {
+      await Promise.resolve();
+    },
+    waitForEvent: async () => await Promise.reject(new Error("No waits here")),
+  };
+  return new ResourceRunHost(
+    env,
+    step,
+    {
+      runId,
+      workflowId: id,
+      version: 1,
+      principal: by.userId,
+      input: { who: "Ada" },
+      params: {},
+      createdAt: Date.now(),
+      build,
+      calling: {
+        runId,
+        workflowId: id,
+        version: 1,
+        principal: by.userId,
+        invoker: { type: "person", id: by.userId, appVersion: null },
+        bindings,
+      },
+      maxModelCalls: 1,
+    },
+    {
+      leaseOf: () => ({ generation: 1, deadline: Date.now() + 60_000 }),
+      tampered: () => {},
+      admitAttempt: admittedFreely,
+      triedOnce: marks,
+    }
+  );
+};
+
+/** Holds a run asleep for longer than any test takes. */
+const longHold = { asleep: { wait: "PT1H" } };
+
+/** Binding `summary` of a greeting workflow, as its start froze it. */
+const frozenSummary = (
+  approval: Awaited<ReturnType<typeof greetingWorkflow>>["approval"]
+): ReadonlyMap<string, FrozenCatalogBinding> =>
+  new Map([
+    [
+      "summary",
+      {
+        alias: approval.alias,
+        kind: approval.kind,
+        resourceId: null,
+        resourceVersion: null,
+        contractId: approval.contractId,
+        fingerprint: approval.fingerprint,
+        approval: approval.id,
+        target: approval.target,
+      },
+    ],
+  ]);
+
+describe("a JSON workflow's model call, once its isolate was stopped past its CPU time", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("parks a call that never started for the next activation, which makes it once", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, approval } = await greetingWorkflow(ada, admin, {
+      before: [longHold, { first: { set: { stage: "first" } } }],
+    });
+    // A run its activations are of, held asleep before its own call.
+    const runId = await started(ada, workflow.id);
+    const gateway = gatewayAnswering(answer('{"line":"Hello Ada"}'));
+    const runKey = unique();
+    const marks = keptMarks();
+    const bindings = frozenSummary(approval);
+    const ran: string[] = [];
+    const failed: unknown[] = [];
+    const first = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      bindings,
+      failed,
+    });
+    // The isolate is stopped past its CPU time in an earlier step's call.
+    await first.do("task:first", adaData, async () => {
+      ran.push("first");
+      return await Promise.reject(cpuLimitKill());
+    });
+    await first.do("task:greet", adaData, async (attempt) => {
+      ran.push("greet, first activation");
+      return await called(attempt);
+    });
+    const parked = [...failed];
+    // The next activation's attempt, the step's retry: its module runs.
+    const second = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      attempts: { "task:greet": 2 },
+      bindings,
+      failed,
+    });
+    await second.do("task:greet", adaData, async (attempt) => {
+      ran.push("greet, next activation");
+      return await called(attempt);
+    });
+    // (What the forged module then answers for its record isn't this
+    // test's: only that its call went out, once, in the next activation.)
+    expect({
+      parked,
+      ran,
+      requests: gateway.requests.length,
+    }).toStrictEqual({
+      // Retryable timeouts, as for attempts the Loader cut off: the
+      // model call's parked for the next activation.
+      parked: [
+        { name: "TimeoutError", code: null },
+        { name: "TimeoutError", code: null },
+      ],
+      ran: ["first", "greet, next activation"],
+      requests: 1,
+    });
+  });
+
+  it("never tries again a call that started, nor one it can't tell never started", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    const { workflow, approval } = await greetingWorkflow(ada, admin, {
+      before: [longHold],
+    });
+    const runId = await started(ada, workflow.id);
+    const gateway = gatewayAnswering(
+      { status: 503, errorType: "overloaded_error" },
+      answer('{"line":"Never sent"}')
+    );
+    const runKey = unique();
+    const marks = keptMarks();
+    const bindings = frozenSummary(approval);
+    const ran: string[] = [];
+    const failed: unknown[] = [];
+    const first = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      bindings,
+      failed,
+    });
+    await first.do("task:greet", adaData, async (attempt) => {
+      ran.push("first attempt");
+      return await called(attempt);
+    });
+    // Its step's retry, in the next activation: refused, never run.
+    const again = await activationOf(ada, workflow.id, {
+      runId,
+      runKey,
+      marks,
+      attempts: { "task:greet": 2 },
+      bindings,
+      failed,
+    });
+    await again.do("task:greet", adaData, async (attempt) => {
+      ran.push("retry");
+      return await called(attempt);
+    });
+    // An attempt nothing was kept of (its activation died mid-call): its
+    // retry is refused too, as an attempt left open.
+    const unknown = await activationOf(ada, workflow.id, {
+      runId,
+      runKey: unique(),
+      marks,
+      attempts: { "task:greet": 2 },
+      bindings,
+      failed,
+    });
+    await unknown.do("task:greet", adaData, async (attempt) => {
+      ran.push("after a lost attempt");
+      return await called(attempt);
+    });
+    const [refused, retried, leftOpen] = failed;
+    expect({
+      // The retry fails as the attempt that ran did, never run itself.
+      retried,
+      leftOpen,
+      ran,
+      requests: gateway.requests.length,
+    }).toStrictEqual({
+      retried: refused,
+      leftOpen: { name: "TimeoutError", code: null },
+      ran: ["first attempt"],
+      requests: 1,
+    });
+  });
+});
+
 describe("a run's host, against a forged module's calls", () => {
   it("builds and makes a task's call itself, once, and through a binding its start froze only", async () => {
     const admin = await person("admin");
@@ -2431,10 +2699,11 @@ describe("an activation's share of core's CPU, for calls tried once", () => {
       funded: await attempted(),
       unfunded: await attempted(0),
     }).toStrictEqual({
-      // Its one attempt, the call tried once.
-      funded: { retries: [0], ran: true },
-      // Its one attempt all the same, on a share of its own.
-      unfunded: { retries: [0], ran: true },
+      // Run, the call tried once: its retries only ever run an attempt
+      // that never ran its module (the host's own check).
+      funded: { retries: [2], ran: true },
+      // Run all the same, on a share of its own.
+      unfunded: { retries: [2], ran: true },
     });
   });
 });
