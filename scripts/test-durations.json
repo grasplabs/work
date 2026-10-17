@@ -62,7 +62,7 @@
   "@grasp-os/core test/board-page-pending.test.ts": 0,
   "@grasp-os/core test/board-page-viewer.test.ts": 0,
   "@grasp-os/core test/board-page.test.ts": 35.5,
-  "@grasp-os/core test/brain-baseline.test.ts": 159.4,
+  "@grasp-os/core:brain test/brain-baseline.test.ts": 159.4,
   "@grasp-os/core test/brain-scale.test.ts": 155.9,
   "@grasp-os/core test/brain-scoring.test.ts": 0,
   "@grasp-os/core test/brain-suite.test.ts": 0,
