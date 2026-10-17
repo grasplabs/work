@@ -1139,16 +1139,36 @@ describe("screens and preferences", () => {
   });
 
   test.each([
-    ["public", { operations: { preferences: { list } } }],
-    ["internal", { internalOperations: { preferences: { secret } } }],
+    ["public", "preferences", { operations: { preferences: { list } } }],
+    [
+      "internal",
+      "preferences",
+      { internalOperations: { preferences: { secret } } },
+    ],
+    [
+      "public",
+      "workflows",
+      { operations: { workflows: { review: { queries: { runs: list } } } } },
+    ],
+    [
+      "internal",
+      "workflows",
+      { internalOperations: { workflows: { secret } } },
+    ],
   ])(
-    "no %s function registers under the preferences segment",
-    (_case, changes) => {
+    "no %s function registers under the %s segment",
+    (_case, _segment, changes) => {
       expect(refusal(() => small(changes))).toContain(
         "that path is the platform's"
       );
     }
   );
+
+  test("a nested workflows segment is the App's own", () => {
+    expect(() =>
+      small({ operations: { notes: { list }, admin: { workflows: { send } } } })
+    ).not.toThrow();
+  });
 });
 
 describe("browser resources", () => {

@@ -622,7 +622,9 @@ const callAllowed = (
 /**
  * What `reference` names in `release`: a public function's path, or a
  * workflow reference's query, which is core's to answer, never the App's
- * (workflow-reference-queries.ts).
+ * (workflow-reference-queries.ts). No App function shadows one: the SDK
+ * keeps the top-level `workflows` segment for the platform, so a release
+ * that registers a function there never seals.
  */
 const referenceIn = async (
   release: Release,
