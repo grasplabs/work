@@ -9,6 +9,7 @@ import {
   contractsFormatVersion,
   generatedPaths,
   generateModules,
+  readSealedWorkflows,
   manifestText,
   manifestVersion,
   readAppManifest,
@@ -16,7 +17,7 @@ import {
   serverModuleSource,
   symbolicModules,
 } from "@grasp-os/sdk/host";
-import type { AppManifest } from "@grasp-os/sdk/host";
+import type { AppManifest, WorkflowBindingExtras } from "@grasp-os/sdk/host";
 import {
   releaseFormatVersion,
   releaseManifestSchema,
@@ -49,6 +50,7 @@ import {
 import { appFor, findVersion, versionFiles, versionTree } from "./apps.ts";
 import { auditedBatch, outboxed } from "./audit-outbox.ts";
 import type { Acting } from "./auth/identity.ts";
+import { boundWorkflowsOf } from "./bound-workflows.ts";
 import { openStore, requireStoreManager } from "./data-stores.ts";
 import {
   appDefaultStores,
@@ -189,6 +191,12 @@ export interface Release {
   readonly sdk: Readonly<Record<string, string>>;
   /** The store it reads and writes, if it declares tables. */
   readonly store: DataStoreBinding | null;
+  /**
+   * What its seal resolved of each workflow it declares (bound-workflows.ts),
+   * as its contracts seal it: what its references were generated with,
+   * whatever the App's bindings say now.
+   */
+  readonly workflows: readonly WorkflowBindingExtras[];
 }
 
 /** `contracts.json` as the host reads it back. */
@@ -201,6 +209,10 @@ const contractsSchema = z.strictObject({
   workflows: z.record(z.string(), z.unknown()),
   workflowFingerprints: z.record(z.string(), z.string()),
 });
+
+/** What `contracts` (a release's `contracts.json`) seal of its workflows. */
+const sealedWorkflowsOf = (contracts: string): WorkflowBindingExtras[] =>
+  readSealedWorkflows(contractsSchema.parse(JSON.parse(contracts)).workflows);
 
 /** Releases loaded and verified, by manifest hash: their content never changes. */
 const verified = new Map<string, Promise<Omit<Release, "manifestHash">>>();
@@ -271,10 +283,12 @@ const verifiedRelease = async (
   }
   let app: AppManifest;
   let fingerprints: Record<string, string>;
+  let workflows: WorkflowBindingExtras[];
   try {
     const contracts = contractsSchema.parse(JSON.parse(contractsText));
     app = readAppManifest(JSON.stringify(contracts.manifest));
     ({ fingerprints } = contracts);
+    workflows = readSealedWorkflows(contracts.workflows);
     if (
       contracts.resourceId !== manifest.resourceId ||
       contracts.resourceVersion !== manifest.resourceVersion ||
@@ -303,7 +317,15 @@ const verifiedRelease = async (
   }
   // Shared by every load of the release in this isolate: frozen, so no
   // caller changes what another runs.
-  return deepFreeze({ manifest, app, fingerprints, modules, sdk, store });
+  return deepFreeze({
+    manifest,
+    app,
+    fingerprints,
+    modules,
+    sdk,
+    store,
+    workflows,
+  });
 };
 
 /**
@@ -700,6 +722,23 @@ const hasTables = (app: AppManifest): boolean =>
 const operationManifestHash = async (app: AppManifest): Promise<string> =>
   await sha256Hex(canonicalText(app.operations));
 
+/** Whether `version` of `app` has a sealed release. */
+const isSealed = async (
+  env: Env,
+  app: AppId,
+  version: number
+): Promise<boolean> =>
+  (await drizzle(env.DB)
+    .select({ version: sdkReleaseManifests.version })
+    .from(sdkReleaseManifests)
+    .where(
+      and(
+        eq(sdkReleaseManifests.appId, app),
+        eq(sdkReleaseManifests.version, version)
+      )
+    )
+    .get()) !== undefined;
+
 /**
  * The App manifest of `version` of `app`, as the host reads it: its
  * sealed release's when it has one, otherwise its code built and
@@ -716,21 +755,39 @@ export const versionManifest = async (
   if (!isAppLayout(files)) {
     return undefined;
   }
-  const sealed = await drizzle(env.DB)
-    .select({ version: sdkReleaseManifests.version })
-    .from(sdkReleaseManifests)
-    .where(
-      and(
-        eq(sdkReleaseManifests.appId, app),
-        eq(sdkReleaseManifests.version, version)
-      )
-    )
-    .get();
-  if (sealed !== undefined) {
+  if (await isSealed(env, app, version)) {
     const release = await loadRelease(env, app, version);
     return release.app;
   }
   return await filesManifest(env, files, app);
+};
+
+/**
+ * What `version` of `app`'s references are generated from: its sealed
+ * release's manifest and what its seal resolved of its workflows when it
+ * has one, so its screens get the very bytes the release sealed; otherwise
+ * its inspected manifest and the workflows as the App binds them now, as a
+ * seal would. Undefined for a version not of spec 8's layout. Throws as
+ * {@link versionManifest} does.
+ */
+export const versionReferenceSource = async (
+  env: Env,
+  app: AppId,
+  version: number,
+  files: Readonly<Record<string, string>>
+): Promise<
+  | { manifest: AppManifest; workflows: readonly WorkflowBindingExtras[] }
+  | undefined
+> => {
+  if (!isAppLayout(files)) {
+    return undefined;
+  }
+  if (await isSealed(env, app, version)) {
+    const release = await loadRelease(env, app, version);
+    return { manifest: release.app, workflows: release.workflows };
+  }
+  const manifest = await filesManifest(env, files, app);
+  return { manifest, workflows: await boundWorkflowsOf(env, app, manifest) };
 };
 
 /**
@@ -927,11 +984,13 @@ const inspectForSeal = async (
   const firstText = await inspected(env, symbolic, sdk.modules);
   const manifest = readManifest(firstText);
 
-  // The real modules, then the same code again with them.
-  const generated = await generateModules(manifest, {
-    resourceId: key.app,
-    resourceVersion: key.version,
-  });
+  // The real modules, then the same code again with them: the workflows
+  // it declares as the App binds them now, sealed with it.
+  const generated = await generateModules(
+    manifest,
+    { resourceId: key.app, resourceVersion: key.version },
+    await boundWorkflowsOf(env, key.app, manifest)
+  );
   const final = await builtCode(env, { ...files, ...generated }, key.app);
   const secondText = await inspected(env, final, sdk.modules);
   const reread = readManifest(secondText);
@@ -1236,5 +1295,9 @@ export const sealRelease = async (
     modules: { ...final },
     sdk: { ...sdk.modules },
     store,
+    // As the next load reads them back from the contracts just sealed.
+    workflows: sealedWorkflowsOf(
+      built.generated[generatedPaths.contracts] ?? ""
+    ),
   });
 };

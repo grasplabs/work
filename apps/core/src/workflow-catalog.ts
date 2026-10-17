@@ -17,13 +17,13 @@ import type {
   CatalogBindingKind,
   CatalogContractEntry,
 } from "@grasp-os/shared/workflow-resources";
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { workflowCatalogContracts } from "./db/core/schema.ts";
-import { isUniqueViolation } from "./db/d1.ts";
+import { inList, isUniqueViolation } from "./db/d1.ts";
 import { requireMemberAdmin, stillAdminSql } from "./permissions.ts";
 
 // The host catalog of contracts independent workflows bind besides each
@@ -172,7 +172,9 @@ export const resolveCatalogKeys = async (
   const rows = await drizzle(env.DB)
     .select()
     .from(workflowCatalogContracts)
-    .where(inArray(workflowCatalogContracts.key, [...keys]));
+    // As one bound parameter: a version names at most 64, but an App's
+    // bound workflows together may name more than D1's 100.
+    .where(inList(workflowCatalogContracts.key, keys));
   for (const row of rows) {
     // oxlint-disable-next-line no-await-in-loop -- one hash per named contract
     if ((await sha256Hex(row.contract)) === row.fingerprint) {

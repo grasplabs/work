@@ -1,10 +1,11 @@
 import { isAppLayout } from "@grasp-os/compiler";
 import { generatedPaths, generateModules } from "@grasp-os/sdk/host";
-import type { AppManifest } from "@grasp-os/sdk/host";
+import type { AppManifest, WorkflowBindingExtras } from "@grasp-os/sdk/host";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import type { AppId } from "@grasp-os/shared/ids";
 
 import { filesManifest } from "./app-inspection.ts";
+import { boundWorkflowsOf } from "./bound-workflows.ts";
 
 // What an App's screens import as `#grasp` (spec 8, 10.1): the public
 // references the host generates from its server code. They are data (each
@@ -56,26 +57,33 @@ export const withReferencesText = async (
     : { ...files, [generatedPaths.references]: references };
 };
 
+/** What references are generated from: a manifest, and its bound workflows. */
+export interface ReferenceSource {
+  readonly manifest: AppManifest;
+  readonly workflows: readonly WorkflowBindingExtras[];
+}
+
 /**
  * `files` with the references their screens import as `#grasp`, generated
- * for `app`'s `version` from the manifest `manifestOf` reads (see
+ * for `app`'s `version` from what `sourceOf` reads (see
  * `withReferencesText`).
  */
 export const withReferencesFrom = async (
   app: AppId,
   version: number,
   files: Record<string, string>,
-  manifestOf: () => Promise<AppManifest | undefined>
+  sourceOf: () => Promise<ReferenceSource | undefined>
 ): Promise<Record<string, string>> =>
   await withReferencesText(files, async () => {
-    const manifest = await manifestOf();
+    const source = await sourceOf();
     const generated =
-      manifest === undefined
+      source === undefined
         ? {}
-        : await generateModules(manifest, {
-            resourceId: app,
-            resourceVersion: version,
-          });
+        : await generateModules(
+            source.manifest,
+            { resourceId: app, resourceVersion: version },
+            source.workflows
+          );
     return Object.hasOwn(generated, generatedPaths.references)
       ? generated[generatedPaths.references]
       : undefined;
@@ -84,7 +92,8 @@ export const withReferencesFrom = async (
 /**
  * `files` as saved or drafted, for `app`'s `version` (a draft's base), with
  * the references their own server code generates: inspected as they are,
- * never read from a sealed release, which may hold other code.
+ * never read from a sealed release, which may hold other code, with the
+ * workflows they declare as the App binds them now.
  */
 export const withDraftReferences = async (
   env: Env,
@@ -97,9 +106,10 @@ export const withDraftReferences = async (
    */
   signal?: AbortSignal
 ): Promise<Record<string, string>> =>
-  await withReferencesFrom(
-    app,
-    version,
-    files,
-    async () => await filesManifest(env, files, app, signal)
-  );
+  await withReferencesFrom(app, version, files, async () => {
+    const manifest = await filesManifest(env, files, app, signal);
+    return {
+      manifest,
+      workflows: await boundWorkflowsOf(env, app, manifest),
+    };
+  });
