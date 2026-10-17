@@ -11,6 +11,7 @@ import type {
   DependencyReview,
   DependencyStatus,
   DependencySubjectRef,
+  DependencySubjectsInForce,
 } from "@grasp-os/shared/dependencies";
 import type {
   DependencyIntent,
@@ -31,6 +32,7 @@ import {
   dependencyImpact,
   dependencyReview,
   dependencyStatus,
+  dependencySubjectsInForce,
   endDependency,
   waitingDependencies,
   waitingDependencyCount,
@@ -108,6 +110,13 @@ export class DependenciesRpc extends CoreRpcTarget implements DependenciesApi {
     return await withPerson(
       this.#check,
       async (by) => await dependencyApprovals(this.#env, by, subject)
+    );
+  }
+
+  async inForce(): Promise<DependencySubjectsInForce> {
+    return await withPerson(
+      this.#check,
+      async (by) => await dependencySubjectsInForce(this.#env, by)
     );
   }
 
