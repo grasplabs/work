@@ -258,7 +258,9 @@ export const logItemsOf = (
   trail: TrailEntry[],
   activity: OrgEvent[] = []
 ): LogItem[] => {
-  const real = view.org.real !== undefined;
+  // Only where the Worker's activity came along: an organization read from core's snapshot has
+  // none, and its days are the only place what happened is told.
+  const real = view.org.real !== undefined && activity.length > 0;
   const hand = trail.map(fromHand);
   const worker = activity.flatMap((event, index) => {
     const item = fromWorker(event, index);
