@@ -152,6 +152,11 @@ const keptGlobals: ReadonlySet<string> = new Set([
   "atob",
   "btoa",
   "structuredClone",
+  // Deterministic, and what workerd's own `process` streams queue their
+  // callbacks through once they are built (`nextTick`): taken away, each
+  // isolate logged an uncaught TypeError, and module code could define one
+  // of its own to be handed those callbacks.
+  "queueMicrotask",
 ]);
 
 /** The global's own properties, and its prototypes', that aren't kept. */
