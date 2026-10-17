@@ -40,6 +40,7 @@ import { compileModule, stripTypes, transformModule } from "./compile.ts";
 import { isError } from "./diagnostic.ts";
 import type { Diagnostic } from "./diagnostic.ts";
 import {
+  collectDirectives,
   collectImports,
   importError,
   codeImportError,
@@ -52,7 +53,12 @@ import {
   serverCode,
   workflowCode,
 } from "./imports.ts";
-import type { CodeKind, ImportSite, ModuleImports } from "./imports.ts";
+import type {
+  CodeKind,
+  DirectiveSite,
+  ImportSite,
+  ModuleImports,
+} from "./imports.ts";
 import {
   appCodeLimitErrors,
   buildFiles,
@@ -685,9 +691,13 @@ const compileAppCodeFile = (
   files: ReadonlySet<string>
 ): { code: string } | { errors: Diagnostic[] } => {
   const imports: ImportSite[] = [];
+  const directives: DirectiveSite[] = [];
   let compiled: string;
   try {
-    compiled = stripTypes(source, path, [collectImports(imports)]);
+    compiled = stripTypes(source, path, [
+      collectImports(imports),
+      collectDirectives(directives),
+    ]);
   } catch (error) {
     const message = messageIn(path, error);
     return {
@@ -696,6 +706,18 @@ const compileAppCodeFile = (
       ],
     };
   }
+  // What would steer the type check (`checkAppCode`) rather than be
+  // checked by it: a triple-slash directive reaches the whole program (a
+  // migration's `/// <reference lib="dom" />` would give every operation
+  // the DOM), and a suppression switches the check off. Server code holds
+  // neither, migrations and tests included.
+  const steering = directives.map(({ directive, line }) =>
+    problem(
+      "imports",
+      `${directive} is never in an App's server code: its type check is the platform's, as it is, for the whole App.`,
+      line === undefined ? { file: path } : { file: path, line }
+    )
+  );
   const errors = imports.flatMap(({ specifier, line, typeOnly, ambient }) => {
     // An ambient module would declare, or shadow, a module by name in the
     // type check (`checkAppCode`): server code declares none. A type is
@@ -722,8 +744,8 @@ const compileAppCodeFile = (
         ]
       : [];
   });
-  if (errors.length > 0) {
-    return { errors };
+  if (steering.length > 0 || errors.length > 0) {
+    return { errors: [...steering, ...errors] };
   }
   try {
     return {
@@ -791,9 +813,10 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
   if (!built.ok) {
     return built;
   }
-  // Not yet its migrations' own errors: the SDK types a migration's row
-  // as any record, not as the table's previous shape, so a migration
-  // that spreads its row fails to check (GRA-690). Their
+  // Not yet its migrations' own type errors: the SDK types a migration's
+  // row as any record, not as the table's previous shape, so a migration
+  // that spreads its row fails to check (GRA-690). What a migration names
+  // beyond its file (`rule: "imports"`) is refused all the same. Their
   // imports are held by the build all the same, and they run where they
   // reach nothing whatever their types say.
   const diagnostics = typeCheck(
@@ -801,7 +824,10 @@ export const checkAppCode = (files: Record<string, string>): AppCodeBuild => {
     kit.types,
     appCodeTarget
   ).filter(
-    ({ file }) => file === undefined || appCodeKind(file) !== "migration"
+    ({ file, rule }) =>
+      file === undefined ||
+      appCodeKind(file) !== "migration" ||
+      !rule.startsWith("TS")
   );
   return diagnostics.some((diagnostic) => isError(diagnostic))
     ? { ok: false, diagnostics }

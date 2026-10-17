@@ -257,6 +257,54 @@ export const collectImports = (imports: ImportSite[]) => () => {
   };
 };
 
+/** A comment as Babel keeps it: its text, without its delimiters. */
+interface Comment {
+  type: string;
+  value: string;
+  loc?: { start: { line: number } } | null;
+}
+
+/** A comment TypeScript reads as a directive to the type check. */
+export interface DirectiveSite {
+  /** What it says, e.g. `/// <reference lib="dom" />` or `@ts-ignore`. */
+  directive: string;
+  line: number | undefined;
+}
+
+/** A triple-slash directive: `/// <reference …/>`, `/// <amd-module …/>`, … */
+const tripleSlash = /^\/\s*<[a-z-]+\b/iu;
+
+/** A comment that switches the type check off for a file, a line or the next. */
+const suppression = /@ts-(?:nocheck|ignore|expect-error)\b/u;
+
+/**
+ * A Babel plugin that lists into `directives` every comment of a file
+ * TypeScript would obey as a directive to its type check rather than
+ * read as a comment: a triple-slash directive (`/// <reference lib>`,
+ * `types`, `path`, which reach the whole program, not only the file), or
+ * a suppression (`@ts-nocheck`, `@ts-ignore`, `@ts-expect-error`).
+ */
+export const collectDirectives = (directives: DirectiveSite[]) => () => ({
+  visitor: {
+    Program: (
+      _path: unknown,
+      state: { file: { ast: { comments?: Comment[] | null } } }
+    ) => {
+      for (const { type, value, loc } of state.file.ast.comments ?? []) {
+        const line = loc?.start.line;
+        if (type === "CommentLine" && tripleSlash.test(value)) {
+          directives.push({ directive: `//${value}`.trim(), line });
+        } else if (suppression.test(value)) {
+          directives.push({
+            directive: suppression.exec(value)?.[0] ?? value.trim(),
+            line,
+          });
+        }
+      }
+    },
+  },
+});
+
 /** How an import may name an App file: as written, or without its extension. */
 const importSuffixes = ["", ".ts", ".tsx", "/index.ts", "/index.tsx"];
 

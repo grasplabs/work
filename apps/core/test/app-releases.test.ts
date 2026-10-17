@@ -809,6 +809,38 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
       '/// <reference lib="dom" />\nexport const title = (): string => document.title;\n',
     ],
     [
+      "a types reference",
+      '/// <reference types="node" />\nexport const extra = 1;\n',
+    ],
+    [
+      "a dynamic import of the platform's bootstrap",
+      'export const load = async (): Promise<unknown> => await import("@grasp-os/sdk/client");\n',
+    ],
+    [
+      "a type's import() of the platform's bootstrap",
+      'export type Host = typeof import("@grasp-os/sdk/host");\n',
+    ],
+    [
+      "a re-export of everything of the platform's bootstrap",
+      'export * from "@grasp-os/sdk/client";\n',
+    ],
+    [
+      "a require-style import of the platform's bootstrap",
+      'import client = require("@grasp-os/sdk/client");\nexport const reached = client;\n',
+    ],
+    [
+      "a line the type check is told to ignore",
+      "// @ts-ignore\nexport const title = (): string => document.title;\n",
+    ],
+    [
+      "an error the type check is told to expect",
+      "// @ts-expect-error\nexport const title = (): string => document.title;\n",
+    ],
+    [
+      "a file the type check is told to skip",
+      "// @ts-nocheck\nexport const title = (): string => document.title;\n",
+    ],
+    [
       "an ambient module that shadows the SDK's",
       'declare module "@grasp-os/sdk" {\n  export const leak: number;\n}\nexport const extra = 1;\n',
     ],
@@ -816,6 +848,23 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     await expect(refusedSeal(withOperation(source))).resolves.toStrictEqual({
       code: "version.build_failed",
       files: ["operations/extra.ts"],
+    });
+  });
+
+  it("refuses a migration's directive that would reach the rest of the server code", async () => {
+    // A migration's own type errors wait for GRA-690; what it would give
+    // the whole program doesn't.
+    await expect(
+      refusedSeal({
+        ...withOperation(
+          "export const title = (): string => document.title;\n"
+        ),
+        "migrations/0001-dom.ts":
+          '/// <reference lib="dom" />\nexport const migration = 1;\n',
+      })
+    ).resolves.toStrictEqual({
+      code: "version.build_failed",
+      files: ["migrations/0001-dom.ts"],
     });
   });
 
