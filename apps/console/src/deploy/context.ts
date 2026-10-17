@@ -20,13 +20,19 @@ type SharedSecret =
   | "ENTRA_CLIENT_SECRET"
   | "MICROSOFT_CLIENT_SECRET"
   | "GOOGLE_CLIENT_SECRET"
-  | "COMPOSIO_API_KEY";
+  | "COMPOSIO_API_KEY"
+  | "APP_OAUTH_CLIENTS";
 
 /**
  * Which Worker gets which shared secret: core signs people in with the
  * Entra and Google apps, connect connects their Microsoft and Google
  * accounts and reaches Composio. Each is named as the Worker secret it
  * becomes.
+ *
+ * `APP_OAUTH_CLIENTS` holds Grasp's OAuth apps at every other app, as
+ * JSON by provider (`{"<provider>": {"id", "secret"}}`): one secret for
+ * them all, so a new app is an entry in the store, never a change here or
+ * in connect (connect's src/providers.ts).
  */
 const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
   core: ["ENTRA_CLIENT_SECRET", "GOOGLE_CLIENT_SECRET"],
@@ -34,6 +40,7 @@ const sharedSecrets: Readonly<Record<string, readonly SharedSecret[]>> = {
     "MICROSOFT_CLIENT_SECRET",
     "GOOGLE_CLIENT_SECRET",
     "COMPOSIO_API_KEY",
+    "APP_OAUTH_CLIENTS",
   ],
 };
 

@@ -137,5 +137,10 @@
       "store_id": "account-secrets-store",
       "secret_name": "COMPOSIO_API_KEY",
     },
+    {
+      "binding": "APP_OAUTH_CLIENTS",
+      "store_id": "account-secrets-store",
+      "secret_name": "APP_OAUTH_CLIENTS",
+    },
   ],
 }

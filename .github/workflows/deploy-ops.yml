@@ -65,6 +65,7 @@ jobs:
           MICROSOFT_CLIENT_SECRET: op://grasp-os-ops/shared/MICROSOFT_CLIENT_SECRET
           GOOGLE_CLIENT_SECRET: op://grasp-os-ops/shared/GOOGLE_CLIENT_SECRET
           COMPOSIO_API_KEY: op://grasp-os-ops/shared/COMPOSIO_API_KEY
+          APP_OAUTH_CLIENTS: op://grasp-os-ops/shared/APP_OAUTH_CLIENTS
       # Secrets Store keeps each secret by an ID of its own: an existing one
       # is updated by that ID, a missing one created. Values go to wrangler
       # on stdin, never as an argument or in a log line, and are written
@@ -80,9 +81,10 @@ jobs:
           MICROSOFT_CLIENT_SECRET: ${{ steps.shared.outputs.MICROSOFT_CLIENT_SECRET }}
           GOOGLE_CLIENT_SECRET: ${{ steps.shared.outputs.GOOGLE_CLIENT_SECRET }}
           COMPOSIO_API_KEY: ${{ steps.shared.outputs.COMPOSIO_API_KEY }}
+          APP_OAUTH_CLIENTS: ${{ steps.shared.outputs.APP_OAUTH_CLIENTS }}
         run: |
           set -euo pipefail
-          names=(ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY)
+          names=(ENTRA_CLIENT_SECRET MICROSOFT_CLIENT_SECRET GOOGLE_CLIENT_SECRET COMPOSIO_API_KEY APP_OAUTH_CLIENTS)
           # Every value is checked before any is written, so an empty field
           # never leaves the store half updated. Only names are reported.
           empty=()

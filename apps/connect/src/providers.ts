@@ -1,17 +1,37 @@
+import type { AccountLookup } from "@grasp-os/connector-kit/sign-in";
+import {
+  appProviderSchema,
+  oauthProviderSchema,
+} from "@grasp-os/shared/connect";
 import type { OAuthProvider } from "@grasp-os/shared/connect";
+import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
-// The OAuth providers people connect accounts from, as config records: one
-// generic flow (src/oauth.ts) runs them all. Grasp owns one multi-tenant
-// app per provider; its client ID and secret are Worker secrets on connect
-// (threat model Q1), and a provider whose secrets are unset can't be
-// connected.
+import { appRecord } from "./bundled-connectors.ts";
+import type { AppRecord } from "./bundled-connectors.ts";
+import { idTokenClaims, lookupAccount } from "./oauth-client.ts";
+import type { TokenSet } from "./oauth-client.ts";
+
+// The providers people connect accounts from, as config records: one
+// generic OAuth flow (src/oauth.ts) runs them all, and one API-key sign-in
+// those that take a key.
 //
-// Every provider is pinned to the organization's own tenant, from the
-// deployment's sign-in config: the flow asks the provider for that tenant
-// only where the provider can do so, and the account in the ID token must
-// be in it (threat model CN5). Accounts outside the organization can't be
-// connected, personal ones included.
+// The suites, Microsoft 365 and Google Workspace, are configured here.
+// Grasp owns one multi-tenant app per suite; its client ID and secret are
+// Worker secrets on connect (threat model Q1), and a suite whose secrets
+// are unset can't be connected. Every suite is pinned to the
+// organization's own tenant, from the deployment's sign-in config: the
+// flow asks the provider for that tenant only where the provider can do
+// so, and the account in the ID token must be in it (threat model CN5).
+// Accounts outside the organization can't be connected, personal ones
+// included.
+//
+// Every other app is described by the provider record its native
+// connector carries (the connector kit's sign-in.ts), and nothing here
+// changes for a new one. Its client ID and secret, for OAuth, are its
+// entry in `APP_OAUTH_CLIENTS`, found by its provider's name alone, so no
+// record reaches another app's secret (AP6). An app has no tenant: the
+// account is the one the app's own lookup names.
 
 /** The client credentials of Grasp's app at a provider. */
 export interface OAuthClientCredentials {
@@ -32,10 +52,30 @@ export interface ProviderAccount {
   email: string | null;
 }
 
-export interface ProviderConfig {
-  id: OAuthProvider;
+/** Where a call's credential goes on a request, and what it says. */
+export interface Credential {
+  /** A lowercase header name. */
+  header: string;
+  value: string;
+}
+
+/** An OAuth access token, as a request carries it. */
+export const bearer = (accessToken: string): Credential => ({
+  header: "authorization",
+  value: `Bearer ${accessToken}`,
+});
+
+/** A provider people connect with the OAuth authorization code flow. */
+export interface OAuthProviderConfig {
+  kind: "oauth";
+  id: string;
   /** The native connector that carries out the connection's actions. */
   server: string;
+  /**
+   * Whether the flow is pinned to the organization's tenant at the
+   * provider (the suites). An app has none: its tenant is always `""`.
+   */
+  pinned: boolean;
   /** Whether `tenant` is a tenant of this provider's kind. */
   isTenant: (tenant: string) => boolean;
   authorizationEndpoint: (tenant: string) => string;
@@ -43,26 +83,42 @@ export interface ProviderConfig {
   /** RFC 7009 revocation; none where the provider has no such endpoint. */
   revocationEndpoint?: string;
   scopes: readonly string[];
+  /** How the scope parameter joins `scopes`. */
+  scopeSeparator: string;
   /** Parameters the authorization request adds to the standard ones. */
   authorizationParams: (tenant: string) => Record<string, string>;
+  /** How the client authenticates at the token and revocation endpoints. */
+  clientAuthentication: "client_secret_post" | "client_secret_basic";
   client: (env: Env) => OAuthClientCredentials | undefined;
   /**
-   * The account subject the ID token's claims name, whatever else they
-   * say: to tell whether a live connection holds the same grant before
-   * revoking tokens that won't be kept.
+   * The account subject the tokens name, whatever else they say: to tell
+   * whether a live connection holds the same grant before revoking tokens
+   * that won't be kept. None for an app: only its lookup names one.
    */
-  subject: (claims: unknown) => string | undefined;
+  subject?: (tokens: TokenSet) => string | undefined;
   /**
-   * The account the ID token's claims name, if they come from this
-   * provider for Grasp's app and the account is in `tenant`; `null`
-   * otherwise.
+   * The account the tokens are for, if they come from this provider for
+   * Grasp's app and the account is in `tenant`; `null` otherwise.
    */
   account: (
-    claims: unknown,
+    tokens: TokenSet,
     tenant: string,
     clientId: string
-  ) => ProviderAccount | null;
+  ) => Promise<ProviderAccount | null>;
 }
+
+/** An app people connect with an API key they give. */
+export interface ApiKeyProviderConfig {
+  kind: "api_key";
+  id: string;
+  server: string;
+  /** The key, as a call's requests carry it. */
+  credential: (key: string) => Credential;
+  /** The account the key is for, as the app says; `null` if it refused it. */
+  account: (key: string) => Promise<ProviderAccount | null>;
+}
+
+export type ProviderConfig = OAuthProviderConfig | ApiKeyProviderConfig;
 
 const credentials = (
   id: string | undefined,
@@ -112,9 +168,11 @@ const microsoftLogin = "https://login.microsoftonline.com";
  * tenant, so the sign-in page offers only its accounts. Entra has no token
  * revocation endpoint: disconnecting deletes the tokens, and they lapse.
  */
-const microsoft: ProviderConfig = {
+const microsoft: OAuthProviderConfig = {
+  kind: "oauth",
   id: "microsoft",
   server: "microsoft-365",
+  pinned: true,
   isTenant: (tenant) => guidPattern.test(tenant),
   authorizationEndpoint: (tenant) =>
     `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
@@ -136,12 +194,15 @@ const microsoft: ProviderConfig = {
     "Files.Read.All",
     "Sites.Read.All",
   ],
+  scopeSeparator: " ",
   authorizationParams: () => ({ response_mode: "query" }),
+  clientAuthentication: "client_secret_post",
   client: (env) =>
     credentials(env.MICROSOFT_CLIENT_ID, env.MICROSOFT_CLIENT_SECRET),
-  subject: (claims) => oidOnly.safeParse(claims).data?.oid,
-  account: (claims, tenant, clientId) => {
-    const parsed = microsoftClaims.safeParse(claims);
+  subject: ({ idToken }) => oidOnly.safeParse(idTokenClaims(idToken)).data?.oid,
+  // oxlint-disable-next-line require-await -- an app's lookup is async
+  account: async ({ idToken }, tenant, clientId) => {
+    const parsed = microsoftClaims.safeParse(idTokenClaims(idToken));
     if (!parsed.success) {
       return null;
     }
@@ -171,9 +232,11 @@ const microsoft: ProviderConfig = {
  * token's `hd` is what counts. `access_type=offline` with `prompt=consent`
  * is how Google gives a refresh token every time.
  */
-const google: ProviderConfig = {
+const google: OAuthProviderConfig = {
+  kind: "oauth",
   id: "google",
   server: "google-workspace",
+  pinned: true,
   isTenant: (tenant) => domainPattern.test(tenant),
   authorizationEndpoint: () => "https://accounts.google.com/o/oauth2/v2/auth",
   tokenEndpoint: () => "https://oauth2.googleapis.com/token",
@@ -188,15 +251,18 @@ const google: ProviderConfig = {
     "https://www.googleapis.com/auth/calendar.events.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
   ],
+  scopeSeparator: " ",
   authorizationParams: (tenant) => ({
     access_type: "offline",
     prompt: "consent",
     hd: tenant,
   }),
+  clientAuthentication: "client_secret_post",
   client: (env) => credentials(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
-  subject: (claims) => subOnly.safeParse(claims).data?.sub,
-  account: (claims, tenant, clientId) => {
-    const parsed = googleClaims.safeParse(claims);
+  subject: ({ idToken }) => subOnly.safeParse(idTokenClaims(idToken)).data?.sub,
+  // oxlint-disable-next-line require-await -- an app's lookup is async
+  account: async ({ idToken }, tenant, clientId) => {
+    const parsed = googleClaims.safeParse(idTokenClaims(idToken));
     if (!parsed.success) {
       return null;
     }
@@ -212,7 +278,109 @@ const google: ProviderConfig = {
   },
 };
 
-export const providers: Readonly<Record<OAuthProvider, ProviderConfig>> = {
+/** The suites, by provider. */
+export const providers: Readonly<Record<OAuthProvider, OAuthProviderConfig>> = {
   microsoft,
   google,
+};
+
+/**
+ * Grasp's OAuth apps at the apps, by provider: one Worker secret, JSON,
+ * which the console delivers as it does the suites' secrets.
+ */
+const appClientsSchema = z.record(
+  appProviderSchema,
+  z.strictObject({
+    id: z.string().min(1).max(512),
+    secret: z.string().min(1).max(4096),
+  })
+);
+
+/**
+ * Grasp's client at the app `provider`, from `APP_OAUTH_CLIENTS`, by that
+ * name only. One that doesn't parse leaves every app unset, and is logged
+ * by its name, never its value.
+ */
+const appClient = (
+  env: Env,
+  provider: string
+): OAuthClientCredentials | undefined => {
+  const raw = env.APP_OAUTH_CLIENTS;
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+  let value: unknown = undefined;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    // Refused below, as anything else that isn't the map.
+  }
+  const parsed = appClientsSchema.safeParse(value);
+  if (!parsed.success) {
+    log.error("config.invalid", { var: "APP_OAUTH_CLIENTS" });
+    return undefined;
+  }
+  return Object.hasOwn(parsed.data, provider)
+    ? parsed.data[provider]
+    : undefined;
+};
+
+/** The account an app's lookup names, with `credential`. */
+const lookedUp =
+  (lookup: AccountLookup) =>
+  async (credential: Credential): Promise<ProviderAccount | null> =>
+    await lookupAccount(lookup, credential);
+
+/** An app, as its record describes it. */
+const appProvider = ({
+  provider,
+  server,
+  signIn,
+}: AppRecord): ProviderConfig => {
+  const lookup = lookedUp(signIn.account);
+  if (signIn.kind === "api_key") {
+    const credential = (key: string): Credential => ({
+      header: signIn.header,
+      value: `${signIn.prefix ?? ""}${key}`,
+    });
+    return {
+      kind: "api_key",
+      id: provider,
+      server,
+      credential,
+      account: async (key) => await lookup(credential(key)),
+    };
+  }
+  return {
+    kind: "oauth",
+    id: provider,
+    server,
+    pinned: false,
+    isTenant: (tenant) => tenant === "",
+    authorizationEndpoint: () => signIn.authorizationEndpoint,
+    tokenEndpoint: () => signIn.tokenEndpoint,
+    ...(signIn.revocationEndpoint === undefined
+      ? {}
+      : { revocationEndpoint: signIn.revocationEndpoint }),
+    scopes: signIn.scopes,
+    scopeSeparator: signIn.scopeSeparator,
+    authorizationParams: () => ({ ...signIn.authorizationParams }),
+    clientAuthentication: signIn.clientAuthentication,
+    client: (env) => appClient(env, provider),
+    // No ID token is trusted from an app: its lookup names the account,
+    // and it has no subject apart from that.
+    account: async ({ accessToken }) => await lookup(bearer(accessToken)),
+  };
+};
+
+/** The provider `id` names: a suite, or an app of this release. */
+export const providerFor = (id: string): ProviderConfig | undefined => {
+  const suite = oauthProviderSchema.safeParse(id);
+  if (suite.success) {
+    return providers[suite.data];
+  }
+  const record = appProviderSchema.safeParse(id).success
+    ? appRecord(id)
+    : undefined;
+  return record === undefined ? undefined : appProvider(record);
 };

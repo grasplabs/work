@@ -4,6 +4,7 @@ import {
   connectionCallbackPath,
   connectionErrors,
   connectionPersonSchema,
+  connectWithKeySchema,
   disconnectPersonalSchema,
   disconnectSchema,
   finishConnectionSchema,
@@ -45,21 +46,30 @@ import {
   oauthFlows,
   pendingActions,
 } from "./db/schema.ts";
-import { exchangeCode, idTokenClaims, revokeToken } from "./oauth-client.ts";
+import { exchangeCode, revokeToken } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import { dropPendingActions } from "./pending.ts";
-import { providers } from "./providers.ts";
+import { providerFor } from "./providers.ts";
 import type {
+  ApiKeyProviderConfig,
   OAuthClientCredentials,
+  OAuthProviderConfig,
   ProviderAccount,
   ProviderConfig,
 } from "./providers.ts";
-import { discardMint, firstTokens, revocableToken } from "./tokens.ts";
+import {
+  apiKeyExpiresAt,
+  discardMint,
+  firstTokens,
+  revocableToken,
+} from "./tokens.ts";
 import { resealBatchSize, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
 
 // Connecting an account: the OAuth 2.0 authorization code flow with PKCE,
-// for every provider in src/providers.ts.
+// for every provider in src/providers.ts, the suites and the apps alike;
+// or, for an app that takes one, an API key the person gives
+// (`connectWithKey`), checked with the app and then kept as tokens are.
 //
 // A person starts it from their browser, signed in to core, and the
 // provider sends the browser back to core's callback on the same origin,
@@ -130,7 +140,7 @@ const connectionHolding = async (
  */
 const reconnects = (
   held: ConnectionRow,
-  flow: FlowRow,
+  flow: Target,
   person: ConnectionPerson
 ): boolean =>
   held.status === "needs_reauth" &&
@@ -142,18 +152,21 @@ const mayManage = (person: ConnectionPerson, scope: ConnectionScope): boolean =>
   scope === "personal" || isAdmin(person.role);
 
 interface Ready {
-  provider: ProviderConfig;
+  provider: OAuthProviderConfig;
   client: OAuthClientCredentials;
   vault: Vault;
 }
 
-/** The provider, with its client and the vault, or refused while unset. */
+/** The OAuth provider, with its client and the vault, or refused while unset. */
 const ready = async (env: Env, providerId: string): Promise<Ready> => {
-  const parsed = oauthProviderSchema.safeParse(providerId);
-  const provider = parsed.success ? providers[parsed.data] : undefined;
-  const client = provider?.client(env);
+  const provider = providerFor(providerId);
+  const client = provider?.kind === "oauth" ? provider.client(env) : undefined;
   const vault = await vaultFor(env);
-  if (provider === undefined || client === undefined || vault === undefined) {
+  if (
+    provider?.kind !== "oauth" ||
+    client === undefined ||
+    vault === undefined
+  ) {
     throw connectionErrors.create("connection.provider_unavailable");
   }
   return { provider, client, vault };
@@ -196,7 +209,9 @@ export const startConnection = async (
     throw roleErrors.create("role.forbidden");
   }
   const { provider, client, vault } = await ready(env, providerId);
-  const tenant = rest.tenant.toLowerCase();
+  // A suite's flow is pinned to the organization's tenant; an app's has
+  // none, so it is always "" (`isTenant`).
+  const tenant = provider.pinned ? (rest.tenant ?? "").toLowerCase() : "";
   if (!provider.isTenant(tenant) || new URL(origin).origin !== origin) {
     throw connectionErrors.create("connection.provider_unavailable");
   }
@@ -225,7 +240,7 @@ export const startConnection = async (
     response_type: "code",
     client_id: client.id,
     redirect_uri: redirectUri,
-    scope: provider.scopes.join(" "),
+    scope: provider.scopes.join(provider.scopeSeparator),
     state,
     code_challenge: await pkceChallenge(verifier),
     code_challenge_method: "S256",
@@ -296,14 +311,29 @@ const isDuplicate = (error: unknown): boolean =>
   error.message.includes("UNIQUE") &&
   error.message.includes("connections");
 
+/** What a connection keeps of its sign-in: tokens or a key, sealed. */
+type Kept = Parameters<typeof firstTokens>[2];
+
+/** What a connection is connected for: its scope, and its tenant if pinned. */
+type Target = Pick<FlowRow, "scope" | "tenant">;
+
+/** A connection's tenant: none (`null`) for an app's (`""`). */
+const tenantOf = ({ tenant }: Target): string | null =>
+  tenant === "" ? null : tenant;
+
+interface Keeping {
+  provider: ProviderConfig;
+  vault: Vault;
+}
+
 /** Stores a new connection with its tokens and its event, all or nothing. */
 const storeConnection = async (
   env: Env,
-  { provider, vault }: Ready,
-  flow: FlowRow,
+  { provider, vault }: Keeping,
+  flow: Target,
   person: ConnectionPerson,
   account: ProviderAccount,
-  tokens: TokenSet & { refreshToken: string },
+  tokens: Kept,
   addresses: AccountAddresses | undefined
 ): Promise<string> => {
   const connectionId = crypto.randomUUID();
@@ -318,7 +348,7 @@ const storeConnection = async (
       status: "active",
       serverKind: "native",
       server: provider.server,
-      tenant: flow.tenant,
+      tenant: tenantOf(flow),
       accountId: account.id,
       accountName: account.name,
       accountEmail: account.email?.toLowerCase() ?? null,
@@ -355,12 +385,12 @@ const storeConnection = async (
  */
 const reconnect = async (
   env: Env,
-  { provider, vault }: Ready,
-  flow: FlowRow,
+  { provider, vault }: Keeping,
+  flow: Target,
   person: ConnectionPerson,
   held: ConnectionRow | undefined,
   account: ProviderAccount,
-  tokens: TokenSet & { refreshToken: string },
+  tokens: Kept,
   addresses: AccountAddresses | undefined
 ): Promise<string | undefined> => {
   if (held === undefined) {
@@ -399,7 +429,7 @@ const reconnect = async (
         .update(connections)
         .set({
           status: "active",
-          tenant: flow.tenant,
+          tenant: tenantOf(flow),
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
           // A lookup that failed keeps what was read before.
@@ -426,44 +456,38 @@ type Refuse = (
   about?: { outcome?: "refused" | "failed"; connectionId?: string }
 ) => Promise<void>;
 
+type RefusalReason =
+  | "connection.wrong_account"
+  | "connection.not_own_account"
+  | "connection.already_connected"
+  | "connection.provider_refused";
+
 /**
- * Keeps the tokens a flow came back with, once they are known to be for an
- * account the person may connect: in the organization's tenant, their own
- * for a personal connection, and held by no other connection, unless by
- * one the person may reconnect (`reconnects`), which gets them. The
- * connection's ID. Tokens that aren't kept are dropped (`dropMint`).
+ * Keeps what a sign-in got (tokens, or a key) for `account`, once it is
+ * known to be an account the person may connect: their own for a personal
+ * connection, and held by no other connection, unless by one the person
+ * may reconnect (`reconnects`), which gets it. The connection's ID.
+ * Whatever isn't kept is dropped (`drop`).
  */
-const keepTokens = async (
+const keepAccount = async (
   env: Env,
-  setUp: Ready,
-  flow: FlowRow,
+  setUp: Keeping,
+  flow: Target,
   person: ConnectionPerson,
-  tokens: TokenSet,
+  account: ProviderAccount,
+  kept: Kept,
+  /** Drops what was minted for the sign-in; none for a key. */
+  drop: ((accountId: string | undefined) => Promise<void>) | undefined,
   refuse: Refuse
 ): Promise<string> => {
-  const { provider, client } = setUp;
-  const claims = idTokenClaims(tokens.idToken);
-  const account = provider.account(claims, flow.tenant, client.id);
-  const accountId = account?.id ?? provider.subject(claims);
-  const held =
-    account === null
-      ? undefined
-      : await connectionHolding(env, provider.id, account.id);
-  const refusal = async (
-    reason:
-      | "connection.wrong_account"
-      | "connection.not_own_account"
-      | "connection.already_connected"
-      | "connection.provider_refused"
-  ): Promise<never> => {
+  const { provider } = setUp;
+  const held = await connectionHolding(env, provider.id, account.id);
+  const refusal = async (reason: RefusalReason): Promise<never> => {
     // Even an account refused here may be one an active connection holds.
-    await dropMint(env, setUp, tokens, accountId);
+    await drop?.(account.id);
     await refuse(reason, { connectionId: held?.id });
     throw connectionErrors.create(reason);
   };
-  if (account === null) {
-    return await refusal("connection.wrong_account");
-  }
   if (
     flow.scope === "personal" &&
     !isOwnAccount(person, provider.id, account)
@@ -473,15 +497,14 @@ const keepTokens = async (
   if (held !== undefined && !reconnects(held, flow, person)) {
     return await refusal("connection.already_connected");
   }
-  const { refreshToken } = tokens;
-  if (refreshToken === undefined) {
-    // Without one the connection would die within the hour.
-    return await refusal("connection.provider_refused");
-  }
-  const kept = { ...tokens, refreshToken };
-  // The account's own addresses, read with the token just issued: core
-  // counts mail to and from them as the account's (account-addresses.ts).
-  const addresses = await accountAddressesOf(provider.id, tokens.accessToken);
+  // A suite's account's own addresses, read with the token just issued:
+  // core counts mail to and from them as the account's
+  // (account-addresses.ts). An app has none to read.
+  const suite = oauthProviderSchema.safeParse(provider.id);
+  const addresses =
+    suite.success && "accessToken" in kept
+      ? await accountAddressesOf(suite.data, kept.accessToken)
+      : undefined;
   try {
     // Stored as new when there is nothing to reconnect, or no longer:
     // disconnected at the same moment, the account connects as new;
@@ -515,9 +538,68 @@ const keepTokens = async (
       });
       throw connectionErrors.create("connection.already_connected");
     }
-    await dropMint(env, setUp, tokens, account.id);
+    await drop?.(account.id);
     throw storeError;
   }
+};
+
+/**
+ * Keeps the tokens a flow came back with, once they are known to be for an
+ * account the person may connect: for a suite, in the organization's
+ * tenant; for an app, one the app's lookup names; and as `keepAccount`
+ * says. Tokens that aren't kept are dropped (`dropMint`).
+ */
+const keepTokens = async (
+  env: Env,
+  setUp: Ready,
+  flow: FlowRow,
+  person: ConnectionPerson,
+  tokens: TokenSet,
+  refuse: Refuse
+): Promise<string> => {
+  const { provider, client } = setUp;
+  const account = await provider.account(tokens, flow.tenant, client.id);
+  const drop = async (accountId: string | undefined): Promise<void> => {
+    await dropMint(env, setUp, tokens, accountId);
+  };
+  const refusal = async (reason: RefusalReason): Promise<never> => {
+    const accountId = account?.id ?? provider.subject?.(tokens);
+    await drop(accountId);
+    const held =
+      account === null || accountId === undefined
+        ? undefined
+        : await connectionHolding(env, provider.id, accountId);
+    await refuse(reason, { connectionId: held?.id });
+    throw connectionErrors.create(reason);
+  };
+  if (account === null) {
+    // A suite's account outside the tenant, or an app's lookup that
+    // named none.
+    return await refusal(
+      provider.pinned
+        ? "connection.wrong_account"
+        : "connection.provider_refused"
+    );
+  }
+  const { refreshToken } = tokens;
+  if (refreshToken === undefined) {
+    // Without one the connection would die within the hour.
+    return await refusal("connection.provider_refused");
+  }
+  return await keepAccount(
+    env,
+    setUp,
+    flow,
+    person,
+    account,
+    {
+      accessToken: tokens.accessToken,
+      refreshToken,
+      expiresAt: tokens.expiresAt,
+    },
+    drop,
+    refuse
+  );
 };
 
 /**
@@ -610,6 +692,75 @@ export const finishConnection = async (
   return { connectionId, returnTo: flow.returnTo };
 };
 
+/**
+ * Connects an app that signs in with an API key: the key the person gave,
+ * once the app's own lookup takes it and names its account, kept sealed
+ * as a connection's tokens are, under the same rules (`keepAccount`). The
+ * key is never logged, audited or answered; a key the app refuses is
+ * `connection.provider_refused`, and nothing is kept.
+ */
+export const connectWithKey = async (
+  env: Env,
+  request: unknown
+): Promise<{ connectionId: string }> => {
+  const {
+    person,
+    provider: providerId,
+    scope,
+    key,
+  } = connectionErrors.parse(
+    "connection.invalid",
+    connectWithKeySchema,
+    request
+  );
+  await refuseStaff(env, person, { provider: providerId, scope });
+  if (!mayManage(person, scope)) {
+    await auditRefusal(env, person, "connection.connect", {
+      provider: providerId,
+      scope,
+      outcome: "refused",
+      reason: "role.forbidden",
+    });
+    throw roleErrors.create("role.forbidden");
+  }
+  const provider = providerFor(providerId);
+  const vault = await vaultFor(env);
+  if (provider?.kind !== "api_key" || vault === undefined) {
+    throw connectionErrors.create("connection.provider_unavailable");
+  }
+  const refuse: Refuse = async (
+    reason,
+    { outcome = "refused", connectionId } = {}
+  ) => {
+    await auditRefusal(
+      env,
+      person,
+      "connection.connect",
+      { provider: provider.id, scope, outcome, reason },
+      connectionId
+    );
+  };
+  const account = await provider.account(key);
+  if (account === null) {
+    await refuse("connection.provider_refused", { outcome: "failed" });
+    throw connectionErrors.create("connection.provider_refused");
+  }
+  const connectionId = await keepAccount(
+    env,
+    { provider, vault } satisfies {
+      provider: ApiKeyProviderConfig;
+      vault: Vault;
+    },
+    { scope, tenant: "" },
+    person,
+    account,
+    { apiKey: key, expiresAt: apiKeyExpiresAt },
+    undefined,
+    refuse
+  );
+  return { connectionId };
+};
+
 /** The person's own connections and the shared ones, never disconnected ones. */
 export const listConnections = async (
   env: Env,
@@ -656,11 +807,11 @@ const revoke = async (
   env: Env,
   connection: ConnectionRow
 ): Promise<boolean> => {
-  const parsed = oauthProviderSchema.safeParse(connection.provider);
-  if (!parsed.success) {
+  const provider = providerFor(connection.provider);
+  // An API key has no grant to revoke: the app's own settings do that.
+  if (provider?.kind !== "oauth") {
     return false;
   }
-  const provider = providers[parsed.data];
   const client = provider.client(env);
   const token = await revocableToken(env, connection.id);
   if (client === undefined || token === undefined) {
