@@ -2822,6 +2822,14 @@ export const workflowResourceRuns = sqliteTable(
     index("workflow_resource_runs_starting_idx")
       .on(table.createdAt)
       .where(sql`${table.status} = 'starting'`),
+    // One person's runs of a workflow, newest first, for an App's
+    // `workflows.<wf>.queries.runs` (workflow-reference-queries.ts).
+    index("workflow_resource_runs_principal_idx").on(
+      table.workflowResourceId,
+      table.principalId,
+      table.createdAt,
+      table.id
+    ),
   ]
 );
 

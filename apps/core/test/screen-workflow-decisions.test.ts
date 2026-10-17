@@ -3,17 +3,19 @@ import { v } from "@grasp-os/sdk";
 import { generatedPaths } from "@grasp-os/sdk/host";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalJson } from "@grasp-os/shared/json";
+import type { OperationResult } from "@grasp-os/shared/operations";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import { callAppFunction, callScreenFunction } from "../src/app-functions.ts";
 import { artifactKey } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import {
   bindWorkflowToApp,
   unbindWorkflowFromApp,
 } from "../src/app-workflow-bindings.ts";
-import { versionFiles } from "../src/apps.ts";
+import { setCurrentVersion, versionFiles } from "../src/apps.ts";
 import { boundWorkflowsOf } from "../src/bound-workflows.ts";
 import { withDraftReferences } from "../src/draft-references.ts";
 import { withScreenReferences } from "../src/screen-references.ts";
@@ -26,7 +28,7 @@ import {
   createWorkflowResource,
   publishWorkflowVersion,
 } from "../src/workflow-resources.ts";
-import { appWith, person, seal } from "./sealed-apps.ts";
+import { appWith, person, queryReference, seal } from "./sealed-apps.ts";
 import type { Fixture } from "./sealed-apps.ts";
 import { unique } from "./sign-in.ts";
 
@@ -277,6 +279,10 @@ const screenErrors = async (
         .map(({ file, line, message }) => `${file}:${line}: ${message}`);
 };
 
+/** What a call answered, or its refusal's code. */
+const answerOf = (result: OperationResult): unknown =>
+  result.ok ? result.value : result.error.code;
+
 describe(
   "the decisions of an App's bound workflows",
   { timeout: 180_000 },
@@ -309,6 +315,48 @@ describe(
         referencesNameIt: true,
         typedBefore: [],
         typedAfterUnbinding: [],
+      });
+    });
+
+    it("answer an empty inbox, and refuse every decision alike, while independent runs have none", async () => {
+      const { fixture } = await boundApp();
+      const release = await seal(fixture);
+      await setCurrentVersion(env, fixture.owner, fixture.app, 1);
+      const ask = async (
+        name: "decisions" | "decision",
+        input: unknown,
+        window?: number
+      ): Promise<OperationResult> => {
+        const request = JSON.stringify({
+          reference: await queryReference(release, "review", name),
+          input,
+          ...(window === undefined ? {} : { window: { extent: window } }),
+        });
+        const { result } =
+          window === undefined
+            ? await callAppFunction(env, fixture.owner, fixture.app, request)
+            : await callScreenFunction(
+                env,
+                fixture.owner,
+                fixture.app,
+                request,
+                Date.now() + 30_000,
+                async () => {
+                  // A window's pages cost nothing here.
+                }
+              );
+        return result;
+      };
+      expect({
+        inbox: answerOf(await ask("decisions", { pagination: {} })),
+        window: answerOf(await ask("decisions", {}, 20)),
+        decision: answerOf(
+          await ask("decision", { runId: "run-1", decisionId: "decision-1" })
+        ),
+      }).toStrictEqual({
+        inbox: { items: [], nextCursor: null, hasMore: false },
+        window: { items: [], hasMore: false },
+        decision: "workflow.decision_unavailable",
       });
     });
 
