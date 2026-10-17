@@ -18,6 +18,7 @@ import {
 import { canonicalText } from "@grasp-os/shared/json";
 import type { PermissionRequest } from "@grasp-os/shared/permissions";
 import { platformLimits } from "@grasp-os/shared/platform-limits";
+import { quotaLimitsSchema } from "@grasp-os/shared/quota-policy";
 import type { Role } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { workflowNamespace } from "@grasp-os/shared/workflow-resources";
@@ -258,6 +259,32 @@ const endOf = (run: WorkflowResourceRun) => ({
     ? { output: run.output }
     : { code: run.error?.code }),
 });
+
+/**
+ * The generation of the next quota policy a test sets: each higher than
+ * any before, as an operator's must be (quotas.ts, `quotaPolicy`).
+ */
+let generations = 100;
+
+/**
+ * What `run` returns with the operator's quota policy `limits` in force,
+ * under a new generation; the deployment's own again after, under a
+ * newer one.
+ */
+const withQuotas = async <Result>(
+  limits: Record<string, number>,
+  run: () => Promise<Result>
+): Promise<Result> => {
+  const configured = quotaLimitsSchema.parse(env.QUOTA_LIMITS).limits;
+  generations += 1;
+  env.QUOTA_LIMITS = { generation: generations, limits };
+  try {
+    return await run();
+  } finally {
+    generations += 1;
+    env.QUOTA_LIMITS = { generation: generations, limits: configured };
+  }
+};
 
 /** The audit events of run `runId`'s calls, each as its receipt says. */
 const receiptsOf = async (runId: string) => {
@@ -593,6 +620,52 @@ describe("grasp.connector calls of JSON workflows", () => {
       ],
       inOutput: false,
       inAudit: false,
+    });
+  });
+
+  it("refuses a call once its run's lineage has made all the host calls it may, sending nothing for it", async () => {
+    const admin = await person("admin");
+    const ada = await person("builder");
+    // Two calls of the clock first, one host call each, then the mail's
+    // own: all the lineage may make, so the first of its arguments'
+    // evaluations is refused before anything is sent.
+    const { workflow, mail, serving } = await mailingWorkflow(ada, admin, {
+      before: [
+        { first: { call: "grasp.now" } },
+        { second: { call: "grasp.now" } },
+      ],
+    });
+    const { runId, run } = await withQuotas(
+      { lineageHostCalls: 3 },
+      async () => {
+        const id = await started(ada, workflow.id, serving);
+        return { runId: id, run: await ended(ada, workflow.id, id) };
+      }
+    );
+    const sent = await mail.did();
+    const lineage = await env.DB.prepare(
+      "SELECT host_calls AS hostCalls FROM run_lineages WHERE root_run_id = ?"
+    )
+      .bind(runId)
+      .first<{ hostCalls: number }>();
+    const attempts = await env.DB.prepare(
+      "SELECT host_calls AS hostCalls FROM run_lineage_attempts WHERE run_id = ? ORDER BY admitted_at"
+    )
+      .bind(runId)
+      .all<{ hostCalls: number }>();
+    expect({
+      end: endOf(run),
+      calls: sent.calls,
+      receipts: await receiptsOf(runId),
+      hostCalls: lineage?.hostCalls,
+      byAttempt: attempts.results.map(({ hostCalls }) => hostCalls),
+    }).toStrictEqual({
+      end: { status: "failed", code: "workflow.lineage_limit" },
+      calls: 0,
+      receipts: [],
+      hostCalls: 3,
+      // Each attempt made its call; the mail's went no further.
+      byAttempt: [1, 1, 1],
     });
   });
 
