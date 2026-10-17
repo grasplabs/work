@@ -473,7 +473,8 @@ export class DataStore extends DurableObject<Env> {
    * Discards a fixture store an App's tests ran on (app-tests.ts):
    * everything the object holds, and its alarm, and marks it discarded,
    * so it refuses every call after (`#live`) and wakes to nothing. Only
-   * for a store core recorded as a fixture (`app_test_fixtures`) and its
+   * for a store core recorded as a fixture (`app_test_fixtures`, or a
+   * preview's, `preview_fixture_stores`, sealed-previews.ts) and its
    * inventory doesn't list, whatever asks: a business store is only ever
    * deleted through its deletion (store-deletion.ts), audited and kept
    * until nothing refers to it. Its live queries' watches go with it. Both are read in one query, and nothing
@@ -484,7 +485,7 @@ export class DataStore extends DurableObject<Env> {
       throw new Error("That isn't this object's store.");
     }
     const found = await this.env.DB.prepare(
-      "SELECT EXISTS (SELECT 1 FROM business_stores WHERE id = ?1) AS listed, EXISTS (SELECT 1 FROM app_test_fixtures WHERE store_id = ?1) AS fixture"
+      "SELECT EXISTS (SELECT 1 FROM business_stores WHERE id = ?1) AS listed, (EXISTS (SELECT 1 FROM app_test_fixtures WHERE store_id = ?1) OR EXISTS (SELECT 1 FROM preview_fixture_stores WHERE store_id = ?1)) AS fixture"
     )
       .bind(storeId)
       .first<{ listed: number; fixture: number }>();

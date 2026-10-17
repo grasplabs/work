@@ -196,7 +196,7 @@ export const admitWindow = async (
  */
 export const admitPreviewCall = async (
   env: Env,
-  by: Identity,
+  by: Pick<Identity, "userId">,
   app: AppId
 ): Promise<void> => {
   if (!(await appHost(env, app).admitRequest(by.userId))) {
