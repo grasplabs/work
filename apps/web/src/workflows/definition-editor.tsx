@@ -284,7 +284,7 @@ export const DefinitionEditor = ({
           <ul>
             {draft.problems.map((problem) => (
               <Problem
-                key={`${problem.pointer} ${problem.code}`}
+                key={`${problem.pointer} ${problem.code} ${problem.message}`}
                 problem={problem}
               />
             ))}
